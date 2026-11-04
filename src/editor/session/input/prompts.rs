@@ -208,15 +208,21 @@ impl InputSession {
     }
     pub(in crate::editor::session) fn search_origin(
         &mut self,
-        view: crate::editor::ViewId,
-        cursor: crate::editor::text::ByteOffset,
+        id: crate::editor::ViewId,
+        view: &crate::editor::View,
     ) -> crate::editor::text::ByteOffset {
-        self.search_origin.get_or_insert((view, cursor)).1
+        self.search_origin.get_or_insert((id, view.cursor, view.scroll_line, view.scroll_wrap_row, view.scroll_column)).1
     }
     pub(in crate::editor::session) fn take_search_origin(
         &mut self,
-    ) -> Option<(crate::editor::ViewId, crate::editor::text::ByteOffset)> {
+    ) -> Option<(crate::editor::ViewId, crate::editor::text::ByteOffset, usize, usize, usize)> {
         self.search_origin.take()
+    }
+    pub(in crate::editor::session) fn set_pending_breakpoint(&mut self, row: crate::debugger::DapSourceBreakpoint) {
+        self.pending_breakpoint = Some(row);
+    }
+    pub(in crate::editor::session) fn take_pending_breakpoint(&mut self) -> Option<crate::debugger::DapSourceBreakpoint> {
+        self.pending_breakpoint.take()
     }
     pub(in crate::editor::session) fn prompt_insert(&mut self, text: &str) {
         if let Some(prompt) = &mut self.prompt {

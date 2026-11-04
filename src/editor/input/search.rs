@@ -60,11 +60,15 @@ pub fn search_match(
     if query.is_empty() {
         return Ok(None);
     }
-    let expression = RegexBuilder::new(&regex::escape(query))
+    let pattern = if whole_word {
+        format!(r"\b(?:{})\b", regex::escape(query))
+    } else {
+        regex::escape(query)
+    };
+    let expression = RegexBuilder::new(&pattern)
         .case_insensitive(smart_case && !query.chars().any(char::is_uppercase))
         .build()
         .map_err(|error| SearchPatternError::InvalidRegex(error.to_string()))?;
-    let word = |character: char| character.is_alphanumeric() || character == '_';
     let matches = || {
         let mut from = 0;
         let expression = &expression;
@@ -77,38 +81,10 @@ pub fn search_match(
                     .expect("literal is nonempty")
                     .len_utf8();
             Some(found)
-        }).filter(|found| {
-            !whole_word
-                || source[..found.start()]
-                    .chars()
-                    .next_back()
-                    .is_none_or(|c| !word(c))
-                    && source[found.end()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !word(c))
         })
     };
     let found = if forward {
-        let mut at = offset;
-        let found = loop {
-            let Some(found) = expression.find_at(source, at) else {
-                break None;
-            };
-            if !whole_word
-                || source[..found.start()]
-                    .chars()
-                    .next_back()
-                    .is_none_or(|c| !word(c))
-                    && source[found.end()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !word(c))
-            {
-                break Some(found);
-            }
-            at = found.end();
-        };
+        let found = expression.find_at(source, offset);
         found.or_else(|| if wrap { matches().next() } else { None })
     } else {
         matches()
@@ -139,6 +115,12 @@ mod tests {
             Some(0..3)
         );
     }
+    #[test]
+    fn whole_word_search_includes_combining_marks() {
+        assert_eq!(super::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(), Some(4..5));
+        assert_eq!(super::search_match("e\u{301} e e\u{301}", "e\u{301}", true, true, 1, true, false).unwrap(), Some(6..9));
+    }
+
     #[test]
     fn navigation_uses_unicode_smart_case() {
         assert_eq!(

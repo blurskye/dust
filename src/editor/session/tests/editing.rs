@@ -1024,6 +1024,19 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 }
 
 #[test]
+fn dot_stops_before_inserting_after_a_failed_search_operator() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("cat cat"), None);
+    app.set_dashboard_visibility(false);
+    app.ui.search_query = Some("cat".into());
+    press_keys(&mut app, &["c", "g", "n", "d", "o", "g", "escape"]);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("unrelated"), None);
+    press_keys(&mut app, &["."]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "unrelated");
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let mut app = app();
     let (_, view) = app.state.open_text(
@@ -1472,6 +1485,23 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 }
 
 #[test]
+fn macro_replay_stops_before_an_edit_after_a_failed_search_effect() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.search.wrap = false;
+    app.configuration.install_fixture(fixture);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("cat cat tail"), None);
+    app.set_dashboard_visibility(false);
+    app.ui.search_query = Some("cat".into());
+    press_keys(&mut app, &["q", "a", "n", "x", "q"]);
+    app.state.views[view].cursor = ByteOffset(7);
+    let before = app.state.buffers[buffer].text.to_string();
+    app.replay_macro('a');
+    assert_eq!(app.state.buffers[buffer].text.to_string(), before);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None);
@@ -1499,6 +1529,29 @@ fn star_and_hash_repeat_only_whole_identifiers() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(0));
     app.search_word_under_cursor(false);
     assert_eq!(app.state.views[view].cursor, ByteOffset(11));
+}
+
+#[test]
+fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("e\u{301} e e\u{301}"), None);
+    app.set_dashboard_visibility(false);
+    assert!(app.search_word_under_cursor(true));
+    assert_eq!(app.ui.search_query.as_deref(), Some("e\u{301}"));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo foobar foo"), None);
+    app.state.views[view].cursor = ByteOffset(0);
+    app.search_word_under_cursor(true);
+    app.state.views[view].cursor = ByteOffset(5);
+    assert!(app.select_next_search_match());
+    let selection = app.state.views[view].selection.as_ref().unwrap();
+    assert_eq!(selection.anchor, ByteOffset(11));
+    assert_eq!(selection.head, ByteOffset(13));
+    app.set_mode(crate::editor::EditorMode::Normal);
+    app.state.views[view].cursor = ByteOffset(5);
+    press_keys(&mut app, &["c", "g", "n", "X", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo foobar X");
 }
 
 #[test]

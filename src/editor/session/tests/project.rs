@@ -332,6 +332,45 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
 }
 
 #[test]
+fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing() {
+    for directory in [false, true] {
+        let mut app = app();
+        let source = app.state.workspace_root.join("source");
+        let target = app.state.workspace_root.join("renamed");
+        let (source_file, target_file) = if directory {
+            fs::create_dir(&source).unwrap();
+            (source.join("inside.txt"), target.join("inside.txt"))
+        } else {
+            (source.clone(), target.clone())
+        };
+        fs::write(&source_file, "original").unwrap();
+        let (original, _) = app.state.open_text(TextBuffer::from_text("original"), Some(source_file.clone()));
+        let (unsaved, _) = app.state.open_text(TextBuffer::from_text("unsaved"), Some(target_file.clone()));
+        app.state.set_buffer_dirty(unsaved, true);
+        app.open_explorer();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.explorer.tree().id_for_path(&source).is_none() {
+            app.process_explorer_result();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        app.explorer.select(app.explorer.tree().id_for_path(&source).unwrap());
+        app.rename_explorer_path("renamed".into());
+        while app.explorer.mutation_pending() {
+            app.process_vfs_results();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fs::read_to_string(&source_file).unwrap(), "original");
+        assert!(!target.exists());
+        assert_eq!(app.state.buffers[original].path.as_ref(), Some(&source_file));
+        assert_eq!(app.state.buffers[unsaved].path.as_ref(), Some(&target_file));
+        assert_eq!(app.state.buffers[unsaved].text.to_string(), "unsaved");
+        assert!(app.ui.notification_error);
+    }
+}
+
+#[test]
 fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let mut app = app();
     let source = app.state.workspace_root.join("source.txt");
@@ -1925,6 +1964,22 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     assert!(!app.search.pending());
     assert!(app.search.workflow().is_none());
     assert!(app.search.matches().is_empty());
+}
+
+#[test]
+fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("many.txt");
+    let before = "needle\n".repeat(3000);
+    fs::write(&path, &before).unwrap();
+    app.start_workspace_search("needle".into(), Some("changed".into()));
+    wait_workspace_search(&mut app);
+    assert_eq!(app.search.matches().len(), 3000);
+    assert_eq!(app.workspace_edits.proposal().unwrap().files.len(), 1);
+    app.accept_workspace_proposal();
+    let buffer = app.state.buffers.values().find(|buffer| buffer.path.as_ref() == Some(&path)).unwrap();
+    assert_eq!(buffer.text.to_string(), "changed\n".repeat(3000));
+    assert_eq!(fs::read_to_string(path).unwrap(), before);
 }
 
 #[test]
@@ -4542,6 +4597,46 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         "and says so: {:?}",
         app.ui.notification
     );
+
+    // Escape must retire the preview before a worktree-removal confirmation is opened.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.conflict.replace", InvocationSource::Test).unwrap()
+            .with_argument("side", CommandValue::String("theirs".into()))
+            .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(!app.git.has_pending_replacement());
+    app.install_picker("Worktrees".into(), vec![(
+        crate::workspace::PickerItem {
+            badge: String::new(), kind: crate::workspace::PickerItemKind::Entry,
+            id: crate::workspace::PickerItemId("missing-worktree".into()),
+            label: "missing-worktree".into(), detail: String::new(), source: "worktrees".into(),
+            action: crate::workspace::PickerAction::None,
+        },
+        crate::editor::session::search::PickerPayload::GitWorktree {
+            name: "missing-worktree".into(), path: root.join("missing-worktree"),
+        },
+    )]);
+    app.request_git_worktree_remove();
+    app.input.select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert_eq!(fs::read(&target).unwrap(), before, "removal confirmation must not replace conflicted files");
+    assert!(app.ui.notification_error, "the nonexistent worktree removal was attempted");
+
+    // Replacing the confirmation with another prompt must also discard its plan.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.conflict.replace", InvocationSource::Test).unwrap()
+            .with_argument("side", CommandValue::String("theirs".into()))
+            .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.open_prompt(crate::ui::PromptKind::Command, String::new());
+    assert!(!app.git.has_pending_replacement());
+    app.close_prompt();
 
     // CONFIRM: the file is replaced with the chosen side's content.
     app.invoke(

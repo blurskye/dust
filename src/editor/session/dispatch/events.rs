@@ -1410,7 +1410,9 @@ impl InteractiveApplication {
                 );
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
-                    self.process_effect(effect);
+                    if !self.process_effect_checked(effect) {
+                        return false;
+                    }
                 }
                 true
             }

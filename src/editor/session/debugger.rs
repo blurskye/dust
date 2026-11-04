@@ -807,6 +807,10 @@ impl DebugSession {
         }
         self.watches.retain(|watch| watch != expression);
     }
+    pub(in crate::editor::session) fn breakpoint_at(&self, path: &std::path::Path, line: u64) -> Option<&DapSourceBreakpoint> {
+        self.breakpoints.get(path)?.iter().find(|row| row.line == line)
+    }
+
     pub(in crate::editor::session) fn breakpoint(
         &mut self,
         row: DapSourceBreakpoint,

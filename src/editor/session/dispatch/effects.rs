@@ -183,37 +183,50 @@ pub(super) fn compose_command_picker_items(
 
 impl InteractiveApplication {
     pub(super) fn process_effect(&mut self, effect: AppEffect) {
+        self.process_effect_checked(effect);
+    }
+
+    pub(super) fn process_effect_checked(&mut self, effect: AppEffect) -> bool {
+        let effect = match effect {
+            AppEffect::SearchRepeat { reverse } => {
+                return self.perform_search(self.input.search_direction(reverse));
+            }
+            AppEffect::SearchWord { forward } => return self.search_word_under_cursor(forward),
+            AppEffect::SearchSelectNext => return self.select_next_search_match(),
+            effect => effect,
+        };
         let effect = match self.process_core_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_configuration_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_terminal_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_extensions_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_project_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_language_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         let effect = match self.process_debugger_effect(effect) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(effect) => effect,
         };
         if self.process_misc_effect(effect).is_err() {
             unreachable!("every AppEffect variant has one owning handler");
         }
+        true
     }
 }
 
@@ -2373,14 +2386,22 @@ impl InteractiveApplication {
                 hit_condition: None,
                 log_message: None,
             } => {
-                let current = self.cursor_breakpoint_place().and_then(|(path, line)| {
-                    self.debugger_session
-                        .persisted_breakpoints()
-                        .into_iter()
-                        .find(|row| row.path == path && row.line == line)
-                        .and_then(|row| row.condition)
-                });
-                self.open_prompt(PromptKind::BreakpointCondition, current.unwrap_or_default());
+                let Some((path, line)) = self.cursor_breakpoint_place() else {
+                    return Ok(());
+                };
+                let row = self.debugger_session
+                    .breakpoint_at(&path, line)
+                    .cloned()
+                    .unwrap_or(DapSourceBreakpoint {
+                        path,
+                        line,
+                        column: None,
+                        condition: None,
+                        hit_condition: None,
+                        log_message: None,
+                    });
+                self.open_prompt(PromptKind::BreakpointCondition, row.condition.clone().unwrap_or_default());
+                self.input.set_pending_breakpoint(row);
             }
             AppEffect::DapBreakpointConfigure {
                 condition,
@@ -3606,12 +3627,16 @@ impl InteractiveApplication {
             self.show_error(self.message("workspace_edit_busy", &[]));
             return;
         }
-        let mut grouped = BTreeMap::<PathBuf, (Vec<u8>, Vec<TextEdit>)>::new();
+        let mut grouped = BTreeMap::<PathBuf, (std::sync::Arc<[u8]>, Vec<TextEdit>, HashSet<*const [u8]>)>::new();
         for found in self.search.matches() {
             let entry = grouped
                 .entry(found.canonical_path.clone())
-                .or_insert_with(|| (found.snapshot.to_vec(), Vec::new()));
-            if entry.0.as_slice() != found.snapshot.as_ref() {
+                .or_insert_with(|| (found.snapshot.clone(), Vec::new(), HashSet::new()));
+            // Search matches normally share one snapshot. Compare each allocation only once.
+            if entry.2.insert(std::sync::Arc::as_ptr(&found.snapshot))
+                && !std::sync::Arc::ptr_eq(&entry.0, &found.snapshot)
+                && entry.0.as_ref() != found.snapshot.as_ref()
+            {
                 self.show_error(self.message("workspace_search_stale_result", &[]));
                 return;
             }
@@ -3625,14 +3650,14 @@ impl InteractiveApplication {
         }
         let mut snapshots = Vec::with_capacity(grouped.len());
         let mut drafts = Vec::with_capacity(grouped.len());
-        for (path, (searched_bytes, edits)) in grouped {
+        for (path, (searched_bytes, edits, _)) in grouped {
             let revision = if let Some((_, buffer)) = self
                 .state
                 .buffers
                 .iter()
                 .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
             {
-                if buffer.text.to_bytes() != searched_bytes {
+                if buffer.text.to_bytes().as_slice() != searched_bytes.as_ref() {
                     self.show_error(self.message("workspace_search_stale_result", &[]));
                     return;
                 }
@@ -3643,7 +3668,7 @@ impl InteractiveApplication {
             snapshots.push(FileSnapshot {
                 canonical_path: path.clone(),
                 revision,
-                bytes: searched_bytes,
+                bytes: searched_bytes.to_vec(),
             });
             drafts.push(WorkspaceEditDraft {
                 canonical_path: path,
@@ -3938,10 +3963,12 @@ impl InteractiveApplication {
         &mut self,
         prepared: crate::files::PreparedExplorerMutation,
     ) {
-        let result = self
-            .documents
-            .apply_explorer(prepared)
-            .map_err(|e| e.to_string());
+        let result = (|| {
+            if let ExplorerMutation::Rename { source, target } = prepared.operation() {
+                self.state.check_rename_destination(source, target)?;
+            }
+            self.documents.apply_explorer(prepared).map_err(|e| e.to_string())
+        })();
         let id = result.as_ref().ok().copied();
         if let Err(error) = self.explorer.admit_apply(result) {
             if let Some(id) = id {
@@ -4291,7 +4318,9 @@ impl InteractiveApplication {
         match self.input.repeat_plan(limit) {
             Ok(invocations) => {
                 for invocation in invocations {
-                    self.invoke(invocation);
+                    if !self.invoke_checked(invocation) {
+                        break;
+                    }
                 }
             }
             Err(super::super::input::ReplayError::NoChange) => {
@@ -4338,35 +4367,32 @@ impl InteractiveApplication {
         self.input.finish_macro_replay();
     }
 
-    pub(super) fn search_word_under_cursor(&mut self, forward: bool) {
+    pub(super) fn search_word_under_cursor(&mut self, forward: bool) -> bool {
         let Some(view_id) = self.state.active_view else {
-            return;
+            return false;
         };
         let view = &self.state.views[view_id];
         let source = self.state.buffers[view.buffer].text.to_string();
         let cursor = view.cursor.get();
-        let Some(character) = source[cursor..].chars().next() else {
+        let word = |grapheme: &str| grapheme.chars().any(|c| c.is_alphanumeric() || c == '_');
+        if !source[cursor..].graphemes(true).next().is_some_and(word) {
             self.show_error(self.message("cursor_not_word", &[]));
-            return;
-        };
-        if !(character.is_alphanumeric() || character == '_') {
-            self.show_error(self.message("cursor_not_word", &[]));
-            return;
+            return false;
         }
         let start = source[..cursor]
-            .char_indices()
+            .grapheme_indices(true)
             .rev()
-            .take_while(|(_, character)| character.is_alphanumeric() || *character == '_')
+            .take_while(|(_, grapheme)| word(grapheme))
             .last()
             .map_or(cursor, |(index, _)| index);
         let end = source[cursor..]
-            .char_indices()
-            .find(|(_, character)| !(character.is_alphanumeric() || *character == '_'))
+            .grapheme_indices(true)
+            .find(|(_, grapheme)| !word(grapheme))
             .map_or(source.len(), |(relative, _)| cursor + relative);
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
         self.input.remember_word_search();
-        self.perform_search(forward);
+        self.perform_search(forward)
     }
 
     pub(super) fn apply_authoritative_editor_transaction(
@@ -4878,7 +4904,14 @@ impl InteractiveApplication {
             }
             target_byte
         };
-        let target = ByteOffset(target_start.get().saturating_add(target_byte));
+        let mut target = ByteOffset(target_start.get().saturating_add(target_byte));
+        if view.mode != EditorMode::Insert {
+            let line = buffer.text.line(target_line).unwrap_or_default();
+            let content = line.strip_suffix('\n').unwrap_or(&line);
+            if !content.is_empty() && target_byte >= content.len() {
+                target = ByteOffset(target_start.get() + content.grapheme_indices(true).next_back().expect("nonempty line").0);
+            }
+        }
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetScroll {
                 view: view_id,
@@ -5005,8 +5038,20 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
-        if let Some((view, cursor)) = self.input.take_search_origin() {
+        if let Some((view, cursor, line, wrap_row, column)) = self.input.take_search_origin() {
             self.move_search_cursor(view, cursor);
+            if let Some(view) = self.state.views.get_mut(view) {
+                view.scroll_line = line;
+                view.scroll_wrap_row = wrap_row;
+                view.scroll_column = column;
+            }
+        }
+        self.input.take_pending_breakpoint();
+        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive) {
+            if self.git.has_pending_replacement() {
+                self.git.take_pending_replacement();
+            }
+            self.git.take_pending_destructive();
         }
         if self
             .input
@@ -5380,14 +5425,13 @@ impl InteractiveApplication {
                 let selected = prompt
                     .confirmation
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                let replacement = self.git.take_pending_replacement();
+                let action = self.git.take_pending_destructive();
                 self.close_prompt();
-                // A previewed whole-file replacement is answered by this same confirmation, and
-                // it is answered through the REBUILT plan rather than the previewed one.
-                if self.git.has_pending_replacement() {
-                    self.apply_git_replacement(selected);
+                if let Some(replacement) = replacement {
+                    self.apply_git_replacement(replacement, selected);
                     return;
                 }
-                let action = self.git.take_pending_destructive();
                 if selected == crate::ui::ConfirmationChoice::Yes {
                     self.confirm_git_destructive(action);
                 } else if action.is_some() {
@@ -5463,13 +5507,15 @@ impl InteractiveApplication {
                 }
             }
             PromptKind::BreakpointCondition => {
+                let row = self.input.take_pending_breakpoint();
                 self.close_prompt();
-                let condition = prompt.input.trim();
-                self.configure_breakpoint(
-                    (!condition.is_empty()).then(|| condition.to_owned()),
-                    None,
-                    None,
-                );
+                if let Some(mut row) = row {
+                    let condition = prompt.input.trim();
+                    row.condition = (!condition.is_empty()).then(|| condition.to_owned());
+                    if let Err(error) = self.debugger_session.breakpoint(row, false) {
+                        self.show_error(error);
+                    }
+                }
             }
             PromptKind::AgentPermission => self.answer_agent_permission(
                 prompt
@@ -5518,7 +5564,7 @@ impl InteractiveApplication {
         }
         let origin = self
             .input
-            .search_origin(view_id, self.state.views[view_id].cursor);
+            .search_origin(view_id, &self.state.views[view_id]);
         let search = &self.configuration.settings().search;
         let buffer = &self.state.buffers[buffer_id];
         let matches = crate::editor::input::search_matches(
@@ -5544,14 +5590,14 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn perform_search(&mut self, forward: bool) {
+    pub(super) fn perform_search(&mut self, forward: bool) -> bool {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
-            return;
+            return false;
         };
         self.record_jump();
         let Some(view_id) = self.state.active_view else {
-            return;
+            return false;
         };
         let view = &self.state.views[view_id];
         let buffer_id = view.buffer;
@@ -5581,11 +5627,11 @@ impl InteractiveApplication {
             Ok(Some(found)) => found.start,
             Ok(None) => {
                 self.show_error(self.message("pattern_not_found", &[("query", query)]));
-                return;
+                return false;
             }
             Err(error) => {
                 self.show_error(error);
-                return;
+                return false;
             }
         };
         let transaction = EditorTransaction::new(self.transaction_id())
@@ -5600,8 +5646,10 @@ impl InteractiveApplication {
             .with_undo_policy(UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
+            false
         } else {
             self.ensure_cursor_visible();
+            true
         }
     }
 
@@ -5619,28 +5667,30 @@ impl InteractiveApplication {
         let cursor = view.cursor.get();
         let buffer = &self.state.buffers[view.buffer];
         let source = buffer.text.to_string();
-        let matches = match crate::editor::input::search_matches(
-            &source,
-            &query,
-            self.configuration.settings().search.smart_case,
-            false,
-        ) {
-            Ok(matches) => matches,
+        let search = &self.configuration.settings().search;
+        let whole_word = self.input.whole_word_search();
+        let found = crate::editor::input::search_match(
+            &source, &query, search.smart_case, whole_word,
+            cursor.saturating_add(1), false, false,
+        ).and_then(|previous| {
+            if let Some(found) = previous.filter(|found| found.end > cursor) {
+                Ok(Some(found))
+            } else {
+                crate::editor::input::search_match(
+                    &source, &query, search.smart_case, whole_word, cursor, true, search.wrap,
+                )
+            }
+        });
+        let found = match found {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                self.show_error(self.message("pattern_not_found", &[("query", query)]));
+                return false;
+            }
             Err(error) => {
                 self.show_error(error);
                 return false;
             }
-        };
-        let wrap = self.configuration.settings().search.wrap;
-        let mut found = matches.iter().filter(|found| !found.is_empty());
-        let Some(found) = found
-            .clone()
-            .find(|found| found.end > cursor)
-            .or_else(|| wrap.then(|| found.next()).flatten())
-            .cloned()
-        else {
-            self.show_error(self.message("pattern_not_found", &[("query", query)]));
-            return false;
         };
         self.select_text(view_id, found.start, found.end)
     }
@@ -9920,11 +9970,9 @@ impl InteractiveApplication {
     /// captured before the question was asked.
     pub(in crate::editor::session) fn apply_git_replacement(
         &mut self,
+        previewed: crate::workspace::git::GitReplacementPlan,
         answer: crate::ui::ConfirmationChoice,
     ) {
-        let Some(previewed) = self.git.take_pending_replacement() else {
-            return;
-        };
         if answer != crate::ui::ConfirmationChoice::Yes {
             self.notify_message("Replacement cancelled; nothing was written".into(), false);
             return;
@@ -13854,18 +13902,13 @@ impl InteractiveApplication {
             AppEffect::NotificationDismiss => {
                 self.clear_notice();
             }
-            AppEffect::SearchRepeat { reverse } => {
-                let forward = self.input.search_direction(reverse);
-                self.perform_search(forward);
+            AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext => {
+                unreachable!("search effects return their status through process_effect_checked")
             }
-            AppEffect::SearchWord { forward } => self.search_word_under_cursor(forward),
             AppEffect::SubstituteAll => {
                 if self.substitute_confirm.is_some() {
                     self.answer_substitution(true, true);
                 }
-            }
-            AppEffect::SearchSelectNext => {
-                self.select_next_search_match();
             }
             AppEffect::Scroll {
                 kind,

@@ -250,6 +250,37 @@ fn log_selection_survives_eviction_of_an_earlier_entry() {
 }
 
 #[test]
+fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("original.rs");
+    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    let row = crate::debugger::DapSourceBreakpoint {
+        path,
+        line: 1,
+        column: Some(2),
+        condition: Some("old".into()),
+        hit_condition: Some("3".into()),
+        log_message: Some("value={value}".into()),
+    };
+    app.debugger_session.breakpoint(row.clone(), false).unwrap();
+    app.process_effect(AppEffect::DapBreakpointConfigure {
+        condition: None, hit_condition: None, log_message: None,
+    });
+    assert_eq!(app.input.prompt().unwrap().input, "old");
+    // An asynchronous stop can navigate while the condition question is open.
+    app.state.views[view].cursor = ByteOffset(6);
+    let another = app.state.workspace_root.join("another.rs");
+    app.state.open_text(TextBuffer::from_text("another"), Some(another));
+    app.input.prompt_insert(" && ready");
+    app.submit_prompt();
+    let mut expected = row;
+    expected.condition = Some("old && ready".into());
+    assert_eq!(app.debugger_session.persisted_breakpoints().len(), 1);
+    assert_eq!(app.debugger_session.breakpoint_at(&expected.path, expected.line), Some(&expected));
+}
+
+#[test]
 fn saved_watches_are_listed_without_a_debugger() {
     let mut app = app();
     app.process_effect(AppEffect::DapWatchAdd("counter".into()));

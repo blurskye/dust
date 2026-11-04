@@ -124,6 +124,7 @@ impl GitSession {
         &mut self,
         plan: crate::workspace::git::GitReplacementPlan,
     ) {
+        self.pending_destructive = None;
         self.pending_replacement = Some(plan);
     }
     /// Take the previewed replacement, so it can be answered exactly once.
@@ -926,6 +927,7 @@ impl GitSession {
         Ok(())
     }
     pub(super) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
+        self.pending_replacement = None;
         self.pending_destructive = Some(action);
     }
     pub(super) fn take_pending_destructive(&mut self) -> Option<GitDestructiveAction> {
