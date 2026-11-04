@@ -8,7 +8,7 @@ use super::{
     MAXIMUM_LAYOUT_DEPTH, MAXIMUM_LAYOUT_PANES,
     id::{BufferId, PaneId, TabId, ViewId},
     layout::{
-        FocusRectangle, collect_focus_rectangles, focus_score, has_split_on_axis, layout_depth,
+        FocusRectangle, collect_focus_rectangles, focus_score, layout_depth,
         layout_ratios_are_valid, offset_index, pane_depth, pane_ids, remove_leaf, resize_parent,
         resize_parent_on_axis, split_between, split_leaf, swap_layout_leaves,
     },
@@ -92,12 +92,6 @@ impl<'a> EditorTopology<'a> {
     }
     pub(crate) fn window_revision(&self) -> Option<u64> {
         self.version.revision()
-    }
-    /// Whether resizing `pane` along `axis` moves a split border in the active tab.
-    pub(crate) fn pane_has_split_on_axis(&self, pane: PaneId, axis: Axis) -> bool {
-        self.active_tab
-            .and_then(|tab| self.tabs.get(tab))
-            .is_some_and(|tab| has_split_on_axis(&tab.root, pane, axis))
     }
 }
 

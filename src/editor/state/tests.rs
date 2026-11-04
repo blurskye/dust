@@ -126,6 +126,26 @@ fn split_and_tab_layouts_keep_independent_views_and_focus() {
 }
 
 #[test]
+fn minimum_resize_delta_clamps_both_sides_without_overflow() {
+    for on_axis in [false, true] {
+        for first in [false, true] {
+            let mut state = EditorState::new(PathBuf::from("/resize"));
+            state.open_text(TextBuffer::from_text("abc"), None);
+            state.split_active(super::Axis::Horizontal, 500).unwrap();
+            if first { state.focus_pane(-1, true).unwrap(); }
+            if on_axis {
+                state.resize_active_pane_on_axis(super::Axis::Horizontal, i16::MIN).unwrap();
+            } else {
+                state.resize_active_pane(i16::MIN).unwrap();
+            }
+            let super::LayoutNode::Split { ratio, .. } = state.tabs[state.active_tab.unwrap()].root else { panic!("split"); };
+            assert_eq!(ratio, if first { 100 } else { 900 });
+            state.validate_layout().unwrap();
+        }
+    }
+}
+
+#[test]
 fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
     let mut state = EditorState::new(PathBuf::from("/bounded"));
     state.open_text(TextBuffer::from_text("seed"), None);

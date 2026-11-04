@@ -4,8 +4,12 @@ use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 #[test]
 fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     let mut app = app();
-    let (_, first_view) = app.state.open_text(TextBuffer::from_text("first"), None);
+    app.state.open_text(TextBuffer::from_text("oldest"), None);
     app.set_dashboard_visibility(false);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let (_, first_view) = app.state.open_text(TextBuffer::from_text("first"), None);
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -45,6 +49,116 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
         second_pane
     );
     assert_eq!(app.window_session.graph().focused(), Some(second));
+}
+
+#[test]
+fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
+    for reverse in [false, true] {
+        let mut app = app();
+        let (_, original_view) = app.state.open_text(TextBuffer::from_text("first"), None);
+        app.set_dashboard_visibility(false);
+        app.reconcile_editor_windows();
+        let original = app.window_session.graph().focused().unwrap();
+        app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+            crate::editor::Axis::Horizontal,
+        )));
+        let clone_view = app.state.active_view.unwrap();
+        let clone = app.window_session.graph().focused().unwrap();
+        let (fullscreen, floating, floating_view) = if reverse {
+            (clone, original, original_view)
+        } else {
+            (original, clone, clone_view)
+        };
+        let rect = WindowPlacement::Floating(WindowRect { x: 2, y: 2, width: 30, height: 8 });
+        app.place_graph_window(&format!("window:{}", floating.0), rect).unwrap();
+        app.place_graph_window(&format!("window:{}", fullscreen.0), WindowPlacement::Fullscreen).unwrap();
+        app.swap_graph_windows(&format!("window:{}", original.0), &format!("window:{}", clone.0)).unwrap();
+        assert_eq!(app.window_session.graph().window(floating).unwrap().placement, WindowPlacement::Fullscreen);
+        assert_eq!(app.window_session.graph().window(fullscreen).unwrap().placement, rect);
+        assert_eq!(app.window_session.graph().focused(), Some(floating));
+        assert_eq!(app.state.active_view, Some(floating_view));
+        app.window_session.graph().validate().unwrap();
+    }
+}
+
+#[test]
+fn showing_the_last_editor_dismisses_the_dashboard() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let editor = app.window_session.graph().focused().unwrap();
+    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Hidden).unwrap();
+    assert!(app.window_session.dashboard_visible());
+    app.show_graph_window(&format!("window:{}", editor.0)).unwrap();
+    assert!(!app.window_session.dashboard_visible());
+    assert_eq!(app.active_input_context(), "editor.normal");
+    assert_eq!(app.window_session.graph().focused(), Some(editor));
+    let dashboard = app.window_session.native_ids().dashboard().unwrap().window;
+    assert_eq!(app.window_session.graph().window(dashboard).unwrap().placement, WindowPlacement::Hidden);
+}
+
+#[test]
+fn perpendicular_docked_editor_resizes_do_nothing() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let editor = app.window_session.graph().focused().unwrap();
+    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    let graph = app.window_session.graph().clone();
+    for key in ["ctrl-up", "ctrl-down"] {
+        app.handle_configured_key(key.parse().unwrap());
+        assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+        assert_eq!(app.window_session.graph(), &graph);
+    }
+}
+
+#[test]
+fn tiled_window_resize_accepts_the_minimum_delta() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.resize_graph_window("focused", i16::MIN).unwrap();
+    assert!(matches!(app.state.tabs[app.state.active_tab.unwrap()].root,
+        crate::editor::LayoutNode::Split { ratio: 900, .. }));
+}
+
+#[test]
+fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let first = app.window_session.graph().focused().unwrap();
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.place_graph_window("focused", WindowPlacement::Hidden).unwrap();
+    let tab = app.state.active_tab.unwrap();
+    app.handle_configured_key("ctrl-right".parse().unwrap());
+    let crate::editor::LayoutNode::Split { ratio, second, .. } = &app.state.tabs[tab].root else { panic!("outer split"); };
+    assert!(*ratio < 500);
+    assert!(matches!(**second, crate::editor::LayoutNode::Split { ratio: 500, .. }));
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+
+    app.place_graph_window(&format!("window:{}", first.0), WindowPlacement::Hidden).unwrap();
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(20, 20, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.place_graph_window("terminal", WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    app.process_effect(AppEffect::TerminalUnfocus);
+    let root = app.state.tabs[tab].root.clone();
+    app.handle_configured_key("ctrl-right".parse().unwrap());
+    assert_eq!(app.state.tabs[tab].root, root);
+    let terminal = app.window_session.native_ids().terminal(1).unwrap().window;
+    assert_eq!(app.window_session.graph().window(terminal).unwrap().placement,
+        WindowPlacement::Docked { edge: DockEdge::Right, size: 20 - crate::ui::render::TERMINAL_PANEL_RESIZE_STEP });
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 }
 
 #[test]
@@ -2677,6 +2791,9 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
     }
     app.show_graph_window(&format!("window:{}", source_window.0))
         .expect("show hidden editor");
+    assert_eq!(app.state.active_view, Some(source_view));
+    assert_eq!(app.state.tabs[tab].focused, source_pane);
+    assert_eq!(app.window_session.graph().focused(), Some(source_window));
     assert_eq!(
         app.window_session
             .graph()

@@ -68,6 +68,8 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
     assert_eq!(bounded.source_range.unwrap().end, ByteOffset(1));
     app.handle_key_in_context("dashboard", KeyEvent::character('q'));
     assert!(app.ui.documentation_popup.is_none());
+    assert_eq!(app.ui.notification.as_deref(), Some("keep unrelated notification"));
+    assert!(!app.ui.notification_error);
 }
 
 #[test]
@@ -208,32 +210,67 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
 }
 
 #[test]
+fn stale_owned_inlay_replies_cannot_replace_the_projection() {
+    use crate::language::lsp::*;
+    for stale in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("owned-hints.rs");
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("let 界 = build();"), Some(path));
+        app.set_dashboard_visibility(false);
+        let transport = super::language::fixture_owned_lsp(&mut app, "server", buffer);
+        app.language.running("server", LspCapabilities { inlay_hints: true, ..Default::default() });
+        app.language.select("server");
+        let document = app.active_lsp_document().unwrap().1;
+        app.request_lsp_inlay_hints();
+        assert!(matches!(transport.requested_feature(), Some(LspFeature::InlayHints { .. })));
+        if stale {
+            app.state.buffers[buffer].text.restore_text("let 界 = changed();").unwrap();
+        }
+        transport.publish_result(u64::MAX - 1, "textDocument/inlayHint", &document,
+            LspFeatureResult::InlayHints(vec![LspInlayHint {
+                position: LspPosition { line: 0, character: 5 }, label: ": Value".into(),
+            }]));
+        app.process_lsp_events();
+        assert_eq!(app.ui.lsp_inlay_hints.len(), usize::from(!stale));
+        if !stale {
+            assert_eq!(app.ui.lsp_inlay_hints[0].position, ByteOffset("let 界".len()));
+        }
+    }
+}
+
+#[test]
 fn content_modified_before_any_loading_is_asked_again_a_few_times() {
     let mut app = app();
+    let path = app.state.workspace_root.join("retry.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("symbol"), Some(path));
+    app.set_dashboard_visibility(false);
+    let transport = super::language::fixture_owned_lsp(&mut app, "rust-analyzer", buffer);
+    app.language.select("rust-analyzer");
+    app.request_lsp(crate::language::lsp::LspFeature::Hover);
+    assert_eq!(transport.requested_feature(), Some(crate::language::lsp::LspFeature::Hover));
     let failure = |app: &mut InteractiveApplication| {
         app.handle_lsp_request_failure(
             "rust-analyzer".into(),
-            7,
-            "textDocument/definition".into(),
+            app.language.generation(),
+            "textDocument/hover".into(),
             r#"{"code":-32801,"message":"content modified"}"#.into(),
         );
     };
-    app.lsp_asked_generation = Some(7);
     for _ in 0..10 {
-        app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
         failure(&mut app);
         assert!(!app.ui.notification_error);
         assert!(app.lsp_waiting.is_some());
         assert!(app.lsp_retry_at.is_some());
-        // Sending it again needs a server, so the test only lets the retry come due.
-        app.lsp_waiting = None;
+        let generation = app.language.generation();
         app.lsp_retry_at = Some(Instant::now());
         app.process_lsp_retry();
         assert!(app.lsp_retry_at.is_none());
+        assert!(app.language.generation() > generation);
+        assert_eq!(transport.requested_feature(), Some(crate::language::lsp::LspFeature::Hover));
     }
-    app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
     failure(&mut app);
     assert!(app.ui.notification_error, "the eleventh answer is shown");
+    assert_eq!(transport.requested_feature(), None);
 }
 
 #[test]
@@ -428,11 +465,12 @@ fn app_waiting_to_save_formatted(
 ) {
     let mut app = app();
     let path = app.state.workspace_root.join(name);
-    std::fs::write(&path, "a  b\n").unwrap();
+    std::fs::write(&path, "previous disk contents\n").unwrap();
     let (buffer, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("a  b\n"),
+        crate::editor::text::TextBuffer::from_text("previous disk contents\n"),
         Some(path.clone()),
     );
+    app.state.buffers[buffer].text.restore_text("a  b\n").unwrap();
     app.set_dashboard_visibility(false);
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
@@ -596,7 +634,7 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
 #[test]
 fn code_actions_wait_for_every_server_and_list_them_together() {
     use crate::language::lsp::{LspCodeAction, LspFeatureResult, LspWorkspaceEdit};
-    let (mut app, _, _, uri) = app_waiting_to_save_formatted("actions.py");
+    let (mut app, _, _, uri) = app_waiting_to_save_formatted("actions.rs");
     app.format_on_save = None;
     let action = |title: &str| LspCodeAction {
         title: title.into(),
@@ -608,15 +646,29 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
         }),
         command: None,
     };
-    app.language
-        .offer_actions("types", vec![action("from types")], None);
-    app.present_lsp_result(
-        "linter",
-        1,
-        "textDocument/codeAction",
-        &uri,
-        LspFeatureResult::CodeActions(vec![action("from linter")]),
-    );
+    let buffer = app.state.active_buffer_id().unwrap();
+    let first = super::language::fixture_owned_lsp(&mut app, "types", buffer);
+    let second = super::language::fixture_owned_lsp(&mut app, "linter", buffer);
+    app.language.select("types");
+    let document = app.active_lsp_document().unwrap().1;
+    assert_eq!(document.uri(), uri);
+    let position = crate::language::lsp::LspPosition { line: 0, character: 0 };
+    app.request_lsp(crate::language::lsp::LspFeature::CodeAction {
+        range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        diagnostics: Vec::new(),
+    });
+    assert!(matches!(first.requested_feature(), Some(crate::language::lsp::LspFeature::CodeAction { .. })));
+    assert!(matches!(second.requested_feature(), Some(crate::language::lsp::LspFeature::CodeAction { .. })));
+    let generation = app.language.generation();
+    first.publish_result(generation, "textDocument/codeAction", &document,
+        LspFeatureResult::CodeActions(vec![action("from types")]));
+    app.process_lsp_events();
+    assert!(app.ui.picker.is_none());
+    assert!(app.language.request_pending());
+    second.publish_result(generation, "textDocument/codeAction", &document,
+        LspFeatureResult::CodeActions(vec![action("from linter")]));
+    app.process_lsp_events();
+    assert!(!app.language.request_pending());
     let labels = app
         .ui
         .picker
@@ -776,7 +828,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a  b\n");
     assert!(!app.state.buffers[app.state.active_buffer_id().unwrap()].dirty);
 
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("failed.txt");
+    let (mut app, buffer, path, _) = app_waiting_to_save_formatted("failed.txt");
     app.handle_lsp_request_failure(
         "formatter".into(),
         1,
@@ -787,7 +839,9 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     super::wait_vfs(&mut app);
     assert!(!app.state.buffers[buffer].dirty);
 
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("slow.txt");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "a  b\n");
+
+    let (mut app, buffer, path, _) = app_waiting_to_save_formatted("slow.txt");
     app.process_format_on_save_deadline();
     assert!(app.format_on_save.is_some());
     app.format_on_save.as_mut().unwrap().deadline = std::time::Instant::now();
@@ -795,6 +849,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     assert!(app.format_on_save.is_none());
     super::wait_vfs(&mut app);
     assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "a  b\n");
 }
 
 #[test]
@@ -977,7 +1032,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
     );
     app.process_job_events();
     assert!(app.format_on_save.is_some());
-    assert_eq!(fs::read_to_string(&path).unwrap(), "a  b\n");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "previous disk contents\n");
     app.tasks.fixture_formatter_result(
         "wanted",
         pending_buffer,

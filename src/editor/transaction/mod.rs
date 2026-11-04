@@ -127,6 +127,11 @@ pub enum EditorOperation {
         axis: crate::editor::Axis,
         delta: i16,
     },
+    SetSplitRatio {
+        first: crate::editor::PaneId,
+        second: crate::editor::PaneId,
+        ratio: u16,
+    },
     SwapPanes {
         first: crate::editor::PaneId,
         second: crate::editor::PaneId,
@@ -612,6 +617,9 @@ fn apply_operation(
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::ResizePaneOnAxis { axis, delta } => state
             .resize_active_pane_on_axis(*axis, *delta)
+            .map_err(|error| TransactionError::Layout(error.into()))?,
+        EditorOperation::SetSplitRatio { first, second, ratio } => state
+            .set_split_ratio_between(*first, *second, *ratio)
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::SwapPanes { first, second } => state
             .swap_panes(*first, *second)
