@@ -1140,6 +1140,9 @@ fn wait_workspace_search(app: &mut InteractiveApplication) {
 #[test]
 fn explorer_auto_git_status_is_silent_outside_a_repository() {
     let mut app = app();
+    // An invalid gitfile stops discovery before any repository above the fixture.
+    fs::write(app.state.workspace_root.join(".git"), "gitdir: missing-repository\n").unwrap();
+    assert!(git2::Repository::discover(&app.state.workspace_root).is_err());
     let path = app.state.workspace_root.join("plain.txt");
     fs::write(&path, "plain\n").unwrap();
     app.state.open_text(
@@ -1647,6 +1650,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_hunks();
+    let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -1680,6 +1684,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     let before = crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     app.stage_selected_git_hunk();
     assert!(app.git.mutation_pending());
+    let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -1752,6 +1757,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.request_reset_selected_git_hunk();
     app.close_prompt();
     app.confirm_reset_selected_git_hunk("reset this hunk".into());
+    let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -1778,9 +1784,12 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let mut app = app();
     let path = app.state.workspace_root.join("find-me.txt");
     let mut contents = String::from("found\n");
-    contents.push_str(&"x".repeat(140 * 1024));
+    contents.push_str(&"x".repeat(crate::ui::render::surfaces::PICKER_MAXIMUM_PREVIEW_BYTES));
     fs::write(&path, contents).unwrap();
-    assert!(fs::metadata(&path).unwrap().len() > 120 * 1024);
+    assert!(
+        fs::metadata(&path).unwrap().len()
+            > crate::ui::render::surfaces::PICKER_MAXIMUM_PREVIEW_BYTES as u64
+    );
     app.start_workspace_file_picker();
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.search.files_pending() {
@@ -1795,7 +1804,11 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
                 preview.title == "find-me.txt"
                     && preview
                         .as_text()
-                        .is_some_and(|text| text.lines.first().map(String::as_str) == Some("found"))
+                        .is_some_and(|text| {
+                            text.lines.len() == 1
+                                && text.lines[0].contains("preview unavailable:")
+                                && text.lines[0].contains("exceeds")
+                        })
             })
     }));
     app.picker_insert("find-me");
@@ -2499,14 +2512,15 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     );
 }
 
+fn index_bytes(root: &std::path::Path, name: &str) -> String {
+    let repo = git2::Repository::open(root).unwrap();
+    let index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
+    String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
+}
+
 #[test]
 fn named_staging_commands_change_only_the_index() {
-    fn index_bytes(root: &std::path::Path, name: &str) -> String {
-        let repo = git2::Repository::open(root).unwrap();
-        let index = repo.index().unwrap();
-        let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
-        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
-    }
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("commands.txt");
@@ -2594,6 +2608,7 @@ fn named_staging_commands_change_only_the_index() {
     );
 
     app.start_git_hunks();
+    let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -2643,12 +2658,6 @@ fn named_staging_commands_change_only_the_index() {
 
 #[test]
 fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
-    fn index_bytes(root: &std::path::Path, name: &str) -> String {
-        let repo = git2::Repository::open(root).unwrap();
-        let index = repo.index().unwrap();
-        let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
-        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
-    }
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("choice.txt");
@@ -3026,6 +3035,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
         thread::yield_now()
     }
     let open_hunks = |app: &mut InteractiveApplication, id: &str| {
+        let deadline = Instant::now() + Duration::from_secs(4);
         app.invoke(
             crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
         );
@@ -3059,6 +3069,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("command id"),
     );
+    let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -3101,12 +3112,6 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let deadline = Instant::now() + Duration::from_secs(4);
-    fn index_bytes(root: &std::path::Path, name: &str) -> String {
-        let repo = git2::Repository::open(root).unwrap();
-        let index = repo.index().unwrap();
-        let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
-        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
-    }
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -3119,6 +3124,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         );
     };
     let drain = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(4);
         while app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_mutation_events();
             app.process_git_status_events();
@@ -3127,6 +3133,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         }
     };
     let load_hunks = |app: &mut InteractiveApplication, id: &str| {
+        let deadline = Instant::now() + Duration::from_secs(4);
         invoke(app, id);
         while app.git.hunks_pending() {
             app.process_git_hunk_events();
@@ -3240,8 +3247,8 @@ fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
     app.reconcile_workspace_trust();
     app.start_open(path.clone());
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
     let settle = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(4);
         while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_hunk_events();
             app.process_git_mutation_events();
@@ -3299,8 +3306,8 @@ fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
     app.reconcile_workspace_trust();
     app.start_open(path.clone());
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
     let settle = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(4);
         while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_hunk_events();
             app.process_git_mutation_events();
@@ -3365,7 +3372,8 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     // Two linked worktrees, both OUTSIDE the main worktree so the main worktree stays clean.
-    let outside = tempfile::tempdir().unwrap().keep();
+    let outside_guard = tempfile::tempdir().unwrap();
+    let outside = outside_guard.path();
     let mut roots = Vec::new();
     for name in ["alpha", "beta"] {
         let branch = repo.branch(name, &head, false).unwrap();
@@ -3382,19 +3390,30 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let identities = app
-        .workspace
-        .roots()
-        .iter()
-        .map(|root| root.identity.clone())
-        .collect::<Vec<_>>();
+    for (name, root) in ["alpha", "beta"].into_iter().zip(&roots) {
+        app.workspace.fixture_add_root(
+            name.into(),
+            crate::workspace::RootIdentity::capture(root).unwrap(),
+        ).unwrap();
+    }
+    let open_note = |app: &mut InteractiveApplication, root: &std::path::Path| {
+        app.open_explorer();
+        app.explorer.select(app.explorer.tree().id_for_path(root).expect("worktree root"));
+        app.explorer_toggle();
+        wait_explorer(app);
+        let path = root.join("note.txt");
+        app.explorer.select(app.explorer.tree().id_for_path(&path).expect("note in explorer"));
+        app.explorer_open_file(false);
+        wait_vfs(app);
+        let buffer = app.state.active_buffer_id().expect("opened note buffer");
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+        buffer
+    };
 
     let alpha_file = roots[0].join("note.txt");
     let beta_file = roots[1].join("note.txt");
-    app.documents
-        .open_explorer(alpha_file.clone(), identities.clone())
-        .expect("open the alpha document");
-    wait_vfs(&mut app);
+    let alpha_buffer = open_note(&mut app, &roots[0]);
+    assert_eq!(app.state.buffers[alpha_buffer].text.to_string(), "alpha");
     let alpha = app
         .documents
         .worktree_identity(&alpha_file)
@@ -3406,10 +3425,11 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         "the identity names the worktree the document was opened in"
     );
 
-    app.documents
-        .open_explorer(beta_file.clone(), identities)
-        .expect("open the beta document");
-    wait_vfs(&mut app);
+    let beta_buffer = open_note(&mut app, &roots[1]);
+    assert_ne!(alpha_buffer, beta_buffer);
+    assert_eq!(app.state.buffers[beta_buffer].text.to_string(), "beta");
+    assert_eq!(app.state.buffers[alpha_buffer].text.to_string(), "alpha");
+    assert_eq!(app.state.buffers[alpha_buffer].path.as_ref(), Some(&alpha_file));
     let beta = app
         .documents
         .worktree_identity(&beta_file)
@@ -3453,7 +3473,8 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
-    let outside = tempfile::tempdir().unwrap().keep();
+    let outside_guard = tempfile::tempdir().unwrap();
+    let outside = outside_guard.path();
     let worktree = outside.join("scoped");
     {
         let branch = repo.branch("scoped", &head, false).unwrap();
@@ -3491,6 +3512,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     let open_worktree_row = |app: &mut InteractiveApplication| {
         // A trust reconciliation bumps the workspace version and retires the previous status
         // snapshot, so the picker's own refresh has to be drained on every open.
+        let deadline = Instant::now() + Duration::from_secs(10);
         app.start_git_status_refresh();
         while app.git.status_pending() {
             app.process_git_status_events();
@@ -3498,6 +3520,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
             thread::yield_now()
         }
         invoke(app, "workspace.git.worktrees.open");
+        let deadline = Instant::now() + Duration::from_secs(10);
         while app.git.branch_pending() {
             app.process_git_branch_events();
             assert!(Instant::now() < deadline);
@@ -3518,6 +3541,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     };
 
     let switch = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(10);
         invoke(app, "workspace.git.worktree.open");
         while app.workspace.root_operation_pending() {
             app.process_trust_events();
@@ -3575,7 +3599,8 @@ fn a_locked_worktree_refuses_removal() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
-    let outside = tempfile::tempdir().unwrap().keep();
+    let outside_guard = tempfile::tempdir().unwrap();
+    let outside = outside_guard.path();
     let worktree = outside.join("locked");
     {
         let branch = repo.branch("locked", &head, false).unwrap();
@@ -3592,13 +3617,13 @@ fn a_locked_worktree_refuses_removal() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
     let invoke = |app: &mut InteractiveApplication, id: &str| {
         app.invoke(
             crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
         );
     };
     let select_worktree_row = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(10);
         app.start_git_status_refresh();
         while app.git.status_pending() {
             app.process_git_status_events();
@@ -3606,6 +3631,7 @@ fn a_locked_worktree_refuses_removal() {
             thread::yield_now()
         }
         invoke(app, "workspace.git.worktrees.open");
+        let deadline = Instant::now() + Duration::from_secs(10);
         while app.git.branch_pending() {
             app.process_git_branch_events();
             assert!(Instant::now() < deadline);
@@ -3622,6 +3648,7 @@ fn a_locked_worktree_refuses_removal() {
         }
     };
     let drain = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(10);
         while app.git.branch_pending() || app.git.status_pending() {
             app.process_git_branch_events();
             app.process_git_status_events();
@@ -4688,20 +4715,34 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     );
     assert!(has("u Unstage"), "the footer names the inverse action");
     assert!(has("Tab Diff"), "the footer names the focus switch");
-    // A legend that does not fit drops whole actions rather than clipping one, so no half
-    // entry can be read as a different action.
-    let footer_row = rendered
-        .iter()
-        .find(|row| row.contains("s Stage"))
-        .expect("the footer row");
-    assert!(
-        !footer_row.trim_end().ends_with('·'),
-        "a shortened footer never ends on a dangling separator: {footer_row:?}"
-    );
     assert!(
         !has("Insert · escape normal"),
         "the widget's mode hint is replaced by the surface's own footer"
     );
+
+    // Read only the footer text, not its surrounding border, on a surface that truncates it.
+    let legend = app.ui.picker.as_ref().unwrap().footer.clone().unwrap();
+    app.handle_event(crate::ui::UiEvent::Resize(55, 24));
+    app.reconcile_editor_windows();
+    let narrow = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        app.window_session.width(),
+        app.window_session.height(),
+    );
+    let rect = app.ui.surface_content.picker.expect("picker geometry").outer;
+    let footer_y = rect.y + rect.height - 1;
+    let footer = (rect.x + 2..rect.x + rect.width - 1)
+        .filter_map(|x| narrow.grid.get(x, footer_y))
+        .filter(|cell| cell.style == crate::ui::Style::Muted)
+        .map(|cell| cell.symbol.as_str())
+        .collect::<String>();
+    let entries = footer.trim().split(" · ").collect::<Vec<_>>();
+    let full_entries = legend.split(" · ").collect::<Vec<_>>();
+    assert!(!entries.is_empty() && entries.len() < full_entries.len(), "{footer:?}");
+    assert_eq!(entries, full_entries[..entries.len()], "only complete legend entries: {footer:?}");
 }
 
 /// W-26: the diff pane follows the focused row and shows that path's real diff, and `Tab`
@@ -5460,9 +5501,12 @@ fn palette_finds_commands_by_the_words_people_type() {
 #[test]
 fn palette_runs_flagged_commands_with_the_flag_off() {
     let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("unsaved\n"), None);
+    app.state.buffers[buffer].dirty = true;
     palette_row_for(&mut app, "quit dust");
     app.accept_picker();
-    assert!(app.should_quit);
+    assert!(!app.should_quit, "ordinary quit refuses unsaved changes");
+    assert!(app.ui.notification_error);
 }
 
 #[test]
@@ -5471,6 +5515,14 @@ fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
     palette_row_for(&mut app, "file.open");
     app.accept_picker();
     assert_eq!(app.input.prompt().expect("prompt").input, "e ");
+    let path = app.state.workspace_root.join("palette-open.txt");
+    fs::write(&path, "opened from the palette\n").unwrap();
+    app.prompt_insert("palette-open.txt");
+    app.submit_prompt();
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().expect("opened buffer");
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "opened from the palette\n");
 
     let settings = app.configuration.settings();
     for (id, initial) in &settings.command_palette.prompts {
@@ -5507,6 +5559,11 @@ fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments
             .any(|row| row == "workspace.git.worktree.remove"),
         "{rows:?}"
     );
+    app.input.prompt_complete(1);
+    assert!(app.input.accept_completion(app.configuration.settings()));
+    let prompt = app.input.prompt().expect("completed prompt");
+    assert_eq!(prompt.input, "worktree ");
+    assert_eq!(prompt.cursor, "worktree ".len());
 
     app.close_prompt();
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
@@ -5587,6 +5644,12 @@ fn switching_folders_with_open_terminals_warns_before_ending_them() {
     assert_eq!(app.terminal_session.running_count(), 1, "nothing ended yet");
     app.switch_workspace_root(main.clone());
     assert_eq!(app.ui.notification.as_deref(), Some("switching…"));
+    wait_root_operation(&mut app);
+    assert_eq!(app.state.workspace_root, main);
+    assert_eq!(app.workspace.roots().len(), 1);
+    assert_eq!(app.workspace.roots()[0].identity.canonical_path, main);
+    assert!(!app.terminal_session.contains(PtyId(1)));
+    assert_eq!(app.terminal_session.running_count(), 0);
 }
 
 #[test]
@@ -5666,7 +5729,16 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
         app.workspace.version(),
     );
     app.terminal_session.fixture_cwd(PtyId(101), path.clone());
+    let first_file = path.join("first.txt");
+    let second_file = extra.path().canonicalize().unwrap().join("second.txt");
+    assert_eq!(app.workspace.roots().len(), 2);
+    assert_eq!(app.workspace_relative_label(&first_file), "first.txt");
+    assert_eq!(app.workspace_relative_label(&second_file), "second.txt");
     app.remove_workspace_root(second);
+    assert_eq!(app.workspace.roots().len(), 1);
+    assert!(app.workspace.roots().iter().all(|root| root.id != second));
+    assert_eq!(app.workspace_relative_label(&first_file), "first.txt");
+    assert_eq!(app.workspace_relative_label(&second_file), second_file.display().to_string());
     assert_eq!(app.workspace.active_root(), Some(first));
     assert_eq!(app.state.workspace_root, path);
     assert!(app.terminal_session.contains(PtyId(101)));
