@@ -253,6 +253,66 @@ pub(in crate::editor::session) fn fixture_manifest(
 }
 
 #[test]
+fn private_cells_use_the_renderers_ambiguous_width_policy() {
+    let index = private_index("demo", 9);
+    let declaration = &index.content_types[0];
+    let mut private = PluginPrivateState {
+        dimensions: Some((4, 1)),
+        dimensions_revision: 1,
+        snapshot: None,
+    };
+    let mut snapshot = PluginPrivateSnapshot {
+        revision: 1,
+        dimensions_revision: 1,
+        styles: vec![PluginPrivateStyle { id: 1, style: PluginUiStyle::Default }],
+        cells: vec![
+            crate::extensions::PluginPrivateCell {
+                x: 0, y: 0, grapheme: "·".into(), continuation: false, style: 1,
+            },
+            crate::extensions::PluginPrivateCell {
+                x: 1, y: 0, grapheme: "A".into(), continuation: false, style: 1,
+            },
+        ],
+        cursor: None,
+        hit_regions: Vec::new(),
+    };
+    assert!(validate_private_snapshot(declaration, &private, &snapshot, None, false).is_ok());
+    assert_eq!(
+        validate_private_snapshot(declaration, &private, &snapshot, None, true).unwrap_err().code,
+        PluginUiErrorCode::SplitWideGrapheme,
+    );
+    snapshot.cells[1].x = 2;
+    snapshot.cells.push(crate::extensions::PluginPrivateCell {
+        x: 1, y: 0, grapheme: String::new(), continuation: true, style: 1,
+    });
+    assert!(validate_private_snapshot(declaration, &private, &snapshot, None, true).is_ok());
+    assert!(validate_private_snapshot(declaration, &private, &snapshot, None, false).is_err());
+    private.snapshot = Some(snapshot);
+    let patch = PluginPrivatePatch {
+        revision: 2,
+        expected_surface_revision: 1,
+        dimensions_revision: 1,
+        dirty: vec![PluginPrivateRect { x: 0, y: 0, width: 2, height: 1 }],
+        cells: vec![
+            crate::extensions::PluginPrivateCell {
+                x: 0, y: 0, grapheme: "·".into(), continuation: false, style: 1,
+            },
+            crate::extensions::PluginPrivateCell {
+                x: 1, y: 0, grapheme: "A".into(), continuation: false, style: 1,
+            },
+        ],
+        styles: Vec::new(),
+        replace_cursor: false,
+        cursor: None,
+        replace_hit_regions: false,
+        hit_regions: Vec::new(),
+    };
+    assert_eq!(apply_private_patch(declaration, &private, &patch, true).unwrap_err().code,
+        PluginUiErrorCode::SplitWideGrapheme);
+    assert!(apply_private_patch(declaration, &private, &patch, false).is_ok());
+}
+
+#[test]
 fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     let mut graph = WindowGraph::default();
     let tab = graph.create_workspace_tab("builtin.test", 1).expect("tab");

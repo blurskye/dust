@@ -189,6 +189,20 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             .expect("index");
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
+    let mut catalog = crate::extensions::PluginContributionCatalog::default();
+    catalog.install(index).expect("catalog install");
+    let plugin_defaults = super::compile_keymaps_with_plugin_catalog(
+        &app.commands,
+        &loaded,
+        &catalog,
+        &app.configuration.settings().input.keymaps,
+    )
+    .expect("plugin defaults");
+    let collision = plugin_defaults
+        .inspect_key("editor.normal", "space f b")
+        .expect("plugin shadows the bundled buffer picker");
+    assert_eq!(collision.command.as_deref(), Some("plugin.demo.run"));
+    assert_eq!(collision.contribution_layer, crate::editor::input::InputContextLayer::Plugin);
     loaded.entries.extend([
         crate::config::KeymapEntry {
             id: "plugin.demo.keymap.action".into(),
@@ -215,8 +229,6 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             desc: None,
         },
     ]);
-    let mut catalog = crate::extensions::PluginContributionCatalog::default();
-    catalog.install(index).expect("catalog install");
     let resolved = super::compile_keymaps_with_plugin_catalog(
         &app.commands,
         &loaded,
@@ -520,6 +532,10 @@ fn key_groups_require_a_command_not_an_orphan_pass_through() {
 #[test]
 fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let app = app();
+    let original = app.configuration.keymaps().hints_for_prefix(
+        "editor.normal", "space f", &app.configuration.settings().command_labels,
+    ).expect("bundled file hints");
+    assert!(original.rows.iter().any(|row| row.next_key == "e"));
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.groups.push(crate::config::KeyGroupEntry {
@@ -546,10 +562,10 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
             desc: None,
         },
         crate::config::KeymapEntry {
-            id: "user.test.unmap-command-palette-hint".into(),
+            id: "user.test.unmap-explorer-hint".into(),
             context: Some("editor".into()),
             mode: "normal".into(),
-            keys: Some("<leader> f c".into()),
+            keys: Some("<leader> f e".into()),
             command: None,
             arguments: BTreeMap::new(),
             unmap: true,
@@ -587,7 +603,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
         )
         .expect("file hints");
     assert!(!files.rows.iter().any(|row| row.next_key == "b"));
-    assert!(!files.rows.iter().any(|row| row.next_key == "c"));
+    assert!(!files.rows.iter().any(|row| row.next_key == "e"));
     assert!(files.rows.iter().any(|row| {
         row.next_key == "z"
             && row.mappings.iter().any(|mapping| {
@@ -820,7 +836,26 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
         );
     }
 
-    let mut invalid = crate::config::load_bundled_config().keymaps;
+    let mut valid = crate::config::load_bundled_config().keymaps;
+    valid.entries.push(toml::from_str(r#"
+        id = "user.test.retained-binding"
+        context = "editor"
+        mode = "normal"
+        keys = "<leader> j z"
+        command = "health.open"
+    "#).unwrap());
+    valid.groups.push(toml::from_str(r#"
+        id = "user.test.retained-group"
+        context = "editor"
+        mode = "normal"
+        prefix = "<leader> j"
+        label = "Retained"
+    "#).unwrap());
+    let (current, diagnostic) = compile_keymaps(
+        &app.commands, &valid, &app.configuration.settings().input.keymaps,
+    );
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    let mut invalid = valid;
     invalid.path = PathBuf::from("keymaps.toml");
     invalid.groups.push(crate::config::KeyGroupEntry {
         id: "user.test.transactional-unreachable".into(),
@@ -834,7 +869,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     });
     let (retained, diagnostic) = reload_keymaps(
         &app.commands,
-        app.configuration.keymaps(),
+        &current,
         &invalid,
         &app.configuration.settings().input.keymaps,
     );
@@ -845,9 +880,15 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     );
     assert_eq!(
         retained.groups(),
-        app.configuration.keymaps().groups(),
-        "rejected candidate must retain groups and maps atomically"
+        current.groups(),
+        "rejected candidate must retain groups atomically"
     );
+    assert_eq!(
+        retained.inspect_key("editor.normal", "space j z").unwrap().command.as_deref(),
+        Some("health.open"),
+        "rejected candidate must retain the user binding too"
+    );
+    assert_eq!(retained.binding_for("editor.normal", "health.open"), Some("space j z"));
 }
 
 #[test]
@@ -1031,11 +1072,11 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
 
     // The answer belongs to the context that was asked about: unmapping `?` in editor.normal
     // says nothing about a context where the same command is bound elsewhere.
-    assert!(
-        !remapped
-            .effective_binding("editor.normal", "command_line.open")
-            .keys()
-            .contains(&"?".to_owned())
+    assert!(bundled.effective_binding("dashboard", "command_line.open").keys().contains(&"?".to_owned()));
+    assert_eq!(
+        remapped.effective_binding("dashboard", "command_line.open"),
+        bundled.effective_binding("dashboard", "command_line.open"),
+        "the editor-only unmap must leave dashboard bindings unchanged"
     );
 }
 

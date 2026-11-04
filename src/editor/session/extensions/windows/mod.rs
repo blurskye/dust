@@ -65,6 +65,7 @@ pub(in crate::editor::session) struct PluginWindowHost {
     next_handle: u64,
     instances: BTreeMap<u64, PluginWindowInstance>,
     configured_placements: BTreeMap<String, PluginRequestedPlacement>,
+    ambiguous_wide: bool,
 }
 
 #[cfg(test)]
@@ -77,6 +78,7 @@ impl Clone for PluginWindowHost {
             next_handle: self.next_handle,
             instances: self.instances.clone(),
             configured_placements: self.configured_placements.clone(),
+            ambiguous_wide: self.ambiguous_wide,
         }
     }
 }

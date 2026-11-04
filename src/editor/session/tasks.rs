@@ -82,7 +82,7 @@ pub(in crate::editor::session) struct TestCaseResult {
     pub(in crate::editor::session) status: String,
     pub(in crate::editor::session) duration: String,
     pub(in crate::editor::session) message: String,
-    pub(in crate::editor::session) source: Option<(PathBuf, usize, usize)>,
+    pub(in crate::editor::session) source: Option<super::search::MatcherSource>,
 }
 
 pub(in crate::editor::session) fn task_plan(
@@ -838,13 +838,13 @@ impl TaskSession {
             };
             for (index, case) in self.tests[name].iter().enumerate() {
                 let status = case.status.to_lowercase();
-                let Some((path, line, _)) = &case.source else {
+                let Some(source) = &case.source else {
                     continue;
                 };
                 if status.contains("fail") || status.contains("error") {
                     failed.push((
-                        path.clone(),
-                        *line,
+                        source.path.clone(),
+                        source.line,
                         format!("{}: {}", case.name, case.message),
                         TestKey {
                             name: name.clone(),
@@ -857,7 +857,7 @@ impl TaskSession {
         }
         failed
     }
-    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<(PathBuf, usize, usize)> {
+    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<super::search::MatcherSource> {
         let current = self.keys.get(&key.name)?;
         if !Arc::ptr_eq(&current.epoch, &key.run) {
             return None;
@@ -1128,7 +1128,10 @@ mod tests {
                 status: "ok".into(),
                 duration: String::new(),
                 message: String::new(),
-                source: Some((root.path().join("source"), 0, 0)),
+                source: Some(super::super::search::MatcherSource {
+                    path: root.path().join("source"), line: 0, column: 0,
+                    encoding: crate::editor::text::PositionEncoding::Utf8,
+                }),
             }],
         );
         assert!(owner.resolve_test(&key).is_some());

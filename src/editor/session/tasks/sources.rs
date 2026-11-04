@@ -165,28 +165,27 @@ impl TaskSession {
                 source: captures
                     .name(&matcher.path_group)
                     .map(|value| PathBuf::from(value.as_str()))
-                    .map(|path| {
-                        (
-                            if path.is_absolute() {
+                    .map(|path| super::super::search::MatcherSource {
+                            path: if path.is_absolute() {
                                 path
                             } else {
                                 task.cwd.join(path)
                             },
-                            captures
+                            line: captures
                                 .name(&matcher.line_group)
                                 .and_then(|v| v.as_str().parse::<usize>().ok())
                                 .unwrap_or(1)
                                 .saturating_sub(1),
-                            matcher
+                            column: matcher
                                 .column_group
                                 .as_ref()
                                 .and_then(|name| captures.name(name))
                                 .and_then(|v| v.as_str().parse::<usize>().ok())
                                 .unwrap_or(1)
                                 .saturating_sub(1),
-                        )
+                            encoding: matcher.column_encoding.unwrap_or(crate::editor::text::PositionEncoding::Utf8),
                     })
-                    .filter(|source| source.0.starts_with(&task.root)),
+                    .filter(|source| source.path.starts_with(&task.root)),
             })
             .collect();
         self.tests.insert(task.requested.clone(), cases);

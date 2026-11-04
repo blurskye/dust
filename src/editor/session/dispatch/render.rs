@@ -378,7 +378,10 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     pub(super) fn sync_plugin_window_ui(&mut self) {
         let projection = self.compositor_projection().cloned();
-        self.extension.synchronize_windows(projection.as_ref());
+        self.extension.synchronize_windows(
+            projection.as_ref(),
+            self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide,
+        );
         self.ui.plugin_surfaces = self.extension.window_snapshots();
         self.ui.private_surfaces = self
             .extension

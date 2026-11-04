@@ -896,7 +896,8 @@ impl InteractiveApplication {
     ) -> crate::extensions::PluginUiEvent {
         match self
             .extension
-            .prepare_window(index, request, &self.state, &self.window_session)
+            .prepare_window(index, request, &self.state, &self.window_session,
+                self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide)
         {
             WindowUpdate::Ready(event) => event,
             WindowUpdate::Publish(source, transition) => {
@@ -3368,6 +3369,7 @@ impl InteractiveApplication {
                         path: entry.canonical_path,
                         line: 0,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     }),
                 )
             })
@@ -5826,6 +5828,7 @@ impl InteractiveApplication {
                                 path: location.path,
                                 line: location.line.saturating_sub(1) as usize,
                                 column: location.column.saturating_sub(1) as usize,
+                                encoding: PositionEncoding::Utf8,
                             });
                         }
                     }
@@ -7515,6 +7518,7 @@ impl InteractiveApplication {
                 path,
                 line: *line,
                 column: 0,
+                encoding: PositionEncoding::Utf8,
             }),
             _ => self.notify_message(self.message("conflict_none", &[]), false),
         }
@@ -7539,6 +7543,7 @@ impl InteractiveApplication {
                 path,
                 line,
                 column: 0,
+                encoding: PositionEncoding::Utf8,
             }),
             Err(error) => self.show_error(error),
         }
@@ -7994,6 +7999,7 @@ impl InteractiveApplication {
                         path: snapshot.scope_root.join(&entry.relative_path),
                         line: 0,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     }),
                 ));
             }
@@ -8505,6 +8511,10 @@ impl InteractiveApplication {
                 return;
             }
         };
+        // A stream may have refreshed the picker underneath help, not the visible page.
+        if self.search.help_is_open() {
+            return;
+        }
         if self.search.theme_picker_key().is_none() {
             self.configuration.cancel_theme_picker();
         }
@@ -9256,11 +9266,11 @@ impl InteractiveApplication {
             return;
         };
         let payload = if let PickerPayload::TaskTest(key) = payload {
-            let Some((path, line, column)) = self.tasks.resolve_test(&key) else {
+            let Some(source) = self.tasks.resolve_test(&key) else {
                 self.clear_picker_preview();
                 return;
             };
-            PickerPayload::MatcherSource(MatcherSource { path, line, column })
+            PickerPayload::MatcherSource(source)
         } else {
             payload
         };
@@ -9661,6 +9671,7 @@ impl InteractiveApplication {
                         path: location.path,
                         line: location.line.saturating_sub(1) as usize,
                         column: location.column.saturating_sub(1) as usize,
+                        encoding: PositionEncoding::Utf8,
                     }),
                     Ok(None) => {}
                     Err(error) => self.show_error(error),
@@ -9684,14 +9695,15 @@ impl InteractiveApplication {
                         path,
                         line: new_line,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     })
                 } else {
                     self.show_error("Git hunk is stale")
                 }
             }
             Some(PickerPayload::TaskTest(key)) => {
-                if let Some((path, line, column)) = self.tasks.resolve_test(&key) {
-                    self.navigate_matcher_source(MatcherSource { path, line, column });
+                if let Some(source) = self.tasks.resolve_test(&key) {
+                    self.navigate_matcher_source(source);
                 } else {
                     self.show_error("test result source retired");
                 }
@@ -10160,6 +10172,7 @@ impl InteractiveApplication {
                     line: first_conflict_line(&repository.join(&conflict.path)),
                     path: repository.join(&conflict.path),
                     column: 0,
+                    encoding: PositionEncoding::Utf8,
                 }),
             ));
         }

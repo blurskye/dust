@@ -14,6 +14,19 @@ use super::{
 type WindowMutationRevisions = (Option<u64>, Option<u64>, Option<u64>);
 
 impl PluginWindowHost {
+    pub(in crate::editor::session) fn set_ambiguous_width(&mut self, wide: bool) {
+        if self.ambiguous_wide == wide {
+            return;
+        }
+        self.ambiguous_wide = wide;
+        // Cell coordinates belong to the width policy too. Request a fresh snapshot.
+        for instance in self.instances.values_mut() {
+            if let Some(private) = &mut instance.private {
+                private.dimensions = None;
+                private.snapshot = None;
+            }
+        }
+    }
     pub(in crate::editor::session) fn set_configured_rules(
         &mut self,
         windows: &crate::config::WindowsConfig,
@@ -586,6 +599,7 @@ impl PluginWindowHost {
                     private,
                     &snapshot,
                     private.snapshot.as_ref().map(|snapshot| snapshot.revision),
+                    self.ambiguous_wide,
                 )?;
                 let revision = snapshot.revision;
                 self.instances
@@ -607,7 +621,7 @@ impl PluginWindowHost {
                         "handle is not private cells",
                     )
                 })?;
-                let candidate = apply_private_patch(declaration, private, &patch)?;
+                let candidate = apply_private_patch(declaration, private, &patch, self.ambiguous_wide)?;
                 let revision = candidate.revision;
                 self.instances
                     .get_mut(&handle)

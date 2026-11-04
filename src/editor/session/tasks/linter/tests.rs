@@ -650,7 +650,7 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
         matcher: matcher.clone(),
     };
     tasks.apply_test_result(&task);
-    assert_eq!(tasks.tests["first"][0].source.as_ref().unwrap().0, path);
+    assert_eq!(tasks.tests["first"][0].source.as_ref().unwrap().path, path);
     task.adapter = AdapterContext::Linter {
         matcher,
         lint: true,

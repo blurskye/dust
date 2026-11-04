@@ -2182,7 +2182,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
 fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
-    fs::write(root.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(root.path().join("a.txt"), "one\ntwo\néX\n").unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.tasks.insert(
         "unit".into(),
@@ -2191,7 +2191,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
             executable: "/bin/sh".into(),
             arguments: vec![
                 "-c".into(),
-                "printf 'FAILED adds a.txt:3 wrong sum\nok reads a.txt:1 fine\n'".into(),
+                "printf 'FAILED adds a.txt:3:2 wrong sum\nok reads a.txt:1:1 fine\n'".into(),
             ],
             cwd: None,
             environment: BTreeMap::new(),
@@ -2199,12 +2199,12 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
             timeout_ms: Some(2000),
             stdin: false,
             matcher: Some(crate::config::ProblemMatcherConfig {
-                pattern: r"(?m)^(?P<status>\S+) (?P<name>\S+) (?P<path>[^:]+):(?P<line>\d+) (?P<message>[^\n]+)$"
+                pattern: r"(?m)^(?P<status>\S+) (?P<name>\S+) (?P<path>[^:]+):(?P<line>\d+):(?P<column>\d+) (?P<message>[^\n]+)$"
                     .into(),
                 path_group: "path".into(),
                 line_group: "line".into(),
-                column_group: None,
-                column_encoding: None,
+                column_group: Some("column".into()),
+                column_encoding: Some(crate::editor::text::PositionEncoding::Utf32),
                 severity_group: None,
                 message_group: "message".into(),
                 name_group: Some("name".into()),
@@ -2253,6 +2253,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
         Some(root.path().join("a.txt").as_path())
     );
     assert_eq!(buffer.text.byte_to_line(view.cursor).unwrap(), 2);
+    assert_eq!(view.cursor.get(), buffer.text.line_to_byte(2).unwrap().get() + "é".len());
 
     // Restarting the finished task runs it again without claiming an error from the stop half.
     app.process_effect(AppEffect::TaskRestart("unit".into()));
@@ -5682,6 +5683,7 @@ fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
         path,
         line: 0,
         column: 0,
+        encoding: crate::editor::text::PositionEncoding::Utf8,
     });
     let (newer, _) = app
         .state

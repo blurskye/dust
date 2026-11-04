@@ -1339,7 +1339,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     };
     let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
         .extension
-        .prepare_window(&index, request.clone(), &app.state, &app.window_session)
+        .prepare_window(&index, request.clone(), &app.state, &app.window_session, false)
     else {
         panic!("expected staged window");
     };
@@ -1358,7 +1358,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     assert!(app.extension.window_snapshots().is_empty());
     let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
         .extension
-        .prepare_window(&index, request.clone(), &app.state, &app.window_session)
+        .prepare_window(&index, request.clone(), &app.state, &app.window_session, false)
     else {
         panic!("expected fresh window proposal");
     };
@@ -1556,6 +1556,12 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         .unwrap()
         .id
         .clone();
+    app.invoke(
+        crate::editor::CommandInvocation::new("overlay.help.contextual", InvocationSource::Test)
+            .unwrap(),
+    );
+    assert!(app.search.help_is_open());
+    let help_ui = app.ui.picker.clone();
     app.extension
         .provider_chunk(
             "demo",
@@ -1575,6 +1581,12 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         )
         .unwrap();
     app.present_plugin_picker(request);
+    assert!(app.search.help_is_open(), "a stream refresh must not dismiss help");
+    assert_eq!(app.ui.picker, help_ui);
+    assert!(app.extension.provider_visible(request));
+    app.close_picker();
+    assert!(!app.search.help_is_open());
+    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label == "Better"));
     assert_eq!(app.ui.picker.as_ref().unwrap().query, "e");
     assert_eq!(
         app.search.picker().unwrap().selected_item().unwrap().id,

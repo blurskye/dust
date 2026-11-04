@@ -1848,22 +1848,8 @@ impl InteractiveApplication {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
-                                let start = self.state.buffers[buffer]
-                                    .text
-                                    .line_to_byte(source.line)
-                                    .ok()
-                                    .map(|offset| {
-                                        ByteOffset(
-                                            (offset.get() + source.column)
-                                                .min(self.state.buffers[buffer].text.len_bytes()),
-                                        )
-                                    })
-                                    .filter(|offset| {
-                                        self.state.buffers[buffer]
-                                            .text
-                                            .validate_offset(*offset)
-                                            .is_ok()
-                                    })
+                                let start = PositionCodec::new(&self.state.buffers[buffer].text)
+                                    .lsp_to_byte(source.line, source.column, source.encoding)
                                     .unwrap_or(ByteOffset(0));
                                 self.state.views[view].cursor = start;
                                 self.state.mark_editor_changed();
