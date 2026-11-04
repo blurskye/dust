@@ -428,6 +428,13 @@ impl GitSession {
                 self.last_unstaged = Some(snapshot.clone());
             }
             Ok(None) => {}
+            Err(crate::workspace::git::GitHunkError::Unmerged) => {
+                let source = source.clone();
+                self.clear_signs();
+                // An unmerged index has no baseline; retry only when the source changes.
+                self.sign_source = Some(source);
+                return Some(Vec::new());
+            }
             Err(_) => {
                 self.clear_signs();
                 return Some(Vec::new());
@@ -1399,6 +1406,50 @@ mod regression_tests {
             thread::yield_now();
         }
         assert!(path.join("a.txt").exists());
+    }
+
+    #[test]
+    fn unmerged_signs_stay_empty_without_restarting_the_same_read() {
+        let (dir, repo, editor, mut session) = fixture();
+        let mut index = repo.index().unwrap();
+        let mut entry = index.get_path(Path::new("a.txt"), 0).unwrap();
+        index.remove(Path::new("a.txt"), 0).unwrap();
+        entry.flags = (entry.flags & !0x3000) | 0x2000;
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+        assert!(index.has_conflicts());
+        refresh(&mut session, &editor, dir.path());
+        assert!(session.reconcile_signs(&editor, 1, true));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut cleared = false;
+        while session.signs_pending() {
+            if let Some(signs) = session.poll_signs(&editor, 1, true) {
+                assert!(signs.is_empty());
+                cleared = true;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(cleared);
+        let generation = session.sign_hunks.generation();
+        assert!(!session.reconcile_signs(&editor, 1, true));
+        assert_eq!(session.sign_hunks.generation(), generation);
+
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        assert!(!index.has_conflicts());
+        refresh(&mut session, &editor, dir.path());
+        assert!(session.reconcile_signs(&editor, 1, true));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut signs = Vec::new();
+        while session.signs_pending() {
+            if let Some(result) = session.poll_signs(&editor, 1, true) {
+                signs = result;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(signs.iter().any(|sign| sign.staged));
     }
 
     #[test]
