@@ -2635,6 +2635,25 @@ fn whole_file_unstage_clears_conflict_entries_without_changing_worktree() {
 }
 
 #[test]
+fn whole_file_unstage_restores_a_staged_deletion() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "file", "old\n");
+    std::fs::remove_file(dir.path().join("file")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("file")).unwrap();
+    index.write().unwrap();
+    let mut plan = plan_template(
+        plan_policy(dir.path(), "file", GitDiffLayer::Staged),
+        GitMutationKind::UnstageFile,
+    );
+    plan.expected_index = Some(git_index_fingerprint(dir.path()).unwrap());
+    run_plan(plan).unwrap();
+    assert_eq!(index_text(dir.path(), "file"), "old\n");
+    assert!(!dir.path().join("file").exists());
+}
+
+#[test]
 fn index_only_unstage_does_not_read_worktree_content() {
     for directory in [false, true] {
         let dir = tempdir().unwrap();

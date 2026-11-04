@@ -1372,6 +1372,44 @@ mod regression_tests {
     }
 
     #[test]
+    fn deleted_file_hunks_are_selectable_for_staging_and_reset() {
+        for reset in [false, true] {
+            let (dir, _, editor, mut session) = fixture();
+            let path = dir.path().join("a.txt");
+            std::fs::remove_file(&path).unwrap();
+            refresh(&mut session, &editor, dir.path());
+            let status = session.status_snapshot.as_ref().unwrap();
+            let mut snapshot = crate::workspace::git::read_hunks(&GitSession::policy(
+                status, "a.txt".into(), GitDiffLayer::Unstaged,
+            )).unwrap();
+            snapshot.revision = 2;
+            assert_eq!(snapshot.hunks[0].new_start, 0);
+            session.selected = None;
+            session.hunk_snapshot = Some(snapshot);
+            session.select_at(1);
+            assert!(session.has_selection());
+            if reset {
+                session.mutate(&editor, true, true, 1).unwrap();
+            } else {
+                session.start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![]).unwrap();
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while session.mutation_pending() {
+                session.poll_mutation().unwrap();
+                assert!(Instant::now() < deadline);
+                thread::yield_now();
+            }
+            let index = git2::Repository::open(dir.path()).unwrap().index().unwrap();
+            assert_eq!(index.get_path(Path::new("a.txt"), 0).is_some(), reset);
+            assert_eq!(path.exists(), reset);
+            if reset {
+                let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
+                assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+            }
+        }
+    }
+
+    #[test]
     fn hunk_reads_preserve_worktree_mutation_outcomes() {
         let (dir, _, _, mut session) = fixture();
         let path = dir.path().join("review");
