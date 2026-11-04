@@ -519,18 +519,17 @@ pub(super) fn render_editor_view(
             .and_then(|markdown| markdown.table.as_ref());
         let leading_indentation = leading_indentation_width(full_content, config.editor.tab_width);
         let can_wrap = wrap_enabled;
-        // A table row is placed whole: each grapheme goes where its cell wraps it.
+        // A table row is placed whole: each grapheme goes where its cell wraps it. Tables fit
+        // the window, so they don't scroll sideways with the rest of the text.
         let table_row = screen_row;
-        let table_scroll = if can_wrap { 0 } else { view.scroll_column };
         if let Some(table) = table {
-            for row in first_line_row..table.rows {
+            for (row, frame) in table.frames.iter().enumerate().skip(first_line_row) {
                 let y = table_row
                     .saturating_add(u16::try_from(row - first_line_row).unwrap_or(u16::MAX));
                 if y >= body_height {
                     break;
                 }
-                let frame = table.frame.chars().skip(table_scroll).collect::<String>();
-                grid.put_text_clipped(gutter_width, y, &frame, table.style, width);
+                grid.put_text_clipped(gutter_width, y, frame, table.style, width);
             }
         }
         let skipped_bytes = if table.is_some() {
@@ -582,9 +581,6 @@ pub(super) fn render_editor_view(
             if let Some(table) = table {
                 let at = ByteOffset(line_start.get() + relative);
                 let Some((row, column)) = table.place(at) else {
-                    continue;
-                };
-                let Some(column) = column.checked_sub(table_scroll) else {
                     continue;
                 };
                 let Some(row) = row.checked_sub(first_line_row) else {
@@ -831,13 +827,16 @@ pub(super) fn render_editor_view(
             }
         }
         if let Some(table) = table {
-            let last = table.rows.saturating_sub(1).saturating_sub(first_line_row);
+            let last = table.frames.len().saturating_sub(1);
             screen_row = table_row
-                .saturating_add(u16::try_from(last).unwrap_or(u16::MAX))
+                .saturating_add(
+                    u16::try_from(last.saturating_sub(first_line_row)).unwrap_or(u16::MAX),
+                )
                 .min(body_height);
+            let frame = table.frames.get(last).map_or("", String::as_str);
             x = gutter_width
                 .saturating_add(
-                    u16::try_from(text_width(&table.frame, config.editor.ambiguous_width))
+                    u16::try_from(text_width(frame, config.editor.ambiguous_width))
                         .unwrap_or(u16::MAX),
                 )
                 .min(width);

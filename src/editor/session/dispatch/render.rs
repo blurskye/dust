@@ -1290,11 +1290,8 @@ impl InteractiveApplication {
             ),
         };
         let first = first_anchor.line;
-        let first_wrap_row = if wrap_enabled {
-            first_anchor.wrap_row
-        } else {
-            0
-        };
+        // Without wrap only a markdown table's row takes more than one row.
+        let first_wrap_row = first_anchor.wrap_row;
         let first_column = if wrap_enabled || available == 0 {
             0
         } else {

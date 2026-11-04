@@ -168,13 +168,7 @@ impl<'a> VisualRowModel<'a> {
             inlay_widths,
         });
         model.markdown = state.views.get(view).and_then(|view| {
-            super::markdown::MarkdownMarks::new(
-                ui,
-                view,
-                text,
-                &config.editor,
-                wrap.then_some(model.content_width),
-            )
+            super::markdown::MarkdownMarks::new(ui, view, text, &config.editor, model.content_width)
         });
         if let Some(buffer) = state
             .views
@@ -331,6 +325,24 @@ impl<'a> VisualRowModel<'a> {
     fn compute_line_rows(&self, line: usize) -> Vec<VisualRowSlice> {
         let text = self.text.line(line).unwrap_or_default();
         let content = text.strip_suffix('\n').unwrap_or(&text);
+        let markdown = self.markdown_line(line);
+        // A table row is drawn as a block, each of its rows showing part of every cell, whether
+        // or not lines wrap.
+        if let Some(table) = markdown
+            .as_ref()
+            .and_then(|markdown| markdown.table.as_ref())
+        {
+            return table
+                .frames
+                .iter()
+                .map(|frame| VisualRowSlice {
+                    byte_start: 0,
+                    byte_end: content.len(),
+                    source_column_start: 0,
+                    used_cells: text_width(frame, self.ambiguous_width).min(self.content_width),
+                })
+                .collect();
+        }
         if !self.wrap {
             return vec![VisualRowSlice {
                 byte_start: 0,
@@ -340,20 +352,6 @@ impl<'a> VisualRowModel<'a> {
             }];
         }
         let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
-        let markdown = self.markdown_line(line);
-        // A table row is drawn as a block, each of its rows showing part of every cell.
-        if let Some(table) = markdown
-            .as_ref()
-            .and_then(|markdown| markdown.table.as_ref())
-        {
-            let row = VisualRowSlice {
-                byte_start: 0,
-                byte_end: content.len(),
-                source_column_start: 0,
-                used_cells: text_width(&table.frame, self.ambiguous_width).min(self.content_width),
-            };
-            return vec![row; table.rows];
-        }
         if content.is_empty() {
             return vec![VisualRowSlice {
                 byte_start: 0,
@@ -568,7 +566,7 @@ impl<'a> VisualRowModel<'a> {
 
     #[must_use]
     pub fn rows_for_line(&self, line: usize) -> usize {
-        if !self.wrap {
+        if !self.wrap && self.markdown.is_none() {
             return 1;
         }
         self.rows

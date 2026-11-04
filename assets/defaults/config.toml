@@ -26,6 +26,9 @@ enabled = true
 # line outside Normal mode, shows its source.
 [editor.markdown]
 render = true
+# Close a table with a border under its last row, and draw one between its rows.
+table_bottom = true
+table_row_lines = false
 
 [editor.markdown.glyphs]
 headings = ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "]

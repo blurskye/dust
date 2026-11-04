@@ -40,6 +40,8 @@ settings = [
   { key = "editor.registers.clipboard", title = "System Clipboard", about = "unnamedplus shares yank and paste with the system clipboard; off keeps them inside Dust.", choices = ["unnamedplus", "off"] },
   { key = "editor.indent_guides.enabled", about = "Draw a line at each indentation level." },
   { key = "editor.markdown.render", title = "Render Markdown", about = "Draw markdown headings, lists, code and links in place; the cursor's line shows the source." },
+  { key = "editor.markdown.table_bottom", title = "Table Bottom Border", about = "Close a markdown table with a border under its last row." },
+  { key = "editor.markdown.table_row_lines", title = "Table Row Lines", about = "Draw a border between a markdown table's rows." },
   { key = "editor.git_signs.enabled", about = "Mark added, changed and deleted lines in the gutter." },
   { key = "editor.large_file.enabled", about = "Open big files in a lighter mode that stays fast." },
 ]

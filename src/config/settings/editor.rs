@@ -128,6 +128,10 @@ impl Default for GitSignsConfig {
 #[serde(deny_unknown_fields)]
 pub struct MarkdownConfig {
     pub render: bool,
+    /// Close a table with a border under its last row.
+    pub table_bottom: bool,
+    /// Draw a border between a table's rows.
+    pub table_row_lines: bool,
     pub glyphs: MarkdownGlyphs,
 }
 
@@ -135,6 +139,8 @@ impl Default for MarkdownConfig {
     fn default() -> Self {
         Self {
             render: true,
+            table_bottom: true,
+            table_row_lines: false,
             glyphs: MarkdownGlyphs::default(),
         }
     }

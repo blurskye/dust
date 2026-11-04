@@ -29,6 +29,9 @@ pub(super) struct MarkdownMarks<'a> {
     /// Code blocks span lines, so they are looked up apart from the marks within a line.
     blocks: Vec<ByteRange>,
     tables: Vec<Table>,
+    /// Whether a border is drawn under the table and between its rows.
+    table_bottom: bool,
+    table_row_lines: bool,
     cursor_line: usize,
     headings: [Highlight; 6],
     list: Highlight,
@@ -78,12 +81,11 @@ pub(super) struct MarkdownLine<'a> {
 }
 
 /// A table row laid out as a block: the same borders on each of its rows, with every cell's
-/// text wrapped inside its column.
+/// text wrapped inside its column, and a border above, below or after it on rows of its own.
 pub(super) struct TableRow {
-    /// The borders and padding, drawn on each row before the text.
-    pub(super) frame: String,
+    /// Each row's borders and padding, drawn before the text.
+    pub(super) frames: Vec<String>,
     pub(super) style: Style,
-    pub(super) rows: usize,
     /// Where each drawn grapheme of the cells goes: its row, and its column from the frame's
     /// start. Sorted by offset; the rest of the line is not drawn.
     places: Vec<(ByteOffset, usize, usize)>,
@@ -102,13 +104,13 @@ pub(super) enum Drawn<'a> {
 
 impl<'a> MarkdownMarks<'a> {
     /// `None` when the buffer has no marks or rendering is off. Tables are narrowed to fit
-    /// `width` when it is given, as it is when lines wrap.
+    /// `width`, whether or not lines wrap, as Neovim draws them.
     pub(super) fn new(
         ui: &'a UiState,
         view: &View,
         text: &'a TextBuffer,
         editor: &'a EditorConfig,
-        width: Option<usize>,
+        width: usize,
     ) -> Option<Self> {
         let config = &editor.markdown;
         let ambiguous = editor.ambiguous_width;
@@ -150,6 +152,8 @@ impl<'a> MarkdownMarks<'a> {
             marks,
             blocks: blocks.into_iter().map(|mark| mark.range).collect(),
             tables,
+            table_bottom: config.table_bottom,
+            table_row_lines: config.table_row_lines,
             cursor_line: text.byte_to_line(view.cursor).unwrap_or(0),
             headings: [1, 2, 3, 4, 5, 6].map(|level| {
                 group(
@@ -267,9 +271,9 @@ impl<'a> MarkdownMarks<'a> {
         Some(drawn)
     }
 
-    /// A table row drawn with each cell padded to its column, the row under the header and the
-    /// borders above and below the table drawn on the blank lines around it, as render-markdown
-    /// draws them.
+    /// A table row drawn with each cell padded to its column, as render-markdown draws it. The
+    /// borders above and below the table are drawn on the blank lines around it, or on rows of
+    /// the first and last row's own when there is no blank line.
     fn table_line(
         &self,
         line: usize,
@@ -279,22 +283,46 @@ impl<'a> MarkdownMarks<'a> {
     ) {
         let style = Style::Syntax(self.table);
         let whole = ByteRange { start, end };
-        if let Some(table) = self
+        let Some(table) = self
             .tables
             .iter()
             .find(|table| (table.first_line..=table.last_line).contains(&line))
-        {
-            let row = line - table.first_line;
-            let cells = &table.rows[row];
-            if row == 1 || cells.is_empty() {
-                drawn.marks.push((whole, Shown::Hidden));
-                drawn.after = Some((self.border(table, 3, 4, 5, true), style));
+        else {
+            let Some((table, bottom)) = self.blank_border(line) else {
                 return;
+            };
+            let border = if bottom {
+                self.border(table, 6, 7, 8, false)
+            } else {
+                self.border(table, 0, 1, 2, false)
+            };
+            if start < end {
+                drawn.marks.push((whole, Shown::Hidden));
             }
+            drawn.after = Some((border, style));
+            return;
+        };
+        let row = line - table.first_line;
+        let cells = &table.rows[row];
+        let last = line == table.last_line;
+        let mut frames = Vec::new();
+        let mut places = Vec::new();
+        let own_border = |line: Option<usize>, bottom: bool| {
+            line.and_then(|line| self.blank_border(line))
+                .is_none_or(|(other, other_bottom)| {
+                    other.first_line != table.first_line || other_bottom != bottom
+                })
+        };
+        if row == 0 && own_border(line.checked_sub(1), false) {
+            frames.push(self.border(table, 0, 1, 2, false));
+        }
+        if row == 1 || cells.is_empty() {
+            frames.push(self.border(table, 3, 4, 5, true));
+        } else {
             let pipe = self.part(9);
             let mut frame = format!("{pipe} ");
-            let mut places = Vec::new();
             let mut rows = 1;
+            let top = frames.len();
             for (column, width) in table.widths.iter().enumerate() {
                 let origin = frame.chars().count();
                 frame.push_str(&" ".repeat(*width));
@@ -318,41 +346,47 @@ impl<'a> MarkdownMarks<'a> {
                         Alignment::Center => spare / 2,
                         Alignment::Right => spare,
                     };
-                    (at, row, origin + leading + offset)
+                    (at, top + row, origin + leading + offset)
                 }));
             }
             places.sort_by_key(|(at, _, _)| *at);
-            drawn.table = Some(TableRow {
-                frame,
-                style,
-                rows,
-                places,
-            });
-            return;
+            frames.extend(std::iter::repeat_n(frame, rows));
+            if self.table_row_lines && row > 1 && !last {
+                frames.push(self.border(table, 3, 4, 5, false));
+            }
         }
+        if last && self.table_bottom && own_border(Some(line + 1), true) {
+            frames.push(self.border(table, 6, 7, 8, false));
+        }
+        // The source is drawn only where `places` puts it.
+        drawn.table = Some(TableRow {
+            frames,
+            style,
+            places,
+        });
+    }
+
+    /// The table whose border `line` draws when it is blank, and whether that is the table's
+    /// bottom: the table above's bottom comes before the table below's top.
+    fn blank_border(&self, line: usize) -> Option<(&Table, bool)> {
         let blank = self
             .text
-            .slice(whole)
+            .line(line)
             .is_ok_and(|text| text.trim().is_empty());
         if !blank {
-            return;
+            return None;
         }
-        let border =
-            if let Some(table) = self.tables.iter().find(|table| table.last_line + 1 == line) {
-                self.border(table, 6, 7, 8, false)
-            } else if let Some(table) = self
-                .tables
-                .iter()
-                .find(|table| table.first_line == line + 1)
-            {
-                self.border(table, 0, 1, 2, false)
-            } else {
-                return;
-            };
-        if start < end {
-            drawn.marks.push((whole, Shown::Hidden));
+        let above = self
+            .tables
+            .iter()
+            .find(|table| self.table_bottom && table.last_line + 1 == line);
+        if let Some(table) = above {
+            return Some((table, true));
         }
-        drawn.after = Some((border, style));
+        self.tables
+            .iter()
+            .find(|table| table.first_line == line + 1)
+            .map(|table| (table, false))
     }
 
     /// A border across the table from the pieces at `left`, `cross` and `right`. The row under
@@ -545,7 +579,7 @@ impl Table {
         range: ByteRange,
         glyphs: &MarkdownGlyphs,
         ambiguous: AmbiguousWidth,
-        fit: Option<usize>,
+        fit: usize,
     ) -> Option<Self> {
         let first_line = text.byte_to_line(range.start).ok()?;
         let last_line = text
@@ -632,10 +666,8 @@ impl Table {
                 widths[column] = widths[column].max(*width);
             }
         }
-        if let Some(width) = fit {
-            // Each column draws its text between a border and a space on either side.
-            narrow(&mut widths, width.saturating_sub(columns * 3 + 1));
-        }
+        // Each column draws its text between a border and a space on either side.
+        narrow(&mut widths, fit.saturating_sub(columns * 3 + 1));
         let mut alignments = alignments;
         alignments.resize(columns, Alignment::Default);
         Some(Self {

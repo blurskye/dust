@@ -5013,7 +5013,7 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
 }
 
 #[test]
-fn a_wrapped_table_too_wide_for_its_window_wraps_each_cell_inside_its_column() {
+fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_without_wrap() {
     use crate::editor::text::{ByteOffset, ByteRange};
     use crate::language::syntax::MarkdownMark;
     let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
@@ -5023,7 +5023,6 @@ fn a_wrapped_table_too_wide_for_its_window_wraps_each_cell_inside_its_column() {
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.editor.git_signs.enabled = false;
-    config.editor.wrap = true;
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
@@ -5042,21 +5041,90 @@ fn a_wrapped_table_too_wide_for_its_window_wraps_each_cell_inside_its_column() {
     ui.markdown_marks
         .push(mark(1, table_end, MarkdownMark::Table));
     ui.markdown_marks.sort_by_key(|mark| mark.range.start);
-    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
-    let rows = (0..8)
-        .map(|row| frame.grid.row_text(row).trim_end().to_owned())
-        .collect::<Vec<_>>();
+    // Neovim draws tables to fit the window even when lines don't wrap.
+    for wrap in [true, false] {
+        config.editor.wrap = wrap;
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
+        let rows = (0..8)
+            .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                "┌───┬──────────────┐",
+                "│ a │ long text    │",
+                "│   │ here and     │",
+                "│   │ more         │",
+                "├───┼──────────────┤",
+                "│ b │ c            │",
+                "└───┴──────────────┘",
+                "last",
+            ],
+            "wrap {wrap}"
+        );
+    }
+}
+
+#[test]
+fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_settings() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::MarkdownMark;
+    let text = "| a | b |\n|---|---|\n| c | d |\n| e | f |\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    let last = text.find("last").expect("last line");
+    state.views[view].cursor = ByteOffset(last);
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = text
+        .match_indices('|')
+        .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+        .collect();
+    ui.markdown_marks.push(mark(0, last, MarkdownMark::Table));
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    let rows = |config: &crate::config::Config| {
+        let frame = render(&state, &ui, config, &loaded.dashboard, 20, 8);
+        (0..8)
+            .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        rows,
+        rows(&config),
         [
-            "┌───┬──────────────┐",
-            "│ a │ long text    │",
-            "│   │ here and     │",
-            "│   │ more         │",
-            "├───┼──────────────┤",
-            "│ b │ c            │",
-            "└───┴──────────────┘",
+            "┌───┬───┐",
+            "│ a │ b │",
+            "├───┼───┤",
+            "│ c │ d │",
+            "│ e │ f │",
+            "└───┴───┘",
             "last",
+            "~"
+        ]
+    );
+    config.editor.markdown.table_row_lines = true;
+    config.editor.markdown.table_bottom = false;
+    assert_eq!(
+        rows(&config),
+        [
+            "┌───┬───┐",
+            "│ a │ b │",
+            "├───┼───┤",
+            "│ c │ d │",
+            "├───┼───┤",
+            "│ e │ f │",
+            "last",
+            "~"
         ]
     );
 }
