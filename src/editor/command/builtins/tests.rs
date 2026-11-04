@@ -246,6 +246,135 @@ fn counted_word_and_paragraph_objects_extend_the_range() {
 }
 
 #[test]
+fn multi_word_matches_keep_combining_graphemes_whole() {
+    for command in ["multi.add_next", "multi.add_all"] {
+        let (mut state, buffer, view) = editing("e\u{301} e\u{301} xe\u{301} e\u{301}x", 1);
+        apply(&mut state, command, &[], 1);
+        if command == "multi.add_next" {
+            apply(&mut state, command, &[], 1);
+        }
+        assert_eq!(state.views[view].multi_marks.len(), 2);
+        for mark in &state.views[view].multi_marks {
+            assert_eq!(state.buffers[buffer].text.slice(*mark).unwrap(), "e\u{301}");
+        }
+        apply(&mut state, "multi.delete", &[], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), "  xe\u{301} e\u{301}x");
+    }
+}
+
+#[test]
+fn multi_visual_matches_remain_literal_after_marking() {
+    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    for command in ["multi.add_next", "multi.add_all", "multi.skip"] {
+        let (mut state, _, view) = editing("foobar xfoo yfoo", 0);
+        state.views[view].mode = EditorMode::VisualChar;
+        state.views[view].selection = Some(Selection {
+            anchor: ByteOffset(0), head: ByteOffset(2), kind: SelectionKind::Character,
+        });
+        apply(&mut state, "multi.add_next", &[], 1);
+        apply(&mut state, command, &[], 1);
+        assert!(state.views[view].multi_marks.iter().any(|mark| mark.start == ByteOffset(8)));
+        apply(&mut state, "multi.add_all", &[], 1);
+        assert_eq!(state.views[view].multi_marks.len(), 3);
+    }
+    let (mut state, _, view) = editing("foo foobar xfoo foo", 0);
+    apply(&mut state, "multi.add_next", &[], 1);
+    apply(&mut state, "multi.add_all", &[], 1);
+    assert_eq!(state.views[view].multi_marks.len(), 2);
+}
+
+#[test]
+fn multi_next_after_mouse_movement_uses_a_mark_boundary() {
+    let (mut state, _, view) = editing("a é a", 0);
+    apply(&mut state, "multi.add_next", &[], 1);
+    state.views[view].cursor = crate::editor::text::ByteOffset(2);
+    apply(&mut state, "multi.add_next", &[], 1);
+    assert_eq!(state.views[view].cursor.get(), 5);
+    assert_eq!(state.views[view].multi_marks.len(), 2);
+}
+
+#[test]
+fn multi_select_all_rejects_empty_visual_selection() {
+    let (mut state, _, view) = editing("abc", 3);
+    apply(&mut state, "mode.visual_char", &[], 1);
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    let invocation = CommandInvocation::new("multi.add_all", InvocationSource::Test).unwrap();
+    assert!(registry.execute(&state, &invocation).is_err());
+    assert!(state.views[view].multi_marks.is_empty());
+}
+
+#[test]
+fn multi_line_additions_keep_the_requested_column_across_short_lines() {
+    for (cursor, command, expected) in [(4, "multi.add_below", 13), (13, "multi.add_above", 4)] {
+        let (mut state, _, view) = editing("abcdef\nx\nabcdef", cursor);
+        apply(&mut state, command, &[], 1);
+        apply(&mut state, command, &[], 1);
+        assert_eq!(state.views[view].cursor.get(), expected);
+        assert_eq!(state.views[view].multi_marks.len(), 3);
+    }
+}
+
+#[test]
+fn multi_vertical_motion_keeps_each_cursors_wanted_column() {
+    use crate::editor::{EditorMode, text::{ByteOffset, ByteRange}};
+    let (mut state, _, view) = editing("abcdef\nx\nabcdef\nabcdef\nx\nabcdef", 4);
+    state.views[view].mode = EditorMode::Multi;
+    state.views[view].multi_marks = vec![ByteRange::empty(ByteOffset(4)), ByteRange::empty(ByteOffset(18))];
+    for (motion, expected) in [("down", vec![7, 23]), ("down", vec![13, 27]), ("up", vec![7, 23]), ("up", vec![4, 18])] {
+        apply(&mut state, "multi.move", &[("motion", motion)], 1);
+        assert_eq!(state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect::<Vec<_>>(), expected);
+    }
+    apply(&mut state, "multi.move", &[("motion", "down")], 1);
+    apply(&mut state, "multi.move", &[("motion", "line_start")], 1);
+    apply(&mut state, "multi.move", &[("motion", "down")], 1);
+    assert_eq!(state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect::<Vec<_>>(), vec![9, 25]);
+}
+
+#[test]
+fn adjacent_multi_character_deletions_deduplicate_collapsed_cursors() {
+    use crate::editor::{EditorMode, text::{ByteOffset, ByteRange}};
+    let (mut state, buffer, view) = editing("::x", 0);
+    state.views[view].mode = EditorMode::Multi;
+    state.views[view].multi_marks = vec![ByteRange::empty(ByteOffset(0)), ByteRange::empty(ByteOffset(1))];
+    apply(&mut state, "multi.delete_char", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "x");
+    assert_eq!(state.views[view].multi_marks, vec![ByteRange::empty(ByteOffset(0))]);
+    apply(&mut state, "multi.delete_char", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "");
+}
+
+#[test]
+fn multi_block_append_pads_short_rows_to_the_rectangle_edge() {
+    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    for (source, expected) in [("abc\nx\nabc", "abc!\nx  !\nabc!"), ("x\nabc\nabc", "x  !\nabc!\nabc!"), ("abc\n\nabc", "abc!\n   !\nabc!")] {
+        let (mut state, buffer, view) = editing(source, 0);
+        state.views[view].mode = EditorMode::VisualBlock;
+        state.views[view].selection = Some(Selection {
+            anchor: ByteOffset(0), head: ByteOffset(source.len() - 1), kind: SelectionKind::Block,
+        });
+        apply(&mut state, "multi.insert", &[("placement", "end")], 1);
+        assert_eq!(state.views[view].cursor, state.views[view].block_insert[0]);
+        apply(&mut state, "edit.insert_text", &[("text", "!")], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn multi_block_change_deletes_the_supplied_visual_ranges() {
+    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    let (mut state, buffer, view) = editing("abc\nx\nabc", 0);
+    state.views[view].mode = EditorMode::VisualBlock;
+    state.views[view].selection = Some(Selection {
+        anchor: ByteOffset(0), head: ByteOffset(7), kind: SelectionKind::Block,
+    });
+    apply(&mut state, "multi.insert", &[("placement", "change")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "c\n\nc");
+    apply(&mut state, "edit.insert_text", &[("text", "!")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "!c\n!\n!c");
+}
+
+#[test]
 fn adjacent_multi_changes_keep_one_insertion_at_each_resulting_position() {
     use crate::editor::text::{ByteOffset, ByteRange};
     let (mut state, buffer, view) = editing("::x", 0);

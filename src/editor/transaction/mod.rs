@@ -96,6 +96,8 @@ pub enum EditorOperation {
     SetMultiMarks {
         view: ViewId,
         marks: Vec<crate::editor::text::ByteRange>,
+        whole_word: bool,
+        preferred_columns: Vec<usize>,
     },
     SetRegister {
         name: char,
@@ -363,6 +365,9 @@ fn apply_operation(
                     mark.start = delta.map_offset(mark.start, Affinity::Before);
                     mark.end = delta.map_offset(mark.end, Affinity::After);
                 }
+                view.multi_marks.sort_by_key(|mark| mark.start);
+                view.multi_marks.dedup();
+                view.multi_preferred_columns.clear();
             }
         }
         EditorOperation::SetCursor { view, position } => {
@@ -393,6 +398,7 @@ fn apply_operation(
             }
             target.cursor = *position;
             target.preferred_column = None;
+            target.multi_preferred_columns.clear();
             if let Some(selection) = &mut target.selection {
                 selection.head = *position;
             }
@@ -480,6 +486,8 @@ fn apply_operation(
             }
             if *mode != EditorMode::Multi {
                 target.multi_marks.clear();
+                target.multi_whole_word = true;
+                target.multi_preferred_columns.clear();
             }
             if *mode == EditorMode::Normal {
                 target.clear_editing_state();
@@ -501,12 +509,14 @@ fn apply_operation(
                 .replace_history
                 .pop();
         }
-        EditorOperation::SetMultiMarks { view, marks } => {
-            state
+        EditorOperation::SetMultiMarks { view, marks, whole_word, preferred_columns } => {
+            let target = state
                 .views
                 .get_mut(*view)
-                .ok_or(TransactionError::MissingView)?
-                .multi_marks = marks.clone();
+                .ok_or(TransactionError::MissingView)?;
+            target.multi_marks = marks.clone();
+            target.multi_whole_word = *whole_word;
+            target.multi_preferred_columns = preferred_columns.clone();
         }
         EditorOperation::SetBlockInsert { view, positions } => {
             state
@@ -574,6 +584,9 @@ fn apply_operation(
                         mark.start = delta.map_offset(mark.start, Affinity::Before);
                         mark.end = delta.map_offset(mark.end, Affinity::After);
                     }
+                    view.multi_marks.sort_by_key(|mark| mark.start);
+                    view.multi_marks.dedup();
+                    view.multi_preferred_columns.clear();
                     view.replace_history.clear();
                 }
             }
