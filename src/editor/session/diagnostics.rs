@@ -380,22 +380,25 @@ impl DiagnosticSession {
         offset: ByteOffset,
         direction: i8,
         severities: &[DiagnosticSeverity],
+        count: u64,
     ) -> Option<DiagnosticKey> {
         let mut rows = self
             .rows
             .iter()
-            .filter(|r| r.problem.uri == uri && severities.contains(&r.problem.severity));
+            .filter(|r| r.problem.uri == uri && severities.contains(&r.problem.severity))
+            .collect::<Vec<_>>();
         if direction < 0 {
-            rows.clone()
-                .rev()
-                .find(|r| r.problem.range.start < offset)
-                .or_else(|| rows.next_back())
-        } else {
-            rows.clone()
-                .find(|r| r.problem.range.start > offset)
-                .or_else(|| rows.next())
+            rows.reverse();
         }
-        .map(|row| row.key.clone())
+        // Navigation skips other diagnostics at the same position, just as a single step does.
+        rows.dedup_by_key(|row| row.problem.range.start);
+        let first = rows.iter().position(|row| if direction < 0 {
+            row.problem.range.start < offset
+        } else {
+            row.problem.range.start > offset
+        }).or_else(|| (!rows.is_empty()).then_some(0))?;
+        let index = (first as u128 + u128::from(count.saturating_sub(1))) % rows.len() as u128;
+        Some(rows[index as usize].key.clone())
     }
     pub(super) fn expand(
         &mut self,

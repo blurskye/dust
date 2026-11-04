@@ -156,7 +156,7 @@ impl ModalResolver {
 
     pub fn decorate_invocation(&mut self, invocation: &mut CommandInvocation) {
         if invocation.count.is_none() {
-            invocation.count = count_nonzero(self.take_count());
+            invocation.count = self.count.take().and_then(NonZeroU64::new);
         }
         if invocation.register.is_none() {
             invocation.register = self.register.take();

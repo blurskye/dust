@@ -12,7 +12,7 @@ pub(in crate::editor::session) enum WindowCommand<'a> {
     Show(&'a str),
     Move(&'a str, u16, u16),
     Resize(&'a str, i16),
-    Direction(FocusDirection, Option<NativeSurfaceTarget>),
+    Direction(FocusDirection, Option<NativeSurfaceTarget>, u64),
     Close(&'a str),
     Swap(&'a str, &'a str),
 }
@@ -341,7 +341,10 @@ impl WindowSession {
                     }
                 }
             }
-            WindowCommand::Direction(direction, explicit) => {
+            WindowCommand::Direction(direction, explicit, count) => {
+                let scaled_step = |step: u16| {
+                    u64::from(step).saturating_mul(count).min(i16::MAX as u64) as i16
+                };
                 let native = if explicit.is_some() {
                     explicit
                 } else if self.terminal_focused() {
@@ -363,7 +366,7 @@ impl WindowSession {
                         self.directional_native_placement(
                             native,
                             direction,
-                            i16::try_from(policy.terminal_step).unwrap_or(i16::MAX),
+                            scaled_step(policy.terminal_step),
                         )?
                         .map_or(NativeAction::None, |p| NativeAction::Place(native, p)),
                     );
@@ -381,7 +384,7 @@ impl WindowSession {
                         .window(window)
                         .ok_or_else(|| CommandError::Rejected("focused window is stale".into()))?
                         .placement;
-                    let step = i16::try_from(policy.pane_step).unwrap_or(i16::MAX);
+                    let step = scaled_step(policy.pane_step);
                     match placement {
                         WindowPlacement::Tiled => {
                             let (axis, grow) = match direction {
@@ -407,7 +410,7 @@ impl WindowSession {
                                     self.directional_native_placement(
                                         dock,
                                         toward,
-                                        i16::try_from(policy.terminal_step).unwrap_or(i16::MAX),
+                                        scaled_step(policy.terminal_step),
                                     )?
                                     .map_or(NativeAction::None, |p| NativeAction::Place(dock, p)),
                                 );

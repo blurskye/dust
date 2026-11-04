@@ -89,6 +89,13 @@ fn directional_resize_uses_the_focused_explorer_clone() {
     assert!(
         matches!(app.window_session.graph().window(clone).unwrap().placement, WindowPlacement::Floating(rect) if rect.width > 20)
     );
+    app.process_effect(AppEffect::WindowResizeDirectional(
+        crate::editor::FocusDirection::Left,
+        1_000_000,
+    ));
+    assert!(
+        matches!(app.window_session.graph().window(clone).unwrap().placement, WindowPlacement::Floating(rect) if rect.width == 1)
+    );
 }
 
 #[test]
@@ -4144,7 +4151,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
     app.process_effect(crate::editor::AppEffect::TerminalFocus(agent.0));
     assert_eq!(app.window_session.focused_terminal(), Some(agent.0));
     assert!(app.terminal_rect(shell).is_some(), "the shell stays below");
-    app.resize_focused_window(crate::editor::FocusDirection::Left)
+    app.resize_focused_window(crate::editor::FocusDirection::Left, 1)
         .expect("resize");
     let wider = app.terminal_rect(agent).expect("agent");
     assert_eq!(

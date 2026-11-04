@@ -175,6 +175,36 @@ fn counted_dot_overrides_the_recorded_count_and_keeps_it_for_later_repeats() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "fghij");
     app.handle_configured_key(KeyEvent::character('.'));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "ij");
+    for key in "1.".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "j");
+}
+
+#[test]
+fn counted_dot_repeats_inserted_text_and_open_lines() {
+    for (key, original, expected) in [
+        ('i', "ABone", "ABABABABone"),
+        ('a', "oABne", "oABABABABne"),
+        ('o', "one\nAB", "one\nAB\nAB\nAB\nAB"),
+        ('O', "AB\none", "AB\nAB\nAB\nAB\none"),
+    ] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("one"), None);
+        app.set_dashboard_visibility(false);
+        for key in [key, 'A', 'B'] {
+            app.handle_configured_key(KeyEvent::character(key));
+        }
+        app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), original);
+        if key == 'i' || key == 'a' {
+            app.state.views[view].cursor = ByteOffset(0);
+        }
+        for key in "3.".chars() {
+            app.handle_configured_key(KeyEvent::character(key));
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), expected, "{key}");
+    }
 }
 
 #[test]
@@ -238,6 +268,10 @@ fn counted_diagnostic_commands_move_the_requested_number_of_problems() {
         app.handle_configured_key(KeyEvent::character(key));
     }
     assert_eq!(app.state.views[view].cursor, ByteOffset(2));
+    for key in "1000000]d".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert_eq!(app.state.views[view].cursor, ByteOffset(2));
 }
 
 #[test]
@@ -259,6 +293,13 @@ fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
     }
     assert_eq!(app.state.active_tab, Some(tabs[2]));
     for key in "2gT".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert_eq!(app.state.active_tab, Some(tabs[0]));
+    app.handle_configured_key(KeyEvent::character('g'));
+    app.handle_configured_key(KeyEvent::character('t'));
+    assert_eq!(app.state.active_tab, Some(tabs[1]));
+    for key in "1gt".chars() {
         app.handle_configured_key(KeyEvent::character(key));
     }
     assert_eq!(app.state.active_tab, Some(tabs[0]));

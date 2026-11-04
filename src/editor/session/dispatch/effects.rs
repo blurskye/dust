@@ -2891,9 +2891,7 @@ impl InteractiveApplication {
             }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate { direction, filter, count } => {
-                for _ in 0..count {
-                    self.navigate_diagnostic(direction, filter);
-                }
+                self.navigate_diagnostic(direction, filter, count);
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspRenamePrompt => self.open_rename_prompt(),
@@ -8374,6 +8372,7 @@ impl InteractiveApplication {
         &mut self,
         direction: i8,
         filter: DiagnosticFilter,
+        count: u64,
     ) {
         let Some(view_id) = self.state.active_view else {
             return;
@@ -8388,7 +8387,7 @@ impl InteractiveApplication {
         self.diagnostics.retire_documents(&self.state);
         let Some(key) = self
             .diagnostics
-            .adjacent(&uri, cursor, direction, filter.severities())
+            .adjacent(&uri, cursor, direction, filter.severities(), count)
         else {
             self.show_error(self.message("diagnostic_none", &[]));
             return;
@@ -14035,11 +14034,8 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::WindowResizeDirectional(direction, count) => {
-                for _ in 0..count {
-                    if let Err(error) = self.resize_focused_window(direction) {
-                        self.show_error(error);
-                        break;
-                    }
+                if let Err(error) = self.resize_focused_window(direction, count) {
+                    self.show_error(error);
                 }
             }
             AppEffect::WindowMove { target, x, y } => {

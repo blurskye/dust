@@ -634,9 +634,10 @@ impl InteractiveApplication {
     pub(super) fn resize_focused_window(
         &mut self,
         direction: FocusDirection,
+        count: u64,
     ) -> Result<(), String> {
         self.reconcile_editor_windows();
-        self.run_window_command(WindowCommand::Direction(direction, None))
+        self.run_window_command(WindowCommand::Direction(direction, None, count))
     }
 
     #[cfg(test)]
@@ -645,7 +646,7 @@ impl InteractiveApplication {
         target: NativeSurfaceTarget,
         direction: FocusDirection,
     ) -> Result<(), String> {
-        self.run_window_command(WindowCommand::Direction(direction, Some(target)))
+        self.run_window_command(WindowCommand::Direction(direction, Some(target), 1))
     }
 
     pub(super) fn close_graph_window(&mut self, target: &str) -> Result<(), String> {

@@ -96,10 +96,34 @@ impl InputSession {
         if self.last_change.len() > limit {
             return Err(ReplayError::RepeatLimit);
         }
+        let mut change = self.last_change.clone();
         if let Some(count) = count {
-            self.last_change[0].count = Some(count);
+            change[0].count = Some(count);
         }
-        Ok(self.last_change.iter().cloned().map(replayed).collect())
+        let plan = if matches!(change[0].id.as_str(), "mode.insert" | "mode.replace") {
+            let repeats = usize::try_from(change[0].count.map_or(1, |count| count.get()))
+                .map_err(|_| ReplayError::RepeatLimit)?;
+            let opens_line = matches!(change[0].arguments.get("placement"),
+                Some(CommandValue::String(placement)) if matches!(placement.as_str(), "open_above" | "open_below"));
+            let body = &change[usize::from(!opens_line)..change.len() - 1];
+            let steps = body.len().checked_mul(repeats)
+                .and_then(|steps| steps.checked_add(if opens_line { 1 } else { 2 }))
+                .filter(|steps| *steps <= limit)
+                .ok_or(ReplayError::RepeatLimit)?;
+            let mut plan = Vec::with_capacity(steps);
+            if !opens_line {
+                plan.push(replayed(change[0].clone()));
+            }
+            for _ in 0..repeats {
+                plan.extend(body.iter().cloned().map(replayed));
+            }
+            plan.push(replayed(change.last().expect("recorded change").clone()));
+            plan
+        } else {
+            change.iter().cloned().map(replayed).collect()
+        };
+        self.last_change = change;
+        Ok(plan)
     }
 
     pub(in crate::editor::session) fn start_macro_recording(&mut self, register: char) {
