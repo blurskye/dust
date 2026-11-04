@@ -38,7 +38,17 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
                 "workspace":{"workspaceFolders":true,"configuration":true,"inlayHint":{"refreshSupport":true},"applyEdit":true,"executeCommand":{"dynamicRegistration":false},"symbol":{"dynamicRegistration":true}},
                 "window":{"workDoneProgress":true},
                 "textDocument":{
-                    "synchronization":{"didSave":true,"dynamicRegistration":true},
+                    "synchronization":{"didSave":true,"dynamicRegistration":false},
+                    "semanticTokens":{
+                        "dynamicRegistration":false,
+                        "requests":{"full":{"delta":true},"range":false},
+                        "tokenTypes":["namespace","type","class","enum","interface","struct","typeParameter","parameter","variable","property","enumMember","event","function","method","macro","keyword","modifier","comment","string","number","regexp","operator","decorator"],
+                        "tokenModifiers":[],
+                        "formats":["relative"],
+                        "overlappingTokenSupport":false,
+                        "multilineTokenSupport":false
+                    },
+                    "diagnostic":{"dynamicRegistration":false,"relatedDocumentSupport":false},
                     "completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"],"resolveSupport":{"properties":["additionalTextEdits","tags"]}}},
                     "hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},
                     "signatureHelp":{"dynamicRegistration":true},
@@ -81,7 +91,7 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
             sync.and_then(|value| value.get("change"))
                 .and_then(Value::as_u64)
         })
-        .unwrap_or(1);
+        .unwrap_or(0);
     let sync_kind = match sync_value {
         0 => SyncKind::None,
         2 => SyncKind::Incremental,
@@ -128,6 +138,10 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
         inlay_hints: capability(capabilities, "inlayHintProvider"),
         pull_diagnostics: capability(capabilities, "diagnosticProvider"),
         code_lens: capability(capabilities, "codeLensProvider"),
+        code_lens_resolve: capabilities
+            .pointer("/codeLensProvider/resolveProvider")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         document_highlights: capability(capabilities, "documentHighlightProvider"),
         folding_ranges: capability(capabilities, "foldingRangeProvider"),
         selection_ranges: capability(capabilities, "selectionRangeProvider"),
@@ -152,14 +166,17 @@ pub(super) fn capability(capabilities: &Value, key: &str) -> bool {
     }
 }
 
-pub(super) fn send_open(stdin: &mut (impl std::io::Write + ?Sized), document: &LspDocument) {
-    let _ = write_content_length_message(
+pub(super) fn send_open(
+    stdin: &mut (impl std::io::Write + ?Sized),
+    document: &LspDocument,
+) -> Result<(), crate::process::ProtocolError> {
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didOpen",
             "params":{"textDocument":{"uri":document.uri(),"languageId":document.language_id,"version":document.version,"text":document.text}}
         }),
-    );
+    )
 }
 
 pub(super) fn send_change(
@@ -167,9 +184,9 @@ pub(super) fn send_change(
     previous: Option<&LspDocument>,
     document: &LspDocument,
     capabilities: &LspCapabilities,
-) {
+) -> Result<(), crate::process::ProtocolError> {
     if capabilities.sync_kind == SyncKind::None {
-        return;
+        return Ok(());
     }
     let content_changes = if capabilities.sync_kind == SyncKind::Incremental {
         previous
@@ -178,13 +195,13 @@ pub(super) fn send_change(
     } else {
         json!([{"text":document.text}])
     };
-    let _ = write_content_length_message(
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didChange",
             "params":{"textDocument":{"uri":document.uri(),"version":document.version},"contentChanges":content_changes}
         }),
-    );
+    )
 }
 
 pub(super) fn incremental_change(
@@ -279,13 +296,14 @@ pub(super) fn feature_params(
     let document = json!({"uri":uri});
     let position = json!({"line":line,"character":character});
     match feature {
-        LspFeature::CompletionResolve { item } => item.clone(),
+        LspFeature::CompletionResolve { item } | LspFeature::CodeLensResolve { item } => item.clone(),
         LspFeature::WorkspaceSymbols { query } => json!({"query":query}),
         LspFeature::ExecuteCommand(command) => {
             json!({"command":command.command,"arguments":command.arguments})
         }
-        LspFeature::DocumentSymbols | LspFeature::Formatting => json!({
-            "textDocument":document,"options":{"tabSize":4,"insertSpaces":true}
+        LspFeature::DocumentSymbols => json!({"textDocument":document}),
+        LspFeature::Formatting { tab_size, insert_spaces } => json!({
+            "textDocument":document,"options":{"tabSize":tab_size,"insertSpaces":insert_spaces}
         }),
         LspFeature::References => json!({
             "textDocument":document,"position":position,"context":{"includeDeclaration":true}
@@ -293,8 +311,8 @@ pub(super) fn feature_params(
         LspFeature::Rename { new_name } => json!({
             "textDocument":document,"position":position,"newName":new_name
         }),
-        LspFeature::RangeFormatting { range } => json!({
-            "textDocument":document,"range":range_json(range),"options":{"tabSize":4,"insertSpaces":true}
+        LspFeature::RangeFormatting { range, tab_size, insert_spaces } => json!({
+            "textDocument":document,"range":range_json(range),"options":{"tabSize":tab_size,"insertSpaces":insert_spaces}
         }),
         LspFeature::CodeAction { range, diagnostics } => json!({
             "textDocument":document,"range":range_json(range),
@@ -326,10 +344,7 @@ fn diagnostic_json(diagnostic: &LspDiagnostic) -> Value {
         value["severity"] = json!(severity);
     }
     if let Some(code) = &diagnostic.code {
-        // TypeScript matches its fixes on the number it sent.
-        value["code"] = code
-            .parse::<i64>()
-            .map_or_else(|_| json!(code), |code| json!(code));
+        value["code"] = code.clone();
     }
     if let Some(source) = &diagnostic.source {
         value["source"] = json!(source);
@@ -405,6 +420,15 @@ pub(super) fn normalize_result(
         return Ok(match feature {
             LspFeature::InlayHints { .. } => LspFeatureResult::InlayHints(Vec::new()),
             LspFeature::DocumentColors => LspFeatureResult::Colors(Vec::new()),
+            LspFeature::DocumentHighlights | LspFeature::FoldingRanges | LspFeature::SelectionRanges => {
+                LspFeatureResult::Ranges(Vec::new())
+            }
+            LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. } => {
+                LspFeatureResult::SemanticTokens(LspSemanticTokens {
+                    result_id: None,
+                    data: Vec::new(),
+                })
+            }
             _ => LspFeatureResult::Empty,
         });
     }
@@ -418,7 +442,7 @@ pub(super) fn normalize_result(
                 .unwrap_or(false),
         }),
         LspFeature::CompletionResolve { .. } => Ok(LspFeatureResult::CompletionResolved(
-            completion_item(result, true)?,
+            Box::new(completion_item(result, true)?),
         )),
         LspFeature::SignatureHelp => Ok(LspFeatureResult::Signature(LspMarkupContent {
             kind: LspMarkupKind::PlainText,
@@ -433,7 +457,7 @@ pub(super) fn normalize_result(
             Ok(LspFeatureResult::Symbols(symbols(result)?))
         }
         LspFeature::Rename { .. } => Ok(LspFeatureResult::WorkspaceEdit(workspace_edit(result)?)),
-        LspFeature::Formatting | LspFeature::RangeFormatting { .. } => {
+        LspFeature::Formatting { .. } | LspFeature::RangeFormatting { .. } => {
             Ok(LspFeatureResult::WorkspaceEdit(LspWorkspaceEdit {
                 resources: Vec::new(),
                 documents: vec![LspDocumentEdit {
@@ -537,6 +561,13 @@ pub(super) fn normalize_result(
         }
         LspFeature::InlayHints { .. } => Ok(LspFeatureResult::InlayHints(inlay_hints(result))),
         LspFeature::CodeLens => Ok(LspFeatureResult::CodeLens(code_lenses(result))),
+        LspFeature::CodeLensResolve { .. } => {
+            let lenses = code_lenses(&json!([result]));
+            if lenses.first().is_none_or(|lens| lens.command.is_none()) {
+                return Err("resolved code lens has no valid command".into());
+            }
+            Ok(LspFeatureResult::CodeLens(lenses))
+        }
         LspFeature::ExecuteCommand(_) => Ok(LspFeatureResult::Empty),
         LspFeature::DocumentHighlights => Ok(LspFeatureResult::Ranges(result_ranges(result))),
         LspFeature::FoldingRanges => Ok(LspFeatureResult::Ranges(folding_ranges(result))),
@@ -695,6 +726,7 @@ pub(super) fn code_lenses(value: &Value) -> Vec<LspCodeLens> {
                     .take(4096)
                     .collect(),
                 command: command.and_then(parse_command),
+                resolve_item: command.is_none_or(Value::is_null).then(|| item.clone()),
             })
         })
         .collect()
@@ -773,6 +805,7 @@ pub(super) fn completion_item(item: &Value, resolved: bool) -> Result<LspComplet
             .and_then(Value::as_u64)
             .and_then(|value| u8::try_from(value).ok()),
         documentation,
+        command: item.get("command").and_then(parse_command),
         resolve_item: (!resolved).then(|| item.clone()),
         resolved,
     })
@@ -1043,9 +1076,24 @@ pub(super) fn diagnostics(value: &Value) -> Vec<LspDiagnostic> {
                     .get("severity")
                     .and_then(Value::as_u64)
                     .and_then(|v| u8::try_from(v).ok()),
-                code: diagnostic
-                    .get("code")
-                    .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned)),
+                code: diagnostic.get("code").filter(|v| v.is_string() || v.is_number()).cloned(),
+                related: diagnostic
+                    .get("relatedInformation")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .take(256)
+                    .filter_map(|related| {
+                        let location = related.get("location")?;
+                        Some((
+                            LspLocation {
+                                uri: location.get("uri")?.as_str()?.to_owned(),
+                                range: parse_range(location.get("range")?)?,
+                            },
+                            sanitize_log(related.get("message")?.as_str()?, MAX_LOG_LINE_BYTES),
+                        ))
+                    })
+                    .collect(),
                 source: diagnostic
                     .get("source")
                     .and_then(Value::as_str)
@@ -1064,8 +1112,15 @@ pub(super) fn diagnostics(value: &Value) -> Vec<LspDiagnostic> {
 }
 
 pub(super) fn signature_text(result: &Value) -> String {
-    result
-        .pointer("/signatures/0/label")
+    let signatures = result.get("signatures").and_then(Value::as_array);
+    let active = result
+        .get("activeSignature")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .unwrap_or(0);
+    signatures
+        .and_then(|items| items.get(active).or_else(|| items.first()))
+        .and_then(|signature| signature.get("label"))
         .and_then(Value::as_str)
         .unwrap_or("no signature information")
         .to_owned()

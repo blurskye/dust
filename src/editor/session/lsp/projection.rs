@@ -1480,6 +1480,7 @@ mod tests {
             kind: None,
             snippet: false,
             documentation: None,
+            command: None,
             resolve_item: None,
             resolved: true,
         }
@@ -1592,6 +1593,7 @@ mod tests {
             severity: Some(1),
             source: None,
             code: None,
+            related: Vec::new(),
             message: "problem".into(),
             data: None,
         };

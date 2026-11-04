@@ -665,8 +665,18 @@ pub(super) fn run_session(
                         }),
                     );
                     for document in documents.values() {
-                        send_open(&mut stdin, document);
+                        if let Err(error) = send_open(&mut stdin, document) {
+                            send_event(&events, LspEvent::Failed {
+                                server: server.clone(),
+                                message: format!("language server synchronization write failed: {error}"),
+                            });
+                            stopping = true;
+                            break;
+                        }
                         opened_documents.insert(document.uri());
+                    }
+                    if stopping {
+                        break;
                     }
                     send_event(
                         &events,
@@ -857,14 +867,23 @@ pub(super) fn handle_command(
         SessionCommand::SyncOwned { .. } => unreachable!("normalized owned sync"),
         SessionCommand::Sync(document) => {
             let uri = document.uri();
-            let previous = documents.insert(uri.clone(), document.clone());
             if initialized {
-                if opened_documents.insert(uri) {
-                    send_open(stdin, &document);
+                let result = if opened_documents.contains(&uri) {
+                    send_change(stdin, documents.get(&uri), &document, capabilities)
                 } else {
-                    send_change(stdin, previous.as_ref(), &document, capabilities);
+                    send_open(stdin, &document)
+                };
+                if let Err(error) = result {
+                    send_event(events, LspEvent::Failed {
+                        server: server.into(),
+                        message: format!("language server synchronization write failed: {error}"),
+                    });
+                    *stopping = true;
+                    return;
                 }
+                opened_documents.insert(uri.clone());
             }
+            documents.insert(uri, document);
         }
         SessionCommand::Save(document) => {
             let uri = document.uri();
@@ -874,18 +893,27 @@ pub(super) fn handle_command(
             {
                 document_sources.remove(&uri);
             }
-            let previous = documents.insert(uri.clone(), document.clone());
             if initialized {
-                if opened_documents.insert(uri) {
-                    send_open(stdin, &document);
-                } else if previous
-                    .as_ref()
-                    .is_some_and(|old| old.version != document.version)
-                {
-                    send_change(stdin, previous.as_ref(), &document, capabilities);
+                let previous = documents.get(&uri);
+                let result = if !opened_documents.contains(&uri) {
+                    send_open(stdin, &document)
+                } else if previous.is_some_and(|old| old.version != document.version || old.text != document.text) {
+                    send_change(stdin, previous, &document, capabilities)
+                } else {
+                    Ok(())
+                };
+                if let Err(error) = result {
+                    send_event(events, LspEvent::Failed {
+                        server: server.into(),
+                        message: format!("language server synchronization write failed: {error}"),
+                    });
+                    *stopping = true;
+                    return;
                 }
+                opened_documents.insert(uri.clone());
                 send_save(stdin, &document);
             }
+            documents.insert(uri, document);
         }
         SessionCommand::Close(uri) => {
             document_sources.remove(&uri);
@@ -997,7 +1025,7 @@ pub(super) fn handle_command(
                 let edit_sources = if matches!(
                     feature,
                     LspFeature::Rename { .. }
-                        | LspFeature::Formatting
+                        | LspFeature::Formatting { .. }
                         | LspFeature::RangeFormatting { .. }
                         | LspFeature::CodeAction { .. }
                         | LspFeature::CompletionResolve { .. }

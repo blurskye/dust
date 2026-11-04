@@ -989,7 +989,15 @@ impl LspEditSources {
                     source: diagnostic.source.unwrap_or_else(|| label.into()),
                     code: diagnostic.code,
                     message: diagnostic.message,
-                    related: Vec::new(),
+                    related: diagnostic.related.into_iter().map(|(location, message)| {
+                        crate::workspace::RelatedDiagnostic {
+                            uri: location.uri,
+                            range: (location.range.start.line, location.range.start.character)
+                                ..(location.range.end.line, location.range.end.character),
+                            encoding: context.encoding(),
+                            message,
+                        }
+                    }).collect(),
                     tags: Vec::new(),
                     fixes: Vec::new(),
                     data: diagnostic.data,
@@ -1044,6 +1052,7 @@ mod diagnostic_tests {
             severity: Some(1),
             source: None,
             code: None,
+            related: Vec::new(),
             message: "problem".into(),
             data: None,
         };
@@ -1133,6 +1142,16 @@ mod diagnostic_tests {
                 severity: Some(1),
                 source: None,
                 code: None,
+                related: vec![(
+                    crate::language::lsp::LspLocation {
+                        uri: "file:///unopened.rs".into(),
+                        range: LspRange {
+                            start: LspPosition { line: 2, character: 4 },
+                            end: LspPosition { line: 2, character: 6 },
+                        },
+                    },
+                    "other declaration".into(),
+                )],
                 message: "message".into(),
                 data: None,
             }]
@@ -1165,6 +1184,11 @@ mod diagnostic_tests {
             "must not use ambient UTF-16"
         );
         assert_eq!(batch.validity, DiagnosticValidity::ReportedVersion);
+        let related = &batch.items[0].related[0];
+        assert_eq!(related.uri, "file:///unopened.rs");
+        assert_eq!(related.range, (2, 4)..(2, 6));
+        assert_eq!(related.encoding, PositionEncoding::Utf8);
+        assert_eq!(related.message, "other declaration");
         let first = batch.producer.clone();
         owner.activate(first.clone());
         owner.publish(batch, &editor).unwrap();

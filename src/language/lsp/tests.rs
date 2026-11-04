@@ -340,6 +340,87 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
 }
 
 #[test]
+fn initialization_advertises_supported_semantic_tokens_and_pull_diagnostics() {
+    let initialize = initialize_message(Path::new("/workspace"), None);
+    let document = &initialize["params"]["capabilities"]["textDocument"];
+    let semantic = &document["semanticTokens"];
+    assert_eq!(semantic["requests"], json!({"full":{"delta":true},"range":false}));
+    assert_eq!(semantic["formats"], json!(["relative"]));
+    assert!(semantic["tokenTypes"].as_array().unwrap().contains(&json!("function")));
+    assert!(semantic["tokenModifiers"].is_array());
+    assert_eq!(semantic["overlappingTokenSupport"], false);
+    assert_eq!(semantic["multilineTokenSupport"], false);
+    assert_eq!(document["diagnostic"], json!({"dynamicRegistration":false,"relatedDocumentSupport":false}));
+    assert_eq!(document["synchronization"]["dynamicRegistration"], false);
+}
+
+#[test]
+fn absent_change_support_does_not_enable_document_changes() {
+    for sync in [Value::Null, json!({"openClose":true}), json!(0)] {
+        let capabilities = initialize_capabilities(Some(&json!({"capabilities":{"textDocumentSync":sync}}))).unwrap();
+        assert_eq!(capabilities.sync_kind, SyncKind::None);
+        let mut output = Vec::new();
+        super::protocol::send_change(&mut output, None, &LspDocument {
+            path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "changed".into(),
+        }, &capabilities).unwrap();
+        assert!(output.is_empty());
+    }
+    assert_eq!(initialize_capabilities(Some(&json!({"capabilities":{}}))).unwrap().sync_kind, SyncKind::None);
+}
+
+#[test]
+fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
+    let range = super::LspRange {
+        start: super::LspPosition { line: 0, character: 0 },
+        end: super::LspPosition { line: 2, character: 0 },
+    };
+    for (tab_size, insert_spaces) in [(2, true), (8, false)] {
+        for feature in [
+            LspFeature::Formatting { tab_size, insert_spaces },
+            LspFeature::RangeFormatting { range: range.clone(), tab_size, insert_spaces },
+        ] {
+            let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+            assert_eq!(params["options"], json!({"tabSize":tab_size,"insertSpaces":insert_spaces}));
+        }
+    }
+}
+
+#[test]
+fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
+    use std::collections::{HashMap, HashSet};
+    use crate::editor::{EditorState, text::TextBuffer};
+    use super::session::{SessionCommand, handle_command};
+    let old = LspDocument {
+        path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "old".into(),
+    };
+    let new = LspDocument { version: 2, text: "x".repeat(16 * 1024 * 1024), ..old.clone() };
+    let mut editor = EditorState::new("/workspace".into());
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(old.path.clone()));
+    let mut service = LspService::new();
+    let endpoint = service.replace_edit_source_fixture(old.uri(), (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16);
+    for opened in [true, false] {
+        for command in [SessionCommand::Sync(new.clone()), SessionCommand::Save(new.clone())] {
+            let mut documents = HashMap::from([(old.uri(), old.clone())]);
+            let mut opened_documents = if opened { HashSet::from([old.uri()]) } else { HashSet::new() };
+            let mut stopping = false;
+            handle_command(
+                command, "fixture", Path::new("/workspace"), Path::new("/server"),
+                &mut std::io::sink(), true,
+                &super::LspCapabilities { sync_kind: SyncKind::Incremental, ..Default::default() },
+                &mut documents, &mut HashMap::new(), &mut Default::default(),
+                &mut HashMap::new(), &mut opened_documents, &mut HashMap::new(), &mut 2,
+                Duration::from_secs(5), 0, &endpoint.events, &mut stopping,
+                &mut super::LspServerConfiguration::standard(),
+            );
+            assert!(stopping);
+            assert_eq!(documents.get(&old.uri()), Some(&old));
+            assert_eq!(opened_documents.contains(&old.uri()), opened);
+            assert!(matches!(service.try_event(), Some(LspEvent::Failed { message, .. }) if message.contains("synchronization write failed")));
+        }
+    }
+}
+
+#[test]
 fn initialization_negotiates_utf32_and_incremental_sync() {
     let capabilities = initialize_capabilities(Some(&json!({"capabilities":{
         "positionEncoding":"utf-32","textDocumentSync":{"change":2},
@@ -368,6 +449,75 @@ fn incremental_sync_uses_the_negotiated_unicode_units() {
     assert_eq!(change.pointer("/range/start/character"), Some(&json!(3)));
     assert_eq!(change.pointer("/range/end/character"), Some(&json!(4)));
     assert_eq!(change.get("text"), Some(&json!("yz")));
+}
+
+#[test]
+fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
+    let range = json!({"start":{"line":0,"character":0},"end":{"line":0,"character":1}});
+    for code in [json!("001"), json!("123"), json!(123)] {
+        let related = json!([{"location":{"uri":"file:///other.rs","range":range},"message":"other declaration"}]);
+        let diagnostics = super::protocol::diagnostics(&json!([{
+            "range":range,"message":"duplicate","code":code,"relatedInformation":related,
+        }]));
+        assert_eq!(diagnostics[0].code, Some(code.clone()));
+        assert_eq!(diagnostics[0].related[0].0.uri, "file:///other.rs");
+        assert_eq!(diagnostics[0].related[0].1, "other declaration");
+        let feature = LspFeature::CodeAction { range: diagnostics[0].range.clone(), diagnostics };
+        let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+        assert_eq!(params["context"]["diagnostics"][0]["code"], code);
+    }
+}
+
+#[test]
+fn signature_help_selects_the_active_overload_with_a_safe_fallback() {
+    for (active, expected) in [(json!(1), "second"), (json!(99), "first"), (Value::Null, "first"), (json!(-1), "first")] {
+        let result = normalize_result(&LspFeature::SignatureHelp, &json!({
+            "signatures":[{"label":"first"},{"label":"second"}],"activeSignature":active,
+        })).unwrap();
+        assert!(matches!(result, LspFeatureResult::Signature(content) if content.value == expected));
+    }
+    assert_eq!(super::protocol::signature_text(&json!({"signatures":[]})), "no signature information");
+}
+
+#[test]
+fn null_results_clear_persistent_document_projections() {
+    for feature in [LspFeature::DocumentHighlights, LspFeature::FoldingRanges, LspFeature::SelectionRanges] {
+        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::Ranges(items) if items.is_empty()));
+    }
+    for feature in [LspFeature::SemanticTokensFull, LspFeature::SemanticTokensDelta { previous_result_id: "old".into() }] {
+        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::SemanticTokens(tokens) if tokens.data.is_empty() && tokens.result_id.is_none()));
+    }
+}
+
+#[test]
+fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
+    let item = json!({"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"data":{"id":42}});
+    let lenses = super::protocol::code_lenses(&json!([item]));
+    assert_eq!(lenses[0].resolve_item, Some(item.clone()));
+    assert!(lenses[0].command.is_none());
+    let feature = LspFeature::CodeLensResolve { item: item.clone() };
+    assert_eq!(feature.method(), "codeLens/resolve");
+    assert_eq!(super::protocol::feature_params(&feature, "file:///main.rs", 0, 0), item);
+    let caps = initialize_capabilities(Some(&json!({"capabilities":{"codeLensProvider":{"resolveProvider":true}}}))).unwrap();
+    assert!(feature.capability(&caps));
+    let mut resolved = item;
+    resolved["command"] = json!({"title":"Run test","command":"run.test","arguments":[42]});
+    let LspFeatureResult::CodeLens(lenses) = normalize_result(&feature, &resolved).unwrap() else {
+        panic!("resolved code lens must be presented as an executable choice");
+    };
+    assert_eq!(lenses[0].title, "Run test");
+    assert_eq!(lenses[0].command.as_ref().unwrap().arguments, vec![json!(42)]);
+}
+
+#[test]
+fn completion_commands_survive_initial_and_resolved_items() {
+    let item = json!({"label":"example","command":{"title":"Import","command":"add.import","arguments":["example"]}});
+    for resolved in [false, true] {
+        let parsed = super::protocol::completion_item(&item, resolved).unwrap();
+        let command = parsed.command.unwrap();
+        assert_eq!(command.command, "add.import");
+        assert_eq!(command.arguments, vec![json!("example")]);
+    }
 }
 
 #[test]
@@ -1088,7 +1238,7 @@ fn stop_cancels_a_blocked_write_even_with_a_full_command_queue() {
         .to_owned()
         + r#"
 m=read()
-send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True,'textDocumentSync':1}}})
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;

@@ -3301,7 +3301,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn request_lsp(&mut self, mut feature: LspFeature) {
-        if matches!(feature, LspFeature::Formatting)
+        if matches!(feature, LspFeature::Formatting { .. })
             && let Some(tool) = self.active_formatter()
         {
             self.process_effect(AppEffect::FormatRun(tool));
@@ -3326,7 +3326,7 @@ impl InteractiveApplication {
         let Some((buffer, document)) = self.active_lsp_document() else {
             return;
         };
-        let server = if matches!(feature, LspFeature::Formatting) {
+        let server = if matches!(feature, LspFeature::Formatting { .. }) {
             // Not every server on a file formats it: Tailwind sits beside the TypeScript one.
             self.language
                 .formatting_server(buffer, &document)
@@ -3366,7 +3366,7 @@ impl InteractiveApplication {
         // A formatter beside the file's main server, such as Ruff by basedpyright, doesn't replace it.
         let formats = matches!(
             feature,
-            LspFeature::Formatting | LspFeature::RangeFormatting { .. }
+            LspFeature::Formatting { .. } | LspFeature::RangeFormatting { .. }
         );
         if !formats && self.language.active() != Some(&server) {
             self.select_lsp_session(&server);
@@ -3446,6 +3446,7 @@ impl InteractiveApplication {
                             crate::workspace::DiagnosticSeverity::Hint => 4,
                         }),
                         code: problem.code.clone(),
+                        related: Vec::new(),
                         source: Some(problem.source.clone()),
                         message: problem.message.clone(),
                         data: problem.data.clone(),
@@ -3465,6 +3466,14 @@ impl InteractiveApplication {
                 },
                 diagnostics,
             };
+        }
+        match &mut feature {
+            LspFeature::Formatting { tab_size, insert_spaces }
+            | LspFeature::RangeFormatting { tab_size, insert_spaces, .. } => {
+                *tab_size = self.state.policy.tab_width;
+                *insert_spaces = self.state.policy.expand_tabs;
+            }
+            _ => {}
         }
         self.refresh_lsp_projection_owner();
         if let Some((start, automatic)) = completion {
@@ -3647,7 +3656,7 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
-                if self.language.accept_resolved(generation, item, &self.state) {
+                if self.language.accept_resolved(generation, *item, &self.state) {
                     self.accept_lsp_completion();
                 }
             }
@@ -3887,18 +3896,28 @@ impl InteractiveApplication {
                     .into_iter()
                     .enumerate()
                     .filter_map(|(index, item)| {
-                        let command = item.command?;
+                        let label = if item.command.is_some() {
+                            item.title.clone()
+                        } else if item.resolve_item.is_some()
+                            && self.language.sessions().get(server)
+                                .and_then(|session| session.capabilities.as_ref())
+                                .is_some_and(|caps| caps.code_lens_resolve)
+                        {
+                            format!("Line {}", item.range.start.line + 1)
+                        } else {
+                            return None;
+                        };
                         Some((
                             PickerItem {
                                 badge: String::new(),
                                 kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("code-lens:{index}")),
-                                label: item.title,
-                                detail: command.command.clone(),
+                                label,
+                                detail: item.command.as_ref().map(|command| command.command.clone()).unwrap_or_default(),
                                 source: String::new(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::LspCommand(command),
+                            PickerPayload::LspCodeLens { server: server.into(), lens: item },
                         ))
                     })
                     .collect::<Vec<_>>();

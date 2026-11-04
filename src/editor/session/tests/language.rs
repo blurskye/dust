@@ -217,6 +217,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
                 filter_text: None,
                 sort_text: None,
                 detail: String::new(),
+                command: None,
                 insert_text: "main".into(),
                 text_edit: None,
                 additional_edits: Vec::new(),
@@ -728,6 +729,115 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
 }
 
 #[test]
+fn completion_executes_its_command_on_the_offering_server_only_after_insertion() {
+    use crate::language::lsp::*;
+    for invalid_edit in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("completion.rs");
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("ex"), Some(path));
+        app.state.views[view].cursor = ByteOffset(2);
+        app.set_dashboard_visibility(false);
+        let offering = fixture_owned_lsp(&mut app, "offering", buffer);
+        let other = fixture_owned_lsp(&mut app, "other", buffer);
+        app.language.select("other");
+        app.refresh_lsp_projection_owner();
+        app.mark_lsp_completion_start(false);
+        let item = LspCompletionItem {
+            label: "example".into(), filter_text: None, sort_text: None, detail: String::new(),
+            insert_text: "example".into(),
+            text_edit: invalid_edit.then(|| LspTextEdit {
+                range: LspRange { start: LspPosition { line: 99, character: 0 }, end: LspPosition { line: 99, character: 1 } },
+                new_text: "example".into(),
+            }),
+            additional_edits: Vec::new(), kind: None, snippet: false, documentation: None,
+            command: Some(LspCommand { command: "add.import".into(), arguments: vec![serde_json::json!("example")] }),
+            resolve_item: None, resolved: true,
+        };
+        app.present_lsp_result("offering", app.language.generation(), "textDocument/completion", "", LspFeatureResult::Completion { items: vec![item], incomplete: false });
+        assert!(app.ui.language_completion.is_some());
+        assert_eq!(offering.executed_command(), None);
+        app.accept_lsp_completion();
+        if invalid_edit {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "ex");
+            assert_eq!(offering.executed_command(), None);
+            assert!(app.ui.notification_error);
+        } else {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "example");
+            assert_eq!(offering.executed_command(), Some("add.import".into()));
+        }
+        assert_eq!(other.executed_command(), None);
+    }
+}
+
+#[test]
+fn unresolved_code_lenses_are_resolved_and_run_on_the_offering_server() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("lens.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("test"), Some(path.clone()));
+    let offering = fixture_owned_lsp(&mut app, "offering", buffer);
+    let other = fixture_owned_lsp(&mut app, "other", buffer);
+    app.language.running("offering", LspCapabilities { code_lens: true, code_lens_resolve: true, execute_command: true, ..Default::default() });
+    app.language.select("other");
+    app.refresh_lsp_projection_owner();
+    let item = serde_json::json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},"data":{"id":42}});
+    let range = LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } };
+    app.present_lsp_result("offering", 1, "textDocument/codeLens", &file_uri(&path), LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range: range.clone(), title: String::new(), command: None, resolve_item: Some(item.clone()),
+    }]));
+    assert!(app.ui.picker.is_some());
+    app.accept_picker();
+    assert!(matches!(offering.requested_feature(), Some(LspFeature::CodeLensResolve { item: sent }) if sent == item));
+    assert_eq!(offering.executed_command(), None);
+    assert!(other.requested_feature().is_none());
+    app.present_lsp_result("offering", app.language.generation(), "codeLens/resolve", &file_uri(&path), LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range, title: "Run test".into(),
+        command: Some(LspCommand { command: "run.test".into(), arguments: Vec::new() }), resolve_item: None,
+    }]));
+    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label == "Run test"));
+    assert_eq!(offering.executed_command(), None);
+    app.accept_picker();
+    assert_eq!(offering.executed_command(), Some("run.test".into()));
+    assert_eq!(other.executed_command(), None);
+}
+
+#[test]
+fn lsp_formatting_captures_the_active_indentation_policy() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("format.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("text"), Some(path));
+    let transport = fixture_owned_lsp(&mut app, "formatter", buffer);
+    app.language.running("formatter", LspCapabilities { formatting: true, range_formatting: true, ..Default::default() });
+    app.language.select("formatter");
+    app.state.policy.tab_width = 2;
+    app.state.policy.expand_tabs = false;
+    app.request_lsp(LspFeature::Formatting { tab_size: 0, insert_spaces: true });
+    assert!(matches!(transport.requested_feature(), Some(LspFeature::Formatting { tab_size: 2, insert_spaces: false })));
+    app.request_lsp(LspFeature::RangeFormatting {
+        range: LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } },
+        tab_size: 0, insert_spaces: true,
+    });
+    assert!(matches!(transport.requested_feature(), Some(LspFeature::RangeFormatting { tab_size: 2, insert_spaces: false, .. })));
+}
+
+#[test]
+fn empty_document_highlights_replace_previous_highlights() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("highlights.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("name"), Some(path.clone()));
+    let _transport = fixture_owned_lsp(&mut app, "highlight", buffer);
+    app.language.select("highlight");
+    let uri = file_uri(&path);
+    let range = LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } };
+    app.present_lsp_result("highlight", 1, "textDocument/documentHighlight", &uri, LspFeatureResult::Ranges(vec![range]));
+    assert_eq!(app.ui.lsp_highlight_spans.len(), 1);
+    app.present_lsp_result("highlight", 2, "textDocument/documentHighlight", &uri, LspFeatureResult::Ranges(Vec::new()));
+    assert!(app.ui.lsp_highlight_spans.is_empty());
+}
+
+#[test]
 fn lsp_completion_applies_through_one_validated_transaction() {
     let mut app = app();
     let path = app.state.workspace_root.join("main.rs");
@@ -760,6 +870,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
             filter_text: None,
             sort_text: None,
             detail: "function".into(),
+            command: None,
             insert_text: "in".into(),
             text_edit: None,
             additional_edits: Vec::new(),
@@ -808,6 +919,7 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         (0..count)
             .map(|index| crate::language::lsp::LspCompletionItem {
                 label: format!("item-{index}"),
+                command: None,
                 filter_text: None,
                 sort_text: None,
                 detail: String::new(),
@@ -1042,6 +1154,7 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     app.mark_lsp_completion_start(false);
     let item = |label: &str| crate::language::lsp::LspCompletionItem {
         label: label.into(),
+        command: None,
         filter_text: None,
         sort_text: None,
         detail: String::new(),
@@ -1737,6 +1850,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     use crate::language::lsp::LspCompletionItem;
     let item = |label: &str| LspCompletionItem {
         label: label.into(),
+        command: None,
         filter_text: None,
         sort_text: None,
         detail: String::new(),

@@ -262,6 +262,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
                 kind: crate::language::lsp::LspMarkupKind::Markdown,
                 value: "**value docs**".into(),
             }),
+            command: None,
             resolve_item: None,
             resolved: true,
         }]);
@@ -804,6 +805,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
             kind: None,
             snippet: true,
             documentation: None,
+            command: None,
             resolve_item: None,
             resolved: true,
         }]);

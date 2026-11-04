@@ -28,8 +28,11 @@ pub(in crate::editor::session) enum PickerPayload {
     Project(std::path::PathBuf),
     /// A recovery journal, by the journal's own path.
     Recovery(std::path::PathBuf),
-    /// A code lens the server runs when chosen.
-    LspCommand(crate::language::lsp::LspCommand),
+    /// A code lens resolved and run on the server that offered it.
+    LspCodeLens {
+        server: String,
+        lens: crate::language::lsp::LspCodeLens,
+    },
     /// A row of one of the agent pickers.
     Agent(crate::editor::session::dispatch::agent::AgentChoice),
     /// Where the tutor starts: the saved step, or the first one in a language.

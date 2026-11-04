@@ -7073,7 +7073,9 @@ impl InteractiveApplication {
                 edits,
             }],
         };
-        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit, encoding) {
+        let applied = self.apply_lsp_workspace_edit(workspace_edit, encoding);
+        let succeeded = applied.is_ok();
+        if let Err(error) = applied {
             self.show_error(error);
         } else {
             if let Some(start) = insertion_start
@@ -7097,6 +7099,28 @@ impl InteractiveApplication {
         }
         self.language.clear_completion();
         self.ui.language_completion = None;
+        if succeeded && let Some(command) = item.command {
+            self.execute_lsp_command(&server, command);
+        }
+    }
+
+    pub(in crate::editor::session) fn execute_lsp_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+    ) {
+        self.sync_lsp_document();
+        self.refresh_lsp_projection_owner();
+        if let Some((_, document)) = self.active_lsp_document()
+            && let Err(error) = self.language.request_projected(
+                server,
+                LspFeature::ExecuteCommand(command),
+                document,
+                ByteOffset(0),
+            )
+        {
+            self.show_error(error);
+        }
     }
 
     pub(in crate::editor::session) fn select_snippet_current(&mut self) {
@@ -9603,8 +9627,22 @@ impl InteractiveApplication {
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
-            Some(PickerPayload::LspCommand(command)) => {
-                self.request_lsp(LspFeature::ExecuteCommand(command));
+            Some(PickerPayload::LspCodeLens { server, lens }) => {
+                if let Some(command) = lens.command {
+                    self.execute_lsp_command(&server, command);
+                } else if let Some(item) = lens.resolve_item {
+                    self.refresh_lsp_projection_owner();
+                    if let Some((_, document)) = self.active_lsp_document()
+                        && let Err(error) = self.language.request_projected(
+                            &server,
+                            LspFeature::CodeLensResolve { item },
+                            document,
+                            ByteOffset(0),
+                        )
+                    {
+                        self.show_error(error);
+                    }
+                }
             }
             Some(PickerPayload::Buffer(buffer)) => {
                 if let Err(error) = self.state.show_buffer(buffer) {
@@ -14340,7 +14378,10 @@ impl InteractiveApplication {
             deadline: std::time::Instant::now()
                 + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
         });
-        self.request_lsp(LspFeature::Formatting);
+        self.request_lsp(LspFeature::Formatting {
+            tab_size: self.state.policy.tab_width,
+            insert_spaces: self.state.policy.expand_tabs,
+        });
         true
     }
 
