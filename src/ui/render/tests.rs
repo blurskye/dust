@@ -2123,6 +2123,17 @@ fn a_long_notification_wraps_so_its_end_stays_readable() {
 }
 
 #[test]
+fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
+    let message = "a  b`c 界 e\u{301} ".repeat(10_000);
+    for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        let lines = super::wrap_plain_text(&message, 40, ambiguous);
+        assert_eq!(lines.concat(), message);
+        assert!(lines.iter().all(|line| super::text_width(line, ambiguous) <= 40));
+    }
+    assert_eq!(super::wrap_plain_text("\n", 40, crate::config::AmbiguousWidth::Narrow), ["", ""]);
+}
+
+#[test]
 fn notification_newlines_and_literal_paths_are_preserved() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     state.open_text(crate::editor::text::TextBuffer::from_text(""), None);

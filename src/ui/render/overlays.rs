@@ -370,7 +370,7 @@ pub(crate) fn wrap_ranges(
 ) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
-    while text_width(&line[start..], ambiguous) > width.max(1) {
+    while start < line.len() {
         let (mut used, mut end, mut space) = (0, start, None);
         for (offset, grapheme) in line[start..].grapheme_indices(true) {
             let cells = text_width(grapheme, ambiguous).clamp(1, 2);
@@ -383,12 +383,14 @@ pub(crate) fn wrap_ranges(
                 space = Some(end);
             }
         }
-        let cut = space.unwrap_or(end);
+        // The final row needs no word break. Scan only the row being wrapped, not
+        // the entire remaining message on every iteration.
+        let cut = if end == line.len() { end } else { space.unwrap_or(end) };
         rows.push(start..cut);
         start = cut;
     }
-    if start < line.len() || rows.is_empty() {
-        rows.push(start..line.len());
+    if rows.is_empty() {
+        rows.push(0..0);
     }
     rows
 }
