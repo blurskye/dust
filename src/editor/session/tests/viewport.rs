@@ -993,6 +993,7 @@ fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
         phase: "conflicts".into(),
         blockers: Vec::new(),
         actions: Vec::new(),
+        abort_binding: None,
     });
     app.reconcile_editor_windows();
     let with_bar = app.compositor_projection().unwrap().workspace_bounds.height;

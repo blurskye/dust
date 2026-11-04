@@ -939,7 +939,7 @@ pub(super) fn render_editor_view(
     let bar_rows =
         u16::from(config.ui.status_line.enabled && ui.operation_bar.is_some() && height > 1);
     if bar_rows == 1 {
-        render_operation_bar(&mut grid, ui, width, height - 2);
+        render_operation_bar(&mut grid, ui, config, width, height - 2);
     }
     if config.ui.status_line.enabled && height > 0 {
         render_status_line(&mut grid, state, view_id, ui, config, width, height - 1);
@@ -977,12 +977,12 @@ pub(super) fn render_editor_view(
 
 /// Draw the operation bar. At narrow widths the blockers are dropped and then the phase is
 /// shortened, because the operation and the cancellation are what must not be lost.
-pub(super) fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, width: u16, y: u16) {
+pub(super) fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, config: &Config, width: u16, y: u16) {
     let Some(bar) = ui.operation_bar.as_ref() else {
         return;
     };
     grid.fill_row(y, Style::Status);
-    let row = bar.row(width);
+    let row = bar.row(width, config.editor.ambiguous_width);
     grid.put_text_clipped(0, y, &row, Style::Status, width);
 }
 

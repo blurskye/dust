@@ -1231,7 +1231,7 @@ pub(super) fn render_tool_menu(
         .filter(|row| tool_state_glyph(row).1 == Style::Error)
         .map_or(0, |row| {
             let note =
-                super::wrap_card_text(&row.note, usize::from(content_width), ambiguous).len();
+                super::wrap_plain_text(&row.note, usize::from(content_width), ambiguous).len();
             usual_detail_rows - 2 + u16::try_from(note).unwrap_or(u16::MAX)
         })
         .min(remaining.saturating_sub(2));
@@ -1395,11 +1395,10 @@ pub(super) fn render_tool_menu(
             };
             // Install failures explain themselves here, so the note wraps above the keys.
             let keys_row = bottom.saturating_sub(1);
-            for line in super::wrap_card_text(&row.note, usize::from(content_width), ambiguous) {
+            for line in super::wrap_plain_text(&row.note, usize::from(content_width), ambiguous) {
                 if y >= keys_row {
                     break;
                 }
-                let line: String = line.into_iter().map(|(piece, _)| piece).collect();
                 frame
                     .grid
                     .put_text(content_left, y, &clip(&line), note_style);
@@ -1812,12 +1811,11 @@ pub(super) fn render_prompt(
             .saturating_sub(geometry.left)
             .saturating_sub(padding.saturating_mul(2));
         let ambiguous = config.editor.ambiguous_width;
-        let lines = super::wrap_card_text(error, usize::from(inner).max(1), ambiguous);
+        let lines = super::wrap_plain_text(error, usize::from(inner).max(1), ambiguous);
         for (row, line) in (error_y..height).zip(lines) {
             for x in geometry.left..right {
                 frame.grid.set_cell(x, row, " ", Style::Default);
             }
-            let line: String = line.into_iter().map(|(piece, _)| piece).collect();
             frame.grid.put_text_clipped(
                 geometry.left.saturating_add(padding),
                 row,

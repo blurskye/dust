@@ -332,6 +332,9 @@ impl InteractiveApplication {
                 phase: bar.phase,
                 blockers: bar.blockers,
                 actions: bar.actions.iter().map(|a| a.name().to_owned()).collect(),
+                abort_binding: self.configuration.keymaps()
+                    .binding_for("editor.normal", "workspace.git.conflict.abort")
+                    .map(super::palette::readable_keys),
             }
         });
     }

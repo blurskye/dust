@@ -129,10 +129,7 @@ fn about_lines(
         about.push_str(" Applies after a restart.");
     }
     let width = usize::from(layout.list_width.saturating_sub(3)).max(1);
-    super::wrap_card_text(&about, width, ambiguous)
-        .into_iter()
-        .map(|line| line.into_iter().map(|(piece, _)| piece).collect())
-        .collect()
+    super::wrap_plain_text(&about, width, ambiguous)
 }
 
 /// Where the page's parts go on a screen of this size.
@@ -751,7 +748,7 @@ mod tests {
             restart: false,
         };
         let about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own \
-                     command-line program in a terminal on the side.";
+                     command-line program in a terminal on the side: /workspace/a  b`c.rs.";
         let page = SettingsPageState {
             rows: vec![row("Connection", about), row("Next", "Short.")],
             lines: vec![SettingsLine::Setting(0), SettingsLine::Setting(1)],
@@ -766,7 +763,7 @@ mod tests {
                 .iter()
                 .all(|line| width_of(line, ambiguous) <= layout.list_width - 3)
         );
-        assert_eq!(lines.join(" "), about);
+        assert_eq!(lines.concat(), about);
         let first = settings_lines_height(&page, 0..1, layout, ambiguous);
         assert_eq!(first, 2 + lines.len());
         let next = layout.list_top + u16::try_from(first).unwrap();
