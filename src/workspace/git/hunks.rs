@@ -325,6 +325,8 @@ pub enum GitHunkError {
     OutsideScope,
     #[error("binary diffs are unsupported")]
     BinaryUnsupported,
+    #[error("unmerged paths cannot be compared to the index")]
+    Unmerged,
     #[error("hunk limit exceeded")]
     Limit,
     #[error("hunk deadline exceeded")]
@@ -522,27 +524,38 @@ pub(super) fn open_hunk_repository(
     Ok((root, repo, workdir, repo_path))
 }
 
+fn check_hunk_request(
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+    started: Instant,
+) -> Result<(), GitHunkError> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(GitHunkError::Cancelled);
+    }
+    if started.elapsed() >= p.deadline {
+        return Err(GitHunkError::Deadline);
+    }
+    Ok(())
+}
+
 pub(super) fn collect_hunks_from_diff(
     diff: &git2::Diff<'_>,
     p: &GitHunkPolicy,
     cancel: &AtomicBool,
+    started: Instant,
 ) -> Result<Vec<GitHunk>, GitHunkError> {
+    check_hunk_request(p, cancel, started)?;
     if diff.deltas().any(|delta| delta.flags().is_binary()) {
         return Err(GitHunkError::BinaryUnsupported);
     }
-    let started = Instant::now();
     let mut hunks: Vec<GitHunk> = Vec::new();
     let mut current_header = Vec::new();
     let mut lines = 0usize;
     let mut bytes = 0usize;
     let mut abort = None;
     let print_result = diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
-        if cancel.load(Ordering::Acquire) {
-            abort = Some(GitHunkError::Cancelled);
-            return false;
-        }
-        if started.elapsed() > p.deadline {
-            abort = Some(GitHunkError::Deadline);
+        if let Err(error) = check_hunk_request(p, cancel, started) {
+            abort = Some(error);
             return false;
         }
         if delta.flags().contains(git2::DiffFlags::BINARY) {
@@ -607,9 +620,7 @@ pub(super) fn collect_hunks_from_diff(
         return Err(error);
     }
     print_result.map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
-    if cancel.load(Ordering::Acquire) {
-        return Err(GitHunkError::Cancelled);
-    }
+    check_hunk_request(p, cancel, started)?;
     let mut identities = std::collections::BTreeSet::new();
     if hunks.iter().any(|h| !identities.insert(h.id)) {
         return Err(GitHunkError::IdentityCollision);
@@ -622,28 +633,14 @@ pub(super) fn read_hunks_owned(
     p: &GitHunkPolicy,
     cancel: &AtomicBool,
 ) -> Result<GitHunkSnapshot, GitHunkError> {
-    if cancel.load(Ordering::Acquire) {
-        return Err(GitHunkError::Cancelled);
-    }
-    if p.file.as_os_str().is_empty()
-        || p.file
-            .components()
-            .any(|c| !matches!(c, std::path::Component::Normal(_)))
-        || p.file.is_absolute()
-        || p.maximum_hunks == 0
-        || p.maximum_hunks > 10_000
-        || p.maximum_lines == 0
-        || p.maximum_lines > 100_000
-        || p.maximum_bytes == 0
-        || p.maximum_bytes > 8 * 1024 * 1024
-        || p.deadline.is_zero()
-        || p.deadline > Duration::from_secs(10)
-    {
-        return Err(GitHunkError::InvalidPolicy);
-    }
+    let started = Instant::now();
+    validate_hunk_policy(p)?;
+    check_hunk_request(p, cancel, started)?;
     let (root, repo, workdir, repo_path) = open_hunk_repository(p)?;
+    check_hunk_request(p, cancel, started)?;
     let index_before =
         git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    check_hunk_request(p, cancel, started)?;
     let mut options = git2::DiffOptions::new();
     options.pathspec(&repo_path).disable_pathspec_match(true);
     let diff = match p.layer {
@@ -666,13 +663,15 @@ pub(super) fn read_hunks_owned(
         }
     }
     .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
-    let hunks = collect_hunks_from_diff(&diff, p, cancel)?;
+    let hunks = collect_hunks_from_diff(&diff, p, cancel, started)?;
     let index_fingerprint =
         git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
     if index_fingerprint != index_before {
         return Err(GitHunkError::StaleIndex);
     }
+    check_hunk_request(p, cancel, started)?;
     let worktree_sha256 = worktree_hash(&root.join(&p.file)).ok().map(|value| value.0);
+    check_hunk_request(p, cancel, started)?;
     Ok(GitHunkSnapshot {
         generation,
         revision: 0,
@@ -692,21 +691,17 @@ pub(super) fn collect_hunks_from_patch(
     patch: &git2::Patch<'_>,
     p: &GitHunkPolicy,
     cancel: &AtomicBool,
+    started: Instant,
 ) -> Result<Vec<GitHunk>, GitHunkError> {
+    check_hunk_request(p, cancel, started)?;
     if patch.delta().flags().contains(git2::DiffFlags::BINARY) {
         return Err(GitHunkError::BinaryUnsupported);
     }
-    let started = Instant::now();
     let mut hunks = Vec::new();
     let mut lines = 0usize;
     let mut bytes = 0usize;
     for hunk_index in 0..patch.num_hunks() {
-        if cancel.load(Ordering::Acquire) {
-            return Err(GitHunkError::Cancelled);
-        }
-        if started.elapsed() > p.deadline {
-            return Err(GitHunkError::Deadline);
-        }
+        check_hunk_request(p, cancel, started)?;
         if hunks.len() >= p.maximum_hunks {
             return Err(GitHunkError::Limit);
         }
@@ -734,12 +729,7 @@ pub(super) fn collect_hunks_from_patch(
             lines: Vec::new(),
         };
         for line_index in 0..line_count {
-            if cancel.load(Ordering::Acquire) {
-                return Err(GitHunkError::Cancelled);
-            }
-            if started.elapsed() > p.deadline {
-                return Err(GitHunkError::Deadline);
-            }
+            check_hunk_request(p, cancel, started)?;
             let line = patch
                 .line_in_hunk(hunk_index, line_index)
                 .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
@@ -767,6 +757,7 @@ pub(super) fn collect_hunks_from_patch(
         }
         hunks.push(accepted);
     }
+    check_hunk_request(p, cancel, started)?;
     let mut identities = std::collections::BTreeSet::new();
     if hunks.iter().any(|hunk| !identities.insert(hunk.id)) {
         return Err(GitHunkError::IdentityCollision);
@@ -780,19 +771,24 @@ pub(super) fn read_buffer_hunks_owned(
     input: GitHunkBufferInput,
     cancel: &AtomicBool,
 ) -> Result<GitHunkSnapshot, GitHunkError> {
+    let started = Instant::now();
     validate_hunk_policy(p)?;
     if p.layer != GitDiffLayer::Unstaged || input.bytes.len() > p.maximum_bytes {
         return Err(GitHunkError::InvalidPolicy);
     }
-    if cancel.load(Ordering::Acquire) {
-        return Err(GitHunkError::Cancelled);
-    }
+    check_hunk_request(p, cancel, started)?;
     let (_root, repo, workdir, repo_path) = open_hunk_repository(p)?;
+    check_hunk_request(p, cancel, started)?;
     let index_before =
         git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
+    check_hunk_request(p, cancel, started)?;
     let index = repo
         .index()
         .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
+    check_hunk_request(p, cancel, started)?;
+    if (1..=3).any(|stage| index.get_path(&repo_path, stage).is_some()) {
+        return Err(GitHunkError::Unmerged);
+    }
     let index_blob = index
         .get_path(&repo_path, 0)
         .map(|entry| {
@@ -800,6 +796,7 @@ pub(super) fn read_buffer_hunks_owned(
                 .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))
         })
         .transpose()?;
+    check_hunk_request(p, cancel, started)?;
     let mut options = git2::DiffOptions::new();
     let patch = match index_blob.as_ref() {
         Some(blob) => git2::Patch::from_blob_and_buffer(
@@ -818,15 +815,13 @@ pub(super) fn read_buffer_hunks_owned(
         ),
     }
     .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
-    let hunks = collect_hunks_from_patch(&patch, p, cancel)?;
-    if cancel.load(Ordering::Acquire) {
-        return Err(GitHunkError::Cancelled);
-    }
+    let hunks = collect_hunks_from_patch(&patch, p, cancel, started)?;
     let index_fingerprint =
         git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
     if index_fingerprint != index_before {
         return Err(GitHunkError::StaleIndex);
     }
+    check_hunk_request(p, cancel, started)?;
     Ok(GitHunkSnapshot {
         generation,
         revision: 0,

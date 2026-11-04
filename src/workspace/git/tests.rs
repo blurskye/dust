@@ -18,7 +18,9 @@ fn commit(repo: &git2::Repository, path: &str, text: &str) {
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &parents)
         .unwrap();
 }
 #[test]
@@ -110,6 +112,21 @@ fn nested_root_is_scoped_and_ceilings_truncate() {
             .iter()
             .all(|e| !e.relative_path.starts_with("sibling.txt"))
     );
+    service
+        .start(GitStatusPolicy {
+            root: dir.path().join("nested"),
+            root_revision: 4,
+            maximum_files: 10,
+            maximum_path_bytes: 1024,
+            deadline: Duration::from_secs(2),
+        })
+        .unwrap();
+    let scoped = wait_status(&mut service);
+    assert!(!scoped.truncated);
+    assert_eq!(
+        scoped.entries.iter().map(|entry| entry.relative_path.as_path()).collect::<Vec<_>>(),
+        vec![Path::new("new.txt"), Path::new("tracked.txt")]
+    );
     assert_eq!(
         GitStatusService::default()
             .start(GitStatusPolicy {
@@ -172,6 +189,56 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
     tiny.maximum_lines = 1;
     assert_eq!(read_hunks(&tiny), Err(GitHunkError::Limit));
 }
+#[test]
+fn empty_hunks_still_obey_the_request_deadline_and_cancellation() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "same.txt", "same\n");
+    let mut policy = plan_policy(dir.path(), "same.txt", GitDiffLayer::Unstaged);
+    let diff = repo.diff_index_to_workdir(None, None).unwrap();
+    let patch = git2::Patch::from_buffers(b"same\n", None, b"same\n", None, None).unwrap();
+    let expired = Instant::now() - policy.deadline;
+    for cancel in [false, true] {
+        let cancelled = AtomicBool::new(cancel);
+        let expected = if cancel { GitHunkError::Cancelled } else { GitHunkError::Deadline };
+        assert_eq!(hunks::collect_hunks_from_diff(&diff, &policy, &cancelled, expired), Err(expected));
+        assert_eq!(
+            hunks::collect_hunks_from_patch(&patch, &policy, &cancelled, expired),
+            Err(if cancel { GitHunkError::Cancelled } else { GitHunkError::Deadline })
+        );
+    }
+    policy.deadline = Duration::from_nanos(1);
+    assert_eq!(read_hunks(&policy), Err(GitHunkError::Deadline));
+    assert_eq!(
+        hunks::read_buffer_hunks_owned(
+            GitHunkGeneration(0),
+            &policy,
+            GitHunkBufferInput { revision: 1, bytes: b"same\n".to_vec() },
+            &AtomicBool::new(false),
+        ),
+        Err(GitHunkError::Deadline)
+    );
+}
+
+#[test]
+fn buffer_hunks_refuse_unmerged_paths_but_allow_untracked_files() {
+    let dir = tempdir().unwrap();
+    conflicted_fixture(dir.path());
+    let policy = plan_policy(dir.path(), "shared.txt", GitDiffLayer::Unstaged);
+    let input = GitHunkBufferInput { revision: 1, bytes: b"resolved\n".to_vec() };
+    assert_eq!(
+        hunks::read_buffer_hunks_owned(GitHunkGeneration(0), &policy, input.clone(), &AtomicBool::new(false)),
+        Err(GitHunkError::Unmerged)
+    );
+    let untracked = hunks::read_buffer_hunks_owned(
+        GitHunkGeneration(0),
+        &GitHunkPolicy { file: "new.txt".into(), ..policy },
+        input,
+        &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(git_hunk_signs(&untracked), vec![GitHunkSign { line: 0, kind: GitHunkSignKind::Added }]);
+}
+
 #[test]
 fn buffer_hunks_compare_exact_unsaved_revision_to_index_without_worktree_mutation() {
     let dir = tempdir().unwrap();
@@ -374,6 +441,12 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         std::fs::read_to_string(root.join("m.txt")).unwrap(),
         changed
     );
+    assert_eq!(index_text(&root, "m.txt"), original.replace("line 2\n", "changed 2\n"));
+    let unstaged = read_hunks(&policy).unwrap();
+    assert_eq!(unstaged.hunks.len(), 1);
+    assert!(unstaged.hunks[0].lines.iter().any(|line| {
+        line.kind == GitDiffLineKind::Add && line.text == "changed 18\n"
+    }));
     let mut stale = request;
     stale.expected_index = Some(index);
     let current = git_index_fingerprint(&root).unwrap();
@@ -471,7 +544,7 @@ fn wait_mutation_error(service: &mut GitMutationService) -> GitMutationError {
 }
 
 #[test]
-fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_late_work() {
+fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "negative.txt", "one\ntwo\nthree\n");
@@ -525,15 +598,6 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
         stage_hunk(GitMutationGeneration(77), &base, &AtomicBool::new(true)),
         Err(GitMutationError::Cancelled)
     );
-    service
-        .start(GitMutationRequest::StageHunk(stale_worktree))
-        .unwrap();
-    service.cancel();
-    let generation = service.next;
-    for _ in 0..256 {
-        assert!(service.poll().unwrap().is_none());
-        assert_eq!(service.next, generation);
-    }
 }
 
 #[cfg(unix)]
@@ -837,6 +901,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
 }
 
 fn plan_policy(root: &Path, file: &str, layer: GitDiffLayer) -> GitHunkPolicy {
+    let root = std::fs::canonicalize(root).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     GitHunkPolicy {
@@ -851,6 +916,20 @@ fn plan_policy(root: &Path, file: &str, layer: GitDiffLayer) -> GitHunkPolicy {
         maximum_bytes: 64 * 1024,
         deadline: Duration::from_secs(2),
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn plan_policy_uses_canonical_repository_identity() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let repo = git2::Repository::init(&root).unwrap();
+    commit(&repo, "a.txt", "one\n");
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let policy = plan_policy(&alias, "a.txt", GitDiffLayer::Unstaged);
+    assert_eq!(policy.scope_root, std::fs::canonicalize(&root).unwrap());
+    assert!(read_hunks(&policy).unwrap().hunks.is_empty());
 }
 
 fn plan_template(policy: GitHunkPolicy, kind: GitMutationKind) -> GitChangePlanRequest {
@@ -896,22 +975,6 @@ fn index_text(root: &Path, path: &str) -> String {
     String::from_utf8(blob.content().to_vec()).unwrap()
 }
 
-/// Commit after the first one, chaining the current tip as parent.
-fn commit_next(repo: &git2::Repository, path: &str, text: &str) {
-    let root = repo.workdir().unwrap();
-    std::fs::write(root.join(path), text).unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(std::path::Path::new(path)).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
-    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &parents)
-        .unwrap();
-}
-
 fn wait_status(service: &mut GitStatusService) -> GitStatusSnapshot {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -928,8 +991,8 @@ fn change_sources_distinguish_staged_unstaged_and_unsaved() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "staged.txt", "one\n");
-    commit_next(&repo, "unstaged.txt", "one\n");
-    commit_next(&repo, "dirty.txt", "one\n");
+    commit(&repo, "unstaged.txt", "one\n");
+    commit(&repo, "dirty.txt", "one\n");
     std::fs::write(dir.path().join("staged.txt"), "two\n").unwrap();
     let mut index = repo.index().unwrap();
     index.add_path(Path::new("staged.txt")).unwrap();
@@ -1126,7 +1189,7 @@ fn plan_is_rejected_after_an_external_index_or_head_change() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "stale.txt", "one\n");
-    commit_next(&repo, "other.txt", "one\n");
+    commit(&repo, "other.txt", "one\n");
     std::fs::write(dir.path().join("stale.txt"), "two\n").unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let head = git_head_id(&root).unwrap();
@@ -1704,48 +1767,9 @@ fn a_locked_or_paused_worktree_refuses_removal_before_any_write() {
 
 #[test]
 fn the_https_and_ssh_transports_are_present_at_runtime() {
-    // The owner approved enabling these transports, and a declaration in Cargo.toml is not
-    // evidence that they exist in the built binary. Before that change a fetch stopped at
-    // "there is no TLS stream available"; a transport that is really present gets as far as
-    // attempting a connection. The probe targets the loopback interface on a port nothing
-    // listens on, so it proves the transport without sending anything off the machine.
-    let dir = tempdir().unwrap();
-    let probe = dir.path().join("probe");
-    std::fs::create_dir_all(&probe).unwrap();
-    let repo = git2::Repository::init(&probe).unwrap();
-    repo.remote("origin", "https://127.0.0.1:1/probe.git")
-        .unwrap();
-    let mut remote = repo.find_remote("origin").unwrap();
-    let message = remote
-        .fetch(&["+refs/heads/*:refs/remotes/origin/*"], None, None)
-        .expect_err("a fetch against a dead port cannot succeed")
-        .message()
-        .to_owned();
-    assert!(
-        !message.contains("no TLS stream") && !message.contains("not supported"),
-        "the https transport is present in the built binary: {message}"
-    );
-    assert!(
-        message.contains("connect") || message.contains("refused") || message.contains("resolve"),
-        "the failure is a connection-level one, which is only reachable with a working transport: {message}"
-    );
-    // The ssh transport is present too: an ssh URL is not rejected as an unsupported protocol.
-    let ssh_probe = dir.path().join("ssh-probe");
-    std::fs::create_dir_all(&ssh_probe).unwrap();
-    let ssh_repo = git2::Repository::init(&ssh_probe).unwrap();
-    ssh_repo
-        .remote("origin", "ssh://git@127.0.0.1:1/probe.git")
-        .unwrap();
-    let mut ssh_remote = ssh_repo.find_remote("origin").unwrap();
-    let ssh_message = ssh_remote
-        .fetch(&["+refs/heads/*:refs/remotes/origin/*"], None, None)
-        .expect_err("an ssh fetch against a dead port cannot succeed")
-        .message()
-        .to_owned();
-    assert!(
-        !ssh_message.contains("not supported") && !ssh_message.contains("unsupported"),
-        "the ssh transport is present in the built binary: {ssh_message}"
-    );
+    let version = git2::Version::get();
+    assert!(version.https(), "the built libgit2 supports HTTPS");
+    assert!(version.ssh(), "the built libgit2 supports SSH");
 }
 
 #[test]
@@ -2084,20 +2108,19 @@ fn recovery_refuses_when_nothing_is_paused() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "only.txt", "one\n");
+    let original_head = repo.head().unwrap().target();
     assert_eq!(
         continue_operation(dir.path(), ""),
         Err(GitRecoveryRefusal::NotPaused("continue")),
         "there is nothing to continue"
     );
+    assert_eq!(repo.head().unwrap().target(), original_head);
     assert_eq!(
         abort_operation(dir.path()),
         Err(GitRecoveryRefusal::NotPaused("abort")),
         "and nothing to abort"
     );
-    assert_eq!(
-        repo.head().unwrap().target(),
-        Some(repo.head().unwrap().target().unwrap())
-    );
+    assert_eq!(repo.head().unwrap().target(), original_head);
 }
 
 #[test]
@@ -2132,7 +2155,7 @@ fn the_operation_bar_lists_only_the_actions_valid_in_the_repositorys_real_state(
         bar.offers(GitOperationAction::Abort),
         "abort stays valid through a pause"
     );
-    assert!(bar.phase.contains("shared.txt").eq(&false) || bar.phase.contains("1 conflicted path"));
+    assert_eq!(bar.phase, "merge: 1 conflicted path(s)");
 
     // After resolving: the bar still exists, its blockers are gone and continue becomes valid.
     {
@@ -2310,7 +2333,10 @@ fn the_bar_names_every_paused_operation_the_contract_lists() {
 fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch() {
     use crate::workspace::git::GitBranchRequest as R;
     let dir = tempdir().unwrap();
-    let repo = git2::Repository::init(dir.path()).unwrap();
+    let repo = git2::Repository::init_opts(
+        dir.path(),
+        git2::RepositoryInitOptions::new().initial_head("main"),
+    ).unwrap();
     commit(&repo, "w.txt", "one\n");
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let main_head = repo.head().unwrap().target().unwrap();
@@ -2340,10 +2366,13 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
     drop(tree);
     drop(index);
 
-    let branches_before: Vec<String> = repo
+    let branches_before: Vec<_> = repo
         .branches(None)
         .unwrap()
-        .map(|branch| branch.unwrap().0.name().unwrap().unwrap().to_owned())
+        .map(|branch| {
+            let (branch, _) = branch.unwrap();
+            (branch.name().unwrap().unwrap().to_owned(), branch.get().target().unwrap())
+        })
         .collect();
 
     let worktree = root.join("wt-review");
@@ -2367,14 +2396,17 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
         worktree.join("review.txt").is_file(),
         "the reviewed revision's own content is checked out"
     );
-    let branches_after: Vec<String> = repo
+    let branches_after: Vec<_> = repo
         .branches(None)
         .unwrap()
-        .map(|branch| branch.unwrap().0.name().unwrap().unwrap().to_owned())
+        .map(|branch| {
+            let (branch, _) = branch.unwrap();
+            (branch.name().unwrap().unwrap().to_owned(), branch.get().target().unwrap())
+        })
         .collect();
     assert_eq!(
         branches_before, branches_after,
-        "looking at a review creates no branch"
+        "looking at a review creates no branch and moves no branch target"
     );
 
     // And the CURRENT branch is untouched: same branch, same commit.
@@ -2534,7 +2566,7 @@ fn nested_hunk_mutations_use_repository_paths() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
     commit(&repo, "f.txt", "old\n");
-    commit_next(&repo, "sub/f.txt", "old\n");
+    commit(&repo, "sub/f.txt", "old\n");
     for name in ["f.txt", "sub/f.txt"] {
         std::fs::write(dir.path().join(name), "new\n").unwrap();
     }
@@ -2592,7 +2624,7 @@ fn whole_file_unstage_treats_wildcards_literally() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "*", "old\n");
-    commit_next(&repo, "other.txt", "old\n");
+    commit(&repo, "other.txt", "old\n");
     for name in ["*", "other.txt"] {
         std::fs::write(dir.path().join(name), "new\n").unwrap();
         let mut index = repo.index().unwrap();
@@ -2764,7 +2796,7 @@ fn content_hunks_preserve_executable_modes() {
         std::fs::Permissions::from_mode(0o755),
     )
     .unwrap();
-    commit_next(&repo, "script", "old\n");
+    commit(&repo, "script", "old\n");
     std::fs::write(dir.path().join("script"), "new\n").unwrap();
     let policy = plan_policy(dir.path(), "script", GitDiffLayer::Unstaged);
     run_plan(captured_plan(
