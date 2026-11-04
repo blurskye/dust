@@ -15,16 +15,34 @@ pub enum MarkdownMark {
     Bullet(usize),
     /// A task's `[ ]` or `[x]`.
     Checkbox { checked: bool },
-    /// A quote's `>`.
-    Quote,
-    /// Where a link starts, its `[` or `<`, drawn as a link icon.
-    Link,
+    /// A quote's `>`. In a callout, such as `> [!NOTE]`, `callout` is where its `[!NOTE]` starts.
+    Quote { callout: Option<usize> },
+    /// A callout's `[!NOTE]`, drawn as its icon and title.
+    Callout,
+    /// Where a link starts, its `[` or `<`, drawn as the icon for where `url` points.
+    Link { url: Option<(usize, usize)> },
     /// Where an image starts, its `![`.
     Image,
+    /// A code span, `` `code` ``, drawn on the code background.
+    InlineCode,
     /// A code block, drawn on its own background to the window's edge.
     Code,
+    /// A fenced code block's language name, drawn after the language's icon.
+    CodeLanguage,
     /// A `---` break, drawn as a line across the window.
     Rule,
+    /// A table's `|`, or a character of the row under its header.
+    Table(TablePart),
+}
+
+/// The pieces of a table's border, as `├──┼──┤` under the header and `│` between cells.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TablePart {
+    Pipe,
+    Line,
+    Left,
+    Cross,
+    Right,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,9 +53,18 @@ pub struct MarkdownSpan {
 }
 
 /// Marks from the block grammar's tree: headings, lists, quotes, rules and code blocks.
-pub(super) fn block_marks(tree: &Tree, source: &str, maximum: usize, marks: &mut Vec<MarkdownSpan>) {
+pub(super) fn block_marks(
+    tree: &Tree,
+    source: &str,
+    maximum: usize,
+    marks: &mut Vec<MarkdownSpan>,
+) {
     let mut push = |start: usize, end: usize, mark| {
-        if marks.len() < maximum && start < end && source.is_char_boundary(start) && source.is_char_boundary(end) {
+        if marks.len() < maximum
+            && start < end
+            && source.is_char_boundary(start)
+            && source.is_char_boundary(end)
+        {
             marks.push(MarkdownSpan { start, end, mark });
         }
     };
@@ -46,41 +73,117 @@ pub(super) fn block_marks(tree: &Tree, source: &str, maximum: usize, marks: &mut
     while let Some(node) = nodes.pop() {
         match node.kind() {
             "atx_heading" => {
-                let marker = node.child(0).filter(|marker| marker.kind().starts_with("atx_h"));
+                let marker = node
+                    .child(0)
+                    .filter(|marker| marker.kind().starts_with("atx_h"));
                 if let Some(marker) = marker {
-                    let level = marker.kind().as_bytes().get(5).map_or(1, |digit| digit.saturating_sub(b'0'));
-                    let end = marker.end_byte() + usize::from(source.as_bytes().get(marker.end_byte()) == Some(&b' '));
+                    let level = marker
+                        .kind()
+                        .as_bytes()
+                        .get(5)
+                        .map_or(1, |digit| digit.saturating_sub(b'0'));
+                    let end = marker.end_byte()
+                        + usize::from(source.as_bytes().get(marker.end_byte()) == Some(&b' '));
                     push(marker.start_byte(), end, MarkdownMark::Heading(level));
-                    push(node.start_byte(), line_end(source, node.start_byte()), MarkdownMark::HeadingLine(level));
+                    push(
+                        node.start_byte(),
+                        line_end(source, node.start_byte()),
+                        MarkdownMark::HeadingLine(level),
+                    );
                 }
             }
             "list_marker_minus" | "list_marker_plus" | "list_marker_star" => {
-                let task = node.next_named_sibling().filter(|next| next.kind().starts_with("task_list_marker"));
+                let task = node
+                    .next_named_sibling()
+                    .filter(|next| next.kind().starts_with("task_list_marker"));
                 if let Some(task) = task {
                     // A task shows only its checkbox, as a bullet before it would be noise.
                     push(node.start_byte(), task.start_byte(), MarkdownMark::Hide);
                 } else {
-                    let start = node.start_byte() + leading_spaces(source, node.start_byte(), node.end_byte());
+                    let start = node.start_byte()
+                        + leading_spaces(source, node.start_byte(), node.end_byte());
                     push(start, start + 1, MarkdownMark::Bullet(list_depth(node)));
                 }
             }
             "task_list_marker_unchecked" => {
-                push(node.start_byte(), node.end_byte(), MarkdownMark::Checkbox { checked: false });
+                push(
+                    node.start_byte(),
+                    node.end_byte(),
+                    MarkdownMark::Checkbox { checked: false },
+                );
             }
             "task_list_marker_checked" => {
-                push(node.start_byte(), node.end_byte(), MarkdownMark::Checkbox { checked: true });
+                push(
+                    node.start_byte(),
+                    node.end_byte(),
+                    MarkdownMark::Checkbox { checked: true },
+                );
             }
-            "block_quote_marker" | "block_continuation" => {
-                let text = source.get(node.byte_range()).unwrap_or_default();
-                for (at, _) in text.match_indices('>') {
-                    push(node.start_byte() + at, node.start_byte() + at + 1, MarkdownMark::Quote);
+            "block_quote" => {
+                if let Some(callout) = callout(node, source) {
+                    let end = source[callout..]
+                        .find(']')
+                        .map_or(callout, |at| callout + at + 1);
+                    push(callout, end, MarkdownMark::Callout);
                 }
             }
-            "thematic_break" => push(node.start_byte(), line_end(source, node.start_byte()), MarkdownMark::Rule),
+            "block_quote_marker" | "block_continuation" => {
+                let quote = ancestor(node, "block_quote");
+                let callout = quote.and_then(|quote| callout(quote, source));
+                let text = source.get(node.byte_range()).unwrap_or_default();
+                for (at, _) in text.match_indices('>') {
+                    let at = node.start_byte() + at;
+                    push(at, at + 1, MarkdownMark::Quote { callout });
+                }
+            }
+            "pipe_table_header" | "pipe_table_row" => {
+                let mut walk = node.walk();
+                for pipe in node.children(&mut walk).filter(|child| child.kind() == "|") {
+                    push(
+                        pipe.start_byte(),
+                        pipe.end_byte(),
+                        MarkdownMark::Table(TablePart::Pipe),
+                    );
+                }
+            }
+            "pipe_table_delimiter_row" => {
+                let text = source.get(node.byte_range()).unwrap_or_default();
+                let last = text.trim_end().rfind('|');
+                for (at, character) in text.char_indices() {
+                    let part = match character {
+                        '|' if at == 0 => TablePart::Left,
+                        '|' if Some(at) == last => TablePart::Right,
+                        '|' => TablePart::Cross,
+                        '-' | ':' => TablePart::Line,
+                        _ => continue,
+                    };
+                    let at = node.start_byte() + at;
+                    push(at, at + 1, MarkdownMark::Table(part));
+                }
+            }
+            "thematic_break" => push(
+                node.start_byte(),
+                line_end(source, node.start_byte()),
+                MarkdownMark::Rule,
+            ),
             "fenced_code_block" | "indented_code_block" => {
                 push(node.start_byte(), node.end_byte(), MarkdownMark::Code);
             }
-            "fenced_code_block_delimiter" => push(node.start_byte(), node.end_byte(), MarkdownMark::Hide),
+            "fenced_code_block_delimiter" => {
+                push(node.start_byte(), node.end_byte(), MarkdownMark::Hide)
+            }
+            "info_string" => {
+                if let Some(language) = node
+                    .named_child(0)
+                    .filter(|child| child.kind() == "language")
+                {
+                    push(
+                        language.start_byte(),
+                        language.end_byte(),
+                        MarkdownMark::CodeLanguage,
+                    );
+                }
+            }
             _ => {}
         }
         nodes.extend(node.named_children(&mut walk));
@@ -88,9 +191,18 @@ pub(super) fn block_marks(tree: &Tree, source: &str, maximum: usize, marks: &mut
 }
 
 /// Marks from an inline tree: emphasis and code markers, links and escapes.
-pub(super) fn inline_marks(tree: &Tree, source: &str, maximum: usize, marks: &mut Vec<MarkdownSpan>) {
+pub(super) fn inline_marks(
+    tree: &Tree,
+    source: &str,
+    maximum: usize,
+    marks: &mut Vec<MarkdownSpan>,
+) {
     let mut push = |start: usize, end: usize, mark| {
-        if marks.len() < maximum && start < end && source.is_char_boundary(start) && source.is_char_boundary(end) {
+        if marks.len() < maximum
+            && start < end
+            && source.is_char_boundary(start)
+            && source.is_char_boundary(end)
+        {
             marks.push(MarkdownSpan { start, end, mark });
         }
     };
@@ -101,17 +213,32 @@ pub(super) fn inline_marks(tree: &Tree, source: &str, maximum: usize, marks: &mu
             "emphasis_delimiter" | "code_span_delimiter" => {
                 push(node.start_byte(), node.end_byte(), MarkdownMark::Hide);
             }
-            "backslash_escape" => push(node.start_byte(), node.start_byte() + 1, MarkdownMark::Hide),
+            "code_span" => push(node.start_byte(), node.end_byte(), MarkdownMark::InlineCode),
+            "backslash_escape" => {
+                push(node.start_byte(), node.start_byte() + 1, MarkdownMark::Hide)
+            }
             "inline_link" | "full_reference_link" | "image" => {
-                let text = named_child(node, "link_text").or_else(|| named_child(node, "image_description"));
+                let text = named_child(node, "link_text")
+                    .or_else(|| named_child(node, "image_description"));
                 if let Some(text) = text {
-                    let mark = if node.kind() == "image" { MarkdownMark::Image } else { MarkdownMark::Link };
+                    let url = named_child(node, "link_destination")
+                        .map(|url| (url.start_byte(), url.end_byte()));
+                    let mark = if node.kind() == "image" {
+                        MarkdownMark::Image
+                    } else {
+                        MarkdownMark::Link { url }
+                    };
                     push(node.start_byte(), text.start_byte(), mark);
                     push(text.end_byte(), node.end_byte(), MarkdownMark::Hide);
                 }
             }
             "uri_autolink" | "email_autolink" if node.end_byte() > node.start_byte() + 2 => {
-                push(node.start_byte(), node.start_byte() + 1, MarkdownMark::Link);
+                let url = Some((node.start_byte() + 1, node.end_byte() - 1));
+                push(
+                    node.start_byte(),
+                    node.start_byte() + 1,
+                    MarkdownMark::Link { url },
+                );
                 push(node.end_byte() - 1, node.end_byte(), MarkdownMark::Hide);
             }
             _ => {}
@@ -120,9 +247,34 @@ pub(super) fn inline_marks(tree: &Tree, source: &str, maximum: usize, marks: &mu
     }
 }
 
+/// Where a quote's `[!NOTE]` starts, when its first line is a callout as GitHub writes them.
+fn callout(quote: Node<'_>, source: &str) -> Option<usize> {
+    let text = source.get(quote.byte_range())?;
+    let line = text.lines().next()?;
+    let title = line.trim_start_matches(['>', ' ']);
+    let name = title.strip_prefix("[!")?.split_once(']')?.0;
+    (!name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphabetic()))
+    .then(|| quote.start_byte() + (line.len() - title.len()))
+}
+
+fn ancestor<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut parent = node.parent();
+    while let Some(node) = parent {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        parent = node.parent();
+    }
+    None
+}
+
 fn named_child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut walk = node.walk();
-    node.named_children(&mut walk).find(|child| child.kind() == kind)
+    node.named_children(&mut walk)
+        .find(|child| child.kind() == kind)
 }
 
 /// How many lists hold this marker's list, from zero.
@@ -139,9 +291,13 @@ fn list_depth(marker: Node<'_>) -> usize {
 }
 
 fn leading_spaces(source: &str, start: usize, end: usize) -> usize {
-    source.get(start..end).map_or(0, |text| text.len() - text.trim_start().len())
+    source
+        .get(start..end)
+        .map_or(0, |text| text.len() - text.trim_start().len())
 }
 
 fn line_end(source: &str, start: usize) -> usize {
-    source[start..].find('\n').map_or(source.len(), |at| start + at)
+    source[start..]
+        .find('\n')
+        .map_or(source.len(), |at| start + at)
 }

@@ -98,6 +98,12 @@ names = [
   "@markup.quote",
   "@markup.raw",
   "@markup.raw.block",
+  # Markdown callouts, such as `> [!NOTE]`, are coloured like diagnostics.
+  "DiagnosticError",
+  "DiagnosticWarn",
+  "DiagnosticInfo",
+  "DiagnosticHint",
+  "DiagnosticOk",
   "@property.definition",
   "@punctuation.bracket",
   "@punctuation.delimiter",

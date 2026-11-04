@@ -4968,7 +4968,16 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
         mark("# ", 2, MarkdownMark::Heading(1)),
         mark("# ", 7, MarkdownMark::HeadingLine(1)),
         mark("- ", 1, MarkdownMark::Bullet(0)),
-        mark("[x]", 1, MarkdownMark::Link),
+        mark(
+            "[x]",
+            1,
+            MarkdownMark::Link {
+                url: Some((
+                    text.find("u)").expect("url"),
+                    text.find("u)").expect("url") + 1,
+                )),
+            },
+        ),
         mark("](u)", 4, MarkdownMark::Hide),
     ];
     let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
@@ -4980,6 +4989,17 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     assert_eq!(frame.grid.row_text(1).trim_end(), "● item 󰌹 x");
     assert_eq!(frame.grid.row_text(2).trim_end(), "last");
 
+    // A link's icon comes from where it points.
+    config
+        .editor
+        .markdown
+        .glyphs
+        .links
+        .insert("u".into(), "U ".into());
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
+    assert_eq!(frame.grid.row_text(1).trim_end(), "● item U x");
+    config.editor.markdown.glyphs.links.clear();
+
     // The cursor's line shows its source.
     state.views[view].cursor = ByteOffset(0);
     let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
@@ -4990,4 +5010,42 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     state.views[view].mode = crate::editor::EditorMode::Insert;
     let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
     assert_eq!(frame.grid.row_text(1).trim_end(), "- item [x](u)");
+}
+
+#[test]
+fn a_table_cell_that_hides_markup_is_padded_so_its_border_stays_in_line() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::{MarkdownMark, TablePart};
+    let text = "| `a` | b |\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: usize, length: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: ByteRange::new(ByteOffset(start), ByteOffset(start + length)).expect("mark range"),
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = vec![
+        mark(0, 1, MarkdownMark::Table(TablePart::Pipe)),
+        mark(2, 1, MarkdownMark::Hide),
+        mark(2, 3, MarkdownMark::InlineCode),
+        mark(4, 1, MarkdownMark::Hide),
+        mark(6, 1, MarkdownMark::Table(TablePart::Pipe)),
+        mark(10, 1, MarkdownMark::Table(TablePart::Pipe)),
+    ];
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 2);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "│ a   │ b │");
+    assert!(matches!(
+        frame.grid.get(2, 0).expect("code").style,
+        crate::ui::Style::MarkdownCode(_)
+    ));
 }

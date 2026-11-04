@@ -378,7 +378,7 @@ pub(super) fn render_editor_view(
     let mut markdown = super::markdown::MarkdownMarks::new(
         ui,
         view.buffer,
-        buffer.text.revision(),
+        &buffer.text,
         view.mode,
         current_line,
         &config.editor.markdown,
@@ -600,11 +600,17 @@ pub(super) fn render_editor_view(
                 }
                 inlay_cursor = inlay_cursor.saturating_add(1);
             }
-            match markdown_line.as_ref().and_then(|markdown| markdown.at(global)) {
+            match markdown_line
+                .as_ref()
+                .and_then(|markdown| markdown.at(global))
+            {
                 Some(super::markdown::Drawn::Hidden) => continue,
                 Some(super::markdown::Drawn::Glyph(glyph, style)) => {
                     x = grid.put_text_clipped(x, screen_row, glyph, style, width);
                     continue;
+                }
+                Some(super::markdown::Drawn::Prefix(glyph, style)) => {
+                    x = grid.put_text_clipped(x, screen_row, glyph, style, width);
                 }
                 None => {}
             }
@@ -699,7 +705,7 @@ pub(super) fn render_editor_view(
             };
             let style = markdown_line
                 .as_ref()
-                .map_or(style, |markdown| markdown.restyle(style));
+                .map_or(style, |markdown| markdown.restyle(global, style));
             let grapheme_column = source_column;
             let cells = if grapheme == "\t" {
                 config.editor.tab_width - (source_column % config.editor.tab_width)

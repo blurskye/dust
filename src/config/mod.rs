@@ -32,13 +32,14 @@ pub use settings::{
     DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig,
     DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet,
     ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, HighlightDefinition,
-    IndentGuideConfig, InlayHintLevel, InputConfig, MarkdownConfig, KeyHintConfig, KeymapPolicyConfig,
-    LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig,
-    PersistenceConfig, PluginEntryConfig, PluginsConfig, ProblemMatcherConfig, PromptTextConfig,
-    RecoveryConfig, RegisterConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
-    TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig, TerminalsConfig,
-    ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles, ToolManagerConfig, UiConfig,
-    WindowPlacementConfig, WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
+    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig,
+    LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig, MarkdownCallout,
+    MarkdownConfig, MarkdownGlyphs, PersistenceConfig, PluginEntryConfig, PluginsConfig,
+    ProblemMatcherConfig, PromptTextConfig, RecoveryConfig, RegisterConfig, SearchConfig,
+    StartupConfig, StatusLineConfig, SyntaxConfig, TaskConfig, TaskKind, TerminalPanelConfig,
+    TerminalProfileConfig, TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle,
+    ThemeStyles, ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig,
+    WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
 };
 mod validation;
 

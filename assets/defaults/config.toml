@@ -36,6 +36,40 @@ quote = "▋"
 link = "󰌹 "
 image = "󰥶 "
 rule = "─"
+table = ["│", "─", "├", "┼", "┤"]
+
+# A link's icon by what its address contains; the longest match wins, `link` otherwise.
+[editor.markdown.glyphs.links]
+"http" = "󰖟 "
+"github.com" = "󰊤 "
+"gitlab.com" = "󰮠 "
+"google.com" = "󰊭 "
+"neovim.io" = " "
+"reddit.com" = "󰑍 "
+"stackoverflow.com" = "󰓌 "
+"wikipedia.org" = "󰖬 "
+"youtube.com" = "󰗃 "
+"youtu.be" = "󰗃 "
+"discord.com" = "󰙯 "
+"mailto:" = "󰀓 "
+
+# Callouts as GitHub writes them, `> [!NOTE]`, with the group that colours them.
+[editor.markdown.glyphs.callouts]
+note = { text = "󰋽 Note", group = "DiagnosticInfo" }
+tip = { text = "󰌶 Tip", group = "DiagnosticOk" }
+important = { text = "󰅾 Important", group = "DiagnosticHint" }
+warning = { text = "󰀪 Warning", group = "DiagnosticWarn" }
+caution = { text = "󰳦 Caution", group = "DiagnosticError" }
+abstract = { text = "󰨸 Abstract", group = "DiagnosticInfo" }
+info = { text = "󰋽 Info", group = "DiagnosticInfo" }
+todo = { text = "󰗡 Todo", group = "DiagnosticInfo" }
+success = { text = "󰄬 Success", group = "DiagnosticOk" }
+question = { text = "󰘥 Question", group = "DiagnosticWarn" }
+failure = { text = "󰅖 Failure", group = "DiagnosticError" }
+danger = { text = "󱐌 Danger", group = "DiagnosticError" }
+bug = { text = "󰨰 Bug", group = "DiagnosticError" }
+example = { text = "󰉹 Example", group = "DiagnosticHint" }
+quote = { text = "󱆨 Quote", group = "@markup.quote" }
 
 [editor.large_file]
 enabled = true

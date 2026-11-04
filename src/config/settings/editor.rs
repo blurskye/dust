@@ -155,12 +155,29 @@ pub struct MarkdownGlyphs {
     pub image: String,
     /// Repeated across the window for a `---` break.
     pub rule: String,
+    /// A table's `│`, `─`, `├`, `┼` and `┤`.
+    pub table: Vec<String>,
+    /// Icons for links whose address contains the key; the longest key wins, `link` otherwise.
+    pub links: BTreeMap<String, String>,
+    /// Callouts such as `> [!NOTE]`, by their lowercase name.
+    pub callouts: BTreeMap<String, MarkdownCallout>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkdownCallout {
+    /// Drawn in place of `[!NOTE]`.
+    pub text: String,
+    /// The highlight group that colours the title and the quote's bar.
+    pub group: String,
 }
 
 impl Default for MarkdownGlyphs {
     fn default() -> Self {
         Self {
-            headings: ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "].map(String::from).into(),
+            headings: ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "]
+                .map(String::from)
+                .into(),
             bullets: ["●", "○", "◆", "◇"].map(String::from).into(),
             unchecked: "󰄱".into(),
             checked: "󰱒".into(),
@@ -168,6 +185,9 @@ impl Default for MarkdownGlyphs {
             link: "󰌹 ".into(),
             image: "󰥶 ".into(),
             rule: "─".into(),
+            table: ["│", "─", "├", "┼", "┤"].map(String::from).into(),
+            links: BTreeMap::new(),
+            callouts: BTreeMap::new(),
         }
     }
 }

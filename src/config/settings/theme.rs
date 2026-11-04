@@ -305,7 +305,10 @@ impl ThemeConfig {
     #[must_use]
     pub fn markdown_code(&self, group: Option<Highlight>) -> ThemeStyle {
         let base = &self.styles.default;
-        let mut style = group.and_then(|group| self.highlight(group)).unwrap_or(base).clone();
+        let mut style = group
+            .and_then(|group| self.highlight(group))
+            .unwrap_or(base)
+            .clone();
         style.fill(blend(base.foreground, base.background, 8));
         style
     }
@@ -525,7 +528,11 @@ fn blend(colour: ThemeColor, background: ThemeColor, percent: u16) -> Option<The
         let mixed = (u16::from(over) * percent + u16::from(under) * (100 - percent)) / 100;
         u8::try_from(mixed).unwrap_or(u8::MAX)
     };
-    Some(ThemeColor::Rgb(mix(red, under_red), mix(green, under_green), mix(blue, under_blue)))
+    Some(ThemeColor::Rgb(
+        mix(red, under_red),
+        mix(green, under_green),
+        mix(blue, under_blue),
+    ))
 }
 
 /// The nearest xterm-256 colour, for terminals without truecolor.

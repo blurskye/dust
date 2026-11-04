@@ -16,7 +16,7 @@ mod highlight;
 mod markdown;
 mod objects;
 pub use highlight::Highlight;
-pub use markdown::{MarkdownMark, MarkdownSpan};
+pub use markdown::{MarkdownMark, MarkdownSpan, TablePart};
 pub use objects::{SyntaxObject, SyntaxObjectKind};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -953,7 +953,12 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
     });
     // Fences highlight their own language through this function, so outside the borrow.
     if language == SyntaxLanguage::Markdown {
-        spans.extend(markdown_inline_spans(&tree, source, usize::MAX, &mut Vec::new()));
+        spans.extend(markdown_inline_spans(
+            &tree,
+            source,
+            usize::MAX,
+            &mut Vec::new(),
+        ));
         spans.extend(markdown_fence_spans(&tree, source, usize::MAX));
     }
     flatten_spans(spans)
@@ -1115,7 +1120,12 @@ fn parse(request: Request) -> SyntaxEvent {
         if request.language == SyntaxLanguage::Markdown {
             markdown::block_marks(&tree, &request.source, maximum, &mut marks);
             let room = maximum.saturating_sub(spans.len());
-            spans.extend(markdown_inline_spans(&tree, &request.source, room, &mut marks));
+            spans.extend(markdown_inline_spans(
+                &tree,
+                &request.source,
+                room,
+                &mut marks,
+            ));
             let room = maximum.saturating_sub(spans.len());
             spans.extend(markdown_fence_spans(&tree, &request.source, room));
         }
@@ -1442,7 +1452,7 @@ mod tests {
     }
     #[test]
     fn markdown_marks_what_it_draws_in_place_of_its_markup() {
-        let source = "## Sub\n\n- one\n  * two\n- [x] done\n\n> quote **bold** `code` [link](https://x.y) ![alt](a.png)\n\n---\n\n```rust\nfn main() {}\n```\n";
+        let source = "## Sub\n\n- one\n  * two\n- [x] done\n\n> quote **bold** `code` [link](https://x.y) ![alt](a.png)\n\n---\n\n```rust\nfn main() {}\n```\n\n> [!NOTE]\n> noted\n\n| a | b |\n|---|:-:|\n| c | d |\n";
         let request = Request {
             document: SyntaxDocumentId(1),
             generation: 1,
@@ -1466,22 +1476,96 @@ mod tests {
         };
         assert_eq!(marked("## "), [MarkdownMark::Heading(2)]);
         assert_eq!(marked("## Sub"), [MarkdownMark::HeadingLine(2)]);
-        assert_eq!(marked("-"), [MarkdownMark::Bullet(0)]);
+        assert_eq!(marked("-")[0], MarkdownMark::Bullet(0));
         // Each `*` of `**bold**` is a delimiter of its own.
-        assert_eq!(marked("*"), [MarkdownMark::Bullet(1), MarkdownMark::Hide, MarkdownMark::Hide, MarkdownMark::Hide, MarkdownMark::Hide]);
+        assert_eq!(
+            marked("*"),
+            [
+                MarkdownMark::Bullet(1),
+                MarkdownMark::Hide,
+                MarkdownMark::Hide,
+                MarkdownMark::Hide,
+                MarkdownMark::Hide
+            ]
+        );
         assert_eq!(marked("[x]"), [MarkdownMark::Checkbox { checked: true }]);
         assert_eq!(marked("- "), [MarkdownMark::Hide]);
-        assert_eq!(marked(">"), [MarkdownMark::Quote]);
+        let note = source.find("[!NOTE]").expect("callout");
+        assert_eq!(
+            marked(">"),
+            [
+                MarkdownMark::Quote { callout: None },
+                MarkdownMark::Quote {
+                    callout: Some(note)
+                },
+                MarkdownMark::Quote {
+                    callout: Some(note)
+                },
+            ]
+        );
+        assert_eq!(marked("[!NOTE]"), [MarkdownMark::Callout]);
+        assert_eq!(marked("`code`"), [MarkdownMark::InlineCode]);
+        assert_eq!(marked("rust"), [MarkdownMark::CodeLanguage]);
+        let url = source.find("https://x.y").expect("url");
+        assert_eq!(
+            marked("["),
+            [MarkdownMark::Link {
+                url: Some((url, url + "https://x.y".len()))
+            }]
+        );
+        let table = |part| MarkdownMark::Table(part);
+        assert_eq!(
+            result
+                .markdown
+                .iter()
+                .filter(|span| span.mark == table(TablePart::Pipe))
+                .count(),
+            6
+        );
+        assert_eq!(
+            result
+                .markdown
+                .iter()
+                .filter(|span| span.mark == table(TablePart::Cross))
+                .count(),
+            1
+        );
+        assert_eq!(
+            result
+                .markdown
+                .iter()
+                .filter(|span| span.mark == table(TablePart::Line))
+                .count(),
+            6
+        );
+        assert_eq!(
+            marked("|")
+                .iter()
+                .filter(|mark| **mark == table(TablePart::Left))
+                .count(),
+            1
+        );
+        assert_eq!(
+            marked("|")
+                .iter()
+                .filter(|mark| **mark == table(TablePart::Right))
+                .count(),
+            1
+        );
         assert_eq!(marked("`"), [MarkdownMark::Hide, MarkdownMark::Hide]);
-        assert_eq!(marked("["), [MarkdownMark::Link]);
         assert_eq!(marked("](https://x.y)"), [MarkdownMark::Hide]);
         assert_eq!(marked("!["), [MarkdownMark::Image]);
         assert_eq!(marked("---"), [MarkdownMark::Rule]);
         assert_eq!(marked("```"), [MarkdownMark::Hide, MarkdownMark::Hide]);
         let code = source.find("```rust").expect("fence");
-        assert!(result.markdown.iter().any(|span| span.mark == MarkdownMark::Code
-            && span.start == code
-            && source[span.start..span.end].contains("fn main")));
+        assert!(
+            result
+                .markdown
+                .iter()
+                .any(|span| span.mark == MarkdownMark::Code
+                    && span.start == code
+                    && source[span.start..span.end].contains("fn main"))
+        );
     }
     #[test]
     fn a_fenced_block_is_coloured_as_the_language_it_names() {

@@ -2548,7 +2548,9 @@ impl InteractiveApplication {
                 })
             })
             .collect();
-        self.ui.markdown_marks.sort_unstable_by_key(|mark| mark.range.start);
+        self.ui
+            .markdown_marks
+            .sort_unstable_by_key(|mark| mark.range.start);
     }
 }
 
