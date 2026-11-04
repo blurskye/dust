@@ -524,22 +524,36 @@ fn plugin_manifest_reads_require_regular_bounded_files() {
     let relative = std::path::Path::new("manifest.toml");
     let path = root.path().join(relative);
     let limits = PluginLimits::default();
-    let check = || {
-        assert!(super::index::load_manifest_component(
+    let check = |expected: fn(&PluginError) -> bool| {
+        let (_, error) = super::index::load_manifest_component(
             root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
-        ).is_err());
-        assert!(super::index::index_manifest_from_store(
+        ).err().expect("manifest must be rejected before loading the component");
+        assert!(expected(&error), "{error}");
+        let error = super::index::index_manifest_from_store(
             root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
-        ).is_err());
+        ).unwrap_err();
+        assert!(expected(&error), "{error}");
     };
     nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
-    check();
+    check(|error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput));
     fs::remove_file(&path).unwrap();
     std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
-    check();
+    check(|error| matches!(error, PluginError::OutsideStore));
     fs::remove_file(&path).unwrap();
-    fs::write(&path, vec![b' '; 1024 * 1024 + 1]).unwrap();
-    check();
+
+    let mut source = toml::to_string(&manifest()).unwrap();
+    fs::write(&path, &source).unwrap();
+    super::index::index_manifest_from_store(
+        root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
+    ).expect("a regular manifest can be indexed without its component");
+    let (_, error) = super::index::load_manifest_component(
+        root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
+    ).err().unwrap();
+    assert!(matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::NotFound));
+
+    source.extend(std::iter::repeat_n(' ', 1024 * 1024 + 1 - source.len()));
+    fs::write(&path, source).unwrap();
+    check(|error| matches!(error, PluginError::InvalidManifest));
 }
 
 #[test]
