@@ -17,7 +17,7 @@ use std::{
     net::Shutdown,
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
@@ -27,6 +27,8 @@ use serde_json::{Value, json};
 pub const SERVER_VARIABLE: &str = "DUST_SERVER";
 const REQUEST_BYTE_CEILING: u64 = 1024 * 1024;
 const AGENT_PREFIX: &str = "agent\t";
+const REQUEST_QUEUE_CEILING: usize = 64;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteOpen {
@@ -99,7 +101,7 @@ impl RemoteServer {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let (wake, wake_reader) = UnixStream::pair()?;
-        let (sender, requests) = mpsc::channel();
+        let (sender, requests) = mpsc::sync_channel(REQUEST_QUEUE_CEILING);
         let (replies, pending) = mpsc::sync_channel::<(UnixStream, Result<String, String>)>(8);
         let stopping = Arc::new(AtomicBool::new(false));
         let reading = Arc::new(Mutex::new(None));
@@ -158,14 +160,29 @@ impl RemoteServer {
                         }
                         *reading = stream.try_clone().ok();
                     }
-                    // A client that never writes must not hold up the next one.
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let deadline = Instant::now() + REQUEST_TIMEOUT;
                     let Ok(reader) = stream.try_clone() else {
                         continue;
                     };
-                    let reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
-                    for line in reader.lines().map_while(Result::ok) {
-                        let request = match line.strip_prefix(AGENT_PREFIX) {
+                    let mut reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
+                    let mut line = Vec::new();
+                    loop {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+                            break;
+                        }
+                        // fill_buf performs at most one socket read, so each read
+                        // gets the remaining overall deadline, even for partial lines.
+                        let Ok(buffer) = reader.fill_buf() else { break };
+                        if buffer.is_empty() { break; }
+                        let end = buffer.iter().position(|byte| *byte == b'\n');
+                        let length = end.map_or(buffer.len(), |end| end + 1);
+                        line.extend_from_slice(&buffer[..length]);
+                        reader.consume(length);
+                        if end.is_none() { continue; }
+                        let Ok(text) = std::str::from_utf8(&line) else { break };
+                        let text = text.trim_end_matches(['\r', '\n']);
+                        let request = match text.strip_prefix(AGENT_PREFIX) {
                             Some(body) => stream.try_clone().ok().and_then(|reply| {
                                 parse_agent(
                                     body,
@@ -175,14 +192,19 @@ impl RemoteServer {
                                     },
                                 )
                             }),
-                            None => parse(&line).map(RemoteRequest::Open),
+                            None => parse(text).map(RemoteRequest::Open),
                         };
                         let asked_for_agent = matches!(request, Some(RemoteRequest::Agent(_)));
-                        if let Some(request) = request
-                            && sender.send(request).is_err()
-                        {
-                            return;
+                        if let Some(request) = request {
+                            match sender.try_send(request) {
+                                Ok(()) => {}
+                                // Reject this connection rather than block admission or
+                                // retain more requests while the editor catches up.
+                                Err(mpsc::TrySendError::Full(_)) => break,
+                                Err(mpsc::TrySendError::Disconnected(_)) => return,
+                            }
                         }
+                        line.clear();
                         // The asker now waits for the answer instead of writing more.
                         if asked_for_agent {
                             break;
@@ -370,6 +392,51 @@ mod tests {
             ]
         );
         assert!(parse("3\trelative.rs").is_none());
+    }
+
+    #[test]
+    fn request_admission_is_bounded_without_blocking_the_listener() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        for _ in 0..=REQUEST_QUEUE_CEILING {
+            writeln!(client, "0\t/file.rs").unwrap();
+        }
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).unwrap(), 0);
+        let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
+        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        send(server.path(), &[PathBuf::from("/next.rs")], None).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(RemoteRequest::Open(open)) = server.try_request() {
+                assert_eq!(open.path, Path::new("/next.rs"));
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn trickling_clients_cannot_extend_the_request_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut writer = client.try_clone().unwrap();
+        let trickling = thread::spawn(move || {
+            while writer.write_all(b"x").is_ok() {
+                thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let started = Instant::now();
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).unwrap(), 0);
+        assert!(started.elapsed() < REQUEST_TIMEOUT + Duration::from_secs(2));
+        trickling.join().unwrap();
+        assert!(server.try_request().is_none());
     }
 
     #[test]

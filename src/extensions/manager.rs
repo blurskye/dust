@@ -445,6 +445,11 @@ impl PluginManager {
                             continue;
                         }
                     };
+                    if let WorkerEvent::Failed { plugin, load, .. } = &event {
+                        // Failure releases the generation before foreground ownership
+                        // is removed, including execution attempted before activation.
+                        indexed.remove(&(plugin.clone(), *load));
+                    }
                     if etx.send(event).is_err() {
                         break;
                     }

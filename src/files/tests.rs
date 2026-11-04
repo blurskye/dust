@@ -11,7 +11,7 @@ use tempfile::tempdir;
 use super::directory::{list_scoped_directory, natural_name_key};
 use super::recovery::{
     RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
-    bounded_recovery_entries, read_bounded_bytes, read_bounded_utf8, recovery_journal_size_allowed,
+    bounded_recovery_entries, read_bounded_bytes, recovery_journal_size_allowed,
     recovery_payload_size_allowed,
 };
 use super::vfs::checked_atomic_write;
@@ -139,6 +139,27 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
     };
     assert_eq!(resolution.document, workspace.join("src/new.rs"));
     assert_eq!(resolution.project_root, Some(workspace.clone()));
+}
+
+#[test]
+fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
+    use super::project_root::{bounded_project_marker, PROJECT_ROOT_MANIFEST_BYTE_CEILING};
+    let root = tempdir().unwrap();
+    let marker = root.path().join("Cargo.toml");
+    nix::unistd::mkfifo(&marker, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::remove_file(&marker).unwrap();
+    let target = root.path().join("manifest");
+    fs::write(&target, "[workspace]\n").unwrap();
+    std::os::unix::fs::symlink(&target, &marker).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::remove_file(&marker).unwrap();
+    fs::write(&marker, "x".repeat(PROJECT_ROOT_MANIFEST_BYTE_CEILING as usize + 1)).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::write(&marker, [0xff]).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::write(&marker, "[workspace]\n").unwrap();
+    assert_eq!(bounded_project_marker(root.path(), "Cargo.toml").as_deref(), Some("[workspace]\n"));
 }
 
 #[test]
@@ -519,19 +540,17 @@ fn document_reader_accepts_exact_limit_and_rejects_limit_plus_one() {
 
 #[test]
 fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
-    let exact =
-        read_bounded_utf8(std::io::Cursor::new(b"1234"), 4, "test journal").expect("exact limit");
-    assert_eq!(exact, "1234");
-    let overflow = read_bounded_utf8(std::io::Cursor::new(b"12345"), 4, "test journal")
-        .expect_err("limit plus one");
-    assert_eq!(overflow, "test journal exceeds 4 byte safety ceiling");
-    let invalid = read_bounded_utf8(std::io::Cursor::new([0xff]), 4, "test journal")
-        .expect_err("invalid UTF-8");
-    assert!(invalid.starts_with("test journal is not UTF-8:"));
-
     let root = tempdir().expect("tempdir");
     let path = root.path().join("invalid.toml");
+    fs::write(&path, "1234").unwrap();
+    let exact = super::vfs::read_file_with_ceiling(&path, 4).expect("exact limit");
+    assert_eq!(exact, b"1234");
+    fs::write(&path, "12345").unwrap();
+    assert!(matches!(super::vfs::read_file_with_ceiling(&path, 4),
+        Err(VfsError::DocumentTooLarge { maximum_bytes: 4, .. })));
     fs::write(&path, [0xff]).expect("invalid journal");
+    let invalid = super::recovery::read_recovery_source(&path).expect_err("invalid UTF-8");
+    assert!(invalid.starts_with("recovery journal is not UTF-8:"));
     let discovery = discover_recovery(root.path());
     assert!(discovery.records.is_empty());
     assert!(discovery.diagnostics[0].contains("recovery journal is not UTF-8"));

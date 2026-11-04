@@ -62,8 +62,15 @@ impl FixedClock {
         }
     }
     fn elapsed(&self) -> Duration {
-        self.step
-            .saturating_mul(self.ticks.fetch_add(1, Ordering::SeqCst) as u32)
+        let ticks = self
+            .ticks
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |ticks| {
+                Some(ticks.saturating_add(1))
+            })
+            .expect("clock tick update");
+        let nanos = self.step.as_nanos().saturating_mul(u128::from(ticks))
+            .min(Duration::MAX.as_nanos());
+        Duration::new((nanos / 1_000_000_000) as u64, (nanos % 1_000_000_000) as u32)
     }
 }
 impl Clock for FixedClock {
@@ -103,5 +110,25 @@ impl AtomicIds {
 impl IdSource for AtomicIds {
     fn next(&self) -> u64 {
         self.next.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_clock_keeps_all_tick_bits_and_saturates() {
+        let clock = FixedClock::new(SystemTime::now(), Instant::now(), Duration::from_nanos(1));
+        clock.ticks.store(u64::from(u32::MAX), Ordering::SeqCst);
+        assert_eq!(clock.elapsed(), Duration::from_nanos(u64::from(u32::MAX)));
+        assert_eq!(clock.elapsed(), Duration::from_nanos(1u64 << 32));
+        clock.ticks.store(u64::MAX, Ordering::SeqCst);
+        assert_eq!(clock.elapsed(), Duration::from_nanos(u64::MAX));
+        assert_eq!(clock.elapsed(), Duration::from_nanos(u64::MAX));
+
+        let clock = FixedClock::new(SystemTime::now(), Instant::now(), Duration::MAX);
+        clock.ticks.store(2, Ordering::SeqCst);
+        assert_eq!(clock.elapsed(), Duration::MAX);
     }
 }

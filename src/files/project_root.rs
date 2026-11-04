@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{error::VfsError, recovery::read_bounded_utf8, vfs::canonical_path};
+use super::{error::VfsError, vfs::{canonical_path, read_file_with_ceiling}};
 
 pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
 pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;
@@ -204,14 +204,11 @@ pub(super) fn regular_project_marker(directory: &Path, marker: &str) -> Option<f
 }
 
 pub(super) fn bounded_project_marker(directory: &Path, marker: &str) -> Option<String> {
-    let metadata = regular_project_marker(directory, marker)?;
-    metadata.file_type().is_file().then(|| {
-        fs::File::open(directory.join(marker))
-            .ok()
-            .and_then(|file| {
-                read_bounded_utf8(file, PROJECT_ROOT_MANIFEST_BYTE_CEILING, "project marker").ok()
-            })
-    })?
+    let bytes = read_file_with_ceiling(
+        &directory.join(marker),
+        PROJECT_ROOT_MANIFEST_BYTE_CEILING,
+    ).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 pub(super) fn project_root_evidence(

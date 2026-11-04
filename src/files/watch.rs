@@ -107,15 +107,20 @@ impl ExplorerWatchSet {
         }
         for (directory, fingerprint) in previous.fingerprints {
             if self.directories.contains(&directory) {
+                self.pending.remove(&directory);
                 self.fingerprints.insert(directory, fingerprint);
             }
         }
-        self.pending = previous
+        self.pending.extend(previous
             .pending
             .into_iter()
-            .filter(|directory| self.directories.contains(directory))
-            .collect();
-        self.changed_at = previous.changed_at;
+            .filter(|directory| self.directories.contains(directory)));
+        if let Some(changed_at) = previous.changed_at {
+            self.changed_at = Some(changed_at);
+        }
+        if self.pending.is_empty() {
+            self.changed_at = None;
+        }
     }
 
     fn publish(&mut self, events: &SyncSender<ExplorerWatchEvent>, maximum: usize) {
@@ -464,10 +469,12 @@ pub(super) fn explorer_watch_worker(
                             generation,
                             root_revision,
                             roots,
+                            // Refresh new watches after their baseline is established:
+                            // the displayed listing may predate this fingerprint.
+                            pending: directories.iter().cloned().collect(),
+                            changed_at: Some(std::time::Instant::now()),
                             directories,
                             fingerprints,
-                            pending: BTreeSet::new(),
-                            changed_at: None,
                         };
                         if let Some(previous) = active.take() {
                             next.retain_previous(previous);
@@ -667,6 +674,30 @@ mod tests {
         fs::write(&replacement, "three.txt\n").unwrap();
         fs::write(root.join("gitconfig"), format!("[core]\nexcludesFile = {:?}\n", replacement)).unwrap();
         assert_ne!(after.ignore_rules, explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap().ignore_rules);
+    }
+
+    #[test]
+    fn newly_watched_directories_are_invalidated_after_the_initial_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = fs::canonicalize(root.path()).unwrap();
+        // The displayed listing was empty; the file appears before watching starts.
+        fs::write(root.path().join("new"), "new").unwrap();
+        let mut service = ExplorerWatchService::start(ExplorerWatchPolicy {
+            poll_interval: Duration::from_millis(10),
+            debounce: Duration::ZERO,
+            ..ExplorerWatchPolicy::default()
+        }).unwrap();
+        let generation = service.reconcile(1, vec![root_path.clone()], vec![root_path.clone()]).unwrap().unwrap();
+        assert_eq!(service.receiver.as_ref().unwrap().recv_timeout(Duration::from_secs(2)).unwrap(),
+            ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+                generation,
+                root_revision: 1,
+                directories: vec![root_path.clone()],
+            }));
+        // Retaining an unchanged watch must not trigger another initial refresh.
+        service.reconcile(1, vec![root_path.clone()], vec![root_path]).unwrap();
+        assert!(matches!(service.receiver.as_ref().unwrap().recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)));
     }
 
     #[test]

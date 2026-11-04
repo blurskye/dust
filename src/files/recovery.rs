@@ -45,17 +45,6 @@ pub(super) fn read_bounded_bytes(
     Ok((bytes.len() as u64 <= maximum_bytes).then_some(bytes))
 }
 
-pub(super) fn read_bounded_utf8(
-    reader: impl Read,
-    maximum_bytes: u64,
-    kind: &str,
-) -> Result<String, String> {
-    let bytes = read_bounded_bytes(reader, maximum_bytes)
-        .map_err(|error| format!("cannot read {kind}: {error}"))?
-        .ok_or_else(|| format!("{kind} exceeds {maximum_bytes} byte safety ceiling"))?;
-    String::from_utf8(bytes).map_err(|error| format!("{kind} is not UTF-8: {error}"))
-}
-
 pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
     let bytes = super::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
         .map_err(|error| format!("cannot read recovery journal: {error}"))?;

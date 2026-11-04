@@ -445,20 +445,7 @@ impl VfsWorker {
                                     id, paths: paths.iter().map(|path| resolve_existing_prefix(path)).collect(),
                                 },
                                 VfsRequest::AgentWrite { id, path, root, bytes } => {
-                                    let result = (|| {
-                                        let resolved = resolve_existing_prefix(&path);
-                                        let root = canonical_path(&root)?;
-                                        if resolved != path || !resolved.starts_with(&root) {
-                                            return Err(VfsError::OutsideScope(path.clone()));
-                                        }
-                                        if path.exists() && !path.is_file() {
-                                            return Err(VfsError::Io { operation: "agent write", path: path.clone(), source: io::Error::other("not a regular file") });
-                                        }
-                                        if let Some(parent) = path.parent() {
-                                            fs::create_dir_all(parent).map_err(|source| VfsError::Io { operation: "create directory", path: parent.into(), source })?;
-                                        }
-                                        atomic_write(&path, &bytes)
-                                    })();
+                                    let result = agent_atomic_write(&root, &path, &bytes);
                                     VfsResult::Write { id, path, result }
                                 }
                                 VfsRequest::Read { id, path } => match canonical_path(&path) {
@@ -1749,6 +1736,73 @@ pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
         .map_err(|(_, error)| io::Error::from(error))
 }
 
+/// Agent paths are already resolved. Open each directory without following
+/// symlinks and keep the parent descriptor for creation, rename and cleanup.
+fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, openat, renameat, statat, unlinkat};
+    use std::{path::Component, sync::atomic::AtomicU64};
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+    let relative = path.strip_prefix(root).map_err(|_| VfsError::OutsideScope(path.into()))?;
+    if !root.is_absolute() || root.components().chain(relative.components())
+        .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err(VfsError::OutsideScope(path.into()));
+    }
+    let name = relative.file_name().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
+    let result = (|| -> io::Result<()> {
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut directory = File::open("/")?;
+        // Walk the root too: an ancestor substituted since resolution must not
+        // redirect the initial directory open outside the resolved workspace.
+        for part in root.components() {
+            if let Component::Normal(name) = part {
+                directory = openat(&directory, name, flags, Mode::empty())?.into();
+            }
+        }
+        for part in relative.parent().unwrap_or(Path::new("")).components() {
+            if let Component::Normal(name) = part {
+                match mkdirat(&directory, name, Mode::from_raw_mode(0o777)) {
+                    Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                directory = openat(&directory, name, flags, Mode::empty())?.into();
+            }
+        }
+        let permissions = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile =>
+                Some(Mode::from_raw_mode(stat.st_mode)),
+            Ok(_) => return Err(io::Error::other("not a regular file")),
+            Err(rustix::io::Errno::NOENT) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let mut attempts = 0;
+        let (temporary_name, mut temporary) = loop {
+            attempts += 1;
+            let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+            let name = format!(".dust-{}-{sequence}.tmp", std::process::id());
+            match openat(&directory, &name,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR)
+            {
+                Ok(fd) => break (name, File::from(fd)),
+                Err(rustix::io::Errno::EXIST) if attempts < 16 => continue,
+                Err(error) => return Err(error.into()),
+            }
+        };
+        let result = (|| -> io::Result<()> {
+            if let Some(permissions) = permissions { fchmod(&temporary, permissions)?; }
+            temporary.write_all(bytes)?;
+            temporary.sync_all()?;
+            renameat(&directory, &temporary_name, &directory, name)?;
+            directory.sync_all()
+        })();
+        let _ = unlinkat(&directory, &temporary_name, AtFlags::empty());
+        result
+    })();
+    result.map_err(|source| VfsError::Io { operation: "agent write", path: path.into(), source })
+}
+
 /// Write through a same-directory temporary file, sync it, then atomically
 /// replace the destination through tempfile's platform-specific persistence.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
@@ -1825,6 +1879,54 @@ mod lifecycle_tests {
             thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn agent_writes_reject_symlinks_substituted_after_path_resolution() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let parent = root.join("nested");
+        fs::create_dir(&parent).unwrap();
+        let path = resolve_existing_prefix(&parent.join("new/file"));
+        fs::remove_dir(&parent).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &parent).unwrap();
+        assert!(agent_atomic_write(&root, &path, b"escape").is_err());
+        assert!(!outside.path().join("new").exists());
+        fs::remove_file(&parent).unwrap();
+        agent_atomic_write(&root, &path, b"inside").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"inside");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        let target = outside.path().join("target");
+        fs::write(&target, "untouched").unwrap();
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(agent_atomic_write(&root, &path, b"escape").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"untouched");
+        assert!(agent_atomic_write(&root, &root.join("../escape"), b"escape").is_err());
+
+        // The root itself may also be replaced after validation.
+        let moved = root.with_extension("moved");
+        fs::rename(&root, &moved).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &root).unwrap();
+        assert!(agent_atomic_write(&root, &root.join("escape"), b"escape").is_err());
+        assert!(!outside.path().join("escape").exists());
+        fs::remove_file(&root).unwrap();
+        fs::rename(&moved, &root).unwrap();
+    }
+
+    #[test]
+    fn agent_writes_replace_regular_files_and_preserve_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let path = root.join("file");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        agent_atomic_write(&root, &path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    }
+
     #[test]
     fn staged_writes_recheck_expectations_and_preserve_displaced_bytes() {
         let root = tempfile::tempdir().unwrap();
