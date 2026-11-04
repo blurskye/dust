@@ -194,6 +194,49 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
 }
 
 #[test]
+fn normalized_multiline_character_repeat_keeps_its_last_line_extent() {
+    for reverse in [false, true] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(
+            crate::editor::text::TextBuffer::from_text("abc\ne\u{301}fg\n0123456789\ne\u{301}xyz\n"), None,
+        );
+        app.set_dashboard_visibility(false);
+        let (anchor, head) = if reverse { (4, 1) } else { (1, 4) };
+        app.state.views[view].cursor = ByteOffset(head);
+        app.state.views[view].mode = crate::editor::EditorMode::VisualChar;
+        app.state.views[view].selection = Some(crate::editor::Selection {
+            anchor: ByteOffset(anchor), head: ByteOffset(head),
+            kind: crate::editor::SelectionKind::Character,
+        });
+        app.handle_configured_key(KeyEvent::character('d'));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "afg\n0123456789\ne\u{301}xyz\n");
+        app.state.views[view].cursor = ByteOffset(4);
+        app.handle_configured_key(KeyEvent::character('.'));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "afg\nxyz\n");
+        app.state.views[view].cursor = ByteOffset(6);
+        app.handle_configured_key(KeyEvent::character('.'));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "afg\nxy");
+    }
+}
+
+#[test]
+fn normalized_block_repeat_does_not_insert_on_the_trailing_phantom_line() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("ab\ncd\nef\n"), None,
+    );
+    app.set_dashboard_visibility(false);
+    app.handle_configured_key("ctrl-v".parse().unwrap());
+    for key in ['j', 'c', 'Z'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.state.views[view].cursor = ByteOffset(6);
+    app.handle_configured_key(KeyEvent::character('.'));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "Zb\nZd\nZf\n");
+}
+
+#[test]
 fn normalized_blockwise_change_repeats_without_a_stale_selection() {
     let mut app = app();
     app.state.open_text(

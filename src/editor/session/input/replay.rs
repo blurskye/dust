@@ -186,8 +186,15 @@ impl InputSession {
                 let low = selection.anchor.min(selection.head);
                 let high = selection.anchor.max(selection.head);
                 let end = next_grapheme_boundary(text, high);
-                let selected = text.slice(ByteRange::new(low, end).ok()?).ok()?;
-                ("character", selected.graphemes(true).count(), 1_usize)
+                let first_line = text.byte_to_line(low).ok()?;
+                let last_line = text.byte_to_line(high).ok()?;
+                let start = if first_line == last_line {
+                    low
+                } else {
+                    text.line_to_byte(last_line).ok()?
+                };
+                let selected = text.slice(ByteRange::new(start, end).ok()?).ok()?;
+                ("character", selected.graphemes(true).count(), last_line - first_line + 1)
             }
             crate::editor::SelectionKind::Line => {
                 let anchor = text.byte_to_line(selection.anchor).ok()?;
