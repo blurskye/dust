@@ -809,6 +809,11 @@ mod tests {
             }
         }
         assert!(owner.load_id("other").is_some());
+        // Disabling while activation is pending suppresses its late Loaded event.
+        // It must also release the pending-load blocker on subsequent package changes.
+        owner.disable("other").unwrap();
+        assert!(!owner.package_startup_pending.contains_key("other"));
+        owner.request_package(crate::tools::PackageOperation::Remove("other".into())).unwrap();
     }
 
     #[test]
@@ -876,8 +881,11 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(matches!(owner.packages.request(PackageOperation::List), Err(PackageError::QueueFull)));
+        let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
+        owner.fixture_manager(manager);
         owner.package_prepared.insert("demo".into(), (PluginLoadId(1), 41));
-        owner.abort_prepared("demo", PluginLoadId(1));
+        owner.disable("demo").unwrap();
+        assert!(owner.package_prepared.is_empty());
         assert!(owner.package_aborts.contains(&41));
         let mut aborted = 0;
         while owner.pending_packages() != 0 {

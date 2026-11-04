@@ -159,8 +159,17 @@ impl ExtensionSession {
             .index_from_store(plugin, store, manifest, component, limits)
     }
     pub(super) fn disable(&mut self, plugin: &str) -> Result<(), PluginError> {
+        let load = self.manager.load_id(plugin);
         self.manager.disable(plugin)?;
         self.disabled_plugins.insert(plugin.into());
+        // The manager discards late events for disabled generations, so they cannot
+        // finish a pending activation or release its prepared package token.
+        if let Some(load) = load {
+            if self.package_startup_pending.get(plugin) == Some(&load) {
+                self.package_startup_pending.remove(plugin);
+            }
+            self.abort_prepared(plugin, load);
+        }
         Ok(())
     }
     pub(super) fn disable_generation(
