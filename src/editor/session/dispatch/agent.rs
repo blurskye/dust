@@ -982,17 +982,17 @@ impl InteractiveApplication {
                 Ok(())
             }
             AgentChoice::Resume(id) => match self.reopen_conversation(&id) {
-                Some(index) if self.agent.sessions[index].process.is_none() => {
+                Ok(index) if self.agent.sessions[index].process.is_none() => {
                     self.show_agent_panel();
                     self.agent.normal = false;
                     self.restart_active_agent()
                 }
-                Some(_) => {
+                Ok(_) => {
                     self.show_agent_panel();
                     self.agent.normal = false;
                     Ok(())
                 }
-                None => Err("that conversation could not be read".to_owned()),
+                Err(error) => Err(error),
             },
             AgentChoice::Option(option) => {
                 self.open_agent_option_picker(Some(&option));
@@ -1518,7 +1518,7 @@ impl InteractiveApplication {
     }
 
     /// Put a saved conversation in a tab, or show the tab it is already in.
-    fn reopen_conversation(&mut self, id: &str) -> Option<usize> {
+    fn reopen_conversation(&mut self, id: &str) -> Result<usize, String> {
         if let Some(index) = self
             .agent
             .sessions
@@ -1526,18 +1526,19 @@ impl InteractiveApplication {
             .position(|session| session.history == id)
         {
             self.agent.active = index;
-            return Some(index);
+            return Ok(index);
         }
-        let (conversation, entries) = history::load(&self.agent.directory, id)?;
+        let (conversation, entries) = history::load(&self.agent.directory, id)
+            .ok_or_else(|| "that conversation could not be read".to_owned())?;
         let index = self.add_agent_tab(
             conversation.agent,
             conversation.root,
             entries,
             conversation.session,
             Some(conversation.id),
-        ).map_err(|error| self.show_error(error)).ok()?;
+        )?;
         self.agent.active = index;
-        Some(index)
+        Ok(index)
     }
 
     fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
@@ -3032,6 +3033,26 @@ mod tests {
         let tools = &app.agent.sessions[index].tools;
         assert_eq!(tools[0]["env"][0]["value"], socket);
         assert_eq!(tools[0]["args"][1], app.agent.sessions[index].number.to_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_resume_reuses_tabs_and_reports_unreadable_history() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let conversation = app.agent.sessions[index].conversation();
+        assert_eq!(app.reopen_conversation(&conversation.id).unwrap(), index);
+        assert_eq!(app.agent.sessions.len(), 1);
+        history::save(app.agent.directory.clone(), conversation.clone(), Vec::new());
+        assert!(history::flush(std::time::Instant::now() + std::time::Duration::from_secs(5)));
+        app.agent.sessions.clear();
+        let index = app.reopen_conversation(&conversation.id).unwrap();
+        assert_eq!(app.agent.sessions[index].history, conversation.id);
+        assert_eq!(app.agent.sessions[index].root, conversation.root);
+        let started = app.agent.started;
+        assert_eq!(app.reopen_conversation("missing").unwrap_err(), "that conversation could not be read");
+        assert_eq!(app.agent.sessions.len(), 1);
+        assert_eq!(app.agent.started, started);
     }
 
     #[cfg(unix)]
