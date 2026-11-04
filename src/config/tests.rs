@@ -270,6 +270,30 @@ fn parser_spans_cover_inline_tables_and_quoted_dotted_keys() {
         .expect("quoted key explain");
     assert_eq!(quoted.value, "\"MOVE\"");
     assert!(quoted.source.contains(":bytes "));
+    for key in [
+        r#"command_labels."view.cursor.\u006dove""#,
+        "command_labels.'view.cursor.move'",
+    ] {
+        let escaped = loaded.explain(key).expect("TOML quoted key explain");
+        assert_eq!(escaped.value, quoted.value);
+        assert_eq!(escaped.source, quoted.source);
+    }
+}
+
+#[test]
+fn config_key_segments_decode_toml_quoted_keys() {
+    for (key, expected) in [
+        (r#"command_labels."caf\u00e9""#, vec!["command_labels", "café"]),
+        (r#"labels."a\\b\"c""#, vec!["labels", "a\\b\"c"]),
+        (r#"labels.'a\b.c'"#, vec!["labels", "a\\b.c"]),
+        (r#"labels."""#, vec!["labels", ""]),
+        ("dashboard.action.0.label", vec!["dashboard", "action", "0", "label"]),
+    ] {
+        assert_eq!(super::config_key_segments(key).unwrap(), expected, "{key}");
+    }
+    for invalid in ["", "a..b", "a.", "\"unterminated", r#"a."\q""#] {
+        assert!(super::config_key_segments(invalid).is_none(), "{invalid}");
+    }
 }
 
 #[test]
@@ -1304,6 +1328,34 @@ fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn config_migration_rejects_noninteger_schema_versions() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    for source in [
+        "schema_version = \"999\"\n",
+        "schema_version = 1.0\n",
+        "schema_version = true\n",
+        "schema_version = []\n",
+        "[schema_version]\n",
+    ] {
+        let error = super::migrate_config_source(source).unwrap_err();
+        assert!(error.contains("schema_version must be an integer"), "{error}");
+        fs::write(&path, source).unwrap();
+        let loaded = load_config(&path);
+        assert!(loaded.diagnostic.unwrap().contains("schema_version must be an integer"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+    for source in ["", "schema_version = 0\n"] {
+        let (migrated, changed) = super::migrate_config_source(source).unwrap();
+        assert!(changed);
+        assert!(migrated.contains("schema_version = 1"));
+    }
+    let current = "schema_version = 1\n";
+    assert_eq!(super::migrate_config_source(current).unwrap(), (current.into(), false));
+    assert!(super::migrate_config_source("schema_version = 999\n").is_err());
 }
 
 #[test]

@@ -304,7 +304,7 @@ impl AgentSession {
             }
             None => agent::new_session_params(&self.root, &self.tools, self.meta.as_ref()),
         };
-        match self.request(method, params) {
+        match params.and_then(|params| self.request(method, params)) {
             Ok(id) if method == "session/new" => self.phase = Phase::Creating(id),
             Ok(id) => self.phase = Phase::Rejoining(id),
             Err(error) => self.entries.push(Entry::Notice(error)),

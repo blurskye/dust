@@ -365,7 +365,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let app = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
-    let config_source = "editor = { tab_width = 7 }\n";
+    let config_source = "editor = { tab_width = 7 }\n[command_labels]\n\"view.cursor.move\" = \"MOVE\"\n";
     fs::write(&config_path, config_source).expect("config");
     let mut loaded = crate::config::load_config(&config_path);
 
@@ -386,6 +386,11 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let (resolved, diagnostic) =
         super::resolve_configuration(&app.commands, loaded, true).expect("resolve");
     assert!(diagnostic.is_none());
+    let label = resolved
+        .explain(r#"command_labels."view.cursor.\u006dove""#)
+        .expect("escaped command label");
+    assert_eq!(label.value, "\"MOVE\"");
+    assert!(label.source.starts_with(&config_path.display().to_string()));
     let setting = resolved.explain("editor.tab_width").expect("setting");
     assert!(
         setting
