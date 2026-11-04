@@ -420,6 +420,9 @@ fn candidate_activation_validates_the_manifest_before_loading() {
     let path = root.path().join("guest.wasm");
     fs::write(&path, loaded.bytes).unwrap();
     let mut manifest = loaded.manifest;
+    // The runtime fixture grants events without declaring subscriptions.
+    manifest.capabilities.remove(&PluginCapability::EventSubscriptions);
+    assert!(activate_candidate(root.path(), &path, manifest.clone(), &limits).is_ok());
     let version = std::mem::take(&mut manifest.version);
     assert!(matches!(
         activate_candidate(root.path(), &path, manifest.clone(), &limits),
