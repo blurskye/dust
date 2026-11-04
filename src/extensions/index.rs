@@ -55,14 +55,13 @@ pub(super) fn index_manifest_from_store(
     if !manifest_path.starts_with(&store) {
         return Err(PluginError::OutsideStore);
     }
-    let metadata = fs::symlink_metadata(&manifest_path).map_err(PluginError::Io)?;
+    let file = crate::files::open_regular_file(&manifest_path).map_err(PluginError::Io)?;
+    let metadata = file.metadata().map_err(PluginError::Io)?;
     if !metadata.file_type().is_file() || metadata.len() > MANIFEST_BYTE_CEILING {
         return Err(PluginError::InvalidManifest);
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    fs::File::open(&manifest_path)
-        .map_err(PluginError::Io)?
-        .take(MANIFEST_BYTE_CEILING + 1)
+    file.take(MANIFEST_BYTE_CEILING + 1)
         .read_to_end(&mut bytes)
         .map_err(PluginError::Io)?;
     if bytes.len() as u64 > MANIFEST_BYTE_CEILING {
@@ -95,23 +94,9 @@ pub(super) fn load_manifest_component(
         .take(256)
         .collect::<String>();
     let result = (|| {
-        if manifest_relative.is_absolute() || component_relative.is_absolute() {
-            return Err(PluginError::OutsideStore);
-        }
-        let store = fs::canonicalize(store).map_err(PluginError::Io)?;
-        let manifest_path =
-            fs::canonicalize(store.join(manifest_relative)).map_err(PluginError::Io)?;
-        if !manifest_path.starts_with(&store) {
-            return Err(PluginError::OutsideStore);
-        }
-        let metadata = fs::metadata(&manifest_path).map_err(PluginError::Io)?;
-        if metadata.len() > 1024 * 1024 {
-            return Err(PluginError::InvalidManifest);
-        }
-        let source = fs::read_to_string(manifest_path).map_err(PluginError::Io)?;
-        let manifest: PluginManifest =
-            toml::from_str(&source).map_err(|_| PluginError::InvalidManifest)?;
-        validate_manifest(&manifest, limits)?;
+        let (manifest, _, store, component_relative) = index_manifest_from_store(
+            store, manifest_relative, component_relative, PluginLoadId(0), limits,
+        )?;
         load_component(&store, &store.join(component_relative), manifest, limits)
     })();
     result.map_err(|error| (fallback, error))
@@ -195,6 +180,7 @@ pub(super) fn index_manifest_contributions_with_text(
     let namespace = format!("plugin.{}.", manifest.id);
     if manifest.commands.iter().any(|(id, declaration)| {
         !valid_plugin_segment(id)
+            || crate::editor::CommandId::new(format!("{namespace}{id}")).is_err()
             || declaration.title.trim().is_empty()
             || declaration.title.len() > 256
             || declaration.title.chars().any(char::is_control)
@@ -577,6 +563,7 @@ pub fn activate_candidate(
     manifest: PluginManifest,
     limits: &PluginLimits,
 ) -> Result<Vec<String>, PluginError> {
+    validate_manifest(&manifest, limits)?;
     let outcome = load_component(store, path, manifest, limits)?;
     Ok(outcome.loaded.activated_commands)
 }
@@ -711,20 +698,44 @@ pub(crate) fn load_component(
     let activation = (|| {
         component_api::EditorPlugin::add_to_linker(&mut linker, |state| state)
             .map_err(|error| error.to_string())?;
-        let bindings = component_api::EditorPlugin::instantiate(&mut store, &component, &linker)
+        let instance = linker.instantiate(&mut store, &component)
             .map_err(|error| format!("{error:#}"))?;
-        let commands = bindings
-            .call_activate(&mut store)
-            .map_err(|error| format!("{error:#}"))??;
+        let bindings = component_api::EditorPlugin::new(&mut store, &instance)
+            .map_err(|error| format!("{error:#}"))?;
+        // Lazy lifting keeps aliased guest strings from being copied before limits apply.
+        use wasmtime::component::{WasmList, WasmStr};
+        let activate = instance.get_typed_func::<(), (Result<WasmList<WasmStr>, WasmStr>,)>(
+            &mut store, "activate",
+        ).map_err(|error| format!("{error:#}"))?;
+        let (result,) = activate.call(&mut store, ()).map_err(|error| format!("{error:#}"))?;
+        let commands = match result {
+            Ok(list) => {
+                if list.len() > limits.maximum_commands {
+                    return Err("activation exceeds command count ceiling".into());
+                }
+                let mut commands = Vec::with_capacity(list.len());
+                for index in 0..list.len() {
+                    let command = list.get(&mut store, index).unwrap()
+                        .map_err(|error| format!("{error:#}"))?;
+                    let command = command.to_str(&store).map_err(|error| format!("{error:#}"))?;
+                    if command.len() > 256 {
+                        return Err("activation command exceeds byte ceiling".into());
+                    }
+                    commands.push(command.into_owned());
+                }
+                commands
+            }
+            Err(error) => {
+                let error = error.to_str(&store).map_err(|error| format!("{error:#}"))?;
+                return Err(error.chars().take(4096).collect());
+            }
+        };
+        activate.post_return(&mut store).map_err(|error| format!("{error:#}"))?;
         Ok::<_, String>((bindings, commands))
     })();
     drop(deadline);
     let (bindings, activated) = activation.map_err(PluginError::Activation)?;
-    let activated_commands = activated
-        .into_iter()
-        .take(limits.maximum_commands)
-        .map(|command| command.chars().take(256).collect::<String>())
-        .collect::<Vec<_>>();
+    let activated_commands = activated;
     if activated_commands
         .iter()
         .any(|command| !manifest.commands.contains_key(command))
@@ -905,7 +916,7 @@ pub(crate) fn execute_component(
         .call_execute_command(&mut runtime.store, &command, &arguments);
     drop(deadline);
     let result = result
-        .map_err(|error| PluginError::Execution(error.to_string()))?
+        .map_err(|error| PluginError::Execution(format!("{error:#}")))?
         .map_err(PluginError::Execution)?;
     if result.len() > 1024 * 1024 {
         return Err(PluginError::InvalidInvocation);

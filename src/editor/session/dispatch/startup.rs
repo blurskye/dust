@@ -33,6 +33,7 @@ impl InteractiveApplication {
         register_builtin_commands(&mut commands)?;
         register_app_commands(&mut commands)?;
         let use_user_configuration = loaded_config.user_configuration;
+        let source_fingerprint = loaded_config.source_fingerprint.clone();
         let config_warning = loaded_config.warning.clone();
         let (configuration, config_diagnostic) =
             match resolve_configuration(&commands, loaded_config, true) {
@@ -130,7 +131,9 @@ impl InteractiveApplication {
             workspace_edits: super::super::workspace_edits::WorkspaceEditSession::default(),
             commands,
             input: InputSession::new(ABSOLUTE_MAX_COUNT),
-            configuration: ConfigurationSession::new(configuration, use_user_configuration),
+            configuration: ConfigurationSession::new(
+                configuration, use_user_configuration, source_fingerprint,
+            ),
             ui: super::Tracked::new(UiState {
                 config_diagnostic,
                 ..UiState::default()

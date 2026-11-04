@@ -332,11 +332,18 @@ impl ExtensionSession {
         plugin: &str,
         load: PluginLoadId,
         proposal: PluginVirtualDocumentProposal,
+        navigation_current: bool,
         context: VirtualContext<'_>,
     ) -> Result<(VirtualPublication<'a>, EditorWindowCandidate), String> {
         self.virtual_documents
             .check_proposal(plugin, load, &proposal)
             .map_err(|error| error.detail)?;
+        if !navigation_current && matches!(&proposal.kind,
+            crate::extensions::PluginVirtualDocumentProposalKind::Full(full) if full.expected_revision.is_none())
+        {
+            self.virtual_documents.cancel(plugin, load, proposal.document);
+            return Err("virtual document opening cancelled after navigation".into());
+        }
         if let crate::extensions::PluginVirtualDocumentProposalKind::Error(error) = &proposal.kind {
             let detail = error.detail.clone();
             self.virtual_documents

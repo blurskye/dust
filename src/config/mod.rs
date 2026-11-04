@@ -2,6 +2,7 @@
 
 mod catalog;
 mod load;
+pub(crate) use load::SourceFingerprint;
 mod themes;
 pub use catalog::{
     SettingInfo, SettingsCatalog, SettingsSection, default_setting, settings_catalog,
@@ -278,6 +279,7 @@ pub struct LoadedKeymaps {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedConfig {
+    pub(crate) source_fingerprint: Option<Vec<SourceFingerprint>>,
     pub installed_plugins: BTreeSet<String>,
     pub user_configuration: bool,
     pub user_setting_keys: BTreeSet<String>,

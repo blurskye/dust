@@ -252,6 +252,16 @@ fn a_bad_task_is_named_with_what_to_fix() {
 }
 
 #[test]
+fn migrated_config_spans_still_address_the_original_file() {
+    let source = "[editor]\ntab_width = 3\n";
+    let loaded = super::load::parse_config_source(std::path::Path::new("config.toml"), source);
+    assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+    let span = &loaded.user_setting_spans["editor.tab_width"];
+    assert_eq!(&source[span.clone()], "3");
+    assert!(!loaded.user_setting_spans.contains_key("schema_version"));
+}
+
+#[test]
 fn parser_spans_cover_inline_tables_and_quoted_dotted_keys() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
@@ -592,6 +602,141 @@ fn clean_consistent_load_never_fingerprints_user_sources() {
 }
 
 #[test]
+fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
+    use sha2::{Digest, Sha256};
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("activations")).unwrap();
+    let manifest = crate::extensions::PluginManifest {
+        id: "test-plugin".into(),
+        version: "1.0.0".into(),
+        component_sha256: "a".repeat(64),
+        capabilities: Default::default(),
+        commands: Default::default(),
+        contributions: Default::default(),
+    };
+    let source = toml::to_string(&manifest).unwrap();
+    let digest = format!("{:x}", Sha256::digest(source.as_bytes()));
+    assert_ne!(digest, manifest.component_sha256);
+    for activation_sha256 in [Some(digest), None] {
+        let package = crate::tools::LockedPackage {
+            name: manifest.id.clone(),
+            version: manifest.version.clone(),
+            source: crate::tools::PackageSource::Path { path: root.path().into() },
+            content_sha256: manifest.component_sha256.clone(),
+            activation_sha256,
+            dependencies: vec![],
+        };
+        let path = root.path().join("activations").join(format!("{}.toml",
+            package.activation_sha256.as_ref().unwrap_or(&package.content_sha256)));
+        let verifies_digest = package.activation_sha256.is_some();
+        let lock = crate::tools::PackageLock { version: 1, packages: vec![package], reproducible: false };
+        fs::write(root.path().join("dust-packages.lock.json"), serde_json::to_vec(&lock).unwrap()).unwrap();
+        fs::write(&path, &source).unwrap();
+        assert_eq!(super::load::installed_plugins(root.path()), BTreeSet::from([manifest.id.clone()]));
+        if verifies_digest {
+            fs::write(&path, source.replace("1.0.0", "2.0.0")).unwrap();
+            assert!(super::load::installed_plugins(root.path()).is_empty());
+        }
+    }
+}
+
+#[test]
+fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments() {
+    use std::time::{Duration, Instant};
+    use super::ConfigurationWorker;
+
+    if std::env::var_os("DUST_CONFIG_WORKER_TEST_CHILD").is_none() {
+        let root = tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "config::tests::configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments", "--nocapture"])
+            .env("DUST_CONFIG_WORKER_TEST_CHILD", "1")
+            .env("DUST_CONFIG_HOME", root.path())
+            .env("DUST_STATE_HOME", root.path().join("state"))
+            .status().unwrap();
+        assert!(status.success());
+        return;
+    }
+
+    fn next(worker: &ConfigurationWorker) -> super::ConfigurationWorkerResult {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        loop {
+            if let Some(result) = worker.try_result().unwrap() {
+                return result;
+            }
+            assert!(Instant::now() < deadline, "configuration change was not reloaded");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    fn no_reload(worker: &ConfigurationWorker) {
+        let deadline = Instant::now() + Duration::from_millis(2300);
+        while Instant::now() < deadline {
+            assert!(worker.try_result().unwrap().is_none(), "duplicate reload");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    let path = super::user_config_path();
+    fs::write(&path, "[editor]\ntab_width=2\n").unwrap();
+    let loaded = super::load_user_config();
+    let unchanged = ConfigurationWorker::start_with_fingerprint(
+        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+    );
+    no_reload(&unchanged);
+    drop(unchanged);
+
+    fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
+    let worker = ConfigurationWorker::start_with_fingerprint(
+        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+    );
+    let initial = next(&worker);
+    assert!(initial.automatic);
+    assert_eq!(initial.candidate.unwrap().config.editor.tab_width, 3);
+
+    fs::write(&path, "[ui]\ntheme='nord'\n").unwrap();
+    worker.request_reload().unwrap();
+    assert_eq!(next(&worker).candidate.unwrap().theme.name, "nord");
+    worker.verify_watch().unwrap();
+    no_reload(&worker);
+
+    let theme_path = super::user_theme_path("night");
+    fs::create_dir_all(theme_path.parent().unwrap()).unwrap();
+    fs::write(&theme_path, "malformed").unwrap();
+    fs::write(&path, "[ui]\ntheme='night'\n").unwrap();
+    worker.request_reload().unwrap();
+    assert!(next(&worker).candidate.is_err());
+    worker.verify_watch().unwrap();
+    fs::write(&theme_path, BUNDLED_THEME.replace("name = \"dust\"", "name = \"night\"")).unwrap();
+    assert_eq!(next(&worker).candidate.unwrap().theme.name, "night");
+
+    fs::write(&path, "[ui]\ntheme='night'\n[editor]\ntab_width=4\n").unwrap();
+    worker.verify_watch().unwrap();
+    worker.verify_watch().unwrap();
+    assert_eq!(next(&worker).candidate.unwrap().config.editor.tab_width, 4);
+    no_reload(&worker);
+}
+
+#[test]
+fn configuration_reads_reject_fifos_and_devices_without_blocking() {
+    let root = tempdir().unwrap();
+    for name in ["config.toml", "keymaps.toml", "dashboard.toml", "theme.toml", "dust-packages.lock.json"] {
+        let path = root.path().join(name);
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        assert!(source_fingerprint(path.clone()).content_hash.is_none());
+        assert!(matches!(super::load::capture_source(path).text, CapturedText::Error(_)));
+    }
+    assert!(super::load::installed_plugins(root.path()).is_empty());
+    let device = PathBuf::from("/dev/zero");
+    assert!(source_fingerprint(device.clone()).content_hash.is_none());
+    assert!(matches!(super::load::capture_source(device).text, CapturedText::Error(_)));
+
+    let path = root.path().join("regular.toml");
+    fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
+    let link = root.path().join("linked.toml");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert_eq!(load_config(&link).config.editor.tab_width, 3);
+}
+
+#[test]
 fn watcher_fingerprint_detects_same_length_content_and_sources_are_size_bounded() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
@@ -890,6 +1035,48 @@ fn keymaps_parse_typed_arguments_and_fail_transactionally() {
             .as_deref()
             .is_some_and(|message| message.contains("unknown field `key_gruop`"))
     );
+}
+
+#[test]
+fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface() {
+    let user = super::load::parse_keymaps(
+        "[[keymap]]\nid='builtin.global.explorer'\ndisable=true\n",
+        PathBuf::from("keymaps.toml"),
+    );
+    assert!(user.diagnostic.is_none());
+    assert_eq!(user.entries.len(), 7);
+    assert!(user.entries.iter().all(|entry| entry.disable));
+    let mut loaded = load_bundled_config();
+    loaded.keymaps.entries.extend(user.entries);
+    loaded.keymaps.user_spans = user.user_spans;
+    let mut commands = crate::editor::CommandRegistry::default();
+    crate::editor::register_builtin_commands(&mut commands).unwrap();
+    crate::editor::register_app_commands(&mut commands).unwrap();
+    let (_, diagnostic) = crate::editor::session::compile_keymaps(
+        &commands, &loaded.keymaps, &loaded.config.input.keymaps,
+    );
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+
+    let surface = super::load::parse_keymaps(
+        "[[keymap]]\nid='builtin.global.explorer.explorer'\ndisable=true\n",
+        PathBuf::from("keymaps.toml"),
+    );
+    assert_eq!(surface.entries.len(), 1);
+    assert_eq!(surface.entries[0].id, "builtin.global.explorer.explorer");
+}
+
+#[test]
+fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
+    for (global, local) in [("z esc", "z escape"), ("<leader> control-a", "<leader> ctrl-a")] {
+        let loaded = super::load::parse_keymaps(
+            &format!("[[keymap]]\nid='user.global.alias'\ncontext='global'\nkeys='{global}'\ncommand='explorer.refresh'\n\n[[keymap]]\nid='user.explorer.alias'\ncontext='explorer'\nkeys='{local}'\ncommand='explorer.refresh'\n"),
+            PathBuf::from("keymaps.toml"),
+        );
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert!(!loaded.entries.iter().any(|entry| entry.id == "user.global.alias.explorer"));
+        assert!(loaded.entries.iter().any(|entry| entry.id == "user.explorer.alias"));
+        assert!(loaded.entries.iter().any(|entry| entry.id == "user.global.alias.editor-normal"));
+    }
 }
 
 #[test]
@@ -1212,6 +1399,37 @@ fn settings_save_preserves_a_symlink() {
             .unwrap()
             .contains("tab_width = 3")
     );
+}
+
+#[test]
+fn unknown_fields_in_window_rule_arrays_preserve_valid_settings() {
+    for (rules, expected_count) in [
+        ("[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\nmisspelled=true\n", 1),
+        ("[windows]\nrule=[{content_type='builtin.problems',placement={kind='hidden'},misspelled=true}]\n", 1),
+        ("[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='hidden'}\nmisspelled=true\n", 2),
+    ] {
+        let source = format!("[editor]\ntab_width=3\n{rules}");
+        let (config, _, _, ignored) = super::load::settings_from_source(&source).unwrap();
+        assert_eq!(config.editor.tab_width, 3);
+        assert_eq!(config.windows.rules.len(), expected_count);
+        assert_eq!(config.windows.rules[0].content_type, "builtin.problems");
+        assert_eq!(ignored.len(), 1);
+        assert!(ignored[0].ends_with("misspelled"));
+    }
+}
+
+#[test]
+fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants() {
+    let source = "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='floating',x=1,y=2,width=30,height=10}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='docked',edge='bottom',size=5,x=99}\n";
+    let (config, _, _, ignored) = super::load::settings_from_source(source).unwrap();
+    assert_eq!(config.windows.rules.len(), 2);
+    assert_eq!(config.windows.rules[0].placement, super::WindowPlacementConfig::Floating {
+        x: 1, y: 2, width: 30, height: 10,
+    });
+    assert_eq!(config.windows.rules[1].placement, super::WindowPlacementConfig::Docked {
+        edge: "bottom".into(), size: 5,
+    });
+    assert_eq!(ignored.len(), 1);
 }
 
 #[test]

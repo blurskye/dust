@@ -150,6 +150,7 @@ fn parse_bundled_config() -> LoadedConfig {
         .validate()
         .expect("bundled theme fallbacks must be covered by tests");
     LoadedConfig {
+        source_fingerprint: None,
         installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
@@ -329,10 +330,12 @@ pub(super) fn capture_configuration_bundle(theme_hint: &str) -> ConfigurationSou
     capture_configuration_bundle_with(theme_hint, capture_source)
 }
 
-fn installed_plugins(root: &Path) -> BTreeSet<String> {
+pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
+    use sha2::{Digest, Sha256};
+
     let read = |path: &Path| -> Option<Vec<u8>> {
         let mut bytes = Vec::new();
-        fs::File::open(path)
+        crate::files::open_regular_file(path)
             .ok()?
             .take(1024 * 1024 + 1)
             .read_to_end(&mut bytes)
@@ -348,19 +351,18 @@ fn installed_plugins(root: &Path) -> BTreeSet<String> {
         .iter()
         .take(1024)
         .filter_map(|package| {
-            if package.content_sha256.len() != 64
-                || !package
-                    .content_sha256
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit())
+            let digest = package.activation_sha256.as_ref().unwrap_or(&package.content_sha256);
+            if [&package.content_sha256, digest].into_iter().any(|digest| {
+                digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit())
+            }) {
+                return None;
+            }
+            let bytes = read(&root.join("activations").join(format!("{digest}.toml")))?;
+            if package.activation_sha256.is_some()
+                && !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(digest)
             {
                 return None;
             }
-            let bytes = read(
-                &root
-                    .join("activations")
-                    .join(format!("{}.toml", package.content_sha256)),
-            )?;
             let manifest: crate::extensions::PluginManifest =
                 toml::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
             manifest
@@ -374,7 +376,11 @@ fn installed_plugins(root: &Path) -> BTreeSet<String> {
 #[must_use]
 pub fn load_user_config() -> LoadedConfig {
     match capture_consistent_configuration_bundle("dust") {
-        Ok((bundle, _)) => bundle.into_loaded(),
+        Ok((bundle, fingerprint)) => {
+            let mut loaded = bundle.into_loaded();
+            loaded.source_fingerprint = Some(fingerprint);
+            loaded
+        }
         Err(diagnostic) => {
             let mut loaded = fallback_config(Some(diagnostic));
             loaded.user_configuration = true;
@@ -419,7 +425,7 @@ pub(super) fn capture_source(path: PathBuf) -> CapturedSource {
     };
     let modified = metadata.modified().ok();
     let length = metadata.len();
-    let bytes = fs::File::open(&path).and_then(|file| {
+    let bytes = crate::files::open_regular_file(&path).and_then(|file| {
         let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING.saturating_add(1));
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
@@ -605,6 +611,7 @@ pub(super) fn parse_dashboard_capture(
 
 pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
     LoadedConfig {
+        source_fingerprint: None,
         installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
@@ -641,11 +648,12 @@ pub fn load_config(path: &Path) -> LoadedConfig {
 
 pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
     match settings_from_source(source) {
-        Ok((config, user_setting_keys, source, ignored)) => LoadedConfig {
+        Ok((config, user_setting_keys, _, ignored)) => LoadedConfig {
+            source_fingerprint: None,
             installed_plugins: BTreeSet::new(),
             user_configuration: false,
             user_setting_keys,
-            user_setting_spans: setting_spans(&source),
+            user_setting_spans: setting_spans(source),
             config,
             path: path.to_path_buf(),
             diagnostic: None,
@@ -722,6 +730,20 @@ fn unknown_field(message: &str) -> Option<Vec<String>> {
 }
 
 fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
+    if let Some(array) = value.as_array_mut() {
+        if let Some(index) = key.first().and_then(|index| index.parse::<usize>().ok()) {
+            return array.get_mut(index)
+                .is_some_and(|value| remove_key(value, &key[1..]));
+        }
+        // TOML's value deserializer omits array indices. Window rules are the only
+        // configuration array of tables; locate the rule that actually rejects this
+        // field, rather than deleting a valid field from an earlier placement variant.
+        return array.iter_mut().any(|value| {
+            let rejected = value.clone().try_into::<super::WindowRuleConfig>()
+                .err().and_then(|error| unknown_field(&error.to_string()));
+            rejected.as_deref() == Some(key) && remove_key(value, key)
+        });
+    }
     let Some(table) = value.as_table_mut() else {
         return false;
     };
@@ -836,7 +858,7 @@ pub struct ConfigurationWorkerResult {
 pub(super) enum ConfigurationRequest {
     Reload,
     Themes(ThemeRead),
-    ConfigureWatch { theme: String },
+    VerifyWatch,
     Shutdown,
 }
 
@@ -847,19 +869,31 @@ const CONFIG_WATCH_DEBOUNCE_MS: u64 = 100;
 
 impl ConfigurationWorker {
     #[must_use]
-    pub fn start(use_user_configuration: bool, mut theme: String) -> Self {
+    pub fn start(use_user_configuration: bool, theme: String) -> Self {
+        Self::start_with_fingerprint(use_user_configuration, theme, None)
+    }
+
+    pub(crate) fn start_with_fingerprint(
+        use_user_configuration: bool,
+        mut theme: String,
+        initial_fingerprint: Option<Vec<SourceFingerprint>>,
+    ) -> Self {
         let (sender, requests) = mpsc::sync_channel(4);
         let (results, receiver) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("dust-configuration".into())
             .spawn(move || {
                 let mut generation = 0_u64;
+                // Without a loaded snapshot, verify startup with a reload. Otherwise
+                // compare against what was loaded so unchanged startup doesn't reset
+                // view toggles or cancel work the user has already started.
+                let mut changed_at = (use_user_configuration && initial_fingerprint.is_none())
+                    .then(Instant::now);
                 let mut fingerprint = if use_user_configuration {
-                    configuration_fingerprint(&theme)
+                    initial_fingerprint.unwrap_or_else(|| configuration_fingerprint(&theme))
                 } else {
                     Vec::new()
                 };
-                let mut changed_at: Option<Instant> = None;
                 loop {
                     let request = if use_user_configuration {
                         requests.recv_timeout(Duration::from_millis(CONFIG_WATCH_POLL_MS))
@@ -876,9 +910,8 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme
-                                            && let Some(stable) = consistent.fingerprint
-                                        {
+                                        theme = consistent.theme;
+                                        if let Some(stable) = consistent.fingerprint {
                                             fingerprint = stable;
                                         }
                                         changed_at = None;
@@ -903,21 +936,17 @@ impl ConfigurationWorker {
                                 break;
                             }
                         }
-                        Ok(ConfigurationRequest::ConfigureWatch {
-                            theme: configured_theme,
-                        }) => {
+                        Ok(ConfigurationRequest::VerifyWatch) => {
                             if !use_user_configuration {
-                                theme = configured_theme;
-                                fingerprint.clear();
-                                changed_at = None;
                                 continue;
                             }
-                            let theme_changed = theme != configured_theme;
-                            theme = configured_theme;
+                            // The worker watches the captured on-disk theme, even if the UI
+                            // rejected it. An acknowledgment must not erase a pending edit.
                             let observed = configuration_fingerprint(&theme);
-                            let verify_candidate = theme_changed || observed != fingerprint;
-                            fingerprint = observed;
-                            changed_at = verify_candidate.then(Instant::now);
+                            if observed != fingerprint {
+                                fingerprint = observed;
+                                changed_at = Some(Instant::now());
+                            }
                         }
                         Ok(ConfigurationRequest::Shutdown)
                         | Err(RecvTimeoutError::Disconnected) => {
@@ -935,9 +964,8 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme
-                                            && let Some(stable) = consistent.fingerprint
-                                        {
+                                        theme = consistent.theme;
+                                        if let Some(stable) = consistent.fingerprint {
                                             fingerprint = stable;
                                         }
                                         changed_at = None;
@@ -986,9 +1014,9 @@ impl ConfigurationWorker {
             .map_err(map_configuration_send_error)
     }
 
-    pub fn configure_watch(&self, theme: String) -> Result<(), ConfigurationWorkerError> {
+    pub fn verify_watch(&self) -> Result<(), ConfigurationWorkerError> {
         self.sender
-            .try_send(ConfigurationRequest::ConfigureWatch { theme })
+            .try_send(ConfigurationRequest::VerifyWatch)
             .map_err(map_configuration_send_error)
     }
 
@@ -1129,7 +1157,7 @@ pub(super) fn load_consistent_configuration(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct SourceFingerprint {
+pub(crate) struct SourceFingerprint {
     pub(super) path: PathBuf,
     pub(super) modified: Option<SystemTime>,
     pub(super) length: Option<u64>,
@@ -1142,7 +1170,7 @@ pub(super) const WATCH_FINGERPRINT_BYTE_CEILING: u64 = 4 * 1024 * 1024;
 
 pub(super) fn source_fingerprint(path: PathBuf) -> SourceFingerprint {
     let metadata = fs::metadata(&path).ok();
-    let content_hash = fs::File::open(&path).ok().and_then(|file| {
+    let content_hash = crate::files::open_regular_file(&path).ok().and_then(|file| {
         let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).ok()?;
@@ -1239,18 +1267,34 @@ const GLOBAL_KEYMAP_TARGETS: &[(&str, &str)] = &[
 ];
 
 fn normalized_keys(keys: &Option<String>) -> Option<String> {
-    keys.as_ref()
-        .map(|keys| keys.split_whitespace().collect::<Vec<_>>().join(" "))
+    keys.as_ref().map(|keys| {
+        keys.split_whitespace()
+            .map(|token| {
+                token.parse::<crate::editor::input::KeyEvent>()
+                    .map_or_else(|_| token.to_owned(), |key| key.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
 }
 
 /// A user entry that names a bundled global binding by id alone (to rebind or disable it)
 /// applies to every surface copy of that binding.
 fn names_global_identity(id: &str, context: &Option<String>) -> bool {
-    context.is_none()
-        && id.starts_with("builtin.global.")
-        && !GLOBAL_KEYMAP_TARGETS
-            .iter()
-            .any(|(context, mode)| id.ends_with(&global_target_id("", context, mode)))
+    if context.is_some() || !id.starts_with("builtin.global.") {
+        return false;
+    }
+    static IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let bundled: toml::Value = toml::from_str(BUNDLED_KEYMAPS).expect("bundled keymaps");
+        ["keymap", "key_group"].into_iter()
+            .filter_map(|kind| bundled.get(kind).and_then(toml::Value::as_array))
+            .flatten()
+            .filter(|entry| entry.get("context").and_then(toml::Value::as_str) == Some("global"))
+            .filter_map(|entry| entry.get("id").and_then(toml::Value::as_str))
+            .map(str::to_owned)
+            .collect()
+    }).contains(id)
 }
 
 fn global_target_id(id: &str, context: &str, mode: &str) -> String {

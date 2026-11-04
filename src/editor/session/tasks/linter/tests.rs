@@ -90,6 +90,7 @@ fn completed(
     diagnostics.activate(source.producer().clone());
     RunningTask {
         output: bytes.to_vec(),
+        cancelled: false,
         key: step.key,
         requested: name.into(),
         name: name.into(),

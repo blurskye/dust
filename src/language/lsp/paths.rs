@@ -11,10 +11,11 @@ pub fn language_id_for_path(path: &Path) -> Option<&'static str> {
         Some("go.work") => return Some("gowork"),
         _ => {}
     }
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    if matches!(extension, Some("C" | "H")) {
+        return Some("cpp");
+    }
+    let extension = extension.map(str::to_ascii_lowercase);
     let builtin = match extension.as_deref().unwrap_or_default() {
         "rs" => Some("rust"),
         "ts" | "mts" | "cts" => Some("typescript"),
@@ -77,6 +78,10 @@ pub fn file_uri(path: &Path) -> String {
 #[must_use]
 pub fn path_from_file_uri(uri: &str) -> Option<PathBuf> {
     let source = uri.strip_prefix("file://")?;
+    let (authority, source) = source.split_at(source.find('/')?);
+    if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
     let bytes = source.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;

@@ -83,14 +83,39 @@ impl InteractiveApplication {
             self.sync_flash_ui();
             return;
         };
-        let height = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
-            .map_or(100, |viewport| usize::from(viewport.height));
+        let Some(viewport) = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
+            .filter(|viewport| viewport.view == flash.view)
+        else {
+            self.sync_flash_ui();
+            return;
+        };
+        let text = &self.state.buffers[view.buffer].text;
+        let width = crate::ui::editor_state_content_width(
+            &self.state, text, &self.configuration.settings().editor, viewport.width,
+        );
+        let wrap = width > 0 && self.configuration.settings().editor.wrap
+            && !self.ui.large_file_buffers.contains(&view.buffer);
+        let model = crate::ui::VisualRowModel::new_for_state(
+            &self.state, text, flash.view, &self.ui, self.configuration.settings(), viewport.width, wrap,
+        );
+        let start = crate::ui::VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        };
+        let horizontal = if wrap { 0 } else { view.scroll_column };
+        let mut visible = HashSet::new();
+        let mut lines = std::collections::BTreeSet::new();
+        for row in 0..usize::from(viewport.height) {
+            let Some(anchor) = model.painted_row(start, row) else { break };
+            let Ok(line_start) = text.line_to_byte(anchor.line) else { continue };
+            lines.insert(anchor.line);
+            if width > 0 {
+                visible.extend(model.visible_bytes(anchor, horizontal, width)
+                    .into_iter().map(|byte| ByteOffset(line_start.get() + byte)));
+            }
+        }
         flash.targets = super::super::flash::flash_targets(
-            &self.state.buffers[view.buffer].text,
-            view.scroll_line,
-            view.scroll_line + height,
-            view.cursor,
-            &flash.query,
+            text, lines, view.cursor, &flash.query, |at| visible.contains(&at),
         );
         match flash.targets.as_slice() {
             [] if !flash.query.is_empty() => {
@@ -2491,10 +2516,12 @@ impl InteractiveApplication {
             .map(|(buffer, state)| SyntaxDocument {
                 buffer,
                 text: &state.text,
-                language: language_for_document(
-                    state.path.as_deref(),
-                    state.text.chunks().next().unwrap_or_default(),
-                ),
+                language: state.virtual_language.as_deref()
+                    .and_then(crate::language::syntax::language_for_fence)
+                    .or_else(|| language_for_document(
+                        state.path.as_deref(),
+                        state.text.chunks().next().unwrap_or_default(),
+                    )),
                 enabled: !self.effective_large_file(buffer),
             })
             .collect::<Vec<_>>();
@@ -2535,8 +2562,11 @@ impl InteractiveApplication {
         }
         // Until a new parse or token reply arrives, the old colours follow the edit instead of
         // dropping out, so typed text doesn't flash plain and back.
-        move_spans_onto_current_text(&mut self.ui.syntax_spans, &self.state);
-        move_spans_onto_current_text(&mut self.ui.lsp_semantic_spans, &self.state);
+        let syntax_changed = move_spans_onto_current_text(&mut self.ui.value.syntax_spans, &self.state);
+        let semantic_changed = move_spans_onto_current_text(&mut self.ui.value.lsp_semantic_spans, &self.state);
+        if syntax_changed || semantic_changed {
+            self.ui.revision = self.ui.revision.wrapping_add(1);
+        }
     }
 
     fn rebuild_syntax_rows(&mut self) {
@@ -2606,7 +2636,7 @@ fn nth_non_blank(text: &str, count: usize) -> usize {
         .map_or(text.len(), |(at, _)| at)
 }
 
-fn move_spans_onto_current_text(spans: &mut Vec<UiSyntaxSpan>, state: &crate::editor::EditorState) {
+fn move_spans_onto_current_text(spans: &mut Vec<UiSyntaxSpan>, state: &crate::editor::EditorState) -> bool {
     let current = |span: &UiSyntaxSpan| {
         state
             .buffers
@@ -2617,7 +2647,7 @@ fn move_spans_onto_current_text(spans: &mut Vec<UiSyntaxSpan>, state: &crate::ed
         .iter()
         .all(|span| current(span).is_none_or(|at| at == span.revision))
     {
-        return;
+        return false;
     }
     spans.retain_mut(|span| {
         let Some(buffer) = state.buffers.get(span.buffer) else {
@@ -2633,6 +2663,7 @@ fn move_spans_onto_current_text(spans: &mut Vec<UiSyntaxSpan>, state: &crate::ed
         span.revision = buffer.text.revision();
         true
     });
+    true
 }
 
 impl InteractiveApplication {
@@ -2889,7 +2920,7 @@ impl InteractiveApplication {
             } else {
                 self.append_lsp_log(format!("{label}: {method} failed: {message}"));
             }
-            if !self.language.request_pending() && (!main || self.language.has_offered_actions()) {
+            if !self.language.request_pending(generation) && (!main || self.language.has_offered_actions()) {
                 self.open_lsp_code_actions_picker(&server);
             }
             return;
@@ -3681,7 +3712,7 @@ impl InteractiveApplication {
                     .install_completions(server, items, incomplete, generation);
                 self.narrow_lsp_completion();
                 if self.ui.language_completion.is_none()
-                    && !self.language.request_pending()
+                    && !self.language.request_pending(generation)
                     && !self.language.completion_automatic()
                 {
                     self.show_lsp_no_result(server);
@@ -3689,6 +3720,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::CompletionResolved(item) => {
                 if self.language.accept_resolved(generation, item, &self.state) {
+                    self.project_lsp_completion();
                     self.accept_lsp_completion();
                 }
             }
@@ -3778,7 +3810,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::CodeActions(actions) => {
                 self.language.offer_actions(server, actions, context);
-                if !self.language.request_pending() {
+                if !self.language.request_pending(generation) {
                     self.open_lsp_code_actions_picker(server);
                 }
             }
@@ -4022,11 +4054,11 @@ impl InteractiveApplication {
             // Only the last of several servers can say that nobody knows.
             LspFeatureResult::Empty
                 if method == "textDocument/hover"
-                    && (self.language.request_pending() || self.hover_is_showing()) => {}
+                    && (self.language.request_pending(generation) || self.hover_is_showing()) => {}
             // Completion asks by itself as you type, and nothing to offer is no news.
             LspFeatureResult::Empty
                 if method == "textDocument/completion"
-                    && (self.language.request_pending()
+                    && (self.language.request_pending(generation)
                         || self.language.completion_automatic()) => {}
             LspFeatureResult::Empty => self.show_lsp_no_result(server),
         }

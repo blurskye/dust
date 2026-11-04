@@ -85,6 +85,13 @@ fn load_headless_startup(
     let mut worker = crate::files::VfsWorker::start(additional_files.len().saturating_add(1));
     let mut first_buffer = None;
     for path in std::iter::once(path).chain(additional_files) {
+        if !path.exists() && path.parent().is_some_and(std::path::Path::is_dir) {
+            let (buffer, _) = state.open_text(TextBuffer::from_text(""), Some(new_file_path(path))).map_err(|error| {
+                ApplicationError::Command(CommandError::InvalidArguments(error.into()))
+            })?;
+            first_buffer.get_or_insert(buffer);
+            continue;
+        }
         let request = worker.read(path.clone())?;
         let (resolved, bytes) = loop {
             match worker.try_result()? {
@@ -148,6 +155,35 @@ mod tests {
             "a"
         );
         app.state.validate_layout().unwrap();
+    }
+
+    #[test]
+    fn headless_startup_opens_new_named_buffers_alongside_existing_files() {
+        let directory = tempdir().unwrap();
+        let existing = directory.path().join("existing.txt");
+        fs::write(&existing, "existing").unwrap();
+        for paths in [
+            vec!["new.txt", "existing.txt", "another.txt"],
+            vec!["existing.txt", "new.txt"],
+        ] {
+            let startup = super::resolve_startup(
+                &paths.iter().map(std::path::PathBuf::from).collect::<Vec<_>>(),
+                directory.path(),
+            ).unwrap();
+            let app = HeadlessApplication::bootstrap(startup).unwrap();
+            assert_eq!(app.state.buffers.len(), paths.len());
+            for name in &paths {
+                let buffer = app.state.buffers.values().find(|buffer| {
+                    buffer.path.as_ref().is_some_and(|path| path.ends_with(name))
+                }).unwrap();
+                assert_eq!(buffer.text.to_string(), if *name == "existing.txt" { "existing" } else { "" });
+                assert!(!buffer.dirty);
+            }
+            assert!(app.state.buffers[app.state.active_buffer_id().unwrap()]
+                .path.as_ref().unwrap().ends_with(paths[0]));
+            app.state.validate_layout().unwrap();
+        }
+        assert!(!directory.path().join("new.txt").exists());
     }
 
     #[test]

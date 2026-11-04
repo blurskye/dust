@@ -2,7 +2,7 @@
   "command_api": 1,
   "wit_api": "0.2.0",
   "config_schema": 1,
-  "persistence_schema": 1,
+  "persistence_schema": 2,
   "package_lock_schema": 1,
   "theme_schema": 1,
   "minimum_compatible_command_api": 1,
@@ -276,7 +276,6 @@
     "command_labels"
   ],
   "capabilities": {
-    "installer": "user-local-atomic-v1",
     "license": "GPL-3.0-or-later",
     "package_network": "official-https-no-redirect-v1",
     "plugin_load_ownership": "generation-conditional-bounded-v1",

@@ -63,6 +63,40 @@ fn language_and_uri_mapping_are_deterministic() {
 }
 
 #[test]
+fn language_mapping_preserves_case_sensitive_cpp_extensions() {
+    for (path, language) in [
+        ("main.C", "cpp"),
+        ("main.H", "cpp"),
+        ("main.c", "c"),
+        ("main.h", "c"),
+        ("main.CPP", "cpp"),
+        ("main.RS", "rust"),
+    ] {
+        assert_eq!(language_id_for_path(Path::new(path)), Some(language), "{path}");
+    }
+}
+
+#[test]
+fn file_uris_accept_only_local_authorities() {
+    for uri in [
+        "file:///home/user/a%20b.rs",
+        "file://localhost/home/user/a%20b.rs",
+        "file://LOCALHOST/home/user/a%20b.rs",
+    ] {
+        assert_eq!(path_from_file_uri(uri).as_deref(), Some(Path::new("/home/user/a b.rs")));
+    }
+    for uri in [
+        "file://remote/home/user/main.rs",
+        "file://localhost:80/home/user/main.rs",
+        "file://user@localhost/home/user/main.rs",
+        "file://relative.rs",
+        "file:///home/user/bad%GG.rs",
+    ] {
+        assert_eq!(path_from_file_uri(uri), None, "{uri}");
+    }
+}
+
+#[test]
 fn representative_mason_servers_are_discoverable_from_real_paths() {
     let catalog = crate::tools::bundled_tool_catalog();
     for (path, language, server) in [

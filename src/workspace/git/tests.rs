@@ -1540,6 +1540,99 @@ fn branch_list_reports_the_real_checked_out_worktree_including_a_linked_one() {
 }
 
 #[test]
+fn worktree_list_reports_detached_heads_without_a_branch() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "tracked.txt", "one\n");
+    let root = dir.path().canonicalize().unwrap();
+    let linked = root.join("detached");
+    run_branch(branch_request(&root, "worktree", "side", linked.to_str().unwrap())).unwrap();
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.set_head_detached(oid).unwrap();
+    git2::Repository::open(&linked).unwrap().set_head_detached(oid).unwrap();
+    let list = branch_list(&root);
+    assert_eq!(list.worktrees.len(), 2);
+    assert!(list.worktrees.iter().all(|entry| entry.branch.is_none()));
+    assert!(list.branches.iter().all(|entry| entry.checked_out.is_none()));
+}
+
+#[test]
+fn worktree_mutations_keep_their_completion_until_polled() {
+    let dir = tempdir().unwrap();
+    let mut service = GitBranchService::default();
+    let request = branch_request(dir.path(), "remove-worktree", "missing", "");
+    service.start(request.clone()).unwrap();
+    service.cancel();
+    assert_eq!(service.start(request.clone()), Err(GitBranchError::Busy));
+    let expires = Instant::now() + Duration::from_secs(5);
+    loop {
+        match service.poll() {
+            Err(GitBranchError::Cancelled | GitBranchError::NotRepository) => break,
+            other => assert!(matches!(other, Ok(None))),
+        }
+        assert!(Instant::now() < expires);
+        thread::yield_now();
+    }
+    service.start(request).unwrap();
+}
+
+#[test]
+fn worktree_deadlines_refuse_expired_mutations_and_lists() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "tracked.txt", "one\n");
+    let root = dir.path().canonicalize().unwrap();
+    let linked = root.join("side");
+    run_branch(branch_request(&root, "worktree", "side", linked.to_str().unwrap())).unwrap();
+    let requests = [
+        GitBranchRequest::List(GitBranchListRequest {
+            repository: root.clone(), deadline: Duration::from_nanos(1),
+        }),
+        GitBranchRequest::CreateWorktree {
+            repository: root.clone(), name: "late".into(), path: root.join("late"),
+            reference: "late".into(), deadline: Duration::from_nanos(1),
+        },
+        GitBranchRequest::CreateDetachedWorktree {
+            repository: root.clone(), name: "late".into(), path: root.join("late"),
+            revision: "HEAD".into(), deadline: Duration::from_nanos(1),
+        },
+        GitBranchRequest::RemoveWorktree {
+            repository: root.clone(), name: "side".into(), deadline: Duration::from_nanos(1),
+        },
+    ];
+    for request in requests {
+        assert_eq!(run_branch(request), Err(GitBranchError::Deadline));
+    }
+    assert!(linked.join("tracked.txt").exists());
+    assert!(repo.find_worktree("side").is_ok());
+    assert!(!root.join("late").exists());
+    assert!(repo.find_branch("late", git2::BranchType::Local).is_err());
+}
+
+#[test]
+fn worktree_creation_preserves_non_utf8_exclude_patterns_and_read_errors() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "tracked.txt", "one\n");
+    let exclude = repo.path().join("info/exclude");
+    let original = b"# retained\n/non-utf8-\xff";
+    std::fs::write(&exclude, original).unwrap();
+    run_branch(branch_request(dir.path(), "worktree", "side", ".worktree/side")).unwrap();
+    let bytes = std::fs::read(&exclude).unwrap();
+    assert!(bytes.starts_with(original));
+    assert!(bytes.ends_with(b"\n/.worktree/side/\n"));
+
+    std::fs::remove_file(&exclude).unwrap();
+    std::fs::create_dir(&exclude).unwrap();
+    std::fs::write(exclude.join("keep"), "keep").unwrap();
+    assert!(matches!(
+        run_branch(branch_request(dir.path(), "worktree", "other", ".worktree/other")),
+        Err(GitBranchError::Backend(_))
+    ));
+    assert_eq!(std::fs::read_to_string(exclude.join("keep")).unwrap(), "keep");
+}
+
+#[test]
 fn worktree_creation_and_removal_refuse_before_writing() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -2430,6 +2523,36 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
         std::fs::canonicalize(&linked).unwrap()
     );
 }
+#[test]
+fn worktree_paths_use_the_checkout_with_separate_git_metadata() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("checkout");
+    let metadata = dir.path().join("metadata");
+    let status = std::process::Command::new("git")
+        .arg("init").arg("--quiet").arg("--separate-git-dir").arg(&metadata).arg(&root)
+        .status().unwrap();
+    assert!(status.success());
+    let repo = git2::Repository::open(&root).unwrap();
+    commit(&repo, "tracked.txt", "one\n");
+    run_branch(branch_request(&root, "worktree", "side", ".worktree/side")).unwrap();
+    let linked = root.join(".worktree/side");
+    assert!(linked.join("tracked.txt").is_file());
+    assert!(!dir.path().join(".worktree/side").exists());
+    assert_eq!(branch_list(&root).worktrees[0].path, root.canonicalize().unwrap());
+    // Git does not record a backlink for --separate-git-dir. Never invent a primary path.
+    assert!(run_branch(GitBranchRequest::List(GitBranchListRequest {
+        repository: linked.clone(), deadline: Duration::from_secs(5),
+    })).is_err());
+    // An absolute destination is usable even when the primary checkout cannot be resolved.
+    let absolute = dir.path().join("absolute");
+    run_branch(branch_request(&linked, "worktree", "absolute", absolute.to_str().unwrap())).unwrap();
+    assert!(absolute.join("tracked.txt").is_file());
+    repo.config().unwrap().set_str("core.worktree", root.to_str().unwrap()).unwrap();
+    assert_eq!(branch_list(&linked).worktrees[0].path, root.canonicalize().unwrap());
+    run_branch(branch_request(&linked, "worktree", "another", ".worktree/another")).unwrap();
+    assert!(root.join(".worktree/another/tracked.txt").is_file());
+}
+
 #[test]
 fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
     let dir = tempdir().unwrap();

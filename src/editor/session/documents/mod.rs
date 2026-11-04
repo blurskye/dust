@@ -86,12 +86,6 @@ pub(super) struct DocumentSession {
     policy_editor: EditorWindowVersion,
     overrides: HashMap<BufferId, LargeFileOverride>,
     restored_overrides: HashMap<PathBuf, LargeFileOverride>,
-    /// The worktree identity captured when each document was opened, keyed by the document
-    /// path the open request named. A root switch never rewrites an entry: that is what keeps
-    /// an open buffer bound to the worktree it came from rather than to whichever root is
-    /// active now. Nothing here touches the filesystem: the identity is captured by the Git
-    /// owner, which is where I/O policy lives.
-    worktree_bindings: HashMap<PathBuf, crate::workspace::git::WorktreeIdentity>,
 }
 impl DocumentSession {
     pub(in crate::editor::session) fn new(
@@ -132,7 +126,6 @@ impl DocumentSession {
             root_revision,
             overrides: HashMap::new(),
             restored_overrides: HashMap::new(),
-            worktree_bindings: HashMap::new(),
         }
     }
     fn startup_current(&self, editor: &EditorWindowVersion, root_revision: u64) -> bool {
@@ -577,24 +570,9 @@ impl DocumentSession {
         roots: Vec<crate::workspace::RootIdentity>,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
-        self.capture_worktree_binding(&path);
         let id = self.vfs.open_explorer(path, roots)?;
         self.pending_legacy.insert(id);
         Ok(id)
-    }
-    /// Capture the worktree a document was opened in, once, at open time.
-    fn capture_worktree_binding(&mut self, path: &Path) {
-        if let Some(identity) = crate::workspace::git::WorktreeIdentity::capture(path) {
-            self.worktree_bindings.insert(path.to_path_buf(), identity);
-        }
-    }
-    /// The worktree identity captured for a document, if it was opened inside a worktree.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn worktree_identity(
-        &self,
-        document: &Path,
-    ) -> Option<&crate::workspace::git::WorktreeIdentity> {
-        self.worktree_bindings.get(document)
     }
     pub(in crate::editor::session) fn inspect_explorer_rename(
         &mut self,

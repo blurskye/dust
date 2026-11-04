@@ -14,7 +14,7 @@ pub use vfs::{
     CheckedResourceIntent, ExplorerMutation, RequestId, ResourceIntentKind, VfsRequest, VfsResult,
     VfsWorker, WriteExpectation, atomic_write, checked_atomic_write, read_file,
 };
-pub(crate) use vfs::{VfsReply, lock_file};
+pub(crate) use vfs::{VfsReply, lock_file, open_regular_file};
 mod project_root;
 pub use project_root::{
     PROJECT_ROOT_ANCESTOR_CEILING, PROJECT_ROOT_MARKER_CEILING, ProjectRootResolution,

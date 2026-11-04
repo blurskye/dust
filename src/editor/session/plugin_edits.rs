@@ -157,6 +157,11 @@ impl ConfirmationSource {
                 })
             })
     }
+    pub(super) fn navigation_current(&self, editor: &EditorState, windows: &WindowSession) -> bool {
+        self.navigation.as_ref().is_none_or(|navigation| {
+            windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
+        })
+    }
     pub(super) fn presentation_current(
         &self,
         manager: &PluginManager,

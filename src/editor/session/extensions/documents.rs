@@ -78,6 +78,7 @@ impl VirtualDocumentEditorBridge {
             ) {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
+            state.set_virtual_metadata(entry.buffer, snapshot.title.clone(), snapshot.language.clone());
             entry.revision = snapshot.revision;
             entry.text = state.topology().buffers()[entry.buffer]
                 .text
@@ -109,6 +110,7 @@ impl VirtualDocumentEditorBridge {
             snapshot.document,
             snapshot.revision,
         ).map_err(VirtualDocumentEditorError::Layout)?;
+        state.set_virtual_metadata(buffer, snapshot.title.clone(), snapshot.language.clone());
         self.entries.insert(
             key,
             VirtualDocumentEditorEntry {
@@ -247,6 +249,8 @@ mod tests {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let mut bridge = VirtualDocumentEditorBridge::default();
         let b = publish(&mut bridge, &mut state, &snap(1, "héllo")).unwrap();
+        assert_eq!(state.buffers[b].virtual_title(), Some("Help"));
+        assert_eq!(state.buffers[b].virtual_language.as_deref(), Some("markdown"));
         let view = state.active_view.unwrap();
         state.views[view].cursor = ByteOffset(3);
         let buffers = state.buffers.len();
@@ -258,6 +262,8 @@ mod tests {
         assert!(state.buffers[b].text.revision() > text_revision);
         assert_eq!(state.active_view, Some(view));
         assert_eq!(state.views[view].cursor, ByteOffset(3));
+        assert_eq!(state.buffers[b].virtual_title(), Some("Help"));
+        assert_eq!(state.buffers[b].virtual_language.as_deref(), Some("markdown"));
         let before = state.buffers[b].text.to_string();
         assert_eq!(
             publish(&mut bridge, &mut state, &snap(4, "stale")),

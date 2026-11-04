@@ -6,6 +6,7 @@ use crate::{
         DocumentationSection,
     },
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Hover and completion documentation is cut to these bounds before it is laid out.
@@ -32,6 +33,7 @@ impl InputSession {
     ) {
         if let Some(popup) = &mut self.documentation {
             let maximum = total_rows.saturating_sub(visible_rows.max(1));
+            popup.scroll = popup.scroll.min(maximum);
             popup.scroll = if direction < 0 {
                 popup.scroll.saturating_sub(step)
             } else {
@@ -66,7 +68,17 @@ impl InputSession {
             if remaining_lines == 0 || remaining_bytes == 0 {
                 break;
             }
-            let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+            let mut end = value.len().min(remaining_bytes);
+            while !value.is_char_boundary(end) {
+                end -= 1;
+            }
+            let normalized = value[..end]
+                .replace("\r\n", "\n")
+                .replace('\r', "\n")
+                .split('\n')
+                .take(remaining_lines)
+                .collect::<Vec<_>>()
+                .join("\n");
             let mut lines = Vec::new();
             let mut spans = Vec::new();
             let markdown = markup == DocumentationMarkupKind::Markdown;
@@ -98,13 +110,18 @@ impl InputSession {
                 let rows = if kind == DocumentationPopupKind::Git {
                     let mut rows = Vec::new();
                     let mut row = String::new();
-                    for character in sanitized[..end].chars() {
-                        if !row.is_empty()
-                            && row.width() + character.width().unwrap_or(0) > text_width.max(1)
-                        {
+                    let mut used = 0;
+                    for grapheme in sanitized[..end].graphemes(true) {
+                        let cells = crate::ui::geometry::text_width(
+                            grapheme,
+                            config.editor.ambiguous_width,
+                        );
+                        if !row.is_empty() && used + cells > text_width.max(1) {
                             rows.push(std::mem::take(&mut row));
+                            used = 0;
                         }
-                        row.push(character);
+                        row.push_str(grapheme);
+                        used += cells;
                     }
                     rows.push(row);
                     rows
@@ -176,12 +193,15 @@ fn markdown_rows(
     crate::ui::markdown::render_compact(&mut styled, &clean, width);
     let mut rows = Vec::new();
     let mut start = 0;
-    for line in styled.text.split('\n') {
+    let mut span_index = 0;
+    for line in styled.text.split('\n').take(DOCUMENTATION_MAXIMUM_LINES) {
         let range = start..start + line.len();
-        let spans = styled
-            .spans
+        while styled.spans.get(span_index).is_some_and(|(span, _)| span.end <= start) {
+            span_index += 1;
+        }
+        let spans = styled.spans[span_index..]
             .iter()
-            .filter(|(span, _)| span.start < range.end && span.end > range.start)
+            .take_while(|(span, _)| span.start < range.end)
             .map(|(span, role)| {
                 (
                     span.start.max(range.start) - start..span.end.min(range.end) - start,
@@ -236,12 +256,18 @@ fn wrap_prose(line: &str, width: usize) -> Vec<String> {
 fn without_data_images(line: &str) -> String {
     let mut kept = String::new();
     let mut rest = line;
-    while let Some(link) = rest.find("](data:") {
-        let (Some(open), Some(close)) = (rest[..link].rfind("!["), rest[link..].find(')')) else {
-            break;
-        };
+    while let Some(open) = rest.find("![") {
         kept.push_str(&rest[..open]);
-        rest = &rest[link + close + 1..];
+        rest = &rest[open..];
+        if let Some(label_end) = rest.find(']')
+            && rest[label_end..].starts_with("](data:")
+            && let Some(close) = rest[label_end..].find(')')
+        {
+            rest = &rest[label_end + close + 1..];
+        } else {
+            kept.push_str("![");
+            rest = &rest[2..];
+        }
     }
     kept.push_str(rest);
     kept
@@ -281,6 +307,51 @@ mod tests {
     }
 
     #[test]
+    fn only_data_images_are_removed_without_consuming_other_links() {
+        let line = "![logo](https://example.org/logo.png) Important text [download](data:text/plain;base64,AA==)";
+        assert_eq!(super::without_data_images(line), line);
+        assert_eq!(super::without_data_images("before ![badge](data:image/png;base64,AA==) after"), "before  after");
+        assert_eq!(super::without_data_images("[download](data:text/plain,AA) ![badge](data:image/png,AA)"), "[download](data:text/plain,AA) ");
+    }
+
+    #[test]
+    fn documentation_bounds_source_before_markdown_rendering() {
+        let mut input = super::InputSession::new(100);
+        let config = crate::config::load_bundled_config().config;
+        // Rendering would remove these badges and otherwise reveal the text after the source limit.
+        let source = format!("{}outside byte limit", "![badge](data:image/png;base64,AA==)".repeat(3000));
+        input.present_documentation(
+            super::DocumentationPopupKind::Hover, "hover".into(), String::new(), None,
+            [(super::DocumentationMarkupKind::Markdown, source)], &config, 40,
+        );
+        assert!(input.documentation().is_none_or(|popup| !popup.sections[0].lines.concat().contains("outside byte limit")));
+        let source = format!("{}outside line limit", "![badge](data:image/png,AA)\n".repeat(super::DOCUMENTATION_MAXIMUM_LINES));
+        input.present_documentation(
+            super::DocumentationPopupKind::Hover, "hover".into(), String::new(), None,
+            [(super::DocumentationMarkupKind::Markdown, source)], &config, 40,
+        );
+        assert!(input.documentation().is_none());
+    }
+
+    #[test]
+    fn git_wrapping_keeps_graphemes_whole_and_uses_configured_width() {
+        let mut input = super::InputSession::new(100);
+        let mut config = crate::config::load_bundled_config().config;
+        let text = format!("+{}👩‍💻", "x".repeat(65));
+        input.present_documentation(
+            super::DocumentationPopupKind::Git, "hunk".into(), String::new(), None,
+            [(super::DocumentationMarkupKind::PlainText, text.clone())], &config, 68,
+        );
+        assert_eq!(input.documentation().unwrap().sections[0].lines, [text]);
+        config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+        input.present_documentation(
+            super::DocumentationPopupKind::Git, "hunk".into(), String::new(), None,
+            [(super::DocumentationMarkupKind::PlainText, "a·b".into())], &config, 3,
+        );
+        assert_eq!(input.documentation().unwrap().sections[0].lines, ["a·", "b"]);
+    }
+
+    #[test]
     fn prose_wraps_at_spaces_and_keeps_its_indent() {
         assert_eq!(wrap_prose("short", 10), ["short"]);
         assert_eq!(wrap_prose("a abcdefgh", 3), ["a", "abc", "def", "gh"]);
@@ -306,5 +377,10 @@ mod tests {
         assert_eq!(popup.sections[0].lines.concat(), text);
         input.scroll_documentation(1, 10, 10, input.documentation().unwrap().line_count());
         assert_eq!(input.documentation().unwrap().scroll, 10);
+        input.scroll_documentation(-1, 1, 10, 12);
+        assert_eq!(input.documentation().unwrap().scroll, 1);
+        input.scroll_documentation(1, 10, 10, 30);
+        input.scroll_documentation(0, 0, 10, 5);
+        assert_eq!(input.documentation().unwrap().scroll, 0);
     }
 }

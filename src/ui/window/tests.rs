@@ -52,20 +52,25 @@ fn one_content_view_and_window_move_without_identity_replacement() {
             1,
         )
         .expect("window");
-    graph
-        .place(
-            window,
-            WindowPlacement::Floating(WindowRect {
-                x: 5,
-                y: 3,
-                width: 80,
-                height: 24,
-            }),
-        )
-        .expect("float");
+    let floating = WindowPlacement::Floating(WindowRect {
+        x: 5,
+        y: 3,
+        width: 80,
+        height: 24,
+    });
+    graph.place(window, floating).expect("float");
+    assert_eq!(graph.window(window).expect("same window").placement, floating);
+    assert_eq!(graph.window(window).expect("same window").view, view);
+    assert_eq!(graph.view(view).expect("same view").content, content);
+    assert_eq!(graph.focused(), Some(window));
+    graph.validate().expect("valid floating graph");
     graph
         .place(window, WindowPlacement::Fullscreen)
         .expect("fullscreen");
+    assert_eq!(
+        graph.window(window).expect("same window").placement,
+        WindowPlacement::Fullscreen
+    );
     assert_eq!(graph.window(window).expect("same window").view, view);
     assert_eq!(graph.view(view).expect("same view").content, content);
     assert_eq!(graph.focused(), Some(window));
@@ -252,7 +257,7 @@ fn topology_count_ceiling_rejects_even_a_shallow_balanced_tree() {
 fn checked_topology_mutations_reject_without_partial_graph_changes() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let mut tiled = Vec::new();
-    for index in 0..MAXIMUM_TILED_DEPTH {
+    for index in 0..MAXIMUM_TILED_WINDOWS {
         let view = if index == 0 {
             first_view
         } else {
@@ -269,17 +274,12 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
     let rejected_view = graph
         .create_view(content, "builtin", 1)
         .expect("extra view");
-    graph
-        .open_window(
-            tab,
-            rejected_view,
-            WindowPlacement::Tiled,
-            true,
-            "builtin",
-            1,
-        )
-        .expect("temporary insertion stays shallow");
-    graph.validate().unwrap();
+    let before_open = graph.clone();
+    assert_eq!(
+        graph.open_window(tab, rejected_view, WindowPlacement::Tiled, true, "builtin", 1),
+        Err(WindowError::TooManyTiledWindows)
+    );
+    assert_eq!(graph, before_open);
 
     let floating_view = graph
         .create_view(content, "builtin", 1)
@@ -299,11 +299,23 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
             1,
         )
         .expect("floating window");
-    graph.place(floating, WindowPlacement::Tiled).unwrap();
+    let before_place = graph.clone();
+    assert_eq!(
+        graph.place(floating, WindowPlacement::Tiled),
+        Err(WindowError::TooManyTiledWindows)
+    );
+    assert_eq!(graph, before_place);
+
+    let source_tab = graph.create_workspace_tab("builtin", 1).expect("source tab");
     graph
-        .rehost(floating, tab, floating_view, WindowPlacement::Tiled, true)
-        .unwrap();
-    graph.validate().unwrap();
+        .rehost(floating, source_tab, floating_view, WindowPlacement::Tiled, true)
+        .expect("tile in source tab");
+    let before_rehost = graph.clone();
+    assert_eq!(
+        graph.rehost(floating, tab, floating_view, WindowPlacement::Tiled, true),
+        Err(WindowError::TooManyTiledWindows)
+    );
+    assert_eq!(graph, before_rehost);
 
     let before_stale = graph.clone();
     assert_eq!(
@@ -316,6 +328,53 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
     );
     assert_eq!(graph, before_stale);
     graph.validate().expect("all rejected mutations are atomic");
+}
+
+#[test]
+fn depth_limit_refusals_preserve_the_entire_graph() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let first = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .expect("first window");
+    let mut root = TiledLayoutNode::Window(first);
+    for _ in 1..MAXIMUM_TILED_DEPTH {
+        let view = graph.create_view(content, "builtin", 1).expect("view");
+        let window = graph
+            .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+            .expect("window");
+        root = TiledLayoutNode::Split {
+            axis: TileAxis::Horizontal,
+            ratio: 500,
+            first: Box::new(root),
+            second: Box::new(TiledLayoutNode::Window(window)),
+        };
+    }
+    graph.set_tiled_layout(tab, Some(root.clone())).expect("maximum depth");
+    graph.validate().expect("valid at depth limit");
+
+    let view = graph.create_view(content, "builtin", 1).expect("extra view");
+    let extra = graph
+        .open_window(tab, view, WindowPlacement::Hidden, true, "builtin", 1)
+        .expect("hidden window");
+    let before = graph.clone();
+    assert_eq!(
+        graph.tile(extra, Some(first), TileAxis::Vertical, true, 500),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    assert_eq!(graph, before);
+
+    let too_deep = TiledLayoutNode::Split {
+        axis: TileAxis::Horizontal,
+        ratio: 500,
+        first: Box::new(root),
+        second: Box::new(TiledLayoutNode::Window(first)),
+    };
+    assert_eq!(
+        graph.set_tiled_layout(tab, Some(too_deep)),
+        Err(WindowError::TiledLayoutTooDeep)
+    );
+    assert_eq!(graph, before);
+    graph.validate().expect("refused mutations leave a valid graph");
 }
 
 #[test]
@@ -1097,30 +1156,49 @@ fn generation_cleanup_removes_only_exact_owned_graph_resources() {
             2,
         )
         .expect("new");
-    for (content, generation) in [(old, 1), (new, 2)] {
+    let other = graph
+        .create_content(
+            ContentTypeId::new("other.panel").expect("type"),
+            ContentAdapterKind::DeclarativeUi,
+            "other".into(),
+            false,
+            "other",
+            1,
+        )
+        .expect("other owner content");
+    let mut surviving_resources = Vec::new();
+    for (content, owner, generation) in [(old, "plugin", 1), (new, "plugin", 2), (other, "other", 1)] {
         let view = graph
-            .create_view(content, "plugin", generation)
+            .create_view(content, owner, generation)
             .expect("view");
         let tab = graph
-            .create_workspace_tab("plugin", generation)
+            .create_workspace_tab(owner, generation)
             .expect("tab");
-        graph
+        let window = graph
             .open_window(
                 tab,
                 view,
                 WindowPlacement::Fullscreen,
                 true,
-                "plugin",
+                owner,
                 generation,
             )
             .expect("window");
+        if content != old {
+            surviving_resources.push((content, view, tab, window));
+        }
     }
     graph
         .remove_owner_generation("plugin", 1)
         .expect("remove owner generation");
     assert!(graph.content(old).is_none());
-    assert!(graph.content(new).is_some());
-    assert_eq!(graph.counts(), (1, 1, 1, 1));
+    for (content, view, tab, window) in surviving_resources {
+        assert!(graph.content(content).is_some());
+        assert!(graph.view(view).is_some());
+        assert!(graph.workspace_tab(tab).is_some());
+        assert!(graph.window(window).is_some());
+    }
+    assert_eq!(graph.counts(), (2, 2, 2, 2));
     graph.validate().expect("valid graph");
 }
 

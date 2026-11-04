@@ -399,21 +399,7 @@ pub fn run_interactive(
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
         application.refresh_plugin_host_events();
-        let before_paste = application.state.window_version();
-        let registers_enabled = application.state.policy.registers_enabled;
-        if let Some(invocation) = application.clipboard.finish_pull(
-            &mut application.state.registers,
-            registers_enabled,
-            &before_paste,
-        ) {
-            application.invoke(invocation);
-            application
-                .clipboard
-                .continue_pastes(&before_paste, &application.state.window_version());
-        }
-        if application.clipboard_shared()
-            && let Some(text) = application.clipboard.push(&mut application.state.registers)
-        {
+        if let Some(text) = application.process_clipboard() {
             terminal.copy_to_clipboard(&text)?;
         }
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
@@ -479,6 +465,36 @@ pub fn run_interactive(
     }
     drop(terminal);
     application.finish_shutdown()
+}
+
+impl InteractiveApplication {
+    fn process_clipboard(&mut self) -> Option<String> {
+        let before_paste = self.state.window_version();
+        let registers_enabled = self.state.policy.registers_enabled;
+        let generation = self.state.registers.generation();
+        let paste = self.clipboard.finish_pull(
+            &mut self.state.value.registers,
+            registers_enabled,
+            &before_paste,
+        );
+        if self.state.registers.generation() != generation {
+            self.state.revision = self.state.revision.wrapping_add(1);
+        }
+        if let Some(invocation) = paste {
+            self.invoke(invocation);
+            self.clipboard.continue_pastes(&before_paste, &self.state.window_version());
+        }
+        let generation = self.state.registers.generation();
+        let output = if self.clipboard_shared() {
+            self.clipboard.push(&mut self.state.value.registers)
+        } else {
+            None
+        };
+        if self.state.registers.generation() != generation {
+            self.state.revision = self.state.revision.wrapping_add(1);
+        }
+        output
+    }
 }
 
 fn mode_name(mode: EditorMode) -> &'static str {

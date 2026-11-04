@@ -48,6 +48,7 @@ use super::{
 };
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
 use crate::editor::session::git::GitHunkAction;
+use crate::editor::session::workspace::leaves_root;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
 use crate::ui::render::surfaces::{
     PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT,
@@ -926,6 +927,7 @@ impl InteractiveApplication {
             }
         };
         let confirmation_source = source.confirmation_source.clone();
+        let navigation_current = confirmation_source.navigation_current(&self.state, &self.window_session);
         let confirmation_result = source.confirmation_result;
         let source_actions_admitted = source.source_actions_admitted;
         let mut execution = source.execution;
@@ -1000,6 +1002,7 @@ impl InteractiveApplication {
                         &plugin,
                         load,
                         proposal,
+                        navigation_current,
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,
@@ -6246,9 +6249,8 @@ impl InteractiveApplication {
                     ) {
                         continue;
                     }
-                    if next {
-                        self.start_task_step(task.requested().clone());
-                    } else {
+                    let next_step = next.then(|| task.requested().clone());
+                    if !next {
                         if code == Some(0) && !truncated {
                             self.apply_formatter_result(&task);
                         } else if truncated
@@ -6265,13 +6267,8 @@ impl InteractiveApplication {
                         {
                             self.finish_format_on_save();
                         }
-                        // Linters exit 1 when they have findings; that is not a failure. Other
-                        // tasks with a matcher publish what they matched however they exit.
-                        let (matched, lint) = match task.adapter() {
-                            AdapterContext::Linter { lint, .. } => (true, *lint),
-                            _ => (false, false),
-                        };
-                        let linter_ran = lint && matches!(code, Some(0 | 1));
+                        let linter_ran = matches!(task.adapter(), AdapterContext::Linter { lint: true, .. })
+                            && matches!(code, Some(0 | 1));
                         if !linter_ran
                             && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
                                 || code != Some(0))
@@ -6290,23 +6287,32 @@ impl InteractiveApplication {
                                 code != Some(0),
                             );
                         }
-                        if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
-                            self.show_error("linter output truncated; diagnostics not published");
-                        }
-                        if matched
-                            && (linter_ran || !lint)
-                            && !truncated
-                            && let Err(error) = self.tasks.begin_linter(
-                                *task,
-                                &self.state,
-                                &self.workspace,
-                                self.configuration.binding_revision(),
-                                &self.diagnostics,
-                                (MAXIMUM_DIAGNOSTICS, SEARCH_MAXIMUM_FILE_BYTES as u64),
-                            )
-                        {
-                            self.show_error(error);
-                        }
+                    }
+                    // Interpret dependency output too, before advancing to the next step.
+                    let (matched, lint) = match task.adapter() {
+                        AdapterContext::Linter { lint, .. } => (true, *lint),
+                        _ => (false, false),
+                    };
+                    let linter_ran = lint && matches!(code, Some(0 | 1));
+                    if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
+                        self.show_error("linter output truncated; diagnostics not published");
+                    }
+                    if matched
+                        && (linter_ran || !lint)
+                        && !truncated
+                        && let Err(error) = self.tasks.begin_linter(
+                            *task,
+                            &self.state,
+                            &self.workspace,
+                            self.configuration.binding_revision(),
+                            &self.diagnostics,
+                            (MAXIMUM_DIAGNOSTICS, SEARCH_MAXIMUM_FILE_BYTES as u64),
+                        )
+                    {
+                        self.show_error(error);
+                    }
+                    if let Some(name) = next_step {
+                        self.start_task_step(name);
                     }
                 }
                 crate::editor::session::tasks::TaskUpdate::Failed { source, message } => {
@@ -7223,12 +7229,16 @@ impl InteractiveApplication {
     }
     /// Remove the selected worktree and its directory. This never deletes a branch.
     pub(in crate::editor::session) fn request_git_worktree_remove(&mut self) {
-        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, .. }) =
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, main, .. }) =
             self.search.selected_picker_payload().cloned()
         else {
             self.show_error("select a worktree first");
             return;
         };
+        if main {
+            self.show_error("the primary worktree cannot be removed");
+            return;
+        }
         self.git.set_pending_destructive(
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name.clone()),
         );
@@ -7356,7 +7366,11 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("git-worktree:{}", worktree.name)),
+                        id: PickerItemId(if worktree.main {
+                            "git-worktree:primary".into()
+                        } else {
+                            format!("git-worktree:linked:{}", worktree.name)
+                        }),
                         label: worktree.name.clone(),
                         detail,
                         source: "worktrees".into(),
@@ -7364,6 +7378,7 @@ impl InteractiveApplication {
                     },
                     crate::editor::session::search::PickerPayload::GitWorktree {
                         name: worktree.name.clone(),
+                        main: worktree.main,
                         path: worktree.path.clone(),
                     },
                 )
@@ -9762,12 +9777,6 @@ impl InteractiveApplication {
             _ => {}
         }
     }
-}
-
-/// Whether a switch from `old` to `new` leaves this file behind. Worktrees nest under the main
-/// checkout: moving down keeps files inside the new root, moving up leaves all of the old one.
-fn leaves_root(file: &Path, old: &Path, new: &Path) -> bool {
-    file.starts_with(old) && (!file.starts_with(new) || old.starts_with(new))
 }
 
 impl InteractiveApplication {
@@ -12848,7 +12857,7 @@ impl InteractiveApplication {
             return true;
         }
         typed.is_some_and(completion_word_char)
-            && !self.language.request_pending()
+            && !self.language.request_pending(self.language.generation())
             && self
                 .lsp_word_before_cursor()
                 .and_then(|word| word.chars().next())
@@ -14997,7 +15006,7 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn process_trust_events(&mut self) {
         let before = self.workspace.version();
-        let updates = self.workspace.poll();
+        let updates = self.workspace.poll(&self.state);
         if before != self.workspace.version() {
             self.documents.retire_workspace(&self.workspace.version());
         }

@@ -1542,6 +1542,19 @@ pub(super) fn list_directory(
     Ok(paths)
 }
 
+/// Open without waiting for a FIFO writer, then validate the opened handle.
+pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected a regular file"));
+    }
+    Ok(file)
+}
+
 pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()

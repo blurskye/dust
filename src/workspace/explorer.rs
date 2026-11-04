@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -185,15 +185,15 @@ impl ExplorerState {
         }
         let data = Arc::make_mut(&mut self.data);
         let root = data.nodes[&node].root;
+        let parent_path = data.nodes[&node].path.clone();
         let old_children = data.nodes[&node].children.clone();
         let old_ids_by_path = old_children
             .iter()
             .filter_map(|id| data.nodes.get(id).map(|child| (child.path.clone(), *id)))
             .collect::<HashMap<_, _>>();
-        let mut reused = BTreeSet::new();
         let mut ids = Vec::new();
         for child in children {
-            if data
+            if child.path.parent() != Some(parent_path.as_path()) || data
                 .by_path
                 .get(&child.path)
                 .is_some_and(|id| data.roots.contains(id))
@@ -211,17 +211,12 @@ impl ExplorerState {
                     old.name = child.name;
                     old.path = child.path.clone();
                 }
-                reused.insert(id);
                 id
             } else {
                 if let Some(stale) = old_ids_by_path.get(&child.path).copied() {
                     remove_subtree(data, stale);
                 }
-                let id = data
-                    .by_path
-                    .get(&child.path)
-                    .copied()
-                    .unwrap_or_else(|| allocate(data));
+                let id = allocate(data);
                 data.by_path.insert(child.path.clone(), id);
                 data.nodes.insert(
                     id,
@@ -240,11 +235,13 @@ impl ExplorerState {
             };
             ids.push(id);
         }
+        let retained = ids.iter().copied().collect::<HashSet<_>>();
         for old in old_children {
-            if !reused.contains(&old) && !ids.contains(&old) {
+            if !retained.contains(&old) {
                 remove_subtree(data, old);
             }
         }
+        self.expanded.retain(|id| data.nodes.contains_key(id));
         if self
             .selected
             .is_some_and(|selected| !data.nodes.contains_key(&selected))
@@ -322,14 +319,16 @@ impl ExplorerState {
     }
 
     pub fn select_first_child(&mut self) {
-        if let Some(id) = self.selected
-            && let Some(child) = self
-                .data
-                .nodes
-                .get(&id)
-                .and_then(|node| node.children.first())
+        let Some(id) = self.selected else { return };
+        if !self.is_expanded(id) {
+            self.toggle_loaded(id);
+        }
+        if let Some(child) = self.data.nodes.get(&id).and_then(|node| {
+            node.children
+                .iter()
+                .find(|child| self.visible_positions.contains_key(child))
                 .copied()
-        {
+        }) {
             self.selected = Some(child);
         }
     }
@@ -394,16 +393,20 @@ impl ExplorerState {
         self.data
             .nodes
             .values()
-            .filter(|node| {
-                matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
-                    && self.expanded.contains(&node.id)
-                    && matches!(
-                        node.load,
-                        ExplorerLoadState::Loaded | ExplorerLoadState::Loading(_)
-                    )
-            })
+            .filter(|node| self.is_watched_directory(node.id))
             .map(|node| node.path.clone())
             .collect()
+    }
+    pub(crate) fn is_watched_directory(&self, id: ExplorerNodeId) -> bool {
+        self.data.nodes.get(&id).is_some_and(|node| {
+            matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
+                && (self.expanded.contains(&id)
+                    || (!self.filter.is_empty() && self.visible_positions.contains_key(&id)))
+                && matches!(
+                    node.load,
+                    ExplorerLoadState::Loaded | ExplorerLoadState::Loading(_)
+                )
+        })
     }
     fn rebuild_visible_projection(&mut self) {
         let mut visible = Vec::new();

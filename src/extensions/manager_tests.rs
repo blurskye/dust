@@ -91,6 +91,47 @@ fn manifest() -> PluginManifest {
     }
 }
 
+fn component_host() -> ComponentHostState {
+    ComponentHostState {
+        runtime_epoch: 0,
+        limits: super::component::ComponentLimits::new(
+            wasmtime::StoreLimitsBuilder::new().build(),
+            64 * 1024 * 1024,
+        ),
+        capabilities: BTreeSet::new(),
+        declared_content_types: BTreeSet::new(),
+        snapshot: None,
+        proposals: Vec::new(),
+        messages: Vec::new(),
+        config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: true,
+        confirmation_result_only: false,
+        ui_requests: Vec::new(),
+        ui_events: Vec::new(),
+        next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
+        host_events: Vec::new(),
+        delivered_host_event_ids: BTreeSet::new(),
+        host_event_acknowledgements: Vec::new(),
+        execution_available: true,
+        pending_storage: BTreeMap::new(),
+        storage_policy: None,
+        storage_requests: Vec::new(),
+        storage_results: Vec::new(),
+        next_storage_token: 1,
+        provider_requests: Vec::new(),
+        delivered_provider_requests: BTreeSet::new(),
+        provider_chunks: Vec::new(),
+        virtual_document_requests: Vec::new(),
+        delivered_virtual_document_requests: BTreeSet::new(),
+        virtual_document_proposals: Vec::new(),
+    }
+}
+
 #[test]
 fn completed_component_execution_cancels_its_epoch_timer() {
     use sha2::{Digest, Sha256};
@@ -148,44 +189,8 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
     use component_api::dust::plugin::host::{
         Host, OpenWindowRequest, UiNode, UiNodeKind, UiRequest, UiStyle, UiTree, WindowPlacement,
     };
-    let mut host = ComponentHostState {
-        runtime_epoch: 0,
-        limits: super::component::ComponentLimits::new(
-            wasmtime::StoreLimitsBuilder::new().build(),
-            64 * 1024 * 1024,
-        ),
-        capabilities: BTreeSet::new(),
-        declared_content_types: ["plugin.demo.chat-panel".into()].into_iter().collect(),
-        snapshot: None,
-        proposals: Vec::new(),
-        messages: Vec::new(),
-        config: BTreeMap::new(),
-        ui_revision: None,
-        confirmation_available: true,
-        confirmation_result_only: false,
-        ui_requests: Vec::new(),
-        ui_events: Vec::new(),
-        next_ui_token: 1,
-        pending_ui_tokens: BTreeSet::new(),
-        confirmation_requests: Vec::new(),
-        confirmation_results: Vec::new(),
-        next_confirmation_token: 1,
-        host_events: Vec::new(),
-        delivered_host_event_ids: BTreeSet::new(),
-        host_event_acknowledgements: Vec::new(),
-        execution_available: true,
-        pending_storage: BTreeMap::new(),
-        storage_policy: None,
-        storage_requests: Vec::new(),
-        storage_results: Vec::new(),
-        next_storage_token: 1,
-        provider_requests: Vec::new(),
-        delivered_provider_requests: BTreeSet::new(),
-        provider_chunks: Vec::new(),
-        virtual_document_requests: Vec::new(),
-        delivered_virtual_document_requests: BTreeSet::new(),
-        virtual_document_proposals: Vec::new(),
-    };
+    let mut host = component_host();
+    host.declared_content_types.insert("plugin.demo.chat-panel".into());
     let request = |content_type: &str| {
         UiRequest::OpenWindow(OpenWindowRequest {
             expected_graph_revision: 4,
@@ -263,44 +268,7 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
     use component_api::dust::plugin::host::{
         ConfirmationAnswer, ConfirmationErrorCode, ConfirmationRequest, Host,
     };
-    let mut host = ComponentHostState {
-        runtime_epoch: 0,
-        limits: super::component::ComponentLimits::new(
-            wasmtime::StoreLimitsBuilder::new().build(),
-            64 * 1024 * 1024,
-        ),
-        capabilities: BTreeSet::new(),
-        declared_content_types: BTreeSet::new(),
-        snapshot: None,
-        proposals: Vec::new(),
-        messages: Vec::new(),
-        config: BTreeMap::new(),
-        ui_revision: None,
-        confirmation_available: true,
-        confirmation_result_only: false,
-        ui_requests: Vec::new(),
-        ui_events: Vec::new(),
-        next_ui_token: 1,
-        pending_ui_tokens: BTreeSet::new(),
-        confirmation_requests: Vec::new(),
-        confirmation_results: Vec::new(),
-        next_confirmation_token: 1,
-        host_events: Vec::new(),
-        delivered_host_event_ids: BTreeSet::new(),
-        host_event_acknowledgements: Vec::new(),
-        execution_available: true,
-        pending_storage: BTreeMap::new(),
-        storage_policy: None,
-        storage_requests: Vec::new(),
-        storage_results: Vec::new(),
-        next_storage_token: 1,
-        provider_requests: Vec::new(),
-        delivered_provider_requests: BTreeSet::new(),
-        provider_chunks: Vec::new(),
-        virtual_document_requests: Vec::new(),
-        delivered_virtual_document_requests: BTreeSet::new(),
-        virtual_document_proposals: Vec::new(),
-    };
+    let mut host = component_host();
     let request = || ConfirmationRequest {
         title: "Continue?".into(),
         message: "A bounded ordinary question".into(),
@@ -318,15 +286,30 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
         ConfirmationErrorCode::QueueFull
     );
     host.confirmation_available = true;
-    let invalid = ConfirmationRequest {
-        title: String::new(),
-        message: "message".into(),
-        default_answer: ConfirmationAnswer::Cancelled,
-    };
-    assert_eq!(
-        host.queue_confirmation(invalid).unwrap_err().code,
-        ConfirmationErrorCode::InvalidRequest
-    );
+    for invalid in [
+        ConfirmationRequest { title: String::new(), ..request() },
+        ConfirmationRequest { message: String::new(), ..request() },
+        ConfirmationRequest { default_answer: ConfirmationAnswer::Cancelled, ..request() },
+        ConfirmationRequest { title: "t".repeat(129), ..request() },
+        ConfirmationRequest { message: "m".repeat(4_097), ..request() },
+        ConfirmationRequest { title: "bad\0title".into(), ..request() },
+        ConfirmationRequest { message: "bad\0message".into(), ..request() },
+    ] {
+        assert_eq!(
+            host.queue_confirmation(invalid).unwrap_err().code,
+            ConfirmationErrorCode::InvalidRequest
+        );
+        assert!(host.confirmation_requests.is_empty());
+        assert_eq!(host.next_confirmation_token, 2);
+    }
+    for valid in [
+        ConfirmationRequest { title: "t".repeat(128), ..request() },
+        ConfirmationRequest { message: "m".repeat(4_096), ..request() },
+    ] {
+        assert!(host.queue_confirmation(valid).is_ok());
+        assert_eq!(host.confirmation_requests.len(), 1);
+        host.confirmation_requests.clear();
+    }
 }
 
 #[test]
@@ -337,56 +320,32 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         maximum_value_bytes: 1_024,
         maximum_total_bytes: 16_384,
     };
-    let mut host = ComponentHostState {
-        runtime_epoch: 0,
-        limits: super::component::ComponentLimits::new(
-            wasmtime::StoreLimitsBuilder::new().build(),
-            64 * 1024 * 1024,
-        ),
-        capabilities: [
-            PluginCapability::PluginStorage,
-            PluginCapability::VirtualDocuments,
-        ]
-        .into_iter()
-        .collect(),
-        declared_content_types: BTreeSet::new(),
-        snapshot: None,
-        proposals: Vec::new(),
-        messages: Vec::new(),
-        config: BTreeMap::new(),
-        ui_revision: None,
-        ui_requests: Vec::new(),
-        ui_events: Vec::new(),
-        next_ui_token: 1,
-        pending_ui_tokens: BTreeSet::new(),
-        confirmation_requests: Vec::new(),
-        confirmation_results: Vec::new(),
-        next_confirmation_token: 1,
-        host_events: Vec::new(),
-        delivered_host_event_ids: BTreeSet::new(),
-        host_event_acknowledgements: Vec::new(),
-        confirmation_available: true,
-        confirmation_result_only: false,
-        execution_available: true,
-        pending_storage: BTreeMap::new(),
-        storage_policy: Some(policy),
-        storage_requests: Vec::new(),
-        storage_results: Vec::new(),
-        next_storage_token: 1,
-        provider_requests: Vec::new(),
-        delivered_provider_requests: BTreeSet::new(),
-        provider_chunks: Vec::new(),
-        virtual_document_requests: Vec::new(),
-        delivered_virtual_document_requests: BTreeSet::new(),
-        virtual_document_proposals: Vec::new(),
-    };
+    let mut host = component_host();
+    host.storage_policy = Some(policy);
+    host.capabilities.insert(PluginCapability::VirtualDocuments);
+    assert_eq!(
+        host.queue_storage_request(StorageRequest::Get("valid".into()))
+            .unwrap_err()
+            .code,
+        component_api::dust::plugin::host::StorageErrorCode::Unavailable
+    );
+    assert!(host.storage_requests.is_empty());
+    assert!(host.pending_storage.is_empty());
+    assert_eq!(host.next_storage_token, 1);
+    host.capabilities.insert(PluginCapability::PluginStorage);
+    assert_eq!(
+        host.queue_storage_request(StorageRequest::Get("valid".into())).unwrap(),
+        1
+    );
+    assert_eq!(host.storage_requests.len(), 1);
+    assert_eq!(host.pending_storage.len(), 1);
     assert_eq!(
         host.queue_storage_request(StorageRequest::Get("bad/key".into()))
             .unwrap_err()
             .code,
         component_api::dust::plugin::host::StorageErrorCode::InvalidKey
     );
-    for _ in 0..STORAGE_REQUEST_CEILING {
+    for _ in 1..STORAGE_REQUEST_CEILING {
         host.queue_storage_request(StorageRequest::Delete(
             component_api::dust::plugin::host::StorageDeleteRequest {
                 key: "valid".into(),
@@ -431,6 +390,48 @@ fn static_manifest_contribution_index_is_namespaced_deterministic_and_pure() {
     stolen.contributions.keymaps[0].id = "plugin.other.keymap.stolen".into();
     assert!(matches!(
         index_manifest_contributions(&stolen, 10, "manifest.toml".into()),
+        Err(PluginError::InvalidManifest)
+    ));
+}
+
+#[test]
+fn static_manifest_command_ids_fit_the_command_registry() {
+    let mut manifest = manifest();
+    manifest.id = "p".repeat(64);
+    manifest.contributions = PluginContributions::default();
+    let declaration = manifest.commands["run"].clone();
+    // "plugin." and the separator leave 56 bytes after a 64-byte plugin ID.
+    manifest.commands = [("c".repeat(56), declaration.clone())].into_iter().collect();
+    assert!(index_manifest_contributions(&manifest, 1, "manifest.toml".into()).is_ok());
+    for length in [57, 64] {
+        manifest.commands = [("c".repeat(length), declaration.clone())].into_iter().collect();
+        assert!(matches!(
+            index_manifest_contributions(&manifest, 1, "manifest.toml".into()),
+            Err(PluginError::InvalidManifest)
+        ));
+    }
+}
+
+#[test]
+fn candidate_activation_validates_the_manifest_before_loading() {
+    let limits = PluginLimits::default();
+    let loaded = retained_runtime(&limits, false).unwrap().loaded;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("guest.wasm");
+    fs::write(&path, loaded.bytes).unwrap();
+    let mut manifest = loaded.manifest;
+    // The runtime fixture grants events without declaring subscriptions.
+    manifest.capabilities.remove(&PluginCapability::EventSubscriptions);
+    assert!(activate_candidate(root.path(), &path, manifest.clone(), &limits).is_ok());
+    let version = std::mem::take(&mut manifest.version);
+    assert!(matches!(
+        activate_candidate(root.path(), &path, manifest.clone(), &limits),
+        Err(PluginError::InvalidManifest)
+    ));
+    manifest.version = version;
+    let limits = PluginLimits { maximum_commands: 0, ..limits };
+    assert!(matches!(
+        activate_candidate(root.path(), &path, manifest, &limits),
         Err(PluginError::InvalidManifest)
     ));
 }
@@ -515,6 +516,44 @@ fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
     conflicts
         .install(other)
         .expect("key conflicts resolve after user overrides");
+}
+
+#[test]
+fn plugin_manifest_reads_require_regular_bounded_files() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = std::path::Path::new("manifest.toml");
+    let path = root.path().join(relative);
+    let limits = PluginLimits::default();
+    let check = |expected: fn(&PluginError) -> bool| {
+        let (_, error) = super::index::load_manifest_component(
+            root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
+        ).err().expect("manifest must be rejected before loading the component");
+        assert!(expected(&error), "{error}");
+        let error = super::index::index_manifest_from_store(
+            root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
+        ).unwrap_err();
+        assert!(expected(&error), "{error}");
+    };
+    nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    check(|error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput));
+    fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
+    check(|error| matches!(error, PluginError::OutsideStore));
+    fs::remove_file(&path).unwrap();
+
+    let mut source = toml::to_string(&manifest()).unwrap();
+    fs::write(&path, &source).unwrap();
+    super::index::index_manifest_from_store(
+        root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
+    ).expect("a regular manifest can be indexed without its component");
+    let (_, error) = super::index::load_manifest_component(
+        root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
+    ).err().unwrap();
+    assert!(matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::NotFound));
+
+    source.extend(std::iter::repeat_n(' ', 1024 * 1024 + 1 - source.len()));
+    fs::write(&path, source).unwrap();
+    check(|error| matches!(error, PluginError::InvalidManifest));
 }
 
 #[test]
@@ -1186,6 +1225,13 @@ fn retained_runtime(
     limits: &PluginLimits,
     looping_activation: bool,
 ) -> Result<super::execution::LoadOutcome, PluginError> {
+    retained_runtime_with_activation(limits, looping_activation.then_some(&[0, 3, 64, 12, 0, 11, 0, 11]))
+}
+
+fn retained_runtime_with_activation(
+    limits: &PluginLimits,
+    activation_body: Option<&[u8]>,
+) -> Result<super::execution::LoadOutcome, PluginError> {
     fn number(bytes: &[u8], at: &mut usize) -> usize {
         let (mut value, mut shift) = (0, 0);
         loop {
@@ -1210,7 +1256,7 @@ fn retained_runtime(
     }
     let original = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
     let mut core = original.to_vec();
-    if looping_activation {
+    if let Some(activation_body) = activation_body {
         let mut at = 8;
         while at < original.len() {
             let section = original[at];
@@ -1225,7 +1271,7 @@ fn retained_runtime(
                     let length = number(original, &mut at);
                     // The fixed guest exports activate as function 70, after 15 imports.
                     let body: &[u8] = if function == 55 {
-                        &[0, 3, 64, 12, 0, 11, 0, 11]
+                        activation_body
                     } else {
                         &original[at..at + length]
                     };
@@ -1289,13 +1335,53 @@ fn retained_runtime(
         maximum_total_bytes: 4 * 1024 * 1024,
     });
     let mut activation_limits = limits.clone();
-    if !looping_activation {
+    if activation_body.is_none() {
         activation_limits.epoch_deadline_ticks = 1000;
     }
     let mut outcome =
         super::index::load_component(root.path(), &path, manifest, &activation_limits)?;
     outcome.runtime.limits = limits.clone();
     Ok(outcome)
+}
+
+#[test]
+fn component_activation_checks_counts_and_strings_before_copying() {
+    fn constant(mut value: i32, body: &mut Vec<u8>) {
+        body.push(0x41); // i32.const
+        loop {
+            let byte = (value & 127) as u8;
+            value >>= 7;
+            let done = (value == 0 && byte & 64 == 0) || (value == -1 && byte & 64 != 0);
+            body.push(byte | if done { 0 } else { 128 });
+            if done { break; }
+        }
+    }
+    for (count, length, expected) in [(4096, i32::MAX, "count ceiling"), (2, 257, "byte ceiling")] {
+        // Replace activate with a result whose list entries alias one guest string.
+        let mut body = vec![0]; // no locals
+        for (address, value) in [(0, 0), (4, 32), (8, count), (32, 4096), (36, length), (40, 4096), (44, length)] {
+            constant(address, &mut body);
+            constant(value, &mut body);
+            body.extend_from_slice(&[0x36, 2, 0]); // i32.store
+        }
+        constant(0, &mut body); // result pointer
+        body.push(0x0b);
+        let error = retained_runtime_with_activation(&PluginLimits::default(), Some(&body))
+            .err().expect("oversized activation must fail");
+        assert!(matches!(error, PluginError::Activation(_)), "{error}");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn component_execution_errors_include_the_trap_cause() {
+    let mut runtime = retained_runtime(&PluginLimits::default(), false).unwrap().runtime;
+    runtime.limits.fuel = 1;
+    let mut request = empty_execution_request();
+    request.command = "spin".into();
+    let error = super::index::execute_component(request, &mut runtime).unwrap_err();
+    assert!(matches!(error, PluginError::Execution(_)));
+    assert!(error.to_string().contains("fuel"), "{error}");
 }
 
 #[test]

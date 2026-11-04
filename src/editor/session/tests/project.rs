@@ -730,6 +730,38 @@ fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
 }
 
 #[test]
+fn workspace_history_records_visits_without_trust_prompts() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let first = app.state.workspace_root.clone();
+    // Recording the startup visit must not suppress its first trust prompt.
+    app.process_trust_events();
+    assert!(app.workspace.seen_roots().contains(&first));
+    app.maybe_prompt_for_unseen_workspace();
+    assert_eq!(app.ui.prompt.as_ref().unwrap().kind, crate::ui::PromptKind::WorkspaceTrust);
+    app.close_prompt();
+    wait_trust(&mut app);
+
+    let second = tempdir().unwrap();
+    let second_path = second.path().canonicalize().unwrap();
+    app.switch_workspace_root(second_path.clone());
+    wait_root_operation(&mut app);
+    wait_trust(&mut app);
+    assert!(app.ui.prompt.is_none());
+    assert_eq!(app.workspace.trust(), crate::workspace::WorkspaceTrust::Untrusted);
+    app.switch_workspace_root(first.clone());
+    wait_root_operation(&mut app);
+    wait_trust(&mut app);
+    assert_eq!(app.state.workspace_root, first);
+    assert!(app.workspace.seen_roots().contains(&second_path));
+    let database: crate::workspace::TrustDatabase = toml::from_str(
+        &fs::read_to_string(app.workspace.state_path()).unwrap(),
+    ).unwrap();
+    assert!(database.seen.iter().any(|identity| identity.canonical_path == second_path));
+    assert!(database.identities.is_empty(), "visiting does not grant trust");
+}
+
+#[test]
 fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
     let mut app = app();
     prepare_trust_identity(&mut app);
@@ -1248,6 +1280,35 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     app.state.buffers[buffer].dirty = false;
     app.remove_workspace_root(second);
     assert_eq!(app.workspace.roots().len(), 1);
+}
+
+#[test]
+fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let original = app.state.workspace_root.clone();
+    let roots = app.workspace.roots().to_vec();
+    let version = app.workspace.version();
+    let target = tempdir().unwrap();
+    let (buffer, _) = app.state.open_text(
+        TextBuffer::from_text("clean"),
+        Some(original.join("notes.txt")),
+    ).unwrap();
+    app.switch_workspace_root(target.path().to_path_buf());
+    assert!(app.workspace.root_operation_pending());
+    // The inspection may have finished on its worker, but its result is not published yet.
+    app.state.set_buffer_dirty(buffer, true);
+    wait_root_operation(&mut app);
+    assert_eq!(app.workspace.roots(), roots);
+    assert_eq!(app.workspace.version(), version);
+    assert_eq!(app.state.workspace_root, original);
+    assert!(app.state.buffers[buffer].dirty);
+    assert!(app.ui.notification_error);
+
+    app.state.set_buffer_dirty(buffer, false);
+    app.switch_workspace_root(target.path().to_path_buf());
+    wait_root_operation(&mut app);
+    assert_eq!(app.state.workspace_root, target.path().canonicalize().unwrap());
 }
 
 #[test]
@@ -2572,6 +2633,15 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
 
 #[test]
 fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
+    check_task_diagnostics(false);
+}
+
+#[test]
+fn successful_dependency_diagnostics_keep_separate_stream_records() {
+    check_task_diagnostics(true);
+}
+
+fn check_task_diagnostics(with_dependency: bool) {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("notes.txt"), "one\ntwo\n").unwrap();
@@ -2605,6 +2675,14 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
             }),
         },
     );
+    if with_dependency {
+        let mut dependency = loaded.config.tasks["build"].clone();
+        dependency.arguments = vec!["-c".into(), "printf 'notes.txt:1:1: warning: stdout'; exec 1>&-; printf 'notes.txt:2:1: warning: stderr' >&2".into()];
+        loaded.config.tasks.insert("check".into(), dependency);
+        let build = loaded.config.tasks.get_mut("build").unwrap();
+        build.dependencies = vec!["check".into()];
+        build.arguments = vec!["-c".into(), "printf 'notes.txt:2:1: warning: main task\\n'".into()];
+    }
     let mut app = InteractiveApplication::new(
         StartupTarget::Dashboard {
             root: root.path().into(),
@@ -2627,7 +2705,10 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     app.reconcile_workspace_trust();
     app.process_effect(AppEffect::TaskRun("build".into()));
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.diagnostics.choices().count() == 0 && Instant::now() < deadline {
+    let expected = if with_dependency { 3 } else { 1 };
+    while (app.diagnostics.choices().count() < expected || app.tasks.is_running("build"))
+        && Instant::now() < deadline
+    {
         app.process_execution_preflight();
         app.process_job_events();
         app.process_vfs_results();
@@ -2635,17 +2716,24 @@ fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     }
     assert_eq!(
         app.diagnostics.choices().count(),
-        1,
+        expected,
         "{:?}",
         app.notices.history().collect::<Vec<_>>()
     );
     // A build that exits 1 still failed, unlike a linter reporting findings.
+    let status = if with_dependency { "succeeded" } else { "failed" };
     assert!(
         app.tasks
             .task_items()
             .iter()
-            .any(|item| item.label == "build" && item.detail == "failed")
+            .any(|item| item.label == "build" && item.detail == status)
     );
+    if with_dependency {
+        let messages = app.diagnostics.choices().map(|(_, diagnostic, _)| diagnostic.message.as_str()).collect::<Vec<_>>();
+        assert!(messages.contains(&"stdout"));
+        assert!(messages.contains(&"stderr"));
+        assert!(messages.contains(&"main task"));
+    }
 }
 
 #[test]
@@ -3531,70 +3619,22 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let identities = app
-        .workspace
-        .roots()
-        .iter()
-        .map(|root| root.identity.clone())
-        .collect::<Vec<_>>();
-
     let alpha_file = roots[0].join("note.txt");
     let beta_file = roots[1].join("note.txt");
-    app.documents
-        .open_explorer(alpha_file.clone(), identities.clone())
-        .expect("open the alpha document");
+    app.start_open(alpha_file.clone());
     wait_vfs(&mut app);
-    let alpha = app
-        .documents
-        .worktree_identity(&alpha_file)
-        .cloned()
-        .expect("the alpha buffer is bound to a worktree");
-    assert_eq!(
-        alpha.root,
-        std::fs::canonicalize(&roots[0]).unwrap(),
-        "the identity names the worktree the document was opened in"
-    );
+    assert!(app.state.buffers.values().any(|buffer| {
+        buffer.path.as_ref() == Some(&alpha_file)
+            && buffer.text.to_string() == "alpha"
+    }));
 
-    app.documents
-        .open_explorer(beta_file.clone(), identities)
-        .expect("open the beta document");
+    app.start_open(beta_file.clone());
     wait_vfs(&mut app);
-    let beta = app
-        .documents
-        .worktree_identity(&beta_file)
-        .cloned()
-        .expect("the beta buffer is bound to a worktree");
-    assert_eq!(beta.root, std::fs::canonicalize(&roots[1]).unwrap());
-    assert_ne!(
-        alpha.id, beta.id,
-        "two linked worktrees carry distinct identities"
-    );
-    assert_eq!(
-        app.documents
-            .worktree_identity(&alpha_file)
-            .cloned()
-            .expect("the alpha binding survives"),
-        alpha,
-        "opening another worktree never retargets an existing buffer"
-    );
-
-    // A path that cannot be canonicalized has no identity rather than a fabricated one.
-    assert!(
-        crate::workspace::git::WorktreeIdentity::capture(std::path::Path::new(
-            "/nonexistent-dust/orphan.txt"
-        ))
-        .is_none(),
-        "a document that does not exist has no worktree"
-    );
-    // The binding is captured when a document is opened, not synthesised on demand: a document
-    // this session never opened reports nothing even though its directory sits under a `.git`.
-    // (This host has a `/tmp/.git`, so a temporary directory is not "outside any worktree".)
-    let unopened = app.state.workspace_root.join("never-opened.txt");
-    fs::write(&unopened, "x").unwrap();
-    assert!(
-        app.documents.worktree_identity(&unopened).is_none(),
-        "an unopened document has no captured identity"
-    );
+    for (path, text) in [(&alpha_file, "alpha"), (&beta_file, "beta")] {
+        assert!(app.state.buffers.values().any(|buffer| {
+            buffer.path.as_ref() == Some(path) && buffer.text.to_string() == text
+        }), "opening another worktree must preserve each buffer's path and text");
+    }
 }
 
 #[test]
@@ -3717,6 +3757,59 @@ fn switching_to_a_worktree_moves_the_editor_there() {
         worktree.join("note.txt").is_file() && main_file.is_file(),
         "switching never touches either checkout"
     );
+}
+
+#[test]
+fn primary_worktree_and_linked_main_have_distinct_picker_entries() {
+    let mut app = app();
+    let repo = history_fixture(&app.state.workspace_root, &["base"]);
+    let mut branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+    if branch == "main" {
+        repo.find_branch("main", git2::BranchType::Local).unwrap()
+            .rename("trunk", false).unwrap();
+        branch = "trunk".into();
+        repo.set_head("refs/heads/trunk").unwrap();
+    }
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = outside.path().join("main");
+    let reference = repo.branch("side", &head, false).unwrap().into_reference();
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&reference));
+    repo.worktree("main", &linked, Some(&options)).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    app.start_git_status_refresh();
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.start_git_worktrees();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let rows = app.search.picker_projection().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == "main").count(), 2);
+    let primary = rows.iter().position(|row| row.id == "git-worktree:primary").unwrap();
+    assert!(rows.iter().any(|row| row.id == "git-worktree:linked:main"));
+    for _ in 0..primary {
+        app.invoke(crate::editor::CommandInvocation::new("picker.next", InvocationSource::Test).unwrap());
+    }
+    app.request_git_worktree_remove();
+    assert!(app.ui.notification_error);
+    assert!(app.ui.notification.as_deref().unwrap_or_default().contains("primary"));
+    assert!(app.git.take_pending_destructive().is_none());
+    assert!(!app.git.branch_pending());
+    assert!(linked.join("h0.txt").is_file());
+    assert!(repo.find_worktree("main").is_ok());
+    assert_eq!(repo.head().unwrap().shorthand(), Some(branch.as_str()));
 }
 
 #[test]

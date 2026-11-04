@@ -647,6 +647,7 @@ impl DebugSession {
                 } else {
                     crate::debugger::DapSessionEnd::Detached
                 });
+                let _ = self.stop();
             }
             DapEvent::Response {
                 response:

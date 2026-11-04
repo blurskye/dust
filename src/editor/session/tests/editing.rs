@@ -1298,6 +1298,25 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
 }
 
 #[test]
+fn idle_syntax_and_clipboard_polls_preserve_frame_revisions() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("let word = 1;"), None).unwrap();
+    app.ui.lsp_semantic_spans = vec![crate::ui::UiSyntaxSpan {
+        buffer,
+        revision: app.state.buffers[buffer].text.revision(),
+        range: ByteRange::new(ByteOffset(4), ByteOffset(8)).unwrap(),
+        role: crate::language::syntax::Highlight::VARIABLE,
+    }];
+    app.process_syntax();
+    let before = (app.state.revision, app.ui.revision);
+    for _ in 0..3 {
+        app.process_syntax();
+        assert!(app.process_clipboard().is_none());
+        assert_eq!((app.state.revision, app.ui.revision), before);
+    }
+}
+
+#[test]
 fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     let mut app = app();
     app.state.open_text(
@@ -1316,7 +1335,9 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     for key in ['i', 'X'] {
         app.handle_configured_key(KeyEvent::character(key));
     }
+    let revision = app.ui.revision;
     app.process_syntax();
+    assert!(app.ui.revision > revision);
     let span = app.ui.lsp_semantic_spans.first().expect("the colour stays");
     assert_eq!(span.revision, app.state.buffers[buffer].text.revision());
     assert_eq!(
@@ -1355,12 +1376,84 @@ fn recovery_failure_and_retired_reads_preserve_the_journal() {
 }
 
 #[test]
+fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
+    for wrap in [true, false] {
+        let mut app = app();
+        app.window_session.observe_size((12, 8));
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = wrap;
+        fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+        fixture.settings.ui.status_line.enabled = false;
+        app.configuration.install_fixture(fixture);
+        let (_, view) = app.state.open_text(
+            TextBuffer::from_text(&format!("{}\nx x x", "x ".repeat(200))), None,
+        ).unwrap();
+        app.set_dashboard_visibility(false);
+        app.reconcile_editor_windows();
+        let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
+        let width = crate::ui::editor_state_content_width(
+            &app.state, &app.state.buffers[app.state.views[view].buffer].text,
+            &app.configuration.settings().editor, viewport.width,
+        );
+        let (first, end) = if wrap {
+            app.state.views[view].scroll_wrap_row = 1;
+            app.state.views[view].cursor = ByteOffset(width);
+            (width, width * (usize::from(viewport.height) + 1))
+        } else {
+            app.state.views[view].scroll_column = 10;
+            app.state.views[view].cursor = ByteOffset(10);
+            (10, 10 + width)
+        };
+        app.begin_flash();
+        press_keys(&mut app, &["x"]);
+        let flash = app.flash.as_ref().expect("several visible matches");
+        let starts = flash.targets.iter().map(|target| target.range.start.get()).collect::<Vec<_>>();
+        let expected = (first..end).filter(|at| at % 2 == 0 && *at != first).collect::<Vec<_>>();
+        assert_eq!(starts, expected, "wrap={wrap}");
+        assert!(flash.targets.iter().any(|target| target.label.is_some()));
+    }
+}
+
+#[test]
+fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
+    let mut app = app();
+    app.window_session.observe_size((20, 8));
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.wrap = false;
+    fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    fixture.settings.ui.status_line.enabled = false;
+    app.configuration.install_fixture(fixture);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&"x ".repeat(100)), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.state.views[view].scroll_column = 10;
+    app.state.views[view].cursor = ByteOffset(10);
+    for position in [0, 18] {
+        app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
+            buffer,
+            revision: app.state.buffers[buffer].text.revision(),
+            position: ByteOffset(position),
+            label: "hint".repeat(20),
+        });
+    }
+    app.begin_flash();
+    press_keys(&mut app, &["x"]);
+    let flash = app.flash.as_ref().expect("three visible matches");
+    assert_eq!(flash.targets.iter().map(|target| target.range.start.get()).collect::<Vec<_>>(), vec![12, 14, 16]);
+    let frame = render(&app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 20, 8);
+    for label in flash.targets.iter().filter_map(|target| target.label) {
+        assert!((0..8).any(|row| frame.grid.row_text(row).contains(label)));
+    }
+}
+
+#[test]
 fn flash_cancels_cached_targets_after_a_reload() {
     let mut app = app();
     let (buffer, view) = app
         .state
         .open_text(TextBuffer::from_text("abc abc abc"), None).unwrap();
     app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
     app.begin_flash();
     press_keys(&mut app, &["a"]);
     let label = app

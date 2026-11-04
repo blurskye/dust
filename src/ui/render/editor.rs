@@ -1054,7 +1054,7 @@ pub(super) fn render_status_line(
         .as_ref()
         .and_then(|path| path.file_name())
         .map_or_else(
-            || buffer.virtual_owner().unwrap_or(SCRATCH_LABEL).to_owned(),
+            || buffer.virtual_title().unwrap_or(SCRATCH_LABEL).to_owned(),
             |name| name.to_string_lossy().into_owned(),
         );
     let file = if shown("file") {

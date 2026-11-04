@@ -190,8 +190,8 @@ mod tests {
             true,
         )
         .unwrap();
-        let mut first = ConfigurationSession::new(resolved.clone(), false);
-        let mut other = ConfigurationSession::new(resolved, false);
+        let mut first = ConfigurationSession::new(resolved.clone(), false, None);
+        let mut other = ConfigurationSession::new(resolved, false, None);
         let catalog = PluginContributionCatalog::default();
         let before = other.settings().windows.clone();
         let revision = other.binding_revision();

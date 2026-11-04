@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, io::Read, path::Path};
 pub const COMMAND_API_VERSION: u32 = 1;
 pub const WIT_API_VERSION: &str = "0.2.0";
 pub const CONFIG_SCHEMA_VERSION: u32 = crate::config::CONFIG_SCHEMA_VERSION;
@@ -25,16 +25,23 @@ pub struct ApiManifest {
     pub capabilities: BTreeMap<String, String>,
 }
 pub fn check_compatibility(path: &Path, maximum_bytes: usize) -> Result<ApiCompatibility, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > maximum_bytes as u64 {
+    let file = crate::files::open_regular_file(path).map_err(|error| error.to_string())?;
+    if file.metadata().map_err(|error| error.to_string())?.len() > maximum_bytes as u64 {
         return Err("API fixture exceeds byte ceiling".into());
     }
-    let required: ApiManifest =
-        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    file.take((maximum_bytes as u64).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > maximum_bytes {
+        return Err("API fixture exceeds byte ceiling".into());
+    }
+    let required: ApiManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| error.to_string())?;
     let current = manifest()?;
     let mut reasons = Vec::new();
-    if required.command_api > current.command_api
+    if required.command_api < current.minimum_compatible_command_api
+        || required.command_api > current.command_api
         || required.minimum_compatible_command_api > current.command_api
     {
         reasons.push("command API version is unsupported".into())
@@ -45,8 +52,8 @@ pub fn check_compatibility(path: &Path, maximum_bytes: usize) -> Result<ApiCompa
     if required.config_schema > current.config_schema {
         reasons.push("config schema is newer".into())
     }
-    if required.persistence_schema > current.persistence_schema {
-        reasons.push("persistence schema is newer".into())
+    if required.persistence_schema != current.persistence_schema {
+        reasons.push("persistence schema is unsupported".into())
     }
     if required.package_lock_schema > current.package_lock_schema {
         reasons.push("package lock schema is newer".into())
@@ -123,6 +130,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             "workspace",
             "messages",
             "command_labels",
+            "command_palette",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -199,7 +207,6 @@ pub fn manifest() -> Result<ApiManifest, String> {
                 "generation-conditional-bounded-v1".into(),
             ),
             ("release_archive".into(), "deterministic-tar-zst-v1".into()),
-            ("installer".into(), "user-local-atomic-v1".into()),
             ("pty_screen".into(), "bounded-vt-subset-v1".into()),
             (
                 "composable_search".into(),
@@ -215,6 +222,62 @@ pub fn manifest() -> Result<ApiManifest, String> {
 
 #[cfg(test)]
 mod tests {
+    fn compatibility(required: &super::ApiManifest) -> super::ApiCompatibility {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        std::fs::write(&path, serde_json::to_vec(required).unwrap()).unwrap();
+        super::check_compatibility(&path, 1024 * 1024).unwrap()
+    }
+
+    #[test]
+    fn compatibility_requires_a_regular_bounded_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        let bytes = serde_json::to_vec(&super::manifest().unwrap()).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(super::check_compatibility(&path, bytes.len()).is_ok());
+        assert!(super::check_compatibility(&path, bytes.len() - 1).is_err());
+        assert!(super::check_compatibility(std::path::Path::new("/dev/zero"), 1024).is_err());
+        std::fs::remove_file(&path).unwrap();
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        assert!(super::check_compatibility(&path, 1024).is_err());
+    }
+
+    #[test]
+    fn command_api_must_be_in_the_supported_range() {
+        let mut required = super::manifest().unwrap();
+        assert!(compatibility(&required).compatible);
+        required.command_api = 0;
+        required.minimum_compatible_command_api = 0;
+        assert!(!compatibility(&required).compatible);
+        required.command_api = super::COMMAND_API_VERSION + 1;
+        assert!(!compatibility(&required).compatible);
+    }
+
+    #[test]
+    fn persistence_schema_must_match_the_reader() {
+        let mut required = super::manifest().unwrap();
+        for version in [0, super::PERSISTENCE_SCHEMA_VERSION - 1, super::PERSISTENCE_SCHEMA_VERSION + 1] {
+            required.persistence_schema = version;
+            assert!(!compatibility(&required).compatible);
+        }
+    }
+
+    #[test]
+    fn command_palette_is_a_supported_config_section() {
+        let mut required = super::manifest().unwrap();
+        required.config_sections = vec!["command_palette".into()];
+        assert!(compatibility(&required).compatible);
+    }
+
+    #[test]
+    fn removed_installer_is_not_supported() {
+        let mut required = super::manifest().unwrap();
+        assert!(!required.capabilities.contains_key("installer"));
+        required.capabilities.insert("installer".into(), "user-local-atomic-v1".into());
+        assert!(!compatibility(&required).compatible);
+    }
+
     #[test]
     fn checked_in_release_contract_is_supported() {
         let compatibility = super::check_compatibility(

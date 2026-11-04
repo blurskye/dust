@@ -114,8 +114,22 @@ impl InteractiveApplication {
             }
         }
         self.ui.surface_content = self.window_session.content().clone();
+        self.project_input_documentation();
     }
     pub(super) fn project_input_documentation(&mut self) {
+        if let Some(popup) = self.input.documentation() {
+            let total_rows = crate::ui::render::overlays::documentation_display_rows(
+                popup,
+                self.configuration.settings(),
+                self.window_session.width(),
+            );
+            self.input.scroll_documentation(
+                0,
+                0,
+                self.window_session.content().documentation_rows.max(1),
+                total_rows,
+            );
+        }
         let popup = self.input.documentation().cloned();
         self.ui.set(popup, |ui| &mut ui.documentation_popup);
     }

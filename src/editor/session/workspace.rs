@@ -1,6 +1,7 @@
 //! Workspace roots and their trust. Project-defined commands run only in a trusted workspace.
 //! Feature execution payloads remain with their callers, not in this owner.
 mod discovery;
+use crate::editor::EditorState;
 use crate::workspace::{
     ExecutionSource, RootId, RootIdentity, TrustEvent, TrustStore, WorkspaceError, WorkspaceRoot,
     WorkspaceState, WorkspaceTrust, WorkspaceTrustService,
@@ -59,12 +60,15 @@ struct Persist {
     generation: u64,
     source: WorkspaceVersion,
     target: Option<WorkspaceTrust>,
+    identities: Vec<RootIdentity>,
 }
 pub(super) struct WorkspaceSession {
     state: WorkspaceState,
     version: WorkspaceVersion,
     service: WorkspaceTrustService,
     store: TrustStore,
+    // Only a successful save may make newly granted trust effective.
+    persisted_identities: Vec<RootIdentity>,
     state_path: PathBuf,
     load_generation: Option<u64>,
     identity_generation: Option<(u64, RootId, WorkspaceVersion)>,
@@ -72,6 +76,7 @@ pub(super) struct WorkspaceSession {
     database_ready: bool,
     identity_ready: bool,
     startup_prompt_checked: bool,
+    startup_root_seen: Option<bool>,
     safe_mode: bool,
     root_operation: Option<RootOperation>,
     confirmation: Option<Confirmation>,
@@ -114,6 +119,7 @@ impl WorkspaceSession {
             version,
             service,
             store: TrustStore::default(),
+            persisted_identities: Vec::new(),
             state_path,
             load_generation,
             identity_generation,
@@ -121,6 +127,7 @@ impl WorkspaceSession {
             database_ready: false,
             identity_ready: false,
             startup_prompt_checked: false,
+            startup_root_seen: None,
             safe_mode,
             root_operation: None,
             confirmation: None,
@@ -208,13 +215,34 @@ impl WorkspaceSession {
         });
         Ok(())
     }
-    /// Make `new` the active root and drop `old`; returns the old root's path.
-    fn switch_root(&mut self, old: RootId, new: RootId) -> Result<PathBuf, WorkspaceError> {
-        self.state.set_active_root(new)?;
-        let old = self.state.remove_root(old)?;
+    /// Stage the replacement so the root limit applies to the final root set.
+    fn switch_root(
+        &mut self,
+        old: RootId,
+        name: String,
+        identity: RootIdentity,
+    ) -> Result<PathBuf, WorkspaceError> {
+        let mut state = self.state.clone();
+        let single_root = state.roots().len() == 1;
+        let old_path = state
+            .roots()
+            .iter()
+            .find(|root| root.id == old)
+            .ok_or(WorkspaceError::UnknownRoot(old))?
+            .identity
+            .canonical_path
+            .clone();
+        if !single_root {
+            state.remove_root(old)?;
+        }
+        state.add_root(name, identity)?;
+        if single_root {
+            state.remove_root(old)?;
+        }
+        self.state = state;
         self.changed();
         self.reconcile_trust();
-        Ok(old.identity.canonical_path)
+        Ok(old_path)
     }
     pub(in crate::editor::session) fn remove_root(
         &mut self,
@@ -222,6 +250,7 @@ impl WorkspaceSession {
     ) -> Result<WorkspaceRoot, WorkspaceError> {
         let root = self.state.remove_root(id)?;
         self.changed();
+        self.reconcile_trust();
         Ok(root)
     }
     pub(in crate::editor::session) fn set_active_root(
@@ -240,7 +269,9 @@ impl WorkspaceSession {
         let trusted = self.database_ready
             && self.identity_ready
             && self.state.roots().iter().all(|r| {
-                r.identity.filesystem_identity.is_some() && self.store.is_trusted(&r.identity)
+                r.identity.filesystem_identity.is_some()
+                    && self.store.is_trusted(&r.identity)
+                    && self.persisted_identities.contains(&r.identity)
             });
         self.state.set_trust(if trusted {
             WorkspaceTrust::Trusted
@@ -256,11 +287,11 @@ impl WorkspaceSession {
         self.startup_prompt_checked = true;
         !self.safe_mode
             && self.state.trust() != WorkspaceTrust::Trusted
-            && self
-                .state
-                .active_root()
-                .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
-                .is_some_and(|r| !self.store.is_seen(&r.identity))
+            && !self.startup_root_seen.unwrap_or_else(|| {
+                self.state.active_root()
+                    .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
+                    .is_none_or(|r| self.store.is_seen(&r.identity))
+            })
     }
     pub(in crate::editor::session) fn cancel_confirmation(&mut self) {
         self.confirmation = None;
@@ -355,9 +386,10 @@ impl WorkspaceSession {
         if !self.database_ready {
             return Err(WorkspaceFailure::Message("workspace_trust_not_ready"));
         }
+        let identities = self.store.identities();
         match self.service.persist(
             self.state_path.clone(),
-            self.store.identities(),
+            identities.clone(),
             self.store.seen_identities(),
             if target == Some(WorkspaceTrust::Untrusted) {
                 self.state.roots().iter().map(|root| root.identity.clone()).collect()
@@ -370,10 +402,12 @@ impl WorkspaceSession {
                     generation,
                     source: self.version(),
                     target,
+                    identities,
                 });
                 Ok(())
             }
             Err(e) => {
+                self.discard_unsaved_trust();
                 self.state.set_trust(WorkspaceTrust::Untrusted);
                 Err(WorkspaceFailure::Diagnostic(
                     "workspace_trust_state_failed",
@@ -381,6 +415,31 @@ impl WorkspaceSession {
                 ))
             }
         }
+    }
+    fn discard_unsaved_trust(&mut self) {
+        for identity in self.store.identities() {
+            if !self.persisted_identities.contains(&identity) {
+                self.store.revoke(&identity);
+            }
+        }
+    }
+    fn record_opened_roots(&mut self) -> Result<(), WorkspaceFailure> {
+        if !self.database_ready || !self.identity_ready {
+            return Ok(());
+        }
+        if self.startup_root_seen.is_none() {
+            self.startup_root_seen = Some(self.state.active_root()
+                .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
+                .is_none_or(|r| self.store.is_seen(&r.identity)));
+        }
+        let mut changed = false;
+        for root in self.state.roots() {
+            changed |= self.store.mark_seen(root.identity.clone());
+        }
+        if changed {
+            self.persist_state(None)?;
+        }
+        Ok(())
     }
     /// Whether project-defined commands (tasks, terminals, debuggers, language servers, tool
     /// installs) may run now. Checked when a command is chosen and again when it spawns.
@@ -395,7 +454,8 @@ impl WorkspaceSession {
             .authorize_execution(ExecutionSource::ProjectLocal)
             .map_err(WorkspaceFailure::from)
     }
-    pub(in crate::editor::session) fn poll(&mut self) -> Vec<WorkspaceUpdate> {
+    pub(in crate::editor::session) fn poll(&mut self, editor: &EditorState) -> Vec<WorkspaceUpdate> {
+        let before = self.version();
         let mut updates = Vec::new();
         loop {
             let event = match self.service.try_event() {
@@ -411,11 +471,21 @@ impl WorkspaceSession {
                     break;
                 }
             };
-            self.accept_event(event, &mut updates);
+            self.accept_event(event, &mut updates, editor);
+        }
+        if (self.startup_root_seen.is_none() || before != self.version)
+            && let Err(error) = self.record_opened_roots()
+        {
+            updates.push(WorkspaceUpdate::Failure(error));
         }
         updates
     }
-    fn accept_event(&mut self, event: TrustEvent, updates: &mut Vec<WorkspaceUpdate>) {
+    fn accept_event(
+        &mut self,
+        event: TrustEvent,
+        updates: &mut Vec<WorkspaceUpdate>,
+        editor: &EditorState,
+    ) {
         match event {
             TrustEvent::Loaded { generation, result }
                 if self.load_generation == Some(generation) =>
@@ -424,10 +494,12 @@ impl WorkspaceSession {
                 self.database_ready = result.is_ok();
                 match result {
                     Ok(db) => {
+                        self.persisted_identities = db.identities.clone();
                         self.store.replace(db.identities);
                         self.store.replace_seen(db.seen);
                     }
                     Err(e) => {
+                        self.persisted_identities.clear();
                         self.store.replace(Vec::new());
                         self.store.replace_seen(Vec::new());
                         updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
@@ -476,22 +548,36 @@ impl WorkspaceSession {
                             || identity.canonical_path.display().to_string(),
                             |n| n.to_string_lossy().into_owned(),
                         );
-                        match self.state.add_root(name, identity.clone()) {
-                            Ok(new) => match operation.replaces {
-                                Some(old) => match self.switch_root(old, new) {
+                        match operation.replaces {
+                            Some(old) => {
+                                if let Some(root) = self.state.roots().iter().find(|root| root.id == old)
+                                    && editor.buffers.values().any(|buffer| {
+                                        buffer.dirty && buffer.path.as_deref().is_some_and(|file| {
+                                            leaves_root(file, &root.identity.canonical_path, &identity.canonical_path)
+                                        })
+                                    })
+                                {
+                                    updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Message(
+                                        "workspace_root_dirty_blocker",
+                                    )));
+                                    return;
+                                }
+                                match self.switch_root(old, name, identity.clone()) {
                                     Ok(old) => updates.push(WorkspaceUpdate::RootSwitched {
                                         path: identity.canonical_path,
                                         old,
                                     }),
                                     Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
-                                },
-                                None => {
-                                    self.changed();
-                                    updates
-                                        .push(WorkspaceUpdate::RootAdded(identity.canonical_path));
                                 }
+                            }
+                            None => match self.state.add_root(name, identity.clone()) {
+                                Ok(_) => {
+                                    self.changed();
+                                    self.reconcile_trust();
+                                    updates.push(WorkspaceUpdate::RootAdded(identity.canonical_path));
+                                }
+                                Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
                             },
-                            Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
                         }
                     }
                     Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(
@@ -506,13 +592,11 @@ impl WorkspaceSession {
                     .is_some_and(|p| p.generation == generation) =>
             {
                 let pending = self.persist.take().expect("matched persistence");
-                if pending.source != self.version {
-                    return;
-                }
                 match result {
                     Ok(()) => {
+                        self.persisted_identities = pending.identities;
                         self.reconcile_trust();
-                        if let Some(target) = pending.target {
+                        if pending.source == self.version && let Some(target) = pending.target {
                             updates.push(WorkspaceUpdate::Message(
                                 if target == WorkspaceTrust::Trusted {
                                     "workspace_trusted"
@@ -523,11 +607,7 @@ impl WorkspaceSession {
                         }
                     }
                     Err(e) => {
-                        if pending.target == Some(WorkspaceTrust::Trusted) {
-                            for root in self.state.roots() {
-                                self.store.revoke(&root.identity);
-                            }
-                        }
+                        self.discard_unsaved_trust();
                         self.state.set_trust(WorkspaceTrust::Untrusted);
                         updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
                             "workspace_trust_state_failed",
@@ -539,6 +619,12 @@ impl WorkspaceSession {
             _ => {}
         }
     }
+}
+
+/// Nested worktrees keep files inside the new root when moving down, but leave the old
+/// worktree's files behind when moving up.
+pub(in crate::editor::session) fn leaves_root(file: &Path, old: &Path, new: &Path) -> bool {
+    file.starts_with(old) && (!file.starts_with(new) || old.starts_with(new))
 }
 
 #[cfg(test)]
@@ -565,6 +651,7 @@ impl WorkspaceSession {
     }
     pub(in crate::editor::session) fn fixture_trust_identity(&mut self, identity: RootIdentity) {
         assert!(self.state.roots().iter().any(|r| r.identity == identity));
+        self.persisted_identities.push(identity.clone());
         self.store.trust(identity);
     }
     pub(in crate::editor::session) fn fixture_safe_mode(&mut self, safe: bool) {
@@ -618,9 +705,119 @@ mod tests {
             owner.store.trust(root.identity.clone());
             owner.store.mark_seen(root.identity.clone());
         }
+        owner.persisted_identities = owner.store.identities();
         owner.reconcile_trust();
         (owner, directory)
     }
+    #[test]
+    fn workspace_root_removal_reconciles_remaining_trust() {
+        let (mut owner, _directory) = fixture();
+        owner.remove_root(RootId(2)).unwrap();
+        assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+        assert!(owner.execution_allowed().is_ok());
+    }
+
+    #[test]
+    fn workspace_root_addition_reconciles_previously_saved_trust() {
+        let (mut owner, _directory) = fixture();
+        let identity = RootIdentity {
+            canonical_path: "/three".into(),
+            filesystem_identity: Some((1, 3)),
+        };
+        owner.store.trust(identity.clone());
+        owner.persisted_identities.push(identity.clone());
+        owner.add_root_request(identity.canonical_path.clone(), None)
+            .unwrap_or_else(|_| panic!("root request"));
+        let generation = owner.root_operation.as_ref().unwrap().generation;
+        let mut updates = Vec::new();
+        owner.accept_event(
+            TrustEvent::RootInspected { generation, result: Ok(identity) },
+            &mut updates,
+            &EditorState::new("/".into()),
+        );
+        assert!(matches!(updates.as_slice(), [WorkspaceUpdate::RootAdded(_)]));
+        assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+        assert!(owner.execution_allowed().is_ok());
+    }
+
+    #[test]
+    fn workspace_root_replacement_at_capacity_is_atomic() {
+        let (mut owner, _directory) = fixture();
+        for index in 3..=64 {
+            owner.state.add_root(format!("root-{index}"), RootIdentity {
+                canonical_path: format!("/root-{index}").into(),
+                filesystem_identity: Some((1, index)),
+            }).unwrap();
+        }
+        let identity = RootIdentity {
+            canonical_path: "/replacement".into(),
+            filesystem_identity: Some((1, 100)),
+        };
+        owner.add_root_request(identity.canonical_path.clone(), Some(RootId(1)))
+            .unwrap_or_else(|_| panic!("root request"));
+        let generation = owner.root_operation.as_ref().unwrap().generation;
+        let mut updates = Vec::new();
+        owner.accept_event(
+            TrustEvent::RootInspected { generation, result: Ok(identity.clone()) },
+            &mut updates,
+            &EditorState::new("/".into()),
+        );
+        assert!(matches!(updates.as_slice(), [WorkspaceUpdate::RootSwitched { path, old }]
+            if path == &identity.canonical_path && old == Path::new("/one")));
+        assert_eq!(owner.roots().len(), 64);
+        assert!(owner.roots().iter().all(|root| root.id != RootId(1)));
+        let new = owner.active_root().unwrap();
+        assert_eq!(owner.roots().iter().find(|root| root.id == new).unwrap().identity, identity);
+
+        let roots = owner.roots().to_vec();
+        let version = owner.version();
+        let revision = owner.root_revision();
+        assert!(owner.switch_root(new, "duplicate".into(), roots[0].identity.clone()).is_err());
+        assert_eq!(owner.roots(), roots);
+        assert_eq!(owner.active_root(), Some(new));
+        assert_eq!(owner.version(), version);
+        assert_eq!(owner.root_revision(), revision);
+    }
+
+    #[test]
+    fn workspace_trust_persistence_survives_active_root_changes() {
+        for fail in [false, true] {
+            let (mut owner, directory) = fixture();
+            owner.store.replace(Vec::new());
+            owner.persisted_identities.clear();
+            owner.reconcile_trust();
+            if fail {
+                owner.state_path = directory.path().to_path_buf();
+            }
+            owner.request_confirmation().unwrap_or_else(|_| panic!("prompt"));
+            owner.confirm().unwrap_or_else(|_| panic!("save trust"));
+            owner.set_active_root(RootId(2)).unwrap();
+            assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+            assert!(owner.execution_allowed().is_err());
+
+            let mut updates = Vec::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while owner.persist_pending() {
+                updates.extend(owner.poll(&EditorState::new("/".into())));
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            if fail {
+                assert!(matches!(updates.as_slice(), [WorkspaceUpdate::Failure(
+                    WorkspaceFailure::Diagnostic("workspace_trust_state_failed", _)
+                )]));
+                assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+                assert!(owner.store.identities().is_empty());
+                owner.reconcile_trust();
+                assert!(owner.execution_allowed().is_err());
+            } else {
+                assert!(updates.is_empty(), "no stale trust confirmation message");
+                assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+                assert!(owner.execution_allowed().is_ok());
+            }
+        }
+    }
+
     #[test]
     fn failed_trust_load_cannot_replace_the_original_database() {
         let (mut owner, _directory) = fixture();
@@ -633,6 +830,7 @@ mod tests {
                 result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
             },
             &mut updates,
+            &EditorState::new("/".into()),
         );
         assert!(!owner.database_ready);
         assert!(owner.persist_state(None).is_err());
@@ -654,6 +852,7 @@ mod tests {
                 result: Ok(root.identity),
             },
             &mut Vec::new(),
+            &EditorState::new("/".into()),
         );
         assert!(owner.identity_ready);
     }
@@ -684,7 +883,7 @@ mod tests {
         assert!(owner.confirm().is_err());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while owner.persist.is_some() {
-            owner.poll();
+            owner.poll(&EditorState::new("/".into()));
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(1));
         }

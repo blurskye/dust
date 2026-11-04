@@ -227,6 +227,67 @@ fn background_inlay_failures_never_replace_the_user_notification() {
 }
 
 #[test]
+fn documentation_resize_clamps_scroll_to_the_new_layout() {
+    let mut app = app();
+    app.handle_event(UiEvent::Resize(120, 40));
+    app.present_documentation_popup(
+        DocumentationPopupKind::Hover, "hover".into(), "server".into(), None,
+        vec![crate::language::lsp::LspMarkupContent {
+            kind: crate::language::lsp::LspMarkupKind::PlainText,
+            value: (0..8).map(|_| "a ".repeat(30)).collect::<Vec<_>>().join("\n"),
+        }],
+    );
+    app.handle_event(UiEvent::Resize(24, 24));
+    app.process_effect(AppEffect::LspDocumentationScroll(1));
+    app.process_effect(AppEffect::LspDocumentationScroll(1));
+    assert!(app.ui.documentation_popup.as_ref().unwrap().scroll > 0);
+    app.handle_event(UiEvent::Resize(120, 40));
+    let popup = app.ui.documentation_popup.as_ref().unwrap();
+    let total = crate::ui::render::overlays::documentation_display_rows(popup, app.configuration.settings(), 120);
+    let maximum = total.saturating_sub(app.window_session.content().documentation_rows.max(1));
+    assert_eq!(maximum, 0);
+    assert_eq!(popup.scroll, 0);
+}
+
+#[test]
+fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
+    use crate::language::lsp::LspCompletionItem;
+    let mut app = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), Some(path.clone())).unwrap();
+    app.set_dashboard_visibility(false);
+    app.language.fixture_projection(Some(super::LspProjectionOwner {
+        server: "primary".into(),
+        buffer,
+        view,
+        revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
+        uri: crate::language::lsp::file_uri(&path),
+        language: "rust".into(),
+    }));
+    for (server, label) in [("secondary", "a-retired"), ("primary", "z-kept")] {
+        app.language.install_completions(server, vec![LspCompletionItem {
+            label: label.into(), filter_text: None, sort_text: None,
+            detail: String::new(), insert_text: label.into(), text_edit: None,
+            additional_edits: Vec::new(), kind: None, snippet: false,
+            documentation: None, resolve_item: None, resolved: true,
+        }], false, 0);
+    }
+    app.narrow_lsp_completion();
+    app.move_lsp_completion(1);
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().selected, 1);
+    app.language.stopped("secondary");
+    app.narrow_lsp_completion();
+    let menu = app.ui.language_completion.as_ref().unwrap();
+    assert_eq!(menu.items.len(), 1);
+    assert_eq!(menu.items[0].label, "z-kept");
+    assert_eq!(menu.selected, 0);
+    app.language.stopped("primary");
+    app.narrow_lsp_completion();
+    assert!(app.ui.language_completion.is_none());
+}
+
+#[test]
 fn completion_documentation_is_typed_and_exact_request_owned() {
     let mut app = app();
     let path = app.state.workspace_root.join("completion.rs");
@@ -307,10 +368,11 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     );
     assert!(app.ui.language_completion.is_some());
 
+    // An unrelated request advances the generation without changing the completion document.
     app.language.fixture_generation(8);
     app.invoke_mapped_command("lsp.completion.documentation.open");
-    assert!(app.ui.documentation_popup.is_none());
-    assert!(app.ui.notification_error);
+    assert!(app.ui.documentation_popup.is_some());
+    assert!(!app.ui.notification_error);
 
     app.language.fixture_generation(7);
     let revision = app.state.buffers[buffer].text.revision();

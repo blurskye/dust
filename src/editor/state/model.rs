@@ -55,6 +55,8 @@ pub struct Buffer {
     pub path: Option<PathBuf>,
     pub read_only: bool,
     pub origin: BufferOrigin,
+    pub(crate) virtual_title: Option<String>,
+    pub(crate) virtual_language: Option<String>,
     pub dirty: bool,
     pub saved_revision: BufferRevision,
     saved_text: Option<std::sync::Arc<str>>,
@@ -78,6 +80,12 @@ impl Buffer {
         }
     }
 
+    /// The title of a virtual document, falling back to its owner.
+    #[must_use]
+    pub fn virtual_title(&self) -> Option<&str> {
+        self.virtual_title.as_deref().or_else(|| self.virtual_owner())
+    }
+
     /// The tree-sitter text objects, when the last parse matches the current text.
     #[must_use]
     pub fn current_syntax_objects(&self) -> &[crate::language::syntax::SyntaxObject] {
@@ -98,6 +106,8 @@ impl Buffer {
             path,
             read_only: false,
             origin: BufferOrigin::FileOrScratch,
+            virtual_title: None,
+            virtual_language: None,
             dirty: false,
             saved_revision,
             saved_text,

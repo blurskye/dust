@@ -521,25 +521,16 @@ impl<'a> VisualRowModel<'a> {
         let mut used = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
             let relative = row.byte_start.saturating_add(relative);
-            let virtual_width = self
-                .inlay_widths
-                .get(&ByteOffset(line_start.get().saturating_add(relative)))
-                .copied()
-                .unwrap_or(0)
+            let virtual_width = self.inlay_width(ByteOffset(line_start.get() + relative))
                 .min(self.content_width);
             if cell < used.saturating_add(virtual_width) {
                 return relative;
             }
             used = used.saturating_add(virtual_width);
             let source_width = self.grapheme_width(grapheme, source_column);
-            let visible_width = self
-                .drawn_width(
-                    markdown.as_ref(),
-                    ByteOffset(line_start.get().saturating_add(relative)),
-                    grapheme,
-                    source_column,
-                )
-                .min(self.content_width);
+            let visible_width = self.drawn_width(
+                markdown.as_ref(), ByteOffset(line_start.get() + relative), grapheme, source_column,
+            ).min(self.content_width);
             if cell < used.saturating_add(visible_width) {
                 return relative;
             }
@@ -547,6 +538,62 @@ impl<'a> VisualRowModel<'a> {
             source_column = source_column.saturating_add(source_width);
         }
         row.byte_end
+    }
+
+    /// Source graphemes that can receive an overlay in this painted row. Horizontal scrolling
+    /// skips source columns before drawing inlays, just as the editor renderer does.
+    #[must_use]
+    pub fn visible_bytes(&self, anchor: VisualRowAnchor, scroll_column: usize, width: usize) -> Vec<usize> {
+        let anchor = self.normalize(anchor);
+        let row = self.row_slice(anchor);
+        let text = self.text.line(anchor.line).unwrap_or_default();
+        let content = text.strip_suffix('\n').unwrap_or(&text);
+        let end = row.byte_end.min(content.len());
+        let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
+        let markdown = self.markdown_line(anchor.line);
+        let table = markdown.as_ref().and_then(|line| line.table.as_ref());
+        let first = if self.wrap || table.is_some() {
+            row.byte_start
+        } else {
+            super::editor::byte_offset_at_display_column(
+                content, scroll_column, self.tab_width, self.ambiguous_width,
+            )
+        };
+        let mut source_column = display_column(&content[..first], self.tab_width, self.ambiguous_width);
+        let mut used = 0usize;
+        let mut bytes = Vec::new();
+        for (relative, grapheme) in content[first..end].grapheme_indices(true) {
+            let relative = first + relative;
+            let at = ByteOffset(line_start.get() + relative);
+            if let Some(table) = table {
+                let Some((painted_row, column)) = table.place(at) else { continue };
+                if painted_row != anchor.wrap_row { continue; }
+                used = column;
+            }
+            used = used.saturating_add(self.inlay_width(at));
+            if let Some(markdown) = &markdown {
+                for (text, _) in markdown.before(at) {
+                    used = used.saturating_add(text_width(text, self.ambiguous_width));
+                }
+                match markdown.at(at) {
+                    Some(super::markdown::Drawn::Hidden) => continue,
+                    Some(super::markdown::Drawn::Glyph(glyph, _)) => {
+                        used = used.saturating_add(text_width(glyph, self.ambiguous_width));
+                        continue;
+                    }
+                    None => {}
+                }
+            }
+            let source_width = self.grapheme_width(grapheme, source_column);
+            if used >= width || (!self.wrap && used.saturating_add(source_width) > width) {
+                if table.is_some() { continue; }
+                break;
+            }
+            bytes.push(relative);
+            used = used.saturating_add(source_width.min(self.content_width));
+            source_column = source_column.saturating_add(source_width);
+        }
+        bytes
     }
 
     #[must_use]
@@ -992,6 +1039,66 @@ pub fn editor_state_content_width(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_cells_return_whole_graphemes_across_tabs_and_wrapped_rows() {
+        let text = crate::editor::text::TextBuffer::from_text("a\t界e\u{301}👩‍💻z");
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        config.editor.tab_width = 4;
+        let ui = UiState::default();
+        let model = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, false);
+        let start = VisualRowAnchor::default();
+        assert_eq!(model.visible_bytes(start, 2, 5), vec![1, 2]);
+        assert_eq!(model.visible_bytes(start, 6, 4), vec![5, 8, 19]);
+        assert!(model.visible_bytes(start, 20, 11).is_empty());
+        assert_eq!(model.byte_at_cell(start, 20), text.len_bytes());
+        let wrapped = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, true);
+        assert_eq!(wrapped.visible_bytes(start, 0, 6), vec![0, 1, 2]);
+        assert_eq!(wrapped.visible_bytes(VisualRowAnchor { line: 0, wrap_row: 1 }, 0, 6), vec![5, 8, 19]);
+    }
+
+    #[test]
+    fn visible_source_excludes_inlays_and_clipped_wide_graphemes() {
+        let text = crate::editor::text::TextBuffer::from_text("a界bcd");
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        let ui = UiState::default();
+        let mut model = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 4, false);
+        let start = VisualRowAnchor::default();
+        // A wide grapheme that does not fit is not drawn at all.
+        assert_eq!(model.visible_bytes(start, 0, 2), vec![0]);
+        model.inlay_widths.insert(ByteOffset(0), 4);
+        assert!(model.visible_bytes(start, 0, 4).is_empty());
+        // Scrolling past the source character skips its inlay too.
+        assert_eq!(model.visible_bytes(start, 1, 4), vec![1, 4, 5]);
+        model.inlay_widths.insert(ByteOffset(4), 4);
+        assert_eq!(model.visible_bytes(start, 1, 4), vec![1]);
+        // Hit testing still maps an inlay to its associated source character.
+        assert_eq!(model.byte_at_cell(start, 2), 0);
+    }
+
+    #[test]
+    fn visible_source_excludes_replaced_markdown() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text("- x [y](url)\nlast"), None).unwrap();
+        state.views[view].cursor = ByteOffset(13);
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        config.editor.markdown.render = true;
+        let mut ui = UiState::default();
+        for (start, end, mark) in [
+            (0, 1, crate::language::syntax::MarkdownMark::Bullet(0)),
+            (6, 12, crate::language::syntax::MarkdownMark::Hide),
+        ] {
+            ui.markdown_marks.push(crate::ui::UiMarkdownMark {
+                buffer, revision: state.buffers[buffer].text.revision(),
+                range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+            });
+        }
+        let model = VisualRowModel::new_for_state(&state, &state.buffers[buffer].text, view, &ui, &config, 20, false);
+        assert_eq!(model.visible_bytes(VisualRowAnchor::default(), 0, 20), vec![1, 2, 3, 4, 5]);
+    }
 
     #[test]
     fn paging_reuses_cached_line_slices() {
