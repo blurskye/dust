@@ -166,12 +166,14 @@ struct FormatOnSave {
     source: crate::editor::text::TextVersion,
     path: Option<std::path::PathBuf>,
     formatter: Option<String>,
+    started: bool,
     quit_after: bool,
     deadline: std::time::Instant,
 }
 
 struct InteractiveApplication {
-    format_on_save: Option<FormatOnSave>,
+    format_on_save: std::collections::HashMap<crate::editor::BufferId, FormatOnSave>,
+    pending_saves: std::collections::VecDeque<(crate::editor::BufferId, bool)>,
     navigation_reads: std::collections::HashMap<
         crate::files::RequestId,
         (super::windows::NavigationStamp, std::sync::Arc<()>),
@@ -192,7 +194,7 @@ struct InteractiveApplication {
         std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
     /// When the repository's index and HEAD last changed, as of the last disk check.
-    pub(super) git_stamp: Option<[Option<std::time::SystemTime>; 2]>,
+    pub(super) git_stamp: Option<([Option<std::time::SystemTime>; 2], Option<crate::workspace::git::GitHeadId>)>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     /// A `:s///c` asking about each match in turn.

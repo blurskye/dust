@@ -1286,6 +1286,69 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
             && sign.buffer_revision == revision
             && sign.kind == crate::ui::UiGitSignKind::Deleted
     }));
+
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() || app.git.signs_pending() {
+        app.process_git_status_events();
+        app.reconcile_git_signs();
+        app.process_git_sign_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.ui.explorer.is_none());
+    assert!(!app.state.buffers[buffer].dirty);
+    assert!(app.ui.git_signs.iter().any(|sign| sign.buffer == buffer));
+
+    let path = app.state.buffers[buffer].path.clone().unwrap();
+    fs::write(path, "one\ntwo\nthree\n").unwrap();
+    app.start_reload(false);
+    wait_vfs(&mut app);
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().unwrap().entries.is_empty());
+}
+
+#[test]
+fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
+    let (mut app, repo, _) = near_changes_fixture();
+    let old = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("near.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&old]).unwrap();
+    app.start_git_status_refresh_with_feedback(false);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    let stamp = |name| fs::metadata(repo.path().join(name)).unwrap().modified().unwrap();
+    let before = (stamp("index"), stamp("HEAD"));
+    repo.reset(old.as_object(), git2::ResetType::Soft, None).unwrap();
+    assert_eq!(before, (stamp("index"), stamp("HEAD")));
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().unwrap().entries.iter().any(|entry| entry.sources.staged));
 }
 
 #[test]
@@ -2220,6 +2283,29 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
         "prefix needle\n"
     );
     assert!(app.ui.notification_error);
+}
+
+#[test]
+fn save_all_retries_documents_beyond_the_request_capacity() {
+    let mut app = app();
+    let mut saved = Vec::new();
+    for index in 0..12 {
+        let path = app.state.workspace_root.join(format!("save-all-{index}.txt"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        app.replace_with_recovered(buffer, format!("new {index}")).unwrap();
+        saved.push((buffer, path, format!("new {index}")));
+    }
+    app.process_effect(AppEffect::SaveAll { quit_after: true });
+    assert!(!app.pending_saves.is_empty());
+    assert!(!app.should_quit);
+    wait_vfs(&mut app);
+    assert!(app.pending_saves.is_empty());
+    for (buffer, path, expected) in saved {
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+    assert!(app.should_quit);
 }
 
 #[test]

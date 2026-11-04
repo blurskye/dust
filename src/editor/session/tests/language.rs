@@ -2027,6 +2027,80 @@ fn fixture_owned_lsp(
 }
 
 #[test]
+fn overlapping_formatting_saves_wait_for_their_own_results() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.lsp.format_on_save = true;
+    app.configuration.install_fixture(fixture);
+    app.set_dashboard_visibility(false);
+    let mut pending = Vec::new();
+    let mut transports = Vec::new();
+    for index in 0..2 {
+        let path = app.state.workspace_root.join(format!("format-{index}.rs"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        app.replace_with_recovered(buffer, "a  b".into()).unwrap();
+        let server = format!("formatter-{index}");
+        transports.push(fixture_owned_lsp(&mut app, &server, buffer));
+        app.language.running(&server, crate::language::lsp::LspCapabilities {
+            formatting: true,
+            ..Default::default()
+        });
+        app.language.select(&server);
+        app.process_effect(AppEffect::Save { quit_after: false, path: None, force: false });
+        let request = app.format_on_save.get(&buffer).unwrap().request.clone().unwrap();
+        pending.push((buffer, path, request));
+    }
+    assert_eq!(app.format_on_save.len(), 2);
+    assert!(pending.iter().all(|(_, path, _)| fs::read_to_string(path).unwrap() == "old"));
+    for (buffer, path, (server, generation)) in pending.into_iter().rev() {
+        app.present_lsp_result(&server, generation, "textDocument/formatting",
+            &crate::language::lsp::file_uri(&path),
+            crate::language::lsp::LspFeatureResult::WorkspaceEdit(crate::language::lsp::LspWorkspaceEdit {
+                resources: Vec::new(),
+                documents: vec![crate::language::lsp::LspDocumentEdit {
+                    uri: crate::language::lsp::file_uri(&path),
+                    version: None,
+                    edits: vec![crate::language::lsp::LspTextEdit {
+                        range: crate::language::lsp::LspRange {
+                            start: crate::language::lsp::LspPosition { line: 0, character: 1 },
+                            end: crate::language::lsp::LspPosition { line: 0, character: 3 },
+                        },
+                        new_text: " ".into(),
+                    }],
+                }],
+            }));
+        wait_vfs(&mut app);
+        assert_eq!(fs::read_to_string(path).unwrap(), "a b");
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+    assert!(app.format_on_save.is_empty());
+}
+
+#[test]
+fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("saved-snapshot.rs");
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.final_newline = crate::config::FinalNewlinePolicy::Insert;
+    app.configuration.install_fixture(fixture);
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    let transport = fixture_owned_lsp(&mut app, "owner", buffer);
+    app.replace_with_recovered(buffer, "written".into()).unwrap();
+    let revision = app.state.buffers[buffer].text.revision().0;
+    app.start_save(false, None, false);
+    app.replace_with_recovered(buffer, "newer unsaved text".into()).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(fs::read_to_string(path).unwrap(), "written\n");
+    let saved = transport.saved_document().unwrap();
+    assert_eq!(saved.text, "written\n");
+    assert_eq!(saved.version, revision);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "newer unsaved text");
+    assert!(app.state.buffers[buffer].dirty);
+}
+
+#[test]
 fn save_notifications_reach_every_document_owner_after_buffer_switch() {
     let mut app = app();
     let path = app.state.workspace_root.join("saved.rs");

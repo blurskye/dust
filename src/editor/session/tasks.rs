@@ -13,7 +13,7 @@ const MAXIMUM_RUNNING: usize = 16;
 use crate::{
     config::{Config, TaskConfig},
     editor::{
-        EditorState, TransactionId,
+        BufferId, EditorState, TransactionId,
         text::{ByteOffset, ByteRange, TextEdit, TextEditSet},
         transaction::{EditorOperation, EditorTransaction, Precondition},
     },
@@ -560,6 +560,14 @@ impl TaskSession {
     pub(super) fn is_running(&self, name: &str) -> bool {
         self.launch_pending(name) || self.running.values().any(|task| task.requested == name)
     }
+    pub(super) fn stop_formatter(&mut self, name: &str, buffer: BufferId) {
+        if matches!(self.adapters.get(name), Some(AdapterContext::Formatter { source }) if source.buffer() == buffer)
+        {
+            // stop retires the run key as well as cancelling the process, so already
+            // buffered results cannot apply after a formatting-save timeout.
+            let _ = self.stop(name);
+        }
+    }
     pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
         let pending = self.launch_pending(name);
         self.preflights.retain(|_, step| step.requested != name);
@@ -937,6 +945,9 @@ impl TaskSession {
             configuration,
         };
         self.keys.insert(name.into(), key.clone());
+        self.adapters.insert(name.into(), AdapterContext::Formatter {
+            source: FormatterSource::capture(editor, buffer).unwrap(),
+        });
         let job = JobId(self.running.len() as u64 + 1000);
         self.running.insert(
             job,

@@ -6334,12 +6334,11 @@ impl InteractiveApplication {
                         }
                         // Whatever the formatter did, the save it was holding back goes on.
                         if let AdapterContext::Formatter { source } = task.adapter()
-                            && self.format_on_save.as_ref().is_some_and(|pending| {
-                                pending.buffer == source.buffer()
-                                    && pending.formatter.as_ref() == Some(task.requested())
+                            && self.format_on_save.get(&source.buffer()).is_some_and(|pending| {
+                                pending.formatter.as_ref() == Some(task.requested())
                             })
                         {
-                            self.finish_format_on_save();
+                            self.finish_format_on_save(source.buffer());
                         }
                         // Linters exit 1 when they have findings; that is not a failure. Other
                         // tasks with a matcher publish what they matched however they exit.
@@ -14478,8 +14477,14 @@ impl InteractiveApplication {
     /// Ask the language server to format, and save when it answers. False when there is nothing
     /// to wait for, so the caller saves right away.
     fn begin_format_on_save(&mut self, quit_after: bool) -> bool {
-        if !self.configuration.settings().lsp.format_on_save || self.format_on_save.is_some() {
+        if !self.configuration.settings().lsp.format_on_save {
             return false;
+        }
+        if let Some(pending) = self.state.active_buffer_id()
+            .and_then(|buffer| self.format_on_save.get_mut(&buffer))
+        {
+            pending.quit_after |= quit_after;
+            return true;
         }
         // An installed formatter runs as a process, which takes longer to start than a request.
         let managed =
@@ -14497,7 +14502,7 @@ impl InteractiveApplication {
         let Some(buffer) = buffer else {
             return false;
         };
-        self.format_on_save = Some(super::FormatOnSave {
+        self.format_on_save.insert(buffer, super::FormatOnSave {
             request: None,
             buffer,
             source: self.state.buffers[buffer].text.source_version(),
@@ -14507,19 +14512,59 @@ impl InteractiveApplication {
             } else {
                 None
             },
+            started: !managed,
             quit_after,
             // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
             deadline: std::time::Instant::now()
                 + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
         });
-        self.request_lsp(LspFeature::Formatting);
+        if managed {
+            self.start_pending_save_formatters();
+        } else {
+            self.request_lsp(LspFeature::Formatting);
+        }
         true
     }
 
-    pub(in crate::editor::session) fn finish_format_on_save(&mut self) {
-        let Some(pending) = self.format_on_save.take() else {
+    pub(super) fn formatting_save_for_request(&self, server: &str, generation: u64) -> Option<crate::editor::BufferId> {
+        self.format_on_save.values().find_map(|pending| {
+            pending.request.as_ref()
+                .filter(|(key, request)| key == server && *request == generation)
+                .map(|_| pending.buffer)
+        })
+    }
+
+    fn start_pending_save_formatters(&mut self) {
+        let waiting = self.format_on_save.values()
+            .filter(|pending| !pending.started)
+            .filter_map(|pending| Some((pending.buffer, pending.formatter.clone()?)))
+            .collect::<Vec<_>>();
+        for (buffer, name) in waiting {
+            // Task names identify one running formatter. Saves using the same tool wait
+            // their turn instead of bypassing formatting or replacing another run.
+            if self.tasks.is_running(&name) {
+                continue;
+            }
+            let pending = self.format_on_save.get_mut(&buffer).expect("pending save");
+            pending.started = true;
+            pending.deadline = Instant::now() + std::time::Duration::from_millis(3000);
+            match crate::editor::session::tasks::FormatterSource::capture(&self.state, buffer) {
+                Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
+                Err(error) => {
+                    self.show_error(error);
+                    self.finish_format_on_save(buffer);
+                }
+            }
+        }
+    }
+
+    pub(in crate::editor::session) fn finish_format_on_save(&mut self, buffer: crate::editor::BufferId) {
+        let Some(pending) = self.format_on_save.remove(&buffer) else {
             return;
         };
+        if pending.started && let Some(formatter) = &pending.formatter {
+            self.tasks.stop_formatter(formatter, pending.buffer);
+        }
         if let Some((server, generation)) = pending.request {
             let _ = self.language.cancel(&server, generation);
             self.language.retire_request(&server, generation);
@@ -14549,11 +14594,15 @@ impl InteractiveApplication {
         let Some(status) = self.git.status() else {
             return;
         };
-        let stamp = ["index", "HEAD"].map(|name| {
+        let Ok(head) = crate::workspace::git::git_head_id(&status.repository) else {
+            return;
+        };
+        let metadata = ["index", "HEAD"].map(|name| {
             std::fs::metadata(status.git_dir.join(name))
                 .and_then(|file| file.modified())
                 .ok()
         });
+        let stamp = (metadata, head);
         if self
             .git_stamp
             .replace(stamp)
@@ -14587,17 +14636,17 @@ impl InteractiveApplication {
                 continue;
             };
             let stamp = (metadata.modified().ok(), metadata.len());
-            let Some(previous) = self.disk_stamps.get(&id).copied() else {
-                self.disk_stamps.insert(id, stamp);
+            if !metadata.is_file() {
                 continue;
-            };
-            if previous == stamp {
+            }
+            if self.disk_stamps.get(&id) == Some(&stamp) {
                 continue;
             }
             let view = Self::document_view(id, &self.state.buffers[id]);
             // Our own save moves the stamp too, and then the bytes on disk are what we wrote.
             if metadata.len() == view.persisted.len() as u64
-                && std::fs::read(&path).is_ok_and(|disk| disk == view.persisted)
+                && crate::files::read_file_with_ceiling(&path, metadata.len())
+                    .is_ok_and(|disk| disk == view.persisted)
             {
                 self.disk_stamps.insert(id, stamp);
                 continue;
@@ -14624,13 +14673,14 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_format_on_save_deadline(&mut self) {
-        if self
-            .format_on_save
-            .as_ref()
-            .is_some_and(|pending| std::time::Instant::now() >= pending.deadline)
-        {
-            self.finish_format_on_save();
+        let expired = self.format_on_save.values()
+            .filter(|pending| pending.started && Instant::now() >= pending.deadline)
+            .map(|pending| pending.buffer)
+            .collect::<Vec<_>>();
+        for buffer in expired {
+            self.finish_format_on_save(buffer);
         }
+        self.start_pending_save_formatters();
     }
 
     pub(in crate::editor::session) fn start_save(
@@ -14687,6 +14737,27 @@ impl InteractiveApplication {
         self.notify_message(self.message("saving", &[]), false);
         for buffer in changed {
             let quit = quit_after && buffer == last;
+            if let Some((_, pending_quit)) = self.pending_saves.iter_mut().find(|(id, _)| *id == buffer) {
+                *pending_quit |= quit;
+            } else {
+                self.pending_saves.push_back((buffer, quit));
+            }
+        }
+        self.process_pending_saves();
+    }
+
+    pub(super) fn process_pending_saves(&mut self) {
+        while !self.pending_saves.is_empty() {
+            match self.documents.check_admission() {
+                Ok(()) => {}
+                Err(crate::files::VfsError::QueueFull) => break,
+                Err(error) => {
+                    self.pending_saves.clear();
+                    self.show_error(error);
+                    break;
+                }
+            }
+            let (buffer, quit) = self.pending_saves.pop_front().expect("pending save");
             if let Err(error) = self.request_save_buffer(buffer, quit, None, false, None) {
                 self.show_document_failure(error);
             }
@@ -14925,7 +14996,14 @@ impl InteractiveApplication {
                     self.disk_stamps.insert(buffer, stamp);
                 }
                 self.git.forget_hunks();
-                self.keep_cursor_off_final_newline();
+                self.start_git_status_refresh_with_feedback(false);
+                let views = self.state.views.iter()
+                    .filter(|(_, view)| view.buffer == buffer)
+                    .map(|(id, _)| id)
+                    .collect::<Vec<_>>();
+                for view in views {
+                    self.keep_view_cursor_off_final_newline(view);
+                }
                 self.notify_message(
                     self.message("reloaded_file", &[("path", self.notice_file_label(&path))]),
                     false,
@@ -14974,8 +15052,8 @@ impl InteractiveApplication {
                     Some(LspDocument {
                         language_id: language_id_for_path(&path)?.into(),
                         path,
-                        version: buffer_state.text.revision().0,
-                        text: buffer_state.text.to_string(),
+                        version: revision.0,
+                        text: crate::editor::text::decode_utf8(buffer_state.persisted_bytes()).ok()?.text,
                     })
                 });
                 self.git.forget_hunks();
@@ -15015,7 +15093,7 @@ impl InteractiveApplication {
                 }
                 if let Some((effect, line)) = stage.filter(|_| !still_dirty) {
                     self.retry_saved_stage(buffer, &path, effect, line);
-                } else if self.ui.explorer.is_some() {
+                } else {
                     self.start_git_status_refresh_with_feedback(false);
                 }
                 if let Some(token) = close {

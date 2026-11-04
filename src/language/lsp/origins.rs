@@ -184,9 +184,12 @@ pub(crate) struct EditSourceFixture {
 #[cfg(test)]
 impl EditSourceFixture {
     pub(crate) fn saved_uri(&self) -> Option<String> {
+        self.saved_document().map(|document| document.uri())
+    }
+    pub(crate) fn saved_document(&self) -> Option<super::model::LspDocument> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Save(document) = command {
-                return Some(document.uri());
+                return Some(document);
             }
         }
         None

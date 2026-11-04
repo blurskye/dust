@@ -1304,6 +1304,46 @@ fn conflict_keys_move_between_markers_and_wrap() {
 }
 
 #[test]
+fn the_first_disk_poll_detects_changes_since_opening() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("changed-before-poll.txt");
+    fs::write(&path, "before\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    fs::write(&path, "after opening\n").unwrap();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "after opening\n");
+    assert!(!app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("shortened.txt");
+    fs::write(&path, "long first line\nsecond line\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    let first = app.state.active_view.unwrap();
+    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    let second = app.state.active_view.unwrap();
+    app.state.views[first].cursor = ByteOffset(20);
+    app.state.views[second].cursor = ByteOffset(20);
+    app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    fs::write(&path, "x\n").unwrap();
+    app.start_reload(false);
+    let (_, other) = app.state.open_text(TextBuffer::from_text("other"), None);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(other));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "x\n");
+    assert_eq!(app.state.views[first].cursor, ByteOffset(0));
+    assert_eq!(app.state.views[second].cursor, ByteOffset(0));
+}
+
+#[test]
 fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     let mut app = app();
     let path = app.state.workspace_root.join("watched.txt");
@@ -1359,6 +1399,33 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
         span.range,
         ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_through_an_alias_preserves_the_already_open_dirty_buffer() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let path = app.state.workspace_root.join("current.txt");
+    let alias = app.state.workspace_root.join("old.txt");
+    fs::write(&path, "disk").unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+    let (original, _) = app.state.open_text(TextBuffer::from_text("disk"), Some(path.clone()));
+    app.replace_with_recovered(original, "new unsaved work".into()).unwrap();
+    let journal = app.state.workspace_root.join("journal.toml");
+    fs::write(&journal, "journal").unwrap();
+    let id = app.documents.read_scoped(alias, vec![app.state.workspace_root.clone()]).unwrap();
+    app.recovery.register_read(id, journal, "recovered draft".into(), app.workspace.version());
+    wait_vfs(&mut app);
+    let recovered = app.state.active_buffer_id().unwrap();
+    assert_ne!(recovered, original);
+    assert_eq!(app.state.buffers[original].text.to_string(), "new unsaved work");
+    assert!(app.state.buffers[original].dirty);
+    assert_eq!(app.state.buffers[original].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[recovered].text.to_string(), "recovered draft");
+    assert!(app.state.buffers[recovered].dirty);
+    assert!(app.state.buffers[recovered].path.is_none());
+    assert_eq!(fs::read_to_string(path).unwrap(), "disk");
 }
 
 #[test]

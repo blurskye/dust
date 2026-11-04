@@ -358,12 +358,13 @@ fn app_waiting_to_save_formatted(
     app.set_dashboard_visibility(false);
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
-    app.format_on_save = Some(super::super::FormatOnSave {
+    app.format_on_save.insert(buffer, super::super::FormatOnSave {
         request: Some(("formatter".into(), 1)),
         buffer,
         source: app.state.buffers[buffer].text.source_version(),
         path: app.state.buffers[buffer].path.clone(),
         formatter: None,
+        started: true,
         quit_after: false,
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
     });
@@ -398,7 +399,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
             }],
         }),
     );
-    assert!(app.format_on_save.is_none());
+    assert!(app.format_on_save.is_empty());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "a b\n");
     super::wait_vfs(&mut app);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a b\n");
@@ -408,7 +409,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
 fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
     use crate::language::lsp::{LspFeatureResult, LspProgressKind};
     let (mut app, _, _, uri) = app_waiting_to_save_formatted("loading.rs");
-    app.format_on_save = None;
+    app.format_on_save.clear();
     app.update_lsp_progress(
         "server".into(),
         "token".into(),
@@ -455,7 +456,7 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
 fn code_actions_wait_for_every_server_and_list_them_together() {
     use crate::language::lsp::{LspCodeAction, LspFeatureResult, LspWorkspaceEdit};
     let (mut app, _, _, uri) = app_waiting_to_save_formatted("actions.py");
-    app.format_on_save = None;
+    app.format_on_save.clear();
     let action = |title: &str| LspCodeAction {
         title: title.into(),
         kind: Some("quickfix".into()),
@@ -545,7 +546,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
         &uri,
         crate::language::lsp::LspFeatureResult::Empty,
     );
-    assert!(app.format_on_save.is_none());
+    assert!(app.format_on_save.is_empty());
     super::wait_vfs(&mut app);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a  b\n");
     assert!(!app.state.buffers[app.state.active_buffer_id().unwrap()].dirty);
@@ -557,17 +558,89 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
         "textDocument/formatting".into(),
         "formatter crashed".into(),
     );
-    assert!(app.format_on_save.is_none());
+    assert!(app.format_on_save.is_empty());
     super::wait_vfs(&mut app);
     assert!(!app.state.buffers[buffer].dirty);
 
     let (mut app, buffer, ..) = app_waiting_to_save_formatted("slow.txt");
     app.process_format_on_save_deadline();
-    assert!(app.format_on_save.is_some());
-    app.format_on_save.as_mut().unwrap().deadline = std::time::Instant::now();
+    assert!(!app.format_on_save.is_empty());
+    app.format_on_save.get_mut(&buffer).unwrap().deadline = std::time::Instant::now();
     app.process_format_on_save_deadline();
-    assert!(app.format_on_save.is_none());
+    assert!(app.format_on_save.is_empty());
     super::wait_vfs(&mut app);
+    assert!(!app.state.buffers[buffer].dirty);
+}
+
+#[cfg(unix)]
+#[test]
+fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
+    let (mut app, first, first_path, _) = app_waiting_to_save_formatted("first-managed.txt");
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.tasks.insert("serial-formatter".into(), crate::config::TaskConfig {
+        kind: crate::config::TaskKind::Formatter,
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), "tr -s ' '".into()],
+        cwd: None, environment: BTreeMap::new(), dependencies: Vec::new(),
+        timeout_ms: Some(2000), stdin: true, matcher: None,
+    });
+    app.configuration.install_fixture(fixture);
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity);
+    }
+    app.reconcile_workspace_trust();
+    let pending = app.format_on_save.get_mut(&first).unwrap();
+    pending.request = None;
+    pending.formatter = Some("serial-formatter".into());
+    app.tasks.fixture_formatter_result("serial-formatter", first, b"a b\n", &app.state,
+        &app.workspace, app.configuration.binding_revision());
+    let second_path = app.state.workspace_root.join("second-managed.txt");
+    fs::write(&second_path, "c  d\n").unwrap();
+    let (second, _) = app.state.open_text(TextBuffer::from_text("c  d\n"), Some(second_path.clone()));
+    app.state.set_buffer_dirty(second, true);
+    app.format_on_save.insert(second, super::super::FormatOnSave {
+        request: None, buffer: second,
+        source: app.state.buffers[second].text.source_version(), path: Some(second_path.clone()),
+        formatter: Some("serial-formatter".into()), started: false, quit_after: false,
+        deadline: Instant::now(),
+    });
+    app.process_format_on_save_deadline();
+    assert!(!app.format_on_save[&second].started);
+    app.process_job_events();
+    app.process_format_on_save_deadline();
+    assert!(app.format_on_save[&second].started);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !app.format_on_save.is_empty() {
+        app.process_execution_preflight();
+        app.process_job_events();
+        assert!(Instant::now() < deadline, "{:?}", app.ui.notification);
+        thread::sleep(Duration::from_millis(2));
+    }
+    wait_vfs(&mut app);
+    assert_eq!(fs::read_to_string(first_path).unwrap(), "a b\n");
+    assert_eq!(fs::read_to_string(second_path).unwrap(), "c d\n");
+    assert!(!app.state.buffers[first].dirty);
+    assert!(!app.state.buffers[second].dirty);
+}
+
+#[test]
+fn a_timed_out_managed_formatting_save_retires_already_buffered_results() {
+    let (mut app, buffer, path, _) = app_waiting_to_save_formatted("slow-managed.txt");
+    let pending = app.format_on_save.get_mut(&buffer).unwrap();
+    pending.request = None;
+    pending.formatter = Some("slow-formatter".into());
+    pending.deadline = Instant::now();
+    app.tasks.fixture_formatter_result(
+        "slow-formatter", buffer, b"late formatted text\n", &app.state,
+        &app.workspace, app.configuration.binding_revision(),
+    );
+    app.process_format_on_save_deadline();
+    assert!(app.format_on_save.is_empty());
+    wait_vfs(&mut app);
+    app.process_job_events();
+    assert_eq!(fs::read_to_string(path).unwrap(), "a  b\n");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "a  b\n");
     assert!(!app.state.buffers[buffer].dirty);
 }
 
@@ -666,14 +739,14 @@ fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
 #[test]
 fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
     let (mut app, buffer, ..) = app_waiting_to_save_formatted("newer-save.txt");
-    app.format_on_save.as_mut().unwrap().request = Some(("formatter".into(), 2));
+    app.format_on_save.get_mut(&buffer).unwrap().request = Some(("formatter".into(), 2));
     app.handle_lsp_request_failure(
         "formatter".into(),
         1,
         "textDocument/formatting".into(),
         "old failure".into(),
     );
-    assert!(app.format_on_save.is_some());
+    assert!(!app.format_on_save.is_empty());
     assert!(app.state.buffers[buffer].dirty);
 }
 
@@ -682,7 +755,7 @@ fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
     let (mut app, buffer, path, ..) = app_waiting_to_save_formatted("save-in-background.txt");
     app.state.open_text(TextBuffer::from_text("other"), None);
     let other = app.state.active_buffer_id();
-    app.finish_format_on_save();
+    app.finish_format_on_save(buffer);
     super::wait_vfs(&mut app);
     assert!(!app.state.buffers[buffer].dirty);
     assert_eq!(fs::read_to_string(path).unwrap(), "a  b\n");
@@ -795,7 +868,7 @@ fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
 #[test]
 fn an_unrelated_formatter_cannot_release_a_pending_save() {
     let (mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
-    app.format_on_save.as_mut().unwrap().formatter = Some("wanted".into());
+    app.format_on_save.get_mut(&pending_buffer).unwrap().formatter = Some("wanted".into());
     let (other, _) = app.state.open_text(TextBuffer::from_text("other"), None);
     app.tasks.fixture_formatter_result(
         "unrelated",
@@ -806,7 +879,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
         app.configuration.binding_revision(),
     );
     app.process_job_events();
-    assert!(app.format_on_save.is_some());
+    assert!(!app.format_on_save.is_empty());
     assert_eq!(fs::read_to_string(&path).unwrap(), "a  b\n");
     app.tasks.fixture_formatter_result(
         "wanted",
@@ -818,7 +891,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
     );
     app.process_job_events();
     wait_vfs(&mut app);
-    assert!(app.format_on_save.is_none());
+    assert!(app.format_on_save.is_empty());
     assert_eq!(fs::read_to_string(path).unwrap(), "a b\n");
 }
 

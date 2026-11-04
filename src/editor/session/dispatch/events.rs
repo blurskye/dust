@@ -1232,6 +1232,10 @@ impl InteractiveApplication {
         let Some(view_id) = self.state.active_view else {
             return;
         };
+        self.keep_view_cursor_off_final_newline(view_id);
+    }
+
+    pub(super) fn keep_view_cursor_off_final_newline(&mut self, view_id: crate::editor::ViewId) {
         let Some(view) = self.state.views.get(view_id) else {
             return;
         };
@@ -1645,6 +1649,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_vfs_results(&mut self) {
+        self.process_pending_saves();
         loop {
             let result = match self
                 .documents
@@ -1674,6 +1679,7 @@ impl InteractiveApplication {
                 }
                 Ok(Some(DocumentEvent::File(reply))) => {
                     self.process_file_reply(reply);
+                    self.process_pending_saves();
                     continue;
                 }
                 Ok(Some(DocumentEvent::Stopped {
@@ -2030,10 +2036,20 @@ impl InteractiveApplication {
                                 self.ensure_cursor_visible();
                             }
                             Some(NavigationRead::Recovered(journal, content)) => {
-                                let (buffer, _) = self.state.open_text(text, Some(path.clone()));
-                                self.state.buffers[buffer].read_only =
-                                    self.workspace.require_path(&path).is_err();
-                                self.record_recent_file(path);
+                                // Scoped reads resolve aliases. Never recover over an existing
+                                // buffer, even when the journal used a different spelling.
+                                let already_open = self.state.buffers.values().any(|buffer| {
+                                    buffer.path.as_ref() == Some(&path)
+                                });
+                                let (buffer, _) = if already_open {
+                                    self.state.open_text(TextBuffer::from_text(""), None)
+                                } else {
+                                    let opened = self.state.open_text(text, Some(path.clone()));
+                                    self.state.buffers[opened.0].read_only =
+                                        self.workspace.require_path(&path).is_err();
+                                    self.record_recent_file(path);
+                                    opened
+                                };
                                 match self.replace_with_recovered(buffer, content) {
                                     Ok(()) => self.finish_recovery(&journal, "recovery_restored"),
                                     Err(error) => self.show_error(error),
@@ -2831,12 +2847,10 @@ impl InteractiveApplication {
         self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting"
-            && self.format_on_save.as_ref().is_some_and(|pending| {
-                pending.request.as_ref() == Some(&(server.clone(), generation))
-            })
+            && let Some(buffer) = self.formatting_save_for_request(&server, generation)
         {
             self.append_lsp_log(format!("format on save failed: {message}"));
-            self.finish_format_on_save();
+            self.finish_format_on_save(buffer);
             return;
         }
         if method == "textDocument/inlayHint" {
@@ -3009,9 +3023,7 @@ impl InteractiveApplication {
                         continue;
                     }
                     let save_format = method == "textDocument/formatting"
-                        && self.format_on_save.as_ref().is_some_and(|pending| {
-                            pending.request.as_ref() == Some(&(server.clone(), generation))
-                        });
+                        && self.formatting_save_for_request(&server, generation).is_some();
                     if save_format {
                         self.present_lsp_result_owned(
                             &server,
@@ -3365,7 +3377,7 @@ impl InteractiveApplication {
             self.language.supporting_server(buffer, &document, &feature)
         };
         // Someone is waiting on these, unlike a save's format or what the editor asks by itself.
-        let asked = !self.format_on_save.is_some()
+        let asked = !self.format_on_save.contains_key(&buffer)
             && !matches!(
                 feature,
                 LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. }
@@ -3508,8 +3520,8 @@ impl InteractiveApplication {
                 if formats
                     && let Some(pending) = self
                         .format_on_save
-                        .as_mut()
-                        .filter(|pending| pending.buffer == buffer && pending.request.is_none())
+                        .get_mut(&buffer)
+                        .filter(|pending| pending.request.is_none())
                 {
                     pending.request = Some((server.clone(), self.language.generation()));
                 }
@@ -3750,10 +3762,8 @@ impl InteractiveApplication {
                         }
                         self.restore_view_positions(positions);
                     }
-                    if self.format_on_save.as_ref().is_some_and(|pending| {
-                        pending.request.as_ref() == Some(&(server.to_owned(), generation))
-                    }) {
-                        self.finish_format_on_save();
+                    if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                        self.finish_format_on_save(buffer);
                     }
                     return;
                 }
@@ -4015,10 +4025,8 @@ impl InteractiveApplication {
             LspFeatureResult::Colors(_) => {}
             // Nothing to change is a normal answer from a formatter.
             LspFeatureResult::Empty if method == "textDocument/formatting" => {
-                if self.format_on_save.as_ref().is_some_and(|pending| {
-                    pending.request.as_ref() == Some(&(server.to_owned(), generation))
-                }) {
-                    self.finish_format_on_save();
+                if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                    self.finish_format_on_save(buffer);
                 }
             }
             // Only the last of several servers can say that nobody knows.
