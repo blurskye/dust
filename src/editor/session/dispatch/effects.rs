@@ -9734,8 +9734,14 @@ impl InteractiveApplication {
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
-            Some(PickerPayload::LspCommand(command)) => {
-                self.request_lsp(LspFeature::ExecuteCommand(command));
+            Some(PickerPayload::LspCommand { server, context, command }) => {
+                if !self.language.edit_context_current(&context) {
+                    self.show_error("code-lens source retired");
+                    return;
+                }
+                if let Err(error) = self.language.execute_command(&server, command) {
+                    self.show_error(error);
+                }
             }
             Some(PickerPayload::Buffer(buffer)) => {
                 if let Err(error) = self.state.show_buffer(buffer) {
@@ -9793,7 +9799,7 @@ impl InteractiveApplication {
                 if let Some(value) = debug_selection.as_ref().ok().and_then(|s| s.value()) {
                     let value = value.to_owned();
                     self.debugger_session
-                        .record_console_evaluation(value.clone());
+                        .record_inspected_value(value.clone());
                     self.notify_message(value, false);
                 }
                 match debug_selection
@@ -9936,6 +9942,13 @@ impl InteractiveApplication {
             Ok(content) => content,
             Err(error) => {
                 self.show_error(error.to_string());
+                return;
+            }
+        };
+        let content = match crate::editor::text::decode_utf8(content.as_bytes()) {
+            Ok(decoded) => decoded.text,
+            Err(error) => {
+                self.show_error(error);
                 return;
             }
         };
@@ -10150,10 +10163,10 @@ impl InteractiveApplication {
             return;
         };
         let line = buffer.text.byte_to_line(cursor).unwrap_or(0) as u64 + 1;
-        let disabled = self
-            .debugger_session
-            .breakpoint_state(&path, line)
-            .is_some_and(|state| state == crate::debugger::DapBreakpointState::Disabled);
+        let Some(disabled) = self.debugger_session.breakpoint_disabled(&path, line) else {
+            self.show_error("no breakpoint on this line");
+            return;
+        };
         self.debugger_session
             .set_breakpoint_disabled(&path, line, !disabled);
         self.notify_message(
@@ -10557,7 +10570,10 @@ impl InteractiveApplication {
         self.switch_ends_terminals = None;
         self.close_picker();
         match self.workspace.add_root_request(target, Some(id)) {
-            Ok(()) => self.notify_message("switching…".to_owned(), false),
+            Ok(()) => {
+                self.switch_approved_terminals = self.terminal_session.running_ids_in_root(&current_path);
+                self.notify_message("switching…".to_owned(), false);
+            },
             Err(e) => self.show_workspace_failure(e),
         }
     }
@@ -10596,23 +10612,24 @@ impl InteractiveApplication {
                 Err(error) => self.show_error(error),
             }
         }
-        // A window can fall back to another window's buffer from the old tree, so go until none
-        // shows one. Each round closes a buffer or a window.
-        for _ in 0..self.state.views.len() + self.state.buffers.len() {
-            let showing = self.state.views.iter().find_map(|(view, state)| {
-                let buffer = self.state.buffers.get(state.buffer)?;
-                (!buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
-                    .then_some((view, state.buffer))
-            });
-            let Some((view, buffer)) = showing else {
-                break;
-            };
-            // Only the active window's buffer can be closed.
-            if let Err(error) = self.state.focus_view(view) {
-                self.show_error(error);
-                break;
+        // Finish one buffer before choosing the next: otherwise fallback buffers can alternate
+        // forever when several panes show the same leaving buffer.
+        let leaving_buffers = self.state.buffers.iter()
+            .filter(|(_, buffer)| !buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        for buffer in leaving_buffers {
+            let views = self.state.views.iter()
+                .filter(|(_, state)| state.buffer == buffer)
+                .map(|(view, _)| view)
+                .collect::<Vec<_>>();
+            for view in views {
+                if let Err(error) = self.state.focus_view(view) {
+                    self.show_error(error);
+                    break;
+                }
+                self.close_buffer_target(view, buffer);
             }
-            self.close_buffer_target(view, buffer);
         }
         // Windows left with nothing to show go too, down to the one the file reopens in.
         let front = self.state.active_view;
@@ -10872,8 +10889,8 @@ impl InteractiveApplication {
         self.tooling.selected_managed_executable(definition)
     }
 
-    fn set_tool_probe_directory(&self) {
-        let directory = self
+    pub(super) fn tool_probe_directory(&self) -> Option<PathBuf> {
+        self
             .active_lsp_document_without_text()
             .and_then(|(_, document)| document.path.parent().map(Path::to_path_buf))
             .or_else(|| {
@@ -10881,8 +10898,11 @@ impl InteractiveApplication {
                     .roots()
                     .first()
                     .map(|root| root.identity.canonical_path.clone())
-            });
-        self.tooling.set_probe_directory(directory);
+            })
+    }
+
+    fn set_tool_probe_directory(&self) {
+        self.tooling.set_probe_directory(self.tool_probe_directory());
     }
 
     pub(in crate::editor::session) fn selected_lsp_runtime_available(
@@ -10942,12 +10962,20 @@ impl InteractiveApplication {
         source: LspRuntimeSource,
         executable: PathBuf,
     ) {
+        let Some(cancelled) = self.workspace.probe_cancellation() else {
+            return;
+        };
+        self.tooling.set_probe_cancellation(cancelled);
         self.set_tool_probe_directory();
         self.tooling
             .queue_tool_version_probe(definition, source, executable)
     }
 
     pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
+        let Some(cancelled) = self.workspace.probe_cancellation() else {
+            return;
+        };
+        self.tooling.set_probe_cancellation(cancelled);
         self.set_tool_probe_directory();
         self.tooling.queue_tool_version_probes(category)
     }
@@ -11753,6 +11781,7 @@ impl InteractiveApplication {
             (current + 1) % order.len()
         };
         let category = order[next];
+        self.queue_tool_version_probes(category);
         self.rebuild_tool_menu(category, None);
     }
 
@@ -12210,13 +12239,7 @@ impl InteractiveApplication {
             return;
         }
         let operation = if let Some((rustup, proxy)) = rustup_install {
-            let Some(cwd) = self.workspace.active_root().and_then(|root| {
-                self.workspace
-                    .roots()
-                    .iter()
-                    .find(|candidate| candidate.id == root)
-                    .map(|root| root.identity.canonical_path.clone())
-            }) else {
+            let Some(cwd) = self.tool_probe_directory() else {
                 self.show_error("rustup installation requires an active workspace root");
                 return;
             };
@@ -15086,6 +15109,22 @@ impl InteractiveApplication {
         self.workspace.reconcile_trust();
     }
     pub(in crate::editor::session) fn process_trust_events(&mut self) {
+        if let Some((old, new)) = self.workspace.pending_root_switch() {
+            let dirty = self.state.buffers.values().any(|buffer| {
+                buffer.dirty && buffer.path.as_deref().is_some_and(|file| leaves_root(file, old, new))
+            });
+            let new_terminal = self.terminal_session.running_ids_in_root(old).iter()
+                .any(|id| !self.switch_approved_terminals.contains(id));
+            if dirty || new_terminal {
+                self.workspace.cancel_root_switch();
+                self.switch_approved_terminals.clear();
+                self.show_error(if dirty {
+                    "Workspace switch cancelled: save or close the unsaved files first"
+                } else {
+                    "Workspace switch cancelled: new terminals opened; switch again to confirm"
+                });
+            }
+        }
         let before = self.workspace.version();
         let updates = self.workspace.poll();
         if before != self.workspace.version() {

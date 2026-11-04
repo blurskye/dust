@@ -754,6 +754,13 @@ impl DebugSession {
         }
         self.push_console(entry);
     }
+    pub(in crate::editor::session) fn record_inspected_value(&mut self, text: String) {
+        self.push_console(crate::debugger::DapConsoleEntry::new(
+            crate::debugger::DapConsoleOrigin::Evaluation,
+            "inspect",
+            text,
+        ));
+    }
     fn push_console(&mut self, mut entry: crate::debugger::DapConsoleEntry) {
         // Provenance is stamped HERE, once, for every record: what the record itself supplied is
         // kept, and what is ambient is filled in.
@@ -926,6 +933,16 @@ impl DebugSession {
                 .insert((path.clone(), row.line), state);
         }
     }
+    pub(in crate::editor::session) fn breakpoint_disabled(
+        &self,
+        path: &std::path::Path,
+        line: u64,
+    ) -> Option<bool> {
+        self.breakpoints.get(path)?
+            .iter()
+            .any(|row| row.line == line)
+            .then(|| self.disabled_breakpoints.contains(&(path.to_path_buf(), line)))
+    }
     /// Disable or enable a breakpoint. Session state, and independent of the adapter.
     pub(in crate::editor::session) fn set_breakpoint_disabled(
         &mut self,
@@ -933,6 +950,9 @@ impl DebugSession {
         line: u64,
         disabled: bool,
     ) {
+        if self.breakpoint_disabled(path, line).is_none() {
+            return;
+        }
         let key = (path.to_path_buf(), line);
         if let Some(changed) = &mut self.changed_breakpoints {
             changed.insert(key.clone());

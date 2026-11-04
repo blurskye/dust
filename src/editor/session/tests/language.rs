@@ -792,6 +792,19 @@ fn rust_analyzer_toolchain_and_standalone_versions_are_not_conflated() {
     );
 }
 
+#[test]
+fn rustup_working_directory_follows_the_selected_document() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let project = root.join("nested");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("rust-toolchain.toml"), "[toolchain]\nchannel = 'nightly'\n").unwrap();
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(project.join("main.rs")));
+    assert_eq!(app.tool_probe_directory(), Some(project));
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(root.join("main.rs")));
+    assert_eq!(app.tool_probe_directory(), Some(root));
+}
+
 #[cfg(unix)]
 #[test]
 fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
@@ -1155,8 +1168,60 @@ fn lsp_installation_mechanisms_are_host_specific() {
 }
 
 #[test]
+fn tool_manager_probes_require_trust_and_follow_category_changes() {
+    for safe in [false, true] {
+        let mut app = app();
+        app.tooling.fixture_retain(|_| false);
+        let echo = crate::tools::discover_executable("echo").unwrap();
+        for (id, kind) in [("probe-lsp", ToolKind::Lsp), ("probe-dap", ToolKind::Dap)] {
+            let mut definition = crate::tools::bundled_tool_catalog().remove(0);
+            definition.id = id.into();
+            definition.kind = kind;
+            definition.executable = echo.display().to_string();
+            definition.probe_args = vec![id.into()];
+            definition.install = None;
+            definition.pins.clear();
+            app.tooling.fixture_insert(crate::tools::ToolEntry { definition, status: ToolStatus::Installed(echo.clone()) });
+        }
+        app.open_tool_menu("lsp".into());
+        let definition = app.tooling.entries()[0].definition.clone();
+        let key = app.tool_version_key(&definition, LspRuntimeSource::Path, Some(&echo));
+        assert_eq!(app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0, "detecting…");
+        assert!(app.tooling.version(&key).is_none());
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots().to_vec() {
+            app.workspace.fixture_trust_identity(root.identity);
+        }
+        app.workspace.fixture_safe_mode(safe);
+        app.reconcile_workspace_trust();
+        app.open_tool_menu("lsp".into());
+        app.cycle_tool_category(1);
+        assert_eq!(app.ui.tool_menu.as_ref().unwrap().category, "dap");
+        let definition = app.tooling.entries()[1].definition.clone();
+        let key = app.tool_version_key(&definition, LspRuntimeSource::Path, Some(&echo));
+        if safe {
+            assert_eq!(app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0, "detecting…");
+            assert!(app.tooling.version(&key).is_none());
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while app.tooling.version(&key).is_none() {
+                app.process_tool_version_results();
+                assert!(Instant::now() < deadline);
+                thread::yield_now();
+            }
+            assert_eq!(app.tooling.version(&key).unwrap().as_ref().unwrap(), "probe-dap");
+        }
+    }
+}
+
+#[test]
 fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
     let mut app = app();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity);
+    }
+    app.reconcile_workspace_trust();
     let source = app.state.workspace_root.join("main.rs");
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
@@ -1927,6 +1992,39 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
         }
         assert_eq!(app.diagnostics.choices().count(), 0);
     }
+}
+
+#[test]
+fn code_lens_commands_keep_their_originating_session() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("lens.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone()));
+    let first = fixture_owned_lsp(&mut app, "first", buffer);
+    let second = fixture_owned_lsp(&mut app, "second", buffer);
+    app.language.select("second");
+    let uri = file_uri(&path);
+    first.publish_disk_diagnostics(&uri, "fn f() {}", Vec::new());
+    let context = app.language.poll_event().unwrap().context;
+    let lens = || LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range: LspRange {
+            start: LspPosition { line: 0, character: 0 },
+            end: LspPosition { line: 0, character: 2 },
+        },
+        title: "Run".into(),
+        command: Some(LspCommand { command: "run-lens".into(), arguments: vec![serde_json::json!(42)] }),
+    }]);
+    app.present_lsp_result_owned("first", 1, "textDocument/codeLens", &uri, lens(), Some(context.clone()));
+    app.accept_picker();
+    assert_eq!(first.executed_command().as_deref(), Some("run-lens"));
+    assert_eq!(second.executed_command(), None);
+
+    app.present_lsp_result_owned("first", 2, "textDocument/codeLens", &uri, lens(), Some(context));
+    let replacement = fixture_owned_lsp(&mut app, "first", buffer);
+    app.accept_picker();
+    assert_eq!(replacement.executed_command(), None);
+    assert_eq!(second.executed_command(), None);
+    assert_eq!(app.ui.notification.as_deref(), Some("code-lens source retired"));
 }
 
 #[test]

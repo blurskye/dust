@@ -10,6 +10,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     time::Duration,
+    sync::{Arc, atomic::AtomicBool},
 };
 
 pub(super) struct ToolingSession {
@@ -26,6 +27,7 @@ pub(super) struct ToolingSession {
     installer: ToolInstaller,
     version_service: ToolVersionService,
     probe_directory: RefCell<Option<PathBuf>>,
+    probe_cancelled: Arc<AtomicBool>,
     version_pending: BTreeSet<String>,
     versions: BTreeMap<String, Result<String, String>>,
 }
@@ -145,6 +147,7 @@ impl ToolingSession {
             installer: ToolInstaller::start(),
             version_service: ToolVersionService::start(),
             probe_directory: RefCell::new(None),
+            probe_cancelled: Arc::new(AtomicBool::new(false)),
             version_pending: BTreeSet::new(),
             versions: BTreeMap::new(),
         }
@@ -195,6 +198,10 @@ impl ToolingSession {
         let mut unavailable = false;
         let mut rustup_key = None;
         while let Some(result) = self.version_service.try_result() {
+            if result.result.as_ref().is_err_and(|error| error == "version probe cancelled") {
+                self.version_pending.remove(&result.id);
+                continue;
+            }
             // Looked up only when a result arrives: this runs every main loop pass.
             let rustup_key = rustup_key.get_or_insert_with(|| {
                 self.entries
@@ -689,6 +696,10 @@ impl ToolingSession {
         }
     }
 
+    pub(in crate::editor::session) fn set_probe_cancellation(&mut self, cancelled: Arc<AtomicBool>) {
+        self.probe_cancelled = cancelled;
+    }
+
     pub(in crate::editor::session) fn queue_tool_version_probe(
         &mut self,
         definition: &ToolDefinition,
@@ -725,6 +736,7 @@ impl ToolingSession {
             environment,
             current_directory,
             timeout,
+            cancelled: self.probe_cancelled.clone(),
         }) {
             Ok(()) => {
                 self.version_pending.insert(key);

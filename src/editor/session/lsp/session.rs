@@ -329,26 +329,28 @@ impl LspSession {
         let command = self.edits.take_command(key);
         self.edits.finish(key, applied, reason)?;
         if applied && let Some((server, command)) = command {
-            let document = self
-                .sessions
-                .get(&server)
-                .and_then(|session| session.documents.values().next())
-                .cloned()
-                .ok_or("code-action server is no longer attached")?;
-            let generation = self
-                .next_generation()
-                .ok_or("language-server request identity exhausted")?;
-            self.service
-                .request(
-                    &server,
-                    crate::language::lsp::LspFeature::ExecuteCommand(command),
-                    document,
-                    crate::editor::text::ByteOffset(0),
-                    generation,
-                )
-                .map_err(|error| error.to_string())?;
+            self.execute_command(&server, command)?;
         }
         Ok(())
+    }
+    pub(super) fn execute_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+    ) -> Result<(), String> {
+        let document = self.sessions.get(server)
+            .and_then(|session| session.documents.values().next())
+            .cloned()
+            .ok_or("command server is no longer attached")?;
+        let generation = self.next_generation()
+            .ok_or("language-server request identity exhausted")?;
+        self.service.request(
+            server,
+            crate::language::lsp::LspFeature::ExecuteCommand(command),
+            document,
+            crate::editor::text::ByteOffset(0),
+            generation,
+        ).map_err(|error| error.to_string())
     }
     pub(super) fn set_edit_command(
         &mut self,

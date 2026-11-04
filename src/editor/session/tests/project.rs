@@ -1442,6 +1442,78 @@ fn hunk_reset_takes_the_change_under_the_cursor() {
 }
 
 #[test]
+fn leaving_a_worktree_closes_shared_buffers_without_alternating_fallbacks() {
+    let mut app = app();
+    let old = app.state.workspace_root.clone();
+    let new = old.join(".worktree/topic");
+    fs::create_dir_all(&new).unwrap();
+    let (a, _) = app.state.open_text(TextBuffer::from_text("a"), Some(old.join("a.txt")));
+    let (b, first) = app.state.open_text(TextBuffer::from_text("b"), Some(old.join("b.txt")));
+    let middle = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    app.state.views[middle].buffer = a;
+    let last = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    app.state.views[last].buffer = b;
+    assert_eq!(app.state.views[first].buffer, b);
+    app.finish_root_switch(new, &old);
+    assert!(!app.state.buffers.contains_key(a));
+    assert!(!app.state.buffers.contains_key(b));
+    assert!(!app.state.views.values().any(|view| view.buffer == a || view.buffer == b));
+}
+
+#[test]
+fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
+    for terminal in [false, true] {
+        let mut app = app();
+        let old = app.state.workspace_root.clone();
+        let new = old.join(".worktree/topic");
+        fs::create_dir_all(&new).unwrap();
+        prepare_trust_identity(&mut app);
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("clean"), Some(old.join("file.txt")));
+        app.switch_workspace_root(new);
+        assert!(app.workspace.root_operation_pending());
+        if terminal {
+            app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+                profile: "shell".into(),
+                screen: crate::ui::PtyScreen::new(80, 8, 100),
+                running: true,
+                exit_code: None,
+                truncated: false,
+            }, app.workspace.version());
+            app.terminal_session.fixture_cwd(PtyId(1), old.clone());
+        } else {
+            app.replace_with_recovered(buffer, "dirty".into()).unwrap();
+        }
+        app.process_trust_events();
+        assert!(!app.workspace.root_operation_pending());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            app.process_trust_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(app.state.workspace_root, old);
+        assert!(app.state.buffers.contains_key(buffer));
+        if terminal { assert_eq!(app.terminal_session.running_count(), 1); }
+    }
+}
+
+#[test]
+fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("main.rs");
+    app.state.open_text(TextBuffer::from_text("one\ntwo\n"), Some(path.clone()));
+    let at = |line| crate::debugger::DapSourceBreakpoint {
+        path: path.clone(), line, column: None, condition: None, hit_condition: None, log_message: None,
+    };
+    app.toggle_breakpoint_disabled();
+    assert!(app.debugger_session.persisted_breakpoints().is_empty());
+    app.debugger_session.breakpoint(at(1), false).unwrap();
+    app.toggle_breakpoint_disabled();
+    app.debugger_session.breakpoint(at(2), false).unwrap();
+    app.toggle_breakpoint_disabled();
+    assert_eq!(app.debugger_session.breakpoint_disabled(&path, 1), Some(false));
+}
+
+#[test]
 fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
     let mut app = app();
     let old = app.state.workspace_root.clone();
@@ -4129,6 +4201,22 @@ fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
 }
 
 #[test]
+fn form_help_captures_keys_without_changing_the_prompt_draft() {
+    let mut app = app();
+    app.open_prompt(crate::ui::PromptKind::Command, "write draft".into());
+    app.handle_configured_key("ctrl-g".parse().unwrap());
+    assert!(app.search.help_is_open());
+    app.handle_configured_key(KeyEvent::character('j'));
+    assert_eq!(app.input.prompt().unwrap().input, "write draft");
+    app.handle_configured_key("escape".parse().unwrap());
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(!app.search.help_is_open());
+    assert_eq!(app.input.prompt().unwrap().input, "write draft");
+    app.handle_configured_key(KeyEvent::character('x'));
+    assert_eq!(app.input.prompt().unwrap().input, "write draftx");
+}
+
+#[test]
 fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
     let mut app = app();
     app.open_confirmation(
@@ -4482,7 +4570,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         let mut builder = repo
             .treebuilder(Some(&base_commit.tree().unwrap()))
             .unwrap();
-        let blob = repo.blob(b"THEIR VERSION\n").unwrap();
+        let blob = repo.blob(b"\xef\xbb\xbfTHEIR VERSION\r\n").unwrap();
         builder.insert("h0.txt", blob, 0o100644).unwrap();
         let tree = repo.find_tree(builder.write().unwrap()).unwrap();
         repo.commit(
@@ -4537,8 +4625,10 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         "the working tree really holds conflict markers: {:?}",
         String::from_utf8_lossy(&on_disk)
     );
+    let mut bom_contents = b"\xef\xbb\xbf".to_vec();
+    bom_contents.extend_from_slice(&on_disk);
     let (buffer, view) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text(&String::from_utf8_lossy(&on_disk)),
+        crate::editor::text::TextBuffer::from_bytes(&bom_contents).unwrap(),
         Some(conflicted.clone()),
     );
     app.state.active_view = Some(view);
@@ -4564,12 +4654,17 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     .expect("the theirs side is readable");
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
-        content,
-        "the result buffer holds exactly the chosen side's content"
+        crate::editor::text::decode_utf8(content.as_bytes()).unwrap().text,
+        "the result buffer holds exactly the chosen side's decoded content"
     );
     assert!(
         app.state.buffers[buffer].dirty,
         "the buffer is dirty after the choice"
+    );
+    assert_eq!(
+        configured_file_bytes(&app.state.buffers[buffer].text, &app.configuration.settings().editor),
+        b"\xef\xbb\xbfTHEIR VERSION\n",
+        "saving keeps one metadata BOM, not the blob's BOM in the text"
     );
     // SAVING IS SEPARATE: the file on disk is byte-identical until an explicit save.
     assert_eq!(

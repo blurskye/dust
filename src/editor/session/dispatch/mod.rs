@@ -234,6 +234,7 @@ struct InteractiveApplication {
     /// A folder the user was warned that switching to ends the open terminals; asking again
     /// switches.
     switch_ends_terminals: Option<PathBuf>,
+    switch_approved_terminals: Vec<PtyId>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
     #[allow(clippy::type_complexity)]
     syntax_spans_source: (

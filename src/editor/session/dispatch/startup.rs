@@ -148,6 +148,7 @@ impl InteractiveApplication {
             tab_drag: None,
             remote: None,
             switch_ends_terminals: None,
+            switch_approved_terminals: Vec::new(),
             syntax_spans_source: (Vec::new(), Vec::new()),
             format_on_save: None,
             navigation_reads: std::collections::HashMap::new(),

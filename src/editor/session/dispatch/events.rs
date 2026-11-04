@@ -833,6 +833,9 @@ impl InteractiveApplication {
             .filter(|id| self.terminal_session.contains(*id))
     }
     pub(super) fn active_input_context(&self) -> String {
+        if self.search.help_is_open() {
+            return if self.input.picker_normal() { "picker_normal" } else { "picker" }.into();
+        }
         if let Some(context) = self.input.capture_context() {
             return context.into();
         }
@@ -3910,6 +3913,10 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::CodeLens(items) => {
+                let Some(context) = context.filter(|context| self.language.edit_context_current(context)) else {
+                    self.show_error("code-lens source retired");
+                    return;
+                };
                 let rows = items
                     .into_iter()
                     .enumerate()
@@ -3925,7 +3932,11 @@ impl InteractiveApplication {
                                 source: String::new(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::LspCommand(command),
+                            PickerPayload::LspCommand {
+                                server: server.to_owned(),
+                                context: context.clone(),
+                                command,
+                            },
                         ))
                     })
                     .collect::<Vec<_>>();

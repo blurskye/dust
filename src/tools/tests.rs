@@ -338,6 +338,7 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
                     environment,
                     current_directory: Some(directory.path().to_path_buf()),
                     timeout: std::time::Duration::from_secs(10),
+                    cancelled: Default::default(),
                 },
                 &std::sync::atomic::AtomicBool::new(false),
             )
@@ -915,6 +916,39 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
 
 #[cfg(unix)]
 #[test]
+fn cancelled_queued_version_probes_do_not_spawn() {
+    use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+    let directory = tempfile::tempdir().unwrap();
+    let service = super::ToolVersionService::start();
+    let request = |id: &str, script: &str, cancelled| ToolVersionRequest {
+        id: id.into(), executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), script.into()], environment: Default::default(),
+        current_directory: Some(directory.path().to_path_buf()),
+        timeout: Duration::from_secs(2), cancelled,
+    };
+    service.probe(request("first", "touch started; while [ ! -f release ]; do sleep 0.01; done; echo version", Default::default())).unwrap();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    service.probe(request("queued", "touch executed; echo version", cancelled.clone())).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !directory.path().join("started").exists() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    cancelled.store(true, Ordering::Release);
+    std::fs::write(directory.path().join("release"), "").unwrap();
+    loop {
+        if let Some(result) = service.try_result() && result.id == "queued" {
+            assert_eq!(result.result.unwrap_err(), "version probe cancelled");
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!directory.path().join("executed").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn version_probe_is_bounded_when_a_descendant_keeps_output_open() {
     let shell = discover_executable("sh").expect("shell fixture");
     let started = std::time::Instant::now();
@@ -926,6 +960,7 @@ fn version_probe_is_bounded_when_a_descendant_keeps_output_open() {
             environment: std::collections::BTreeMap::new(),
             current_directory: None,
             timeout: std::time::Duration::from_secs(1),
+            cancelled: Default::default(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     );
@@ -960,6 +995,7 @@ fn version_service_shutdown_with_full_results_is_bounded() {
             environment: Default::default(),
             current_directory: None,
             timeout: Duration::from_secs(1),
+            cancelled: Default::default(),
         };
         while service.probe(request.clone()).is_err() {
             thread::sleep(Duration::from_millis(2));
@@ -991,6 +1027,7 @@ fn version_probe_stops_continuous_oversized_output() {
             environment: Default::default(),
             current_directory: None,
             timeout: std::time::Duration::from_millis(100),
+            cancelled: Default::default(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     );
