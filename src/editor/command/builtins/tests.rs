@@ -176,10 +176,10 @@ fn block_put_extends_eof_and_repeats_rows_horizontally() {
 fn counted_block_put_preserves_short_rows_and_display_width() {
     use crate::editor::{RegisterShape, Selection, SelectionKind, text::ByteOffset};
     for (source, register, expected) in [
-        ("ab\nx\ncd", "ab\nx \ncd", "abab|\nx x |\ncdcd|"),
-        ("界\nx\nab", "界\nx \nab", "界界|\nx x |\nabab|"),
-        ("\tq\nx\nabcd", "    \nx   \nabcd", "        |\nx   x   |\nabcdabcd|"),
-        ("e\u{301}b\nx\ncd", "e\u{301}b\nx \ncd", "e\u{301}be\u{301}b|\nx x |\ncdcd|"),
+        ("ab\nx\ncd", "ab\nx\ncd", "abab|\nx x |\ncdcd|"),
+        ("界\nx\nab", "界\nx\nab", "界界|\nx x |\nabab|"),
+        ("\tq\nx\nabcd", "\t\nx\nabcd", "        |\nx   x   |\nabcdabcd|"),
+        ("e\u{301}b\nx\ncd", "e\u{301}b\nx\ncd", "e\u{301}be\u{301}b|\nx x |\ncdcd|"),
     ] {
         let (mut state, _, view) = editing(source, source.len() - 1);
         apply(&mut state, "mode.visual_block", &[], 1);
@@ -201,6 +201,21 @@ fn counted_block_put_preserves_short_rows_and_display_width() {
 }
 
 #[test]
+fn counted_block_put_pads_empty_rows_and_expands_tabs_at_the_destination() {
+    use crate::editor::{RegisterShape, RegisterValue};
+    let (mut state, buffer, view) = editing("a|\nb|\nc|", 1);
+    state.registers.set('"', RegisterValue {
+        text: "\t\n\nx".into(), shape: RegisterShape::Block,
+    }, true, true);
+    apply(&mut state, "edit.put", &[("before", "true")], 2);
+    assert_eq!(state.buffers[buffer].text.to_string(), "a      |\nb      |\ncx  x  |");
+    assert_eq!(state.views[view].cursor.get(), 1);
+    assert_eq!(state.registers.get('"').unwrap().text, "\t\n\nx");
+    apply(&mut state, "history.undo", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "a|\nb|\nc|");
+}
+
+#[test]
 fn counted_history_commands_stop_at_history_boundaries() {
     let (mut state, buffer, _) = editing("abc", 0);
     for text in ["X", "Y", "Z"] {
@@ -216,6 +231,32 @@ fn counted_history_commands_stop_at_history_boundaries() {
     ] {
         apply(&mut state, command, &[], count);
         assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+    apply(&mut state, "history.undo", &[], 2);
+    apply(&mut state, "edit.replace", &[("text", "Q")], 1);
+    let branched = state.buffers[buffer].text.to_string();
+    apply(&mut state, "history.undo", &[], u64::MAX);
+    assert_eq!(state.buffers[buffer].text.to_string(), "abc");
+    apply(&mut state, "history.redo", &[], u64::MAX);
+    assert_eq!(state.buffers[buffer].text.to_string(), branched);
+}
+
+#[test]
+fn counted_history_commands_preserve_empty_history_errors() {
+    use crate::editor::transaction::TransactionError;
+    let (mut state, buffer, _) = editing("abc", 0);
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    for id in ["history.undo", "history.redo"] {
+        let mut invocation = CommandInvocation::new(id, InvocationSource::Test).unwrap();
+        invocation.count = std::num::NonZeroU64::new(u64::MAX);
+        let outcome = registry.execute(&state, &invocation).unwrap();
+        let error = state.apply_transaction(&outcome.transaction.unwrap()).unwrap_err();
+        assert!(matches!((id, error),
+            ("history.undo", TransactionError::NothingToUndo)
+            | ("history.redo", TransactionError::NothingToRedo)
+        ));
+        assert_eq!(state.buffers[buffer].text.to_string(), "abc");
     }
 }
 

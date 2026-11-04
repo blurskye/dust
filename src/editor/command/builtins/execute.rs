@@ -24,7 +24,7 @@ use super::{
     text_object::text_object,
     transaction::{
         bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
-        failed, integer_argument, string_argument, transaction_for,
+        failed, string_argument, transaction_for,
     },
 };
 
@@ -899,51 +899,11 @@ pub(super) fn execute_builtin<E>(
                     "unknown operator `{operator}`"
                 )));
             }
-            let mut rows = ranges
+            let text = ranges
                 .iter()
                 .map(|range| buffer.text.slice(*range).map_err(failed))
-                .collect::<Result<Vec<_>, _>>()?;
-            if shape == RegisterShape::Block {
-                let width_policy = DisplayWidthPolicy {
-                    tab_width: state.policy.tab_width,
-                    ambiguous_wide: state.policy.ambiguous_width_wide,
-                };
-                let mut width = if invocation.id.as_str() == "edit.repeat_visual" {
-                    usize::try_from(integer_argument(invocation, "width")?)
-                        .map_err(|_| CommandError::InvalidArguments("visual repeat width is invalid".into()))?
-                } else {
-                    let selection = view.selection.ok_or_else(|| {
-                        CommandError::Unavailable("visual selection is missing".into())
-                    })?;
-                    let anchor = cursor_display_column(&buffer.text, selection.anchor, state.policy)?;
-                    let head = cursor_display_column(&buffer.text, selection.head, state.policy)?;
-                    anchor.abs_diff(head).saturating_add(1)
-                };
-                let mut widths = Vec::with_capacity(rows.len());
-                for (row, range) in rows.iter_mut().zip(&ranges) {
-                    let start_column = cursor_display_column(&buffer.text, range.start, state.policy)?;
-                    let mut column = start_column;
-                    let mut expanded = String::new();
-                    for grapheme in row.graphemes(true) {
-                        let cells = grapheme_cell_width(grapheme, column, width_policy);
-                        if grapheme == "\t" {
-                            expanded.push_str(&" ".repeat(cells));
-                        } else {
-                            expanded.push_str(grapheme);
-                        }
-                        column = column.saturating_add(cells);
-                    }
-                    let row_width = column.saturating_sub(start_column);
-                    width = width.max(row_width);
-                    widths.push(row_width);
-                    *row = expanded;
-                }
-                // Store the rectangle itself, including cells past shorter lines.
-                for (row, row_width) in rows.iter_mut().zip(widths) {
-                    row.push_str(&" ".repeat(width.saturating_sub(row_width)));
-                }
-            }
-            let text = rows.join(if shape == RegisterShape::Block { "\n" } else { "" });
+                .collect::<Result<Vec<_>, _>>()?
+                .join(if shape == RegisterShape::Block { "\n" } else { "" });
             transaction.operations.push(EditorOperation::SetRegister {
                 name: invocation.register.unwrap_or('"'),
                 text,
@@ -1068,7 +1028,30 @@ pub(super) fn execute_builtin<E>(
                         .saturating_sub(line_start.get())
                 };
                 let column = display_column_at(source_content, cursor_relative, width_policy);
-                let rows = register.text.split('\n').collect::<Vec<_>>();
+                let mut rows = register.text.split('\n').map(str::to_owned).collect::<Vec<_>>();
+                if count > 1 {
+                    // Preserve raw yanks and single puts; only repeated copies need padding.
+                    let mut widths = Vec::with_capacity(rows.len());
+                    for row in &mut rows {
+                        let mut end_column = column;
+                        let mut expanded = String::new();
+                        for grapheme in row.graphemes(true) {
+                            let cells = grapheme_cell_width(grapheme, end_column, width_policy);
+                            if grapheme == "\t" {
+                                expanded.push_str(&" ".repeat(cells));
+                            } else {
+                                expanded.push_str(grapheme);
+                            }
+                            end_column = end_column.saturating_add(cells);
+                        }
+                        widths.push(end_column.saturating_sub(column));
+                        *row = expanded;
+                    }
+                    let width = widths.iter().copied().max().unwrap_or(0);
+                    for (row, row_width) in rows.iter_mut().zip(widths) {
+                        row.push_str(&" ".repeat(width.saturating_sub(row_width)));
+                    }
+                }
                 let mut edits = Vec::new();
                 let mut extra = String::new();
                 for (row, text) in rows.iter().enumerate() {
@@ -1176,21 +1159,14 @@ pub(super) fn execute_builtin<E>(
         "history.undo" | "history.redo" => {
             transaction.undo_policy = UndoPolicy::Ignore;
             let undo = invocation.id.as_str() == "history.undo";
-            let mut history = buffer.undo.clone();
-            for step in 0..count {
-                let changes = if undo { history.undo() } else { history.redo() };
-                if changes.is_none() && step > 0 {
-                    break;
-                }
+            // Keep the normal empty-history error, but stop counted commands at the boundary.
+            let steps = buffer.undo.available_steps(undo, count).max(1);
+            for _ in 0..steps {
                 transaction.operations.push(if undo {
                     EditorOperation::Undo { buffer: buffer_id }
                 } else {
                     EditorOperation::Redo { buffer: buffer_id }
                 });
-                // Preserve the normal empty-history error on the first step.
-                if changes.is_none() {
-                    break;
-                }
             }
         }
         other => {

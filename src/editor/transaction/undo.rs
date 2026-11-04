@@ -145,6 +145,24 @@ impl UndoTree {
         Some(self.nodes[child].changes.clone())
     }
 
+    /// Count reachable history steps without copying their text changes.
+    pub(crate) fn available_steps(&self, undo: bool, limit: usize) -> usize {
+        let mut current = self.current;
+        let mut steps = 0;
+        while steps < limit {
+            let node = &self.nodes[current];
+            let next = if undo {
+                node.parent
+            } else {
+                node.children.last().copied()
+            };
+            let Some(next) = next else { break };
+            current = next;
+            steps += 1;
+        }
+        steps
+    }
+
     #[must_use]
     pub fn redo_branch_count(&self) -> usize {
         self.nodes[self.current].children.len()
@@ -349,7 +367,14 @@ mod tests {
         apply(&mut text, &tree.undo().unwrap());
         assert_eq!(text, "ab");
         assert_eq!(tree.redo_branch_count(), 2);
+        assert_eq!(tree.available_steps(true, usize::MAX), 1);
+        assert_eq!(tree.available_steps(false, usize::MAX), 1);
+        assert_eq!(tree.available_steps(true, 0), 0);
+        assert_eq!(tree.available_steps(false, 0), 0);
         apply(&mut text, &tree.redo().unwrap());
+        assert_eq!(tree.available_steps(true, 1), 1);
+        assert_eq!(tree.available_steps(true, usize::MAX), 2);
+        assert_eq!(tree.available_steps(false, usize::MAX), 0);
         assert_eq!(text, "abX");
     }
 
