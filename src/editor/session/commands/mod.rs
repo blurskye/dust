@@ -564,7 +564,8 @@ impl PromptMove {
     #[must_use]
     pub fn apply(self, text: &str, cursor: usize) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
-        let class = |character: char| {
+        let class = |grapheme: &str| {
+            let character = grapheme.chars().next().unwrap_or(' ');
             if character.is_whitespace() {
                 0
             } else if character.is_alphanumeric() || character == '_' {
@@ -585,24 +586,24 @@ impl PromptMove {
                 .nth(1)
                 .map_or(text.len(), |(index, _)| cursor + index),
             Self::WordRight => {
-                let mut characters = text[cursor..].char_indices().peekable();
-                let start = characters.peek().map(|(_, character)| class(*character));
+                let mut characters = text[cursor..].grapheme_indices(true).peekable();
+                let start = characters.peek().map(|(_, grapheme)| class(grapheme));
                 characters
-                    .skip_while(|(_, character)| Some(class(*character)) == start)
-                    .find(|(_, character)| class(*character) != 0)
+                    .skip_while(|(_, grapheme)| Some(class(grapheme)) == start)
+                    .find(|(_, grapheme)| class(grapheme) != 0)
                     .map_or(text.len(), |(index, _)| cursor + index)
             }
             Self::WordLeft => {
                 let mut characters = text[..cursor]
-                    .char_indices()
+                    .grapheme_indices(true)
                     .rev()
-                    .skip_while(|(_, character)| character.is_whitespace())
+                    .skip_while(|(_, grapheme)| grapheme.chars().all(char::is_whitespace))
                     .peekable();
-                let Some(word) = characters.peek().map(|(_, character)| class(*character)) else {
+                let Some(word) = characters.peek().map(|(_, grapheme)| class(grapheme)) else {
                     return 0;
                 };
                 characters
-                    .take_while(|(_, character)| class(*character) == word)
+                    .take_while(|(_, grapheme)| class(grapheme) == word)
                     .last()
                     .map_or(0, |(index, _)| index)
             }
@@ -951,5 +952,8 @@ mod tests {
         assert_eq!(stops(PromptMove::WordLeft, 24), [18, 12, 10, 5, 0]);
         assert_eq!(PromptMove::WordLeft.apply(text, 7), 5);
         assert_eq!(PromptMove::WordRight.apply("añb c", 0), 5);
+        assert_eq!(PromptMove::WordRight.apply("e\u{301}.x", 0), 3);
+        assert_eq!(PromptMove::WordLeft.apply("e\u{301}.x", 3), 0);
+        assert_eq!(PromptMove::WordLeft.apply("👩‍💻 x", 12), 0);
     }
 }

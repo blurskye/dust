@@ -66,6 +66,34 @@ pub struct AgentPanelUi {
     pub settings: String,
 }
 
+impl AgentPanelUi {
+    fn list_height(&self, height: u16) -> u16 {
+        let count = if self.menu.is_empty() { self.family.len() } else { self.menu.len() };
+        u16::try_from(count.min(LIST_ROW_CEILING)).unwrap_or(0)
+            .min(height.saturating_sub(8) / 2)
+    }
+
+    fn transcript_height_for_input(&self, height: u16, input_rows: usize) -> usize {
+        let chips = u16::from(!self.context.is_empty());
+        let list = self.list_height(height);
+        let room = usize::from(height.saturating_sub(6 + chips + list)).max(1);
+        let shown = input_rows.min(INPUT_ROW_CEILING).min(room);
+        usize::from(height.saturating_sub(4 + chips + list)).saturating_sub(shown)
+    }
+
+    /// Rows available to the transcript inside a pane, excluding the global status line.
+    #[must_use]
+    pub fn transcript_height(&self, config: &Config, width: u16, height: u16) -> usize {
+        if width < 8 || height < 6 {
+            return 0;
+        }
+        let grid = CellGrid::new_with_policy(0, 0, CONTROL_CHARACTER_REPLACEMENT,
+            ZERO_WIDTH_REPLACEMENT, config.editor.ambiguous_width == AmbiguousWidth::Wide);
+        let (rows, _) = wrap_input(&self.input, self.cursor, usize::from(width - 2), &grid);
+        self.transcript_height_for_input(height, rows.len())
+    }
+}
+
 /// Where the transcript's lines start, without the trailing empty ones outside the bands, so
 /// the user's last message keeps its padding while the answer is awaited.
 #[must_use]
@@ -109,18 +137,11 @@ pub(super) fn render_agent_panel(
 
     let inner = width - 2;
     let chips = u16::from(!panel.context.is_empty());
-    let list = if panel.menu.is_empty() {
-        panel.family.len()
-    } else {
-        panel.menu.len()
-    };
-    let list = u16::try_from(list.min(LIST_ROW_CEILING))
-        .unwrap_or(0)
-        .min(height.saturating_sub(8) / 2);
+    let list = panel.list_height(height);
     let (rows, (cursor_row, cursor_column)) =
         wrap_input(&panel.input, panel.cursor, usize::from(inner), &grid);
-    let room = usize::from(height.saturating_sub(6 + chips + list)).max(1);
-    let shown = rows.len().min(INPUT_ROW_CEILING).min(room);
+    let area = panel.transcript_height_for_input(height, rows.len());
+    let shown = usize::from(height - 4 - chips - list) - area;
     let first = cursor_row.saturating_sub(shown - 1).min(rows.len() - shown);
     let footer = height - 1;
     let bottom = footer - 1;
@@ -250,7 +271,6 @@ pub(super) fn render_agent_panel(
     );
     grid.put_text_clipped(settings_x, footer, &settings, Style::Muted, width - 1);
 
-    let area = usize::from(list_top - chips - 1);
     let lines = transcript_lines(&panel.transcript.text, &panel.bands);
     let hidden = lines.len().saturating_sub(area);
     let scroll = panel.scroll.min(hidden);

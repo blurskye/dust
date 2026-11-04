@@ -17,6 +17,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::InteractiveApplication;
 use super::commands::PromptMove;
@@ -2150,7 +2151,8 @@ impl InteractiveApplication {
         let width = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
             .map_or(80, |viewport| usize::from(viewport.width))
             .saturating_sub(2)
-            .max(10);
+            .max(1);
+        let same_width = self.agent.width == width;
         self.agent.width = width;
         let mut text = Styled {
             ambiguous_width: self.configuration.settings().editor.ambiguous_width,
@@ -2205,8 +2207,11 @@ impl InteractiveApplication {
                 (String::new(), String::new())
             }
         };
-        self.agent.lines = crate::ui::transcript_lines(&text.text, &bands).len();
-        self.agent.scroll = self.agent.scroll.min(self.agent.lines);
+        let lines = crate::ui::transcript_lines(&text.text, &bands).len();
+        if self.agent.scroll > 0 && same_width {
+            self.agent.scroll = self.agent.scroll.saturating_add(lines.saturating_sub(self.agent.lines));
+        }
+        self.agent.lines = lines;
         self.ui.agent_panel = Some(AgentPanelUi {
             view,
             tabs: Vec::new(),
@@ -2368,6 +2373,13 @@ impl InteractiveApplication {
 
     /// Copy the input and its context to the panel; cheaper than a rebuild, for keystrokes.
     fn sync_agent_input(&mut self) {
+        if self.agent.normal {
+            let cursor = self.agent.cursor.min(self.agent.input.len());
+            let start = self.agent.input[..cursor].rfind('\n').map_or(0, |index| index + 1);
+            if cursor > start && (cursor == self.agent.input.len() || self.agent.input[cursor..].starts_with('\n')) {
+                self.agent.cursor = PromptMove::Left.apply(&self.agent.input, cursor);
+            }
+        }
         let name = self.active_agent().map_or_else(
             || self.configuration.settings().agents.default.clone(),
             |session| session.name.clone(),
@@ -2383,9 +2395,17 @@ impl InteractiveApplication {
         panel.placeholder = format!("Ask {name}…  / for commands");
         let menu = self.slash_menu();
         self.agent.selected = self.agent.selected.min(menu.len().saturating_sub(1));
+        let viewport = self.agent_view().and_then(|view| crate::ui::view_pane_viewport(&self.state, &self.ui, view));
         if let Some(panel) = self.ui.agent_panel.as_mut() {
             panel.selected = self.agent.selected;
             panel.menu = menu;
+            if let Some(viewport) = viewport {
+                let height = panel.transcript_height(
+                    self.configuration.settings(), viewport.width, viewport.height,
+                );
+                self.agent.scroll = self.agent.scroll.min(self.agent.lines.saturating_sub(height));
+            }
+            panel.scroll = self.agent.scroll;
         }
     }
 
@@ -2400,7 +2420,7 @@ impl InteractiveApplication {
         let width = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
             .map_or(80, |viewport| usize::from(viewport.width))
             .saturating_sub(2)
-            .max(10);
+            .max(1);
         if self
             .ui
             .agent_panel
@@ -2409,6 +2429,8 @@ impl InteractiveApplication {
             || width != self.agent.width
         {
             self.refresh_agent_transcript();
+        } else {
+            self.sync_agent_input();
         }
     }
 
@@ -2465,11 +2487,9 @@ impl InteractiveApplication {
         let line_end = input[cursor..]
             .find('\n')
             .map_or(input.len(), |index| cursor + index);
-        let before = input[..cursor]
-            .chars()
-            .next_back()
-            .map_or(0, char::len_utf8);
-        let after = input[cursor..].chars().next().map_or(0, char::len_utf8);
+        let previous = PromptMove::Left.apply(input, cursor);
+        let next = PromptMove::Right.apply(input, cursor);
+        let normal = self.agent.normal;
         self.agent.cursor = match action {
             "submit" => {
                 let question = std::mem::take(input);
@@ -2482,27 +2502,27 @@ impl InteractiveApplication {
                 input.insert(cursor, '\n');
                 cursor + 1
             }
+            "backspace" if normal && cursor == line_start => cursor,
             "backspace" => {
-                input.replace_range(cursor - before..cursor, "");
-                cursor - before
+                input.replace_range(previous..cursor, "");
+                previous
             }
             "delete" => {
-                input.replace_range(cursor..cursor + after, "");
+                if !normal || cursor < line_end {
+                    input.replace_range(cursor..next, "");
+                }
                 cursor
             }
-            "left" => cursor - before,
-            "right" => cursor + after,
+            "left" if normal => previous.max(line_start),
+            "left" => previous,
+            "right" if normal => next.min(line_end),
+            "right" => next,
             "word_left" => PromptMove::WordLeft.apply(input, cursor),
             "word_right" => PromptMove::WordRight.apply(input, cursor),
             "home" => line_start,
             "end" => line_end,
             "delete_word" => {
-                let kept = input[..cursor].trim_end();
-                let start = kept
-                    .char_indices()
-                    .rev()
-                    .find(|(_, character)| character.is_whitespace())
-                    .map_or(0, |(index, character)| index + character.len_utf8());
+                let start = PromptMove::WordLeft.apply(input, cursor);
                 input.replace_range(start..cursor, "");
                 start
             }
@@ -2531,7 +2551,7 @@ impl InteractiveApplication {
                 input.len()
             }
             "up" | "down" => {
-                let column = input[line_start..cursor].chars().count();
+                let column = input[line_start..cursor].graphemes(true).count();
                 let target = if action == "up" {
                     line_start
                         .checked_sub(1)
@@ -2545,7 +2565,7 @@ impl InteractiveApplication {
                             .find('\n')
                             .map_or(input.len(), |index| start + index);
                         input[start..end]
-                            .char_indices()
+                            .grapheme_indices(true)
                             .nth(column)
                             .map_or(end, |(index, _)| start + index)
                     }
@@ -2571,11 +2591,8 @@ impl InteractiveApplication {
         let line_end = input[cursor..]
             .find('\n')
             .map_or(input.len(), |index| cursor + index);
-        let before = input[..cursor]
-            .chars()
-            .next_back()
-            .map_or(0, char::len_utf8);
-        let after = input[cursor..].chars().next().map_or(0, char::len_utf8);
+        let previous = PromptMove::Left.apply(input, cursor);
+        let next = PromptMove::Right.apply(input, cursor);
         let (cursor, insert) = match action {
             "normal" if menu_open => {
                 input.clear();
@@ -2584,7 +2601,7 @@ impl InteractiveApplication {
             // Leaving Insert steps back onto the last typed character, as in Vim.
             "normal" => (
                 if cursor > line_start {
-                    cursor - before
+                    previous
                 } else {
                     cursor
                 },
@@ -2593,13 +2610,16 @@ impl InteractiveApplication {
             "insert" => (cursor, true),
             "append" => (
                 if cursor < line_end {
-                    cursor + after
+                    next
                 } else {
                     cursor
                 },
                 true,
             ),
-            "insert_home" => (line_start, true),
+            "insert_home" => (
+                line_start + input[line_start..line_end].len() - input[line_start..line_end].trim_start().len(),
+                true,
+            ),
             "append_end" => (line_end, true),
             "open_below" => {
                 input.insert(line_end, '\n');
@@ -2613,33 +2633,16 @@ impl InteractiveApplication {
                 input.insert(cursor, '/');
                 (cursor + 1, true)
             }
-            "word_forward" => {
-                let rest = &input[cursor..];
-                let word = rest.find(char::is_whitespace).unwrap_or(rest.len());
-                let next = rest[word..]
-                    .find(|character: char| !character.is_whitespace())
-                    .map_or(rest.len(), |gap| word + gap);
-                (cursor + next, false)
-            }
-            "word_back" => {
-                let text = input[..cursor].trim_end();
-                let start = text
-                    .char_indices()
-                    .rfind(|(_, character)| character.is_whitespace())
-                    .map_or(0, |(space, character)| space + character.len_utf8());
-                (start, false)
-            }
+            "word_forward" => (PromptMove::WordRight.apply(input, cursor), false),
+            "word_back" => (PromptMove::WordLeft.apply(input, cursor), false),
             "word_end" => {
-                let skip = cursor + after;
-                let rest = &input[skip..];
-                let start = rest
-                    .find(|character: char| !character.is_whitespace())
-                    .unwrap_or(rest.len());
-                let end = rest[start..]
-                    .find(char::is_whitespace)
-                    .map_or(rest.len(), |end| start + end);
-                let last = rest[..end].chars().next_back().map_or(0, char::len_utf8);
-                (skip + end - last, false)
+                let start = input[next..]
+                    .grapheme_indices(true)
+                    .find(|(_, grapheme)| !grapheme.chars().all(char::is_whitespace))
+                    .map_or(input.len(), |(index, _)| next + index);
+                let end = PromptMove::WordRight.apply(input, start);
+                let end = input[..end].trim_end().len();
+                (PromptMove::Left.apply(input, end).max(cursor), false)
             }
             "delete_line" => {
                 let (start, end) = if line_end < input.len() {
@@ -2671,8 +2674,7 @@ impl InteractiveApplication {
         self.agent.scroll = self
             .agent
             .scroll
-            .saturating_add_signed(rows)
-            .min(self.agent.lines);
+            .saturating_add_signed(rows);
         self.sync_agent_input();
     }
 
@@ -3025,22 +3027,23 @@ fn slash_matches(
 mod tests {
     use super::*;
 
-    fn test_app() -> InteractiveApplication {
-        let root = tempfile::tempdir().unwrap().keep();
+    fn test_app() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
         let mut loaded = crate::config::load_bundled_config();
         loaded.config.persistence.enabled = false;
         let mut app = InteractiveApplication::new(
-            crate::editor::StartupTarget::Dashboard { root },
+            crate::editor::StartupTarget::Dashboard { root: root.path().into() },
             loaded,
             false,
-            tempfile::tempdir().unwrap().keep(),
+            state.path().into(),
             false,
             false,
             std::sync::Arc::new(crate::clock::SystemClock),
         )
         .unwrap();
         app.window_session.observe_size((80, 24));
-        app
+        ((root, state), app)
     }
 
     fn tab(app: &mut InteractiveApplication) -> usize {
@@ -3116,10 +3119,193 @@ mod tests {
         }
     }
 
+    fn frame(app: &InteractiveApplication) -> crate::ui::Frame {
+        crate::ui::render(
+            &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(),
+            app.window_session.width(), app.window_session.height(),
+        )
+    }
+
+    #[test]
+    fn agent_fixture_removes_workspace_and_state_after_application_shutdown() {
+        let (directories, app) = test_app();
+        let root = directories.0.path().to_path_buf();
+        let state = directories.1.path().to_path_buf();
+        assert!(root.is_dir() && state.is_dir());
+        drop(app);
+        drop(directories);
+        assert!(!root.exists() && !state.exists());
+    }
+
+    #[test]
+    fn agent_narrow_transcript_uses_the_panes_content_width() {
+        let (_directories, mut app) = test_app();
+        let index = tab(&mut app);
+        app.agent.active = index;
+        app.agent.sessions[index].entries = vec![Entry::Agent("abcdefghijklmnop".into())];
+        app.show_agent_panel();
+        app.window_session.observe_size((10, 24));
+        app.reconcile_editor_windows();
+        app.follow_agent_pane();
+        let panel = app.ui.agent_panel.as_ref().unwrap();
+        let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, panel.view).unwrap();
+        assert_eq!(viewport.width, 10);
+        assert_eq!(app.agent.width, 8);
+        assert_eq!(panel.transcript.text, "abcdefgh\nijklmnop\n");
+        let frame = frame(&app);
+        assert_eq!(frame.grid.row_text(viewport.y + 1).trim(), "abcdefgh");
+        assert_eq!(frame.grid.row_text(viewport.y + 2).trim(), "ijklmnop");
+        app.follow_agent_pane();
+        assert_eq!(app.agent.width, 8);
+    }
+
+    #[test]
+    fn agent_streaming_keeps_scrolled_rows_in_place_and_follows_at_the_bottom() {
+        let (_directories, mut app) = test_app();
+        let index = tab(&mut app);
+        app.agent.active = index;
+        app.agent.sessions[index].entries = vec![Entry::Agent((0..80).map(|row| format!("row {row:02}\n")).collect())];
+        app.show_agent_panel();
+        app.scroll_agent(40);
+        let panel = app.ui.agent_panel.as_ref().unwrap();
+        let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, panel.view).unwrap();
+        let first = frame(&app).grid.row_text(viewport.y + 1);
+        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText((80..90).map(|row| format!("row {row:02}\n")).collect()));
+        app.refresh_agent_transcript();
+        assert_eq!(app.agent.scroll, 50);
+        assert_eq!(frame(&app).grid.row_text(viewport.y + 1), first);
+        app.scroll_agent(i64::MIN);
+        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText("last row\n".into()));
+        app.refresh_agent_transcript();
+        assert_eq!(app.agent.scroll, 0);
+    }
+
+    #[test]
+    fn agent_scroll_top_has_no_invisible_excess_offset() {
+        let (_directories, mut app) = test_app();
+        let index = tab(&mut app);
+        app.agent.active = index;
+        app.agent.sessions[index].entries = vec![Entry::Agent((0..100).map(|row| format!("row {row:02}\n")).collect())];
+        app.show_agent_panel();
+        let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, app.agent_view().unwrap()).unwrap();
+        let maximum = 100 - usize::from(viewport.height - 5);
+        app.scroll_agent(i64::MAX);
+        assert_eq!(app.agent.scroll, maximum);
+        app.scroll_agent(-3);
+        assert_eq!(app.agent.scroll, maximum - 3);
+        assert_eq!(frame(&app).grid.row_text(viewport.y + 1).trim(), "row 03");
+    }
+
+    #[test]
+    fn agent_input_moves_and_deletes_whole_graphemes() {
+        let (_directories, mut app) = test_app();
+        for grapheme in ["👩‍💻", "e\u{301}"] {
+            app.agent.input = format!("{grapheme}x");
+            app.agent.cursor = app.agent.input.len();
+            app.agent_input_edit("left");
+            assert_eq!(app.agent.cursor, grapheme.len());
+            app.agent_input_edit("left");
+            assert_eq!(app.agent.cursor, 0);
+            app.agent_input_edit("right");
+            assert_eq!(app.agent.cursor, grapheme.len());
+            app.agent_input_edit("backspace");
+            assert_eq!(app.agent.input, "x");
+            app.agent.input = format!("{grapheme}x");
+            app.agent.cursor = 0;
+            app.agent_input_edit("delete");
+            assert_eq!(app.agent.input, "x");
+            app.agent.input = format!("{grapheme}x\n{grapheme}y");
+            app.agent.cursor = grapheme.len();
+            app.agent_input_edit("down");
+            assert_eq!(app.agent.cursor, 2 * grapheme.len() + 2);
+            app.agent_input_edit("up");
+            assert_eq!(app.agent.cursor, grapheme.len());
+            app.agent_input_edit("normal");
+            assert_eq!(app.agent.cursor, 0);
+            app.agent_input_edit("append");
+            assert_eq!(app.agent.cursor, grapheme.len());
+            app.agent_input_edit("delete_word");
+            assert_eq!(app.agent.input, format!("x\n{grapheme}y"));
+            assert_eq!(app.agent.cursor, 0);
+        }
+    }
+
+    #[test]
+    fn agent_normal_input_stays_on_line_characters_and_preserves_separators() {
+        let (_directories, mut app) = test_app();
+        app.agent.input = "ab\ncd".into();
+        app.agent.cursor = 1;
+        app.agent.normal = true;
+        app.agent_input_edit("right");
+        assert_eq!(app.agent.cursor, 1);
+        app.agent_input_edit("delete");
+        assert_eq!(app.agent.input, "a\ncd");
+        assert_eq!(app.agent.cursor, 0);
+        app.agent_input_edit("left");
+        assert_eq!(app.agent.cursor, 0);
+        app.agent_input_edit("down");
+        app.agent_input_edit("backspace");
+        assert_eq!(app.agent.input, "a\ncd");
+        assert_eq!(app.agent.cursor, 2);
+        app.agent_input_edit("end");
+        assert_eq!(app.agent.cursor, 3);
+        app.agent_input_edit("delete_to_end");
+        assert_eq!(app.agent.input, "a\nc");
+        assert_eq!(app.agent.cursor, 2);
+        app.agent.input = "\nx".into();
+        app.agent.cursor = 0;
+        app.agent_input_edit("delete");
+        assert_eq!(app.agent.input, "\nx");
+        app.agent_input_edit("right");
+        assert_eq!(app.agent.cursor, 0);
+    }
+
+    #[test]
+    fn agent_insert_home_starts_after_indentation_but_home_stays_at_zero() {
+        let (_directories, mut app) = test_app();
+        app.agent.input = "  foo".into();
+        app.agent.cursor = 4;
+        app.agent.normal = true;
+        app.agent_input_edit("home");
+        assert_eq!(app.agent.cursor, 0);
+        app.agent_input_edit("insert_home");
+        assert!(!app.agent.normal);
+        assert_eq!(app.agent.cursor, 2);
+        app.agent_input_insert("X");
+        assert_eq!(app.agent.input, "  Xfoo");
+    }
+
+    #[test]
+    fn agent_vim_word_motions_stop_at_punctuation_and_graphemes() {
+        let (_directories, mut app) = test_app();
+        app.agent.input = "foo.bar baz".into();
+        app.agent.normal = true;
+        for expected in [3, 4, 8] {
+            app.agent_input_edit("word_forward");
+            assert_eq!(app.agent.cursor, expected);
+        }
+        for expected in [4, 3, 0] {
+            app.agent_input_edit("word_back");
+            assert_eq!(app.agent.cursor, expected);
+        }
+        for expected in [2, 3, 6, 10] {
+            app.agent_input_edit("word_end");
+            assert_eq!(app.agent.cursor, expected);
+        }
+        app.agent.input = "e\u{301}.👩‍💻 x".into();
+        app.agent.cursor = 0;
+        app.agent_input_edit("word_forward");
+        assert_eq!(app.agent.cursor, 3);
+        app.agent_input_edit("word_back");
+        assert_eq!(app.agent.cursor, 0);
+        app.agent_input_edit("word_end");
+        assert_eq!(app.agent.cursor, 4);
+    }
+
     #[cfg(unix)]
     #[test]
     fn agent_queued_questions_start_new_transcript_turns_only_when_sent() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         app.agent.active = index;
         app.agent_ask("first".into());
@@ -3142,7 +3328,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_cancel_full_writer_stops_the_parent_instead_of_losing_cancel() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         app.agent.active = index;
         let session = &mut app.agent.sessions[index];
@@ -3163,7 +3349,7 @@ mod tests {
         use std::io::BufRead;
         for cancel in [false, true] {
             let (reply, mut answer) = subagent_reply();
-            let mut app = test_app();
+            let (_directories, mut app) = test_app();
             let index = echo_agent(&mut app);
             app.agent.active = index;
             if cancel {
@@ -3186,7 +3372,7 @@ mod tests {
         use std::io::BufRead;
         for outcome in ["error", "exit", "success"] {
             let (reply, mut answer) = subagent_reply();
-            let mut app = test_app();
+            let (_directories, mut app) = test_app();
             let index = echo_agent(&mut app);
             let session = &mut app.agent.sessions[index];
             session.parent = Some(99);
@@ -3210,7 +3396,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_unused_tabs_are_reused_only_in_the_current_worktree() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let old = tab(&mut app);
         let number = app.agent.sessions[old].number;
         app.agent.sessions[old].root = app.state.workspace_root.join("other-worktree");
@@ -3233,7 +3419,7 @@ mod tests {
     fn agent_cancel_stops_starting_children_and_their_permissions() {
         use std::io::BufRead;
         let (reply, mut answer) = subagent_reply();
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let parent = tab(&mut app);
         let number = app.agent.sessions[parent].number;
         let first = child(&mut app, number, Phase::Initializing(1));
@@ -3281,7 +3467,7 @@ mod tests {
         use std::io::BufRead;
         for close in [true, false] {
             let (reply, mut answer) = subagent_reply();
-            let mut app = test_app();
+            let (_directories, mut app) = test_app();
             let parent = tab(&mut app);
             let number = app.agent.sessions[parent].number;
             let child = child(&mut app, number, Phase::Prompting(2));
@@ -3319,7 +3505,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_response_transport_failure_stops_children_and_permissions() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let parent = tab(&mut app);
         let number = app.agent.sessions[parent].number;
         let child = child(&mut app, number, Phase::Creating(2));
@@ -3363,7 +3549,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_full_writer_preserves_prompt_context_and_recap_until_retry() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.id = Some("s".into());
@@ -3408,7 +3594,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_recap_survives_failed_session_creation_and_reattachment() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.earlier = Some("old".into());
@@ -3427,7 +3613,7 @@ mod tests {
 
     #[test]
     fn agent_unsupported_profile_options_are_reported() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.id = Some("s".into());
@@ -3438,7 +3624,7 @@ mod tests {
 
     #[test]
     fn agent_empty_question_keeps_attached_context() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let context = vec![PromptPart::File { path: app.state.workspace_root.join("file.rs"), text: Some("selection".into()) }];
         app.agent.context = context.clone();
         app.agent_ask("  \n ".into());
@@ -3449,7 +3635,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_explicit_subagent_model_replaces_profile_alias_and_actual_id() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.parent = Some(99);
@@ -3476,7 +3662,7 @@ mod tests {
     #[test]
     fn agent_model_changes_finish_before_subagent_prompts() {
         for accepted in [true, false] {
-            let mut app = test_app();
+            let (_directories, mut app) = test_app();
             let index = tab(&mut app);
             let session = &mut app.agent.sessions[index];
             session.parent = Some(99);
@@ -3530,7 +3716,7 @@ mod tests {
 
     #[test]
     fn agent_restart_failure_keeps_the_submitted_draft() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let mut config = app.configuration.fixture_snapshot();
         let name = config.settings.agents.default.clone();
         config
@@ -3568,7 +3754,7 @@ mod tests {
 
     #[test]
     fn agent_shutdown_saves_an_unfinished_turn() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let directory = app.agent.directory.clone();
         let mut config = app.configuration.fixture_snapshot();
         config.settings.persistence.enabled = true;
@@ -3592,7 +3778,7 @@ mod tests {
 
     #[test]
     fn agent_rejoining_keeps_command_and_option_updates() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         app.agent.sessions[index].phase = Phase::Rejoining(1);
         app.agent.sessions[index]
@@ -3656,7 +3842,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_file_requests_use_unsaved_aliases_and_update_buffers_before_acknowledging() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         let root = app.state.workspace_root.clone();
         let real = root.join("real.txt");
@@ -3696,7 +3882,7 @@ mod tests {
     #[test]
     fn agent_write_refreshes_buffers_opened_during_io_and_preserves_file_format() {
         use crate::editor::session::documents::DocumentEvent;
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         let path = app.state.workspace_root.join("written.txt");
         std::fs::write(&path, "old").unwrap();
@@ -3727,7 +3913,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn cancelling_a_turn_retires_permissions_still_resolving_paths() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         app.agent.active = index;
         app.agent.sessions[index].phase = Phase::Prompting(1);
@@ -3759,7 +3945,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_write_checks_every_alias_of_a_not_yet_created_file() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         let root = app.state.workspace_root.clone();
         std::fs::create_dir(root.join("real")).unwrap();
@@ -3782,7 +3968,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_persistent_permission_is_named_explicitly_before_acceptance() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
         let mut request = permission(app.agent.sessions[index].number);
         request.id = json!(100);
@@ -3796,7 +3982,7 @@ mod tests {
 
     #[test]
     fn agent_panel_hides_in_place_when_it_is_the_only_pane() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         tab(&mut app);
         app.show_agent_panel();
         let pane = app.agent_pane().unwrap();
@@ -3815,7 +4001,7 @@ mod tests {
 
     #[test]
     fn agent_panel_opens_in_the_requested_tab_without_switching_tabs() {
-        let mut app = test_app();
+        let (_directories, mut app) = test_app();
         tab(&mut app);
         app.show_agent_panel();
         let first = app.state.active_tab.unwrap();
