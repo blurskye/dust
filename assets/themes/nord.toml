@@ -531,7 +531,7 @@ attributes = []
 "@lsp.type.property" = { link = "@property" }
 "@lsp.type.regexp" = { link = "@string.regexp" }
 "@lsp.type.string" = { link = "@string" }
-"@lsp.type.struct" = { link = "@structure" }
+"@lsp.type.struct" = { link = "Structure" }
 "@lsp.type.type" = { link = "@type" }
 "@lsp.type.typeParameter" = { link = "@parameter" }
 "@lsp.type.variable" = {  }

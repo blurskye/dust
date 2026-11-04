@@ -3,9 +3,10 @@ use std::{cell::Cell, collections::BTreeSet, fs, path::PathBuf};
 use tempfile::tempdir;
 
 use super::load::{
-    BUNDLED_CONFIG, BUNDLED_THEME, CandidateAttempt, CapturedSource, CapturedText,
-    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING, capture_configuration_bundle_with,
-    captured_bundle_is_stable, hash_source_bytes, load_consistent_candidate_with, load_theme,
+    BUNDLED_CONFIG, BUNDLED_THEME, CapturedSource, CapturedText,
+    ConfigurationSourceBundle, SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
+    capture_configuration_bundle_with, capture_consistent_configuration_bundle_with,
+    captured_bundle_is_stable, hash_source_bytes, load_consistent_configuration, load_theme,
     setting_keys, setting_spans, source_fingerprint,
 };
 use super::{
@@ -74,7 +75,7 @@ fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
         if valid {
             assert!(loaded.diagnostic.is_none());
             assert_eq!(loaded.theme, installed);
-            assert!(loaded.theme_path.is_absolute());
+            assert_eq!(loaded.theme_path, super::user_theme_path("nord"));
         } else {
             assert!(
                 loaded.diagnostic.is_some(),
@@ -404,17 +405,25 @@ fn captured(path: PathBuf, text: CapturedText) -> CapturedSource {
     }
 }
 
-fn candidate_attempt(theme: &str, valid: bool) -> CandidateAttempt {
-    let mut loaded = load_bundled_config();
-    loaded.config.ui.theme = theme.into();
-    CandidateAttempt {
-        candidate: if valid {
-            Ok(loaded)
-        } else {
-            Err("synthetic malformed candidate".into())
-        },
-        theme: theme.into(),
-    }
+fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> ConfigurationSourceBundle {
+    capture_configuration_bundle_with(theme, |path| {
+        let source = match path.file_name().and_then(|name| name.to_str()) {
+            Some("config.toml") => format!(
+                "[ui]\ntheme='{theme}'\n[editor]\ntab_width={}\n",
+                if valid { usize::from(revision) + 2 } else { 0 },
+            ),
+            Some("keymaps.toml") => format!(
+                "[[keymap]]\nid='user.revision-{revision}'\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n"
+            ),
+            Some("dashboard.toml") => include_str!("../../assets/defaults/dashboard.toml")
+                .replace("D U S T", &format!("dashboard-{revision}")),
+            Some(_) => BUNDLED_THEME
+                .replace("name = \"dust\"", &format!("name = \"{theme}\""))
+                .replace("#c9d1d9", if revision == 0 { "#c9d1d9" } else { "#c9d1d8" }),
+            None => panic!("unexpected captured path {}", path.display()),
+        };
+        captured(path, CapturedText::Text(source))
+    })
 }
 
 #[test]
@@ -502,41 +511,54 @@ fn captured_bundle_identity_detects_missing_created_and_deleted_sources() {
 fn consistent_loader_retries_same_theme_changes_and_theme_source_switches() {
     let revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
-    let stable = load_consistent_candidate_with(
-        true,
+    let (stable, fingerprint) = capture_consistent_configuration_bundle_with(
         "dust",
-        || {
+        |_| {
             loads.set(loads.get() + 1);
             if loads.get() == 1 {
                 revision.set(1);
             }
-            candidate_attempt("dust", true)
+            configuration_bundle("dust", revision.get(), true)
         },
-        |_| revision.get(),
+        |_| configuration_bundle("dust", revision.get(), true).identity(),
     )
     .expect("eventually stable");
     assert_eq!(loads.get(), 2);
-    assert_eq!(stable.fingerprint, Some(1));
-    assert!(stable.candidate.is_ok());
+    assert_eq!(fingerprint, configuration_bundle("dust", 1, true).identity());
+    assert!(stable.into_loaded().diagnostic.is_none());
 
     let theme_revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
-    let switched = load_consistent_candidate_with(
-        true,
+    let (switched, fingerprint) = capture_consistent_configuration_bundle_with(
         "dust",
-        || {
+        |_| {
             loads.set(loads.get() + 1);
             if loads.get() == 2 {
                 theme_revision.set(1);
             }
-            candidate_attempt("night", true)
+            configuration_bundle("night", theme_revision.get(), true)
         },
-        |theme| (theme.to_owned(), theme_revision.get()),
+        |theme| configuration_bundle(theme, theme_revision.get(), true).identity(),
     )
     .expect("new theme stabilizes");
     assert_eq!(loads.get(), 3);
-    assert_eq!(switched.theme, "night");
-    assert_eq!(switched.fingerprint, Some(("night".into(), 1)));
+    assert_eq!(switched.selected_theme, "night");
+    assert_eq!(fingerprint, configuration_bundle("night", 1, true).identity());
+}
+
+#[test]
+fn consistent_loader_rejects_transient_captures_even_when_before_and_after_match() {
+    let loads = Cell::new(0_usize);
+    let result = capture_consistent_configuration_bundle_with(
+        "dust",
+        |_| {
+            loads.set(loads.get() + 1);
+            configuration_bundle("dust", 1, true)
+        },
+        |_| configuration_bundle("dust", 0, true).identity(),
+    );
+    assert!(result.is_err(), "a transient capture must never be accepted");
+    assert_eq!(loads.get(), super::load::CONFIGURATION_CONSISTENCY_ATTEMPTS);
 }
 
 #[test]
@@ -544,24 +566,23 @@ fn consistent_loader_never_emits_discarded_malformed_or_stale_attempts() {
     for final_valid in [true, false] {
         let revision = Cell::new(0_u8);
         let loads = Cell::new(0_usize);
-        let loaded = load_consistent_candidate_with(
-            true,
+        let (bundle, fingerprint) = capture_consistent_configuration_bundle_with(
             "dust",
-            || {
+            |_| {
                 loads.set(loads.get() + 1);
                 if loads.get() == 1 {
                     revision.set(1);
-                    candidate_attempt("dust", !final_valid)
+                    configuration_bundle("dust", 0, !final_valid)
                 } else {
-                    candidate_attempt("dust", final_valid)
+                    configuration_bundle("dust", revision.get(), final_valid)
                 }
             },
-            |_| vec![revision.get(); 4],
+            |_| configuration_bundle("dust", revision.get(), final_valid).identity(),
         )
         .expect("second complete source set is stable");
         assert_eq!(loads.get(), 2);
-        assert_eq!(loaded.candidate.is_ok(), final_valid);
-        assert_eq!(loaded.fingerprint, Some(vec![1; 4]));
+        assert_eq!(bundle.into_loaded().diagnostic.is_none(), final_valid);
+        assert_eq!(fingerprint, configuration_bundle("dust", 1, final_valid).identity());
     }
 }
 
@@ -569,50 +590,40 @@ fn consistent_loader_never_emits_discarded_malformed_or_stale_attempts() {
 fn accepted_candidate_fingerprint_matches_all_four_loaded_surfaces() {
     let revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
-    let loaded = load_consistent_candidate_with(
-        true,
+    let (bundle, fingerprint) = capture_consistent_configuration_bundle_with(
         "dust",
-        || {
+        |_| {
             loads.set(loads.get() + 1);
             let snapshot = revision.get();
-            let mut attempt = candidate_attempt("dust", true);
-            let candidate = attempt.candidate.as_mut().expect("candidate");
-            candidate.config.editor.tab_width = usize::from(snapshot) + 2;
-            candidate.keymaps.path = format!("keymaps-{snapshot}").into();
-            candidate.dashboard.identity = format!("dashboard-{snapshot}");
-            candidate.theme_path = format!("theme-{snapshot}").into();
+            let bundle = configuration_bundle("dust", snapshot, true);
             if loads.get() == 1 {
                 revision.set(1);
             }
-            attempt
+            bundle
         },
-        |_| vec![revision.get(); 4],
+        |_| configuration_bundle("dust", revision.get(), true).identity(),
     )
     .expect("stable complete snapshot");
-    let candidate = loaded.candidate.expect("accepted candidate");
-    assert_eq!(loaded.fingerprint, Some(vec![1; 4]));
+    assert_eq!(loads.get(), 2);
+    assert_eq!(fingerprint, bundle.identity());
+    assert_eq!(fingerprint, configuration_bundle("dust", 1, true).identity());
+    let candidate = bundle.into_loaded();
+    assert!(candidate.diagnostic.is_none(), "{:?}", candidate.diagnostic);
     assert_eq!(candidate.config.editor.tab_width, 3);
-    assert_eq!(candidate.keymaps.path, PathBuf::from("keymaps-1"));
+    assert_eq!(candidate.keymaps.entries.last().unwrap().id, "user.revision-1");
     assert_eq!(candidate.dashboard.identity, "dashboard-1");
-    assert_eq!(candidate.theme_path, PathBuf::from("theme-1"));
+    assert_eq!(candidate.theme.styles.default.foreground, super::ThemeColor::Rgb(0xc9, 0xd1, 0xd8));
 }
 
 #[test]
 fn clean_consistent_load_never_fingerprints_user_sources() {
-    let loads = Cell::new(0_usize);
-    let loaded = load_consistent_candidate_with(
-        false,
-        "dust",
-        || {
-            loads.set(loads.get() + 1);
-            candidate_attempt("dust", true)
-        },
-        |_| -> Vec<u8> { panic!("--clean must not fingerprint user sources") },
-    )
-    .expect("bundled candidate");
-    assert_eq!(loads.get(), 1);
+    let loaded = load_consistent_configuration(false, "unused-user-theme")
+        .expect("bundled candidate");
     assert!(loaded.fingerprint.is_none());
-    assert!(loaded.candidate.is_ok());
+    let candidate = loaded.candidate.expect("valid bundled candidate");
+    assert_eq!(candidate.config, load_bundled_config().config);
+    assert!(!candidate.user_configuration);
+    assert_eq!(candidate.path, PathBuf::from("<bundled:config>"));
 }
 
 #[test]
@@ -945,36 +956,48 @@ label = "Files"
         PathBuf::from("keymaps.toml"),
     );
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
-    let ids = loaded
-        .entries
+    let surfaces = [
+        ("editor-normal", "editor", "normal"),
+        ("explorer", "explorer", ""),
+        ("dashboard", "dashboard", ""),
+        ("terminal-normal", "terminal_normal", ""),
+        ("tool-manager", "tool_manager", ""),
+        ("panel", "panel", ""),
+        ("agent-normal", "agent_normal", ""),
+    ];
+    let mut expected_bindings = surfaces
         .iter()
-        .map(|entry| entry.id.as_str())
-        .collect::<Vec<_>>();
-    assert!(ids.contains(&"user.global.files.editor-normal"));
-    assert!(ids.contains(&"user.global.files.dashboard"));
-    assert!(ids.contains(&"user.global.files.terminal-normal"));
-    assert!(
-        !ids.contains(&"user.global.files.explorer"),
-        "the explorer's own binding for the same keys wins"
-    );
-    assert!(ids.contains(&"user.explorer.files"));
-    let editor = loaded
-        .entries
-        .iter()
-        .find(|entry| entry.id == "user.global.files.editor-normal")
-        .expect("editor copy");
-    assert_eq!(editor.context.as_deref(), Some("editor"));
-    assert_eq!(editor.mode, "normal");
-    assert!(ids.contains(&"builtin.global.quit.editor-normal"));
-    assert!(ids.contains(&"builtin.global.quit.explorer"));
+        .filter(|(_, context, _)| *context != "explorer")
+        .map(|(suffix, context, mode)| (
+            format!("user.global.files.{suffix}"),
+            Some(*context),
+            *mode,
+            Some("workspace.file.find"),
+        ))
+        .collect::<BTreeSet<_>>();
+    expected_bindings.insert((
+        "user.explorer.files".into(), Some("explorer"), "", Some("explorer.refresh"),
+    ));
+    let bindings = loaded.entries.iter().filter(|entry| !entry.disable).map(|entry| (
+        entry.id.clone(), entry.context.as_deref(), entry.mode.as_str(), entry.command.as_deref(),
+    )).collect::<BTreeSet<_>>();
+    assert_eq!(bindings, expected_bindings);
+    let disables = loaded.entries.iter().filter(|entry| entry.disable)
+        .map(|entry| entry.id.clone()).collect::<BTreeSet<_>>();
+    assert_eq!(disables, surfaces.iter().map(|(suffix, _, _)|
+        format!("builtin.global.quit.{suffix}")
+    ).collect());
+    let groups = loaded.groups.iter().map(|group| (
+        group.id.clone(), group.context.as_deref(), group.mode.as_str(),
+        group.prefix.as_deref(), group.label.as_deref(),
+    )).collect::<BTreeSet<_>>();
+    assert_eq!(groups, surfaces.iter().map(|(suffix, context, mode)| (
+        format!("user.global.group.files.{suffix}"), Some(*context), *mode,
+        Some("<leader> f"), Some("Files"),
+    )).collect());
+    assert_eq!(loaded.entries.len(), 14);
     assert_eq!(loaded.entries.len(), loaded.user_spans.len());
-    assert!(
-        loaded
-            .groups
-            .iter()
-            .any(|group| group.id == "user.global.group.files.explorer"
-                && group.context.as_deref() == Some("explorer"))
-    );
+    assert_eq!(loaded.groups.len(), 7);
     assert_eq!(loaded.groups.len(), loaded.user_group_spans.len());
 }
 
@@ -987,20 +1010,18 @@ fn highlight_groups_resolve_like_neovim() {
     };
 
     // Every bundled link lands on a group with a definition, so ports keep their colours.
+    let mut unresolved = Vec::new();
     for (name, _) in super::themes::BUNDLED {
         let theme = super::themes::bundled_named(name).unwrap().theme;
         for (group, definition) in &theme.highlights {
-            if let Some(link) = &definition.link {
-                assert!(
-                    link.starts_with('@')
-                        || theme.highlights.contains_key(link)
-                        || Highlight::named(link)
-                            .is_some_and(|linked| theme.highlight(linked).is_some()),
-                    "{name}: {group} links to undefined {link}"
-                );
+            if let Some(link) = &definition.link
+                && theme.resolve(link).is_none()
+            {
+                unresolved.push(format!("{name}: {group} links to undefined {link}"));
             }
         }
     }
+    assert!(unresolved.is_empty(), "{}", unresolved.join("\n"));
     let tokyo = super::themes::bundled_named("tokyo-night").unwrap().theme;
     // `@function.method.call` links to `@function.method`, which links to `Function`.
     assert_eq!(
@@ -1015,6 +1036,16 @@ fn highlight_groups_resolve_like_neovim() {
     );
 
     let mut dust = super::themes::bundled_named("dust").unwrap().theme;
+    assert!(dust.resolve("@missing.nonexistent").is_none());
+    assert_eq!(dust.resolve("@function.custom.child"), dust.resolve("@function"));
+    dust.highlights.insert(
+        "@test.broken".into(),
+        super::HighlightDefinition {
+            link: Some("@missing.nonexistent".into()),
+            ..Default::default()
+        },
+    );
+    assert!(dust.resolve("@test.broken").is_none());
     dust.highlights.insert(
         "@function".into(),
         super::HighlightDefinition {

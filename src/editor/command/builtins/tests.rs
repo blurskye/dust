@@ -346,6 +346,44 @@ fn indentation_and_joins_accept_multibyte_endpoints() {
 }
 
 #[test]
+fn comment_templates_with_outer_whitespace_round_trip() {
+    for template in [" <!-- %s -->", "<!-- %s --> ", " <!-- %s --> "] {
+        let (mut state, buffer, _) = editing("  hello\n  world\n", 0);
+        let arguments = [
+            ("operator", "comment"),
+            ("motion", "line"),
+            ("linewise", "true"),
+            ("comment", template),
+        ];
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), "  <!-- hello -->\n  <!-- world -->\n");
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), "  hello\n  world\n");
+    }
+}
+
+#[test]
+fn comment_insertion_uses_each_lines_unicode_whitespace_boundaries() {
+    for (original, commented) in [
+        ("\u{2003}one\n two\n", "\u{2003}// one\n // two\n"),
+        ("\u{2003}\u{2003}one\n two\n", "\u{2003}// \u{2003}one\n // two\n"),
+        (" one\n\u{2003}two\n", " // one\n\u{2003}// two\n"),
+    ] {
+        let (mut state, buffer, _) = editing(original, 0);
+        let arguments = [
+            ("operator", "comment"),
+            ("motion", "line"),
+            ("linewise", "true"),
+            ("comment", "//"),
+        ];
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), commented);
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), original);
+    }
+}
+
+#[test]
 fn blank_comment_ranges_finish_the_operator_and_visual_modes() {
     for mode in [
         crate::editor::EditorMode::OperatorPending,
