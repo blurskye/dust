@@ -428,8 +428,8 @@ pub fn continue_operation(
         .collect::<Result<Vec<_>, _>>()?;
     // A previous attempt may have committed successfully but failed to remove MERGE_HEAD.
     // In that case retry only cleanup, never create another merge commit.
-    let already_committed = head.tree_id() == tree_id
-        && head.parent_count() == merge_heads.len() + 1
+    let already_committed = head.parent_count() == merge_heads.len() + 1
+        && repo.refname_to_id("ORIG_HEAD").ok() == head.parent_id(0).ok()
         && merge_heads.iter().enumerate().all(|(index, parent)| {
             head.parent_id(index + 1).ok() == Some(parent.id())
         });
@@ -487,7 +487,10 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
         "rebase" => rebase.as_ref().and_then(|rebase| rebase.orig_head_id()),
         _ => return Err(GitRecoveryRefusal::Backend(format!("aborting {operation} is not supported"))),
     }.ok_or(GitRecoveryRefusal::NoRecordedStart)?;
-    let touched = merge_touched_paths(&repo, recorded, &operation)?;
+    let rebase_current = rebase.as_mut().and_then(|rebase| {
+        rebase.operation_current().and_then(|index| rebase.nth(index)).map(|operation| operation.id())
+    });
+    let touched = operation_touched_paths(&repo, recorded, &operation, rebase_current)?;
     let risky = risky_changes(&repo, &touched)?;
     if !risky.is_empty() {
         return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
@@ -560,10 +563,11 @@ fn recorded_merge_heads(repo: &git2::Repository) -> Result<Vec<git2::Oid>, GitRe
 }
 
 /// Determine operation paths from its commits, never from arbitrary user-staged changes.
-fn merge_touched_paths(
+fn operation_touched_paths(
     repo: &git2::Repository,
     recorded: git2::Oid,
     operation: &str,
+    rebase_current: Option<git2::Oid>,
 ) -> Result<std::collections::BTreeSet<PathBuf>, GitRecoveryRefusal> {
     let mut touched = std::collections::BTreeSet::new();
     let index = repo
@@ -589,22 +593,38 @@ fn merge_touched_paths(
         "merge" => recorded_merge_heads(repo)?,
         "cherry-pick" => vec![repo.refname_to_id("CHERRY_PICK_HEAD").map_err(|_| GitRecoveryRefusal::NoRecordedStart)?],
         "revert" => vec![repo.refname_to_id("REVERT_HEAD").map_err(|_| GitRecoveryRefusal::NoRecordedStart)?],
+        "rebase" => rebase_current.into_iter().collect(),
         _ => Vec::new(),
     };
     for incoming in incoming {
         let commit = repo.find_commit(incoming)
             .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-        let base = if operation == "merge" {
-            repo.merge_base(recorded, incoming)
-        } else {
-            commit.parent_id(0)
-        }.map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
-        let base_tree = repo.find_commit(base).and_then(|commit| commit.tree())
+        let recorded_commit = repo.find_commit(recorded)
             .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        // Recompute the merge rather than treating every incoming path as changed: a change
+        // already present on our branch is not permission to discard later user edits there.
+        let merged = if operation == "merge" {
+            Some(repo.merge_commits(&recorded_commit, &commit, None)
+                .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?)
+        } else {
+            None
+        };
+        let base = if operation == "merge" {
+            Some(recorded)
+        } else if commit.parent_count() > 0 {
+            Some(commit.parent_id(0).map_err(|_| GitRecoveryRefusal::NoRecordedStart)?)
+        } else {
+            None
+        };
+        let base_tree = base.map(|base| repo.find_commit(base).and_then(|commit| commit.tree()))
+            .transpose().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
         let incoming_tree = commit.tree()
             .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-        let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&incoming_tree), None)
-            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        let diff = if let Some(merged) = &merged {
+            repo.diff_tree_to_index(base_tree.as_ref(), Some(merged), None)
+        } else {
+            repo.diff_tree_to_tree(base_tree.as_ref(), Some(&incoming_tree), None)
+        }.map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
         for delta in diff.deltas() {
             for path in [delta.old_file().path(), delta.new_file().path()].into_iter().flatten() {
                 touched.insert(path.to_path_buf());
