@@ -57,9 +57,12 @@ pub(super) struct Projection {
     completion_scroll: usize,
     resolve: Option<(u64, LspProjectionOwner, usize, ByteOffset)>,
     selection_ranges: Vec<ByteRange>,
+    selection_cursor: Option<ByteOffset>,
+    selection_request: Option<(u64, ByteOffset, bool)>,
     semantic: HashMap<(String, String), (Option<String>, Vec<u32>)>,
     pull_ids: HashMap<(String, String), String>,
     logs: VecDeque<String>,
+    log_start: usize,
     progress: Vec<UiLspProgress>,
     progress_epoch: Option<Instant>,
     progress_frame: usize,
@@ -166,6 +169,8 @@ impl LspSession {
     }
     fn clear_projection_rows(&mut self) {
         self.projection.selection_ranges.clear();
+        self.projection.selection_cursor = None;
+        self.projection.selection_request = None;
         self.projection.owner = None;
         self.projection.request = None;
         self.projection.request_servers.clear();
@@ -279,6 +284,9 @@ impl LspSession {
         let generation = self
             .next_generation()
             .ok_or_else(|| LspError::Busy(server.into()))?;
+        if matches!(feature, LspFeature::SelectionRanges) {
+            self.projection.selection_request = Some((generation, offset, false));
+        }
         let others: Vec<String> = match feature {
             LspFeature::Completion => self
                 .attached_servers(owner.buffer, &owner.language, |c| c.completion)
@@ -1138,6 +1146,27 @@ impl LspSession {
     pub(in crate::editor::session) fn install_selection_ranges(&mut self, ranges: Vec<ByteRange>) {
         self.projection.selection_ranges = ranges;
     }
+    pub(in crate::editor::session) fn selection_ranges_current(&self, cursor: ByteOffset) -> bool {
+        self.projection.selection_cursor.is_none_or(|origin| origin == cursor)
+    }
+    pub(in crate::editor::session) fn expand_requested_selection(&mut self) {
+        if let Some((_, _, expand)) = &mut self.projection.selection_request {
+            *expand = true;
+        }
+    }
+    pub(in crate::editor::session) fn complete_selection_ranges(
+        &mut self,
+        generation: u64,
+        ranges: Vec<ByteRange>,
+    ) -> Option<ByteOffset> {
+        let request = self.projection.selection_request.take()
+            .filter(|(pending, _, _)| *pending == generation);
+        self.projection.selection_cursor = request.map(|(_, cursor, _)| cursor);
+        self.install_selection_ranges(ranges);
+        request.filter(|(_, cursor, expand)| *expand
+            && self.projection.selection_ranges.iter().any(|range| range.contains(*cursor)))
+            .map(|(_, cursor, _)| cursor)
+    }
     pub(in crate::editor::session) fn record_pull(&mut self, server: &str, uri: &str, id: String) {
         self.projection
             .pull_ids
@@ -1213,8 +1242,12 @@ impl LspSession {
     pub(in crate::editor::session) fn append_log(&mut self, line: String, maximum: usize) {
         while self.projection.logs.len() >= maximum.max(1) {
             self.projection.logs.pop_front();
+            self.projection.log_start = self.projection.log_start.saturating_add(1);
         }
         self.projection.logs.push_back(line);
+    }
+    pub(in crate::editor::session) fn log_start(&self) -> usize {
+        self.projection.log_start
     }
     pub(in crate::editor::session) fn logs(&self) -> &VecDeque<String> {
         &self.projection.logs
@@ -1736,6 +1769,21 @@ mod tests {
         assert_eq!(result.data, [vec![99; 5], (0..10).collect()].concat());
         owner.remove("owned");
         assert!(owner.projection.semantic.is_empty());
+    }
+    #[test]
+    fn detaching_a_document_retires_its_pull_and_semantic_result_ids() {
+        let (_, buffer, document, mut owner) = fixture();
+        let uri = document.uri();
+        owner.record_pull("owned", &uri, "old-pull".into());
+        owner.record_pull("owned", "another-uri", "keep-pull".into());
+        let tokens = LspSemanticTokens { result_id: Some("old-semantic".into()), data: vec![0; 5] };
+        assert!(owner.record_semantic("owned", &uri, &tokens));
+        assert!(owner.record_semantic("owned", "another-uri", &tokens));
+        owner.detach("owned", buffer);
+        assert!(!owner.projection.pull_ids.contains_key(&("owned".into(), uri.clone())));
+        assert!(!owner.projection.semantic.contains_key(&("owned".into(), uri)));
+        assert_eq!(owner.projection.pull_ids.len(), 1);
+        assert_eq!(owner.projection.semantic.len(), 1);
     }
     #[test]
     fn starting_a_replacement_transport_retires_old_result_ids() {

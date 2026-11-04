@@ -1357,6 +1357,7 @@ impl InteractiveApplication {
                         .map(|buffer| buffer.text.source_version())
                 });
                 if let Some(mut transaction) = outcome.transaction {
+                    self.persistence.reconcile_marks(&self.state);
                     let source = self.state.window_version();
                     let snippet_document = self.input.snippet_buffer().and_then(|id| {
                         self.state.buffers.get(id).map(|buffer| {
@@ -1375,6 +1376,7 @@ impl InteractiveApplication {
                         self.show_error(error);
                         return false;
                     }
+                    self.persistence.reconcile_marks(&self.state);
                     if let Some(update) = update {
                         let source = self.state.window_version();
                         let document = self.input.snippet_buffer().and_then(|id| {
@@ -3970,7 +3972,12 @@ impl InteractiveApplication {
                             }
                         }
                         "textDocument/selectionRange" => {
-                            self.language.install_selection_ranges(ranges)
+                            let expand = self.language.complete_selection_ranges(generation, ranges);
+                            if let Some(cursor) = expand
+                                && self.state.active_view.is_some_and(|view| self.state.views[view].cursor == cursor)
+                            {
+                                self.process_effect(AppEffect::LspSelectionExpand);
+                            }
                         }
                         _ => {}
                     }

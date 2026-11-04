@@ -162,6 +162,7 @@ impl InteractiveApplication {
             replace_query: None,
             substitute_confirm: None,
             session_load_requested: false,
+            session_restore_notice: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
             language: super::super::lsp::LspSession::default(),

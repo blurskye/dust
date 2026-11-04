@@ -1447,17 +1447,11 @@ impl InteractiveApplication {
                     self.input
                         .restore_history(state.command_history, state.search_history);
                     let requested = std::mem::take(&mut self.session_load_requested);
-                    let found = session.is_some();
                     if let Some(session) = session {
+                        self.session_restore_notice = requested;
                         self.restore_session(session);
-                    }
-                    if requested {
-                        let message = if found {
-                            "session_restored"
-                        } else {
-                            "session_load_none"
-                        };
-                        self.notify_message(self.message(message, &[]), false);
+                    } else if requested {
+                        self.notify_message(self.message("session_load_none", &[]), false);
                     }
                 }
                 Err(error) => {
@@ -1500,8 +1494,12 @@ impl InteractiveApplication {
             STATE_ENTRY_LIMIT,
         ) {
             Ok(Some(paths)) => paths,
-            Ok(None) => return,
+            Ok(None) => {
+                self.session_restore_notice = false;
+                return;
+            }
             Err(error) => {
+                self.session_restore_notice = false;
                 self.ui.config_diagnostic = Some(error);
                 return;
             }
@@ -1511,6 +1509,9 @@ impl InteractiveApplication {
                 self.ui.config_diagnostic = Some(format!(
                     "persistent window layout rejected transactionally: {error}"
                 ));
+                self.session_restore_notice = false;
+            } else {
+                self.notify_session_restored();
             }
             return;
         }
@@ -1552,6 +1553,7 @@ impl InteractiveApplication {
         }
     }
     pub(super) fn cancel_session_restore(&mut self) {
+        self.session_restore_notice = false;
         for id in self.persistence.cancel_restore() {
             self.documents.cancel_request(id);
         }
@@ -1648,8 +1650,17 @@ impl InteractiveApplication {
                     .collect();
                 self.window_session.restore_pins(pinned);
                 self.window_session.restore_content_order(order);
+                self.notify_session_restored();
             }
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                self.session_restore_notice = false;
+                self.show_error(error);
+            }
+        }
+    }
+    fn notify_session_restored(&mut self) {
+        if std::mem::take(&mut self.session_restore_notice) {
+            self.notify_message(self.message("session_restored", &[]), false);
         }
     }
     pub(super) fn record_recent_file(&mut self, path: PathBuf) {
@@ -2088,11 +2099,17 @@ impl InteractiveApplication {
             AppEffect::TestList(name) => self.show_test_picker(&name),
             AppEffect::TaskList => self.show_task_picker(),
             AppEffect::TaskRestart(name) => {
+                let adapter = self.tasks.last_adapter(&name).cloned();
                 // A finished task has nothing to stop: restarting just runs it again.
                 if self.tasks.is_running(&name) {
                     self.stop_task(&name);
                 }
-                self.run_trusted(TrustedAction::RunTask(name));
+                match adapter {
+                    Some(AdapterContext::Test { matcher }) => self.run_trusted(TrustedAction::RunTest { name, matcher }),
+                    Some(AdapterContext::Linter { matcher, lint: true }) => self.run_trusted(TrustedAction::RunLinter { name, matcher }),
+                    Some(AdapterContext::Formatter { .. }) => self.process_effect(AppEffect::FormatRun(name)),
+                    _ => self.run_trusted(TrustedAction::RunTask(name)),
+                }
             }
             AppEffect::LintRun(name) => {
                 let Some(task) = self.configuration.settings().tasks.get(&name) else {
@@ -2645,7 +2662,7 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("lsp-log:{index}")),
+                        id: PickerItemId(format!("lsp-log:{}", self.language.log_start().saturating_add(index))),
                         label: line.clone(),
                         detail: String::new(),
                         source: "lsp".into(),
@@ -2721,6 +2738,9 @@ impl InteractiveApplication {
                 self.start_lsp(None);
             }
             AppEffect::LspStop => {
+                if let Some(buffer) = self.state.active_buffer_id() {
+                    self.language.stop_document_launches(buffer);
+                }
                 if let Some(server) = self.language.active().cloned() {
                     if let Some(id) = self
                         .language
@@ -2817,9 +2837,12 @@ impl InteractiveApplication {
                         self.language.set_detached(id, buffer, true);
                     }
                     self.language.detach(&server, buffer);
-                    if let Ok(owner) = DiagnosticOwner::new(format!("lsp.{server}")) {
-                        self.diagnostics.clear_owner_uri(&owner, &uri);
+                    for name in [format!("lsp.{server}"), format!("lsp-pull:{server}")] {
+                        if let Ok(owner) = DiagnosticOwner::new(name) {
+                            self.diagnostics.clear_owner_uri(&owner, &uri);
+                        }
                     }
+                    self.clear_lsp_ui_projection();
                     self.sync_ui_diagnostics();
                 }
             }
@@ -2905,17 +2928,28 @@ impl InteractiveApplication {
                             .byte_to_line(view.cursor)
                             .ok()
                     });
-                    if let Some(fold) = self.ui.lsp_folds.iter_mut().find(|fold| {
+                    if let Some(fold) = self.ui.lsp_folds.iter_mut().filter(|fold| {
                         fold.view == view
                             && line.is_some_and(|line| {
                                 line >= fold.start_line && line <= fold.end_line
                             })
-                    }) {
+                    }).min_by_key(|fold| fold.end_line.saturating_sub(fold.start_line)) {
                         fold.collapsed = !fold.collapsed;
+                        if fold.collapsed && line.is_some_and(|line| line > fold.start_line) {
+                            let buffer = self.state.views[view].buffer;
+                            if let Ok(cursor) = self.state.buffers[buffer].text.line_to_byte(fold.start_line) {
+                                self.state.views[view].cursor = cursor;
+                                self.state.views[view].selection = None;
+                                self.state.mark_editor_changed();
+                            }
+                        }
                     }
                 }
             }
             AppEffect::LspSelectionExpand => {
+                if self.active_lsp_document().is_some() {
+                    self.refresh_lsp_projection_owner();
+                }
                 if let Some(view) = self.state.active_view {
                     let state = &self.state.views[view];
                     let text = &self.state.buffers[state.buffer].text;
@@ -2931,6 +2965,7 @@ impl InteractiveApplication {
                         .language
                         .selection_ranges()
                         .iter()
+                        .filter(|_| selection.is_some() || self.language.selection_ranges_current(state.cursor))
                         .filter(|range| {
                             if let Some((start, end)) = selection {
                                 range.start <= start
@@ -2944,6 +2979,9 @@ impl InteractiveApplication {
                         .copied();
                     if let Some(range) = range {
                         self.select_text(view, range.start.get(), range.end.get());
+                    } else if selection.is_none() || self.language.selection_ranges().is_empty() {
+                        self.request_lsp(LspFeature::SelectionRanges);
+                        self.language.expand_requested_selection();
                     }
                 }
             }
@@ -2960,6 +2998,7 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::MarkJump(name) => {
+                self.persistence.reconcile_marks(&self.state);
                 let location = self
                     .persistence
                     .marks()
@@ -2974,6 +3013,7 @@ impl InteractiveApplication {
             AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
                     self.persistence.set_mark(name, location, MARK_LIMIT);
+                    self.persistence.reconcile_marks(&self.state);
                 }
             }
 
@@ -8659,8 +8699,25 @@ impl InteractiveApplication {
         kind: &str,
         rows: Vec<(String, String, DapControl)>,
     ) {
+        let saved = rows.iter().map(|(label, detail, _)| (label.clone(), detail.clone())).collect::<Vec<_>>();
         let rows = self.debugger_session.controls(rows);
-        self.install_debug_rows(kind, rows);
+        if kind == "watches" && rows.is_empty() {
+            let items = saved.into_iter().enumerate().map(|(index, (label, detail))| {
+                (PickerItem {
+                    badge: String::new(),
+                    kind: crate::workspace::PickerItemKind::Entry,
+                    id: PickerItemId(format!("dap:watches:{index}")),
+                    label,
+                    detail,
+                    source: "dap".into(),
+                    action: PickerAction::None,
+                }, PickerPayload::Command(String::new()))
+            }).collect();
+            self.install_surface_picker(PickerSurfaceKind::Debug,
+                self.message("dap_picker_title", &[("kind", kind.into())]), items);
+        } else {
+            self.install_debug_rows(kind, rows);
+        }
     }
     pub(in crate::editor::session) fn install_debug_rows(
         &mut self,
@@ -12428,7 +12485,7 @@ impl InteractiveApplication {
         }
     }
     pub(super) fn process_package_events(&mut self) {
-        let updates = self.extension.poll_packages(self.plugin_limits());
+        let updates = self.extension.poll_packages(self.plugin_limits(), !self.workspace.safe_mode());
         self.apply_extension_updates(updates);
     }
     pub(in crate::editor::session) fn apply_extension_updates(

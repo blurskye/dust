@@ -408,6 +408,7 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn poll_packages(
         &mut self,
         limits: PluginLimits,
+        activate: bool,
     ) -> Vec<ExtensionUpdate> {
         let mut updates = Vec::new();
         for event in self.packages.poll().unwrap_or_default() {
@@ -416,7 +417,15 @@ impl ExtensionSession {
                     let prepared_operation = result.prepared.is_some();
                     let activation_operation = result.operation == "activations";
                     if let Some(prepared) = result.prepared.take() {
-                        updates.extend(self.load_prepared(result.id, prepared, &limits));
+                        if activate {
+                            updates.extend(self.load_prepared(result.id, prepared, &limits));
+                        } else {
+                            self.package_preparing.remove(&result.id);
+                            let _ = self.packages.request(PackageOperation::Abort { token: prepared.token });
+                        }
+                    }
+                    if !activate {
+                        result.activations.clear();
                     }
                     for (manifest, path) in std::mem::take(&mut result.activations) {
                         let plugin = manifest.id.clone();
@@ -466,9 +475,10 @@ impl ExtensionSession {
                             updates.extend(self.rollback_packages());
                             continue;
                         }
-                        match self.packages.request(PackageOperation::Activations) {
-                            Ok(id) => self.package_startup_request = Some(id),
-                            Err(error) => {
+                        match activate.then(|| self.packages.request(PackageOperation::Activations)) {
+                            Some(Ok(id)) => self.package_startup_request = Some(id),
+                            None => {},
+                            Some(Err(error)) => {
                                 updates.push(ExtensionUpdate::Error(error.to_string()));
                                 updates.extend(self.rollback_packages());
                             }
@@ -640,7 +650,7 @@ mod tests {
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(10);
             let load = loop {
-                for update in owner.poll_packages(PluginLimits::default()) {
+                for update in owner.poll_packages(PluginLimits::default(), true) {
                     assert!(
                         !matches!(
                             update,
@@ -688,7 +698,7 @@ mod tests {
             );
             owner.commit_package("demo".into(), load, token).unwrap();
             while owner.pending_packages() != 0 {
-                owner.poll_packages(PluginLimits::default());
+                owner.poll_packages(PluginLimits::default(), true);
                 assert!(Instant::now() < deadline);
                 thread::sleep(Duration::from_millis(2));
             }
@@ -697,6 +707,20 @@ mod tests {
                 package.version
             );
             old_load = Some(load);
+        }
+        // Package maintenance is allowed in safe mode, but must not activate installed code.
+        for operation in [PackageOperation::Rollback, PackageOperation::Remove("demo".into())] {
+            owner.request_package(operation).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while owner.pending_packages() != 0 {
+                for update in owner.poll_packages(PluginLimits::default(), false) {
+                    assert!(!matches!(update, ExtensionUpdate::Error(_) | ExtensionUpdate::Failed { .. }));
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert!(owner.manager.load_id("demo").is_none());
+            assert!(owner.package_startup_request.is_none());
         }
     }
 
@@ -782,7 +806,7 @@ mod tests {
         assert!(owner.package_startup_rollback.is_some());
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            if owner.poll_packages(PluginLimits::default()).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
+            if owner.poll_packages(PluginLimits::default(), true).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
             assert!(Instant::now() < deadline, "rollback terminal missing");
             std::thread::sleep(Duration::from_millis(2));
         }

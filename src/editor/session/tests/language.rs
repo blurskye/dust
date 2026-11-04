@@ -1750,6 +1750,7 @@ fn fixture_owned_lsp(
             capabilities: Some(crate::language::lsp::LspCapabilities {
                 code_action: true,
                 execute_command: true,
+                selection_ranges: true,
                 ..Default::default()
             }),
             documents: HashMap::from([(buffer, document)]),
@@ -1822,7 +1823,7 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
     use crate::editor::session::diagnostics::{
         DiagnosticBatch, DiagnosticDocument, DiagnosticValidity,
     };
-    for tool_stop in [false, true] {
+    for effect in [AppEffect::LspStop, AppEffect::LspDetach, AppEffect::StopSelectedLsp] {
         let mut app = app();
         let path = app.state.workspace_root.join("problem.rs");
         let (buffer, _) = app
@@ -1860,10 +1861,10 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
                 .unwrap();
         }
         assert_eq!(app.diagnostics.choices().count(), 2);
-        if tool_stop {
+        if matches!(effect, AppEffect::StopSelectedLsp) {
             app.stop_lsp_sessions_for_server("rust-analyzer");
         } else {
-            app.process_effect(AppEffect::LspStop);
+            app.process_effect(effect);
         }
         assert_eq!(app.diagnostics.choices().count(), 0);
     }
@@ -1920,6 +1921,36 @@ fn code_action_command_waits_for_approval_of_its_edits() {
     app.accept_workspace_proposal();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
     assert_eq!(transport.executed_command(), Some("finish-action".into()));
+}
+
+#[test]
+fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
+    use crate::language::lsp::{LspFeatureResult, LspPosition, LspRange};
+    let mut app = app();
+    let path = app.state.workspace_root.join("selection.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    let _transport = fixture_owned_lsp(&mut app, "owned", buffer);
+    app.language.select("owned");
+    app.state.views[view].cursor = ByteOffset(5);
+    let generation = app.language.generation();
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert!(app.language.generation() > generation);
+    assert!(app.state.views[view].selection.is_none());
+    app.present_lsp_result("owned", app.language.generation(), "textDocument/selectionRange",
+        &crate::language::lsp::file_uri(&path), LspFeatureResult::Ranges(vec![
+            LspRange { start: LspPosition { line: 0, character: 4 }, end: LspPosition { line: 0, character: 7 } },
+            LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 7 } },
+        ]));
+    assert_eq!(app.state.views[view].selection.unwrap().anchor, ByteOffset(4));
+    assert_eq!(app.state.views[view].selection.unwrap().head, ByteOffset(6));
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert_eq!(app.state.views[view].selection.unwrap().anchor, ByteOffset(0));
+    app.state.views[view].selection = None;
+    app.state.views[view].cursor = ByteOffset(1);
+    let generation = app.language.generation();
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert!(app.language.generation() > generation, "ranges for another cursor must be requested again");
 }
 
 #[test]
@@ -1993,8 +2024,9 @@ fn stopping_a_starting_server_retires_its_launch() {
 
     app.sync_lsp_document();
     assert!(app.language.project_pending());
-    app.stop_lsp_sessions_for_server("automatic-rust");
-    app.language.mark_stopped("automatic-rust");
+    assert!(app.language.active().is_none());
+    app.process_effect(AppEffect::LspStop);
+    assert!(app.language.is_stopped("automatic-rust"));
     assert!(!app.language.project_pending());
     assert!(!app.language.launch_pending("automatic-rust"));
     wait_vfs(&mut app);

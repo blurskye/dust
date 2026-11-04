@@ -162,6 +162,7 @@ pub(super) struct TaskSession {
     running: HashMap<JobId, RunningTask>,
     keys: HashMap<String, RunKey>,
     plans: HashMap<String, Plan>,
+    adapters: HashMap<String, AdapterContext>,
     rows: HashMap<String, Vec<TaskOutputRecord>>,
     active_output: Option<String>,
     truncated: HashSet<JobId>,
@@ -181,6 +182,7 @@ impl TaskSession {
             running: HashMap::new(),
             keys: HashMap::new(),
             plans: HashMap::new(),
+            adapters: HashMap::new(),
             rows: HashMap::new(),
             active_output: None,
             truncated: HashSet::new(),
@@ -195,6 +197,7 @@ impl TaskSession {
         owner
     }
     pub(super) fn configure(&mut self, config: &Config) {
+        self.adapters.clear();
         self.maximum_output = MAXIMUM_OUTPUT_BYTES;
         self.matchers = config
             .tasks
@@ -270,10 +273,14 @@ impl TaskSession {
                 awaiting: false,
             },
         );
+        self.adapters.insert(name.into(), adapter.clone());
         self.rows.insert(name.into(), Vec::new());
         self.tests.remove(name);
         self.statuses.insert(name.into(), "queued".into());
         Ok(())
+    }
+    pub(super) fn last_adapter(&self, name: &str) -> Option<&AdapterContext> {
+        self.adapters.get(name)
     }
     pub(super) fn step(
         &mut self,

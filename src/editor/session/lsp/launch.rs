@@ -121,6 +121,26 @@ pub(super) struct Preparation {
     preflights: HashMap<PreflightId, Preflight>,
 }
 impl LspSession {
+    pub(in crate::editor::session) fn stop_document_launches(&mut self, buffer: crate::editor::BufferId) {
+        let mut definitions = Vec::new();
+        if let Some((_, pending)) = &self.preparation.root
+            && pending.source.buffer == buffer
+        {
+            definitions.push(pending.value.definition.id.clone());
+        }
+        if let Some((_, pending)) = &self.preparation.nix
+            && pending.source.buffer == buffer
+        {
+            definitions.push(pending.value.definition.id.clone());
+        }
+        definitions.extend(self.preparation.preflights.values()
+            .filter(|pending| pending.pending.source.buffer == buffer)
+            .map(|pending| pending.pending.value.definition.id.clone()));
+        for definition in definitions {
+            self.cancel_launches(&definition);
+            self.mark_stopped(&definition);
+        }
+    }
     pub(in crate::editor::session) fn cancel_launches(&mut self, definition: &str) {
         if self
             .preparation
@@ -703,7 +723,8 @@ mod tests {
             },
         );
         assert!(owner.launch_pending(&definition.id));
-        owner.cancel_launches(&definition.id);
+        owner.stop_document_launches(buffer);
+        assert!(owner.is_stopped(&definition.id));
         assert!(!owner.launch_pending(&definition.id));
         assert!(!owner.owns_preflight(PreflightId(3)));
     }

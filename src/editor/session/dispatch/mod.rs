@@ -198,6 +198,7 @@ struct InteractiveApplication {
     /// A `:s///c` asking about each match in turn.
     substitute_confirm: Option<substitute::SubstituteConfirm>,
     session_load_requested: bool,
+    session_restore_notice: bool,
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,

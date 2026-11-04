@@ -667,6 +667,26 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
 }
 
 #[test]
+fn lsp_fold_toggle_uses_the_innermost_fold_and_moves_out_of_hidden_text() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("outer\ninner\nbody\nend\ntail"), None);
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(13);
+    app.ui.lsp_folds = vec![
+        UiFold { view, start_line: 0, end_line: 4, collapsed: false },
+        UiFold { view, start_line: 1, end_line: 3, collapsed: false },
+    ];
+    app.process_effect(AppEffect::LspFoldToggle);
+    assert!(!app.ui.lsp_folds[0].collapsed);
+    assert!(app.ui.lsp_folds[1].collapsed);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+    app.invoke_mapped_command("edit.delete_char");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "outer\nnner\nbody\nend\ntail");
+    app.process_effect(AppEffect::LspFoldToggle);
+    assert!(!app.ui.lsp_folds[1].collapsed);
+}
+
+#[test]
 fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), None);

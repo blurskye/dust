@@ -616,8 +616,8 @@ impl LspSession {
     }
     pub(super) fn detach(&mut self, key: &str, buffer: BufferId) {
         self.invalidate_document(key, buffer);
-        if let Some(state) = self.sessions.get_mut(key) {
-            state.documents.remove(&buffer);
+        if let Some(document) = self.sessions.get_mut(key).and_then(|state| state.documents.remove(&buffer)) {
+            self.retire_projection_document(key, &document.uri());
         }
     }
     pub(super) fn hint_install_once(&mut self, language: &str) -> bool {

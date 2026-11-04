@@ -234,6 +234,34 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
 }
 
 #[test]
+fn log_selection_survives_eviction_of_an_earlier_entry() {
+    let mut app = app();
+    for line in ["first", "selected", "last"] {
+        app.language.append_log(line.into(), 3);
+    }
+    app.show_lsp_logs();
+    app.picker_move(-1);
+    let selected = app.ui.picker.as_ref().unwrap().selected.unwrap();
+    assert_eq!(app.ui.picker.as_ref().unwrap().rows[selected].label, "selected");
+    app.language.append_log("new".into(), 3);
+    app.show_lsp_logs();
+    let picker = app.ui.picker.as_ref().unwrap();
+    assert_eq!(picker.rows[picker.selected.unwrap()].label, "selected");
+}
+
+#[test]
+fn saved_watches_are_listed_without_a_debugger() {
+    let mut app = app();
+    app.process_effect(AppEffect::DapWatchAdd("counter".into()));
+    app.process_effect(AppEffect::DapWatchList);
+    let picker = app.ui.picker.as_ref().unwrap();
+    assert_eq!(picker.rows.len(), 1);
+    assert_eq!(picker.rows[0].label, "counter");
+    app.accept_picker();
+    assert_eq!(app.debugger_session.watches(), ["counter"]);
+}
+
+#[test]
 fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
     let mut app = app();
     for logs in [false, true] {
@@ -5315,9 +5343,24 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     wait_vfs(&mut app);
     assert_eq!(app.state.active_view, Some(view));
     let identity = app.state.window_version();
+    let (manager, plugin) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+    });
+    let invocation = plugin.take();
     app.persistence.fixture_restore_source(context!());
+    app.session_restore_notice = true;
+    app.notify_message("restoring".into(), false);
     app.restore_session(session.clone());
+    assert_eq!(app.ui.notification.as_deref(), Some("restoring"));
     wait_vfs(&mut app);
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    plugin.reply_with(&invocation, |execution| {
+        execution.messages.push("obsolete plugin reply".into());
+    });
+    app.process_plugin_events();
+    assert!(!app.notices.history().any(|(_, message)| message == "obsolete plugin reply"));
     let buffer = app.state.active_buffer_id().unwrap();
     assert!(!app.state.buffers.contains_key(newer));
     assert_ne!(buffer, newer);
@@ -5349,8 +5392,12 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         pane.path = app.state.workspace_root.join("missing.txt");
     }
     app.persistence.fixture_restore_source(context!());
+    app.session_restore_notice = true;
+    app.notify_message("waiting for missing file".into(), false);
     app.restore_session(missing);
     wait_vfs(&mut app);
+    assert_ne!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    assert!(!app.session_restore_notice);
     assert_eq!(app.state.version(), before);
     assert_eq!(app.window_session.graph(), &graph_before);
     assert_eq!(

@@ -60,6 +60,26 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
 }
 
 #[test]
+fn marks_follow_ordinary_edits_before_any_window_transition() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("marks.txt");
+    fs::write(&path, "abc target").unwrap();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc target"), Some(path));
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(4);
+    app.process_effect(AppEffect::MarkSet("a".into()));
+    app.state.views[view].cursor = ByteOffset(0);
+    for key in ["i", "X", "escape"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "Xabc target");
+    assert_eq!(app.persistence.marks()[0].location.byte, 5);
+    app.process_effect(AppEffect::MarkJump("a".into()));
+    wait_vfs(&mut app);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(5));
+}
+
+#[test]
 fn path_completion_is_bounded_async_and_rejects_stale_generations() {
     let mut app = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");

@@ -437,6 +437,7 @@ impl ExtensionSession {
     }
     pub(super) fn reset_runtime(&mut self) -> bool {
         self.runtime_epoch = self.runtime_epoch.saturating_add(1);
+        self.edits = PluginEditSources::default();
         let active_confirmation = self.confirmations.reset();
         self.windows.clear_runtime();
         self.providers.reset_runtime();

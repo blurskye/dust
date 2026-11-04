@@ -2291,6 +2291,18 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     // Restarting the finished task runs it again without claiming an error from the stop half.
     app.process_effect(AppEffect::TaskRestart("unit".into()));
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    assert!(app.tasks.test_items("unit").is_empty());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.tasks.test_items("unit").is_empty() && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.tasks.test_items("unit").len(), 2);
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
 }
 
 #[cfg(unix)]
