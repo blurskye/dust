@@ -1441,6 +1441,26 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
 }
 
 #[test]
+fn settings_toggles_wait_for_the_saved_configuration_to_reload() {
+    use crate::editor::session::dispatch::commands::SettingsAction;
+    let mut app = app();
+    app.open_settings();
+    let page = app.ui.settings.as_mut().unwrap();
+    assert_eq!(page.selected_row().unwrap().key, "editor.wrap");
+    page.saving = true;
+    page.status = Some(("Saved".into(), false));
+    app.settings_action(SettingsAction::Toggle);
+    let page = app.ui.settings.as_ref().unwrap();
+    assert!(page.saving);
+    assert_eq!(page.status, Some(("Saved".into(), false)));
+    app.refresh_settings();
+    assert!(!app.ui.settings.as_ref().unwrap().saving);
+    app.ui.settings.as_mut().unwrap().saving = true;
+    app.settings_status("Reload rejected".into(), true);
+    assert!(!app.ui.settings.as_ref().unwrap().saving);
+}
+
+#[test]
 fn undo_persistence_policy_changes_with_configuration() {
     let mut app = app();
     let mut loaded = crate::config::load_bundled_config();

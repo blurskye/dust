@@ -693,7 +693,7 @@ impl PluginVirtualDocumentBroker {
             }
             PluginVirtualDocumentProposalKind::Error(error) => {
                 self.pending.remove(&proposal.request);
-                if candidate.revision == 0 {
+                if candidate.revision == 0 || candidate.closed {
                     self.documents.remove(&proposal.document);
                 } else if let Some(document) = self.documents.get_mut(&proposal.document) {
                     document.pending_request = None;
@@ -727,6 +727,23 @@ impl PluginVirtualDocumentBroker {
             .flatten()
     }
 
+    /// Withdraw a pending request without losing a published document.
+    pub fn cancel_pending(&mut self, plugin: &str, load: PluginLoadId, document: u64) -> bool {
+        let Some(doc) = self.documents.get_mut(&document) else {
+            return false;
+        };
+        if doc.plugin != plugin || doc.load != load {
+            return false;
+        }
+        let Some(request) = doc.pending_request.take() else {
+            return false;
+        };
+        self.pending.remove(&request);
+        if doc.revision == 0 || doc.closed {
+            self.documents.remove(&document);
+        }
+        true
+    }
     pub fn cancel(&mut self, plugin: &str, load: PluginLoadId, document: u64) -> bool {
         let Some(d) = self.documents.get(&document) else {
             return false;

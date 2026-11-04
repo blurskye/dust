@@ -1040,6 +1040,9 @@ impl CapturedExecution {
     pub(crate) fn arguments(&self) -> &[String] {
         &self.request.arguments
     }
+    pub(crate) fn virtual_documents(&self) -> &[super::PluginVirtualDocumentRequest] {
+        &self.request.virtual_document_requests
+    }
     pub(crate) fn snapshot(&self) -> Option<&PluginSnapshot> {
         self.request.snapshot.as_ref()
     }
@@ -1068,6 +1071,9 @@ impl ExecutionFixture {
             .insert("demo".into(), PluginStatus::Active(vec!["run".into()]));
         manager.next_load = 2;
         (manager, Self { requests, events })
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        matches!(self.requests.try_recv(), Err(mpsc::TryRecvError::Empty))
     }
     pub(crate) fn take(&self) -> CapturedExecution {
         match self

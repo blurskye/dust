@@ -1194,12 +1194,10 @@ impl InteractiveApplication {
     }
     fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
         match result {
-            Ok(VirtualOpen::Execute { plugin, command }) => {
-                self.process_effect(AppEffect::PluginExecute {
-                    plugin,
-                    command,
-                    arguments: Vec::new(),
-                })
+            Ok(VirtualOpen::Execute { plugin, load, command, document }) => {
+                if !self.execute_plugin_command(plugin.clone(), command, Vec::new()) {
+                    self.extension.cancel_virtual_request(&plugin, load, document);
+                }
             }
             Ok(VirtualOpen::Existing(buffer)) => {
                 let mut draft = self.state.draft();
@@ -9346,15 +9344,11 @@ impl InteractiveApplication {
         provider: String,
         query: String,
     ) {
-        let buffer_revision = self
-            .state
-            .active_buffer_id()
-            .and_then(|buffer| self.state.buffers.get(buffer))
-            .map(|buffer| buffer.text.revision().0);
         let invocation = match self.extension.start_provider(
             &provider,
             query,
-            (self.workspace.root_revision(), buffer_revision),
+            self.workspace.root_revision(),
+            &self.state,
         ) {
             Ok(invocation) => invocation,
             Err(error) => {
@@ -9382,14 +9376,14 @@ impl InteractiveApplication {
         }
     }
 
-    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) {
+    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) -> bool {
         let Some(load) = self.extension.load_id(&plugin) else {
             self.show_error(crate::extensions::PluginError::NotActive);
-            return;
+            return false;
         };
         if !self.extension.is_active_generation(&plugin, load) {
             self.show_error(crate::extensions::PluginError::NotActive);
-            return;
+            return false;
         }
         self.refresh_plugin_host_events();
         self.retire_plugin_edit_sources();
@@ -9423,7 +9417,9 @@ impl InteractiveApplication {
         );
         if let Err(error) = result {
             self.show_error(error);
+            return false;
         }
+        true
     }
 
     pub(in crate::editor::session) fn present_plugin_picker(&mut self, request: u64) {
@@ -9541,7 +9537,7 @@ impl InteractiveApplication {
                 action_command,
             }) => self
                 .extension
-                .provider_selection(plugin, *load, *request, item, action_command),
+                .provider_selection(plugin, *load, *request, item, action_command, &self.state),
             _ => None,
         };
         self.close_picker();
@@ -14567,7 +14563,11 @@ impl InteractiveApplication {
         {
             self.documents.cancel_request(id);
         }
-        self.extension.close_virtual_buffer(buffer_id);
+        match self.extension.close_virtual_buffer(buffer_id) {
+            Ok(Some(request)) => self.route_virtual_open(Ok(request)),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
         let documents = self
             .language
             .sessions()

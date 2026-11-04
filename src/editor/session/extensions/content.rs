@@ -47,7 +47,7 @@ impl VirtualPublication<'_> {
 }
 pub(in crate::editor::session) enum VirtualOpen {
     Existing(BufferId),
-    Execute { plugin: String, command: String },
+    Execute { plugin: String, load: PluginLoadId, command: String, document: u64 },
 }
 pub(in crate::editor::session) struct ProviderInvocation {
     pub request: u64,
@@ -64,7 +64,8 @@ impl ExtensionSession {
         &mut self,
         provider: &str,
         query: String,
-        revisions: (u64, Option<u64>),
+        workspace_revision: u64,
+        editor: &EditorState,
     ) -> Result<ProviderInvocation, String> {
         let Some((plugin, load, command)) = self.plugin_contributions.ordered().find_map(|index| {
             index
@@ -97,12 +98,16 @@ impl ExtensionSession {
                     provider: provider.into(),
                     query,
                     context: "editor".into(),
-                    workspace_revision: Some(revisions.0),
-                    buffer_revision: revisions.1,
+                    workspace_revision: Some(workspace_revision),
+                    buffer_revision: editor.active_buffer_id()
+                        .map(|buffer| editor.buffers[buffer].text.revision().0),
                 },
                 self.active_picker,
             )
             .map_err(|error| error.detail)?;
+        self.provider_source = Some((request, editor.active_buffer_id().map(|buffer| {
+            (buffer, editor.buffers[buffer].text.source_version())
+        })));
         Ok(ProviderInvocation {
             request,
             plugin,
@@ -164,7 +169,16 @@ impl ExtensionSession {
         request: u64,
         item: &str,
         command: &str,
+        editor: &EditorState,
     ) -> Option<(String, Vec<String>)> {
+        let (source_request, source) = self.provider_source.as_ref()?;
+        if *source_request != request || match source {
+            Some((buffer, text)) => editor.active_buffer_id() != Some(*buffer)
+                || editor.buffers.get(*buffer).is_none_or(|buffer| buffer.text.source_version() != *text),
+            None => editor.active_buffer_id().is_some(),
+        } {
+            return None;
+        }
         if !self.provider_visible(request)
             || !self.manager.is_active_generation(plugin, load)
             || !self
@@ -237,10 +251,10 @@ impl ExtensionSession {
             .strip_prefix(&format!("plugin.{plugin}."))
             .ok_or("invalid virtual document command")?
             .to_owned();
-        self.virtual_documents
+        let document = self.virtual_documents
             .start(&plugin, load, source, key)
             .map_err(|error| error.detail)?;
-        Ok(VirtualOpen::Execute { plugin, command })
+        Ok(VirtualOpen::Execute { plugin, load, command, document })
     }
     pub(in crate::editor::session) fn refresh_virtual(
         &mut self,
@@ -277,16 +291,39 @@ impl ExtensionSession {
             .map_err(|error| error.detail)?;
         Ok(VirtualOpen::Execute {
             plugin: entry.plugin.clone(),
+            load: entry.load,
             command,
+            document: entry.document,
         })
     }
-    pub(in crate::editor::session) fn close_virtual_buffer(&mut self, buffer: BufferId) {
-        if let Some(entry) = self.virtual_editor.entry_for_buffer(buffer).cloned() {
-            self.virtual_documents
-                .cancel(&entry.plugin, entry.load, entry.document);
-            self.virtual_editor
-                .forget_document(&entry.plugin, entry.load, entry.document);
+    pub(in crate::editor::session) fn cancel_virtual_request(
+        &mut self, plugin: &str, load: PluginLoadId, document: u64,
+    ) {
+        self.virtual_documents.cancel_pending(plugin, load, document);
+    }
+    pub(in crate::editor::session) fn close_virtual_buffer(
+        &mut self, buffer: BufferId,
+    ) -> Result<Option<VirtualOpen>, String> {
+        let Some(entry) = self.virtual_editor.entry_for_buffer(buffer).cloned() else {
+            return Ok(None);
+        };
+        self.virtual_editor.forget_document(&entry.plugin, entry.load, entry.document);
+        let command = self.virtual_documents
+            .command_for_document(&entry.plugin, entry.load, entry.document)
+            .and_then(|command| command.strip_prefix(&format!("plugin.{}.", entry.plugin)))
+            .map(str::to_owned);
+        let Some(command) = command else {
+            self.virtual_documents.cancel(&entry.plugin, entry.load, entry.document);
+            return Ok(None);
+        };
+        self.virtual_documents.cancel_pending(&entry.plugin, entry.load, entry.document);
+        if let Err(error) = self.virtual_documents.close(&entry.plugin, entry.load, entry.document) {
+            self.virtual_documents.cancel(&entry.plugin, entry.load, entry.document);
+            return Err(error.detail);
         }
+        Ok(Some(VirtualOpen::Execute {
+            plugin: entry.plugin, load: entry.load, command, document: entry.document,
+        }))
     }
 
     pub(in crate::editor::session) fn virtual_descriptor_sources(
@@ -337,12 +374,11 @@ impl ExtensionSession {
         self.virtual_documents
             .check_proposal(plugin, load, &proposal)
             .map_err(|error| error.detail)?;
-        if let crate::extensions::PluginVirtualDocumentProposalKind::Error(error) = &proposal.kind {
-            let detail = error.detail.clone();
-            self.virtual_documents
+        if matches!(proposal.kind, crate::extensions::PluginVirtualDocumentProposalKind::Error(_)) {
+            return Err(self.virtual_documents
                 .apply(plugin, load, proposal)
-                .map_err(|error| error.detail)?;
-            return Err(detail);
+                .expect_err("an error proposal cannot publish a snapshot")
+                .detail);
         }
         context
             .windows
@@ -353,6 +389,10 @@ impl ExtensionSession {
             .map_err(|error| error.detail)?;
         let mut draft = context.editor.draft();
         let mut bridge = self.virtual_editor.clone();
+        if snapshot.closed {
+            broker.cancel(plugin, load, snapshot.document);
+            return self.virtual_publication(context, draft, bridge, Some(broker), None);
+        }
         bridge
             .publish(&mut draft, &snapshot)
             .map_err(|error| format!("virtual document publication rejected: {error:?}"))?;
@@ -461,8 +501,13 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn fixture_provider_start(
         &mut self,
         start: PluginProviderStart,
+        editor: &EditorState,
     ) -> Result<u64, PluginProviderError> {
-        self.providers.start(start)
+        let request = self.providers.start(start)?;
+        self.provider_source = Some((request, editor.active_buffer_id().map(|buffer| {
+            (buffer, editor.buffers[buffer].text.source_version())
+        })));
+        Ok(request)
     }
     pub(in crate::editor::session) fn fixture_virtual_request(
         &mut self,

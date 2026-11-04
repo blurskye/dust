@@ -3359,7 +3359,7 @@ fn history_fixture(root: &std::path::Path, subjects: &[&str]) -> git2::Repositor
 }
 
 #[test]
-fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
+fn document_paths_identify_their_worktrees_independently_of_open_requests() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
@@ -3394,11 +3394,8 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         .open_explorer(alpha_file.clone(), identities.clone())
         .expect("open the alpha document");
     wait_vfs(&mut app);
-    let alpha = app
-        .documents
-        .worktree_identity(&alpha_file)
-        .cloned()
-        .expect("the alpha buffer is bound to a worktree");
+    let alpha = crate::workspace::git::WorktreeIdentity::capture(&alpha_file)
+        .expect("the alpha path belongs to a worktree");
     assert_eq!(
         alpha.root,
         std::fs::canonicalize(&roots[0]).unwrap(),
@@ -3409,21 +3406,16 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         .open_explorer(beta_file.clone(), identities)
         .expect("open the beta document");
     wait_vfs(&mut app);
-    let beta = app
-        .documents
-        .worktree_identity(&beta_file)
-        .cloned()
-        .expect("the beta buffer is bound to a worktree");
+    let beta = crate::workspace::git::WorktreeIdentity::capture(&beta_file)
+        .expect("the beta path belongs to a worktree");
     assert_eq!(beta.root, std::fs::canonicalize(&roots[1]).unwrap());
     assert_ne!(
         alpha.id, beta.id,
         "two linked worktrees carry distinct identities"
     );
     assert_eq!(
-        app.documents
-            .worktree_identity(&alpha_file)
-            .cloned()
-            .expect("the alpha binding survives"),
+        crate::workspace::git::WorktreeIdentity::capture(&alpha_file)
+            .expect("the alpha identity is unchanged"),
         alpha,
         "opening another worktree never retargets an existing buffer"
     );
@@ -3436,15 +3428,12 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         .is_none(),
         "a document that does not exist has no worktree"
     );
-    // The binding is captured when a document is opened, not synthesised on demand: a document
-    // this session never opened reports nothing even though its directory sits under a `.git`.
-    // (This host has a `/tmp/.git`, so a temporary directory is not "outside any worktree".)
-    let unopened = app.state.workspace_root.join("never-opened.txt");
+    let unopened = roots[0].join("never-opened.txt");
     fs::write(&unopened, "x").unwrap();
-    assert!(
-        app.documents.worktree_identity(&unopened).is_none(),
-        "an unopened document has no captured identity"
-    );
+    let identity = crate::workspace::git::WorktreeIdentity::capture(&unopened).unwrap();
+    assert_eq!(identity.root, alpha.root);
+    assert_eq!(identity.id, alpha.id);
+    assert_eq!(identity.document, unopened);
 }
 
 #[test]

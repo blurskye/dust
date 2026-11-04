@@ -81,17 +81,14 @@ pub(super) struct DocumentSession {
     closing: bool,
     stopped: bool,
     primary: Option<BufferId>,
+    primary_path: Option<PathBuf>,
+    startup_navigation: Option<super::windows::NavigationStamp>,
+    startup_activate: bool,
     editor: EditorWindowVersion,
     root_revision: u64,
     policy_editor: EditorWindowVersion,
     overrides: HashMap<BufferId, LargeFileOverride>,
     restored_overrides: HashMap<PathBuf, LargeFileOverride>,
-    /// The worktree identity captured when each document was opened, keyed by the document
-    /// path the open request named. A root switch never rewrites an entry: that is what keeps
-    /// an open buffer bound to the worktree it came from rather than to whichever root is
-    /// active now. Nothing here touches the filesystem: the identity is captured by the Git
-    /// owner, which is where I/O policy lives.
-    worktree_bindings: HashMap<PathBuf, crate::workspace::git::WorktreeIdentity>,
 }
 impl DocumentSession {
     pub(in crate::editor::session) fn new(
@@ -101,6 +98,10 @@ impl DocumentSession {
         root_revision: u64,
         maximum_pending: usize,
     ) -> Self {
+        let primary_path = match startup {
+            StartupTarget::File { path, .. } => Some(path.clone()),
+            StartupTarget::Dashboard { .. } => None,
+        };
         let startup = match startup {
             StartupTarget::Dashboard { .. } => VecDeque::new(),
             StartupTarget::File {
@@ -127,13 +128,44 @@ impl DocumentSession {
             closing: false,
             stopped: false,
             primary: None,
+            primary_path,
+            startup_navigation: None,
+            startup_activate: true,
             policy_editor: editor.clone(),
             editor,
             root_revision,
             overrides: HashMap::new(),
             restored_overrides: HashMap::new(),
-            worktree_bindings: HashMap::new(),
         }
+    }
+    pub(in crate::editor::session) fn startup_activation(
+        &mut self,
+        editor: &crate::editor::EditorState,
+        windows: &super::windows::WindowSession,
+    ) -> bool {
+        if let Some(stamp) = &self.startup_navigation {
+            self.startup_activate &= windows.navigation_current(
+                stamp, &editor.window_version(), editor.active_view,
+            );
+        } else {
+            // New startup files were opened synchronously and need no read receipt.
+            self.primary = self.primary_path.as_ref().and_then(|path| {
+                editor.buffers.iter().find_map(|(id, buffer)| {
+                    (buffer.path.as_ref() == Some(path)).then_some(id)
+                })
+            });
+            self.startup_activated(editor, windows);
+        }
+        self.startup_activate
+    }
+    pub(in crate::editor::session) fn startup_activated(
+        &mut self,
+        editor: &crate::editor::EditorState,
+        windows: &super::windows::WindowSession,
+    ) {
+        self.startup_navigation = Some(windows.navigation_stamp(
+            editor.window_version(), editor.active_view,
+        ));
     }
     fn startup_current(&self, editor: &EditorWindowVersion, root_revision: u64) -> bool {
         editor.revision().is_some()
@@ -577,24 +609,9 @@ impl DocumentSession {
         roots: Vec<crate::workspace::RootIdentity>,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
-        self.capture_worktree_binding(&path);
         let id = self.vfs.open_explorer(path, roots)?;
         self.pending_legacy.insert(id);
         Ok(id)
-    }
-    /// Capture the worktree a document was opened in, once, at open time.
-    fn capture_worktree_binding(&mut self, path: &Path) {
-        if let Some(identity) = crate::workspace::git::WorktreeIdentity::capture(path) {
-            self.worktree_bindings.insert(path.to_path_buf(), identity);
-        }
-    }
-    /// The worktree identity captured for a document, if it was opened inside a worktree.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn worktree_identity(
-        &self,
-        document: &Path,
-    ) -> Option<&crate::workspace::git::WorktreeIdentity> {
-        self.worktree_bindings.get(document)
     }
     pub(in crate::editor::session) fn inspect_explorer_rename(
         &mut self,

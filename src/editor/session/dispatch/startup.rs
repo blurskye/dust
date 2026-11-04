@@ -196,6 +196,7 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     pub(super) fn queue_startup_reads(&mut self) {
+        self.documents.startup_activation(&self.state, &self.window_session);
         for error in self
             .documents
             .queue_startup(&self.state.window_version(), self.workspace.root_revision())
@@ -212,14 +213,24 @@ impl InteractiveApplication {
         self.window_session
             .check_editor_admission(&(&*self.state).into())?;
         let mut candidate = self.state.draft();
-        let (buffer, _) = candidate.open_document(text, path);
-        self.commit_editor_draft(candidate, None, true)?;
+        let activate = self.documents.startup_activation(&self.state, &self.window_session);
+        let buffer = if activate {
+            candidate.open_document(text, path).0
+        } else {
+            candidate.load_document(text, path)
+        };
+        self.commit_editor_draft(candidate, None, activate)?;
+        if activate {
+            self.documents.startup_activated(&self.state, &self.window_session);
+        }
         Ok(buffer)
     }
     pub(super) fn finish_startup_reads_if_complete(&mut self) {
+        let activate = self.documents.startup_activation(&self.state, &self.window_session);
         if let Some(buffer) = self
             .documents
             .take_startup_primary(&self.state.window_version(), self.workspace.root_revision())
+            && activate
             && self.state.buffers.contains_key(buffer)
         {
             if let Err(error) = self
