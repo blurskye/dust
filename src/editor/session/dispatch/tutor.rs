@@ -167,6 +167,9 @@ pub(super) struct Step {
     split: Option<bool>,
     explorer: Option<bool>,
     terminal: Option<bool>,
+    /// A fresh project needs the preceding lesson's state before this step can be resumed.
+    #[serde(default)]
+    resume_from_previous: bool,
     /// The language's practice file.
     #[serde(skip)]
     practice: &'static str,
@@ -340,10 +343,11 @@ impl Tutor {
         Some(TutorStart { language, step })
     }
 
-    fn save_progress(&self, step: usize) {
+    fn save_progress(&self, step: usize) -> std::io::Result<()> {
         if let Some(practice) = &self.practice {
-            let _ = std::fs::write(&self.progress, format!("{step} {}", practice.language.id()));
+            std::fs::write(&self.progress, format!("{step} {}", practice.language.id()))?;
         }
+        Ok(())
     }
 
     /// The user's own layout while the tutor has the editor in its practice project.
@@ -471,6 +475,10 @@ impl InteractiveApplication {
             Ok(steps) => self.tutor.steps = steps,
             Err(error) => return self.show_error(error),
         }
+        // Session restoration cannot replace dirty buffers, including unnamed scratch tabs.
+        if self.state.buffers.values().any(|buffer| buffer.dirty) {
+            return self.show_error("save or close unsaved buffers before starting the tutor");
+        }
         let layout = match self.try_capture_session() {
             Ok(layout) => layout,
             Err(error) => return self.show_error(format!("could not keep your layout: {error}")),
@@ -498,12 +506,7 @@ impl InteractiveApplication {
             return;
         }
         let mut step = start.step.min(self.tutor.steps.len().saturating_sub(1));
-        while step > 0
-            && self.tutor.steps[step]
-                .done
-                .iter()
-                .any(|command| matches!(command.as_str(), "history.undo" | "history.redo"))
-        {
+        while step > 0 && self.tutor.steps[step].resume_from_previous {
             step -= 1;
         }
         self.tutor.practice = Some(Practice {
@@ -602,7 +605,11 @@ impl InteractiveApplication {
         }
         self.tutor_show_line();
         let observed = std::mem::take(&mut self.tutor.observed);
-        let done = if self.tutor.steps[index].checks_text() {
+        // Trust is persisted asynchronously after confirmation; dispatching :trust is not
+        // enough, since the user can decline or the write can fail.
+        let done = if self.tutor.steps[index].done.iter().any(|command| command == "workspace.trust") {
+            self.workspace.trust() == crate::workspace::WorkspaceTrust::Trusted
+        } else if self.tutor.steps[index].checks_text() {
             let revision = self.state.revision;
             self.tutor.checked != Some(revision) && {
                 self.tutor.checked = Some(revision);
@@ -640,6 +647,10 @@ impl InteractiveApplication {
     }
 
     fn tutor_go(&mut self, index: usize, praised: bool) {
+        if !self.tutor_in_project() {
+            self.notify_message("The tutor is paused: :Tutor returns to the practice project.".into(), false);
+            return;
+        }
         self.tutor.observed = false;
         self.tutor.done_at = None;
         self.tutor.shown_at = Instant::now();
@@ -651,7 +662,7 @@ impl InteractiveApplication {
             return;
         }
         self.tutor.current = Some(index);
-        self.tutor.save_progress(index);
+        let saved = self.tutor.save_progress(index);
         self.tutor_scene(index);
         // The scene's own commands don't count as the user doing the step.
         self.tutor.observed = false;
@@ -661,6 +672,9 @@ impl InteractiveApplication {
         self.tutor.checked = (!praised).then_some(self.state.revision);
         self.tutor_show_line();
         self.sync_tutor_card();
+        if let Err(error) = saved {
+            self.show_error(format!("could not save tutor progress: {error}"));
+        }
     }
 
     /// Set up the windows and file the step starts from.
@@ -744,7 +758,16 @@ impl InteractiveApplication {
         let Some(practice) = &self.tutor.practice else {
             return;
         };
-        if practice.stage != Stage::Running {
+        if practice.stage == Stage::Entering && self.state.workspace_root != practice.root {
+            let root = practice.root.clone();
+            self.workspace.cancel_root_request(&root);
+            if self.switch_ends_terminals.as_ref() == Some(&root) {
+                self.switch_ends_terminals = None;
+            }
+            self.tutor.practice = None;
+            return;
+        }
+        if practice.stage == Stage::Leaving {
             return;
         }
         let (root, home) = (practice.root.clone(), practice.home.clone());
@@ -780,6 +803,7 @@ impl InteractiveApplication {
         let Some(practice) = self.tutor.practice.take() else {
             return;
         };
+        self.close_agent_sessions_in_root(&practice.root);
         if let Err(error) = self.workspace.forget_folder(&practice.root) {
             self.show_workspace_failure(error);
         }
@@ -1067,6 +1091,116 @@ mod tests {
     }
 
     #[test]
+    fn tutor_quit_cancels_entry_and_terminal_confirmation() {
+        for terminal in [false, true] {
+            let mut app = app();
+            let home = app.state.workspace_root.clone();
+            if terminal {
+                running_terminal(&mut app);
+            }
+            app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+            let root = app.tutor.practice.as_ref().unwrap().root.clone();
+            assert_eq!(app.workspace.root_operation_pending(), !terminal);
+            app.tutor_quit();
+            assert!(app.tutor.practice.is_none());
+            assert!(app.switch_ends_terminals.is_none());
+            assert!(!app.workspace.root_operation_pending());
+            assert_eq!(app.state.workspace_root, home);
+            assert!(!root.exists());
+            app.open_tutor();
+            assert!(app.ui.picker.is_some());
+            assert!(app.tutor.practice.is_none());
+        }
+    }
+
+    #[test]
+    fn tutor_rejects_dirty_scratch_buffers_before_putting_the_layout_aside() {
+        let mut app = app();
+        let home = app.state.workspace_root.clone();
+        let path = home.join("notes.txt");
+        std::fs::write(&path, "saved notes").unwrap();
+        app.state.open_text(crate::editor::TextBuffer::from_text("saved notes"), Some(path));
+        let (scratch, _) = app.state.open_text(crate::editor::TextBuffer::from_text("unsaved notes"), None);
+        app.state.set_buffer_dirty(scratch, true);
+        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        assert!(app.tutor.practice.is_none());
+        assert!(!app.workspace.root_operation_pending());
+        assert_eq!(app.state.workspace_root, home);
+        assert_eq!(app.state.buffers[scratch].text.to_string(), "unsaved notes");
+        assert!(app.state.buffers[scratch].dirty);
+        assert!(app.ui.notification.as_deref().unwrap().contains("unsaved buffers"));
+    }
+
+    #[test]
+    fn tutor_reports_progress_write_failures_without_stopping_the_lesson() {
+        let mut app = app();
+        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        enter(&mut app);
+        std::fs::remove_file(&app.tutor.progress).unwrap();
+        std::fs::create_dir(&app.tutor.progress).unwrap();
+        app.tutor_next();
+        assert_eq!(app.tutor.current, Some(1));
+        assert!(app.ui.tutor.is_some());
+        assert!(app.ui.notification.as_deref().unwrap().contains("could not save tutor progress:"));
+    }
+
+    #[test]
+    fn paused_tutor_navigation_leaves_the_other_workspace_unchanged() {
+        let mut app = app();
+        let home = app.state.workspace_root.clone();
+        app.start_tutor(TutorStart { language: Language::Rust, step: 2 });
+        enter(&mut app);
+        app.switch_workspace_root(home.clone());
+        enter(&mut app);
+        assert_eq!(app.state.workspace_root, home);
+        let revision = app.state.revision;
+        let views = app.state.views.len();
+        let progress = std::fs::read_to_string(&app.tutor.progress).unwrap();
+        app.tutor_next();
+        app.tutor_back();
+        assert_eq!(app.tutor.current, Some(2));
+        assert_eq!(app.state.revision, revision);
+        assert_eq!(app.state.views.len(), views);
+        assert_eq!(std::fs::read_to_string(&app.tutor.progress).unwrap(), progress);
+        assert_eq!(app.state.workspace_root, home);
+        app.open_tutor();
+        enter(&mut app);
+        app.tutor_next();
+        assert_eq!(app.tutor.current, Some(3));
+    }
+
+    #[test]
+    fn tutor_trust_lesson_waits_for_confirmed_persisted_trust() {
+        let mut app = app();
+        let step = lessons(Language::Rust).unwrap().iter().position(|step| step.done.iter().any(|done| done == "workspace.trust")).unwrap();
+        app.start_tutor(TutorStart { language: Language::Rust, step });
+        enter(&mut app);
+        let root = app.workspace.active_root().unwrap();
+        let identity = crate::workspace::RootIdentity::capture(&app.state.workspace_root).unwrap();
+        app.workspace.fixture_identity(root, identity).unwrap();
+        app.tutor_command("workspace.trust");
+        assert!(app.input.prompt().is_some());
+        app.tutor_tick();
+        assert!(app.tutor.done_at.is_none());
+        app.close_prompt();
+        app.tutor_tick();
+        assert!(app.tutor.done_at.is_none());
+        app.tutor_command("workspace.trust");
+        app.confirm_workspace_trust();
+        app.close_prompt();
+        app.tutor_tick();
+        assert!(app.tutor.done_at.is_none(), "trust is still being saved");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.workspace.trust() != crate::workspace::WorkspaceTrust::Trusted {
+            app.process_trust_events();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.tutor_tick();
+        assert!(app.tutor.done_at.is_some());
+    }
+
+    #[test]
     fn refused_tutor_exit_keeps_the_lesson_and_card() {
         let mut app = app();
         app.start_tutor(TutorStart {
@@ -1099,6 +1233,27 @@ mod tests {
             let resumed = app.tutor.practice.as_ref().unwrap().start;
             assert!(resumed < step);
             assert!(app.tutor.steps[resumed].gone.is_some());
+        }
+    }
+
+    #[test]
+    fn resuming_dependent_lessons_replays_their_prerequisites() {
+        for language in Language::ALL {
+            for (dependent, prerequisite) in [
+                ("The dog sat. The dog ran. Every dog naps.", "/cat"),
+                ("agent.model", "agent.new"),
+                ("terminal.mode.normal", "workspace.trust"),
+            ] {
+                let mut app = app();
+                let steps = lessons(language).unwrap();
+                let step = steps.iter().position(|step| step.line.as_deref() == Some(dependent) || step.done.iter().any(|done| done == dependent)).unwrap();
+                app.start_tutor(TutorStart { language, step });
+                let resumed = app.tutor.practice.as_ref().unwrap().start;
+                assert!(resumed < step);
+                let first = &app.tutor.steps[resumed];
+                assert!(first.press.contains(prerequisite) || first.done.iter().any(|done| done == prerequisite));
+                assert!(!first.resume_from_previous);
+            }
         }
     }
 

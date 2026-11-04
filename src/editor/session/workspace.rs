@@ -205,6 +205,12 @@ impl WorkspaceSession {
         });
         Ok(())
     }
+    /// Ignore a pending inspection when its caller abandons this destination.
+    pub(in crate::editor::session) fn cancel_root_request(&mut self, path: &Path) {
+        if self.root_operation.as_ref().is_some_and(|operation| operation.requested_path == path) {
+            self.root_operation = None;
+        }
+    }
     /// Make `new` the active root and drop `old`; returns the old root's path.
     fn switch_root(&mut self, old: RootId, new: RootId) -> Result<PathBuf, WorkspaceError> {
         self.state.set_active_root(new)?;
@@ -613,6 +619,34 @@ mod tests {
         owner.reconcile_trust();
         (owner, directory)
     }
+    #[test]
+    fn cancelled_root_request_ignores_its_late_inspection() {
+        let (mut owner, _directory) = fixture();
+        let path = PathBuf::from("/practice");
+        owner.root_operation = Some(RootOperation {
+            generation: 99,
+            source: owner.version(),
+            requested_path: path.clone(),
+            replaces: owner.active_root(),
+        });
+        let active = owner.active_root();
+        owner.cancel_root_request(Path::new("/other"));
+        assert!(owner.root_operation_pending());
+        owner.cancel_root_request(&path);
+        assert!(!owner.root_operation_pending());
+        let mut updates = Vec::new();
+        owner.accept_event(TrustEvent::RootInspected {
+            generation: 99,
+            result: Ok(RootIdentity {
+                canonical_path: path,
+                filesystem_identity: Some((1, 3)),
+            }),
+        }, &mut updates);
+        assert!(updates.is_empty());
+        assert_eq!(owner.active_root(), active);
+        assert_eq!(owner.roots().len(), 2);
+    }
+
     #[test]
     fn failed_trust_load_cannot_replace_the_original_database() {
         let (mut owner, _directory) = fixture();

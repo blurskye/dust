@@ -1051,6 +1051,19 @@ impl InteractiveApplication {
         self.refresh_agent_transcript();
     }
 
+    /// Close sessions before their disposable workspace is removed.
+    pub(super) fn close_agent_sessions_in_root(&mut self, root: &Path) {
+        let active = self.agent.sessions.get(self.agent.active).map(|session| session.number);
+        while let Some(index) = self.agent.sessions.iter().position(|session| session.root.starts_with(root)) {
+            self.agent.active = index;
+            self.close_agent_session();
+        }
+        if let Some(index) = self.agent.sessions.iter().position(|session| Some(session.number) == active) {
+            self.agent.active = index;
+        }
+        self.refresh_agent_transcript();
+    }
+
     /// Starting an installed adapter from the tool manager opens a session of the profile
     /// that runs it.
     pub(super) fn start_agent_for_program(&mut self, executable: &str) {
@@ -3041,6 +3054,43 @@ mod tests {
                 .contains("parent")
         );
         assert!(app.agent.sessions[first].reply.is_none());
+    }
+
+    #[test]
+    fn tutor_exit_closes_practice_agents_and_preserves_other_sessions() {
+        let mut app = test_app();
+        let home = app.state.workspace_root.clone();
+        let unrelated = tab(&mut app);
+        let number = app.agent.sessions[unrelated].number;
+        app.open_tutor();
+        app.handle_configured_key("enter".parse().unwrap());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while app.workspace.root_operation_pending() {
+            app.process_trust_events();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.tutor_tick();
+        let practice = app.state.workspace_root.clone();
+        assert_ne!(practice, home);
+        let parent = tab(&mut app);
+        let parent_number = app.agent.sessions[parent].number;
+        let child = child(&mut app, parent_number, Phase::Initializing(1));
+        app.agent.permissions.push_back(permission(app.agent.sessions[child].number));
+        app.agent.active = unrelated;
+        app.tutor_quit();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while app.workspace.root_operation_pending() {
+            app.process_trust_events();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.tutor_tick();
+        assert_eq!(app.state.workspace_root, home);
+        assert!(!practice.exists());
+        assert_eq!(app.agent.sessions.len(), 1);
+        assert_eq!(app.agent.sessions[app.agent.active].number, number);
+        assert!(app.agent.permissions.is_empty());
     }
 
     #[cfg(unix)]
