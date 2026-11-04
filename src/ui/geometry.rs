@@ -106,9 +106,9 @@ pub fn picker_content_geometry(
         // about how wide a preview is.
         let (rows, numbers) = match &preview.body {
             crate::ui::PickerPreviewBody::Text(text) => (
-                text.lines.clone(),
+                text.lines().to_vec(),
                 text.first_line
-                    .saturating_add(text.lines.len())
+                    .saturating_add(text.lines().len())
                     .max(1)
                     .to_string()
                     .len(),

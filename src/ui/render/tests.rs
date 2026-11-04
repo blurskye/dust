@@ -2300,9 +2300,10 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
         assert_eq!(text.spans.as_ptr(), allocation);
     }
     let text = picker.preview.as_mut().unwrap().as_text_mut().unwrap();
-    text.lines = vec![String::new()];
-    text.prepare_highlighting();
-    assert!(text.spans.iter().all(Vec::is_empty));
+    text.set_content(vec!["x".into()], None);
+    assert!(text.spans.is_empty());
+    super::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("1 x")));
 }
 
 #[test]
@@ -4837,6 +4838,16 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
         assert!(screen.contains(if can_start { "Enter start" } else { "open a matching file to start" }));
         assert!(!screen.contains("x stop"));
         assert!(!screen.contains("R restart"));
+    }
+    // A failed version probe does not imply an already-running server has stopped.
+    for state in ["running", "running ×2", "starting", "restarting"] {
+        menu.rows[0].session_state = state.into();
+        let mut frame = super::Frame { grid: crate::ui::CellGrid::new(120, 40), cursor: None };
+        super::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        let screen = (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+        assert!(screen.contains("x stop"), "{state}");
+        assert!(screen.contains("R restart"), "{state}");
+        assert!(!screen.contains("Enter start"), "{state}");
     }
 }
 

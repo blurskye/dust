@@ -1730,7 +1730,7 @@ fn recovery_dialog_discards_one_journal_and_recovers_another() {
             .preview
             .as_ref()
             .and_then(crate::ui::PickerPreview::as_text)
-            .is_some_and(|text| text.lines == ["draft", "second"])
+            .is_some_and(|text| text.lines() == ["draft", "second"])
     );
 
     app.accept_picker();

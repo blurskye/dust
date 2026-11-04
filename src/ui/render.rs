@@ -563,11 +563,11 @@ pub enum PickerPreviewBody {
 /// Plain preview lines with a starting line number and one emphasised line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerTextPreview {
-    pub lines: Vec<String>,
+    lines: Vec<String>,
     pub first_line: usize,
     pub highlight_line: Option<usize>,
     /// The language the lines are coloured as, when the previewed file has a grammar.
-    pub language: Option<crate::language::syntax::SyntaxLanguage>,
+    language: Option<crate::language::syntax::SyntaxLanguage>,
     spans: Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>>,
 }
 
@@ -584,7 +584,28 @@ impl PickerTextPreview {
         preview
     }
 
-    pub(crate) fn prepare_highlighting(&mut self) {
+    #[must_use]
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
+    #[must_use]
+    pub fn language(&self) -> Option<crate::language::syntax::SyntaxLanguage> {
+        self.language
+    }
+
+    /// Replace text and its cached byte ranges together.
+    pub fn set_content(
+        &mut self,
+        lines: Vec<String>,
+        language: Option<crate::language::syntax::SyntaxLanguage>,
+    ) {
+        self.lines = lines;
+        self.language = language;
+        self.prepare_highlighting();
+    }
+
+    fn prepare_highlighting(&mut self) {
         self.spans.clear();
         let Some(language) = self.language else { return };
         if self.lines.iter().map(|line| line.len().saturating_add(1)).sum::<usize>() > 512 * 1024 {

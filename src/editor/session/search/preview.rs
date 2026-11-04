@@ -150,8 +150,7 @@ impl SearchSession {
         if Arc::ptr_eq(&ticket.0, &self.preview_epoch)
             && let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut)
         {
-            text.lines = vec![format!("preview unavailable: {error}")];
-            text.prepare_highlighting();
+            text.set_content(vec![format!("preview unavailable: {error}")], text.language());
         }
     }
     pub(in crate::editor::session) fn accept_preview(
@@ -173,7 +172,7 @@ impl SearchSession {
             return true;
         }
         if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
-            text.lines = match result {
+            let lines = match result {
                 Ok(bytes) if bytes.len() > maximum => {
                     vec!["preview exceeds admitted byte limit".into()]
                 }
@@ -183,13 +182,13 @@ impl SearchSession {
                 ),
                 Err(error) => vec![format!("preview unavailable: {error}")],
             };
-            if text.language.is_none() {
-                text.language = crate::language::syntax::language_for_document(
+            let language = text.language().or_else(|| {
+                crate::language::syntax::language_for_document(
                     None,
-                    text.lines.first().map_or("", String::as_str),
-                );
-            }
-            text.prepare_highlighting();
+                    lines.first().map_or("", String::as_str),
+                )
+            });
+            text.set_content(lines, language);
         }
         true
     }

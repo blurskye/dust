@@ -1426,7 +1426,9 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
     }
     if row.installed {
         if row.lsp {
-            if matches!(state, "installed" | "crashed" | "not working") {
+            let active = row.session_state.starts_with("running")
+                || matches!(row.session_state.as_str(), "starting" | "restarting");
+            if matches!(state, "installed" | "crashed") || state == "not working" && !active {
                 keys.push(if row.can_start {
                     "Enter start"
                 } else {

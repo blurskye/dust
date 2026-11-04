@@ -95,7 +95,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
             .unwrap()
             .as_text()
             .expect("text preview")
-            .lines,
+            .lines(),
         ["preview exceeds admitted byte limit"]
     );
     assert!(!owner.accept_preview(
@@ -128,7 +128,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
             .unwrap()
             .as_text()
             .expect("text preview")
-            .lines,
+            .lines(),
         ["valid"]
     );
     let ticket = owner
@@ -193,7 +193,7 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
         .unwrap()
         .as_text()
         .expect("text preview")
-        .lines
+        .lines()
         .as_ptr();
     for _ in 0..256 {
         owner.preview_snapshot(&item, 64);
@@ -206,7 +206,7 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
                 .unwrap()
                 .as_text()
                 .expect("text preview")
-                .lines
+                .lines()
                 .as_ptr()
         );
     }
@@ -572,6 +572,6 @@ fn crlf_previews_use_the_normalized_match_offset() {
     found.line = 300_000;
     let preview = super::preview::search_picker_preview(&found, 1024);
     let text = preview.as_text().unwrap();
-    assert!(text.lines.iter().any(|line| line == "needle"));
+    assert!(text.lines().iter().any(|line| line == "needle"));
     assert_eq!(text.highlight_line, Some(300_000));
 }

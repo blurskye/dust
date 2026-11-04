@@ -1877,7 +1877,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
                 preview.title == "find-me.txt"
                     && preview
                         .as_text()
-                        .is_some_and(|text| text.lines.first().map(String::as_str) == Some("found"))
+                        .is_some_and(|text| text.lines().first().map(String::as_str) == Some("found"))
             })
     }));
     app.picker_insert("find-me");
