@@ -1224,6 +1224,7 @@ impl InteractiveApplication {
 
     pub(super) fn ensure_cursor_visible(&mut self) {
         self.reconcile_editor_windows();
+        self.sync_flash_ui();
         let Some(view_id) = self.state.active_view else {
             return;
         };

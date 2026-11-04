@@ -291,6 +291,58 @@ impl<'a> VisualRowModel<'a> {
         }
     }
 
+    /// Source text actually painted in the viewport, excluding folds and clipped columns.
+    #[must_use]
+    pub fn visible_text_ranges(
+        &self,
+        start: VisualRowAnchor,
+        height: usize,
+        scroll_column: usize,
+    ) -> Vec<ByteRange> {
+        let mut ranges: Vec<ByteRange> = Vec::new();
+        for row in 0..height {
+            let Some(anchor) = self.painted_row(start, row) else { break };
+            let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
+            let slice = self.row_slice(anchor);
+            let (begin, end) = if self.wrap {
+                (slice.byte_start, slice.byte_end)
+            } else {
+                let line = self.text.line(anchor.line).unwrap_or_default();
+                let content = line.trim_end_matches(['\n', '\r']);
+                let begin = super::editor::byte_offset_at_display_column(
+                    content, scroll_column, self.tab_width, self.ambiguous_width,
+                );
+                let mut column = display_column(&content[..begin], self.tab_width, self.ambiguous_width);
+                let mut used = 0usize;
+                let mut end = begin;
+                let markdown = self.markdown_line(anchor.line);
+                for (relative, grapheme) in content[begin..].grapheme_indices(true) {
+                    let at = ByteOffset(line_start.get() + begin + relative);
+                    used = used.saturating_add(self.inlay_width(at));
+                    let width = self.drawn_width(markdown.as_ref(), at, grapheme, column);
+                    if used.saturating_add(width) > self.content_width { break; }
+                    used = used.saturating_add(width);
+                    column = column.saturating_add(self.grapheme_width(grapheme, column));
+                    end = begin + relative + grapheme.len();
+                }
+                (begin, end)
+            };
+            let range = ByteRange::new(
+                ByteOffset(line_start.get() + begin), ByteOffset(line_start.get() + end),
+            ).expect("visible text range");
+            if range.start == range.end { continue; }
+            if let Some(last) = ranges.last_mut() {
+                if last.end == range.start {
+                    last.end = range.end;
+                    continue;
+                }
+                if last.start <= range.start && range.end <= last.end { continue; }
+            }
+            ranges.push(range);
+        }
+        ranges
+    }
+
     pub(super) fn inlay_width(&self, position: ByteOffset) -> usize {
         self.inlay_widths.get(&position).copied().unwrap_or(0)
     }

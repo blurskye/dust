@@ -318,6 +318,20 @@ impl InputSession {
         self.hints = None;
         result
     }
+    pub(super) fn mapping_context(&self) -> Option<&str> {
+        self.pending.as_ref().map(|pending| pending.context.as_str())
+    }
+    pub(super) fn finish_mapping(&mut self, context: &str, revision: u64) -> MappingResolution {
+        let Some(pending) = self.pending.take() else {
+            return MappingResolution::Missing;
+        };
+        if pending.context != context || pending.binding_revision != revision {
+            self.cancel_mapping();
+            return MappingResolution::Missing;
+        }
+        self.hints = None;
+        self.sequence.flush_timeout()
+    }
     pub(super) fn cancel_mapping(&mut self) {
         self.pending = None;
         self.sequence.cancel();
@@ -339,9 +353,7 @@ impl InputSession {
         if pending.deadline.is_none_or(|deadline| now < deadline) {
             return MappingResolution::Missing;
         }
-        self.pending = None;
-        self.hints = None;
-        self.sequence.flush_timeout()
+        self.finish_mapping(context, revision)
     }
     pub(super) fn hide_hints(&mut self) {
         self.hints = None;

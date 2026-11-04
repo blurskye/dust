@@ -532,13 +532,18 @@ fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
 fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abcdef abcdef abcdef"), None);
+    app.set_dashboard_visibility(false);
     let first = app.state.active_view.expect("first view");
     app.state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
     assert_ne!(app.state.active_view, Some(first));
+    let flash_view = app.state.active_view.unwrap();
     app.reconcile_editor_windows();
+    app.begin_flash();
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_some());
     let viewport = crate::ui::pane_viewports(
         &app.state,
         &app.ui,
@@ -566,12 +571,21 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let geometry = app.mouse_pane_geometry().expect("mouse geometry");
     assert_eq!(geometry.0, viewport.pane);
     assert_eq!((geometry.3, geometry.4), (viewport.width, viewport.height));
-    app.apply_mouse_cursor(false);
+    let (column, row) = app.input.mouse_position().unwrap();
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column, row,
+    });
     assert_eq!(app.state.active_view, Some(first));
     assert_eq!(
         app.state.views[first].cursor,
         crate::editor::text::ByteOffset(1)
     );
+    assert!(app.flash.is_none());
+    assert!(app.ui.flash.is_none());
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('l'), kind: crate::ui::KeyInputKind::Press });
+    assert_eq!(app.state.views[first].cursor, ByteOffset(2));
+    assert_eq!(app.state.views[flash_view].cursor, ByteOffset(0));
 }
 
 #[test]
@@ -1813,6 +1827,73 @@ fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
     assert_eq!(app.state.active_buffer_id(), Some(first));
     app.handle_key_in_context("editor.normal", KeyEvent::character('L'));
     assert_eq!(app.state.active_buffer_id(), Some(second));
+}
+
+#[test]
+fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
+    let mut app = app();
+    let (first, _) = app.state.open_text(TextBuffer::from_text("first"), None);
+    let (second, _) = app.state.open_text(TextBuffer::from_text("second"), None);
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.process_effect(AppEffect::WindowFloat {
+        target: "terminal".into(), x: 0, y: 0, width: 60, height: 12,
+    });
+    let target = app.window_session.editor_ids().content_for(first).unwrap();
+    let bounds = app.workspace_bounds().unwrap();
+    let column = (0..bounds.width).find(|column| {
+        crate::ui::content_tab_at_column(&app.ui.content_tabs, app.configuration.settings(), bounds.width, *column)
+            .is_some_and(|id| id.0 == target)
+    }).unwrap() + bounds.x;
+    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseRightDown, Default::default()),
+        column, row,
+    });
+    assert!(app.state.buffers.contains_key(first));
+    assert!(app.state.buffers.contains_key(second));
+    assert!(app.window_session.terminal_focused());
+}
+
+#[test]
+fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("source"), None);
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(20, 24, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.sync_terminal_panel();
+    app.process_effect(AppEffect::WindowDock { target: "terminal".into(), edge: "right".into(), size: 20 });
+    app.ui.debug_panes = Some(crate::ui::DebugPanesUiState {
+        selected: crate::ui::DebugPane::Sessions, target: String::new(), status: String::new(),
+        threads: Vec::new(), stack: Vec::new(), breakpoints: Vec::new(), variables: Vec::new(),
+        watches: Vec::new(), console: Vec::new(),
+    });
+    app.window_session.set_debugging(true);
+    app.reconcile_editor_windows();
+    let bounds = app.workspace_bounds().unwrap();
+    let top = crate::ui::workspace_top_rows(&app.state, &app.ui, app.configuration.settings());
+    let region = WindowRect { y: bounds.y + top, height: bounds.height - top, ..bounds };
+    let (column, row) = (region.y..region.y + region.height).find_map(|row| {
+        (region.x..region.x + region.width).find(|column| {
+            crate::ui::debug_pane_tab_at(region, crate::ui::DebugPane::Sessions, *column, row)
+                == Some(crate::ui::DebugPane::Threads)
+        }).map(|column| (column, row))
+    }).expect("visible Threads tab");
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column, row,
+    });
+    assert_eq!(app.ui.debug_panes.as_ref().unwrap().selected, crate::ui::DebugPane::Threads);
 }
 
 #[test]
@@ -6096,6 +6177,31 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
             );
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn oversized_terminal_paste_reports_its_rejection() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert("paste".into(), crate::config::TerminalProfileConfig {
+        program: "/bin/sh".into(), arguments: vec!["-c".into(), "printf ready; read line".into()],
+        cwd: None, environment: Default::default(), columns: 40, rows: 8,
+        float: false, close_on_exit: false,
+    });
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("paste");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver.terminal_lines().iter().any(|line| line.contains("ready")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline, "{:?}", driver.notification());
+        thread::sleep(Duration::from_millis(2));
+    }
+    driver.paste(&"x".repeat(2 * 1024 * 1024));
+    assert_eq!(driver.notification(), Some("terminal paste exceeds the input limit"));
+    driver.terminal_close();
 }
 
 #[test]

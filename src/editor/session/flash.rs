@@ -26,14 +26,13 @@ pub(super) struct FlashTarget {
     pub(super) label: Option<char>,
 }
 
-/// Every match of `query` in lines `first..=last`, labelled nearest to the cursor first.
+/// Every match of `query` in visible source ranges, labelled nearest to the cursor first.
 ///
 /// Matching ignores case unless the query has a capital letter. A label is never a character
 /// that continues some match, so typing more of the query is never read as a label.
 pub(super) fn flash_targets(
     text: &TextBuffer,
-    first: usize,
-    last: usize,
+    visible: &[ByteRange],
     cursor: ByteOffset,
     query: &str,
 ) -> Vec<FlashTarget> {
@@ -50,12 +49,9 @@ pub(super) fn flash_targets(
     };
     let mut targets = Vec::new();
     let mut continuations = Vec::new();
-    let last = last.min(text.len_lines().saturating_sub(1));
-    for line in first..=last {
-        let (Ok(start), Ok(content)) = (text.line_to_byte(line), text.line(line)) else {
-            continue;
-        };
-        let content = content.trim_end_matches(['\n', '\r']);
+    for range in visible {
+        let Ok(content) = text.slice(*range) else { continue };
+        let start = range.start;
         for (index, _) in content.grapheme_indices(true) {
             let mut rest = content[index..].chars();
             if !query
@@ -97,7 +93,8 @@ mod tests {
 
     fn labels(text: &str, cursor: usize, query: &str) -> Vec<(usize, Option<char>)> {
         let text = TextBuffer::from_bytes(text.as_bytes()).unwrap();
-        flash_targets(&text, 0, 100, ByteOffset(cursor), query)
+        let visible = ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes())).unwrap();
+        flash_targets(&text, &[visible], ByteOffset(cursor), query)
             .into_iter()
             .map(|target| (target.range.start.get(), target.label))
             .collect()

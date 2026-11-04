@@ -636,6 +636,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
 
 #[test]
 fn an_unfinished_insert_mapping_types_its_keys() {
+    for snippet in [false, true] {
     let mut app = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -662,8 +663,16 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     app.configuration.install_bindings(keymaps, false);
-    let (_, view) = app.state.open_text(TextBuffer::from_text(""), None);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), None);
     app.set_dashboard_visibility(false);
+    if snippet {
+        app.input.install_snippet(
+            crate::editor::session::input::SnippetDocument {
+                editor: &app.state.window_version(), buffer,
+                text: &app.state.buffers[buffer].text, view: Some(view),
+            }, ByteOffset(0), [(1, 0, 0), (0, 0, 0)],
+        );
+    }
     let text = |app: &InteractiveApplication| {
         app.state.buffers[app.state.views[view].buffer]
             .text
@@ -674,8 +683,11 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     app.handle_configured_key(KeyEvent::character('j'));
     app.handle_configured_key(KeyEvent::character('a'));
     assert_eq!(text(&app), "ja");
+    if snippet { assert_eq!(app.input.snippet_buffer(), Some(buffer)); }
 
     app.handle_configured_key(KeyEvent::character('j'));
+    app.update_key_hint_ui();
+    assert!(app.input.mapping_pending());
     clock.advance(Duration::from_millis(
         app.configuration.settings().input.mapping_timeout_ms + 1,
     ));
@@ -683,12 +695,63 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     assert_eq!(text(&app), "jaj");
 
     app.handle_configured_key(KeyEvent::character('j'));
+    app.handle_configured_paste("foo".into());
+    assert_eq!(text(&app), "jajjfoo");
+    assert!(!app.input.mapping_pending());
+    if snippet { assert_eq!(app.input.snippet_buffer(), Some(buffer)); }
+
+    app.handle_configured_key(KeyEvent::character('j'));
     app.handle_configured_key(KeyEvent::character('k'));
-    assert_eq!(text(&app), "jaj");
+    assert_eq!(text(&app), "jajjfoo");
     assert_eq!(
         app.state.views[view].mode,
         crate::editor::EditorMode::Normal
     );
+    }
+}
+
+#[test]
+fn snippet_keys_only_route_in_the_owning_buffer() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("one two"), None);
+    app.set_dashboard_visibility(false);
+    app.input.install_snippet(
+        crate::editor::session::input::SnippetDocument {
+            editor: &app.state.window_version(), buffer,
+            text: &app.state.buffers[buffer].text, view: Some(view),
+        }, ByteOffset(0), [(1, 0, 3), (2, 4, 7)],
+    );
+    let (other, _) = app.state.open_text(TextBuffer::from_text(""), None);
+    press_keys(&mut app, &["i", "tab"]);
+    assert!(!app.state.buffers[other].text.to_string().is_empty());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "one two");
+    assert_eq!(app.state.active_buffer_id(), Some(other));
+}
+
+#[test]
+fn timeout_executes_an_earlier_exact_mapping_and_replays_its_suffix() {
+    let mut app = app();
+    let clock = std::sync::Arc::new(crate::clock::ManualClock::new(std::time::UNIX_EPOCH, Instant::now()));
+    app.clock = clock.clone();
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    for (id, keys, command) in [("short", "x", "edit.delete_char"), ("long", "x y z", "file.new")] {
+        loaded.entries.push(crate::config::KeymapEntry {
+            id: format!("user.test.{id}"), context: Some("editor".into()), mode: "normal".into(),
+            keys: Some(keys.into()), command: Some(command.into()), arguments: BTreeMap::new(),
+            unmap: false, disable: false, pass_through: false, desc: None,
+        });
+    }
+    let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    app.configuration.install_bindings(keymaps, false);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["x", "y"]);
+    clock.advance(Duration::from_millis(app.configuration.settings().input.mapping_timeout_ms + 1));
+    app.flush_keymap_timeout();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "bc");
+    // Replayed y starts the ordinary yank operator.
+    assert!(app.input.grammar_pending());
 }
 
 #[test]
@@ -1502,6 +1565,33 @@ fn recovery_failure_and_retired_reads_preserve_the_journal() {
             .values()
             .all(|buffer| buffer.text.to_string() != "draft")
     );
+}
+
+#[test]
+fn flash_ignores_wrapped_folded_and_horizontally_clipped_text() {
+    for (source, wrap, fold, scroll) in [
+        (format!("{}\nz", "a".repeat(4000)), true, false, 0),
+        ("a\nhidden z\na".into(), true, true, 0),
+        (format!("{}z", "a".repeat(100)), false, false, 0),
+        (format!("z{}", "a".repeat(100)), false, false, 10),
+    ] {
+        let mut app = app();
+        let (_, view) = app.state.open_text(TextBuffer::from_text(&source), None);
+        app.set_dashboard_visibility(false);
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = wrap;
+        app.configuration.install_fixture(fixture);
+        app.reconcile_editor_windows();
+        if fold {
+            app.ui.lsp_folds.push(UiFold { view, start_line: 0, end_line: 1, collapsed: true });
+        }
+        app.state.views[view].scroll_column = scroll;
+        app.begin_flash();
+        press_keys(&mut app, &["z"]);
+        assert!(app.flash.is_none());
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        assert_eq!(app.ui.notification.as_deref(), Some("no match for z"));
+    }
 }
 
 #[test]

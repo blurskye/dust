@@ -367,9 +367,16 @@ impl DiagnosticSession {
         self.rows
             .iter()
             .filter(|row| {
+                let range = row.problem.range;
                 row.problem.uri == uri
-                    && row.problem.range.start <= end
-                    && row.problem.range.end >= start
+                    && if start == end {
+                        range.start <= start
+                            && (start < range.end || range.start == range.end && start == range.start)
+                    } else if range.start == range.end {
+                        start <= range.start && range.start < end
+                    } else {
+                        range.start < end && start < range.end
+                    }
             })
             .map(|row| &row.problem)
             .collect()
@@ -462,6 +469,8 @@ impl DiagnosticSession {
                     .clamp(start, length);
                 crate::editor::text::ByteRange::new(start, end).unwrap_or(range)
             });
+            // Sorted row indices may now refer to different diagnostics when ranges collapse.
+            batch.epoch = Arc::new(());
             batch.revision = Some(text.revision());
             document.text = text.source_version();
             moved = true;
@@ -645,6 +654,61 @@ mod tests {
             owner.resolve(&key, &editor).is_none(),
             "an unbound disk report cannot adopt a newly opened buffer"
         );
+    }
+
+    #[test]
+    fn diagnostic_intersections_are_half_open_and_include_points() {
+        let mut owner = DiagnosticSession::new(10, 10);
+        owner.rows = [(0, 1), (1, 2), (2, 3), (1, 1), (2, 2)]
+            .into_iter().enumerate().map(|(index, (start, end))| Row {
+                key: DiagnosticKey { epoch: Arc::new(()), index },
+                problem: ProblemRow {
+                    owner: DiagnosticOwner::new("test").unwrap(),
+                    uri: "file:///file".into(),
+                    range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+                    severity: DiagnosticSeverity::Error,
+                    source: "test".into(), code: None, message: index.to_string(), data: None,
+                },
+            }).collect();
+        let messages = |start, end| owner.within("file:///file", ByteOffset(start), ByteOffset(end))
+            .into_iter().map(|row| row.message.as_str()).collect::<Vec<_>>();
+        assert_eq!(messages(1, 2), vec!["1", "3"]);
+        assert_eq!(messages(1, 1), vec!["1", "3"]);
+        assert_eq!(messages(2, 2), vec!["2", "4"]);
+    }
+
+    #[test]
+    fn collapsed_diagnostics_cannot_reassign_existing_keys() {
+        let mut editor = EditorState::new("/workspace".into());
+        let path = PathBuf::from("/workspace/file");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abcd"), Some(path.clone()));
+        let uri = crate::language::lsp::file_uri(&path);
+        let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
+        let mut owner = DiagnosticSession::new(10, 10);
+        owner.activate(producer.clone());
+        owner.publish(DiagnosticBatch {
+            producer, uri: uri.clone(), document: DiagnosticDocument::capture(&editor, buffer),
+            validity: DiagnosticValidity::RequestedSnapshot,
+            items: [(1, DiagnosticSeverity::Warning), (2, DiagnosticSeverity::Error)]
+                .into_iter().map(|(at, severity)| Diagnostic {
+                    uri: uri.clone(), version: None,
+                    range: ByteRange::empty(ByteOffset(at)), severity,
+                    source: "test".into(), code: None, message: format!("{severity:?}"),
+                    related: Vec::new(), tags: Vec::new(), fixes: Vec::new(), data: None,
+                    timestamp: std::time::UNIX_EPOCH,
+                }).collect(),
+        }, &editor).unwrap();
+        let key = owner.choices().next().unwrap().0;
+        assert_eq!(owner.resolve(&key, &editor).unwrap().severity, DiagnosticSeverity::Warning);
+        let text = &mut editor.buffers[buffer].text;
+        text.apply_edits(&crate::editor::text::TextEditSet::new(text.revision(), vec![
+            crate::editor::text::TextEdit::new(
+                ByteRange::new(ByteOffset(1), ByteOffset(3)).unwrap(), String::new(),
+            ),
+        ])).unwrap();
+        owner.projection(&editor);
+        assert!(owner.resolve(&key, &editor).is_none());
+        assert_eq!(owner.choices().next().unwrap().1.severity, DiagnosticSeverity::Error);
     }
 
     #[test]

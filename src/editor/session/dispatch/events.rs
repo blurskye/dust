@@ -22,6 +22,7 @@ use crate::ui::window::{
 
 impl InteractiveApplication {
     pub(super) fn begin_flash(&mut self) {
+        self.reconcile_editor_windows();
         let Some(view) = self.state.active_view else {
             return;
         };
@@ -43,7 +44,8 @@ impl InteractiveApplication {
         let Some(mut flash) = self.flash.take() else {
             return;
         };
-        if !self
+        if self.state.active_view != Some(flash.view)
+            || !self
             .state
             .views
             .get(flash.view)
@@ -83,12 +85,27 @@ impl InteractiveApplication {
             self.sync_flash_ui();
             return;
         };
-        let height = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
-            .map_or(100, |viewport| usize::from(viewport.height));
+        let visible = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
+            .filter(|viewport| viewport.view == flash.view && crate::ui::editor_state_content_width(
+                &self.state, &self.state.buffers[view.buffer].text,
+                &self.configuration.settings().editor, viewport.width,
+            ) > 0)
+            .map(|viewport| {
+                let text = &self.state.buffers[view.buffer].text;
+                let wrap = self.configuration.settings().editor.wrap
+                    && !self.ui.large_file_buffers.contains(&view.buffer);
+                let rows = crate::ui::VisualRowModel::new_for_state(
+                    &self.state, text, flash.view, &self.ui, self.configuration.settings(),
+                    viewport.width, wrap,
+                );
+                rows.visible_text_ranges(
+                    crate::ui::VisualRowAnchor { line: view.scroll_line, wrap_row: view.scroll_wrap_row },
+                    usize::from(viewport.height), view.scroll_column,
+                )
+            }).unwrap_or_default();
         flash.targets = super::super::flash::flash_targets(
             &self.state.buffers[view.buffer].text,
-            view.scroll_line,
-            view.scroll_line + height,
+            &visible,
             view.cursor,
             &flash.query,
         );
@@ -120,7 +137,10 @@ impl InteractiveApplication {
         self.ensure_cursor_visible();
     }
 
-    fn sync_flash_ui(&mut self) {
+    pub(super) fn sync_flash_ui(&mut self) {
+        if self.flash.as_ref().is_some_and(|flash| self.state.active_view != Some(flash.view)) {
+            self.flash = None;
+        }
         self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
             view: flash.view,
             matches: flash.targets.iter().map(|target| target.range).collect(),
@@ -242,15 +262,14 @@ impl InteractiveApplication {
             return false;
         }
         let active = self.displayed_terminal();
-        let Some(id) = self
-            .shown_terminal_windows()
-            .into_iter()
-            .map(|(id, _)| id)
-            .filter(|id| Some(*id) != active)
-            .find(|id| {
-                self.terminal_rect(*id)
-                    .is_some_and(|rect| rect_contains_point(rect, column, row))
+        let Some(id) = self.compositor_projection()
+            .and_then(|projection| projection.hit_test(column, row))
+            .and_then(|window| self.window_session.native_ids().target_for_window(window))
+            .and_then(|target| match target {
+                NativeSurfaceTarget::Terminal(id) => Some(PtyId(id)),
+                _ => None,
             })
+            .filter(|id| Some(*id) != active)
         else {
             return false;
         };
@@ -387,17 +406,9 @@ impl InteractiveApplication {
         };
         let top =
             crate::ui::workspace_top_rows(&self.state, &self.ui, self.configuration.settings());
-        // The same region the renderer gives the panes: above a docked terminal panel.
-        let panel_top = self
-            .ui
-            .terminal_panel
-            .as_ref()
-            .and(self.terminal_window_rect())
-            .map_or(u16::MAX, |panel| panel.y);
-        let end = bounds.y.saturating_add(bounds.height).min(panel_top);
         let region = crate::ui::window::WindowRect {
             y: bounds.y.saturating_add(top),
-            height: end.saturating_sub(bounds.y).saturating_sub(top),
+            height: bounds.height.saturating_sub(top),
             ..bounds
         };
         let Some(pane) = crate::ui::debug_pane_tab_at(region, selected, column, row) else {
@@ -635,17 +646,28 @@ impl InteractiveApplication {
                         _ => {}
                     }
                 }
-                if self.handle_debug_tab_mouse(&key, column, row)
-                    || self.handle_content_tab_mouse(&key, column, row)
-                    || self.handle_dock_drag(&key, column, row)
-                    || self.handle_border_drag(&key, column, row)
+                let over_floating = self.compositor_projection().is_some_and(|projection| {
+                    projection.hit_test(column, row)
+                        .and_then(|window| projection.window(window))
+                        .is_some_and(|window| matches!(window.layer,
+                            crate::ui::window::CompositorLayer::Floating
+                                | crate::ui::window::CompositorLayer::Fullscreen))
+                });
+                if (!over_floating
+                    && (self.handle_debug_tab_mouse(&key, column, row)
+                        || self.handle_content_tab_mouse(&key, column, row)
+                        || self.handle_dock_drag(&key, column, row)
+                        || self.handle_border_drag(&key, column, row)))
                     || self.handle_other_terminal_mouse(&key, column, row)
                 {
                     return;
                 }
-                let over_terminal = self
-                    .terminal_window_rect()
-                    .is_some_and(|rect| rect_contains_point(rect, column, row));
+                let hit = self.compositor_projection()
+                    .and_then(|projection| projection.hit_test(column, row));
+                let over_terminal = hit.is_some_and(|window| matches!(
+                    self.window_session.native_ids().target_for_window(window),
+                    Some(NativeSurfaceTarget::Terminal(_))
+                ));
                 let explorer_window = (!over_terminal)
                     .then(|| {
                         self.compositor_projection()
@@ -662,7 +684,7 @@ impl InteractiveApplication {
                         )
                     })
                     .or_else(|| {
-                        (!over_terminal
+                        (!over_floating && !over_terminal
                             && self
                                 .explorer_window_rect()
                                 .is_some_and(|rect| rect_contains_point(rect, column, row)))
@@ -924,6 +946,14 @@ impl InteractiveApplication {
             .active_view
             .and_then(|view| self.state.views.get(view))
             .map_or(EditorMode::Normal, |view| view.mode);
+        if mode == EditorMode::Insert
+            && self.input.snippet_buffer() == self.state.active_buffer_id()
+            && self.input.snippet_buffer().is_some()
+            && self.input.pending_context().is_none()
+            && self.input.mapping_context().is_none_or(|context| context == "snippet")
+        {
+            return "snippet".into();
+        }
         format!("editor.{}", mode_name(mode))
     }
 
@@ -938,14 +968,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
-        let mut context = self.active_input_context();
-        // While a snippet runs its keys come first; anything else is Insert as usual.
-        if context == "editor.insert"
-            && self.input.snippet_buffer().is_some()
-            && self.input.pending_context().is_none()
-        {
-            context = "snippet".into();
-        }
+        let context = self.active_input_context();
         self.handle_key_in_context(&context, key);
     }
 
@@ -1061,22 +1084,39 @@ impl InteractiveApplication {
             && let Some(id) = self.keyboard_terminal()
             && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
         {
-            if let Err(error) =
-                self.terminal_session
-                    .send(id, TerminalInput::Paste(&text), &self.workspace)
-            {
-                self.show_error(error);
+            match self.terminal_session.send(id, TerminalInput::Paste(&text), &self.workspace) {
+                Ok(true) => {}
+                Ok(false) => self.show_error("terminal paste exceeds the input limit"),
+                Err(error) => self.show_error(error),
             }
             return;
         }
+        let context = self.active_input_context();
+        if self.typing() && matches!(context.as_str(), "editor.insert" | "editor.replace" | "snippet") {
+            match self.input.finish_mapping(&context, self.configuration.binding_revision()) {
+                MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+                MappingResolution::ReadyAndReplay(invocation, replay) => {
+                    self.invoke_mapped(invocation);
+                    for key in replay {
+                        self.handle_configured_key(key);
+                    }
+                }
+                MappingResolution::Replay(prefix, replay) => {
+                    self.type_unmapped(&context, &prefix);
+                    self.type_unmapped(&context, &replay);
+                }
+                _ => {}
+            }
+        }
         self.cancel_pending_mapping();
         let context = self.active_input_context();
+        let context = if context == "snippet" { "editor.insert" } else { &context };
         if let Some(command_id) = self
             .configuration
             .settings()
             .input
             .paste_commands
-            .get(&context)
+            .get(context)
             .cloned()
         {
             self.invoke_text_command(&command_id, text);
@@ -1126,6 +1166,12 @@ impl InteractiveApplication {
         self.project_input_hints();
         match resolution {
             MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+            MappingResolution::ReadyAndReplay(invocation, replay) => {
+                self.invoke_mapped(invocation);
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
             MappingResolution::Replay(prefix, _)
                 if !context.starts_with("editor.") || self.typing() =>
@@ -1399,6 +1445,10 @@ impl InteractiveApplication {
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
                     self.process_effect(effect);
+                }
+                if self.flash.as_ref().is_some_and(|flash| self.state.active_view != Some(flash.view)) {
+                    self.flash = None;
+                    self.sync_flash_ui();
                 }
                 true
             }
