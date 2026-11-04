@@ -38,6 +38,55 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 }
 
 #[test]
+fn prompt_word_deletion_keeps_decomposed_accents_and_emoji_whole() {
+    let mut input = InputSession::new(100);
+    for (text, expected) in [
+        ("e e\u{301}", "e "),
+        ("e cafe\u{301}  ", "e "),
+        ("e e\u{301}!!", "e e\u{301}"),
+        ("e 👩‍💻", "e "),
+    ] {
+        input.open_prompt(PromptKind::Command, text.into(), None);
+        input.prompt_delete_word();
+        let prompt = input.prompt().unwrap();
+        assert_eq!(prompt.input, expected);
+        assert_eq!(prompt.cursor, expected.len());
+    }
+    input.open_prompt(PromptKind::Command, "e e\u{301}界".into(), None);
+    input.prompt_move(PromptMove::Left);
+    input.prompt_delete_word();
+    assert_eq!(input.prompt().unwrap().input, "e 界");
+    assert_eq!(input.prompt().unwrap().cursor, 2);
+}
+
+#[test]
+fn prompt_history_restores_the_draft_and_its_cursor() {
+    let mut input = InputSession::new(100);
+    for kind in [PromptKind::Command, PromptKind::SearchForward, PromptKind::SearchBackward] {
+        input.record_prompt_history(kind, "old");
+        input.record_prompt_history(kind, "new");
+        input.open_prompt(kind, "unfinished e\u{301}".into(), None);
+        input.prompt_move(PromptMove::Left);
+        let cursor = input.prompt().unwrap().cursor;
+        input.prompt_history(1);
+        assert_eq!(input.prompt().unwrap().cursor, cursor);
+        input.prompt_history(-1);
+        assert_eq!(input.prompt().unwrap().input, "new");
+        input.prompt_history(-1);
+        assert_eq!(input.prompt().unwrap().input, "old");
+        input.prompt_history(1);
+        input.prompt_history(1);
+        assert_eq!(input.prompt().unwrap().input, "unfinished e\u{301}");
+        assert_eq!(input.prompt().unwrap().cursor, cursor);
+        input.prompt_insert("x");
+        input.prompt_history(-1);
+        input.prompt_history(1);
+        assert_eq!(input.prompt().unwrap().input, "unfinished xe\u{301}");
+        assert_eq!(input.prompt().unwrap().cursor, cursor + 1);
+    }
+}
+
+#[test]
 fn confirmation_choice_is_typed_and_does_not_accept_text() {
     let mut input = InputSession::new(10);
     input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
@@ -133,6 +182,67 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
         &policy
     ));
     assert!(input.prompt().unwrap().completions.is_empty());
+}
+
+#[test]
+fn prompt_directory_replies_merge_and_deduplicate_open_buffer_matches() {
+    let policy = load_bundled_config().config;
+    let mut input = InputSession::new(100);
+    let root = Path::new("/isolated");
+    let open = root.join("src/needle.rs");
+    input.open_prompt(PromptKind::Command, "e needle".into(), None);
+    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
+    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+    assert!(input.accept_prompt_paths(&request.key, vec![], root, &policy));
+    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+    assert!(input.accept_prompt_paths(&request.key, vec![root.join("needle.txt")], root, &policy));
+    assert_eq!(input.prompt().unwrap().completions.len(), 2);
+
+    input.open_prompt(PromptKind::Command, "e src/needle".into(), None);
+    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
+    assert!(input.accept_prompt_paths(&request.key, vec![open.clone()], root, &policy));
+    assert_eq!(input.prompt().unwrap().completions.len(), 1);
+
+    input.open_prompt(PromptKind::Command, format!("e {}", open.display()), None);
+    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
+    assert!(input.accept_prompt_paths(&request.key, vec![], root, &policy));
+    assert_eq!(input.prompt().unwrap().completions.len(), 1);
+    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+}
+
+#[test]
+fn prompt_path_completion_requests_children_after_a_directory_separator() {
+    let policy = load_bundled_config().config;
+    let mut input = InputSession::new(100);
+    let root = Path::new("/isolated");
+    for (fragment, directory, prefix) in [
+        ("src/", "/isolated/src", ""),
+        ("/", "/", ""),
+        ("/tmp/", "/tmp", ""),
+        ("src/Ne", "/isolated/src", "ne"),
+        ("", "/isolated", ""),
+    ] {
+        input.open_prompt(PromptKind::Command, format!("e {fragment}"), None);
+        let request = input.refresh_completions(&policy, root, [], []).unwrap();
+        assert_eq!(request.directory, Path::new(directory));
+        assert_eq!(request.key.prefix, prefix);
+        let child = request.directory.join(format!("{prefix}child.rs"));
+        assert!(input.accept_prompt_paths(&request.key, vec![child], root, &policy));
+        assert_eq!(input.prompt().unwrap().completions.len(), 1);
+    }
+}
+
+#[test]
+fn prompt_command_completion_uses_the_id_when_a_plugin_label_is_absent() {
+    let mut policy = load_bundled_config().config;
+    policy.input.command_aliases.insert("demo".into(), "plugin.demo".into());
+    let mut input = InputSession::new(100);
+    for query in ["", "dem", "plugin."] {
+        input.open_prompt(PromptKind::Command, query.into(), None);
+        assert!(input.refresh_completions(&policy, Path::new("/isolated"), [], ["plugin.demo", "plugin.other"]).is_none());
+        assert!(input.prompt().unwrap().completions.iter().any(|item| item.label == "demo" && item.detail == "plugin.demo"));
+    }
+    assert!(input.prompt().unwrap().completions.iter().any(|item| item.label == "plugin.other" && item.detail == "plugin.other"));
 }
 
 #[test]

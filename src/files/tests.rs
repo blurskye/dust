@@ -1077,7 +1077,7 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
     fs::write(root.path().join("c.txt"), b"").expect("c");
     let mut worker = VfsWorker::start(2);
     let id = worker
-        .list_directory(root.path().to_path_buf(), 2)
+        .list_directory(root.path().to_path_buf(), String::new(), 2)
         .expect("queue list");
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -1092,6 +1092,30 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
             assert_eq!(paths.len(), 2);
             assert!(paths[0].ends_with("a.txt"));
             assert!(paths[1].ends_with("b.txt"));
+            break;
+        }
+        assert!(Instant::now() < deadline, "worker timed out");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn directory_completion_filters_names_before_capping_worker_results() {
+    let root = tempdir().expect("tempdir");
+    let names = (0..1005).map(|index| format!("File-{index:04}.txt")).collect::<Vec<_>>();
+    for name in &names {
+        fs::write(root.path().join(name), b"").expect("file");
+    }
+    let initial = super::vfs::list_directory(root.path(), "", 1000).expect("unfiltered listing");
+    assert_eq!(initial.len(), 1000);
+    let target = names.iter().find(|name| !initial.contains(&root.path().join(name))).unwrap();
+    let mut worker = VfsWorker::start(2);
+    let id = worker.list_directory(root.path().to_path_buf(), target.to_uppercase(), 1000).expect("queue filtered list");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(VfsResult::Directory { id: result_id, result, .. }) = worker.try_result().expect("worker") {
+            assert_eq!(result_id, id);
+            assert_eq!(result.expect("filtered listing"), vec![root.path().join(target)]);
             break;
         }
         assert!(Instant::now() < deadline, "worker timed out");

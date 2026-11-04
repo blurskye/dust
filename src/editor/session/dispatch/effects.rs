@@ -5274,7 +5274,7 @@ impl InteractiveApplication {
         ) && !self.input.completion_read_pending()
             && let Ok(id) = self
                 .documents
-                .list_directory(request.directory, request.limit)
+                .list_directory(request.directory, request.key.prefix.clone(), request.limit)
         {
             self.input.register_completion_read(id, request.key);
         }

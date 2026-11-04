@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub(in crate::editor::session) struct PromptCompletionKey {
     generation: u64,
     prompt_input: String,
-    fragment: String,
+    pub(in crate::editor::session) prefix: String,
 }
 
 pub(in crate::editor::session) struct PromptCompletionRequest {
@@ -54,6 +54,7 @@ impl InputSession {
         prompt.input = initial;
         self.prompt = Some(prompt);
         self.history_index = None;
+        self.history_draft = None;
         mode
     }
     pub(in crate::editor::session) fn configure_confirmation_actions(
@@ -108,6 +109,7 @@ impl InputSession {
         }
         self.prompt = None;
         self.history_index = None;
+        self.history_draft = None;
         self.cancel_prompt_completions();
         self.previous_mode
             .take()
@@ -138,6 +140,7 @@ impl InputSession {
         self.command_history.clear();
         self.search_history.clear();
         self.history_index = None;
+        self.history_draft = None;
     }
     pub(in crate::editor::session) fn restore_history(
         &mut self,
@@ -159,6 +162,7 @@ impl InputSession {
             history.drain(..excess);
         }
         self.history_index = None;
+        self.history_draft = None;
     }
     pub(in crate::editor::session) fn completion_current(&self, key: &PromptCompletionKey) -> bool {
         key.generation == self.completion_generation
@@ -181,26 +185,29 @@ impl InputSession {
         {
             return false;
         }
-        let prefix = PathBuf::from(&request.fragment)
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().to_lowercase());
+        let prefix = &request.prefix;
         let detail = &policy.command_labels["file.open"];
-        prompt.completions = paths
+        let mut candidates = prompt.completions
+            .iter()
+            .map(|item| (item.label.clone(), item.detail.clone()))
+            .collect::<BTreeMap<_, _>>();
+        for path in paths
             .into_iter()
             .filter(|path| {
                 path.file_name()
-                    .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(&prefix))
+                    .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(prefix))
             })
+        {
+            let label = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+            candidates.insert(label, detail.clone());
+        }
+        prompt.completions = candidates.into_iter()
             .take(COMPLETION_LIMIT)
-            .map(|path| CompletionItem {
+            .map(|(label, detail)| CompletionItem {
                 icon: None,
                 color: None,
-                label: path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string(),
-                detail: detail.clone(),
+                label,
+                detail,
             })
             .collect();
         prompt.selected_completion = None;
@@ -252,15 +259,27 @@ impl InputSession {
     /// Vim's ctrl-w: the word or run of punctuation before the cursor, and the spaces after it.
     pub(in crate::editor::session) fn prompt_delete_word(&mut self) {
         self.prompt_delete_back(|before| {
-            let trimmed = before.trim_end();
-            let word = |c: char| c.is_alphanumeric() || c == '_';
-            let in_word = trimmed.chars().next_back().is_some_and(word);
-            trimmed
-                .char_indices()
-                .rev()
-                .take_while(|(_, c)| !c.is_whitespace() && word(*c) == in_word)
-                .last()
-                .map_or(trimmed.len(), |(index, _)| index)
+            let mut graphemes = before.grapheme_indices(true).rev().peekable();
+            let whitespace = |text: &str| text.chars().all(char::is_whitespace);
+            let word = |text: &str| text.chars().any(|c| c.is_alphanumeric() || c == '_');
+            let mut start = before.len();
+            while let Some(&(index, text)) = graphemes.peek() {
+                if !whitespace(text) {
+                    break;
+                }
+                start = index;
+                graphemes.next();
+            }
+            if let Some(&(_, text)) = graphemes.peek() {
+                let in_word = word(text);
+                for (index, text) in graphemes {
+                    if whitespace(text) || word(text) != in_word {
+                        break;
+                    }
+                    start = index;
+                }
+            }
+            start
         });
     }
 
@@ -339,14 +358,23 @@ impl InputSession {
         } else {
             (current + 1).min(history.len())
         };
+        if current == next {
+            return;
+        }
+        if self.history_index.is_none() {
+            self.history_draft = self.prompt.as_ref().map(|prompt| (prompt.input.clone(), prompt.cursor));
+        }
         self.history_index = (next < history.len()).then_some(next);
-        let selected = self
-            .history_index
-            .and_then(|index| history.get(index).cloned())
-            .unwrap_or_default();
+        let (selected, cursor) = if let Some(index) = self.history_index {
+            let selected = history[index].clone();
+            let cursor = selected.len();
+            (selected, cursor)
+        } else {
+            self.history_draft.take().unwrap_or_default()
+        };
         if let Some(prompt) = &mut self.prompt {
             prompt.input = selected;
-            prompt.cursor = prompt.input.len();
+            prompt.cursor = cursor;
             prompt.error = None;
             prompt.selected_completion = None;
         }
@@ -447,8 +475,8 @@ impl InputSession {
             let fragment = fragment.trim();
             let query = fragment.to_lowercase();
             for path in buffers {
-                let label = path.display().to_string();
-                if label.to_lowercase().contains(&query) {
+                let label = path.strip_prefix(root).unwrap_or(path).display().to_string();
+                if path.to_string_lossy().to_lowercase().contains(&query) {
                     let detail = &policy.command_labels["file.open"];
                     candidates.insert(label, detail.clone());
                 }
@@ -456,7 +484,17 @@ impl InputSession {
             self.completion_generation = self.completion_generation.saturating_add(1);
             let generation = self.completion_generation;
             let entered = PathBuf::from(fragment);
-            let parent = entered.parent().filter(|path| !path.as_os_str().is_empty());
+            let trailing_separator = fragment.ends_with(std::path::is_separator);
+            let parent = if trailing_separator {
+                Some(entered.as_path())
+            } else {
+                entered.parent().filter(|path| !path.as_os_str().is_empty())
+            };
+            let prefix = if trailing_separator {
+                String::new()
+            } else {
+                entered.file_name().map_or_else(String::new, |name| name.to_string_lossy().to_lowercase())
+            };
             let directory = parent.map_or_else(
                 || root.to_path_buf(),
                 |parent| {
@@ -471,7 +509,7 @@ impl InputSession {
                 key: PromptCompletionKey {
                     generation,
                     prompt_input: input.clone(),
-                    fragment: fragment.into(),
+                    prefix,
                 },
                 directory,
                 limit: COMPLETION_LIMIT,
@@ -561,7 +599,7 @@ fn command_completions<'a>(
         let label = policy
             .command_labels
             .get(command_id)
-            .expect("resolved configuration validates command labels");
+            .unwrap_or(command_id);
         let prefix = alias.to_lowercase().starts_with(&query);
         if !prefix && !label.to_lowercase().contains(&query) {
             continue;
@@ -577,9 +615,7 @@ fn command_completions<'a>(
     }
     let hidden = &policy.command_palette.hidden;
     for id in commands {
-        let Some(label) = policy.command_labels.get(id) else {
-            continue;
-        };
+        let label = policy.command_labels.get(id).map_or(id, String::as_str);
         let plumbing = hidden.iter().any(|prefix| id.starts_with(prefix.as_str()));
         if best.contains_key(id)
             || (plumbing && !query.contains('.'))
@@ -591,7 +627,10 @@ fn command_completions<'a>(
     }
     let mut rows = best
         .into_iter()
-        .map(|(command_id, rank)| (rank, policy.command_labels[&command_id].clone()))
+        .map(|(command_id, rank)| {
+            let label = policy.command_labels.get(&command_id).cloned().unwrap_or(command_id);
+            (rank, label)
+        })
         .collect::<Vec<_>>();
     rows.sort();
     rows.into_iter()

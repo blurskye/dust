@@ -88,6 +88,34 @@ fn path_completion_is_bounded_async_and_rejects_stale_generations() {
 }
 
 #[test]
+fn path_completion_keeps_open_buffers_and_lists_directory_children() {
+    let mut app = app();
+    let directory = app.state.workspace_root.join("src");
+    fs::create_dir(&directory).expect("src");
+    let path = directory.join("needle.rs");
+    fs::write(&path, b"").expect("needle");
+    app.state.open_text(TextBuffer::from_text(""), Some(path));
+    app.set_dashboard_visibility(false);
+    app.open_prompt(crate::ui::PromptKind::Command, "e needle".into());
+    wait_vfs(&mut app);
+    let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].label, "src/needle.rs");
+
+    app.open_prompt(crate::ui::PromptKind::Command, "e src/".into());
+    wait_vfs(&mut app);
+    let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
+    assert_eq!(completions.len(), 1, "buffer and directory results are deduplicated");
+    assert_eq!(completions[0].label, "src/needle.rs");
+    fs::write(directory.join("other.rs"), b"").expect("other");
+    app.prompt_insert("o");
+    wait_vfs(&mut app);
+    let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].label, "src/other.rs");
+}
+
+#[test]
 fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
     let mut app = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");

@@ -652,10 +652,11 @@ impl DocumentSession {
     pub(in crate::editor::session) fn list_directory(
         &mut self,
         path: PathBuf,
+        prefix: String,
         maximum_entries: usize,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
-        let id = self.vfs.list_directory(path, maximum_entries)?;
+        let id = self.vfs.list_directory(path, prefix, maximum_entries)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }
