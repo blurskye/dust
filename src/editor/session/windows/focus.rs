@@ -134,7 +134,21 @@ impl WindowSession {
             FocusTarget::Plugin(window) => Some(window),
             FocusTarget::Editor => self.core.graph.focused(),
         }?;
-        layout.projection.spatial_neighbor(current, direction)
+        let projection = &layout.projection;
+        projection.spatial_neighbor(current, direction).or_else(|| {
+            // The dashboard lies under the whole screen, so nothing is beside a dock on its
+            // side; moving off a dock toward the workspace goes to the dashboard.
+            let dashboard = self.core.native.dashboard().filter(|_| self.dashboard)?;
+            let from = projection.window(current)?.rect;
+            let workspace = projection.workspace_bounds;
+            let toward = match direction {
+                SpatialDirection::Left => workspace.x + workspace.width <= from.x,
+                SpatialDirection::Right => from.x + from.width <= workspace.x,
+                SpatialDirection::Up => workspace.y + workspace.height <= from.y,
+                SpatialDirection::Down => from.y + from.height <= workspace.y,
+            };
+            (toward && dashboard.window != current).then_some(dashboard.window)
+        })
     }
     pub(in crate::editor::session) fn terminal_height(&self) -> u16 {
         if self.terminal_shrunk {

@@ -3913,6 +3913,96 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
 
 #[cfg(unix)]
 #[test]
+fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let agents = &mut loaded.config.agents;
+    agents.connection = crate::config::AgentConnection::Terminal;
+    let mut profile = agents.profiles[&agents.default].clone();
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    agents.profiles.insert("echoer".into(), profile);
+    agents.default = "echoer".into();
+    let mut driver = TestSession::new(loaded);
+    driver.trust_owned_terminal_fixture();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
+    while !driver.terminal_lines().iter().any(|line| line.contains("READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let agent = driver.application_mut().displayed_terminal().expect("agent");
+    driver.key("ctrl-h");
+    let app = driver.application_mut();
+    assert_eq!(app.window_session.focused_terminal(), None);
+    assert!(app.window_session.dashboard_visible());
+    let rect = app.terminal_rect(agent).expect("the agent stays");
+    // The menu is centred in the room left of the agent, not under it.
+    let frame = driver.frame();
+    let menu = (0..rect.y + rect.height)
+        .map(|y| {
+            (0..rect.x)
+                .map(|x| frame.grid.get(x, y).map_or(" ".into(), |cell| cell.symbol.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .find(|cells| cells.concat().contains("Find File"))
+        .expect("the dashboard draws");
+    let start = menu.iter().position(|cell| cell.trim() != "").unwrap();
+    let end = menu.iter().rposition(|cell| cell.trim() != "").unwrap();
+    let middle = (start + end) / 2;
+    assert!(
+        middle.abs_diff(usize::from(rect.x) / 2) <= 2,
+        "menu from {start} to {end}, agent at {}",
+        rect.x
+    );
+    driver.key("ctrl-l");
+    assert_eq!(driver.application_mut().window_session.focused_terminal(), Some(agent.0));
+}
+
+#[cfg(unix)]
+#[test]
+fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let agents = &mut loaded.config.agents;
+    agents.connection = crate::config::AgentConnection::Terminal;
+    let mut profile = agents.profiles[&agents.default].clone();
+    profile.cli = vec!["sh".into(), "-c".into(), "echo READY; cat".into()];
+    agents.profiles.insert("echoer".into(), profile);
+    agents.default = "echoer".into();
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
+    while !driver.terminal_lines().iter().any(|line| line.contains("READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let agent = driver.application_mut().displayed_terminal().expect("agent");
+    driver.key("ctrl-h");
+    let app = driver.application_mut();
+    assert_eq!(app.window_session.focused_terminal(), None);
+    let start = app.terminal_rect(agent).expect("agent").width;
+
+    // The editor has no split, so ctrl-left grows the code into the agent's side.
+    driver.key("ctrl-left");
+    let app = driver.application_mut();
+    let step = crate::ui::render::TERMINAL_PANEL_RESIZE_STEP;
+    assert_eq!(app.terminal_rect(agent).map(|rect| rect.width), Some(start + step));
+    assert_eq!(app.window_session.focused_terminal(), None);
+    driver.key("ctrl-right");
+    let app = driver.application_mut();
+    assert_eq!(app.terminal_rect(agent).map(|rect| rect.width), Some(start));
+}
+
+#[cfg(unix)]
+#[test]
 fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();

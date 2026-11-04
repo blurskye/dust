@@ -309,6 +309,25 @@ pub(super) fn resize_parent_on_axis(
     true
 }
 
+/// Whether a split above `target` divides along `requested_axis`, so resizing on that axis
+/// moves one of its borders.
+pub(super) fn has_split_on_axis(node: &LayoutNode, target: PaneId, requested_axis: Axis) -> bool {
+    let LayoutNode::Split {
+        axis, first, second, ..
+    } = node
+    else {
+        return false;
+    };
+    let child = if contains_pane(first, target) {
+        first
+    } else if contains_pane(second, target) {
+        second
+    } else {
+        return false;
+    };
+    *axis == requested_axis || has_split_on_axis(child, target, requested_axis)
+}
+
 pub(super) fn remove_leaf(node: LayoutNode, target: PaneId) -> Option<LayoutNode> {
     match node {
         LayoutNode::Pane(pane) => (pane != target).then_some(LayoutNode::Pane(pane)),

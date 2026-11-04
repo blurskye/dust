@@ -2031,8 +2031,19 @@ pub fn render(
             },
             _ => bounds,
         };
-        let side_terminal =
-            terminal_rect.filter(|dock| dock.y <= workspace.map_or(0, |bounds| bounds.y));
+        // The side terminal may be the focused one or another shown beside it.
+        let side_terminal = terminal_rect
+            .into_iter()
+            .chain(compositor.into_iter().flat_map(|compositor| {
+                ui.other_terminals.iter().filter_map(|(window, _)| {
+                    compositor
+                        .projection
+                        .window(*window)
+                        .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+                        .map(|window| window.rect)
+                })
+            }))
+            .find(|dock| dock.y <= workspace.map_or(0, |bounds| bounds.y));
         dashboard_rect
             .or(workspace)
             .map(|bounds| beside(beside(bounds, explorer_rect), side_terminal))

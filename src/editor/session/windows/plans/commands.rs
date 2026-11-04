@@ -63,6 +63,22 @@ pub(in crate::editor::session) enum CommandEffect {
     ClosedPicker(crate::ui::PickerSurfaceKind),
 }
 impl WindowSession {
+    /// A shown terminal docked on the right (for `Horizontal`) or at the bottom (`Vertical`).
+    fn docked_terminal_on(&self, axis: crate::editor::Axis) -> Option<NativeSurfaceTarget> {
+        let wanted = match axis {
+            crate::editor::Axis::Horizontal => crate::ui::window::DockEdge::Right,
+            crate::editor::Axis::Vertical => crate::ui::window::DockEdge::Bottom,
+        };
+        let mut ids: Vec<u64> = self.native_ids().terminal_ids().collect();
+        ids.sort_unstable();
+        ids.into_iter().map(NativeSurfaceTarget::Terminal).find(|target| {
+            matches!(
+                self.native_placement(*target),
+                Ok(WindowPlacement::Docked { edge, .. }) if edge == wanted
+            )
+        })
+    }
+
     pub(in crate::editor::session) fn plan_window_command(
         &self,
         command: WindowCommand<'_>,
@@ -364,10 +380,33 @@ impl WindowSession {
                                 FocusDirection::Up => (crate::editor::Axis::Vertical, true),
                                 FocusDirection::Down => (crate::editor::Axis::Vertical, false),
                             };
-                            plan.operations.push(EditorOperation::ResizePaneOnAxis {
-                                axis,
-                                delta: if grow { step } else { -step },
-                            });
+                            // With no split on that axis the border is a docked terminal's, such
+                            // as an agent on the right, so that terminal resizes instead.
+                            let dock = (!source.pane_has_split_on_axis(pane, axis))
+                                .then(|| self.docked_terminal_on(axis))
+                                .flatten();
+                            if let Some(dock) = dock {
+                                // The editor grows as the terminal shrinks: right grows the code
+                                // and narrows a right dock, up grows it and lowers a bottom one.
+                                let toward = match direction {
+                                    FocusDirection::Up => FocusDirection::Down,
+                                    FocusDirection::Down => FocusDirection::Up,
+                                    other => other,
+                                };
+                                plan.native = Some(
+                                    self.directional_native_placement(
+                                        dock,
+                                        toward,
+                                        i16::try_from(policy.terminal_step).unwrap_or(i16::MAX),
+                                    )?
+                                    .map_or(NativeAction::None, |p| NativeAction::Place(dock, p)),
+                                );
+                            } else {
+                                plan.operations.push(EditorOperation::ResizePaneOnAxis {
+                                    axis,
+                                    delta: if grow { step } else { -step },
+                                });
+                            }
                         }
                         WindowPlacement::Docked { edge, size } => {
                             let grow = match (edge, direction) {

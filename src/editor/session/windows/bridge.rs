@@ -1063,6 +1063,10 @@ impl NativeSurfaceBridge {
         })
     }
 
+    pub(in crate::editor::session) fn terminal_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.terminals.keys().copied()
+    }
+
     pub(in crate::editor::session) fn ids_for_target(
         &self,
         target: NativeSurfaceTarget,
