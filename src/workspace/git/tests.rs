@@ -2883,7 +2883,7 @@ fn nested_worktree_exclusion_does_not_hide_siblings() {
 #[test]
 fn conflict_replacement_is_atomic_and_restores_missing_working_copies() {
     use super::conflict::{
-        GitConflictChoice, GitReplacementPlan, apply_replacement, read_side_content,
+        GitConflictChoice, GitReplacementPlan, apply_replacement, plan_replacement,
     };
     let dir = tempdir().unwrap();
     conflicted_fixture(dir.path());
@@ -2898,10 +2898,16 @@ fn conflict_replacement_is_atomic_and_restores_missing_working_copies() {
     .unwrap();
     assert_eq!(std::fs::read(&backup).unwrap(), original);
     std::fs::remove_file(&path).unwrap();
-    assert_eq!(
-        read_side_content(dir.path(), &path, GitConflictChoice::Ours).unwrap(),
-        "ours\n"
-    );
+    let plan = plan_replacement(
+        dir.path(),
+        std::slice::from_ref(&path),
+        GitConflictChoice::Ours,
+    )
+    .unwrap();
+    assert!(!path.exists(), "planning must not recreate the file");
+    assert_eq!(apply_replacement(&plan).unwrap(), vec![path.clone()]);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours\n");
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
 }
 
 #[test]
