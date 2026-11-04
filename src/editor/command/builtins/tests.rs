@@ -217,8 +217,25 @@ fn matching_pairs_ignore_quoted_and_escaped_delimiters_in_both_directions() {
         r"( \\() )",
         "(\n  \"quoted )\"\n)",
         r#""ignored (" ( ")" )"#,
+        "(don't)",
+        "('unterminated)",
+        "(&'a str, &'b str)",
+        "(don't 'x')",
     ] {
         let opening = if source.starts_with('"') { source.find(" ( ").unwrap() + 1 } else { 0 };
+        let closing = source.len() - 1;
+        let (mut state, _, view) = editing(source, opening);
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), closing, "{source}");
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), opening, "{source}");
+    }
+}
+
+#[test]
+fn matching_pairs_handle_unbalanced_prefixes_and_rust_lifetimes() {
+    for source in [")(()", "fn f<'a, 'b>(x: &'a str)"] {
+        let opening = source.rfind('(').unwrap();
         let closing = source.len() - 1;
         let (mut state, _, view) = editing(source, opening);
         apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);

@@ -740,37 +740,11 @@ pub(super) fn matching_pair(
     let source = text.to_string();
     let line = text.byte_to_line(cursor).map_err(failed)?;
     let line_end = line_content_end(text, line)?.get();
-    let mut quote = None;
-    let mut escaped = false;
-    // Scan forward even for a backward match so quotes and escapes have the same meaning.
-    let delimiters: Vec<_> = source.char_indices().filter(|(_, character)| {
-        if *character == '\n' {
-            quote = None;
-            escaped = false;
-            return false;
-        }
-        if escaped {
-            escaped = false;
-            return false;
-        }
-        if *character == '\\' {
-            escaped = true;
-            return false;
-        }
-        if let Some(delimiter) = quote {
-            if *character == delimiter {
-                quote = None;
-            }
-            return false;
-        }
-        if matches!(character, '\'' | '"' | '`') {
-            quote = Some(*character);
-            return false;
-        }
-        "()[]{}".contains(*character)
-    }).collect();
-    let (position, &(_, character)) = delimiters.iter().enumerate()
-        .find(|(_, (index, _))| *index >= cursor.get() && *index < line_end)
+    let delimiters = pair_delimiters(&source);
+    let mut following = delimiters.clone();
+    let (at, character) = following.by_ref()
+        .take_while(|(index, _)| *index < line_end)
+        .find(|(index, _)| *index >= cursor.get())
         .ok_or_else(|| CommandError::Unavailable("no matching pair on line".into()))?;
     let (mate, forward) = match character {
         '(' => (')', true),
@@ -781,9 +755,9 @@ pub(super) fn matching_pair(
         '}' => ('{', false),
         _ => unreachable!(),
     };
-    let mut depth = 0_usize;
     if forward {
-        for &(index, candidate) in &delimiters[position..] {
+        let mut depth = 1_usize;
+        for (index, candidate) in following {
             if candidate == character {
                 depth += 1;
             } else if candidate == mate {
@@ -794,18 +768,56 @@ pub(super) fn matching_pair(
             }
         }
     } else {
-        for &(index, candidate) in delimiters[..=position].iter().rev() {
-            if candidate == character {
-                depth += 1;
-            } else if candidate == mate {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(ByteOffset(index));
-                }
+        // Two forward passes preserve quote handling without storing every delimiter.
+        let prefix = delimiters.take_while(|(index, _)| *index < at);
+        let change = |candidate| if candidate == mate { 1_isize } else if candidate == character { -1 } else { 0 };
+        let wanted = prefix.clone().map(|(_, candidate)| change(candidate)).sum::<isize>() - 1;
+        let (mut depth, mut opening) = (0, None);
+        for (index, candidate) in prefix {
+            if candidate == mate && depth == wanted {
+                opening = Some(ByteOffset(index));
             }
+            depth += change(candidate);
+        }
+        if let Some(opening) = opening {
+            return Ok(opening);
         }
     }
     Err(CommandError::Unavailable("matching pair not found".into()))
+}
+
+/// Skip complete, same-line quoted strings, not apostrophes or Rust lifetimes.
+fn pair_delimiters(source: &str) -> impl Iterator<Item = (usize, char)> + Clone + '_ {
+    let mut characters = source.char_indices().peekable();
+    std::iter::from_fn(move || {
+        while let Some((index, character)) = characters.next() {
+            if character == '\\' {
+                characters.next();
+            } else if matches!(character, '\'' | '"' | '`')
+                && !(character == '\'' && source[..index].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_'))
+            {
+                let mut closing = characters.clone();
+                while let Some((_, next)) = closing.next() {
+                    if next == '\n' {
+                        break;
+                    }
+                    if next == '\\' {
+                        if closing.next().is_some_and(|(_, c)| c == '\n') {
+                            break;
+                        }
+                    } else if next == character {
+                        if !(character == '\'' && closing.peek().is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_')) {
+                            characters = closing;
+                        }
+                        break;
+                    }
+                }
+            } else if "()[]{}".contains(character) {
+                return Some((index, character));
+            }
+        }
+        None
+    })
 }
 
 fn word_end(source: &str, cursor: ByteOffset) -> ByteOffset {

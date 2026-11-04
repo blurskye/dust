@@ -462,7 +462,7 @@ pub fn parse_ex(
     Ok(invocation)
 }
 
-/// Read one whitespace-separated argument, with single or double quoted string segments.
+/// Read one argument, quoting either the whole token or the value after `=`.
 /// Backslashes in quotes escape only the quote itself or another backslash.
 fn argument(input: &str) -> Result<(String, bool, &str), ExParseError> {
     let mut value = String::new();
@@ -480,7 +480,9 @@ fn argument(input: &str) -> Result<(String, bool, &str), ExParseError> {
             } else {
                 value.push(character);
             }
-        } else if matches!(character, '\'' | '"') {
+        } else if matches!(character, '\'' | '"')
+            && (value.is_empty() || value.split_once('=').is_some_and(|(_, value)| value.is_empty()))
+        {
             quote = Some(character);
             quoted = true;
         } else if character.is_whitespace() {
@@ -625,6 +627,13 @@ mod tests {
         assert_eq!(invocation.arguments["path"], CommandValue::String("a\\b\"c".into()));
         assert_eq!(invocation.arguments["retries"], CommandValue::Integer(2));
         assert_eq!(invocation.arguments["enabled"], CommandValue::Bool(true));
+        for (input, name, expected) in [
+            ("lint.run name=don't", "name", "don't"),
+            (r#"dap.watch.remove expression=map["key"]"#, "expression", r#"map["key"]"#),
+        ] {
+            let invocation = parse_ex(input, &aliases()).unwrap();
+            assert_eq!(invocation.arguments[name], CommandValue::String(expected.into()));
+        }
         for input in ["lint.run name=", "lint.run name='unfinished", "lint.run =value"] {
             assert!(parse_ex(input, &aliases()).is_err(), "{input}");
         }
