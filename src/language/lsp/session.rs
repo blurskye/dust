@@ -87,7 +87,7 @@ pub struct LspSessionLaunch<'a> {
     pub document: Option<LspDocument>,
     pub policy: LspPolicy,
     pub configuration: LspServerConfiguration,
-    pub environment: BTreeMap<String, String>,
+    pub environment: BTreeMap<String, std::ffi::OsString>,
 }
 
 impl LspService {
@@ -421,7 +421,7 @@ pub(super) fn run_session(
     initial_document: Option<LspDocument>,
     policy: LspPolicy,
     mut configuration: LspServerConfiguration,
-    environment: BTreeMap<String, String>,
+    environment: BTreeMap<String, std::ffi::OsString>,
     commands: Receiver<SessionCommand>,
     mut events: EventSender,
     initial_source: Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>,

@@ -6021,26 +6021,27 @@ impl InteractiveApplication {
                     name.into(),
                     crate::config::TaskConfig {
                         kind: crate::config::TaskKind::Formatter,
-                        executable: tool.executable,
-                        arguments: tool.arguments,
+                        executable: tool.executable.clone(),
+                        arguments: Vec::new(),
                         cwd: None,
-                        environment: tool.environment,
+                        environment: BTreeMap::new(),
                         dependencies: Vec::new(),
                         timeout_ms: Some(10_000),
                         stdin: true,
                         matcher: None,
                     },
                 );
-                Some(config)
+                Some((config, tool))
             }
             _ => None,
         };
         match self.tasks.plan(
             name,
             &adapter,
-            managed.as_ref().unwrap_or(self.configuration.settings()),
+            managed.as_ref().map_or(self.configuration.settings(), |(config, _)| config),
             &self.workspace,
             self.configuration.binding_revision(),
+            managed.as_ref().map(|(_, tool)| tool.clone()),
         ) {
             Ok(()) => {}
             Err(error) => {

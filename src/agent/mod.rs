@@ -65,7 +65,7 @@ impl AgentProcess {
     pub fn spawn(
         program: &Path,
         arguments: &[String],
-        environment: &BTreeMap<String, String>,
+        environment: &BTreeMap<String, std::ffi::OsString>,
         cwd: &Path,
     ) -> Result<Self, String> {
         let mut command = Command::new(program);

@@ -40,9 +40,9 @@ impl Default for JobPolicy {
 pub struct JobRequest {
     pub program: PathBuf,
     pub argv0: Option<PathBuf>,
-    pub arguments: Vec<String>,
+    pub arguments: Vec<std::ffi::OsString>,
     pub cwd: PathBuf,
-    pub environment: BTreeMap<String, String>,
+    pub environment: BTreeMap<String, std::ffi::OsString>,
     pub root_revision: u64,
     pub stdin: Option<Vec<u8>>,
     pub policy: JobPolicy,
@@ -291,7 +291,7 @@ impl JobEvent {
     }
 }
 fn check_request(request: &JobRequest) -> Result<(), JobError> {
-    let argument_bytes = request.arguments.iter().map(String::len).sum::<usize>();
+    let argument_bytes = request.arguments.iter().map(|argument| argument.len()).sum::<usize>();
     let environment_bytes = request
         .environment
         .iter()
@@ -680,6 +680,39 @@ mod tests {
         }
     }
     #[test]
+    fn job_process_receives_native_arguments_and_environment() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = tempfile::tempdir().unwrap();
+        let native = std::ffi::OsString::from_vec(b"path-\xff".to_vec());
+        let mut request = request(root.path(), "printf '%s' \"$1\"; printf '%s' \"$PATH\"");
+        request.arguments.extend(["sh".into(), native.clone()]);
+        request.environment.insert("PATH".into(), native);
+        let mut jobs = JobSupervisor::new(16);
+        let id = jobs.start(request).unwrap();
+        let mut bytes = Vec::new();
+        let mut exited = false;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !exited {
+            for event in jobs.poll() {
+                match event {
+                    JobEvent::Output { bytes: output, .. } => bytes.extend(output),
+                    JobEvent::Exited { job, code, timed_out } => {
+                        assert_eq!(job, id);
+                        assert_eq!(code, Some(0));
+                        assert!(!timed_out);
+                        exited = true;
+                    }
+                    JobEvent::Failed { message, .. } => panic!("{message}"),
+                    JobEvent::Started { .. } => {}
+                }
+            }
+            assert!(Instant::now() < deadline, "native argument job did not finish");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(bytes, b"path-\xffpath-\xff");
+    }
+
+    #[test]
     fn job_admission_is_worker_owned_bounded_and_drains_output_before_terminal() {
         let root = tempfile::tempdir().unwrap();
         let mut jobs = JobSupervisor::new(1);
@@ -788,7 +821,7 @@ mod tests {
         let mut request = request(root, script);
         request
             .environment
-            .insert("PATH".into(), std::env::var("PATH").unwrap());
+            .insert("PATH".into(), std::env::var_os("PATH").unwrap());
         (
             Submission {
                 root: None,

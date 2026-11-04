@@ -1337,8 +1337,10 @@ impl InteractiveApplication {
         let Some(program) = self.agent_program(&profile.program) else {
             return Err(self.missing_agent_program(&profile.program));
         };
-        let mut environment = profile.environment.clone();
-        environment.extend(profile.acp_environment.clone());
+        let mut environment = profile.environment.iter()
+            .chain(&profile.acp_environment)
+            .map(|(key, value)| (key.clone(), std::ffi::OsString::from(value)))
+            .collect::<BTreeMap<_, _>>();
         if let Some(entry) = self.tooling.entries().iter().find(|entry| {
             entry.definition.kind == ToolKind::Agent
                 && matches!(&entry.status, ToolStatus::Installed(path) if path == &program)
@@ -1348,15 +1350,15 @@ impl InteractiveApplication {
         if let Some(server) = &self.remote {
             environment.insert(
                 crate::remote::SERVER_VARIABLE.into(),
-                server.path().display().to_string(),
+                server.path().as_os_str().to_owned(),
             );
         }
         if let Some(tab) = tab {
-            environment.insert(agent::mcp::TAB_VARIABLE.into(), tab.to_string());
+            environment.insert(agent::mcp::TAB_VARIABLE.into(), tab.to_string().into());
         }
         let profiles = self.configuration.settings().agents.profiles.keys();
         let profiles = profiles.map(String::as_str).collect::<Vec<_>>().join(",");
-        environment.insert(agent::mcp::PROFILES_VARIABLE.into(), profiles);
+        environment.insert(agent::mcp::PROFILES_VARIABLE.into(), profiles.into());
         let mut process = AgentProcess::spawn(&program, &profile.arguments, &environment, root)
             .map_err(|error| format!("could not start agent {name}: {error}"))?;
         let id = process.request("initialize", agent::initialize_params())?;

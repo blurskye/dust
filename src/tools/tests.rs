@@ -207,8 +207,10 @@ fn javascript_tools_prepend_their_private_bun_backed_node_runtime() {
 fn nixos_host_detection_accepts_only_the_exact_os_release_id() {
     let directory = tempfile::tempdir().expect("os release directory");
     let os_release = directory.path().join("os-release");
-    std::fs::write(&os_release, "NAME=NixOS\nID=\"nixos\"\n").expect("NixOS release");
-    assert!(nixos_os_release_at(&os_release));
+    for value in ["nixos", "\"nixos\"", "'nixos'"] {
+        std::fs::write(&os_release, format!("NAME=NixOS\nID={value}\n")).expect("NixOS release");
+        assert!(nixos_os_release_at(&os_release));
+    }
     std::fs::write(&os_release, "ID_LIKE=nixos\nID=ubuntu\n").expect("other release");
     assert!(!nixos_os_release_at(&os_release));
 }

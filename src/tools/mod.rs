@@ -29,7 +29,7 @@ pub use mason_catalog::mason_filetype_for_path;
 mod catalog;
 pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 pub use catalog::{
-    DebugProgramPolicy, ToolArchiveFormat, ToolDefinition, ToolEntry, ToolInstall, ToolKind,
+    DebugProgramPolicy, ManagedFormatter, ToolArchiveFormat, ToolDefinition, ToolEntry, ToolInstall, ToolKind,
     ToolStatus, ToolVersionPin, bundled_tool_catalog, discover_executable, inspect_tools,
     inspect_tools_at, is_nixos_host, managed_formatter, managed_tool_executable,
     managed_tool_installed_version, nix_lsp_launch_environment, nix_lsp_profile_installed,
