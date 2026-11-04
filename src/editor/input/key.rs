@@ -103,7 +103,7 @@ impl KeyEvent {
     #[must_use]
     pub fn normalized_shift(mut self) -> Self {
         if self.modifiers.shift && let KeyCode::Char(character) = &mut self.code {
-            if character.is_ascii_lowercase() {
+            if (self.modifiers.control || self.modifiers.alt) && character.is_ascii_lowercase() {
                 *character = character.to_ascii_uppercase();
             }
             if character.is_uppercase()
@@ -332,7 +332,11 @@ impl FromStr for KeyEvent {
                 if characters.next().is_some() {
                     return Err(KeyParseError::UnknownKey((*key_name).into()));
                 }
-                KeyCode::Char(character)
+                KeyCode::Char(if modifiers.shift {
+                    character.to_ascii_uppercase()
+                } else {
+                    character
+                })
             }
         };
         Ok(Self { code, modifiers }.normalized_shift())

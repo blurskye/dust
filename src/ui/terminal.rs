@@ -1257,6 +1257,21 @@ mod tests {
     }
 
     #[test]
+    fn shifted_lowercase_text_keeps_the_terminals_translated_character() {
+        // Shift with Caps Lock can produce lowercase text, not an uppercase shortcut.
+        let event = normalize_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('h'),
+            KeyModifiers::SHIFT,
+        )));
+        let Some(UiEvent::Key { key, .. }) = event else {
+            panic!("expected key event");
+        };
+        assert_eq!(key.code, DustKeyCode::Char('h'));
+        assert_eq!(key.text_character(), Some('h'));
+        assert!(key.modifiers.shift);
+    }
+
+    #[test]
     fn shifted_symbol_identity_does_not_gain_a_spurious_modifier() {
         let symbol = normalize_event(Event::Key(KeyEvent::new(
             KeyCode::Char('!'),
