@@ -20,4 +20,4 @@ pub use key::{
 };
 pub use keymap::{Keymap, KeymapLayer, KeymapResolver, MappingResolution};
 pub(crate) use keymap::{KeymapBindings, KeymapSequence};
-pub use search::{SearchPatternError, search_match, search_matches};
+pub use search::{SearchPatternError, search_match, search_matches, substitution_regex};

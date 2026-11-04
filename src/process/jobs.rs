@@ -416,25 +416,42 @@ impl JobEngine {
             }
         }
         let mut child = command.spawn().map_err(JobError::Spawn)?;
+        // Configure all pipes before starting I/O threads, so setup failure still owns the child.
+        let pipes = (|| -> io::Result<_> {
+            Ok((
+                child.stdin.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
+                child.stdout.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
+                child.stderr.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
+            ))
+        })();
+        let (stdin, stdout, stderr) = match pipes {
+            Ok(pipes) => pipes,
+            Err(error) => {
+                terminate_tree(&mut child, false);
+                let _ = child.wait();
+                return Err(JobError::Spawn(error));
+            }
+        };
         let readers = Arc::new(AtomicUsize::new(0));
         let io_failed = Arc::new(AtomicBool::new(false));
         if let Some(bytes) = request.stdin
-            && let Some(mut stdin) = child.stdin.take()
+            && let Some(mut stdin) = stdin
         {
             let lease = slot.clone();
             let pending = readers.clone();
             let failed = io_failed.clone();
+            let cancelled = cancel.clone();
             pending.fetch_add(1, Ordering::AcqRel);
             thread::spawn(move || {
                 let _lease = lease;
-                if stdin.write_all(&bytes).is_err() {
+                if stdin.write_all(&bytes).is_err() && !cancelled.load(Ordering::Acquire) {
                     failed.store(true, Ordering::Release);
                 }
                 pending.fetch_sub(1, Ordering::AcqRel);
             });
         }
         let total = Arc::new(AtomicUsize::new(0));
-        if let Some(stdout) = child.stdout.take() {
+        if let Some(stdout) = stdout {
             stream_reader(
                 id,
                 JobStream::Stdout,
@@ -442,10 +459,10 @@ impl JobEngine {
                 self.sender.clone(),
                 total.clone(),
                 request.policy.clone(),
-                (readers.clone(), io_failed.clone(), slot.clone()),
+                (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
             );
         }
-        if let Some(stderr) = child.stderr.take() {
+        if let Some(stderr) = stderr {
             stream_reader(
                 id,
                 JobStream::Stderr,
@@ -453,7 +470,7 @@ impl JobEngine {
                 self.sender.clone(),
                 total,
                 request.policy.clone(),
-                (readers.clone(), io_failed.clone(), slot.clone()),
+                (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
             );
         }
         self.jobs.insert(
@@ -476,8 +493,14 @@ impl JobEngine {
 
     fn expire(&mut self) {
         for running in self.jobs.values_mut() {
-            running.timed_out |= running.started.elapsed() >= running.timeout;
+            if running.status.is_none()
+                && let Ok(Some(status)) = running.child.try_wait()
+            {
+                running.status = Some(status.code());
+            }
+            running.timed_out |= running.status.is_none() && running.started.elapsed() >= running.timeout;
             if !running.killed && (running.timed_out || running.cancel.load(Ordering::Acquire)) {
+                running.cancel.store(true, Ordering::Release);
                 terminate_tree(&mut running.child, running.status.is_some());
                 running.killed = true;
             }
@@ -547,6 +570,7 @@ impl JobEngine {
 impl Drop for JobEngine {
     fn drop(&mut self) {
         for job in self.jobs.values_mut() {
+            job.cancel.store(true, Ordering::Release);
             if !job.killed {
                 terminate_tree(&mut job.child, job.status.is_some());
             }
@@ -563,9 +587,9 @@ fn stream_reader(
     sender: SyncSender<JobEvent>,
     total: Arc<AtomicUsize>,
     policy: JobPolicy,
-    completion: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<JobSlot>),
+    completion: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<JobSlot>, Arc<AtomicBool>),
 ) {
-    let (readers, failed, slot) = completion;
+    let (readers, failed, slot, cancel) = completion;
     readers.fetch_add(1, Ordering::AcqRel);
     thread::spawn(move || {
         struct End(Arc<AtomicUsize>);
@@ -578,6 +602,9 @@ fn stream_reader(
         let _slot = slot;
         let mut reader = BufReader::new(reader);
         loop {
+            if cancel.load(Ordering::Acquire) {
+                break;
+            }
             let mut bytes = Vec::new();
             let read = match reader
                 .by_ref()
@@ -586,7 +613,9 @@ fn stream_reader(
             {
                 Ok(read) => read,
                 Err(_) => {
-                    failed.store(true, Ordering::Release);
+                    if !cancel.load(Ordering::Acquire) {
+                        failed.store(true, Ordering::Release);
+                    }
                     break;
                 }
             };
@@ -594,24 +623,51 @@ fn stream_reader(
                 break;
             }
             let line_truncated = bytes.len() > policy.maximum_line_bytes;
+            let discard_tail = line_truncated && !bytes.ends_with(b"\n");
             bytes.truncate(policy.maximum_line_bytes);
             let allowed = reserve_output(&total, policy.maximum_output_bytes, bytes.len());
             bytes.truncate(allowed);
             let truncated = line_truncated || bytes.len() < read || allowed < read;
-            if (!bytes.is_empty() || truncated)
-                && sender
-                    .send(JobEvent::Output {
-                        job: id,
-                        stream,
-                        bytes,
-                        truncated,
-                    })
-                    .is_err()
-            {
-                break;
+            if !bytes.is_empty() || truncated {
+                let mut event = JobEvent::Output { job: id, stream, bytes, truncated };
+                loop {
+                    if cancel.load(Ordering::Acquire) {
+                        return;
+                    }
+                    match sender.try_send(event) {
+                        Ok(()) => break,
+                        Err(mpsc::TrySendError::Disconnected(_)) => return,
+                        Err(mpsc::TrySendError::Full(value)) => {
+                            event = value;
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                    }
+                }
             }
             if truncated && allowed == 0 {
                 break;
+            }
+            if discard_tail {
+                // Discard the rest of this physical line without allocating for it.
+                loop {
+                    match reader.fill_buf() {
+                        Ok([]) => break,
+                        Ok(tail) => {
+                            let newline = tail.iter().position(|byte| *byte == b'\n');
+                            let consumed = newline.map_or(tail.len(), |at| at + 1);
+                            reader.consume(consumed);
+                            if newline.is_some() || cancel.load(Ordering::Acquire) {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            if !cancel.load(Ordering::Acquire) {
+                                failed.store(true, Ordering::Release);
+                            }
+                            return;
+                        }
+                    }
+                }
             }
         }
     });
@@ -814,6 +870,86 @@ mod tests {
         let mut engine = JobEngine::new(16);
         assert!(matches!(engine.start(queued), Err(JobError::RootChanged)));
         assert!(!outside.path().join("marker").exists());
+    }
+
+    #[test]
+    fn completed_job_is_not_timed_out_when_polling_is_late() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut queued, _) = submission(root.path(), "exit 0");
+        queued.request.policy.timeout = Duration::from_millis(1);
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let running = engine.jobs.get_mut(&JobId(1)).unwrap();
+        assert!(running.child.wait().unwrap().success());
+        running.started = Instant::now() - Duration::from_secs(1);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut exited = false;
+        while !engine.jobs.is_empty() {
+            for event in engine.poll() {
+                if let JobEvent::Exited { code, timed_out, .. } = event {
+                    assert_eq!(code, Some(0));
+                    assert!(!timed_out);
+                    exited = true;
+                }
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(exited);
+    }
+
+    #[test]
+    fn oversized_output_lines_discard_the_tail_before_the_next_line() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut queued, _) = submission(root.path(), "printf '123456789\\nok\\nabcdefghi'");
+        queued.request.policy.maximum_line_bytes = 4;
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut lines = Vec::new();
+        while !engine.jobs.is_empty() {
+            for event in engine.poll() {
+                if let JobEvent::Output { bytes, truncated, .. } = event {
+                    lines.push((bytes, truncated));
+                }
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert_eq!(lines, vec![(b"1234".to_vec(), true), (b"ok\n".to_vec(), false), (b"abcd".to_vec(), true)]);
+    }
+
+    #[test]
+    fn job_cancellation_releases_escaped_descendants_pipe_readers() {
+        struct Escaped(u32);
+        impl Drop for Escaped {
+            fn drop(&mut self) { super::super::terminate_process_group(self.0); }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let (queued, residents) = submission(root.path(), "exec python3 -c 'import os,time\nif os.fork() == 0:\n os.setsid()\n print(os.getpid(), flush=True)\n time.sleep(30)\n'");
+        let cancel = queued.cancel.clone();
+        let mut engine = JobEngine::new(1);
+        engine.start(queued).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let escaped = loop {
+            let output = engine.poll().into_iter().find_map(|event| match event {
+                JobEvent::Output { stream: JobStream::Stdout, bytes, .. } => Some(bytes),
+                JobEvent::Output { bytes, .. } => panic!("fixture stderr: {}", String::from_utf8_lossy(&bytes)),
+                _ => None,
+            });
+            if let Some(bytes) = output {
+                break Escaped(String::from_utf8(bytes).unwrap().trim().parse().unwrap());
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        };
+        cancel.store(true, Ordering::Release);
+        while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
+            engine.poll();
+            assert!(Instant::now() < deadline, "escaped descendant retained job readers");
+            thread::sleep(Duration::from_millis(2));
+        }
+        drop(escaped);
     }
 
     #[test]

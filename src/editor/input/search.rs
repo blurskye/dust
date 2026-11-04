@@ -47,6 +47,17 @@ pub fn search_matches(
     Ok(matches)
 }
 
+pub fn substitution_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
+    if flags.chars().any(|flag| !"gicn".contains(flag)) {
+        return Err("unsupported substitute flag".into());
+    }
+    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    RegexBuilder::new(&pattern)
+        .case_insensitive(flags.contains('i'))
+        .build()
+        .map_err(|error| error.to_string())
+}
+
 /// Find one occurrence without retaining a range for every match in a large file.
 pub fn search_match(
     source: &str,

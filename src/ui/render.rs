@@ -1433,6 +1433,7 @@ pub struct UiState {
     pub notification_error: bool,
     pub notification_warning: bool,
     pub search_query: Option<String>,
+    pub search_whole_word: bool,
     /// The `s` jump's matches and labels while it is active.
     pub flash: Option<FlashOverlay>,
     pub config_diagnostic: Option<String>,

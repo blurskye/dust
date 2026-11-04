@@ -591,6 +591,7 @@ pub struct SyntaxPolicy {
     pub maximum_spans: usize,
     pub maximum_folds: usize,
     pub maximum_indent_rows: usize,
+    pub tab_width: usize,
 }
 impl Default for SyntaxPolicy {
     fn default() -> Self {
@@ -599,6 +600,7 @@ impl Default for SyntaxPolicy {
             maximum_spans: 100_000,
             maximum_folds: 10_000,
             maximum_indent_rows: 100_000,
+            tab_width: 4,
         }
     }
 }
@@ -1344,6 +1346,7 @@ fn parse(request: Request) -> SyntaxEvent {
             Ok(indentation_folds(
                 &request.source,
                 request.policy.maximum_folds,
+                request.policy.tab_width,
             ))
         },
         |query| {
@@ -1443,7 +1446,7 @@ fn query_rows(
 }
 /// Folds what is indented under a line, as Vim's `foldmethod=indent`, for grammars with no fold
 /// query. The line closing a block at its own indentation folds with it.
-fn indentation_folds(source: &str, limit: usize) -> (Vec<SyntaxFold>, bool) {
+fn indentation_folds(source: &str, limit: usize, tab_width: usize) -> (Vec<SyntaxFold>, bool) {
     let mut folds = Vec::new();
     let mut open: Vec<(usize, usize)> = Vec::new();
     let mut previous = 0;
@@ -1452,7 +1455,10 @@ fn indentation_folds(source: &str, limit: usize) -> (Vec<SyntaxFold>, bool) {
         if body.is_empty() {
             continue;
         }
-        let indent = line.len() - body.len();
+        let tab_width = tab_width.max(1);
+        let indent = line[..line.len() - body.len()].chars().fold(0, |column, ch| {
+            column + if ch == '\t' { tab_width - column % tab_width } else { 1 }
+        });
         let closes = body.starts_with(['}', ')', ']'])
             || body.starts_with("</")
             || body.split(|c: char| !c.is_alphanumeric()).next() == Some("end");
@@ -1559,7 +1565,7 @@ mod tests {
     #[test]
     fn languages_without_a_fold_query_fold_by_indentation() {
         let rows = |source: &str| {
-            indentation_folds(source, 10).0
+            indentation_folds(source, 10, 4).0
                 .into_iter()
                 .map(|fold| (fold.start_row, fold.end_row))
                 .collect::<Vec<_>>()
@@ -1573,9 +1579,25 @@ mod tests {
         assert_eq!(rows("<div>\n  <p>\n</div>\n"), [(0, 2)]);
         assert!(rows("one\ntwo\n").is_empty());
         assert_eq!(rows("class A:\n  def b():\n    c\n"), [(0, 2), (1, 2)]);
-        let (folds, truncated) = indentation_folds("a\n b\nc\n d\n", 1);
+        let (folds, truncated) = indentation_folds("a\n b\nc\n d\n", 1, 4);
         assert_eq!(folds.len(), 1);
         assert!(truncated);
+    }
+    #[test]
+    fn indentation_folds_use_configured_tab_stops() {
+        let source = "void f() {\n\tx;\n    y;\n}\n";
+        for tab_width in [4, 8] {
+            let result = parse_with_policy(SyntaxLanguage::C, source, SyntaxPolicy {
+                tab_width,
+                ..Default::default()
+            });
+            assert_eq!(result.folds.iter().map(|fold| (fold.start_row, fold.end_row)).collect::<Vec<_>>(), [(0, 3)]);
+        }
+        let source = "void f() {\n    x;\n\ty;\n}\n";
+        assert_eq!(indentation_folds(source, 10, 4).0.len(), 1);
+        assert_eq!(indentation_folds(source, 10, 8).0.len(), 2);
+        // A tab advances to its next stop, not by a fixed number of cells.
+        assert_eq!(indentation_folds("f\n \tx\n    y\n", 10, 4).0.len(), 1);
     }
     #[test]
     fn an_html_element_folds_even_when_its_children_share_its_indentation() {
@@ -1921,8 +1943,8 @@ mod tests {
         let (spans, overflow) = highlight_spans(&query, &tree, source, 2, "rust");
         assert!(overflow);
         assert!(flatten_spans(spans).len() < 2);
-        assert!(!indentation_folds("a\n b\n", 1).1);
-        assert!(indentation_folds("a\n b\nc\n d\n", 1).1);
+        assert!(!indentation_folds("a\n b\n", 1, 4).1);
+        assert!(indentation_folds("a\n b\nc\n d\n", 1, 4).1);
     }
 
     #[test]

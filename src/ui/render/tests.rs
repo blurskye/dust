@@ -766,6 +766,61 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
 }
 
 #[test]
+fn visual_line_selection_paints_empty_lines() {
+    use crate::editor::{Selection, SelectionKind, text::{ByteOffset, TextBuffer}};
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("a\n\nb"), None);
+    state.views[view].mode = crate::editor::EditorMode::VisualLine;
+    state.views[view].selection = Some(Selection { anchor: ByteOffset(0), head: ByteOffset(3), kind: SelectionKind::Line });
+    state.views[view].cursor = ByteOffset(3);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
+    assert_eq!(frame.grid.get(0, 1).unwrap().style, crate::ui::Style::Selection);
+    assert_eq!(frame.grid.get(1, 1).unwrap().style, crate::ui::Style::Default);
+}
+
+#[test]
+fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
+    use crate::editor::text::TextBuffer;
+    use crate::ui::Style;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("foo foobar foo\n123 abc ABC\n123 abc ABC"), None);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.wrap = false;
+    config.ui.status_line.enabled = false;
+    let mut ui = UiState { search_query: Some("foo".into()), search_whole_word: true, ..Default::default() };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    for (column, selected) in [(0, true), (4, false), (11, true)] {
+        assert_eq!(frame.grid.get(column, 0).unwrap().style == Style::Search, selected);
+    }
+    // A freshly typed ordinary search doesn't inherit the previous word-search policy.
+    let mut prompt = PromptState::new(PromptKind::SearchForward);
+    prompt.input = "foo".into();
+    ui.prompt = Some(prompt);
+    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    assert_eq!(frame.grid.get(4, 0).unwrap().style, Style::Search);
+    for (input, expected) in [
+        ("%s/[0-9]+/x/g", [true, false, false]),
+        ("%s/abc/x/g", [false, true, false]),
+        ("%s/ABC/x/gi", [false, true, true]),
+        ("%s/^123/x/g", [true, false, false]),
+    ] {
+        let mut prompt = PromptState::new(PromptKind::Command);
+        prompt.input = input.into();
+        ui.prompt = Some(prompt);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+        for row in [1, 2] {
+            for (column, selected) in [0, 4, 8].into_iter().zip(expected) {
+                assert_eq!(frame.grid.get(column, row).unwrap().style == Style::Search, selected, "{input} row {row} column {column}");
+            }
+        }
+    }
+}
+
+#[test]
 fn block_selection_projection_uses_shared_display_cell_ranges() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (_, view) = state.open_text(
@@ -1481,6 +1536,33 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
 }
 
 #[test]
+fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text("e\u{301} x!"), None);
+    state.views[view].cursor = ByteOffset(5);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let ui = UiState {
+        substitute_preview: [1, 5].into_iter().map(|position| super::UiInlayHint {
+            buffer, revision: state.buffers[buffer].text.revision(), position: ByteOffset(position), label: ">".into(),
+        }).collect(),
+        ..Default::default()
+    };
+    for wrap in [false, true] {
+        config.editor.wrap = wrap;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 2);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x>!");
+        assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((5, 0)));
+        config.editor.wrap = true;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 3);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x");
+        assert_eq!(frame.grid.row_text(1).trim_end(), ">!");
+    }
+}
+
+#[test]
 fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs() {
     let text = "a\t界e\u{301}bcdef";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -1847,6 +1929,20 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     );
     let tiny = render(&state, &ui, &loaded.config, &loaded.dashboard, 1, 3);
     assert_eq!(tiny.grid.width(), 1);
+}
+
+#[test]
+fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("\ntext"), None);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = true;
+    config.ui.status_line.enabled = false;
+    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "");
+    assert_eq!(frame.grid.row_text(1).trim_end(), "text");
+    assert_eq!(super::git_sign_column(0, &config.editor), None);
 }
 
 #[test]
@@ -2634,6 +2730,38 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
         before,
         "stale dimensions draw nothing"
     );
+}
+
+#[test]
+fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::ui::Style;
+    let path = PathBuf::from("/workspace/file.rs");
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("abc\ndef\nghi\njkl"), Some(path.clone()));
+    let mut config = crate::config::load_bundled_config().config;
+    config.ui.status_line.enabled = false;
+    let ui = UiState { diagnostics: vec![super::UiDiagnostic {
+        path, range: ByteRange::new(ByteOffset(1), ByteOffset(12)).unwrap(),
+        severity: crate::workspace::DiagnosticSeverity::Error,
+        source: String::new(), code: None, message: "problem".into(),
+    }], ..Default::default() };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
+    let gutter = super::editor_state_gutter_width(&state, &state.buffers[state.views[view].buffer].text, &config.editor, 40);
+    assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Default);
+    assert_eq!(frame.grid.get(gutter + 1, 0).unwrap().style, Style::Error);
+    for row in [1, 2] {
+        assert_eq!(frame.grid.get(gutter, row).unwrap().style, Style::Error);
+        assert!(!frame.grid.row_text(row).contains("problem"));
+    }
+    assert_eq!(frame.grid.get(gutter, 3).unwrap().style, Style::Default);
+    assert!(frame.grid.row_text(0).contains("problem"));
+    // Starting the viewport inside the diagnostic still paints its continuation.
+    state.views[view].cursor = ByteOffset(8);
+    state.views[view].scroll_line = 1;
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Error);
+    assert!(!frame.grid.row_text(0).contains("problem"));
 }
 
 #[test]
@@ -4938,6 +5066,28 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
     };
     let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
     assert!((0..40).any(|row| frame.grid.row_text(row).contains("Console")));
+}
+
+#[test]
+fn concealed_markdown_preserves_source_tab_columns() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::language::syntax::MarkdownMark;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text("*a*\tb\nlast"), None);
+    state.views[view].cursor = ByteOffset(6);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.tab_width = 4;
+    config.ui.status_line.enabled = false;
+    let ui = UiState { markdown_marks: [0, 2].into_iter().map(|at| super::UiMarkdownMark {
+        buffer, revision: state.buffers[buffer].text.revision(),
+        range: ByteRange::new(ByteOffset(at), ByteOffset(at + 1)).unwrap(), mark: MarkdownMark::Hide,
+    }).collect(), ..Default::default() };
+    for wrap in [true, false] {
+        config.editor.wrap = wrap;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 2);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "a b");
+    }
 }
 
 #[test]

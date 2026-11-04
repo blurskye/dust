@@ -1077,6 +1077,21 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 }
 
 #[test]
+fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("foo foobar foo"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["*"]);
+    assert!(app.ui.search_whole_word);
+    assert_eq!(app.ui.search_query.as_deref(), Some("foo"));
+    let view = app.state.active_view.unwrap();
+    assert_eq!(app.state.views[view].cursor, ByteOffset(11));
+    press_keys(&mut app, &["/", "f", "o", "o", "enter"]);
+    assert!(!app.ui.search_whole_word);
+    assert!(!app.input.whole_word_search());
+}
+
+#[test]
 fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let mut app = app();
     let (_, view) = app.state.open_text(

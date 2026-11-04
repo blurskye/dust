@@ -4350,6 +4350,7 @@ impl InteractiveApplication {
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
         self.input.remember_word_search();
+        self.ui.search_whole_word = true;
         self.perform_search(forward);
     }
 
@@ -5473,6 +5474,7 @@ impl InteractiveApplication {
                 }
                 let forward = prompt.kind == PromptKind::SearchForward;
                 self.ui.search_query = Some(prompt.input);
+                self.ui.search_whole_word = false;
                 self.input.remember_search(forward);
                 self.close_prompt();
                 self.perform_search(forward);

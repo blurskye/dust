@@ -2458,6 +2458,7 @@ impl InteractiveApplication {
         self.syntax.tick(
             &documents,
             &self.configuration.settings().syntax,
+            self.configuration.settings().editor.tab_width,
             self.clock.monotonic(),
             &too_large,
         );

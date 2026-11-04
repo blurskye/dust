@@ -72,14 +72,7 @@ fn substitution_edits(
     if pattern.is_empty() {
         return Err("no previous search pattern".into());
     }
-    if flags.chars().any(|flag| !"gicn".contains(flag)) {
-        return Err("unsupported substitute flag".into());
-    }
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
-    let regex = regex::RegexBuilder::new(&pattern)
-        .case_insensitive(flags.contains('i'))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let regex = crate::editor::input::substitution_regex(pattern, flags)?;
     let template = replacement_template(replacement);
     let every = flags.contains('g');
     let mut edits = Vec::new();

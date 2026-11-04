@@ -14,6 +14,36 @@ use crate::{
 
 use super::{UiState, editor::display_column};
 
+/// Hints inside a source grapheme are drawn immediately after it. Scan each hinted line once.
+pub(super) fn projected_inlay_hints(
+    text: &crate::editor::text::TextBuffer,
+    buffer: crate::editor::BufferId,
+    ui: &UiState,
+) -> Vec<super::UiInlayHint> {
+    let mut hints = ui.lsp_inlay_hints.iter().chain(&ui.substitute_preview)
+        .filter(|hint| hint.buffer == buffer && hint.revision == text.revision())
+        .take(10_000).collect::<Vec<_>>();
+    hints.sort_unstable_by_key(|hint| hint.position);
+    let mut projected = Vec::with_capacity(hints.len());
+    for group in hints.chunk_by(|a, b| text.byte_to_line(a.position).ok() == text.byte_to_line(b.position).ok()) {
+        let Ok(line) = text.byte_to_line(group[0].position) else { continue; };
+        let Ok(start) = text.line_to_byte(line) else { continue; };
+        let Ok(source) = text.line(line) else { continue; };
+        let mut boundaries = source.grapheme_indices(true).map(|(at, _)| at)
+            .chain(std::iter::once(source.len())).peekable();
+        for hint in group {
+            let relative = hint.position.get().saturating_sub(start.get());
+            while boundaries.peek().is_some_and(|at| *at < relative) {
+                boundaries.next();
+            }
+            let mut hint = (*hint).clone();
+            hint.position = ByteOffset(start.get() + boundaries.peek().copied().unwrap_or(source.len()));
+            projected.push(hint);
+        }
+    }
+    projected
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct VisualRowAnchor {
     pub line: usize,
@@ -90,19 +120,13 @@ impl<'a> VisualRowModel<'a> {
     ) -> Self {
         let mut inlay_widths = BTreeMap::<ByteOffset, usize>::new();
         let mut labels = BTreeMap::<ByteOffset, Vec<&str>>::new();
-        if let Some(buffer) = state.views.get(view).map(|view| view.buffer) {
-            let revision = text.revision();
-            let mut hints = ui
-                .lsp_inlay_hints
-                .iter()
-                .chain(&ui.substitute_preview)
-                .filter(|hint| hint.buffer == buffer && hint.revision == revision)
-                .take(10_000)
-                .collect::<Vec<_>>();
-            hints.sort_unstable_by_key(|hint| hint.position);
+        let hints = state.views.get(view)
+            .map_or_else(Vec::new, |view| projected_inlay_hints(text, view.buffer, ui));
+        {
             let mut per_line = BTreeMap::<usize, usize>::new();
-            for hint in hints {
-                let Ok(line) = text.byte_to_line(hint.position) else {
+            for hint in &hints {
+                let position = hint.position;
+                let Ok(line) = text.byte_to_line(position) else {
                     continue;
                 };
                 let count = per_line.entry(line).or_default();
@@ -110,10 +134,10 @@ impl<'a> VisualRowModel<'a> {
                     continue;
                 }
                 *count = count.saturating_add(1);
-                labels.entry(hint.position).or_default().push(&hint.label);
+                labels.entry(position).or_default().push(&hint.label);
                 let width = text_width(&hint.label, config.editor.ambiguous_width);
                 inlay_widths
-                    .entry(hint.position)
+                    .entry(position)
                     .and_modify(|current| *current = current.saturating_add(width))
                     .or_insert(width);
             }
@@ -925,7 +949,7 @@ pub(super) fn configured_editor_gutter_width(
 }
 
 pub(super) fn git_sign_column(gutter_width: u16, config: &EditorConfig) -> Option<u16> {
-    config.git_signs.enabled.then(|| {
+    (config.git_signs.enabled && gutter_width > 0).then(|| {
         let trailing_padding = GUTTER_PADDING.min(gutter_width.saturating_sub(1));
         gutter_width
             .saturating_sub(trailing_padding)
