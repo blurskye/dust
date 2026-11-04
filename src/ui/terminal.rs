@@ -748,23 +748,15 @@ fn normalize_keyboard_event(event: Event, legacy: bool) -> Option<UiEvent> {
                 CtKeyCode::F(number) => KeyCode::F(number),
                 _ => return None,
             };
-            // Crossterm's Char carries the translated text identity. Uppercase
-            // and punctuation therefore already encode the ordinary Shift
-            // transformation (for example `R` and `!`). Keep Shift for
-            // lowercase/digit/space enhanced-protocol events where it is an
-            // independently meaningful modifier.
-            let shift_is_encoded_in_character = matches!(code, KeyCode::Char(character)
-                if character.is_uppercase() || (!character.is_alphanumeric() && !character.is_whitespace()));
             Some(UiEvent::Key {
                 key: KeyEvent {
                     code,
                     modifiers: Modifiers {
                         control: key.modifiers.contains(KeyModifiers::CONTROL),
                         alt: key.modifiers.contains(KeyModifiers::ALT),
-                        shift: key.modifiers.contains(KeyModifiers::SHIFT)
-                            && !shift_is_encoded_in_character,
+                        shift: key.modifiers.contains(KeyModifiers::SHIFT),
                     },
-                },
+                }.normalized_shift(),
                 kind: match key.kind {
                     KeyEventKind::Press => KeyInputKind::Press,
                     KeyEventKind::Repeat => KeyInputKind::Repeat,
@@ -1248,6 +1240,20 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn shifted_control_letters_match_configured_bindings() {
+        for character in ['h', 'H'] {
+            let event = normalize_event(Event::Key(KeyEvent::new(
+                KeyCode::Char(character),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )));
+            assert_eq!(event, Some(UiEvent::Key {
+                key: "ctrl-shift-h".parse().unwrap(),
+                kind: KeyInputKind::Press,
+            }));
+        }
     }
 
     #[test]

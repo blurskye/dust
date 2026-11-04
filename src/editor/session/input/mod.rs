@@ -268,6 +268,12 @@ impl InputSession {
         mode: EditorMode,
         input: GrammarInput,
     ) -> Result<InputAction, InputError> {
+        if input == GrammarInput::MacroRecordToggle && self.recording_macro.is_some() {
+            return Ok(InputAction::Invoke(CommandInvocation::new(
+                "macro.record.stop",
+                crate::editor::InvocationSource::Keymap,
+            )?));
+        }
         let pending = self.modal.has_pending_grammar();
         let result = self.modal.feed(mode, input);
         if !pending && self.modal.has_pending_grammar() {

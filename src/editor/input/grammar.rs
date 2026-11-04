@@ -69,7 +69,6 @@ pub struct ModalResolver {
     pending: Option<PendingInputContext>,
     awaiting: Option<CharacterTarget>,
     last_find: Option<(String, char)>,
-    macro_recording: bool,
     count_limit: u64,
 }
 
@@ -93,7 +92,6 @@ impl Default for ModalResolver {
             pending: None,
             awaiting: None,
             last_find: None,
-            macro_recording: false,
             count_limit: ABSOLUTE_MAX_COUNT,
         }
     }
@@ -115,11 +113,9 @@ impl ModalResolver {
 
     pub fn cancel_pending(&mut self) {
         let count_limit = self.count_limit;
-        let macro_recording = self.macro_recording;
         let last_find = self.last_find.take();
         *self = Self::with_count_limit(count_limit);
         self.last_find = last_find;
-        self.macro_recording = macro_recording;
     }
 
     #[must_use]
@@ -145,14 +141,9 @@ impl ModalResolver {
             || self.pending.is_some()
     }
 
-    #[must_use]
-    pub const fn macro_recording(&self) -> bool {
-        self.macro_recording
-    }
-
     pub fn decorate_invocation(&mut self, invocation: &mut CommandInvocation) {
         if invocation.count.is_none() {
-            invocation.count = count_nonzero(self.take_count());
+            invocation.count = self.count.take().and_then(NonZeroU64::new);
         }
         if invocation.register.is_none() {
             invocation.register = self.register.take();
@@ -327,18 +318,12 @@ impl ModalResolver {
                 }
             }
             GrammarInput::MacroRecordToggle => {
-                if self.macro_recording {
-                    self.macro_recording = false;
-                    Ok(InputAction::Invoke(command("macro.record.stop")?))
-                } else {
-                    self.pending = Some(PendingInputContext::MacroRecord);
-                    Ok(InputAction::Pending)
-                }
+                self.pending = Some(PendingInputContext::MacroRecord);
+                Ok(InputAction::Pending)
             }
             GrammarInput::MacroRecordSelect(value) => {
                 let name = one_character(&value)?;
                 self.pending = None;
-                self.macro_recording = true;
                 Ok(InputAction::Invoke(
                     command("macro.record.start")?
                         .with_argument("register", CommandValue::String(name.to_string())),
@@ -388,11 +373,13 @@ impl ModalResolver {
             if self.count.is_some() || self.operator_count.is_some() {
                 invocation.count = NonZeroU64::new(count);
             }
-            if let Some(character) = character {
-                invocation = invocation
-                    .with_argument("character", CommandValue::String(character.to_string()));
-            }
             let surround = self.operator.as_deref() == Some("surround_add");
+            if let Some(character) = character {
+                invocation = invocation.with_argument(
+                    if surround { "find_character" } else { "character" },
+                    CommandValue::String(character.to_string()),
+                );
+            }
             self.reset_pending();
             if surround {
                 self.await_character(CharacterTarget::SurroundAdd(invocation));
@@ -571,6 +558,18 @@ mod tests {
     }
 
     #[test]
+    fn decorated_invocations_preserve_an_explicit_count_of_one() {
+        let mut resolver = ModalResolver::default();
+        let mut invocation = super::command("view.cursor.move").unwrap();
+        resolver.decorate_invocation(&mut invocation);
+        assert_eq!(invocation.count, None);
+        resolver.feed(EditorMode::Normal, GrammarInput::Count(1)).unwrap();
+        resolver.decorate_invocation(&mut invocation);
+        assert_eq!(invocation.count, NonZeroU64::new(1));
+        assert!(!resolver.has_pending_grammar());
+    }
+
+    #[test]
     fn combines_operator_and_motion_counts_without_knowing_keys() {
         let mut resolver = ModalResolver::default();
         resolver
@@ -665,26 +664,6 @@ mod tests {
             Some(PendingInputContext::MacroRecord)
         );
     }
-    #[test]
-    fn cancelling_pending_grammar_keeps_macro_recording() {
-        let mut resolver = ModalResolver::default();
-        resolver
-            .feed(
-                EditorMode::Normal,
-                GrammarInput::MacroRecordSelect("a".into()),
-            )
-            .unwrap();
-        resolver.cancel_pending();
-        assert!(resolver.macro_recording());
-        let InputAction::Invoke(stop) = resolver
-            .feed(EditorMode::Normal, GrammarInput::MacroRecordToggle)
-            .unwrap()
-        else {
-            panic!("stop recording")
-        };
-        assert_eq!(stop.id.as_str(), "macro.record.stop");
-    }
-
     #[test]
     fn operator_zero_is_a_motion_and_count_failures_clear_pending_grammar() {
         let mut resolver = ModalResolver::with_count_limit(10);

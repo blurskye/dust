@@ -306,6 +306,34 @@ fn replace_mode_session_is_semantically_repeatable() {
 }
 
 #[test]
+fn surround_find_keeps_the_target_separate_from_the_delimiter() {
+    for (keys, expected) in [("gsafX)", "(abcX)def"), ("gsatX]", "[abc]Xdef")] {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("abcXdef"), None);
+        app.set_dashboard_visibility(false);
+        for key in keys.chars() {
+            app.handle_configured_key(KeyEvent::character(key));
+        }
+        let buffer = app.state.active_buffer_id().unwrap();
+        assert_eq!(app.state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn command_line_macro_recording_is_stopped_by_the_normal_toggle() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("abcde"), None);
+    app.set_dashboard_visibility(false);
+    app.open_prompt(crate::ui::PromptKind::Command, "macro.record.start register=a".into());
+    app.submit_prompt();
+    for key in ['x', 'q', '@', 'a'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "cde");
+}
+
+#[test]
 fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
     let mut app = app();
     app.state.open_text(

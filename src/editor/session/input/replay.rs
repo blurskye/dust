@@ -258,6 +258,24 @@ mod tests {
     }
 
     #[test]
+    fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
+        use crate::editor::{EditorMode, input::{GrammarInput, InputAction, PendingInputContext}};
+        let mut input = InputSession::new(100);
+        input.start_macro_recording('a');
+        input.record_successful_invocation(&invocation("edit.delete_char"), None, false);
+        input.cancel_pending();
+        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+            panic!("stop recording");
+        };
+        assert_eq!(stop.id.as_str(), "macro.record.stop");
+        let (register, recorded) = input.finish_macro_recording().unwrap();
+        assert_eq!(register, 'a');
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap(), InputAction::Pending);
+        assert_eq!(input.pending_context(), Some(PendingInputContext::MacroRecord));
+    }
+
+    #[test]
     fn recording_and_repeat_retain_semantics_and_strip_original_targets() {
         let mut input = InputSession::new(100);
         assert_eq!(input.repeat_plan(10), Err(ReplayError::NoChange));

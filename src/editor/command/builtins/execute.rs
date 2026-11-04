@@ -645,7 +645,10 @@ pub(super) fn execute_builtin<E>(
                             count,
                             motion != original_motion,
                             requested_linewise,
-                            character_argument(invocation, "character")?,
+                            character_argument(
+                                invocation,
+                                if operator == "surround_add" { "find_character" } else { "character" },
+                            )?,
                             state.policy,
                         )?],
                         if requested_linewise {
