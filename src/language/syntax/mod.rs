@@ -16,7 +16,7 @@ mod highlight;
 mod markdown;
 mod objects;
 pub use highlight::Highlight;
-pub use markdown::{MarkdownMark, MarkdownSpan, TablePart};
+pub use markdown::{MarkdownMark, MarkdownSpan};
 pub use objects::{SyntaxObject, SyntaxObjectKind};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1513,44 +1513,22 @@ mod tests {
                 url: Some((url, url + "https://x.y".len()))
             }]
         );
-        let table = |part| MarkdownMark::Table(part);
         assert_eq!(
             result
                 .markdown
                 .iter()
-                .filter(|span| span.mark == table(TablePart::Pipe))
+                .filter(|span| span.mark == MarkdownMark::TablePipe)
                 .count(),
-            6
+            9
         );
-        assert_eq!(
+        let table = source.find("| a").expect("table");
+        assert!(
             result
                 .markdown
                 .iter()
-                .filter(|span| span.mark == table(TablePart::Cross))
-                .count(),
-            1
-        );
-        assert_eq!(
-            result
-                .markdown
-                .iter()
-                .filter(|span| span.mark == table(TablePart::Line))
-                .count(),
-            6
-        );
-        assert_eq!(
-            marked("|")
-                .iter()
-                .filter(|mark| **mark == table(TablePart::Left))
-                .count(),
-            1
-        );
-        assert_eq!(
-            marked("|")
-                .iter()
-                .filter(|mark| **mark == table(TablePart::Right))
-                .count(),
-            1
+                .any(|span| span.mark == MarkdownMark::Table
+                    && span.start == table
+                    && source[span.end..].trim().is_empty())
         );
         assert_eq!(marked("`"), [MarkdownMark::Hide, MarkdownMark::Hide]);
         assert_eq!(marked("](https://x.y)"), [MarkdownMark::Hide]);

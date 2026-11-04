@@ -3,7 +3,7 @@
 //! which refreshes the page.
 
 use super::InteractiveApplication;
-use super::commands::{AppEffect, PromptMove, SettingsAction};
+use super::commands::{AppEffect, SettingsAction};
 use crate::config::{
     SettingInfo, default_setting, settings_catalog, theme_display_name, write_user_setting,
 };
@@ -244,18 +244,7 @@ impl InteractiveApplication {
             }
             SettingsAction::Cursor(to) => {
                 if let Some(SettingsEdit::Text { text, cursor, .. }) = &mut page.edit {
-                    *cursor = match to {
-                        PromptMove::Home => 0,
-                        PromptMove::End => text.len(),
-                        PromptMove::Left => text[..*cursor]
-                            .chars()
-                            .next_back()
-                            .map_or(*cursor, |character| *cursor - character.len_utf8()),
-                        PromptMove::Right => text[*cursor..]
-                            .chars()
-                            .next()
-                            .map_or(*cursor, |character| *cursor + character.len_utf8()),
-                    };
+                    *cursor = to.apply(text, *cursor);
                 }
             }
             SettingsAction::Clear => {

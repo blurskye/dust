@@ -155,8 +155,11 @@ pub struct MarkdownGlyphs {
     pub image: String,
     /// Repeated across the window for a `---` break.
     pub rule: String,
-    /// A table's `│`, `─`, `├`, `┼` and `┤`.
+    /// A table's border: its top `┌┬┐`, the row under its header `├┼┤`, its bottom `└┴┘`,
+    /// then the `│` between cells and the `─` across.
     pub table: Vec<String>,
+    /// Marks a column's alignment at its ends in the row under the header.
+    pub table_alignment: String,
     /// Icons for links whose address contains the key; the longest key wins, `link` otherwise.
     pub links: BTreeMap<String, String>,
     /// Callouts such as `> [!NOTE]`, by their lowercase name.
@@ -185,7 +188,10 @@ impl Default for MarkdownGlyphs {
             link: "󰌹 ".into(),
             image: "󰥶 ".into(),
             rule: "─".into(),
-            table: ["│", "─", "├", "┼", "┤"].map(String::from).into(),
+            table: ["┌", "┬", "┐", "├", "┼", "┤", "└", "┴", "┘", "│", "─"]
+                .map(String::from)
+                .into(),
+            table_alignment: "━".into(),
             links: BTreeMap::new(),
             callouts: BTreeMap::new(),
         }

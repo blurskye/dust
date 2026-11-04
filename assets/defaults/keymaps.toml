@@ -559,6 +559,20 @@ keys = "right"
 command = "input.motion"
 arguments = { motion = "right", linewise = false }
 [[keymap]]
+id = "builtin.editor.insert.input-motion.word-backward.ctrl-left"
+context = "editor"
+mode = "insert"
+keys = "ctrl-left"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.word-forward.ctrl-right"
+context = "editor"
+mode = "insert"
+keys = "ctrl-right"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
 id = "builtin.editor.insert.input-motion.up"
 context = "editor"
 mode = "insert"
@@ -1833,6 +1847,16 @@ context = "command_prompt"
 keys = "right"
 command = "command_line.move_right"
 [[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-word-left.ctrl-left"
+context = "command_prompt"
+keys = "ctrl-left"
+command = "command_line.move_word_left"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-word-right.ctrl-right"
+context = "command_prompt"
+keys = "ctrl-right"
+command = "command_line.move_word_right"
+[[keymap]]
 id = "builtin.command-prompt.surface.command-line-move-home.home"
 context = "command_prompt"
 keys = "home"
@@ -1898,6 +1922,16 @@ id = "builtin.search-prompt.surface.command-line-move-right.right"
 context = "search_prompt"
 keys = "right"
 command = "command_line.move_right"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-word-left.ctrl-left"
+context = "search_prompt"
+keys = "ctrl-left"
+command = "command_line.move_word_left"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-word-right.ctrl-right"
+context = "search_prompt"
+keys = "ctrl-right"
+command = "command_line.move_word_right"
 [[keymap]]
 id = "builtin.search-prompt.surface.command-line-move-home.home"
 context = "search_prompt"
@@ -5348,11 +5382,11 @@ keys = "ctrl-l"
 command = "surface.focus.right"
 
 [[keymap]]
-id = "builtin.agent.window-resize.ctrl-left"
+id = "builtin.agent.word-left.ctrl-left"
 context = "agent"
 keys = "ctrl-left"
-command = "window.resize.directional"
-arguments = { direction = "left" }
+command = "agent.input.edit"
+arguments = { action = "word_left" }
 
 [[keymap]]
 id = "builtin.agent.window-resize.ctrl-down"
@@ -5369,11 +5403,11 @@ command = "window.resize.directional"
 arguments = { direction = "up" }
 
 [[keymap]]
-id = "builtin.agent.window-resize.ctrl-right"
+id = "builtin.agent.word-right.ctrl-right"
 context = "agent"
 keys = "ctrl-right"
-command = "window.resize.directional"
-arguments = { direction = "right" }
+command = "agent.input.edit"
+arguments = { action = "word_right" }
 
 [[keymap]]
 id = "builtin.agent.terminal-toggle.ctrl-slash"
@@ -7383,6 +7417,18 @@ id = "builtin.settings-edit.right.right"
 context = "settings_edit"
 keys = "right"
 command = "settings.page.right"
+
+[[keymap]]
+id = "builtin.settings-edit.word-left.ctrl-left"
+context = "settings_edit"
+keys = "ctrl-left"
+command = "settings.page.word_left"
+
+[[keymap]]
+id = "builtin.settings-edit.word-right.ctrl-right"
+context = "settings_edit"
+keys = "ctrl-right"
+command = "settings.page.word_right"
 
 [[keymap]]
 id = "builtin.settings-edit.home.home"

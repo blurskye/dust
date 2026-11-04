@@ -288,23 +288,16 @@ impl InputSession {
         if let Some(prompt) = &mut self.prompt {
             if let Some(confirmation) = &mut prompt.confirmation {
                 confirmation.selected = match movement {
-                    PromptMove::Left | PromptMove::Home => ConfirmationChoice::Yes,
-                    PromptMove::Right | PromptMove::End => ConfirmationChoice::No,
+                    PromptMove::Left | PromptMove::WordLeft | PromptMove::Home => {
+                        ConfirmationChoice::Yes
+                    }
+                    PromptMove::Right | PromptMove::WordRight | PromptMove::End => {
+                        ConfirmationChoice::No
+                    }
                 };
                 return;
             }
-            prompt.cursor = match movement {
-                PromptMove::Home => 0,
-                PromptMove::End => prompt.input.len(),
-                PromptMove::Left => prompt.input[..prompt.cursor]
-                    .grapheme_indices(true)
-                    .next_back()
-                    .map_or(0, |(index, _)| index),
-                PromptMove::Right => prompt.input[prompt.cursor..]
-                    .grapheme_indices(true)
-                    .nth(1)
-                    .map_or(prompt.input.len(), |(index, _)| prompt.cursor + index),
-            };
+            prompt.cursor = movement.apply(&prompt.input, prompt.cursor);
         }
     }
 

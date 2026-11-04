@@ -5013,10 +5013,11 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
 }
 
 #[test]
-fn a_table_cell_that_hides_markup_is_padded_so_its_border_stays_in_line() {
+fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
     use crate::editor::text::{ByteOffset, ByteRange};
-    use crate::language::syntax::{MarkdownMark, TablePart};
-    let text = "| `a` | b |\nlast";
+    use crate::language::syntax::MarkdownMark;
+    // Unaligned, the second row without its outer pipes and the last one short of a cell.
+    let text = "\n| `a` | long head |\n|---|--:|\nwide cell | b\n| c |\n\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
     let loaded = crate::config::load_bundled_config();
@@ -5026,26 +5027,51 @@ fn a_table_cell_that_hides_markup_is_padded_so_its_border_stays_in_line() {
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, length: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
         buffer,
         revision,
-        range: ByteRange::new(ByteOffset(start), ByteOffset(start + length)).expect("mark range"),
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
         mark,
     };
+    let table_end = text.find("\n\nlast").expect("table end") + 1;
     let mut ui = ui_with_editor_layout(&state);
-    ui.markdown_marks = vec![
-        mark(0, 1, MarkdownMark::Table(TablePart::Pipe)),
-        mark(2, 1, MarkdownMark::Hide),
-        mark(2, 3, MarkdownMark::InlineCode),
-        mark(4, 1, MarkdownMark::Hide),
-        mark(6, 1, MarkdownMark::Table(TablePart::Pipe)),
-        mark(10, 1, MarkdownMark::Table(TablePart::Pipe)),
-    ];
+    ui.markdown_marks = text
+        .match_indices('|')
+        .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+        .collect();
+    let code = text.find('`').expect("code");
+    ui.markdown_marks.extend([
+        mark(1, table_end, MarkdownMark::Table),
+        mark(code, code + 1, MarkdownMark::Hide),
+        mark(code, code + 3, MarkdownMark::InlineCode),
+        mark(code + 2, code + 3, MarkdownMark::Hide),
+    ]);
     ui.markdown_marks.sort_by_key(|mark| mark.range.start);
-    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 2);
-    assert_eq!(frame.grid.row_text(0).trim_end(), "│ a   │ b │");
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 30, 8);
+    let rows = (0..6)
+        .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            "┌───────────┬───────────┐",
+            "│ a         │ long head │",
+            "├───────────┼──────────━┤",
+            "│ wide cell │         b │",
+            "│ c         │           │",
+            "└───────────┴───────────┘",
+        ]
+    );
     assert!(matches!(
-        frame.grid.get(2, 0).expect("code").style,
+        frame.grid.get(2, 1).expect("code").style,
         crate::ui::Style::MarkdownCode(_)
     ));
+    // The cursor's row shows its source and the others stay lined up.
+    state.views[view].cursor = ByteOffset(text.find("wide").expect("row"));
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 30, 8);
+    assert_eq!(frame.grid.row_text(3).trim_end(), "wide cell | b");
+    assert_eq!(
+        frame.grid.row_text(4).trim_end(),
+        "│ c         │           │"
+    );
 }

@@ -31,18 +31,10 @@ pub enum MarkdownMark {
     CodeLanguage,
     /// A `---` break, drawn as a line across the window.
     Rule,
-    /// A table's `|`, or a character of the row under its header.
-    Table(TablePart),
-}
-
-/// The pieces of a table's border, as `├──┼──┤` under the header and `│` between cells.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TablePart {
-    Pipe,
-    Line,
-    Left,
-    Cross,
-    Right,
+    /// A whole table, whose cells are padded to their column's width.
+    Table,
+    /// A `|` between a table's cells, in any of its rows.
+    TablePipe,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,29 +128,11 @@ pub(super) fn block_marks(
                     push(at, at + 1, MarkdownMark::Quote { callout });
                 }
             }
-            "pipe_table_header" | "pipe_table_row" => {
+            "pipe_table" => push(node.start_byte(), node.end_byte(), MarkdownMark::Table),
+            "pipe_table_header" | "pipe_table_delimiter_row" | "pipe_table_row" => {
                 let mut walk = node.walk();
                 for pipe in node.children(&mut walk).filter(|child| child.kind() == "|") {
-                    push(
-                        pipe.start_byte(),
-                        pipe.end_byte(),
-                        MarkdownMark::Table(TablePart::Pipe),
-                    );
-                }
-            }
-            "pipe_table_delimiter_row" => {
-                let text = source.get(node.byte_range()).unwrap_or_default();
-                let last = text.trim_end().rfind('|');
-                for (at, character) in text.char_indices() {
-                    let part = match character {
-                        '|' if at == 0 => TablePart::Left,
-                        '|' if Some(at) == last => TablePart::Right,
-                        '|' => TablePart::Cross,
-                        '-' | ':' => TablePart::Line,
-                        _ => continue,
-                    };
-                    let at = node.start_byte() + at;
-                    push(at, at + 1, MarkdownMark::Table(part));
+                    push(pipe.start_byte(), pipe.end_byte(), MarkdownMark::TablePipe);
                 }
             }
             "thematic_break" => push(

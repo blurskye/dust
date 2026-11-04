@@ -824,7 +824,8 @@ fn dragging_the_border_between_two_windows_resizes_them() {
 }
 
 #[test]
-fn the_agent_panel_opens_narrow_and_ctrl_arrows_resize_it() {
+fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_resize_it_in_normal_mode()
+ {
     let mut app = app();
     app.window_session.observe_size((160, 45));
     app.state.open_text(TextBuffer::from_text("a\n"), None);
@@ -860,19 +861,31 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_resize_it() {
         (100..=106).contains(&opened[0]),
         "the panel opens at about 35%: {layout}"
     );
+    // While typing, ctrl-left and ctrl-right move by word, as in any other input.
+    for key in "ask it".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
     app.handle_configured_key("ctrl-left".parse::<KeyEvent>().expect("ctrl-left"));
-    // As in LazyVim, ctrl-left narrows the focused window and ctrl-right widens it.
+    let cursor =
+        |app: &InteractiveApplication| app.ui.agent_panel.as_ref().map(|panel| panel.cursor);
+    assert_eq!(cursor(&app), Some(4));
+    assert_eq!(border(&app).0, opened);
+    app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("ctrl-right"));
+    assert_eq!(cursor(&app), Some(6));
+    // As in LazyVim, ctrl-left narrows the focused window in Normal mode and ctrl-right
+    // widens it.
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.handle_configured_key("ctrl-left".parse::<KeyEvent>().expect("ctrl-left"));
     let (narrowed, layout) = border(&app);
     assert!(
         narrowed[0] > opened[0],
         "ctrl-left narrows the panel: {opened:?} -> {layout}"
     );
-    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("ctrl-right"));
     let (widened, layout) = border(&app);
     assert!(
         widened[0] < narrowed[0],
-        "ctrl-right widens it in Normal mode: {narrowed:?} -> {layout}"
+        "ctrl-right widens it: {narrowed:?} -> {layout}"
     );
 }
 

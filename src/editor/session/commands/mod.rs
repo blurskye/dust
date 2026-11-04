@@ -551,8 +551,63 @@ pub enum SettingsAction {
 pub enum PromptMove {
     Left,
     Right,
+    /// To the start of the word or run of punctuation before the cursor, as Vim's `b`.
+    WordLeft,
+    /// To the start of the next word or run of punctuation, as Vim's `w`.
+    WordRight,
     Home,
     End,
+}
+
+impl PromptMove {
+    /// Where a cursor at byte `cursor` of a single text field moves to.
+    #[must_use]
+    pub fn apply(self, text: &str, cursor: usize) -> usize {
+        use unicode_segmentation::UnicodeSegmentation;
+        let class = |character: char| {
+            if character.is_whitespace() {
+                0
+            } else if character.is_alphanumeric() || character == '_' {
+                1
+            } else {
+                2
+            }
+        };
+        match self {
+            Self::Home => 0,
+            Self::End => text.len(),
+            Self::Left => text[..cursor]
+                .grapheme_indices(true)
+                .next_back()
+                .map_or(0, |(index, _)| index),
+            Self::Right => text[cursor..]
+                .grapheme_indices(true)
+                .nth(1)
+                .map_or(text.len(), |(index, _)| cursor + index),
+            Self::WordRight => {
+                let mut characters = text[cursor..].char_indices().peekable();
+                let start = characters.peek().map(|(_, character)| class(*character));
+                characters
+                    .skip_while(|(_, character)| Some(class(*character)) == start)
+                    .find(|(_, character)| class(*character) != 0)
+                    .map_or(text.len(), |(index, _)| cursor + index)
+            }
+            Self::WordLeft => {
+                let mut characters = text[..cursor]
+                    .char_indices()
+                    .rev()
+                    .skip_while(|(_, character)| character.is_whitespace())
+                    .peekable();
+                let Some(word) = characters.peek().map(|(_, character)| class(*character)) else {
+                    return 0;
+                };
+                characters
+                    .take_while(|(_, character)| class(*character) == word)
+                    .last()
+                    .map_or(0, |(index, _)| index)
+            }
+        }
+    }
 }
 
 pub fn register_app_commands(
@@ -870,5 +925,31 @@ fn bool_arg(
         _ => Err(CommandError::InvalidArguments(format!(
             "missing boolean `{name}`"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PromptMove;
+
+    #[test]
+    fn word_moves_stop_at_words_and_punctuation_runs_as_vim_does() {
+        let text = "git  push --force origin";
+        let stops = |movement: PromptMove, from: usize| {
+            let mut stops = Vec::new();
+            let mut cursor = from;
+            loop {
+                let next = movement.apply(text, cursor);
+                if next == cursor {
+                    return stops;
+                }
+                stops.push(next);
+                cursor = next;
+            }
+        };
+        assert_eq!(stops(PromptMove::WordRight, 0), [5, 10, 12, 18, 24]);
+        assert_eq!(stops(PromptMove::WordLeft, 24), [18, 12, 10, 5, 0]);
+        assert_eq!(PromptMove::WordLeft.apply(text, 7), 5);
+        assert_eq!(PromptMove::WordRight.apply("añb c", 0), 5);
     }
 }

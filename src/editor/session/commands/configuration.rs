@@ -83,6 +83,16 @@ pub(super) fn register_commands(
             SettingsAction::Cursor(PromptMove::Right),
         ),
         (
+            "settings.page.word_left",
+            "Cursor a word left",
+            SettingsAction::Cursor(PromptMove::WordLeft),
+        ),
+        (
+            "settings.page.word_right",
+            "Cursor a word right",
+            SettingsAction::Cursor(PromptMove::WordRight),
+        ),
+        (
             "settings.page.home",
             "Cursor to start",
             SettingsAction::Cursor(PromptMove::Home),
@@ -692,6 +702,16 @@ pub(super) fn register_commands(
             "command_line.move_right",
             "Prompt right",
             AppEffect::PromptMove(PromptMove::Right),
+        ),
+        (
+            "command_line.move_word_left",
+            "Prompt word left",
+            AppEffect::PromptMove(PromptMove::WordLeft),
+        ),
+        (
+            "command_line.move_word_right",
+            "Prompt word right",
+            AppEffect::PromptMove(PromptMove::WordRight),
         ),
         (
             "command_line.move_home",

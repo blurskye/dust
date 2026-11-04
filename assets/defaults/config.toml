@@ -36,7 +36,9 @@ quote = "▋"
 link = "󰌹 "
 image = "󰥶 "
 rule = "─"
-table = ["│", "─", "├", "┼", "┤"]
+# A table's top, the row under its header, its bottom, then the line between cells and across.
+table = ["┌", "┬", "┐", "├", "┼", "┤", "└", "┴", "┘", "│", "─"]
+table_alignment = "━"
 
 # A link's icon by what its address contains; the longest match wins, `link` otherwise.
 [editor.markdown.glyphs.links]
@@ -1006,6 +1008,8 @@ workspace = "Project"
 "command_line.move_home" = "Prompt home"
 "command_line.move_left" = "Prompt left"
 "command_line.move_right" = "Prompt right"
+"command_line.move_word_left" = "Prompt word left"
+"command_line.move_word_right" = "Prompt word right"
 "application.notifications.open" = "Open notification history"
 "application.notification.dismiss" = "Dismiss current notification"
 "command_line.open" = "Open command line"
@@ -1031,6 +1035,8 @@ workspace = "Project"
 "settings.page.clear" = "Clear the text"
 "settings.page.left" = "Cursor left"
 "settings.page.right" = "Cursor right"
+"settings.page.word_left" = "Cursor a word left"
+"settings.page.word_right" = "Cursor a word right"
 "settings.page.home" = "Cursor to start"
 "settings.page.end" = "Cursor to end"
 "config.reload" = "Reload Settings"

@@ -19,6 +19,7 @@ use std::{
 use serde_json::{Value, json};
 
 use super::InteractiveApplication;
+use super::commands::PromptMove;
 use crate::ui::window::ContentLifecycle;
 use crate::{
     agent::{
@@ -2299,7 +2300,7 @@ impl InteractiveApplication {
     }
 
     /// Editing keys in the input: `submit`, `newline`, `backspace`, `delete`, `left`, `right`,
-    /// `home`, `end`, `up`, `down`, `delete_word`, `clear_line`, `clear` and `complete`, and
+    /// `word_left`, `word_right`, `home`, `end`, `up`, `down`, `delete_word`, `clear_line`, `clear` and `complete`, and
     /// the Vim ones in `agent_input_vim`. While the slash-command menu is open, up and down
     /// move in it, and `complete` and `submit` take the selected command.
     pub(super) fn agent_input_edit(&mut self, action: &str) {
@@ -2371,6 +2372,8 @@ impl InteractiveApplication {
             }
             "left" => cursor - before,
             "right" => cursor + after,
+            "word_left" => PromptMove::WordLeft.apply(input, cursor),
+            "word_right" => PromptMove::WordRight.apply(input, cursor),
             "home" => line_start,
             "end" => line_end,
             "delete_word" => {

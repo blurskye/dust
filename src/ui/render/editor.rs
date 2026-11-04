@@ -382,6 +382,7 @@ pub(super) fn render_editor_view(
         view.mode,
         current_line,
         &config.editor.markdown,
+        config.editor.ambiguous_width,
     );
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
@@ -600,19 +601,18 @@ pub(super) fn render_editor_view(
                 }
                 inlay_cursor = inlay_cursor.saturating_add(1);
             }
-            match markdown_line
-                .as_ref()
-                .and_then(|markdown| markdown.at(global))
-            {
-                Some(super::markdown::Drawn::Hidden) => continue,
-                Some(super::markdown::Drawn::Glyph(glyph, style)) => {
-                    x = grid.put_text_clipped(x, screen_row, glyph, style, width);
-                    continue;
+            if let Some(markdown) = &markdown_line {
+                for (text, style) in markdown.before(global) {
+                    x = grid.put_text_clipped(x, screen_row, text, style, width);
                 }
-                Some(super::markdown::Drawn::Prefix(glyph, style)) => {
-                    x = grid.put_text_clipped(x, screen_row, glyph, style, width);
+                match markdown.at(global) {
+                    Some(super::markdown::Drawn::Hidden) => continue,
+                    Some(super::markdown::Drawn::Glyph(glyph, style)) => {
+                        x = grid.put_text_clipped(x, screen_row, glyph, style, width);
+                        continue;
+                    }
+                    None => {}
                 }
-                None => {}
             }
             let style = if is_selected(
                 view.selection,
@@ -802,6 +802,9 @@ pub(super) fn render_editor_view(
             }
         }
         if let Some(markdown) = &markdown_line {
+            if let Some((text, style)) = &markdown.after {
+                x = grid.put_text_clipped(x, screen_row, text, *style, width);
+            }
             if let Some(rule) = markdown.rule {
                 while x < width {
                     let next = grid.put_text_clipped(x, screen_row, rule, Style::Muted, width);
