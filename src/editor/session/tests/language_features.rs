@@ -467,7 +467,7 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
         command: None,
     };
     app.language
-        .offer_actions("types", vec![action("from types")], None);
+        .offer_actions("types", &uri, vec![action("from types")], None);
     app.present_lsp_result(
         "linter",
         1,
@@ -743,6 +743,29 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
     wait_vfs(&mut app);
     assert!(app.format_on_save.is_none());
     assert_eq!(fs::read_to_string(path).unwrap(), "a b\n");
+}
+
+#[test]
+fn leaving_the_last_snippet_stop_clears_its_selection() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo"), None);
+    let source = app.state.window_version();
+    app.input.install_snippet(
+        crate::editor::session::input::SnippetDocument {
+            editor: &source,
+            buffer,
+            text: &app.state.buffers[buffer].text,
+            view: Some(view),
+        },
+        ByteOffset(0),
+        crate::language::lsp::parse_snippet("${1:foo}", 1024).unwrap().tabstops,
+    );
+    app.select_snippet_current();
+    assert!(app.state.views[view].selection.is_some());
+    app.navigate_snippet(1);
+    assert!(app.input.snippet_buffer().is_none());
+    assert!(app.state.views[view].selection.is_none());
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
 }
 
 #[test]

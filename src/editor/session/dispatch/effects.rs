@@ -7077,9 +7077,7 @@ impl InteractiveApplication {
                         view: self.state.active_view,
                     },
                     start,
-                    tabstops
-                        .into_iter()
-                        .map(|stop| (stop.index, stop.start, stop.end)),
+                    tabstops,
                 );
                 self.select_snippet_current();
             }
@@ -7118,7 +7116,18 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn navigate_snippet(&mut self, direction: i8) {
-        self.input.navigate_snippet(direction);
+        let buffer = self.input.snippet_buffer();
+        if self.input.navigate_snippet(direction)
+            && let Some(view) = self.state.active_view
+            && Some(self.state.views[view].buffer) == buffer
+        {
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_undo_policy(UndoPolicy::Ignore)
+                .with_operation(EditorOperation::SetSelection { view, selection: None });
+            if let Err(error) = self.state.apply_transaction(&transaction) {
+                self.show_error(error);
+            }
+        }
         self.select_snippet_current();
     }
 }
@@ -9525,7 +9534,17 @@ impl InteractiveApplication {
             _ => None,
         };
         let code_action = match &payload {
-            Some(PickerPayload::CodeAction(key)) => Some(self.language.take_action(key)),
+            Some(PickerPayload::CodeAction(key)) => {
+                let documents = self.state.buffers.iter().filter_map(|(id, buffer)| {
+                    Some(crate::editor::session::lsp_edits::EditDocument {
+                        id,
+                        path: buffer.path.as_deref()?,
+                        text: &buffer.text,
+                        dirty: buffer.dirty,
+                    })
+                }).collect::<Vec<_>>();
+                Some(self.language.take_action(key, &documents))
+            },
             _ => None,
         };
         let debug_selection = match &payload {

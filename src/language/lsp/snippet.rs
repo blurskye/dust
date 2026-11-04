@@ -3,6 +3,16 @@ pub struct SnippetTabstop {
     pub index: u32,
     pub start: usize,
     pub end: usize,
+    pub depth: usize,
+    pub order: usize,
+}
+impl SnippetTabstop {
+    pub(crate) fn range(&self) -> crate::editor::text::ByteRange {
+        crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(self.start),
+            crate::editor::text::ByteOffset(self.end),
+        ).expect("snippet tabstop endpoints are ordered")
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedSnippet {
@@ -112,6 +122,8 @@ fn expand(
             index: number,
             start: position,
             end: position,
+            depth,
+            order: stop,
         });
         let default = braced && bytes.get(*cursor) == Some(&b':');
         if default {

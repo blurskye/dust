@@ -3733,7 +3733,7 @@ impl InteractiveApplication {
                 );
             }
             LspFeatureResult::CodeActions(actions) => {
-                self.language.offer_actions(server, actions, context);
+                self.language.offer_actions(server, uri, actions, context);
                 if !self.language.request_pending() {
                     self.open_lsp_code_actions_picker(server);
                 }
@@ -4033,6 +4033,7 @@ impl InteractiveApplication {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
+                    dirty: buffer.dirty,
                 })
             })
             .collect::<Vec<_>>();
@@ -4148,6 +4149,7 @@ impl InteractiveApplication {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
+                    dirty: buffer.dirty,
                 })
             })
             .collect::<Vec<_>>();
@@ -4318,6 +4320,7 @@ impl InteractiveApplication {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
+                    dirty: buffer.dirty,
                 })
             })
             .collect::<Vec<_>>();

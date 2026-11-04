@@ -14,6 +14,10 @@ use std::{
 #[derive(Clone)]
 pub(in crate::editor::session) enum InputFile {
     Read(PathBuf),
+    ReadMatchingDisk {
+        path: PathBuf,
+        text: crate::editor::text::TextBuffer,
+    },
     Create(PathBuf),
     Resource {
         source: PathBuf,
@@ -23,7 +27,7 @@ pub(in crate::editor::session) enum InputFile {
 impl InputFile {
     pub(super) fn path(&self) -> &Path {
         match self {
-            Self::Read(path) | Self::Create(path) => path,
+            Self::Read(path) | Self::Create(path) | Self::ReadMatchingDisk { path, .. } => path,
             Self::Resource { source, .. } => source,
         }
     }
@@ -295,7 +299,7 @@ impl WorkspaceEditSession {
         }
         p.slots[index] = Slot::Complete;
         match (file, result) {
-            (InputFile::Read(requested), VfsResult::Read { path, result, .. }) => {
+            (file @ (InputFile::Read(_) | InputFile::ReadMatchingDisk { .. }), VfsResult::Read { path, result, .. }) => {
                 let bytes = result.map_err(|e| e.to_string())?;
                 if bytes.len() > p.maximum {
                     return Err("workspace read exceeds its admitted byte limit".into());
@@ -303,10 +307,18 @@ impl WorkspaceEditSession {
                 if !p.roots.iter().any(|root| path.starts_with(root)) {
                     return Err("workspace read escaped its scope".into());
                 }
-                p.paths.insert(requested, path.clone());
+                let revision = if let InputFile::ReadMatchingDisk { text, .. } = &file {
+                    if !text.matches_encoded_text(&bytes) {
+                        return Err("untracked workspace edit buffer differs from disk".into());
+                    }
+                    Some(text.revision())
+                } else {
+                    None
+                };
+                p.paths.insert(file.path().to_owned(), path.clone());
                 p.snapshots.push(FileSnapshot {
                     canonical_path: path,
-                    revision: None,
+                    revision,
                     bytes,
                 });
             }

@@ -252,10 +252,11 @@ impl LspSession {
     pub(super) fn offer_actions(
         &mut self,
         server: &str,
+        uri: &str,
         actions: Vec<LspCodeAction>,
         context: Option<EditContext>,
     ) {
-        self.edits.offer_actions(server, actions, context);
+        self.edits.offer_actions(server, uri, actions, context);
     }
     pub(super) fn clear_offered_actions(&mut self) {
         self.edits.clear_offered_actions();
@@ -280,8 +281,8 @@ impl LspSession {
     pub(super) fn clear_actions(&mut self) {
         self.edits.clear_actions();
     }
-    pub(super) fn take_action(&mut self, key: &CodeActionKey) -> Result<OfferedAction, String> {
-        self.edits.take_action(key, &self.service)
+    pub(super) fn take_action(&mut self, key: &CodeActionKey, current: &[EditDocument<'_>]) -> Result<OfferedAction, String> {
+        self.edits.take_action(key, &self.service, current)
     }
     pub(super) fn poll_event(&self) -> Option<OwnedLspEvent> {
         self.edits.poll_event(&self.service)

@@ -792,7 +792,7 @@ impl DocumentSession {
             let file = permit.file(&self.owner)?;
             use super::workspace_edits::InputFile;
             match file {
-                InputFile::Read(path) => {
+                InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
                     self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
                 }
                 InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
