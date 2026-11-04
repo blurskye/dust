@@ -1139,6 +1139,9 @@ impl InteractiveApplication {
     /// An agent's `agent` tool call: start a subagent of the asking session in a new tab.
     /// The tab shown does not change; the subagent's answer goes back once it is done.
     pub(super) fn start_subagent(&mut self, request: AgentRequest) {
+        if request.reply.is_cancelled() {
+            return;
+        }
         let Some(parent) = self
             .agent
             .sessions
@@ -1159,7 +1162,13 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let index = self.add_agent_tab(name, root, Vec::new(), None, None);
+        let index = match self.add_agent_tab(name, root, Vec::new(), None, None) {
+            Ok(index) => index,
+            Err(error) => {
+                request.reply.send(Err(error));
+                return;
+            }
+        };
         let session = &mut self.agent.sessions[index];
         session.parent = Some(request.parent);
         session.task = match request.description.trim() {
@@ -1246,7 +1255,7 @@ impl InteractiveApplication {
             .profiles
             .get(name)
             .and_then(|profile| profile.note.clone().map(Entry::Notice));
-        let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None);
+        let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None)?;
         self.agent.active = index;
         self.agent.sessions[index].attach(spawned);
         self.agent.sessions[index].entries.extend(note);
@@ -1261,9 +1270,8 @@ impl InteractiveApplication {
         entries: Vec<Entry>,
         earlier: Option<String>,
         history: Option<String>,
-    ) -> usize {
-        self.agent.started += 1;
-        let number = self.agent.started;
+    ) -> Result<usize, String> {
+        let number = self.agent.started + 1;
         let history = history.unwrap_or_else(|| {
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1279,10 +1287,11 @@ impl InteractiveApplication {
                     server.path(),
                     number,
                     &profiles
-                )])
+                )?])
             }
             _ => json!([]),
         };
+        self.agent.started = number;
         self.agent.sessions.push(AgentSession {
             number,
             name,
@@ -1308,7 +1317,7 @@ impl InteractiveApplication {
             tools,
             meta: None,
         });
-        self.agent.sessions.len() - 1
+        Ok(self.agent.sessions.len() - 1)
     }
 
     /// Start the active tab's agent again after it exited, in the tab's own worktree. It
@@ -1425,6 +1434,12 @@ impl InteractiveApplication {
     pub(super) fn process_agent_events(&mut self) {
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
+            if self.agent.sessions[index].reply.as_ref().is_some_and(Reply::is_cancelled) {
+                let number = self.agent.sessions[index].number;
+                self.cancel_agent_permissions(&[number]);
+                self.agent.sessions[index].stop("the MCP client cancelled the subagent");
+                changed = true;
+            }
             let mut save = false;
             for _ in 0..MESSAGES_PER_TICK {
                 let Some(message) = self.agent.sessions[index]
@@ -1520,7 +1535,7 @@ impl InteractiveApplication {
             entries,
             conversation.session,
             Some(conversation.id),
-        );
+        ).map_err(|error| self.show_error(error)).ok()?;
         self.agent.active = index;
         Some(index)
     }
@@ -2961,7 +2976,7 @@ mod tests {
             Vec::new(),
             None,
             None,
-        )
+        ).unwrap()
     }
 
     fn child(app: &mut InteractiveApplication, parent: u64, phase: Phase) -> usize {
@@ -3003,6 +3018,54 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_tab_passes_its_remote_socket_to_the_mcp_server() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = test_app();
+        let server = crate::remote::RemoteServer::start(directory.path()).unwrap();
+        let socket = server.path().to_str().unwrap().to_owned();
+        app.remote = Some(server);
+        let index = tab(&mut app);
+        let tools = &app.agent.sessions[index].tools;
+        assert_eq!(tools[0]["env"][0]["value"], socket);
+        assert_eq!(tools[0]["args"][1], app.agent.sessions[index].number.to_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_mcp_cancellation_stops_only_the_requested_child() {
+        let (reply, connection) = subagent_reply();
+        let (other_reply, _other_connection) = subagent_reply();
+        let mut app = test_app();
+        let parent = tab(&mut app);
+        let number = app.agent.sessions[parent].number;
+        let cancelled = child(&mut app, number, Phase::Prompting(2));
+        let other = child(&mut app, number, Phase::Creating(3));
+        app.agent.sessions[cancelled].reply = Some(reply);
+        app.agent.sessions[other].reply = Some(other_reply);
+        for index in [cancelled, other] {
+            app.agent.sessions[index].process = Some(
+                AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &app.state.workspace_root).unwrap()
+            );
+        }
+        let cancelled_number = app.agent.sessions[cancelled].number;
+        app.agent.permissions.push_back(permission(cancelled_number));
+        app.agent.asking = Some(permission(cancelled_number));
+        connection.get_ref().shutdown(std::net::Shutdown::Both).unwrap();
+        app.process_agent_events();
+        let session = &app.agent.sessions[cancelled];
+        assert_eq!(session.phase, Phase::Stopped);
+        assert!(session.process.is_none());
+        assert!(session.queued.is_empty());
+        assert!(session.reply.is_none());
+        assert!(app.agent.permissions.is_empty());
+        assert!(app.agent.asking.is_none());
+        assert_eq!(app.agent.sessions[other].phase, Phase::Creating(3));
+        assert!(app.agent.sessions[other].reply.is_some());
+        assert_eq!(app.agent.sessions[parent].phase, Phase::Ready);
     }
 
     #[cfg(unix)]
@@ -3207,7 +3270,7 @@ mod tests {
             Vec::new(),
             None,
             None,
-        );
+        ).unwrap();
         app.agent.active = index;
         app.show_agent_panel();
         app.agent.context.push(PromptPart::Text("context".into()));

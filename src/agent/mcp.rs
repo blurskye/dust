@@ -9,6 +9,8 @@
 
 use std::{
     io::{self, BufRead, Read, Write},
+    net::Shutdown,
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
@@ -32,9 +34,10 @@ independent tasks that can run in parallel, a self-contained change), use this t
 never a built-in subagent or task tool. Each subagent shows up as its own tab in Dust.";
 
 /// The `mcpServers` entry of `session/new` that runs this server for the tab `tab`.
-#[must_use]
-pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Value {
-    json!({
+pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Result<Value, String> {
+    let dust = dust.to_str().ok_or("Dust's MCP server requires a UTF-8 executable path; move Dust to a UTF-8 installation directory")?;
+    let socket = socket.to_str().ok_or("Dust's MCP server requires a UTF-8 socket path; use a UTF-8 runtime directory")?;
+    Ok(json!({
         "name": "dust",
         "command": dust,
         "args": ["--agent-tools", tab.to_string()],
@@ -42,7 +45,7 @@ pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Val
             {"name": remote::SERVER_VARIABLE, "value": socket},
             {"name": PROFILES_VARIABLE, "value": profiles},
         ],
-    })
+    }))
 }
 
 /// Answer MCP requests until stdin closes. Tool calls run on their own threads, so several
@@ -57,7 +60,7 @@ fn serve_io<W: Write + Send + 'static>(
     target: Option<(PathBuf, u64)>,
     profiles: &str,
 ) -> io::Result<()> {
-    let mut calls: Vec<thread::JoinHandle<()>> = Vec::new();
+    let mut calls: Vec<(Value, UnixStream, thread::JoinHandle<()>)> = Vec::new();
     let tools = if target.is_some() {
         vec![tool(profiles)]
     } else {
@@ -75,7 +78,15 @@ fn serve_io<W: Write + Send + 'static>(
         let Ok(message) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
-        // Notifications such as `notifications/initialized` need no answer.
+        // Closing this call's connection tells Dust to stop only its subagent.
+        if message["method"] == "notifications/cancelled" && message.get("id").is_none() {
+            if let Some((_, stream, _)) = calls.iter().find(|(id, _, call)| {
+                id == &message["params"]["requestId"] && !call.is_finished()
+            }) {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+            continue;
+        }
         let Some(id) = message.get("id").cloned() else {
             continue;
         };
@@ -100,15 +111,24 @@ fn serve_io<W: Write + Send + 'static>(
                     );
                     continue;
                 };
-                calls.retain(|call| !call.is_finished());
+                calls.retain(|(_, _, call)| !call.is_finished());
                 if calls.len() == MAX_CONCURRENT_CALLS {
                     Err(json!({"code": -32000, "message": "Dust's subagent capacity is full; retry after a call finishes"}))
                 } else {
-                    let (params, output) = (params.clone(), Arc::clone(&output));
-                    calls.push(thread::spawn(move || {
-                        write(&output, &answer(id, Ok(call(&socket, tab, &params))));
-                    }));
-                    continue;
+                    match UnixStream::connect(&socket).and_then(|stream| {
+                        stream.try_clone().map(|cancel| (stream, cancel))
+                    }) {
+                        Ok((stream, cancel)) => {
+                            let (params, output) = (params.clone(), Arc::clone(&output));
+                            let request_id = id.clone();
+                            let worker = thread::spawn(move || {
+                                write(&output, &answer(id, Ok(call(stream, tab, &params))));
+                            });
+                            calls.push((request_id, cancel, worker));
+                            continue;
+                        }
+                        Err(error) => Err(json!({"code": -32603, "message": format!("could not reach Dust: {error}")})),
+                    }
                 }
             }
             method => Err(json!({"code": -32601, "message": format!("{method} is not supported")})),
@@ -172,7 +192,7 @@ fn tool(profiles: &str) -> Value {
     })
 }
 
-fn call(socket: &Path, tab: u64, params: &Value) -> Value {
+fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
     let arguments = &params["arguments"];
     let (text, failed) = if params["name"] != "agent" {
         (format!("Dust has no tool {}", params["name"]), true)
@@ -184,7 +204,7 @@ fn call(socket: &Path, tab: u64, params: &Value) -> Value {
             "agent": arguments["agent"],
             "model": arguments["model"],
         });
-        match remote::ask_agent(socket, &request) {
+        match remote::ask_agent(stream, &request) {
             Ok(reply) => match reply["text"].as_str() {
                 Some(text) => (text.to_owned(), false),
                 None => (
@@ -205,6 +225,18 @@ fn call(socket: &Path, tab: u64, params: &Value) -> Value {
 mod tests {
     use super::*;
     use std::{io::{BufReader, Cursor}, os::unix::net::UnixListener, time::{Duration, Instant}};
+
+    #[test]
+    fn mcp_server_entry_rejects_non_utf8_paths() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let invalid = Path::new(OsStr::from_bytes(b"/invalid-\xff"));
+        let valid = Path::new("/dust");
+        assert!(server_entry(invalid, valid, 1, "").unwrap_err().contains("executable path"));
+        assert!(server_entry(valid, invalid, 1, "").unwrap_err().contains("socket path"));
+        let entry = server_entry(valid, Path::new("/socket"), 1, "pi").unwrap();
+        assert_eq!(entry["command"], "/dust");
+        assert_eq!(entry["env"][0]["value"], "/socket");
+    }
 
     #[test]
     fn mcp_input_rejects_oversized_lines_before_reading_the_rest() {
@@ -234,6 +266,48 @@ mod tests {
             .map(|line| serde_json::from_slice(line).unwrap()).collect();
         assert_eq!(replies.len(), 2);
         assert!(replies.iter().all(|reply| reply["id"] == 1 && reply["result"] == json!({})));
+    }
+
+    #[test]
+    fn mcp_cancellation_closes_only_the_matching_calls_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = remote::RemoteServer::start(directory.path()).unwrap();
+        let target = server.path().to_owned();
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let serving = thread::spawn(move || {
+            serve_io(BufReader::new(input), output, Some((target, 1)), "").unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut requests = Vec::new();
+        for id in [json!(1), json!("1")] {
+            writeln!(client, "{}", json!({
+                "id": id, "method": "tools/call", "params": {"name": "agent", "arguments": {
+                    "description": "test", "prompt": "wait"
+                }}
+            })).unwrap();
+            loop {
+                if let Some(remote::RemoteRequest::Agent(request)) = server.try_request() {
+                    requests.push(request);
+                    break;
+                }
+                assert!(Instant::now() < deadline, "call did not reach Dust");
+                thread::yield_now();
+            }
+        }
+        writeln!(client, "{}", json!({
+            "method": "notifications/cancelled", "params": {"requestId": 1}
+        })).unwrap();
+        while !requests[0].reply.is_cancelled() {
+            assert!(Instant::now() < deadline, "cancellation did not reach Dust");
+            thread::yield_now();
+        }
+        assert!(!requests[1].reply.is_cancelled());
+        for request in requests {
+            request.reply.send(Ok("done".into()));
+        }
+        drop(client);
+        serving.join().unwrap();
     }
 
     #[test]
