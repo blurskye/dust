@@ -3,12 +3,11 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, OpenOptions},
+    fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
     },
     thread,
@@ -90,7 +89,6 @@ const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
 const MAXIMUM_DESCRIPTOR_ID_BYTES: usize = 128;
 const MAXIMUM_PROVIDER_ID_BYTES: usize = 256;
 const MAXIMUM_VIRTUAL_KEY_BYTES: usize = 1024;
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct PersistencePolicy {
     pub maximum_file_bytes: usize,
@@ -829,19 +827,11 @@ fn write_state(
     {
         return Err(PersistenceError::InvalidFileType);
     }
-    let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), sequence));
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temp).map_err(PersistenceError::Io)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(PersistenceError::Io)?;
     file.write_all(&bytes).map_err(PersistenceError::Io)?;
-    file.sync_all().map_err(PersistenceError::Io)?;
-    fs::rename(&temp, path).map_err(PersistenceError::Io)?;
+    file.as_file().sync_all().map_err(PersistenceError::Io)?;
+    file.persist(path)
+        .map_err(|error| PersistenceError::Io(error.error))?;
     fs::File::open(parent)
         .and_then(|file| file.sync_all())
         .map_err(PersistenceError::Io)
@@ -854,13 +844,22 @@ fn merge_shared_state(
 ) {
     let empty = PersistedState::default();
     let previous = previous.unwrap_or(&empty);
-    merge_entries(
-        &mut state.recent_files,
-        &current.recent_files,
-        &previous.recent_files,
-        maximum,
-        Clone::clone,
-    );
+    // Keep locally opened files first, then the disk's newest-first order. The
+    // unchanged suffix may omit entries evicted by the local history limit.
+    let mut previous_order = previous.recent_files.iter().rev();
+    let unchanged = state.recent_files.iter().rev()
+        .take_while(|path| previous_order.by_ref().any(|old| old == *path))
+        .count();
+    let mut recent_files = state.recent_files[..state.recent_files.len() - unchanged].to_vec();
+    for path in &current.recent_files {
+        if !recent_files.contains(path)
+            && (state.recent_files.contains(path) || !previous.recent_files.contains(path))
+        {
+            recent_files.push(path.clone());
+        }
+    }
+    recent_files.truncate(maximum);
+    state.recent_files = recent_files;
     merge_entries(
         &mut state.marks,
         &current.marks,
@@ -1077,6 +1076,67 @@ mod tests {
         let session = loaded.session.unwrap();
         assert_eq!(session.content_descriptors[0].path, Some(path.clone()));
         assert_eq!(session.tabs[0].focused_path, Some(path));
+    }
+
+    #[test]
+    fn failed_writes_remove_temporary_files_and_preserve_saved_state() {
+        const CHILD: &str = "DUST_TEST_PERSISTENCE_FILE_LIMIT";
+        if std::env::var_os(CHILD).is_none() {
+            let result = std::process::Command::new("sh")
+                .args(["-c", "ulimit -f 1; trap '' XFSZ; exec \"$@\"", "sh"])
+                .arg(std::env::current_exe().unwrap())
+                .args(["--exact", "persistence::tests::failed_writes_remove_temporary_files_and_preserve_saved_state", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{}{}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            return;
+        }
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let policy = PersistencePolicy::default();
+        let mut state = PersistedState::default();
+        write_state(&path, &state, None, &policy).unwrap();
+        let original = fs::read(&path).unwrap();
+        state.command_history.push("x".repeat(8192));
+        assert!(matches!(write_state(&path, &state, None, &policy), Err(PersistenceError::Io(_))));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        let mut files = fs::read_dir(directory.path()).unwrap()
+            .map(|entry| entry.unwrap().file_name()).collect::<Vec<_>>();
+        files.sort();
+        assert_eq!(files, ["state.json", "state.json.lock"]);
+    }
+
+    #[test]
+    fn recent_file_merges_keep_newest_first_and_apply_the_limit_after_merging() {
+        let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let previous = PersistedState {
+            recent_files: paths(&["/a", "/b"]),
+            ..PersistedState::default()
+        };
+        let current = PersistedState {
+            recent_files: paths(&["/c", "/d", "/a", "/b"]),
+            ..previous.clone()
+        };
+        let mut state = previous.clone();
+        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        assert_eq!(state.recent_files, paths(&["/c", "/d", "/a"]));
+
+        // Local opens stay ahead of external opens, while local deletions stay deleted.
+        state.recent_files = paths(&["/e", "/a"]);
+        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        assert_eq!(state.recent_files, paths(&["/e", "/c", "/d"]));
+
+        let reordered = PersistedState {
+            recent_files: paths(&["/b", "/a"]),
+            ..previous.clone()
+        };
+        state = previous.clone();
+        super::merge_shared_state(&mut state, &reordered, Some(&previous), 3);
+        assert_eq!(state.recent_files, reordered.recent_files);
+        state = reordered.clone();
+        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        assert_eq!(state.recent_files, paths(&["/b", "/c", "/d"]));
     }
 
     #[test]

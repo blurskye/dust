@@ -114,10 +114,9 @@ pub fn picker_content_geometry(
                     .len(),
             ),
             crate::ui::PickerPreviewBody::Diff(diff) => {
-                let numbers = diff.number_width().saturating_mul(2).saturating_add(3);
-                // The diff's own width is measured from the same rows the painter reads.
+                // The measured rows already include both line-number columns.
                 let width = diff.content_width(config.editor.ambiguous_width);
-                (vec![], width.saturating_add(numbers).saturating_add(4))
+                (vec![], width.saturating_add(4))
             }
         };
         if rows.is_empty() {

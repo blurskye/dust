@@ -4527,6 +4527,54 @@ fn eof_fold_stops_forward_scrolling() {
 }
 
 #[test]
+fn picker_diff_geometry_does_not_count_line_numbers_twice() {
+    use crate::ui::{PickerPreview, PickerPreviewBody, PickerUiState, window::WindowRect};
+    let config = crate::config::load_bundled_config().config;
+    let diff = super::DiffPreview {
+        hunks: vec![super::DiffHunk {
+            header: "@@".into(),
+            collapsed_before: 0,
+            lines: vec![super::DiffLine {
+                old_number: Some(100),
+                new_number: Some(100),
+                kind: super::DiffLineKind::Context,
+                text: "x".repeat(30),
+                spans: Vec::new(),
+            }],
+        }],
+        provenance: String::new(),
+        truncated: false,
+        total_lines: 1,
+        layout: super::DiffLayout::Unified,
+    };
+    assert_eq!(diff.content_width(config.editor.ambiguous_width), 40);
+    let picker = PickerUiState {
+        preview: Some(PickerPreview {
+            title: "Diff".into(),
+            body: PickerPreviewBody::Diff(diff),
+        }),
+        preview_side_scroll: (0, 0),
+        footer: None,
+        input_hint: String::new(),
+        surface: crate::ui::PickerSurfaceKind::Changes,
+        title: "Changes".into(),
+        query: String::new(),
+        rows: Vec::new(),
+        selected: None,
+        scroll: 0,
+        loading: false,
+    };
+    let rect = WindowRect { x: 0, y: 0, width: 80, height: 24 };
+    let geometry = crate::ui::geometry::picker_content_geometry(&picker, &config, rect).unwrap();
+    assert!(geometry.divider.is_some());
+    assert!(geometry.stacked_divider.is_none());
+    let narrow = WindowRect { width: 74, ..rect };
+    let geometry = crate::ui::geometry::picker_content_geometry(&picker, &config, narrow).unwrap();
+    assert!(geometry.divider.is_none());
+    assert!(geometry.stacked_divider.is_some());
+}
+
+#[test]
 fn large_diff_rows_share_number_width() {
     let diff = super::DiffPreview {
         hunks: vec![super::DiffHunk {

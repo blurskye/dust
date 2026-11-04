@@ -64,7 +64,17 @@ pub fn install_panic_restore_hook() {
     PANIC_HOOK.call_once(|| {
         let previous = panic::take_hook();
         panic::set_hook(Box::new(move |information| {
-            let _ = restore_terminal(&mut io::stderr());
+            let _ = restore_terminal(
+                &mut io::stderr(),
+                TerminalOptions {
+                    color_mode: ColorMode::Auto,
+                    alternate_screen: true,
+                    bracketed_paste: true,
+                    focus_events: true,
+                    mouse: true,
+                },
+                true,
+            );
             previous(information);
         }));
     });
@@ -105,6 +115,7 @@ impl TerminalSession {
         install_panic_restore_hook();
         enable_raw_mode()?;
         let mut stdout = io::stdout();
+        let mut keyboard_pushed = false;
         let enter_result = (|| -> io::Result<()> {
             if options.alternate_screen {
                 execute!(stdout, EnterAlternateScreen)?;
@@ -124,13 +135,15 @@ impl TerminalSession {
                 stdout,
                 PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
             )?;
-            execute!(stdout, Hide, Clear(ClearType::All))
+            keyboard_pushed = true;
+            execute!(stdout, Hide, Clear(ClearType::All))?;
+            event::poll(Duration::ZERO)?;
+            Ok(())
         })();
         if let Err(error) = enter_result {
-            let _ = restore_terminal(&mut stdout);
+            let _ = restore_terminal(&mut stdout, options, keyboard_pushed);
             return Err(TerminalError::Io(error));
         }
-        event::poll(Duration::ZERO)?;
         let enhanced_keyboard = terminal::supports_keyboard_enhancement().unwrap_or(false);
         let (color_tier, color_source) = configured_color_tier(options.color_mode);
         Ok(Self {
@@ -331,41 +344,49 @@ fn queue_frame(
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = execute!(
-            self.stdout,
-            EndSynchronizedUpdate,
-            PopKeyboardEnhancementFlags
-        );
-        if self.options.mouse {
-            let _ = execute!(self.stdout, DisableMouseCapture);
-        }
-        if self.options.focus_events {
-            let _ = execute!(self.stdout, DisableFocusChange);
-        }
-        if self.options.bracketed_paste {
-            let _ = execute!(self.stdout, DisableBracketedPaste);
-        }
-        if self.options.alternate_screen {
-            let _ = execute!(self.stdout, LeaveAlternateScreen);
-        }
-        let _ = restore_terminal(&mut self.stdout);
+        let _ = restore_terminal(&mut self.stdout, self.options, true);
     }
 }
 
-fn restore_terminal(writer: &mut impl Write) -> io::Result<()> {
+fn restore_terminal(
+    writer: &mut impl Write,
+    options: TerminalOptions,
+    keyboard_pushed: bool,
+) -> io::Result<()> {
     let _ = disable_raw_mode();
-    execute!(
+    queue_terminal_restore(writer, options, keyboard_pushed)?;
+    writer.flush()
+}
+
+fn queue_terminal_restore(
+    writer: &mut impl Write,
+    options: TerminalOptions,
+    keyboard_pushed: bool,
+) -> io::Result<()> {
+    queue!(
         writer,
         EndSynchronizedUpdate,
         ResetColor,
         SetAttribute(Attribute::Reset),
         SetCursorStyle::DefaultUserShape,
-        Show,
-        PopKeyboardEnhancementFlags,
-        DisableBracketedPaste,
-        DisableFocusChange,
-        LeaveAlternateScreen
-    )
+        Show
+    )?;
+    if keyboard_pushed {
+        queue!(writer, PopKeyboardEnhancementFlags)?;
+    }
+    if options.mouse {
+        queue!(writer, DisableMouseCapture)?;
+    }
+    if options.bracketed_paste {
+        queue!(writer, DisableBracketedPaste)?;
+    }
+    if options.focus_events {
+        queue!(writer, DisableFocusChange)?;
+    }
+    if options.alternate_screen {
+        queue!(writer, LeaveAlternateScreen)?;
+    }
+    Ok(())
 }
 
 fn queue_style(
@@ -399,18 +420,11 @@ fn queue_style(
             },
             |color| terminal_pty_color(color, tier),
         );
-        // Reverse swaps the colours as drawn, so text in the default colours inverts too.
-        let (foreground, background) = if pty.reverse {
-            (background, foreground)
-        } else {
-            (foreground, background)
-        };
-        queue!(
-            writer,
-            SetAttribute(Attribute::Reset),
-            SetForegroundColor(foreground),
-            SetBackgroundColor(background)
-        )?;
+        queue!(writer, SetAttribute(Attribute::Reset))?;
+        queue_colors(writer, foreground, background, tier)?;
+        if pty.reverse {
+            queue!(writer, SetAttribute(Attribute::Reverse))?;
+        }
         if pty.bold {
             queue!(writer, SetAttribute(Attribute::Bold))?;
         }
@@ -520,24 +534,49 @@ fn queue_style(
             &derived
         }
     };
-    queue!(
+    queue!(writer, SetAttribute(Attribute::Reset))?;
+    queue_colors(
         writer,
-        SetAttribute(Attribute::Reset),
-        SetForegroundColor(terminal_color(tier_color(
+        terminal_color(tier_color(
             configured.foreground,
             configured.foreground_256,
             configured.foreground_16,
             tier,
-        ))),
-        SetBackgroundColor(terminal_color(tier_color(
+        )),
+        terminal_color(tier_color(
             configured.background,
             configured.background_256,
             configured.background_16,
             tier,
-        )))
+        )),
+        tier,
     )?;
     for attribute in &configured.attributes {
         queue!(writer, SetAttribute(terminal_attribute(*attribute)))?;
+    }
+    Ok(())
+}
+
+fn queue_colors(
+    writer: &mut impl Write,
+    foreground: Color,
+    background: Color,
+    tier: ColorTier,
+) -> io::Result<()> {
+    if tier != ColorTier::Ansi16 {
+        return queue!(writer, SetForegroundColor(foreground), SetBackgroundColor(background));
+    }
+    // Crossterm emits extended indexed SGR even for named colours.
+    for (color, base) in [(foreground, 30), (background, 40)] {
+        let code = if color == Color::Reset {
+            base + 9
+        } else {
+            let index = (0..16)
+                .find(|index| terminal_ansi_color(*index) == color)
+                .expect("ANSI16 colours are reduced to named colours");
+            base + index % 8 + if index >= 8 { 60 } else { 0 }
+        };
+        write!(writer, "\x1b[{code}m")?;
     }
     Ok(())
 }
@@ -571,6 +610,7 @@ fn status_bar_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
         Style::StatusEdgeVisual => edge(text(group(Highlight::KEYWORD))),
         Style::StatusEdgeReplace => edge(text(&styles.error)),
         Style::StatusEdgeCommand => edge(text(&styles.warning)),
+        Style::StatusSection => paint(text(&styles.status), fill(&styles.selection), Vec::new()),
         Style::StatusEdgeSection => {
             paint(fill(&styles.selection), fill(&styles.status), Vec::new())
         }
@@ -609,22 +649,24 @@ fn tier_color(
     match tier {
         ColorTier::TrueColor => primary,
         ColorTier::Ansi256 => ansi_256.or(ansi_16).unwrap_or(primary),
-        ColorTier::Ansi16 => ansi_16.unwrap_or(primary),
+        ColorTier::Ansi16 => ansi_16.unwrap_or(primary).ansi16(),
     }
 }
 
 fn terminal_pty_color(color: crate::ui::PtyColor, tier: ColorTier) -> Color {
     match (color, tier) {
-        (crate::ui::PtyColor::Indexed(index), ColorTier::Ansi16) => terminal_ansi_color(index % 16),
+        (crate::ui::PtyColor::Indexed(index), ColorTier::Ansi16) => {
+            terminal_color(ThemeColor::Indexed(index).ansi16())
+        }
         (crate::ui::PtyColor::Indexed(index), _) if index > 15 => Color::AnsiValue(index),
         (crate::ui::PtyColor::Indexed(index), _) => terminal_ansi_color(index),
         (crate::ui::PtyColor::Rgb(r, g, b), ColorTier::TrueColor) => Color::Rgb { r, g, b },
         (crate::ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi256) => {
             Color::AnsiValue(16 + 36 * (r / 51) + 6 * (g / 51) + (b / 51))
         }
-        (crate::ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi16) => terminal_ansi_color(
-            ((r > 127) as u8) | (((g > 127) as u8) << 1) | (((b > 127) as u8) << 2),
-        ),
+        (crate::ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi16) => {
+            terminal_color(ThemeColor::Rgb(r, g, b).ansi16())
+        },
     }
 }
 fn terminal_ansi_color(index: u8) -> Color {
@@ -1057,11 +1099,9 @@ mod tests {
             ColorTier::Ansi16,
         )
         .expect("queue ANSI fallback");
-        assert!(
-            String::from_utf8(ansi16)
-                .expect("ANSI is UTF-8")
-                .contains("38;5;14")
-        );
+        let ansi16 = String::from_utf8(ansi16).expect("ANSI is UTF-8");
+        assert!(ansi16.contains("\x1b[96m"));
+        assert!(!ansi16.contains("38;") && !ansi16.contains("48;"));
         let mut pty = Vec::new();
         queue_style(
             &mut pty,
@@ -1079,7 +1119,7 @@ mod tests {
         assert!(pty.contains("38;5;1"));
         assert!(pty.contains("48;5;4"));
         assert!(pty.contains("\u{1b}[1m"));
-        // Reverse in the default colours draws the theme's background on its text colour.
+        // Reverse is an attribute, including when both theme colours are terminal defaults.
         let mut reversed = Vec::new();
         queue_style(
             &mut reversed,
@@ -1095,32 +1135,138 @@ mod tests {
             &theme.styles.terminal_text,
             &theme.styles.terminal_background,
         );
-        let mut swapped = Vec::new();
+        let mut expected = Vec::new();
         crossterm::queue!(
-            swapped,
+            expected,
             crossterm::style::SetForegroundColor(terminal_color(tier_color(
+                text.foreground,
+                text.foreground_256,
+                text.foreground_16,
+                ColorTier::TrueColor,
+            ))),
+            crossterm::style::SetBackgroundColor(terminal_color(tier_color(
                 background.background,
                 background.background_256,
                 background.background_16,
                 ColorTier::TrueColor,
             ))),
-            crossterm::style::SetBackgroundColor(terminal_color(tier_color(
-                text.foreground,
-                text.foreground_256,
-                text.foreground_16,
-                ColorTier::TrueColor,
-            )))
+            crossterm::style::SetAttribute(crossterm::style::Attribute::Reverse)
         )
-        .expect("expected colours");
-        assert!(
-            String::from_utf8(reversed)
-                .unwrap()
-                .contains(&String::from_utf8(swapped).unwrap())
-        );
+        .expect("expected colours and reverse attribute");
+        assert!(reversed.windows(expected.len()).any(|window| window == expected));
         assert_eq!(
             configured_color_tier(crate::config::ColorMode::Ansi256),
             (ColorTier::Ansi256, "configured")
         );
+    }
+
+    #[test]
+    fn reversed_default_terminal_colors_retain_the_reverse_attribute() {
+        let mut theme = crate::config::load_bundled_config().theme;
+        theme.styles.terminal_text.foreground = crate::config::ThemeColor::Reset;
+        theme.styles.terminal_background.background = crate::config::ThemeColor::Reset;
+        let mut output = Vec::new();
+        queue_style(
+            &mut output,
+            crate::ui::Style::Terminal(crate::ui::PtyStyle {
+                reverse: true,
+                ..crate::ui::PtyStyle::default()
+            }),
+            &theme,
+            ColorTier::TrueColor,
+        ).unwrap();
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.contains("\x1b[39m\x1b[49m\x1b[7m"));
+    }
+
+    #[test]
+    fn ansi16_uses_basic_sgr_for_every_palette_color_and_quantizes_extended_colors() {
+        use crate::ui::PtyColor;
+        let mut theme = crate::config::load_bundled_config().theme;
+        for index in 0..16 {
+            let mut output = Vec::new();
+            queue_style(
+                &mut output,
+                crate::ui::Style::Terminal(crate::ui::PtyStyle {
+                    foreground: Some(PtyColor::Indexed(index)),
+                    background: Some(PtyColor::Indexed(index)),
+                    ..crate::ui::PtyStyle::default()
+                }),
+                &theme,
+                ColorTier::Ansi16,
+            ).unwrap();
+            let emitted = String::from_utf8(output).unwrap();
+            let foreground = 30 + index % 8 + if index >= 8 { 60 } else { 0 };
+            let background = foreground + 10;
+            assert!(emitted.contains(&format!("\x1b[{foreground}m\x1b[{background}m")));
+            assert!(!emitted.contains("38;") && !emitted.contains("48;"));
+        }
+        for (input, expected) in [
+            (PtyColor::Indexed(196), crossterm::style::Color::Red),
+            (PtyColor::Indexed(46), crossterm::style::Color::Green),
+            (PtyColor::Indexed(21), crossterm::style::Color::DarkBlue),
+            (PtyColor::Indexed(244), crossterm::style::Color::DarkGrey),
+            (PtyColor::Rgb(255, 0, 0), crossterm::style::Color::Red),
+        ] {
+            assert_eq!(super::terminal_pty_color(input, ColorTier::Ansi16), expected);
+        }
+        // Missing or extended theme fallbacks must not leak extended SGR either.
+        theme.styles.accent.foreground = crate::config::ThemeColor::Indexed(196);
+        theme.styles.accent.foreground_16 = None;
+        theme.styles.accent.background_16 = Some(crate::config::ThemeColor::Rgb(0, 255, 0));
+        let mut output = Vec::new();
+        queue_style(&mut output, crate::ui::Style::Accent, &theme, ColorTier::Ansi16).unwrap();
+        let emitted = String::from_utf8(output).unwrap();
+        assert!(emitted.contains("\x1b[91m\x1b[102m"));
+        assert!(!emitted.contains("38;") && !emitted.contains("48;"));
+    }
+
+    #[test]
+    fn status_sections_use_text_on_selection_fill_in_every_color_tier() {
+        use crate::config::ThemeColor;
+        let mut theme = crate::config::load_bundled_config().theme;
+        theme.styles.status_accent.background = theme.styles.selection.background;
+        theme.styles.status.foreground = ThemeColor::White;
+        theme.styles.status.foreground_256 = Some(ThemeColor::Indexed(255));
+        theme.styles.status.foreground_16 = Some(ThemeColor::White);
+        theme.styles.selection.background_256 = Some(ThemeColor::Indexed(236));
+        theme.styles.selection.background_16 = Some(ThemeColor::DarkGrey);
+        let section = super::status_bar_style(crate::ui::Style::StatusSection, &theme);
+        assert_eq!(section.foreground, theme.styles.status.foreground);
+        assert_eq!(section.foreground_256, theme.styles.status.foreground_256);
+        assert_eq!(section.foreground_16, theme.styles.status.foreground_16);
+        assert_eq!(section.background, theme.styles.selection.background);
+        assert_eq!(section.background_256, theme.styles.selection.background_256);
+        assert_eq!(section.background_16, theme.styles.selection.background_16);
+        for tier in [ColorTier::Ansi16, ColorTier::Ansi256, ColorTier::TrueColor] {
+            let mut output = Vec::new();
+            queue_style(&mut output, crate::ui::Style::StatusSection, &theme, tier).unwrap();
+            assert!(!output.is_empty());
+        }
+    }
+
+    #[test]
+    fn terminal_restoration_balances_enabled_modes_once() {
+        for enabled in [false, true] {
+            let options = super::TerminalOptions {
+                color_mode: crate::config::ColorMode::Ansi16,
+                alternate_screen: enabled,
+                bracketed_paste: enabled,
+                focus_events: enabled,
+                mouse: enabled,
+            };
+            let mut output = Vec::new();
+            super::queue_terminal_restore(&mut output, options, true).unwrap();
+            let emitted = String::from_utf8(output).unwrap();
+            assert_eq!(emitted.matches("\x1b[<1u").count(), 1);
+            for sequence in ["\x1b[?1049l", "\x1b[?2004l", "\x1b[?1004l", "\x1b[?1000l"] {
+                assert_eq!(emitted.contains(sequence), enabled, "{emitted:?}");
+            }
+            assert!(emitted.contains("\x1b[?25h"));
+            let mut before_keyboard_push = Vec::new();
+            super::queue_terminal_restore(&mut before_keyboard_push, options, false).unwrap();
+            assert!(!String::from_utf8(before_keyboard_push).unwrap().contains("\x1b[<1u"));
+        }
     }
 
     #[test]

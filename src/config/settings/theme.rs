@@ -28,6 +28,10 @@ pub enum ThemeColor {
 }
 
 impl ThemeColor {
+    pub(crate) fn ansi16(self) -> Self {
+        nearest_16(self).unwrap_or(self)
+    }
+
     pub(crate) fn rgb(self) -> Option<(u8, u8, u8)> {
         Some(match self {
             Self::Reset => return None,
