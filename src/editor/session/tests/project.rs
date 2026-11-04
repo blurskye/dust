@@ -1952,7 +1952,8 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
     app.start_workspace_search("needle".into(), None);
     wait_workspace_search(&mut app);
-    assert_eq!(app.search.sequence(), 1);
+    // Each file publishes its remaining matches before the next file is read.
+    assert_eq!(app.search.sequence(), 2);
     let broker = app.search.workflow().unwrap();
     let snapshot = broker.snapshot_if_changed(0).unwrap();
     assert!(snapshot.complete);
