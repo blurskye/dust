@@ -60,6 +60,7 @@ pub struct Buffer {
     saved_text: Option<std::sync::Arc<str>>,
     pub(crate) saved_view: Option<View>,
     persisted_bytes: std::sync::Arc<[u8]>,
+    pub(crate) new_file: bool,
     pub undo: UndoTree,
     /// Tree-sitter text objects from the parse of `revision`, set by the syntax session.
     pub syntax_objects: Option<(
@@ -103,6 +104,7 @@ impl Buffer {
             saved_text,
             saved_view: None,
             persisted_bytes,
+            new_file: false,
             syntax_objects: None,
         }
     }
@@ -154,6 +156,7 @@ impl Buffer {
             self.saved_text = Some(saved.to_string().into());
         }
         self.persisted_bytes = bytes.into();
+        self.new_file = false;
         self.refresh_dirty();
     }
 

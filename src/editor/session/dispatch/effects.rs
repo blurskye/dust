@@ -5276,7 +5276,7 @@ impl InteractiveApplication {
         ) && !self.input.completion_read_pending()
             && let Ok(id) = self
                 .documents
-                .list_directory(request.directory, request.limit)
+                .list_directory(request.directory, request.limit, request.prefix)
         {
             self.input.register_completion_read(id, request.key);
         }
@@ -14094,6 +14094,7 @@ impl InteractiveApplication {
             path: buffer.path.as_deref(),
             text: &buffer.text,
             persisted: buffer.persisted_bytes(),
+            new_file: buffer.new_file,
             dirty: buffer.dirty,
             virtual_read_only: buffer.is_virtual_read_only(),
             read_only: buffer.read_only,
@@ -14125,7 +14126,7 @@ impl InteractiveApplication {
         let path = crate::editor::new_file_path(&absolute);
         self.record_jump();
         let mut candidate = self.state.draft();
-        candidate.open_document(TextBuffer::from_text(""), path.clone());
+        candidate.open_new_document(path.clone());
         if let Err(error) = self.commit_editor_draft(candidate, None, true) {
             self.show_error(error);
             return;

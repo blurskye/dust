@@ -21,6 +21,7 @@ pub(in crate::editor::session) struct PromptCompletionRequest {
     pub(in crate::editor::session) key: PromptCompletionKey,
     pub(in crate::editor::session) directory: PathBuf,
     pub(in crate::editor::session) limit: usize,
+    pub(in crate::editor::session) prefix: String,
 }
 
 impl InputSession {
@@ -475,6 +476,7 @@ impl InputSession {
                 },
                 directory,
                 limit: COMPLETION_LIMIT,
+                prefix: entered.file_name().map_or_else(String::new, |name| name.to_string_lossy().to_lowercase()),
             });
         }
         let mut ordered = candidates.into_iter().collect::<Vec<_>>();

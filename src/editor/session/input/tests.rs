@@ -102,6 +102,8 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
             registry.specs().map(|spec| spec.id.as_str()),
         )
         .unwrap();
+    assert_eq!(current.directory, root);
+    assert_eq!(current.prefix, "foo");
     assert!(!input.accept_prompt_paths(&old.key, vec![root.join("foo-old.rs")], root, &policy));
     assert!(input.accept_prompt_paths(
         &current.key,

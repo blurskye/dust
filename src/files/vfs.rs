@@ -77,6 +77,7 @@ pub enum VfsRequest {
         id: RequestId,
         path: PathBuf,
         maximum_entries: usize,
+        prefix: String,
     },
     DiscoverRecovery {
         id: RequestId,
@@ -589,11 +590,11 @@ impl VfsWorker {
                                     let document = queued.document_paths.is_some();
                                     let result = (|| {
                                         if let Some(paths) = queued.document_paths {
-                                            let canonical = fs::canonicalize(&path).ok();
+                                            let canonical = canonical_write_path(&path).ok();
                                             if paths.iter().any(|other| {
                                                 other == &path
                                                     || canonical.as_ref().is_some_and(|target| {
-                                                        fs::canonicalize(other).ok().as_ref()
+                                                        canonical_write_path(other).ok().as_ref()
                                                             == Some(target)
                                                     })
                                             }) {
@@ -615,9 +616,10 @@ impl VfsWorker {
                                     id,
                                     path,
                                     maximum_entries,
+                                    prefix,
                                 } => VfsResult::Directory {
                                     id,
-                                    result: list_directory(&path, maximum_entries),
+                                    result: list_directory(&path, maximum_entries, &prefix),
                                     path,
                                 },
                                 VfsRequest::DiscoverRecovery {
@@ -930,12 +932,14 @@ impl VfsWorker {
         &mut self,
         path: PathBuf,
         maximum_entries: usize,
+        prefix: String,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
         self.submit(VfsRequest::ListDirectory {
             id,
             path,
             maximum_entries,
+            prefix,
         })?;
         Ok(id)
     }
@@ -1315,9 +1319,16 @@ pub(super) fn apply_explorer_mutation(
                     path: source.clone(),
                     source: error,
                 })?;
+                use std::os::unix::fs::OpenOptionsExt;
+                let permissions = input.metadata().map_err(|error| VfsError::Io {
+                    operation: "inspect explorer copy source",
+                    path: source.clone(),
+                    source: error,
+                })?.permissions();
                 let mut output = fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
+                    .mode(0o600)
                     .open(&target)
                     .map_err(|error| VfsError::Io {
                         operation: "create explorer copy target",
@@ -1334,7 +1345,10 @@ pub(super) fn apply_explorer_mutation(
                     source: error,
                 });
                 match copied {
-                    Ok(bytes) if bytes <= maximum_bytes => match output.sync_all() {
+                    Ok(bytes) if bytes <= maximum_bytes => match output
+                        .set_permissions(permissions)
+                        .and_then(|()| output.sync_all())
+                    {
                         Ok(()) => Ok(()),
                         Err(error) => {
                             drop(output);
@@ -1500,6 +1514,17 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
     }
 }
 
+fn canonical_write_path(path: &Path) -> io::Result<PathBuf> {
+    fs::canonicalize(path).or_else(|error| {
+        if error.kind() != io::ErrorKind::NotFound {
+            return Err(error);
+        }
+        let name = path.file_name().ok_or(error)?;
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        Ok(fs::canonicalize(parent)?.join(name))
+    })
+}
+
 pub(super) fn canonical_path(path: &Path) -> Result<PathBuf, VfsError> {
     fs::canonicalize(path).map_err(|source| VfsError::Io {
         operation: "canonicalize",
@@ -1526,6 +1551,7 @@ fn rename_noreplace(source: &Path, target: &Path) -> Result<(), VfsError> {
 pub(super) fn list_directory(
     path: &Path,
     maximum_entries: usize,
+    prefix: &str,
 ) -> Result<Vec<PathBuf>, VfsError> {
     let entries = fs::read_dir(path).map_err(|source| VfsError::Io {
         operation: "list directory",
@@ -1534,6 +1560,7 @@ pub(super) fn list_directory(
     })?;
     let mut paths = entries
         .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().to_lowercase().starts_with(prefix))
         .map(|entry| entry.path())
         .take(maximum_entries.saturating_add(1))
         .collect::<Vec<_>>();
@@ -1601,20 +1628,15 @@ fn commit_atomic_write(
         }
         WriteExpectation::Missing => persist_missing(path, temporary)?,
         WriteExpectation::Exact(expected) => {
-            // A new file's buffer starts empty, with nothing on disk to compare it with yet.
-            let new_file = expected.is_empty()
-                && matches!(
-                    fs::symlink_metadata(path),
-                    Err(error) if error.kind() == io::ErrorKind::NotFound
-                );
-            if new_file {
-                persist_missing(path, temporary)?;
-            } else {
-                if read_file(path)? != *expected {
+            match read_file(path) {
+                Ok(bytes) if bytes == *expected => {}
+                Ok(_) => return Err(VfsError::ExternalModification(path.to_path_buf())),
+                Err(VfsError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
                     return Err(VfsError::ExternalModification(path.to_path_buf()));
                 }
-                replace_exact(path, temporary, expected)?;
+                Err(error) => return Err(error),
             }
+            replace_exact(path, temporary, expected)?;
         }
     }
     sync_parent(
@@ -1707,16 +1729,6 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
         path: parent.to_path_buf(),
         source,
     })?;
-    if let Ok(metadata) = fs::metadata(path) {
-        temporary
-            .as_file()
-            .set_permissions(metadata.permissions())
-            .map_err(|source| VfsError::Io {
-                operation: "copy permissions",
-                path: path.to_path_buf(),
-                source,
-            })?;
-    }
     temporary.write_all(bytes).map_err(|source| VfsError::Io {
         operation: "write temporary file",
         path: path.to_path_buf(),
@@ -1727,6 +1739,29 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
         path: path.to_path_buf(),
         source,
     })?;
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            use std::os::unix::fs::{MetadataExt, fchown};
+            fchown(temporary.as_file(), Some(metadata.uid()), Some(metadata.gid()))
+                .map_err(|source| VfsError::Io {
+                    operation: "copy ownership",
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            temporary.as_file().set_permissions(metadata.permissions())
+                .map_err(|source| VfsError::Io {
+                    operation: "copy permissions",
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => return Err(VfsError::Io {
+            operation: "inspect write target",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
     temporary
         .as_file()
         .sync_all()
@@ -1767,6 +1802,24 @@ mod lifecycle_tests {
             thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn document_writes_reject_missing_destination_aliases_before_creating_files() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink(root.path(), root.path().join("alias")).unwrap();
+        let owned = root.path().join("new.txt");
+        let mut worker = VfsWorker::start(2);
+        for target in [root.path().join("sub/../new.txt"), root.path().join("alias/new.txt")] {
+            for (target, other) in [(target.clone(), owned.clone()), (owned.clone(), target)] {
+                worker.write_document(target, b"not written".to_vec(), WriteExpectation::Any, vec![other]).unwrap();
+                assert!(matches!(result(&worker), VfsResult::Write {
+                    result: Err(VfsError::DestinationExists(_)), ..
+                }));
+                assert!(!owned.exists());
+            }
+        }
+    }
+
     #[test]
     fn staged_writes_recheck_expectations_and_preserve_displaced_bytes() {
         let root = tempfile::tempdir().unwrap();

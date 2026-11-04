@@ -653,9 +653,10 @@ impl DocumentSession {
         &mut self,
         path: PathBuf,
         maximum_entries: usize,
+        prefix: String,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
-        let id = self.vfs.list_directory(path, maximum_entries)?;
+        let id = self.vfs.list_directory(path, maximum_entries, prefix)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }

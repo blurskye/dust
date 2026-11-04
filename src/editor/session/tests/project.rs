@@ -5003,6 +5003,30 @@ fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
     super::wait_vfs(&mut app);
     let saved = fs::read_to_string(&path).expect("the save created the file");
     assert!(saved.contains('o'), "{saved:?}");
+    assert!(!app.state.buffers[buffer].new_file);
+}
+
+#[test]
+fn saving_an_existing_empty_file_detects_external_deletion() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("existing-empty.txt");
+    fs::write(&path, b"").unwrap();
+    app.edit_path(path.clone());
+    super::wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert!(!app.state.buffers[buffer].new_file);
+    app.handle_configured_key(KeyEvent::character('i'));
+    app.handle_configured_key(KeyEvent::character('x'));
+    app.handle_configured_key("escape".parse::<KeyEvent>().unwrap());
+    fs::remove_file(&path).unwrap();
+    // Reopening the absent path must not turn this existing buffer into a new file.
+    app.edit_path(path.clone());
+    assert!(!app.state.buffers[buffer].new_file);
+    app.invoke(crate::editor::CommandInvocation::new("file.save", InvocationSource::Test).unwrap());
+    super::wait_vfs(&mut app);
+    assert!(!path.exists());
+    assert!(app.state.buffers[buffer].dirty);
 }
 
 /// The page keys have names a keymap can use, and a focused terminal receives them.
