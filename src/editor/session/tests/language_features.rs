@@ -621,6 +621,23 @@ fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
 }
 
 #[test]
+fn pending_debugger_file_navigation_does_not_interrupt_a_new_prompt() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("keep editing"), None);
+    let path = app.state.workspace_root.join("debug-target.rs");
+    fs::write(&path, "é😀x\n").unwrap();
+    app.set_dashboard_visibility(false);
+    app.navigate_debug_location(crate::editor::session::debugger::DebugLocation {
+        path, line: 1, column: 4,
+    });
+    app.open_prompt(crate::ui::PromptKind::Command, "keep draft".into());
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.buffers[app.state.views[view].buffer].text.to_string(), "keep editing");
+    assert_eq!(app.input.prompt().unwrap().input, "keep draft");
+}
+
+#[test]
 fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None);

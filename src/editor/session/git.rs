@@ -208,6 +208,10 @@ impl GitSession {
             self.branches.cancel();
             self.branch_generation = None;
         }
+        self.clear_status();
+    }
+
+    fn clear_status(&mut self) {
         self.clear_hunks();
         self.pending_destructive = None;
         self.clear_signs();
@@ -252,7 +256,7 @@ impl GitSession {
         revision: u64,
         report: bool,
     ) -> Result<(), String> {
-        self.clear();
+        self.clear_status();
         self.silent = !report;
         let result = match root {
             Some(root) => {
@@ -983,7 +987,7 @@ impl GitSession {
     /// One poll reporting whichever branch outcome arrived.
     pub(super) fn poll_branch_outcome(&mut self, revision: u64) -> Result<Option<GitBranchOutcome>, String> {
         if self.branch_list_scope.as_ref().is_some_and(|(repository, expected)| {
-            *expected != revision || self.status().is_none_or(|status| status.repository != *repository)
+            *expected != revision || self.status().is_some_and(|status| status.repository != *repository)
         }) {
             self.branches.cancel();
             self.branch_generation = None;
@@ -1401,6 +1405,23 @@ mod regression_tests {
         session.clear();
         assert!(!session.branch_pending());
         assert!(session.poll_branch_outcome(2).unwrap().is_none());
+    }
+
+    #[test]
+    fn status_refresh_does_not_cancel_a_current_worktree_list() {
+        let (dir, _, editor, mut session) = fixture();
+        session.start_branches(dir.path(), 1).unwrap();
+        session.refresh(&editor, Some(dir.path()), 1, false).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(outcome) = session.poll_branch_outcome(1).unwrap() {
+                assert!(matches!(outcome, GitBranchOutcome::List(_)));
+                break;
+            }
+            assert!(session.branch_pending(), "status refresh cancelled the list");
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
     }
 
     #[test]

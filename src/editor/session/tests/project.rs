@@ -2170,9 +2170,8 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
         }),
     };
     let mut parent = dependency.clone();
-    parent.arguments = vec!["-c".into(), "printf done > parent-finished".into()];
+    parent.arguments = vec!["-c".into(), "printf 'a.txt:1:warning:parent warning\\n'; printf done > parent-finished".into()];
     parent.dependencies = vec!["dependency".into()];
-    parent.matcher = None;
     loaded.config.tasks.insert("dependency".into(), dependency);
     loaded.config.tasks.insert("parent".into(), parent);
     let mut app = InteractiveApplication::new(
@@ -2186,7 +2185,7 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
     app.reconcile_workspace_trust();
     app.process_effect(AppEffect::TaskRun("parent".into()));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !root.path().join("parent-finished").exists() || app.diagnostics.choices().count() == 0 {
+    while !root.path().join("parent-finished").exists() || app.diagnostics.choices().count() < 2 {
         app.process_execution_preflight();
         app.process_job_events();
         app.process_vfs_results();
@@ -2195,8 +2194,9 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
     }
     app.open_builtin_picker(PickerKind::Diagnostics);
     let rows = &app.ui.picker.as_ref().unwrap().rows;
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].label.contains("dependency warning"), "{rows:?}");
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|row| row.label.contains("dependency warning")), "{rows:?}");
+    assert!(rows.iter().any(|row| row.label.contains("parent warning")), "{rows:?}");
 }
 
 #[cfg(unix)]

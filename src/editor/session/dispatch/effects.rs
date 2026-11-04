@@ -5753,7 +5753,7 @@ impl InteractiveApplication {
             line: location.line.saturating_sub(1) as usize,
             character: location.column.saturating_sub(1) as usize,
         };
-        self.navigate_lsp_location_encoded(
+        self.navigate_location_encoded(
             &crate::language::lsp::LspLocation {
                 uri: crate::language::lsp::file_uri(&location.path),
                 range: crate::language::lsp::LspRange {
@@ -5762,6 +5762,7 @@ impl InteractiveApplication {
                 },
             },
             PositionEncoding::Utf16,
+            true,
         );
     }
 
@@ -8254,6 +8255,15 @@ impl InteractiveApplication {
         location: &crate::language::lsp::LspLocation,
         encoding: PositionEncoding,
     ) {
+        self.navigate_location_encoded(location, encoding, false);
+    }
+
+    fn navigate_location_encoded(
+        &mut self,
+        location: &crate::language::lsp::LspLocation,
+        encoding: PositionEncoding,
+        cancel_on_capture_change: bool,
+    ) {
         let Some(path) = path_from_file_uri(&location.uri) else {
             self.show_error(self.message("lsp_invalid_uri", &[("uri", location.uri.clone())]));
             return;
@@ -8282,6 +8292,9 @@ impl InteractiveApplication {
             }
             match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
+                    if cancel_on_capture_change {
+                        self.remember_navigation_read(id);
+                    }
                     self.language.register_navigation_read(
                         id,
                         location.range.clone(),

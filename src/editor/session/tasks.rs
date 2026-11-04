@@ -455,8 +455,14 @@ impl TaskSession {
             _ => None,
         };
         let diagnostic_source = if matches!(step.adapter, AdapterContext::Linter { .. }) {
+            // Each dependency owns its findings independently of later steps in the plan.
+            let diagnostic_name = if step.name == step.requested {
+                step.requested.clone()
+            } else {
+                format!("{}:{}", step.requested, step.name)
+            };
             Some(TaskDiagnosticRun::capture(
-                &step.requested,
+                &diagnostic_name,
                 editor,
                 workspace,
                 configuration,
