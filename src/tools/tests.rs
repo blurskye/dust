@@ -1079,6 +1079,103 @@ fn package_activation_identity_is_independent_of_component() {
 }
 
 #[test]
+fn package_resolver_and_verifier_accept_uppercase_digests() {
+    let root = tempfile::tempdir().unwrap();
+    let (manifest, _, bytes) = package_fixture("demo");
+    let digest = manifest.source_digest().to_ascii_uppercase();
+    for source in [
+        super::PackageSource::Registry {
+            registry: "https://example.invalid".into(),
+            version: "1.0.0".into(),
+            archive_sha256: digest.clone(),
+        },
+        super::PackageSource::Git {
+            url: "https://example.invalid/demo.git".into(),
+            commit: "a".repeat(40),
+            tree_sha256: digest.clone(),
+        },
+    ] {
+        let mut manifest = manifest.clone();
+        manifest.source = source;
+        let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
+        let mut lock = super::resolve_manifests(&manifests).unwrap();
+        assert_eq!(lock.packages[0].content_sha256, digest.to_ascii_lowercase());
+        let store = root.path().join("store");
+        super::commit_store_bytes(&store, &digest, &bytes, 1024).unwrap();
+        let path = root.path().join("lock.json");
+        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        assert_eq!(super::verify_lock_store(&path, &store, 4096).unwrap(), 1);
+        // Supplied locks may still use uppercase, even though generated locks do not.
+        lock.packages[0].content_sha256.make_ascii_uppercase();
+        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        assert_eq!(super::verify_lock_store(&path, &store, 4096).unwrap(), 1);
+    }
+}
+
+#[test]
+fn package_verification_rejects_content_that_differs_from_its_source_pin() {
+    let root = tempfile::tempdir().unwrap();
+    let (manifest, _, bytes) = package_fixture("demo");
+    let store = root.path().join("store");
+    super::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
+    let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
+    let mut lock = super::resolve_manifests(&manifests).unwrap();
+    for source in [
+        super::PackageSource::Registry {
+            registry: "https://example.invalid".into(),
+            version: "1.0.0".into(),
+            archive_sha256: "0".repeat(64),
+        },
+        super::PackageSource::Git {
+            url: "https://example.invalid/demo.git".into(),
+            commit: "a".repeat(40),
+            tree_sha256: "0".repeat(64),
+        },
+    ] {
+        lock.packages[0].source = source;
+        let path = root.path().join("lock.json");
+        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        assert!(matches!(super::verify_lock_store(&path, &store, 4096), Err(super::PackageError::ChecksumMismatch)));
+    }
+}
+
+#[test]
+fn package_store_reinstall_repairs_corrupted_objects() {
+    let root = tempfile::tempdir().unwrap();
+    let (manifest, _, bytes) = package_fixture("demo");
+    let object = super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+    for corrupt in [vec![b'x'; bytes.len()], vec![b'x'; 2048]] {
+        std::fs::write(&object, corrupt).unwrap();
+        let repaired = super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+        assert_eq!(repaired, object);
+        assert_eq!(std::fs::read(&object).unwrap(), bytes);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    let manager = super::PackageManager::new(root.path().join("manager"), 4096, 1024).unwrap();
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    std::fs::write(&object, b"corrupt").unwrap();
+    assert_eq!(manager.stage_verified_object(&manifest, &bytes).unwrap(), object);
+}
+
+#[test]
+fn package_atomic_writes_remove_staging_files_when_rename_fails() {
+    let root = tempfile::tempdir().unwrap();
+    let (manifest, _, bytes) = package_fixture("demo");
+    let manifests = [(manifest.name.clone(), manifest.clone())].into_iter().collect();
+    let lock = super::resolve_manifests(&manifests).unwrap();
+    // Staging succeeds in the directory, but the destination name cannot be installed.
+    let path = root.path().join("x".repeat(300));
+    assert!(super::write_lock_atomic(&path, &lock, 4096).is_err());
+    assert!(super::package_lock::write_protected_atomic(&path, b"activation", 1024).is_err());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    let target = root.path().join(manifest.source_digest());
+    std::fs::create_dir(&target).unwrap();
+    assert!(super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err());
+    assert!(target.is_dir());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn package_commit_accepts_and_normalizes_uppercase_digest() {
     let root = tempfile::tempdir().unwrap();
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();

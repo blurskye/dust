@@ -1,6 +1,8 @@
 //! What a markdown line draws in place of its markup, as render-markdown.nvim does in Neovim:
 //! heading bars, bullets, checkboxes, quote bars, rules, code blocks and links without their
 //! brackets. The marks come from the same trees that colour the text.
+use std::collections::BTreeMap;
+
 use tree_sitter::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -164,10 +166,39 @@ pub(super) fn block_marks(
     }
 }
 
+/// Reference definitions belong to the block tree, not the separately parsed inline trees.
+pub(super) fn references(tree: &Tree, source: &str) -> BTreeMap<String, (usize, usize)> {
+    let mut references = BTreeMap::new();
+    let mut nodes = vec![tree.root_node()];
+    let mut walk = tree.walk();
+    while let Some(node) = nodes.pop() {
+        if node.kind() == "link_reference_definition" {
+            if let (Some(label), Some(destination)) = (
+                named_child(node, "link_label"),
+                named_child(node, "link_destination"),
+            ) {
+                references.entry(reference_label(&source[label.start_byte() + 1..label.end_byte() - 1]))
+                    .or_insert((destination.start_byte(), destination.end_byte()));
+            }
+        } else {
+            // Preserve document order: the first definition of a label wins.
+            let start = nodes.len();
+            nodes.extend(node.named_children(&mut walk));
+            nodes[start..].reverse();
+        }
+    }
+    references
+}
+
+fn reference_label(label: &str) -> String {
+    label.split_whitespace().collect::<Vec<_>>().join(" ").to_uppercase().to_lowercase()
+}
+
 /// Marks from an inline tree: emphasis and code markers, links and escapes.
 pub(super) fn inline_marks(
     tree: &Tree,
     source: &str,
+    references: &BTreeMap<String, (usize, usize)>,
     maximum: usize,
     marks: &mut Vec<MarkdownSpan>,
 ) {
@@ -191,12 +222,25 @@ pub(super) fn inline_marks(
             "backslash_escape" => {
                 push(node.start_byte(), node.start_byte() + 1, MarkdownMark::Hide)
             }
-            "inline_link" | "full_reference_link" | "image" => {
+            "inline_link" | "full_reference_link" | "collapsed_reference_link" | "shortcut_link" | "image" => {
                 let text = named_child(node, "link_text")
                     .or_else(|| named_child(node, "image_description"));
                 if let Some(text) = text {
-                    let url = named_child(node, "link_destination")
+                    let mut url = named_child(node, "link_destination")
                         .map(|url| (url.start_byte(), url.end_byte()));
+                    let inline = node.kind() == "inline_link"
+                        || (node.kind() == "image"
+                            && source[text.end_byte()..node.end_byte()].starts_with("]("));
+                    if !inline {
+                        let label = named_child(node, "link_label")
+                            .map(|label| &source[label.start_byte() + 1..label.end_byte() - 1])
+                            .unwrap_or(&source[text.byte_range()]);
+                        url = references.get(&reference_label(label)).copied();
+                        if url.is_none() {
+                            nodes.extend(node.named_children(&mut walk));
+                            continue;
+                        }
+                    }
                     let mark = if node.kind() == "image" {
                         MarkdownMark::Image
                     } else {

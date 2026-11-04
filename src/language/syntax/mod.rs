@@ -784,6 +784,7 @@ fn markdown_inline_spans(
     {
         return Vec::new();
     }
+    let references = markdown::references(tree, source);
     let mut inline = Vec::new();
     let mut nodes = vec![tree.root_node()];
     let mut walk = tree.walk();
@@ -832,7 +833,7 @@ fn markdown_inline_spans(
             if room == 0 {
                 break;
             }
-            markdown::inline_marks(&tree, source, maximum, marks);
+            markdown::inline_marks(&tree, source, &references, maximum, marks);
             spans.extend(highlight_spans(
                 query,
                 &tree,
@@ -1545,6 +1546,52 @@ mod tests {
                     && source[span.start..span.end].contains("fn main"))
         );
     }
+    #[test]
+    fn markdown_reference_marks_require_a_definition() {
+        let source = "[a][missing]\n\n![a][missing]\n\n[missing][]\n\n[missing]\n\n![missing][]\n\n![missing]\n\n```markdown\n[missing]: https://example.com\n```\n";
+        let request = Request {
+            document: SyntaxDocumentId(1),
+            generation: 1,
+            revision: 1,
+            language: SyntaxLanguage::Markdown,
+            source: source.into(),
+            policy: SyntaxPolicy::default(),
+        };
+        let SyntaxEvent::Parsed(result) = parse(request) else {
+            panic!("parse markdown")
+        };
+        let fence = source.find("```markdown").unwrap();
+        assert!(result.markdown.iter().all(|span| span.start >= fence), "{:?}", result.markdown);
+    }
+
+    #[test]
+    fn markdown_resolves_full_collapsed_and_shortcut_references() {
+        let links = ["[full][label]", "[LaBeL][]", "[label]", "![full][label]", "![LaBeL][]", "![label]", "[spaced][two  words]"];
+        let source = format!("{}\n\n[label]: https://first.example\n[label]: https://ignored.example\n[two words]: https://spaced.example\n", links.join("\n\n"));
+        let request = Request {
+            document: SyntaxDocumentId(1),
+            generation: 1,
+            revision: 1,
+            language: SyntaxLanguage::Markdown,
+            source: source.clone(),
+            policy: SyntaxPolicy::default(),
+        };
+        let SyntaxEvent::Parsed(result) = parse(request) else {
+            panic!("parse markdown")
+        };
+        let mut start = 0;
+        for link in links {
+            let url = if link.contains("two ") { "https://spaced.example" } else { "https://first.example" };
+            let url_start = source.find(url).unwrap();
+            let mark = if link.starts_with('!') { MarkdownMark::Image } else {
+                MarkdownMark::Link { url: Some((url_start, url_start + url.len())) }
+            };
+            assert!(result.markdown.iter().any(|span| span.start == start && span.mark == mark), "{link}: {:?}", result.markdown);
+            assert!(result.markdown.iter().any(|span| span.end == start + link.len() && span.mark == MarkdownMark::Hide), "{link}: {:?}", result.markdown);
+            start += link.len() + 2;
+        }
+    }
+
     #[test]
     fn a_fenced_block_is_coloured_as_the_language_it_names() {
         let source = "# Example\n\n```python\ndef area(r: float):\n    return \"x\"\n```\n";

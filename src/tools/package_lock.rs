@@ -167,15 +167,17 @@ pub fn resolve_manifests(
         .into_iter()
         .map(|name| {
             let manifest = &manifests[&name];
-            let content_sha256 = match &manifest.source {
-                PackageSource::Registry { archive_sha256, .. } => archive_sha256.clone(),
-                PackageSource::Git { tree_sha256, .. } => tree_sha256.clone(),
-                PackageSource::Path { .. } => String::new(),
-            };
+            let mut source = manifest.source.clone();
+            match &mut source {
+                PackageSource::Registry { archive_sha256, .. } => archive_sha256.make_ascii_lowercase(),
+                PackageSource::Git { tree_sha256, .. } => tree_sha256.make_ascii_lowercase(),
+                PackageSource::Path { .. } => {}
+            }
+            let content_sha256 = manifest.source_digest().to_ascii_lowercase();
             LockedPackage {
                 name,
                 version: manifest.version.clone(),
-                source: manifest.source.clone(),
+                source,
                 content_sha256,
                 activation_sha256: None,
                 dependencies: manifest
@@ -198,29 +200,7 @@ pub fn write_lock_atomic(
     maximum_bytes: usize,
 ) -> Result<(), PackageError> {
     let bytes = serde_json::to_vec_pretty(lock).map_err(PackageError::Json)?;
-    if bytes.len() > maximum_bytes {
-        return Err(PackageError::LockTooLarge);
-    }
-    let parent = path.parent().ok_or(PackageError::InvalidManifest)?;
-    fs::create_dir_all(parent).map_err(PackageError::Io)?;
-    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Err(PackageError::InvalidManifest);
-    }
-    let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), next_temp_suffix()));
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temp).map_err(PackageError::Io)?;
-    file.write_all(&bytes).map_err(PackageError::Io)?;
-    file.sync_all().map_err(PackageError::Io)?;
-    fs::rename(temp, path).map_err(PackageError::Io)?;
-    fs::File::open(parent)
-        .and_then(|file| file.sync_all())
-        .map_err(PackageError::Io)
+    write_protected_atomic(path, &bytes, maximum_bytes)
 }
 pub(super) fn write_protected_atomic(
     path: &Path,
@@ -237,18 +217,11 @@ pub(super) fn write_protected_atomic(
     {
         return Err(PackageError::InvalidManifest);
     }
-    let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), next_temp_suffix()));
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temp).map_err(PackageError::Io)?;
+    // NamedTempFile removes staging files on every error path and creates them with mode 0600.
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(PackageError::Io)?;
     file.write_all(bytes).map_err(PackageError::Io)?;
-    file.sync_all().map_err(PackageError::Io)?;
-    fs::rename(temp, path).map_err(PackageError::Io)?;
+    file.as_file().sync_all().map_err(PackageError::Io)?;
+    file.persist(path).map_err(|error| PackageError::Io(error.error))?;
     fs::File::open(parent)
         .and_then(|file| file.sync_all())
         .map_err(PackageError::Io)
@@ -282,7 +255,15 @@ pub fn verify_lock_store(
         {
             return Err(PackageError::InvalidManifest);
         }
-        let object = store.join(&package.content_sha256);
+        let source_digest = match &package.source {
+            PackageSource::Registry { archive_sha256, .. } => Some(archive_sha256),
+            PackageSource::Git { tree_sha256, .. } => Some(tree_sha256),
+            PackageSource::Path { .. } => None,
+        };
+        if source_digest.is_some_and(|digest| !digest.eq_ignore_ascii_case(&package.content_sha256)) {
+            return Err(PackageError::ChecksumMismatch);
+        }
+        let object = store.join(package.content_sha256.to_ascii_lowercase());
         let data = fs::read(&object).map_err(PackageError::Io)?;
         if format!("{:x}", Sha256::digest(&data)) != package.content_sha256.to_ascii_lowercase() {
             return Err(PackageError::ChecksumMismatch);
@@ -315,27 +296,15 @@ pub fn commit_store_bytes(
     }
     fs::create_dir_all(store).map_err(PackageError::Io)?;
     let target = store.join(&actual);
-    if target.exists() {
+    if read_bounded_regular(&target, maximum_bytes as u64)
+        .is_ok_and(|data| format!("{:x}", Sha256::digest(&data)) == actual)
+    {
         return Ok(target);
     }
-    let temp = store.join(format!(
-        ".stage-{}-{}",
-        std::process::id(),
-        next_temp_suffix()
-    ));
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temp).map_err(PackageError::Io)?;
-    if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
-        let _ = fs::remove_file(&temp);
-        return Err(PackageError::Io(error));
-    }
-    fs::rename(&temp, &target).map_err(PackageError::Io)?;
+    let mut file = tempfile::NamedTempFile::new_in(store).map_err(PackageError::Io)?;
+    file.write_all(bytes).map_err(PackageError::Io)?;
+    file.as_file().sync_all().map_err(PackageError::Io)?;
+    file.persist(&target).map_err(|error| PackageError::Io(error.error))?;
     fs::File::open(store)
         .and_then(|file| file.sync_all())
         .map_err(PackageError::Io)?;
