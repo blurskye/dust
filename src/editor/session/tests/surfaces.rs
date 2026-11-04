@@ -4889,17 +4889,18 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.debug_stop();
     drain(&mut driver);
     assert!(!starts.exists(), "retired preflight launched adapter");
-    driver.debug_start("owned");
-    assert_eq!(driver.debug_preflights(), 1);
+    // Configured adapters may run scripts; exercise executable preflight through a native tool.
+    driver.debug_start_native_program_fixture();
     let program_deadline = Instant::now() + Duration::from_secs(3);
     while !driver.debug_program_pending() {
         driver.pump_debug();
         assert!(
             Instant::now() < program_deadline,
-            "program preflight not admitted"
+            "program preflight not admitted: {:?}", driver.projection().notification
         );
         std::thread::sleep(Duration::from_millis(2));
     }
+    assert_eq!(driver.debug_preflights(), 1);
     driver.debug_stop();
     drain(&mut driver);
     assert!(

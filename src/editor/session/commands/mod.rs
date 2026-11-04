@@ -121,7 +121,6 @@ pub enum AppEffect {
         side: String,
         files: String,
     },
-    GitConflictReplaceSubmit,
     Tutor,
     TutorNext,
     TutorBack,
@@ -564,7 +563,8 @@ impl PromptMove {
     #[must_use]
     pub fn apply(self, text: &str, cursor: usize) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
-        let class = |character: char| {
+        let class = |grapheme: &str| {
+            let character = grapheme.chars().next().unwrap();
             if character.is_whitespace() {
                 0
             } else if character.is_alphanumeric() || character == '_' {
@@ -585,24 +585,24 @@ impl PromptMove {
                 .nth(1)
                 .map_or(text.len(), |(index, _)| cursor + index),
             Self::WordRight => {
-                let mut characters = text[cursor..].char_indices().peekable();
-                let start = characters.peek().map(|(_, character)| class(*character));
-                characters
-                    .skip_while(|(_, character)| Some(class(*character)) == start)
-                    .find(|(_, character)| class(*character) != 0)
+                let mut graphemes = text[cursor..].grapheme_indices(true).peekable();
+                let start = graphemes.peek().map(|(_, grapheme)| class(grapheme));
+                graphemes
+                    .skip_while(|(_, grapheme)| Some(class(grapheme)) == start)
+                    .find(|(_, grapheme)| class(grapheme) != 0)
                     .map_or(text.len(), |(index, _)| cursor + index)
             }
             Self::WordLeft => {
-                let mut characters = text[..cursor]
-                    .char_indices()
+                let mut graphemes = text[..cursor]
+                    .grapheme_indices(true)
                     .rev()
-                    .skip_while(|(_, character)| character.is_whitespace())
+                    .skip_while(|(_, grapheme)| class(grapheme) == 0)
                     .peekable();
-                let Some(word) = characters.peek().map(|(_, character)| class(*character)) else {
+                let Some(word) = graphemes.peek().map(|(_, grapheme)| class(grapheme)) else {
                     return 0;
                 };
-                characters
-                    .take_while(|(_, character)| class(*character) == word)
+                graphemes
+                    .take_while(|(_, grapheme)| class(grapheme) == word)
                     .last()
                     .map_or(0, |(index, _)| index)
             }
@@ -951,5 +951,11 @@ mod tests {
         assert_eq!(stops(PromptMove::WordLeft, 24), [18, 12, 10, 5, 0]);
         assert_eq!(PromptMove::WordLeft.apply(text, 7), 5);
         assert_eq!(PromptMove::WordRight.apply("añb c", 0), 5);
+        let text = "cafe\u{301} next";
+        assert_eq!(PromptMove::WordRight.apply(text, 0), "cafe\u{301} ".len());
+        assert_eq!(PromptMove::WordLeft.apply(text, "cafe\u{301}".len()), 0);
+        let text = "👩‍💻! next";
+        assert_eq!(PromptMove::WordRight.apply(text, 0), "👩‍💻! ".len());
+        assert_eq!(PromptMove::WordLeft.apply(text, "👩‍💻!".len()), 0);
     }
 }

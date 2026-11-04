@@ -167,7 +167,10 @@ impl DapService {
             .load(Ordering::Acquire)
     }
     pub(crate) fn available(&self) -> bool {
-        !self.closed && self.session.is_none() && self.pending() < RESIDENT
+        self.session.is_none() && self.restart_available()
+    }
+    pub(crate) fn restart_available(&self) -> bool {
+        !self.closed && self.pending() < RESIDENT
     }
     pub(crate) fn admission(&mut self) -> Result<DapAdmission<'_>, DapError> {
         if self.closed {
@@ -730,6 +733,20 @@ impl ExecutionScope {
 mod request_tests {
     use super::*;
     use crate::debugger::{DapResponse, DapSourceBreakpoint};
+    #[test]
+    fn restart_requires_a_free_resident_slot_before_stopping() {
+        let (mut service, _adapter) = fixture();
+        let residents: Vec<_> = (0..RESIDENT).map(|_| Arc::new(())).collect();
+        service.residents = residents.iter().map(Arc::downgrade).collect();
+        assert!(service.is_running());
+        assert!(!service.restart_available());
+        assert!(!service.available());
+        drop(residents);
+        assert!(service.restart_available());
+        assert!(!service.available());
+        service.begin_shutdown();
+        assert!(!service.restart_available());
+    }
     #[test]
     fn unsupported_detach_is_refused_before_admission() {
         let (service, adapter) = fixture();

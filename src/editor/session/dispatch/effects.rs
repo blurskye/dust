@@ -13663,7 +13663,6 @@ impl InteractiveApplication {
             AppEffect::GitConflictReplace { side, files } => {
                 self.preview_git_replacement(&side, &files);
             }
-            AppEffect::GitConflictReplaceSubmit => {}
             AppEffect::Tutor => self.open_tutor(),
             AppEffect::TutorNext => self.tutor_next(),
             AppEffect::WalkJumps(back) => self.walk_jumps(back),

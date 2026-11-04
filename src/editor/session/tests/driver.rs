@@ -1019,6 +1019,23 @@ impl TestSession {
         std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
+    pub(super) fn debug_start_native_program_fixture(&mut self) {
+        let source = self._workspace.path().join("main.rs");
+        std::fs::write(&source, "fn main() {}\n").unwrap();
+        self.application.state.open_text(
+            crate::editor::text::TextBuffer::from_text("fn main() {}\n"), Some(source),
+        );
+        let definition = crate::tools::bundled_tool_catalog().into_iter()
+            .find(|d| d.id == "codelldb").unwrap();
+        self.application.tooling.fixture_retain(|entry| entry.definition.id != "codelldb");
+        self.application.tooling.fixture_insert(crate::tools::ToolEntry {
+            definition,
+            status: crate::tools::ToolStatus::Installed(std::env::current_exe().unwrap()),
+        });
+        self.application.start_dap(
+            Some("codelldb".into()), Some(self._workspace.path().join("debuggee")),
+        );
+    }
     pub(super) fn debug_program_pending(&self) -> bool {
         self.application.debugger_session.debug_program_pending()
     }

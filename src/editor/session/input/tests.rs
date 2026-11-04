@@ -38,6 +38,19 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 }
 
 #[test]
+fn prompt_word_moves_and_backspace_keep_combining_characters_together() {
+    let mut input = InputSession::new(100);
+    input.open_prompt(PromptKind::SearchForward, "cafe\u{301} next".into(), None);
+    input.prompt_move(PromptMove::Home);
+    input.prompt_move(PromptMove::WordRight);
+    assert_eq!(input.prompt().unwrap().cursor, "cafe\u{301} ".len());
+    input.prompt_backspace();
+    input.prompt_backspace();
+    assert_eq!(input.prompt().unwrap().input, "cafnext");
+    assert_eq!(input.prompt().unwrap().cursor, 3);
+}
+
+#[test]
 fn confirmation_choice_is_typed_and_does_not_accept_text() {
     let mut input = InputSession::new(10);
     input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
