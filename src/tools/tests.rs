@@ -1037,6 +1037,88 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
 }
 
 #[cfg(unix)]
+fn wait_for_descendant(path: &std::path::Path) -> nix::unistd::Pid {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(path)
+            && let Ok(pid) = contents.trim().parse::<i32>()
+            && pid > 0
+        {
+            let pid = nix::unistd::Pid::from_raw(pid);
+            assert_eq!(nix::sys::signal::kill(pid, None), Ok(()), "descendant must be observable before cancellation");
+            return pid;
+        }
+        assert!(std::time::Instant::now() < deadline, "descendant PID was not published");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+fn assert_descendant_stopped(pid: nix::unistd::Pid) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match nix::sys::signal::kill(pid, None) {
+            Err(nix::errno::Errno::ESRCH) => return,
+            Ok(()) => {
+                // A killed orphan can remain a zombie until the host's init reaps it.
+                #[cfg(target_os = "linux")]
+                if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                    && stat.rsplit_once(") ").and_then(|(_, state)| state.chars().next()) == Some('Z')
+                {
+                    return;
+                }
+            }
+            Err(error) => panic!("cannot inspect descendant {pid}: {error}"),
+        }
+        assert!(std::time::Instant::now() < deadline, "descendant {pid} is still running");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn version_probe_terminates_descendants_on_every_exit_path() {
+    use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time::Duration};
+
+    for (action, expected_error) in [
+        ("wait", Some("cancelled")),
+        ("wait", Some("timed out")),
+        ("while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done", Some("exceeded its limit")),
+        ("printf version", Some("remained open")),
+        ("printf version; exec 1>&- 2>&-; exit 1", Some("exited with")),
+        ("printf version; exec 1>&- 2>&-", None),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let request = ToolVersionRequest {
+            id: "descendant".into(),
+            executable: "/bin/sh".into(),
+            arguments: vec!["-c".into(), format!(
+                "sleep 30 {} & echo $! > descendant; while [ ! -f release ]; do sleep 0.01; done; {action}",
+                if action.contains("exec") { ">/dev/null 2>&1" } else { "" },
+            )],
+            environment: Default::default(),
+            current_directory: Some(root.path().into()),
+            timeout: Duration::from_secs(10),
+        };
+        let worker_cancelled = cancelled.clone();
+        let worker = thread::spawn(move || probe_tool_version(request, &worker_cancelled));
+        let pid = wait_for_descendant(&root.path().join("descendant"));
+        std::fs::write(root.path().join("release"), b"").unwrap();
+        if expected_error == Some("cancelled") {
+            cancelled.store(true, Ordering::Release);
+        }
+        let result = worker.join().unwrap();
+        assert_descendant_stopped(pid);
+        if let Some(error) = expected_error {
+            assert!(result.as_ref().is_err_and(|result| result.contains(error)), "{result:?}");
+        } else {
+            assert_eq!(result.unwrap(), "version");
+        }
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn version_probe_is_bounded_when_a_descendant_keeps_output_open() {
     let shell = discover_executable("sh").expect("shell fixture");
@@ -1130,7 +1212,7 @@ fn version_probe_stops_continuous_oversized_output() {
             ],
             environment: Default::default(),
             current_directory: None,
-            timeout: std::time::Duration::from_millis(100),
+            timeout: std::time::Duration::from_secs(10),
         },
         &std::sync::atomic::AtomicBool::new(false),
     );
@@ -1297,9 +1379,21 @@ fn package_service_keeps_every_completion_under_backpressure() {
     let root = tempfile::tempdir().unwrap();
     let mut service = super::PackageService::start(root.path().into(), 1, 1024, 1024);
     let mut admitted = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
-        admitted.push(service.request(super::PackageOperation::List).unwrap());
-        thread::sleep(Duration::from_millis(50));
+        loop {
+            match service.request(super::PackageOperation::List) {
+                Ok(id) => {
+                    admitted.push(id);
+                    break;
+                }
+                Err(super::PackageError::QueueFull) => {
+                    assert!(Instant::now() < deadline, "package admission timed out");
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("package admission failed: {error}"),
+            }
+        }
     }
     let mut received = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -1336,15 +1430,23 @@ fn registry_service_keeps_every_result_under_backpressure() {
     )
     .unwrap();
     let mut admitted = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
-        admitted.push(
-            service
-                .request(super::RegistryRequest::Search {
-                    query: "fixture".into(),
-                })
-                .unwrap(),
-        );
-        thread::sleep(Duration::from_millis(50));
+        loop {
+            match service.request(super::RegistryRequest::Search {
+                query: "fixture".into(),
+            }) {
+                Ok(id) => {
+                    admitted.push(id);
+                    break;
+                }
+                Err(super::RegistryError::QueueFull) => {
+                    assert!(Instant::now() < deadline, "registry admission timed out");
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("registry admission failed: {error}"),
+            }
+        }
     }
     let mut received = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -1400,12 +1502,7 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
 #[cfg(unix)]
 #[test]
 fn installer_cancellation_terminates_descendant_processes() {
-    use std::{
-        fs,
-        sync::mpsc,
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{sync::mpsc, thread};
     let root = tempfile::tempdir().unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
@@ -1422,16 +1519,10 @@ fn installer_cancellation_terminates_descendant_processes() {
             None,
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !root.path().join("descendant").exists() {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    let pid = wait_for_descendant(&root.path().join("descendant"));
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
-    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
-    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+    assert_descendant_stopped(pid);
 }
 
 #[test]
