@@ -740,13 +740,37 @@ pub(super) fn matching_pair(
     let source = text.to_string();
     let line = text.byte_to_line(cursor).map_err(failed)?;
     let line_end = line_content_end(text, line)?.get();
-    let (at, character) = source[cursor.get()..line_end]
-        .char_indices()
-        .find_map(|(relative, character)| {
-            "()[]{}"
-                .contains(character)
-                .then_some((cursor.get() + relative, character))
-        })
+    let mut quote = None;
+    let mut escaped = false;
+    // Scan forward even for a backward match so quotes and escapes have the same meaning.
+    let delimiters: Vec<_> = source.char_indices().filter(|(_, character)| {
+        if *character == '\n' {
+            quote = None;
+            escaped = false;
+            return false;
+        }
+        if escaped {
+            escaped = false;
+            return false;
+        }
+        if *character == '\\' {
+            escaped = true;
+            return false;
+        }
+        if let Some(delimiter) = quote {
+            if *character == delimiter {
+                quote = None;
+            }
+            return false;
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            quote = Some(*character);
+            return false;
+        }
+        "()[]{}".contains(*character)
+    }).collect();
+    let (position, &(_, character)) = delimiters.iter().enumerate()
+        .find(|(_, (index, _))| *index >= cursor.get() && *index < line_end)
         .ok_or_else(|| CommandError::Unavailable("no matching pair on line".into()))?;
     let (mate, forward) = match character {
         '(' => (')', true),
@@ -759,18 +783,18 @@ pub(super) fn matching_pair(
     };
     let mut depth = 0_usize;
     if forward {
-        for (relative, candidate) in source[at..].char_indices() {
+        for &(index, candidate) in &delimiters[position..] {
             if candidate == character {
                 depth += 1;
             } else if candidate == mate {
                 depth -= 1;
                 if depth == 0 {
-                    return Ok(ByteOffset(at + relative));
+                    return Ok(ByteOffset(index));
                 }
             }
         }
     } else {
-        for (index, candidate) in source[..=at].char_indices().rev() {
+        for &(index, candidate) in delimiters[..=position].iter().rev() {
             if candidate == character {
                 depth += 1;
             } else if candidate == mate {

@@ -207,6 +207,28 @@ fn counted_percent_navigates_lines_and_document_start_skips_indent() {
 }
 
 #[test]
+fn matching_pairs_ignore_quoted_and_escaped_delimiters_in_both_directions() {
+    for source in [
+        r#"( ")" )"#,
+        r#"( '(' ')' )"#,
+        r"( `)` )",
+        r#"( "escaped \" )" )"#,
+        r"( \) )",
+        r"( \\() )",
+        "(\n  \"quoted )\"\n)",
+        r#""ignored (" ( ")" )"#,
+    ] {
+        let opening = if source.starts_with('"') { source.find(" ( ").unwrap() + 1 } else { 0 };
+        let closing = source.len() - 1;
+        let (mut state, _, view) = editing(source, opening);
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), closing, "{source}");
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), opening, "{source}");
+    }
+}
+
+#[test]
 fn counted_percent_operators_cover_whole_lines() {
     for cursor in [0, 8] {
         let (mut state, buffer, _) = editing("  one\ntwo\nthree\nfour\n", cursor);

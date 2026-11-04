@@ -5,7 +5,7 @@ use super::{
     ByteOffset, ByteRange, EditorMode, EditorOperation, EditorTransaction, InteractiveApplication,
     Precondition, PromptKind, TextEdit, TextEditSet,
 };
-use crate::editor::text::TextBuffer;
+use crate::editor::{input::substitution_pattern, text::TextBuffer};
 
 /// A replacement in regex-crate template form.
 fn replacement_template(replacement: &str) -> String {
@@ -75,7 +75,7 @@ fn substitution_edits(
     if flags.chars().any(|flag| !"gicn".contains(flag)) {
         return Err("unsupported substitute flag".into());
     }
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let pattern = substitution_pattern(pattern);
     let regex = regex::RegexBuilder::new(&pattern)
         .case_insensitive(flags.contains('i'))
         .build()
@@ -141,7 +141,7 @@ fn global_lines(
         .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
     let last = text.visible_lines().saturating_sub(1);
     let (start, end) = range_lines(range, line_of(view.cursor), selection, last)?;
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let pattern = substitution_pattern(pattern);
     let regex = regex::Regex::new(&pattern).map_err(|error| error.to_string())?;
     let mut lines = Vec::new();
     for number in start..=end {
@@ -514,6 +514,29 @@ mod tests {
             out.replace_range(range.start.get()..range.end.get(), edit.replacement());
         }
         out
+    }
+
+    #[test]
+    fn escaped_word_boundaries_match_literal_backslashes_in_preview_and_execution() {
+        use crate::editor::input::{parse_ex, substitute_pattern, search_matches};
+        for (command, source, expected) in [
+            (r"s/\\</x/g", r"\< \b", r"x \b"),
+            (r"s/\\>/x/g", r"\> \b", r"x \b"),
+            (r"s/\\\<cat/x/g", r"\cat \scatter", r"x \scatter"),
+            ("s/a/b ", "a", "b "),
+        ] {
+            let invocation = parse_ex(command, &Default::default()).unwrap();
+            let string = |name| match &invocation.arguments[name] {
+                crate::editor::CommandValue::String(value) => value.as_str(),
+                _ => panic!("expected string"),
+            };
+            assert_eq!(applied(source, (0, 0), string("pattern"), string("replacement"), string("flags")), expected);
+            let preview = substitute_pattern(command).unwrap();
+            let buffer = TextBuffer::from_text(source);
+            let (edits, _) = substitution_edits(&buffer, (0, 0), string("pattern"), string("replacement"), string("flags")).unwrap();
+            let ranges: Vec<_> = edits.iter().map(|edit| edit.range().start.get()..edit.range().end.get()).collect();
+            assert_eq!(search_matches(source, &preview, false, true).unwrap(), ranges);
+        }
     }
 
     #[test]
