@@ -1510,6 +1510,54 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     );
 }
 
+fn wait_syntax(app: &mut InteractiveApplication, buffer: crate::editor::BufferId) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        app.process_syntax();
+        if app.syntax.source(buffer) == Some(&app.state.buffers[buffer].text.source_version())
+            && app.syntax.result(buffer).is_some_and(|result| {
+                Some(result.language) == crate::language::syntax::language_for_document(
+                    app.state.buffers[buffer].path.as_deref(), "")
+            })
+        { break; }
+        assert!(Instant::now() < deadline, "syntax reply timed out");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn syntax_objects_refresh_when_only_the_document_language_changes() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("hello.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("def hello():\n    return 1\n"), Some(path));
+    wait_syntax(&mut app, buffer);
+    let revision = app.state.buffers[buffer].text.revision();
+    app.state.buffers[buffer].path = Some(app.state.workspace_root.join("hello.py"));
+    wait_syntax(&mut app, buffer);
+    let (at, objects) = app.state.buffers[buffer].syntax_objects.as_ref().unwrap();
+    assert_eq!(*at, revision);
+    assert!(objects.iter().any(|object| object.kind == crate::language::syntax::SyntaxObjectKind::Function));
+}
+
+#[test]
+fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("hello.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("\nfn hello() {\n    let a = 1;\n}\n"), Some(path));
+    app.set_dashboard_visibility(false);
+    wait_syntax(&mut app, buffer);
+    let fold = app.ui.syntax_folds.iter_mut().find(|fold| fold.start_line == 1).unwrap();
+    fold.collapsed = true;
+    let end = fold.end_line;
+    let revision = app.state.buffers[buffer].text.revision();
+    app.state.buffers[buffer].text.apply_edits(&crate::editor::text::TextEditSet::new(
+        revision,
+        vec![crate::editor::text::TextEdit::new(ByteRange::empty(ByteOffset(0)), "\n")],
+    )).unwrap();
+    wait_syntax(&mut app, buffer);
+    assert!(app.ui.syntax_folds.iter().any(|fold| fold.collapsed && fold.start_line == 2 && fold.end_line == end + 1));
+}
+
 #[test]
 fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     let mut app = app();
@@ -1536,6 +1584,56 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
         span.range,
         ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()
     );
+}
+
+#[test]
+fn recovery_replies_never_replace_a_buffer_opened_during_the_read() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("recover.txt");
+    fs::write(&path, "disk").unwrap();
+    let id = app.documents.read_scoped(path.clone(), vec![app.state.workspace_root.clone()]).unwrap();
+    app.recovery.register_read(id, path.with_extension("journal"), "recovered".into(), app.workspace.version());
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("disk"), Some(path));
+    app.replace_with_recovered(buffer, "new edits".into()).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "new edits");
+    let recovered = &app.state.buffers[app.state.active_buffer_id().unwrap()];
+    assert_eq!(recovered.text.to_string(), "recovered");
+    assert!(recovered.path.is_none());
+    assert!(recovered.dirty);
+}
+
+#[test]
+fn recovery_missing_original_is_bound_only_inside_the_workspace() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("missing.txt");
+    let id = app.documents.read_scoped(path.clone(), vec![app.state.workspace_root.clone()]).unwrap();
+    app.recovery.register_read(id, path.with_extension("journal"), "recovered".into(), app.workspace.version());
+    wait_vfs(&mut app);
+    let recovered = &app.state.buffers[app.state.active_buffer_id().unwrap()];
+    assert_eq!(recovered.path.as_ref(), Some(&path));
+    assert_eq!(recovered.text.to_string(), "recovered");
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch() {
+    for exists in [true, false] {
+        let mut app = app();
+        let outside = tempdir().unwrap();
+        if exists { fs::write(outside.path().join("original.txt"), "").unwrap(); }
+        let link = app.state.workspace_root.join("link");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        let path = link.join("original.txt");
+        let id = app.documents.read_scoped(path.clone(), vec![app.state.workspace_root.clone()]).unwrap();
+        app.recovery.register_read(id, path.with_extension("journal"), "recovered".into(), app.workspace.version());
+        wait_vfs(&mut app);
+        let recovered = &app.state.buffers[app.state.active_buffer_id().unwrap()];
+        assert_eq!(recovered.text.to_string(), "recovered");
+        assert!(recovered.path.is_none());
+        assert!(recovered.dirty);
+        assert_eq!(outside.path().join("original.txt").exists(), exists);
+    }
 }
 
 #[test]
@@ -1710,6 +1808,33 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 }
 
 #[test]
+fn macro_replay_waits_for_clipboard_put_before_deleting() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("recording"), None);
+    app.set_dashboard_visibility(false);
+    app.state.registers.set('"', crate::editor::RegisterValue {
+        text: "old".into(), shape: crate::editor::RegisterShape::Character,
+    }, true, false);
+    press_keys(&mut app, &["q", "a", "p", "x", "q"]);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.registers.clipboard = crate::config::ClipboardSync::Unnamedplus;
+    app.configuration.install_fixture(fixture);
+    let reply = app.clipboard.fixture_read();
+    app.replay_macro('a', 1);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
+    assert_eq!(app.input.replay_depth(), 1);
+    app.process_clipboard_pastes();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
+    reply.send(Some("XY".into())).unwrap();
+    app.process_clipboard_pastes();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "aYbc");
+    assert_eq!(app.state.registers.get('"').unwrap().text, "X");
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(app.macro_replays.is_empty());
+}
+
+#[test]
 fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None);
@@ -1719,7 +1844,7 @@ fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     }
     app.state.views[view].cursor = ByteOffset(3);
     let before = app.state.buffers[buffer].text.to_string();
-    app.replay_macro('a');
+    app.replay_macro('a', 1);
     assert_eq!(app.state.buffers[buffer].text.to_string(), before);
     assert!(app.ui.notification_error);
 }

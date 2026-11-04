@@ -2671,7 +2671,7 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("lsp-log:{index}")),
+                        id: PickerItemId(format!("lsp-log:{}", self.language.log_start() + index as u64)),
                         label: line.clone(),
                         detail: String::new(),
                         source: "lsp".into(),
@@ -4287,7 +4287,7 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn replay_macro(&mut self, requested: char) {
+    pub(super) fn replay_macro(&mut self, requested: char, count: u64) {
         let Ok(register) = self.input.macro_register(requested) else {
             self.show_error(self.message("no_previous_macro", &[]));
             return;
@@ -4307,19 +4307,51 @@ impl InteractiveApplication {
             ));
             return;
         }
-        for invocation in invocations {
+        self.macro_replays.push((invocations, 0, count));
+        self.continue_macro_replay();
+    }
+
+    pub(super) fn cancel_macro_replay(&mut self) {
+        for _ in self.macro_replays.drain(..) {
+            self.input.finish_macro_replay();
+        }
+    }
+
+    pub(super) fn continue_macro_replay(&mut self) {
+        if self.macro_running || self.clipboard.pending() {
+            return;
+        }
+        self.macro_running = true;
+        while let Some((invocations, next, remaining)) = self.macro_replays.last_mut() {
+            if *next == invocations.len() {
+                if *remaining > 1 && !invocations.is_empty() {
+                    *remaining -= 1;
+                    *next = 0;
+                } else {
+                    self.macro_replays.pop();
+                    self.input.finish_macro_replay();
+                    continue;
+                }
+            }
+            let invocation = invocations[*next].clone();
+            *next += 1;
             let Ok(invocation) = self.input.macro_step(invocation, MACRO_STEP_LIMIT) else {
                 self.show_error(self.message(
                     "macro_step_limit",
                     &[("limit", MACRO_STEP_LIMIT.to_string())],
                 ));
+                self.cancel_macro_replay();
                 break;
             };
             if !self.invoke_checked(invocation) {
+                self.cancel_macro_replay();
+                break;
+            }
+            if self.clipboard.pending() {
                 break;
             }
         }
-        self.input.finish_macro_replay();
+        self.macro_running = false;
     }
 
     pub(super) fn search_word_under_cursor(&mut self, forward: bool, count: u64) {
@@ -5834,11 +5866,7 @@ impl InteractiveApplication {
                             .iter()
                             .any(|root| location.path.starts_with(&root.identity.canonical_path))
                         {
-                            self.navigate_matcher_source(MatcherSource {
-                                path: location.path,
-                                line: location.line.saturating_sub(1) as usize,
-                                column: location.column.saturating_sub(1) as usize,
-                            });
+                            self.navigate_debug_location(location);
                         }
                     }
                     crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
@@ -8172,6 +8200,20 @@ impl InteractiveApplication {
             Ok(()) => self.ensure_cursor_visible(),
             Err(error) => self.show_error(error),
         }
+    }
+
+    pub(in crate::editor::session) fn navigate_debug_location(
+        &mut self,
+        location: crate::editor::session::debugger::DebugLocation,
+    ) {
+        let position = crate::language::lsp::LspPosition {
+            line: usize::try_from(location.line.saturating_sub(1)).unwrap_or(usize::MAX),
+            character: usize::try_from(location.column.saturating_sub(1)).unwrap_or(usize::MAX),
+        };
+        self.navigate_lsp_location_encoded(&crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&location.path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }, PositionEncoding::Utf16);
     }
 
     pub(in crate::editor::session) fn navigate_lsp_location_encoded(
@@ -14071,12 +14113,7 @@ impl InteractiveApplication {
             }
             AppEffect::MacroReplay { register, count } => {
                 self.input.begin_macro_batch();
-                for _ in 0..count {
-                    self.replay_macro(register);
-                    if self.ui.notification_error {
-                        break;
-                    }
-                }
+                self.replay_macro(register, count);
             }
             AppEffect::Grammar(input) => self.process_grammar_input(input),
             AppEffect::CancelPendingMapping => self.cancel_pending_mapping(),

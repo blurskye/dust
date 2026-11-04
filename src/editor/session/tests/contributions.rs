@@ -735,7 +735,7 @@ fn macros_record_replay_last_register_and_stop_at_limits() {
         .expect("macro command")
         .with_argument("register", CommandValue::String("r".into()));
     app.state.registers.set_macro('r', vec![recursive]);
-    app.replay_macro('r');
+    app.replay_macro('r', 1);
     assert_eq!(app.input.replay_depth(), 0);
     assert!(app.ui.notification_error);
     assert!(

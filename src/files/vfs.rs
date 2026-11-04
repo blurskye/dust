@@ -450,7 +450,15 @@ impl VfsWorker {
                                     id,
                                     path,
                                     canonical_roots,
-                                } => match canonical_path(&path) {
+                                } => match canonical_path(&path).or_else(|error| {
+                                    if matches!(&error, VfsError::Io { source, .. }
+                                        if source.kind() == io::ErrorKind::NotFound)
+                                    {
+                                        scoped_missing_target(&path, &canonical_roots)
+                                    } else {
+                                        Err(error)
+                                    }
+                                }) {
                                     Ok(path)
                                         if canonical_roots
                                             .iter()
@@ -478,7 +486,15 @@ impl VfsWorker {
                                     path,
                                     canonical_roots,
                                     maximum_bytes,
-                                } => match canonical_path(&path) {
+                                } => match canonical_path(&path).or_else(|error| {
+                                    if matches!(&error, VfsError::Io { source, .. }
+                                        if source.kind() == io::ErrorKind::NotFound)
+                                    {
+                                        scoped_missing_target(&path, &canonical_roots)
+                                    } else {
+                                        Err(error)
+                                    }
+                                }) {
                                     Ok(path)
                                         if canonical_roots
                                             .iter()

@@ -242,6 +242,20 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
 }
 
 #[test]
+fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
+    let mut app = app();
+    for index in 0..200 { app.append_lsp_log(format!("message {index}")); }
+    app.show_lsp_logs();
+    app.search.picker_move(-1, false);
+    app.sync_picker_ui();
+    let before = app.search.picker().unwrap().selected_item().unwrap().clone();
+    app.append_lsp_log("new message".into());
+    let after = app.search.picker().unwrap().selected_item().unwrap();
+    assert_eq!(before.id, after.id);
+    assert_eq!(before.label, after.label);
+}
+
+#[test]
 fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
     let mut app = app();
     for logs in [false, true] {

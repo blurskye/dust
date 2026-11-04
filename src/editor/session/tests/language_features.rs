@@ -158,6 +158,7 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
             r#"{"code":-32801,"message":"content modified"}"#.into(),
         );
     };
+    app.lsp_asked_generation = Some(7);
     for _ in 0..10 {
         app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
         failure(&mut app);
@@ -173,6 +174,20 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
     app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
     failure(&mut app);
     assert!(app.ui.notification_error, "the eleventh answer is shown");
+}
+
+#[test]
+fn stale_content_modified_failures_do_not_retry_the_latest_user_feature() {
+    let mut app = app();
+    app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
+    app.lsp_asked_generation = Some(7);
+    app.ui.lsp_loading = Some("definition loading".into());
+    for (generation, method) in [(6, "textDocument/hover"), (7, "textDocument/semanticTokens/full"), (6, "textDocument/definition")] {
+        app.handle_lsp_request_failure("server".into(), generation, method.into(), "-32801 content modified".into());
+        assert!(app.lsp_waiting.is_none());
+        assert!(app.lsp_retry_at.is_none());
+        assert_eq!(app.ui.lsp_loading.as_deref(), Some("definition loading"));
+    }
 }
 
 #[test]
@@ -197,6 +212,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         app.configuration.install_fixture(fixture);
     }
     app.notify_message("stable notification".into(), false);
+    app.ui.lsp_loading = Some("completion loading".into());
     app.language.fixture_inlay_source(Some((42, owner.clone())));
 
     app.handle_lsp_request_failure(
@@ -205,6 +221,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         "textDocument/inlayHint".into(),
         r#"{"code":-32801,"message":"content modified"}"#.into(),
     );
+    assert_eq!(app.ui.lsp_loading.as_deref(), Some("completion loading"));
     assert_eq!(app.language.inlay_source(), Some((42, owner)));
     assert_eq!(app.language.inlay_retries(), 0);
     assert_eq!(app.ui.notification.as_deref(), Some("stable notification"));
@@ -217,6 +234,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         r#"{"code":-32801,"message":"content modified"}"#.into(),
     );
     assert!(app.language.inlay_source().is_none());
+    assert_eq!(app.ui.lsp_loading.as_deref(), Some("completion loading"));
     assert_eq!(app.language.inlay_retries(), 1);
     assert!(app.language.inlay_pending());
     assert_eq!(app.ui.notification.as_deref(), Some("stable notification"));
@@ -402,6 +420,22 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "a b\n");
     super::wait_vfs(&mut app);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a b\n");
+}
+
+#[test]
+fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() {
+    for already_open in [true, false] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("debug.rs");
+        fs::write(&path, "first\né😀value\n").unwrap();
+        if already_open { app.state.open_text(TextBuffer::from_text("first\né😀value\n"), Some(path.clone())); }
+        app.navigate_debug_location(crate::editor::session::debugger::DebugLocation { path: path.clone(), line: 2, column: 2 });
+        wait_vfs(&mut app);
+        let view = &app.state.views[app.state.active_view.unwrap()];
+        assert_eq!(view.cursor, ByteOffset("first\né".len()));
+        app.navigate_debug_location(crate::editor::session::debugger::DebugLocation { path, line: 2, column: u64::MAX });
+        assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset("first\né😀value".len()));
+    }
 }
 
 #[test]

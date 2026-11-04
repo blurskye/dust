@@ -990,7 +990,9 @@ impl InteractiveApplication {
         }
         self.ui.lsp_loading = None;
         self.lsp_asked = None;
+        self.lsp_asked_generation = None;
         self.lsp_waiting = None;
+        self.lsp_waiting_server = None;
         self.lsp_retry_at = None;
         self.lsp_retries = 0;
         if key.terminal_mouse().is_none() {
@@ -1302,6 +1304,26 @@ impl InteractiveApplication {
             == crate::config::ClipboardSync::Unnamedplus
     }
 
+    pub(super) fn process_clipboard_pastes(&mut self) {
+        let before = self.state.window_version();
+        let pending = self.clipboard.pending();
+        let registers_enabled = self.state.policy.registers_enabled;
+        if let Some(invocation) = self.clipboard.finish_pull(
+            &mut self.state.registers, registers_enabled, &before,
+        ) {
+            let succeeded = self.invoke_checked(invocation);
+            self.clipboard.continue_pastes(&before, &self.state.window_version());
+            if succeeded {
+                self.continue_macro_replay();
+            } else {
+                self.cancel_macro_replay();
+            }
+        } else if pending && !self.clipboard.pending() {
+            // The read was discarded because its original view changed.
+            self.cancel_macro_replay();
+        }
+    }
+
     pub(super) fn invoke(&mut self, invocation: CommandInvocation) {
         self.invoke_checked(invocation);
     }
@@ -1519,7 +1541,7 @@ impl InteractiveApplication {
         loaded: LoadedConfig,
         automatic: bool,
     ) -> Result<(), String> {
-        let warning = loaded.warning.clone();
+        let mut warning = loaded.warning.clone();
         let candidate =
             self.configuration
                 .prepare(loaded, &self.commands, self.extension.contributions())?;
@@ -1595,7 +1617,14 @@ impl InteractiveApplication {
                     crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&server_id),
                 );
             }
-            let _ = self.language.configure(&key, configuration);
+            if let Err(error) = self.language.configure(&key, configuration) {
+                let diagnostic = format!("language-server configuration update failed: {error}");
+                if let Some(warning) = &mut warning {
+                    warning.push_str(&format!("; {diagnostic}"));
+                } else {
+                    warning = Some(diagnostic);
+                }
+            }
         }
         self.schedule_lsp_inlay_refresh(true);
         self.explorer.reset_watch_observation();
@@ -1884,12 +1913,29 @@ impl InteractiveApplication {
                     {
                         continue;
                     }
-                    // A file deleted since the crash comes back as a new file at its path.
-                    if let Some(NavigationRead::Recovered(journal, content)) = &pending
-                        && result.is_err()
-                    {
-                        let (buffer, _) =
-                            self.state.open_text(TextBuffer::from_text(""), Some(path));
+                    if let Some(NavigationRead::Recovered(journal, content)) = &pending {
+                        // A read may finish after another command opened this file. Never
+                        // replace that buffer, and never bind a rejected path to recovered text.
+                        let already_open = self.state.buffers.values()
+                            .any(|buffer| buffer.path.as_ref() == Some(&path));
+                        let missing = matches!(&result, Err(crate::files::VfsError::Io { source, .. })
+                            if source.kind() == std::io::ErrorKind::NotFound);
+                        let writable = self.workspace.require_path(&path).is_ok();
+                        let (text, destination) = match result {
+                            Ok(bytes) if !already_open && writable => {
+                                match TextBuffer::from_bytes(&bytes) {
+                                    Ok(text) => (text, Some(path)),
+                                    Err(_) => (TextBuffer::from_text(""), None),
+                                }
+                            }
+                            Err(_) if missing && !already_open && writable =>
+                                (TextBuffer::from_text(""), Some(path)),
+                            _ => (TextBuffer::from_text(""), None),
+                        };
+                        if let Some(path) = &destination {
+                            self.record_recent_file(path.clone());
+                        }
+                        let (buffer, _) = self.state.open_text(text, destination);
                         if let Err(error) = self.replace_with_recovered(buffer, content.clone()) {
                             self.show_error(error);
                             continue;
@@ -2052,16 +2098,6 @@ impl InteractiveApplication {
                                 }
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
-                            }
-                            Some(NavigationRead::Recovered(journal, content)) => {
-                                let (buffer, _) = self.state.open_text(text, Some(path.clone()));
-                                self.state.buffers[buffer].read_only =
-                                    self.workspace.require_path(&path).is_err();
-                                self.record_recent_file(path);
-                                match self.replace_with_recovered(buffer, content) {
-                                    Ok(()) => self.finish_recovery(&journal, "recovery_restored"),
-                                    Err(error) => self.show_error(error),
-                                }
                             }
                             _ => self.show_error(self.message("unexpected_read", &[])),
                         },
@@ -2497,6 +2533,20 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_syntax(&mut self) {
+        // Move old fold rows with their text before matching them to a new parse.
+        for (fold, source) in self.ui.syntax_folds.iter_mut()
+            .zip(&mut self.syntax_fold_positions)
+        {
+            let Some((view, revision, range)) = source else { continue };
+            let Some(buffer) = self.state.views.get(*view)
+                .and_then(|view| self.state.buffers.get(view.buffer)) else { continue };
+            if let Some(mapped) = buffer.text.map_range_since(*revision, *range) {
+                fold.start_line = buffer.text.byte_to_line(mapped.start).unwrap_or(fold.start_line);
+                fold.end_line = buffer.text.byte_to_line(mapped.end).unwrap_or(fold.end_line);
+                *range = mapped;
+                *revision = buffer.text.revision();
+            }
+        }
         let documents = self
             .state
             .buffers
@@ -2522,7 +2572,7 @@ impl InteractiveApplication {
             let revision = BufferRevision(result.revision);
             let stale = self.state.buffers.get(*buffer).is_some_and(|target| {
                 self.syntax.source(*buffer) == Some(&target.text.source_version())
-                    && target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
+                    && !self.syntax_spans_source.0.contains(&(*buffer, result.generation, result.revision))
             });
             if stale {
                 self.state.buffers[*buffer].syntax_objects =
@@ -2573,6 +2623,13 @@ impl InteractiveApplication {
                 }
             }
         }
+        self.syntax_fold_positions = syntax_folds.iter().map(|fold| {
+            let buffer = self.state.buffers.get(self.state.views.get(fold.view)?.buffer)?;
+            Some((fold.view, buffer.text.revision(), ByteRange::new(
+                buffer.text.line_to_byte(fold.start_line).ok()?,
+                buffer.text.line_to_byte(fold.end_line).ok()?,
+            ).ok()?))
+        }).collect();
         self.ui.set(syntax_folds, |ui| &mut ui.syntax_folds);
         self.ui.syntax_spans = self
             .syntax
@@ -2778,11 +2835,15 @@ impl InteractiveApplication {
         message: String,
         percentage: Option<u8>,
     ) {
+        let was_loading = self.language.server_loading(&server);
         self.language.update_progress(
-            (server, token, kind, title, message, percentage),
+            (server.clone(), token, kind, title, message, percentage),
             &self.configuration.settings().ui.lsp_progress,
             Instant::now(),
         );
+        if was_loading && !self.language.server_loading(&server) {
+            self.schedule_lsp_inlay_refresh(true);
+        }
         self.project_lsp_progress();
     }
     pub(in crate::editor::session) fn clear_lsp_progress(&mut self, server: &str) {
@@ -2791,16 +2852,17 @@ impl InteractiveApplication {
     }
     fn project_lsp_progress(&mut self) {
         let (rows, frame) = self.language.progress();
-        let was_loading = self.ui.lsp_progress.iter().any(|row| !row.done);
         if self.ui.lsp_progress != rows {
             self.ui.lsp_progress = rows.to_vec();
         }
-        if was_loading && self.ui.lsp_progress.iter().all(|row| row.done) {
+        if self.lsp_waiting_server.as_ref()
+            .is_some_and(|server| !self.language.server_loading(server))
+        {
+            self.lsp_waiting_server = None;
+            self.lsp_retry_at = None;
             if let Some(feature) = self.lsp_waiting.take() {
                 self.request_lsp(feature);
             }
-            // Hints asked for while the server was indexing or checking come back empty.
-            self.schedule_lsp_inlay_refresh(true);
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -2818,15 +2880,13 @@ impl InteractiveApplication {
             return;
         }
         self.lsp_retry_at = None;
+        self.lsp_waiting_server = None;
         if let Some(feature) = self.lsp_waiting.take() {
             self.request_lsp(feature);
         }
     }
     fn lsp_server_loading(&self, server: &str) -> bool {
-        self.ui
-            .lsp_progress
-            .iter()
-            .any(|row| row.server_key == server && !row.done)
+        self.language.server_loading(server)
     }
     fn show_lsp_loading(&mut self) {
         self.ui.lsp_loading = Some(self.message("lsp_loading", &[]));
@@ -2836,6 +2896,7 @@ impl InteractiveApplication {
         if self.lsp_server_loading(server) {
             self.show_lsp_loading();
             self.lsp_waiting = self.lsp_asked.clone();
+            self.lsp_waiting_server = Some(server.into());
         } else {
             self.show_error(self.message("lsp_no_result", &[]));
         }
@@ -2852,7 +2913,6 @@ impl InteractiveApplication {
             self.language.retry_breadcrumbs();
             return;
         }
-        self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting"
             && self.format_on_save.as_ref().is_some_and(|pending| {
@@ -2873,6 +2933,11 @@ impl InteractiveApplication {
             // for any superseded generation is stale by definition, while a
             // current failure is retried above. Neither is user-actionable.
             return;
+        }
+        let current_asked = self.lsp_asked_generation == Some(generation)
+            && self.lsp_asked.as_ref().is_some_and(|feature| feature.method() == method);
+        if current_asked {
+            self.ui.lsp_loading = None;
         }
         // Colours are background work, and a second server failing a completion
         // must not hide the items the others returned.
@@ -2917,7 +2982,7 @@ impl InteractiveApplication {
         // so the request waits for the load to finish, as an empty answer does.
         // Right after opening a file the server can answer that way before it reports loading;
         // then the request is sent again shortly, a bounded number of times.
-        if message.contains("-32801") && self.lsp_asked.is_some() {
+        if message.contains("-32801") && current_asked {
             let loading = self.lsp_server_loading(&server);
             if loading || self.lsp_retries < LSP_CONTENT_MODIFIED_RETRIES {
                 if !loading {
@@ -2926,8 +2991,13 @@ impl InteractiveApplication {
                 }
                 self.show_lsp_loading();
                 self.lsp_waiting = self.lsp_asked.clone();
+                self.lsp_waiting_server = loading.then_some(server);
                 return;
             }
+        }
+        if !current_asked && message.contains("-32801") {
+            self.language.forget_request(&server, generation);
+            return;
         }
         let server = self.lsp_server_label(&server);
         self.show_error(self.message(
@@ -2941,6 +3011,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_events(&mut self) {
+        for error in self.language.retry_configurations() {
+            self.show_error(error);
+        }
         for error in self.language.flush_edit_replies() {
             self.show_error(error);
         }
@@ -2965,8 +3038,11 @@ impl InteractiveApplication {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
                     }
-                    if let Some(feature) = self.lsp_waiting.take() {
-                        self.request_lsp(feature);
+                    if self.lsp_waiting_server.as_ref().is_none_or(|waiting| waiting == &server) {
+                        self.lsp_waiting_server = None;
+                        if let Some(feature) = self.lsp_waiting.take() {
+                            self.request_lsp(feature);
+                        }
                     }
                     self.request_lsp_colors();
                     // Successful lifecycle transitions are reflected by the
@@ -3406,6 +3482,7 @@ impl InteractiveApplication {
             {
                 self.show_lsp_loading();
                 self.lsp_waiting = Some(feature);
+                self.lsp_waiting_server = None;
             }
             return;
         };
@@ -3438,6 +3515,7 @@ impl InteractiveApplication {
             if asked {
                 self.show_lsp_loading();
                 self.lsp_waiting = Some(feature);
+                self.lsp_waiting_server = Some(server.clone());
             }
             return;
         }
@@ -3447,6 +3525,7 @@ impl InteractiveApplication {
         }
         if asked {
             self.lsp_asked = Some(feature.clone());
+            self.lsp_asked_generation = None;
         }
         if matches!(feature, LspFeature::CodeAction { .. }) {
             self.language.clear_offered_actions();
@@ -3529,6 +3608,9 @@ impl InteractiveApplication {
             .request_projected(&server, feature, document, offset)
         {
             Ok(()) => {
+                if asked {
+                    self.lsp_asked_generation = Some(self.language.generation());
+                }
                 if formats
                     && let Some(pending) = self
                         .format_on_save

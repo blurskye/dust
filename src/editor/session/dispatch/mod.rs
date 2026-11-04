@@ -178,9 +178,11 @@ struct InteractiveApplication {
     >,
     /// The last request someone asked for, until their next key.
     lsp_asked: Option<crate::language::lsp::LspFeature>,
+    lsp_asked_generation: Option<u64>,
     /// Asked for before its server could answer, and sent again once it has started and
     /// finished loading.
     lsp_waiting: Option<crate::language::lsp::LspFeature>,
+    lsp_waiting_server: Option<String>,
     /// When the waiting request is sent again after a "content modified" answer that came
     /// before the server reported any loading, and how many times it has been.
     lsp_retry_at: Option<std::time::Instant>,
@@ -239,6 +241,7 @@ struct InteractiveApplication {
         Vec<(crate::editor::BufferId, u64, u64)>,
         Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
     ),
+    syntax_fold_positions: Vec<Option<(crate::editor::ViewId, BufferRevision, ByteRange)>>,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
@@ -249,6 +252,8 @@ struct InteractiveApplication {
     next_transaction: u64,
     git: super::git::GitSession,
     clipboard: super::clipboard::ClipboardSession,
+    macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
+    macro_running: bool,
     explorer: super::explorer::ExplorerSession,
     syntax: SyntaxSession,
     persistence: super::persistence::PersistenceSession,
@@ -398,18 +403,7 @@ pub fn run_interactive(
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
         application.refresh_plugin_host_events();
-        let before_paste = application.state.window_version();
-        let registers_enabled = application.state.policy.registers_enabled;
-        if let Some(invocation) = application.clipboard.finish_pull(
-            &mut application.state.registers,
-            registers_enabled,
-            &before_paste,
-        ) {
-            application.invoke(invocation);
-            application
-                .clipboard
-                .continue_pastes(&before_paste, &application.state.window_version());
-        }
+        application.process_clipboard_pastes();
         if application.clipboard_shared()
             && let Some(text) = application.clipboard.push(&mut application.state.registers)
         {

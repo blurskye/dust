@@ -1764,6 +1764,38 @@ fn fixture_owned_lsp(
 }
 
 #[test]
+fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui() {
+    use crate::language::lsp::{LspFeature, LspProgressKind, LspRange, LspPosition};
+    for display_progress in [true, false] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("loading.rs");
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path));
+        app.set_dashboard_visibility(false);
+        let first = fixture_owned_lsp(&mut app, "first", buffer);
+        let second = fixture_owned_lsp(&mut app, "second", buffer);
+        app.language.select("first");
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.lsp_progress.enabled = display_progress;
+        app.configuration.install_fixture(fixture);
+        let feature = LspFeature::CodeAction { range: LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 0 } }, diagnostics: Vec::new() };
+        app.request_lsp(feature);
+        assert!(matches!(first.requested_feature(), Some(LspFeature::CodeAction { .. })));
+        assert!(matches!(second.requested_feature(), Some(LspFeature::CodeAction { .. })));
+        for server in ["first", "second"] {
+            app.update_lsp_progress(server.into(), "index".into(), LspProgressKind::Begin, "Indexing".into(), String::new(), None);
+        }
+        app.show_lsp_no_result("first");
+        assert!(app.lsp_waiting.is_some());
+        assert!(app.ui.lsp_loading.is_some());
+        if !display_progress { assert!(app.ui.lsp_progress.is_empty()); }
+        app.update_lsp_progress("first".into(), "index".into(), LspProgressKind::End, String::new(), String::new(), None);
+        assert!(app.language.server_loading("second"));
+        assert!(app.lsp_waiting.is_none());
+        assert!(matches!(first.requested_feature(), Some(LspFeature::CodeAction { .. })));
+    }
+}
+
+#[test]
 fn save_notifications_reach_every_document_owner_after_buffer_switch() {
     let mut app = app();
     let path = app.state.workspace_root.join("saved.rs");

@@ -60,6 +60,8 @@ pub(super) struct Projection {
     semantic: HashMap<(String, String), (Option<String>, Vec<u32>)>,
     pull_ids: HashMap<(String, String), String>,
     logs: VecDeque<String>,
+    log_start: u64,
+    loading: HashMap<String, std::collections::HashSet<String>>,
     progress: Vec<UiLspProgress>,
     progress_epoch: Option<Instant>,
     progress_frame: usize,
@@ -1213,11 +1215,18 @@ impl LspSession {
     pub(in crate::editor::session) fn append_log(&mut self, line: String, maximum: usize) {
         while self.projection.logs.len() >= maximum.max(1) {
             self.projection.logs.pop_front();
+            self.projection.log_start += 1;
         }
         self.projection.logs.push_back(line);
     }
     pub(in crate::editor::session) fn logs(&self) -> &VecDeque<String> {
         &self.projection.logs
+    }
+    pub(in crate::editor::session) fn log_start(&self) -> u64 {
+        self.projection.log_start
+    }
+    pub(in crate::editor::session) fn server_loading(&self, server: &str) -> bool {
+        self.projection.loading.get(server).is_some_and(|tokens| !tokens.is_empty())
     }
     pub(in crate::editor::session) fn server_label(&self, key: &str) -> String {
         self.sessions
@@ -1243,6 +1252,16 @@ impl LspSession {
         now: Instant,
     ) {
         let (server_key, token, kind, title, message, percentage) = event;
+        if kind == LspProgressKind::End {
+            if let Some(tokens) = self.projection.loading.get_mut(&server_key) {
+                tokens.remove(&token);
+                if tokens.is_empty() {
+                    self.projection.loading.remove(&server_key);
+                }
+            }
+        } else {
+            self.projection.loading.entry(server_key.clone()).or_default().insert(token.clone());
+        }
         if !policy.enabled {
             self.projection.progress.clear();
             self.projection.progress_frame = 0;
@@ -1317,6 +1336,7 @@ impl LspSession {
     }
 
     pub(in crate::editor::session) fn clear_progress(&mut self, server_key: &str) {
+        self.projection.loading.remove(server_key);
         self.projection
             .progress
             .retain(|item| item.server_key != server_key);
@@ -1532,6 +1552,28 @@ mod tests {
         owner.refresh_projection(&editor, Some((buffer, &document)));
         (editor, buffer, document, owner)
     }
+    #[test]
+    fn configuration_updates_retry_busy_queues_and_keep_the_latest_settings() {
+        let (editor, buffer, document, mut owner) = fixture();
+        let endpoint = owner.service.replace_edit_source_fixture(
+            document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16,
+        );
+        endpoint.block_responses();
+        let standard = crate::language::lsp::LspServerConfiguration::standard();
+        assert!(matches!(owner.configure("owned-edit-fixture", standard.clone()), Err(crate::language::lsp::LspError::Busy(_))));
+        assert!(owner.retry_configurations().is_empty());
+        let maximum = crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
+        assert!(owner.configure("owned-edit-fixture", maximum.clone()).is_err());
+        endpoint.unblock_responses();
+        assert!(owner.retry_configurations().is_empty());
+        assert_eq!(endpoint.configured(), Some(maximum));
+        assert!(owner.retry_configurations().is_empty());
+        assert!(endpoint.configured().is_none());
+        owner.configure("owned-edit-fixture", standard.clone()).unwrap();
+        assert_eq!(endpoint.configured(), Some(standard));
+    }
+
     #[test]
     fn document_replay_retries_every_rejected_queue_admission() {
         let (mut editor, buffer, document, mut owner) = fixture();

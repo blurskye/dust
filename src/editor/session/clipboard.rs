@@ -138,6 +138,10 @@ impl ClipboardSession {
         fallback
     }
 
+    pub(super) fn pending(&self) -> bool {
+        !self.pastes.is_empty()
+    }
+
     pub(super) fn pull(
         &mut self,
         invocation: &CommandInvocation,
@@ -301,6 +305,17 @@ fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
         return None;
     }
     String::from_utf8(bytes).ok()
+}
+
+#[cfg(test)]
+impl ClipboardSession {
+    pub(super) fn fixture_read(&mut self) -> mpsc::Sender<Option<String>> {
+        let (sender, receiver) = mpsc::channel();
+        self.enabled = true;
+        self.tool = Some(Tool::Wayland);
+        self.reading = Some(receiver);
+        sender
+    }
 }
 
 #[cfg(test)]

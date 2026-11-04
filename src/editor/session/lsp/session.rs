@@ -146,6 +146,7 @@ pub(super) struct LspSession {
     stopped: HashSet<String>,
     detached: HashSet<(String, BufferId)>,
     errors: BTreeMap<String, String>,
+    pending_configurations: HashMap<String, LspServerConfiguration>,
     navigation_reads: HashMap<
         crate::files::RequestId,
         (
@@ -240,11 +241,29 @@ impl LspSession {
         self.service.cancel(server, generation)
     }
     pub(super) fn configure(
-        &self,
+        &mut self,
         server: &str,
         configuration: LspServerConfiguration,
     ) -> Result<(), LspError> {
-        self.service.configure(server, configuration)
+        self.pending_configurations.remove(server);
+        match self.service.configure(server, configuration.clone()) {
+            Err(error @ LspError::Busy(_)) => {
+                self.pending_configurations.insert(server.into(), configuration);
+                Err(error)
+            }
+            result => result,
+        }
+    }
+    pub(super) fn retry_configurations(&mut self) -> Vec<LspError> {
+        let mut errors = Vec::new();
+        for (server, configuration) in std::mem::take(&mut self.pending_configurations) {
+            if let Err(error) = self.configure(&server, configuration)
+                && !matches!(error, LspError::Busy(_))
+            {
+                errors.push(error);
+            }
+        }
+        errors
     }
     pub(super) fn health(&self, server: &str) -> Result<(), LspError> {
         self.service.health(server)
