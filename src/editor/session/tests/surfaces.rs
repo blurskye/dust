@@ -3394,6 +3394,35 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
 }
 
 #[test]
+fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
+    let mut app = app();
+    // Even the largest dimensions must not overflow before the missing-terminal check.
+    app.window_session.observe_size((u16::MAX, u16::MAX));
+    app.process_effect(AppEffect::TerminalFloat(None));
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message("terminal_missing", &[]).as_str()));
+
+    app.window_session.observe_size((80, 24));
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(), screen: PtyScreen::new(80, 8, 100),
+            running: true, exit_code: None, truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.handle_event(UiEvent::Resize(20_000, 24));
+    app.process_effect(AppEffect::TerminalFloat(None));
+    let ids = app.window_session.native_ids().terminal(1).unwrap();
+    assert_eq!(app.window_session.graph().window(ids.window).unwrap().placement,
+        WindowPlacement::Floating(WindowRect { x: 2_000, y: 2, width: 16_000, height: 19 }));
+}
+
+#[test]
 fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.ui.terminal_panel.height = 10;

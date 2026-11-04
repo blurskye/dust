@@ -236,6 +236,46 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
     // Rechecks are not a filesystem lock: concurrent changes after validation remain possible.
     super::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
 }
+fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use rustix::fs::{Mode, OFlags, openat};
+    use std::path::Component;
+
+    let root = roots.iter()
+        .filter(|root| path.starts_with(&root.canonical_path))
+        .max_by_key(|root| root.canonical_path.components().count())
+        .ok_or_else(|| error(path, "file is outside the workspace roots"))?;
+    let directory = fs::OpenOptions::new().read(true)
+        .custom_flags(nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(&root.canonical_path)
+        .map_err(|e| error(path, e.to_string()))?;
+    let metadata = directory.metadata().map_err(|e| error(path, e.to_string()))?;
+    if root.filesystem_identity != Some(identity(&metadata)) {
+        return Err(error(path, "workspace directory identity changed"));
+    }
+    let relative = path.strip_prefix(&root.canonical_path)
+        .map_err(|e| error(path, e.to_string()))?;
+    let mut file = directory;
+    let mut components = relative.components().peekable();
+    // Walk from held directory descriptors so intermediate replacements cannot
+    // redirect the read through a symlink. No absolute paths or `..` are admitted.
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(error(path, "invalid workspace-relative file path"));
+        };
+        let flags = if components.peek().is_some() {
+            OFlags::PATH | OFlags::DIRECTORY
+        } else {
+            OFlags::RDONLY | OFlags::NONBLOCK
+        } | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        file = fs::File::from(openat(&file, name, flags, Mode::empty())
+            .map_err(|e| error(path, e.to_string()))?);
+    }
+    super::vfs::read_open_file_with_ceiling(
+        file, path, super::recovery::DOCUMENT_BYTE_CEILING,
+    )
+}
+
 impl ExplorerIo {
     pub(super) fn run(self, id: RequestId, cancelled: bool) -> ExplorerIoReply {
         let cancellation = || VfsError::Io {
@@ -287,7 +327,7 @@ impl ExplorerIo {
                     Ok((canonical, roots))
                 }) {
                     Ok((path, roots)) => {
-                        let result = super::read_file(&path)
+                        let result = read_scoped_file(&path, &roots)
                             .and_then(|bytes| roots_current(&roots).map(|()| bytes));
                         ExplorerIoReply::Opened { id, path, result }
                     }
@@ -340,6 +380,22 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn explorer_read_rejects_intermediate_symlink_replacement_after_canonicalization() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let sub = root.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("file"), b"inside").unwrap();
+        fs::write(outside.path().join("file"), b"outside").unwrap();
+        let roots = vec![RootIdentity::capture(root.path()).unwrap()];
+        let path = fs::canonicalize(sub.join("file")).unwrap();
+        assert_eq!(read_scoped_file(&path, &roots).unwrap(), b"inside");
+        fs::rename(&sub, root.path().join("original-sub")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &sub).unwrap();
+        assert!(read_scoped_file(&path, &roots).is_err());
+    }
+
     #[test]
     fn explorer_rename_and_delete_do_not_require_source_read_permission() {
         use std::os::unix::fs::PermissionsExt;

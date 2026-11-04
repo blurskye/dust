@@ -1553,6 +1553,14 @@ pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
             path: path.to_path_buf(),
             source,
         })?;
+    read_open_file_with_ceiling(file, path, maximum_bytes)
+}
+
+pub(super) fn read_open_file_with_ceiling(
+    file: fs::File,
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, VfsError> {
     let metadata = file.metadata().map_err(|source| VfsError::Io {
         operation: "inspect read target",
         path: path.to_path_buf(),

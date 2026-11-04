@@ -4148,7 +4148,10 @@ impl InteractiveApplication {
                 let rect = rect.unwrap_or_else(|| {
                     let (columns, rows) =
                         (self.window_session.width(), self.window_session.height());
-                    let (width, height) = (columns * 4 / 5, rows * 4 / 5);
+                    let (width, height) = (
+                        (u32::from(columns) * 4 / 5) as u16,
+                        (u32::from(rows) * 4 / 5) as u16,
+                    );
                     WindowRect {
                         x: (columns - width) / 2,
                         y: (rows - height) / 2,
