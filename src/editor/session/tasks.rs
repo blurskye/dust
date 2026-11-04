@@ -561,7 +561,12 @@ impl TaskSession {
         let current = self.keys.get(name).cloned();
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
         let mut found = pending || producer.is_some();
-        if !found && !self.running.values().any(|task| task.requested == name) {
+        let running = current.as_ref().is_some_and(|key| {
+            self.running.values().any(|task| {
+                task.requested == name && !task.cancelled && Arc::ptr_eq(&key.epoch, &task.key.epoch)
+            })
+        });
+        if !found && !running {
             return Err("task is not running".into());
         }
         self.preflights.retain(|_, step| step.requested != name);
@@ -1046,7 +1051,13 @@ mod tests {
     }
     #[test]
     fn stopping_a_finished_task_keeps_its_test_results_current() {
-        let (root, _editor, workspace, mut tasks) = fixture();
+        let (root, editor, workspace, mut tasks) = fixture();
+        // The cancelled predecessor can still be waiting for its terminal event when
+        // its replacement has already finished.
+        tasks.events.clear();
+        tasks.stop("task").unwrap();
+        let buffer = editor.buffers.iter().next().unwrap().0;
+        tasks.fixture_formatter_result("task", buffer, b"new", &editor, &workspace, 1);
         assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
         tasks.tests.insert("task".into(), vec![TestCaseResult {
             name: "test".into(), status: "failed".into(), duration: String::new(),

@@ -3676,6 +3676,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::CompletionResolved(item) => {
                 if self.language.accept_resolved(generation, item, &self.state) {
+                    self.project_lsp_completion();
                     self.accept_lsp_completion();
                 }
             }

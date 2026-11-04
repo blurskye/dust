@@ -250,6 +250,44 @@ fn documentation_resize_clamps_scroll_to_the_new_layout() {
 }
 
 #[test]
+fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
+    use crate::language::lsp::LspCompletionItem;
+    let mut app = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    app.language.fixture_projection(Some(super::LspProjectionOwner {
+        server: "primary".into(),
+        buffer,
+        view,
+        revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
+        uri: crate::language::lsp::file_uri(&path),
+        language: "rust".into(),
+    }));
+    for (server, label) in [("secondary", "a-retired"), ("primary", "z-kept")] {
+        app.language.install_completions(server, vec![LspCompletionItem {
+            label: label.into(), filter_text: None, sort_text: None,
+            detail: String::new(), insert_text: label.into(), text_edit: None,
+            additional_edits: Vec::new(), kind: None, snippet: false,
+            documentation: None, resolve_item: None, resolved: true,
+        }], false, 0);
+    }
+    app.narrow_lsp_completion();
+    app.move_lsp_completion(1);
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().selected, 1);
+    app.language.stopped("secondary");
+    app.narrow_lsp_completion();
+    let menu = app.ui.language_completion.as_ref().unwrap();
+    assert_eq!(menu.items.len(), 1);
+    assert_eq!(menu.items[0].label, "z-kept");
+    assert_eq!(menu.selected, 0);
+    app.language.stopped("primary");
+    app.narrow_lsp_completion();
+    assert!(app.ui.language_completion.is_none());
+}
+
+#[test]
 fn completion_documentation_is_typed_and_exact_request_owned() {
     let mut app = app();
     let path = app.state.workspace_root.join("completion.rs");

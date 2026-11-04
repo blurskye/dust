@@ -1216,6 +1216,7 @@ impl LspSession {
         });
         self.projection.completion_servers.retain(|key| key != server);
         self.projection.completion_all.retain(|(key, _)| key != server);
+        self.projection.completion_narrowed = None;
         self.projection.completion_scroll = self.projection.completion_scroll.min(self.projection.completion_selected);
     }
     pub(in crate::editor::session) fn retire_projection_document(
@@ -1718,7 +1719,9 @@ mod tests {
         owner.projection.resolve = Some((1, source.clone(), 1, ByteOffset(0)));
         owner.projection.requests.insert(1, (source.clone(), vec!["owned".into()], "completionItem/resolve".into()));
         owner.projection.requests.insert(2, (source.clone(), vec!["second".into()], "textDocument/completion".into()));
+        owner.projection.completion_narrowed = Some((ByteOffset(0), editor.buffers[source.buffer].text.revision()));
         owner.stopped("second");
+        assert!(owner.completion_needs_narrowing(ByteOffset(0), editor.buffers[source.buffer].text.revision()));
         assert_eq!(owner.completion_items(), &[item("kept")]);
         assert_eq!(owner.projection.completion_all, vec![("owned".into(), item("kept"))]);
         assert!(!owner.accept_result("second", 2, "textDocument/completion", &document.uri(), 0));
