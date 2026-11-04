@@ -1084,7 +1084,13 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
         Err(error) if error.code() == git2::ErrorCode::UnbornBranch => None,
         Err(_) => return Err(GitMutationError::Backend),
     };
-    let entry = tree.as_ref().and_then(|tree| tree.get_path(repo_path).ok());
+    let entry = match tree.as_ref().map(|tree| tree.get_path(repo_path)) {
+        Some(Ok(entry)) => Some(entry),
+        Some(Err(error)) if error.code() == git2::ErrorCode::NotFound
+            && error.class() == git2::ErrorClass::Tree => None,
+        Some(Err(_)) => return Err(GitMutationError::Backend),
+        None => None,
+    };
     if let Some(entry) = entry {
         let mut restored = index.get_path(repo_path, 0).unwrap_or(git2::IndexEntry {
             ctime: git2::IndexTime::new(0, 0),

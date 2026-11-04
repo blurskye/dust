@@ -1,18 +1,22 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
-    path::PathBuf,
+    fs::{File, OpenOptions},
+    os::unix::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender, TryRecvError},
     },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use super::{
     catalog::{ToolDefinition, nix_lsp_shell, tool_store_root},
     install::{ToolInstallerError, install_tool},
+    install_prepare::ensure_private_directory,
     runtimes::{
         install_nix_lsp_profile, install_path_rustup_component, uninstall_managed_tool,
         uninstall_nix_lsp_tool,
@@ -66,6 +70,29 @@ pub(super) enum InstallerRequest {
         definition: ToolDefinition,
     },
     Shutdown,
+}
+
+fn lock_tool_store(root: &Path, cancellations: &Receiver<()>) -> Result<nix::fcntl::Flock<File>, String> {
+    ensure_private_directory(root)?;
+    let mut file = OpenOptions::new()
+        .read(true).write(true).create(true).truncate(false)
+        .mode(0o600).custom_flags(nix::libc::O_NOFOLLOW)
+        .open(root.join(".installer.lock"))
+        .map_err(|error| format!("cannot open tool store lock: {error}"))?;
+    if !file.metadata().map_err(|error| error.to_string())?.is_file() {
+        return Err("tool store lock must be a regular file".into());
+    }
+    loop {
+        match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+            Ok(lock) => return Ok(lock),
+            Err((returned, nix::errno::Errno::EWOULDBLOCK)) => file = returned,
+            Err((_, error)) => return Err(format!("cannot lock tool store: {error}")),
+        }
+        match cancellations.recv_timeout(Duration::from_millis(50)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            _ => return Err("tool installation cancelled while waiting for the store lock".into()),
+        }
+    }
 }
 
 pub struct ToolInstaller {
@@ -173,7 +200,10 @@ impl ToolInstaller {
                         0,
                         None,
                     );
-                    let result = match operation {
+                    let result = (|| {
+                        // All instances share runtimes and destinations under this store.
+                        let _lock = lock_tool_store(&root, &cancellations)?;
+                        match operation {
                         ToolOperation::InstallManaged => {
                             install_tool(&definition, &root, &cancellations, &mut report, None)
                         }
@@ -205,7 +235,8 @@ impl ToolInstaller {
                         ToolOperation::UninstallNix => {
                             uninstall_nix_lsp_tool(&definition, &root).map(|()| None)
                         }
-                    };
+                        }
+                    })();
                     if results
                         .send(ToolInstallResult {
                             id: result_id,
@@ -321,6 +352,66 @@ impl Drop for ToolInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installer_store_lock_serializes_instances_and_waiting_can_be_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        let (cancel, cancellations) = mpsc::channel();
+        let held = lock_tool_store(directory.path(), &cancellations).unwrap();
+        let definition = crate::tools::bundled_tool_catalog().into_iter()
+            .find(|tool| tool.id == "rust-analyzer").unwrap();
+        let destination = directory.path().join(&definition.id);
+        std::fs::create_dir(&destination).unwrap();
+        let installer = ToolInstaller::start_at(directory.path().to_path_buf());
+        installer.uninstall(definition.clone()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if installer.try_progress().unwrap().is_some() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "worker did not start");
+            thread::yield_now();
+        }
+        // Drop cancels a waiting worker rather than hanging on another process's lock.
+        drop(installer);
+        assert!(destination.is_dir(), "a locked store must not be mutated");
+        drop(held);
+        drop(cancel);
+
+        let installer = ToolInstaller::start_at(directory.path().to_path_buf());
+        installer.uninstall(definition).unwrap();
+        loop {
+            if let Some(result) = installer.try_result().unwrap() {
+                assert!(result.result.is_ok(), "{result:?}");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "uninstall did not finish");
+            thread::yield_now();
+        }
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn installer_store_lock_is_released_after_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join(".installer.lock"), b"").unwrap();
+        let installer = ToolInstaller::start_at(directory.path().to_path_buf());
+        let mut definition = crate::tools::bundled_tool_catalog().into_iter()
+            .find(|tool| tool.id == "rust-analyzer").unwrap();
+        definition.id = "../invalid".into();
+        installer.uninstall(definition).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = installer.try_result().unwrap() {
+                assert!(result.result.is_err());
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "worker did not finish");
+            thread::yield_now();
+        }
+        let file = File::open(directory.path().join(".installer.lock")).unwrap();
+        let _lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).unwrap();
+    }
 
     #[test]
     fn completion_discards_late_progress_for_only_that_tool() {

@@ -751,14 +751,11 @@ pub(super) fn completion_item(item: &Value, resolved: bool) -> Result<LspComplet
     let label = item
         .get("label")
         .and_then(Value::as_str)
-        .ok_or("completion item has no label")?
-        .chars()
-        .take(4096)
-        .collect::<String>();
+        .ok_or("completion item has no label")?;
     let insert_text = item
         .get("insertText")
         .and_then(Value::as_str)
-        .unwrap_or(&label)
+        .unwrap_or(label)
         .chars()
         .take(1024 * 1024)
         .collect();
@@ -784,7 +781,7 @@ pub(super) fn completion_item(item: &Value, resolved: bool) -> Result<LspComplet
     Ok(LspCompletionItem {
         filter_text: text_field("filterText"),
         sort_text: text_field("sortText"),
-        label,
+        label: label.chars().take(4096).collect(),
         detail: item
             .get("detail")
             .and_then(Value::as_str)
@@ -925,9 +922,9 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                     .unwrap_or_default();
                 let options = change.get("options").unwrap_or(&Value::Null);
                 let operation = match kind {
-                    "create" => change.get("uri").and_then(Value::as_str).map(|uri| {
-                        LspResourceOperation::Create {
-                            uri: uri.into(),
+                    "create" => LspResourceOperation::Create {
+                            uri: change.get("uri").and_then(Value::as_str)
+                                .ok_or("create has no URI")?.into(),
                             overwrite: options
                                 .get("overwrite")
                                 .and_then(Value::as_bool)
@@ -936,9 +933,8 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                                 .get("ignoreIfExists")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
-                        }
-                    }),
-                    "rename" => Some(LspResourceOperation::Rename {
+                    },
+                    "rename" => LspResourceOperation::Rename {
                         old_uri: change
                             .get("oldUri")
                             .and_then(Value::as_str)
@@ -957,10 +953,10 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                             .get("ignoreIfExists")
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
-                    }),
-                    "delete" => change.get("uri").and_then(Value::as_str).map(|uri| {
-                        LspResourceOperation::Delete {
-                            uri: uri.into(),
+                    },
+                    "delete" => LspResourceOperation::Delete {
+                            uri: change.get("uri").and_then(Value::as_str)
+                                .ok_or("delete has no URI")?.into(),
                             recursive: options
                                 .get("recursive")
                                 .and_then(Value::as_bool)
@@ -969,13 +965,10 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                                 .get("ignoreIfNotExists")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
-                        }
-                    }),
-                    _ => None,
+                    },
+                    _ => return Err("unknown workspace resource operation".into()),
                 };
-                if let Some(operation) = operation {
-                    resources.push(operation);
-                }
+                resources.push(operation);
                 continue;
             };
             let uri = text_document
@@ -984,7 +977,11 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                 .ok_or("document edit has no URI")?;
             documents.push(LspDocumentEdit {
                 uri: uri.into(),
-                version: text_document.get("version").and_then(Value::as_u64),
+                version: match text_document.get("version") {
+                    None | Some(Value::Null) => None,
+                    Some(version) => Some(version.as_u64()
+                        .ok_or("document edit version must be a nonnegative integer or null")?),
+                },
                 edits: text_edits(change.get("edits").unwrap_or(&Value::Null))?,
             });
         }

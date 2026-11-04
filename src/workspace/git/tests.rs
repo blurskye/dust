@@ -2635,6 +2635,61 @@ fn whole_file_unstage_clears_conflict_entries_without_changing_worktree() {
 }
 
 #[test]
+fn whole_file_unstage_preserves_the_index_when_a_head_subtree_is_missing() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    std::fs::create_dir(dir.path().join("nested")).unwrap();
+    commit(&repo, "nested/file", "old\n");
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let subtree = tree.get_name("nested").unwrap().id().to_string();
+    std::fs::write(dir.path().join("nested/file"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("nested/file")).unwrap();
+    index.write().unwrap();
+    let mut plan = plan_template(
+        plan_policy(dir.path(), "nested/file", GitDiffLayer::Staged),
+        GitMutationKind::UnstageFile,
+    );
+    plan.expected_index = Some(git_index_fingerprint(dir.path()).unwrap());
+    let index_path = repo.path().join("index");
+    let before = std::fs::read(&index_path).unwrap();
+    let object_path = repo.path().join("objects").join(&subtree[..2]).join(&subtree[2..]);
+    drop(tree);
+    drop(index);
+    drop(repo);
+    std::fs::remove_file(object_path).unwrap();
+
+    assert_eq!(run_plan(plan), Err(GitMutationError::Backend));
+    assert_eq!(std::fs::read(index_path).unwrap(), before);
+    assert_eq!(index_text(dir.path(), "nested/file"), "staged\n");
+}
+
+#[test]
+fn whole_file_unstage_removes_new_paths_absent_from_head() {
+    for path in ["new", "nested/new", "new_directory/new"] {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+        commit(&repo, "nested/tracked", "old\n");
+        std::fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(path), "new\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(path)).unwrap();
+        index.write().unwrap();
+        let mut plan = plan_template(
+            plan_policy(dir.path(), path, GitDiffLayer::Staged),
+            GitMutationKind::UnstageFile,
+        );
+        plan.expected_index = Some(git_index_fingerprint(dir.path()).unwrap());
+        run_plan(plan).unwrap();
+        index.read(true).unwrap();
+        assert!(index.get_path(Path::new(path), 0).is_none());
+        assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "new\n");
+        assert_eq!(index_text(dir.path(), "nested/tracked"), "old\n");
+    }
+}
+
+#[test]
 fn whole_file_unstage_restores_a_staged_deletion() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();

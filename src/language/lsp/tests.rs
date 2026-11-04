@@ -555,6 +555,20 @@ fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
 }
 
 #[test]
+fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
+    let label = "é".repeat(5000);
+    for resolved in [false, true] {
+        let item = super::protocol::completion_item(&json!({"label":label}), resolved).unwrap();
+        assert_eq!(item.label.chars().count(), 4096);
+        assert_eq!(item.insert_text, label);
+        let item = super::protocol::completion_item(
+            &json!({"label":label,"insertText":"explicit"}), resolved,
+        ).unwrap();
+        assert_eq!(item.insert_text, "explicit");
+    }
+}
+
+#[test]
 fn completion_commands_survive_initial_and_resolved_items() {
     let item = json!({"label":"example","command":{"title":"Import","command":"add.import","arguments":["example"]}});
     for resolved in [false, true] {
@@ -601,6 +615,53 @@ fn completion_and_workspace_edits_are_bounded_typed_data() {
     .expect("workspace edit");
     assert_eq!(edit.documents.len(), 1);
     assert_eq!(edit.documents[0].edits[0].new_text, "b");
+}
+
+#[test]
+fn workspace_edits_reject_malformed_resource_operations_without_partial_results() {
+    for operation in [
+        json!({"kind":"create"}),
+        json!({"kind":"create","uri":42}),
+        json!({"kind":"delete"}),
+        json!({"kind":"delete","uri":null}),
+        json!({"kind":"rename","oldUri":"file:///old"}),
+        json!({"kind":"rename","newUri":"file:///new"}),
+        json!({"kind":"unknown","uri":"file:///new"}),
+        json!({"uri":"file:///new"}),
+    ] {
+        assert!(workspace_edit(&json!({
+            "changes":{"file:///valid":[{
+                "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                "newText":"valid"
+            }]},
+            "documentChanges":[operation]
+        })).is_err(), "accepted {operation}");
+    }
+    let edit = workspace_edit(&json!({"documentChanges":[
+        {"kind":"create","uri":"file:///new","options":{"overwrite":true}},
+        {"kind":"rename","oldUri":"file:///old","newUri":"file:///renamed"},
+        {"kind":"delete","uri":"file:///deleted"}
+    ]})).unwrap();
+    assert_eq!(edit.resources.len(), 3);
+}
+
+#[test]
+fn workspace_edits_reject_invalid_non_null_document_versions() {
+    for version in [json!(-1), json!(1.5), json!("1"), json!(false), json!({})] {
+        assert!(workspace_edit(&json!({"documentChanges":[{
+            "textDocument":{"uri":"file:///a","version":version},"edits":[]
+        }]})).is_err(), "accepted {version}");
+    }
+    for (version, expected) in [(Value::Null, None), (json!(0), Some(0)), (json!(42), Some(42))] {
+        let edit = workspace_edit(&json!({"documentChanges":[{
+            "textDocument":{"uri":"file:///a","version":version},"edits":[]
+        }]})).unwrap();
+        assert_eq!(edit.documents[0].version, expected);
+    }
+    let edit = workspace_edit(&json!({"documentChanges":[{
+        "textDocument":{"uri":"file:///a"},"edits":[]
+    }]})).unwrap();
+    assert_eq!(edit.documents[0].version, None);
 }
 
 #[test]
