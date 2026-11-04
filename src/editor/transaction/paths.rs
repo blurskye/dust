@@ -59,6 +59,14 @@ impl EditorState {
         }
         Ok(())
     }
+    pub(crate) fn check_rename_destination(&self, target: &Path) -> Result<(), String> {
+        if self.buffers.values().any(|buffer| {
+            buffer.path.as_ref().is_some_and(|path| path.starts_with(target))
+        }) {
+            return Err("rename destination belongs to an open buffer".into());
+        }
+        Ok(())
+    }
     pub(crate) fn check_resource_destination(&self, target: Option<&Path>) -> Result<(), String> {
         if target.is_some_and(|path| {
             self.buffers

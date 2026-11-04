@@ -1373,6 +1373,7 @@ impl InteractiveApplication {
     }
 
     fn write_persistence(&mut self) {
+        self.persistence.reconcile_marks(&self.state);
         let configured = &self.configuration.settings().persistence;
         if !configured.enabled {
             return;
@@ -1540,13 +1541,25 @@ impl InteractiveApplication {
             }
             return;
         }
+        self.submit_restore_reads();
+    }
+    pub(super) fn submit_restore_reads(&mut self) {
         let roots = self
             .workspace
             .roots()
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect::<Vec<_>>();
-        for path in paths {
+        while let Some(path) = self.persistence.next_restore_path() {
+            match self.documents.check_admission() {
+                Ok(()) => {}
+                Err(crate::files::VfsError::QueueFull) => return,
+                Err(error) => {
+                    self.cancel_session_restore();
+                    self.show_error(error);
+                    return;
+                }
+            }
             let Some(read) = self.persistence.restore_read(
                 &path,
                 RestoreContext {
@@ -1568,6 +1581,7 @@ impl InteractiveApplication {
                         return;
                     }
                 }
+                Err(crate::files::VfsError::QueueFull) => return,
                 Err(error) => {
                     drop(read);
                     self.cancel_session_restore();
@@ -2986,6 +3000,7 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::MarkJump(name) => {
+                self.persistence.reconcile_marks(&self.state);
                 let location = self
                     .persistence
                     .marks()
@@ -2999,7 +3014,7 @@ impl InteractiveApplication {
             }
             AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
-                    self.persistence.set_mark(name, location, MARK_LIMIT);
+                    self.persistence.set_mark(name, location, MARK_LIMIT, &self.state);
                 }
             }
 
@@ -3730,20 +3745,13 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn retire_stale_explorer_intents(&mut self) {
-        let (ids, may_write) = self.explorer.retire_stale_intents(
+        let ids = self.explorer.retire_stale_intents(
             self.workspace.version(),
             self.configuration.binding_revision(),
             &self.state.window_version(),
         );
-        let mut all_cancelled = true;
         for id in ids {
-            all_cancelled &= self.documents.cancel_request(id);
-        }
-        if may_write && !all_cancelled {
-            self.notify_message(
-                "explorer source changed; a running filesystem write may still finish".into(),
-                true,
-            );
+            self.documents.cancel_request(id);
         }
         if self
             .input
@@ -3767,16 +3775,8 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn retire_explorer_intents(&mut self) {
-        let (ids, may_write) = self.explorer.retire_intents();
-        let mut all_cancelled = true;
-        for id in ids {
-            all_cancelled &= self.documents.cancel_request(id);
-        }
-        if may_write && !all_cancelled {
-            self.notify_message(
-                "explorer operation retired; a running filesystem write may still finish".into(),
-                true,
-            );
+        for id in self.explorer.retire_intents() {
+            self.documents.cancel_request(id);
         }
     }
     fn queue_explorer_mutation(
@@ -3922,10 +3922,11 @@ impl InteractiveApplication {
         &mut self,
         prepared: crate::files::PreparedExplorerMutation,
     ) {
-        let result = self
-            .documents
-            .apply_explorer(prepared)
-            .map_err(|e| e.to_string());
+        let result = match prepared.operation() {
+            ExplorerMutation::Rename { target, .. } => self.state.check_rename_destination(target),
+            _ => Ok(()),
+        }
+        .and_then(|()| self.documents.apply_explorer(prepared).map_err(|e| e.to_string()));
         let id = result.as_ref().ok().copied();
         if let Err(error) = self.explorer.admit_apply(result) {
             if let Some(id) = id {
@@ -8927,6 +8928,7 @@ impl InteractiveApplication {
                 self.install_picker(self.message("navigation_recents_title", &[]), items);
             }
             PickerKind::Marks => {
+                self.persistence.reconcile_marks(&self.state);
                 let items = self
                     .persistence
                     .marks()

@@ -1629,6 +1629,7 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn process_vfs_results(&mut self) {
         loop {
+            self.submit_restore_reads();
             let result = match self
                 .documents
                 .poll(&self.state.window_version(), self.workspace.root_revision())
@@ -1674,7 +1675,7 @@ impl InteractiveApplication {
                     }
                     self.recovery.stopped();
                     self.search.clear_preview();
-                    self.explorer.retire_intents();
+                    self.explorer.transport_stopped();
                     self.persistence.restore_transport_stopped();
                     if self.workspace_edits.proposal().is_some() || self.workspace_edits.preparing()
                     {

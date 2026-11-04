@@ -569,6 +569,7 @@ impl PluginWindowHost {
                     .min(tree_rows(&tree, None).len().saturating_sub(1));
                 let revision = tree.revision;
                 instance.tree = Some(tree);
+                ensure_focused_visible(instance);
                 Ok((Some(handle), Some(revision), None))
             }
             PluginUiRequestKind::ReplacePrivate { handle, snapshot } => {

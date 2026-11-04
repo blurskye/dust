@@ -3146,9 +3146,10 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
 #[test]
 fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
     let mut source = app();
+    let path = source.state.workspace_root.join("editor.rs");
     source.state.open_text(
         TextBuffer::from_text("editor"),
-        Some(PathBuf::from("/workspace/editor.rs")),
+        Some(path),
     );
     source.set_dashboard_visibility(false);
     source.open_explorer();
@@ -5003,6 +5004,74 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
 }
 
 #[test]
+fn session_restore_reads_more_files_than_the_document_queue_capacity() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    for index in 0..12 {
+        if index > 0 {
+            app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::NewTab));
+        }
+        let path = app.state.workspace_root.join(format!("restore-{index}.txt"));
+        fs::write(&path, format!("file {index}\n")).unwrap();
+        app.start_open(path);
+        wait_vfs(&mut app);
+    }
+    let session = app.capture_session().unwrap();
+    assert_eq!(session.tabs.len(), 12);
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    assert_eq!(app.ui.config_diagnostic, None);
+    assert_eq!(app.state.tabs.len(), 12);
+    assert!(app.persistence.next_restore_path().is_none());
+    for index in 0..12 {
+        let path = app.state.workspace_root.join(format!("restore-{index}.txt"));
+        assert!(app.state.buffers.values().any(|buffer| {
+            buffer.path.as_ref() == Some(&path)
+                && buffer.text.to_string() == format!("file {index}\n")
+        }));
+    }
+}
+
+#[test]
+fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let path = app.state.workspace_root.join("same.txt");
+    fs::write(&path, "first line\nsecond line\nthird line\n").unwrap();
+    app.start_open(path);
+    wait_vfs(&mut app);
+    app.set_dashboard_visibility(false);
+    let first = app.state.active_view.unwrap();
+    let second = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    app.state.views[first].cursor = ByteOffset(0);
+    app.state.views[second].cursor = ByteOffset(11);
+    app.reconcile_editor_windows();
+    let session = app.capture_session().unwrap();
+    assert_eq!(session.tabs[0].focused_pane, Some(1));
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    assert_eq!(app.ui.config_diagnostic, None);
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(11));
+}
+
+#[test]
 fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     use crate::editor::session::persistence::RestoreContext;
 
@@ -5210,6 +5279,72 @@ fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
 }
 
 #[test]
+fn live_marks_follow_command_edits_before_saving_and_jumping() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("marked.txt");
+    fs::write(&path, "abc").unwrap();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), Some(path));
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.state.views[view].cursor = ByteOffset(2);
+    app.process_effect(AppEffect::MarkSet("a".into()));
+    app.state.views[view].cursor = ByteOffset(0);
+    for key in ['i', 'x', 'x'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.save_persistence();
+    assert_eq!(app.persistence.marks()[0].location.byte, 4);
+    app.state.views[view].cursor = ByteOffset(0);
+    for key in ['i', 'y'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
+    app.process_effect(AppEffect::MarkJump("a".into()));
+    wait_vfs(&mut app);
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
+    assert_eq!(app.persistence.marks()[0].location.anchor, 5);
+}
+
+#[test]
+fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
+    use crate::editor::session::persistence::RestoreContext;
+    let mut app = app();
+    let path = app.state.workspace_root.join("cancelled-restore.txt");
+    fs::write(&path, "restored\n").unwrap();
+    app.start_open(path);
+    wait_vfs(&mut app);
+    app.set_dashboard_visibility(false);
+    let session = app.capture_session().unwrap();
+    for _ in 0..12 {
+        app.persistence.fixture_restore_source(RestoreContext {
+            editor: &app.state,
+            workspace: &app.workspace,
+            input: &app.input,
+            windows: &app.window_session,
+            configuration: app.configuration.binding_revision(),
+        });
+        app.restore_session(session.clone());
+        app.cancel_session_restore();
+        assert_eq!(app.documents.legacy_count(), 0);
+        assert!(app.persistence.next_restore_path().is_none());
+        wait_vfs(&mut app);
+    }
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    assert_eq!(app.ui.config_diagnostic, None);
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "restored\n");
+}
+
+#[test]
 fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::{
         editor::session::persistence::RestoreContext,
@@ -5234,6 +5369,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
                 },
             },
             focused_path: Some(path.clone()),
+            focused_pane: None,
         }],
         active_tab: 0,
         window_rules: Vec::new(),
@@ -5320,7 +5456,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         scroll_line: 0,
         scroll_column: 0,
     };
-    app.persistence.set_mark("x".into(), location(3), 8);
+    app.persistence.set_mark("x".into(), location(3), 8, &app.state);
     let live = app.state.workspace_root.join("live.txt");
     app.persistence.record_recent(live.clone(), 8);
     let mut saved = PersistedState {

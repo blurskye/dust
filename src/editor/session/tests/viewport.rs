@@ -541,7 +541,7 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
         .expect("split source view");
     source.views[second].scroll_column = 17;
     let source_tab = source.active_tab.expect("source tab");
-    let persisted = capture_persisted_layout(&source, &source.tabs[source_tab].root)
+    let persisted = capture_persisted_layout(&source, &source.tabs[source_tab].root, std::slice::from_ref(&source.workspace_root))
         .expect("capture clean layout");
 
     let mut restored = crate::editor::EditorState::new(PathBuf::from("/workspace"));
@@ -570,7 +570,11 @@ fn session_capture_keeps_project_panes_after_external_navigation() {
     );
     state.buffers[external].read_only = true;
     let tab = state.active_tab.unwrap();
-    let layout = capture_persisted_layout(&state, &state.tabs[tab].root).unwrap();
+    let roots = std::slice::from_ref(&state.workspace_root);
+    let layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
+    state.buffers[external].read_only = false;
+    let writable_layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
+    assert_eq!(serde_json::to_value(&layout).unwrap(), serde_json::to_value(&writable_layout).unwrap());
     assert!(
         matches!(layout, crate::persistence::PersistedLayout::Pane { pane } if pane.path == path)
     );

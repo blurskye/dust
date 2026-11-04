@@ -4119,7 +4119,7 @@ fn retained_keyboard_focus_scrolls_with_the_projected_height() {
     let height = host.instances.values().next().unwrap().visible_rows;
     assert!(height > 0);
     let mut catalog = crate::extensions::PluginContributionCatalog::default();
-    catalog.install(index).unwrap();
+    catalog.install(index.clone()).unwrap();
     host.interact_focused(&graph, &catalog, PluginUiInteraction::Focus(4))
         .unwrap();
     let instance = host.instances.values().next().unwrap();
@@ -4137,4 +4137,34 @@ fn retained_keyboard_focus_scrolls_with_the_projected_height() {
     host.interact_focused(&graph, &catalog, PluginUiInteraction::Focus(-4))
         .unwrap();
     assert_eq!(host.instances.values().next().unwrap().scroll, 0);
+
+    let (handle, instance) = host.instances.iter().next().unwrap();
+    let handle = *handle;
+    let mut replacement = instance.tree.clone().unwrap();
+    replacement.revision += 1;
+    // Keep the same focused node, but move it below the unchanged viewport.
+    replacement.nodes[0].children.rotate_left(1);
+    let result = process_fixture(
+        &mut host,
+        &mut graph,
+        &index,
+        PluginUiRequest {
+            token: 2,
+            kind: PluginUiRequestKind::ReplaceUi {
+                handle,
+                expected_tree_revision: 1,
+                tree: replacement,
+            },
+        },
+    );
+    assert!(result.error.is_none(), "{:?}", result.error);
+    host.synchronize_private_geometry(Some(&projection));
+    let snapshot = &host.snapshots()[0];
+    let focused_row = snapshot.rows.iter().position(|row| row.focused).unwrap();
+    assert_eq!(snapshot.rows[focused_row].node, 2);
+    assert!(focused_row >= snapshot.scroll && focused_row < snapshot.scroll + height);
+    assert_eq!(
+        host.interact_focused(&graph, &catalog, PluginUiInteraction::Activate).unwrap(),
+        Some("plugin.demo.open".into())
+    );
 }

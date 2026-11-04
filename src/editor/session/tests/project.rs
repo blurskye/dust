@@ -332,6 +332,88 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
 }
 
 #[test]
+fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
+    for directory in [false, true] {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let source = root.join("source");
+        let target = root.join("target");
+        let (source_file, target_file) = if directory {
+            fs::create_dir(&source).unwrap();
+            (source.join("file.txt"), target.join("file.txt"))
+        } else {
+            (source.clone(), target.clone())
+        };
+        fs::write(&source_file, "source text").unwrap();
+        let (buffer, _) = app.state.open_text(
+            TextBuffer::from_text("source text"), Some(source_file.clone()),
+        );
+        let (destination, _) = app.state.open_text(
+            TextBuffer::from_text("unsaved destination"), Some(target_file.clone()),
+        );
+        app.state.set_buffer_dirty(destination, true);
+        app.open_explorer();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.explorer.tree().id_for_path(&source).is_none() {
+            app.process_explorer_result();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        app.explorer.select(app.explorer.tree().id_for_path(&source).unwrap());
+        app.rename_explorer_path("target".into());
+        wait_vfs(&mut app);
+        assert!(!app.explorer.mutation_pending());
+        assert_eq!(fs::read_to_string(&source_file).unwrap(), "source text");
+        assert!(!target.exists());
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&source_file));
+        assert_eq!(app.state.buffers[destination].path.as_ref(), Some(&target_file));
+        assert_eq!(app.state.buffers[destination].text.to_string(), "unsaved destination");
+        assert!(app.state.buffers[destination].dirty);
+    }
+}
+
+#[test]
+fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
+    use crate::editor::session::documents::DocumentEvent;
+    let mut app = app();
+    let source = app.state.workspace_root.join("before.txt");
+    let target = app.state.workspace_root.join("after.txt");
+    fs::write(&source, "kept").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("kept"), Some(source.clone()));
+    app.open_explorer();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.explorer.tree().id_for_path(&source).is_none() {
+        app.process_explorer_result();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    app.explorer.select(app.explorer.tree().id_for_path(&source).unwrap());
+    app.rename_explorer_path("after.txt".into());
+    // Admit the prepared write, but do not consume its completion yet.
+    loop {
+        if let Some(DocumentEvent::Explorer(reply)) = app.documents
+            .poll(&app.state.window_version(), app.workspace.root_revision()).unwrap()
+        {
+            app.process_explorer_io(reply);
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    while !target.exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&source));
+    app.process_effect(AppEffect::ExplorerClose);
+    app.retire_stale_explorer_intents();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+    assert!(!app.explorer.mutation_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "kept");
+}
+
+#[test]
 fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let mut app = app();
     let source = app.state.workspace_root.join("source.txt");

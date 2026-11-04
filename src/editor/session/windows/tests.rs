@@ -60,6 +60,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                 },
             },
             focused_path: Some(path.clone()),
+            focused_pane: None,
         }],
         active_tab: 0,
         window_rules: Vec::new(),

@@ -210,6 +210,9 @@ impl PersistenceSession {
         });
         Ok(Some(result))
     }
+    pub(in crate::editor::session) fn next_restore_path(&self) -> Option<PathBuf> {
+        self.restore.as_ref()?.remaining.first().cloned()
+    }
     pub(in crate::editor::session) fn restore_read(
         &mut self,
         path: &std::path::Path,
@@ -225,17 +228,13 @@ impl PersistenceSession {
         })
     }
     pub(in crate::editor::session) fn cancel_restore(&mut self) -> Vec<RequestId> {
-        let ids = self
-            .restore
+        self.restore
             .take()
-            .map(|restore| restore.requests.into_keys().collect::<Vec<_>>())
-            .unwrap_or_default();
-        self.retired_reads.extend(ids.iter().copied());
-        ids
+            .map(|restore| restore.requests.into_keys().collect())
+            .unwrap_or_default()
     }
     pub(in crate::editor::session) fn restore_transport_stopped(&mut self) {
         self.restore = None;
-        self.retired_reads.clear();
     }
     pub(in crate::editor::session) fn accept_restore(
         &mut self,
@@ -243,9 +242,6 @@ impl PersistenceSession {
         context: RestoreContext<'_>,
     ) -> ControlFlow<RestoreUpdate, VfsResult> {
         let id = event.request_id();
-        if self.retired_reads.remove(&id) {
-            return Break(RestoreUpdate::Waiting);
-        }
         let Some(restore) = self
             .restore
             .as_ref()
@@ -352,6 +348,7 @@ impl PersistenceSession {
         name: String,
         location: PersistedLocation,
         maximum: usize,
+        editor: &EditorState,
     ) {
         if name.len() > 64 || name.chars().any(char::is_control) {
             return;
@@ -361,6 +358,7 @@ impl PersistenceSession {
         self.marks.push(PersistedMark { name, location });
         let extra = self.marks.len().saturating_sub(maximum);
         self.marks.drain(..extra);
+        self.reconcile_marks(editor);
     }
     pub(in crate::editor::session) fn record_location(
         &mut self,
@@ -465,11 +463,16 @@ impl PersistenceSession {
         rules: Vec<PersistedWindowRule>,
         virtual_sources: &[(crate::editor::BufferId, String, String, String)],
     ) -> Result<Option<PersistedSession>, String> {
+        let roots = workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect::<Vec<_>>();
         let mut tabs = Vec::new();
         let mut descriptors = Vec::new();
         let mut active_tab = 0;
         for (id, tab) in &state.tabs {
-            let Some(layout) = capture_persisted_layout(state, &tab.root) else {
+            let Some(layout) = capture_persisted_layout(state, &tab.root, &roots) else {
                 continue;
             };
             if Some(id) == state.active_tab {
@@ -477,7 +480,8 @@ impl PersistenceSession {
             }
             let tab_index = tabs.len();
             let mut panes = Vec::new();
-            collect_persistable_editor_panes(state, &tab.root, &mut panes);
+            collect_persistable_editor_panes(state, &tab.root, &roots, &mut panes);
+            let focused_pane = panes.iter().position(|(pane, _)| *pane == tab.focused);
             let focused_path = panes
                 .iter()
                 .find(|(pane, _)| *pane == tab.focused)
@@ -500,6 +504,7 @@ impl PersistenceSession {
             tabs.push(PersistedTab {
                 layout,
                 focused_path,
+                focused_pane,
             });
         }
 
@@ -543,11 +548,7 @@ impl PersistenceSession {
 
         Ok(
             (!tabs.is_empty() || !descriptors.is_empty()).then(|| PersistedSession {
-                roots: workspace
-                    .roots()
-                    .iter()
-                    .map(|root| root.identity.canonical_path.clone())
-                    .collect(),
+                roots,
                 tabs,
                 active_tab,
                 window_rules: rules,
@@ -586,6 +587,7 @@ fn collect_editor_panes(
 fn collect_persistable_editor_panes(
     state: &EditorState,
     layout: &crate::editor::LayoutNode,
+    roots: &[PathBuf],
     panes: &mut Vec<(crate::editor::PaneId, PathBuf)>,
 ) {
     match layout {
@@ -597,11 +599,9 @@ fn collect_persistable_editor_panes(
                 .and_then(|view| state.buffers.get(view.buffer))
                 .filter(|buffer| {
                     !buffer.dirty
-                        && !(buffer.read_only
-                            && buffer
-                                .path
-                                .as_ref()
-                                .is_some_and(|path| !path.starts_with(&state.workspace_root)))
+                        && buffer.path.as_ref().is_some_and(|path| {
+                            roots.iter().any(|root| path.starts_with(root))
+                        })
                 })
                 .and_then(|buffer| buffer.path.clone())
             {
@@ -609,8 +609,8 @@ fn collect_persistable_editor_panes(
             }
         }
         crate::editor::LayoutNode::Split { first, second, .. } => {
-            collect_persistable_editor_panes(state, first, panes);
-            collect_persistable_editor_panes(state, second, panes);
+            collect_persistable_editor_panes(state, first, roots, panes);
+            collect_persistable_editor_panes(state, second, roots, panes);
         }
     }
 }
@@ -628,6 +628,7 @@ fn collect_persisted_panes(layout: &PersistedLayout, panes: &mut Vec<PersistedPa
 pub(in crate::editor::session) fn capture_persisted_layout(
     state: &EditorState,
     layout: &crate::editor::LayoutNode,
+    roots: &[PathBuf],
 ) -> Option<PersistedLayout> {
     match layout {
         crate::editor::LayoutNode::Pane(pane) => {
@@ -638,7 +639,7 @@ pub(in crate::editor::session) fn capture_persisted_layout(
                 return None;
             }
             let path = buffer.path.clone()?;
-            if buffer.read_only && !path.starts_with(&state.workspace_root) {
+            if !roots.iter().any(|root| path.starts_with(root)) {
                 return None;
             }
             Some(PersistedLayout::Pane {
@@ -660,8 +661,8 @@ pub(in crate::editor::session) fn capture_persisted_layout(
             first,
             second,
         } => {
-            let first = capture_persisted_layout(state, first);
-            let second = capture_persisted_layout(state, second);
+            let first = capture_persisted_layout(state, first, roots);
+            let second = capture_persisted_layout(state, second, roots);
             match (first, second) {
                 (Some(first), Some(second)) => Some(PersistedLayout::Split {
                     axis: match axis {

@@ -26,7 +26,6 @@ pub(in crate::editor::session) use session::{
 pub(in crate::editor::session) struct PersistenceSession {
     load_source: Option<session::RestoreSource>,
     restore: Option<session::PendingRestore>,
-    retired_reads: std::collections::HashSet<crate::files::RequestId>,
     recent_files: Vec<PathBuf>,
     marks: Vec<crate::persistence::PersistedMark>,
     mark_sources: std::collections::HashMap<
@@ -63,7 +62,6 @@ impl PersistenceSession {
         Self {
             load_source: None,
             restore: None,
-            retired_reads: Default::default(),
             recent_files: Vec::new(),
             marks: Vec::new(),
             mark_sources: Default::default(),
@@ -380,8 +378,7 @@ mod tests {
             crate::editor::text::TextBuffer::from_text("abc"),
             Some(path),
         );
-        owner.set_mark("a".into(), location, 10);
-        owner.reconcile_marks(&editor);
+        owner.set_mark("a".into(), location, 10, &editor);
         let text = &mut editor.buffers[buffer].text;
         text.apply_edits(&crate::editor::text::TextEditSet::new(
             text.revision(),

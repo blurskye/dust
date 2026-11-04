@@ -473,8 +473,10 @@ impl ExplorerSession {
         }
         let current = self.mutation_current(intent, &scope, configuration, editor);
         let mut intent = self.mutation.take().expect("checked request");
-        if !current {
-            return Some(MutationUpdate::Failed("explorer result retired; an admitted disk operation may have completed, but buffers were not changed".into()));
+        // Once a write is admitted, its result must still reconcile buffer paths even
+        // if the explorer closes or its configuration changes in the meantime.
+        if !current && !matches!(intent.phase, Phase::Applying(_)) {
+            return Some(MutationUpdate::Failed("explorer result retired".into()));
         }
         match (reply, &intent.phase) {
             (
@@ -582,28 +584,24 @@ impl ExplorerSession {
         scope: WorkspaceVersion,
         configuration: u64,
         editor: &EditorWindowVersion,
-    ) -> (Vec<RequestId>, bool) {
+    ) -> Vec<RequestId> {
         let mut ids =
             if self.rename.is_some() && !self.rename_current(&scope, configuration, editor) {
                 self.cancel_rename()
             } else {
                 Vec::new()
             };
-        let mut may_write = false;
         if self
             .mutation
             .as_ref()
-            .is_some_and(|intent| !self.mutation_current(intent, &scope, configuration, editor))
+            .is_some_and(|intent| {
+                !matches!(intent.phase, Phase::Applying(_))
+                    && !self.mutation_current(intent, &scope, configuration, editor)
+            })
             && let Some(intent) = self.mutation.take()
+            && let Phase::Preparing(id) = intent.phase
         {
-            match intent.phase {
-                Phase::Preparing(id) => ids.push(id),
-                Phase::Applying(id) => {
-                    ids.push(id);
-                    may_write = true;
-                }
-                _ => {}
-            }
+            ids.push(id);
         }
         if self.open.as_ref().is_some_and(|open| {
             !Arc::ptr_eq(&open.epoch, &self.epoch)
@@ -615,7 +613,7 @@ impl ExplorerSession {
         {
             ids.push(id);
         }
-        (ids, may_write)
+        ids
     }
     pub(in crate::editor::session) fn confirmation_pending(&self) -> bool {
         self.mutation.as_ref().is_some_and(|intent| {
@@ -624,25 +622,25 @@ impl ExplorerSession {
                 && matches!(intent.phase, Phase::Preparing(_) | Phase::Ready(_))
         })
     }
-    pub(in crate::editor::session) fn retire_intents(&mut self) -> (Vec<RequestId>, bool) {
+    pub(in crate::editor::session) fn retire_intents(&mut self) -> Vec<RequestId> {
         let mut ids = self.cancel_rename();
         if let Some(open) = self.open.take()
             && let Some((id, _)) = open.read
         {
             ids.push(id);
         }
-        let mut may_write = false;
         if let Some(intent) = self.mutation.take() {
             match intent.phase {
                 Phase::Preparing(id) => ids.push(id),
-                Phase::Applying(id) => {
-                    ids.push(id);
-                    may_write = true;
-                }
+                Phase::Applying(_) => self.mutation = Some(intent),
                 _ => {}
             }
         }
-        (ids, may_write)
+        ids
+    }
+    pub(in crate::editor::session) fn transport_stopped(&mut self) {
+        self.retire_intents();
+        self.mutation = None;
     }
     pub(in crate::editor::session) fn prepare_open(
         &mut self,
