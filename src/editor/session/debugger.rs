@@ -146,8 +146,6 @@ pub(super) struct DebugSession {
     /// again. Data captured at one stop is stamped with it, so a value read at an earlier stop
     /// can never be presented as current at a later one.
     stop_epoch: u64,
-    /// Values read from the adapter at a particular stop, stamped with the epoch they belong to.
-    stopped_values: BTreeMap<i64, (u64, String)>,
     /// The stop at which each stopped-data request was ISSUED. An answer whose request is known to
     /// belong to a DIFFERENT stop belongs to that stop, and is refused rather than presented as
     /// current. A request with no record is presented as before: the session cannot prove it
@@ -206,7 +204,6 @@ impl DebugSession {
             breakpoint_states: BTreeMap::new(),
             end_state: None,
             stop_epoch: 0,
-            stopped_values: BTreeMap::new(),
             issued_stack: VecDeque::new(),
             requests: HashMap::new(),
             watch_refresh: VecDeque::new(),
@@ -711,16 +708,6 @@ impl DebugSession {
         self.push_console(entry);
         self.pending_submissions
             .push_back((submission, stop, frame, actor));
-    }
-    /// Test-facing: drive the same PROGRAM OUTPUT path an adapter Output event uses, so a test
-    /// measures the real entry shape rather than a parallel construction.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn record_program_output_for_test(&mut self, text: String) {
-        self.push_console(crate::debugger::DapConsoleEntry::new(
-            crate::debugger::DapConsoleOrigin::ProgramOutput,
-            "adapter",
-            text,
-        ));
     }
     pub(in crate::editor::session) fn record_console_evaluation(&mut self, text: String) {
         // The answer belongs to the OLDEST submission still waiting for one, so a LATE result
@@ -1240,22 +1227,9 @@ impl DebugSession {
             }
             DapResponse::Variables(rows) => (
                 "variables",
-                // Every value the adapter reports is STAMPED with the stop it was read at, which
-                // is what lets a later stop refuse to present it.
                 {
-                    // A value whose request was ISSUED at an earlier stop answers THAT stop, not
-                    // this one: it is refused rather than presented as current. A value whose
-                    // request is unrecorded is presented as before, because the session cannot
-                    // prove it belongs to another stop.
                     let page = self.pending_variable_pages.pop_front();
                     let current = rows;
-                    // Every value that IS current is STAMPED with the stop it was read at.
-                    for row in current.iter() {
-                        self.record_stopped_value(
-                            row.variables_reference,
-                            format!("{} = {}", row.name, row.value),
-                        );
-                    }
                     let open: Vec<i64> = self.expansion.clone();
                     let shown = current.len();
                     let mut values: Vec<(String, String, Choice)> = current
@@ -1480,7 +1454,6 @@ impl DebugSession {
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;
-        self.stopped_values.clear();
         // Nothing captured at the stop that has ended is open any more.
         self.threads.clear();
         self.stack.clear();
@@ -1496,7 +1469,6 @@ impl DebugSession {
         self.stop_epoch = self.stop_epoch.wrapping_add(1);
         self.choices = None;
         self.source = None;
-        self.stopped_values.clear();
         // A new stop has its own references; the previous stop's path is not this one's.
         self.threads.clear();
         self.stack.clear();
@@ -1504,25 +1476,6 @@ impl DebugSession {
         self.pending_variable_pages.clear();
         // A new stop has its own frames; the previous frame is not this stop's frame.
         self.console_frame = None;
-    }
-    /// Record a value read at the CURRENT stop.
-    pub(in crate::editor::session) fn record_stopped_value(
-        &mut self,
-        reference: i64,
-        value: String,
-    ) {
-        self.stopped_values
-            .insert(reference, (self.stop_epoch, value));
-    }
-    /// The value for a reference ONLY IF it was captured at the current stop. A value from an
-    /// earlier stop is not returned, which is what makes it unpresentable rather than merely
-    /// outdated.
-    #[cfg(test)]
-    pub(in crate::editor::session) fn current_stopped_value(&self, reference: i64) -> Option<&str> {
-        self.stopped_values
-            .get(&reference)
-            .filter(|(epoch, _)| *epoch == self.stop_epoch)
-            .map(|(_, value)| value.as_str())
     }
     #[cfg(test)]
     #[must_use]
@@ -1630,4 +1583,4 @@ impl DebugSession {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

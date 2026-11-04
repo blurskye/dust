@@ -290,18 +290,19 @@ fn detaching_and_terminating_are_different_session_facts() {
     detached.service = service;
     detached.detach_debuggee().expect("detach is admitted");
     assert_eq!(detached.end_state(), None);
+    let request = adapter.control().expect("detach sends a control");
+    let DapControl::Disconnect { terminate_debuggee } = request else {
+        panic!("detach must send Disconnect");
+    };
+    assert!(!terminate_debuggee, "detach leaves the program running");
     adapter.event(
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
             stop_generation: 0,
             request_id: 1,
-            request: Some(DapControl::Disconnect {
-                terminate_debuggee: false,
-            }),
-            response: DapResponse::Disconnected {
-                terminate_debuggee: false,
-            },
+            request: Some(request),
+            response: DapResponse::Disconnected { terminate_debuggee },
         },
     );
     detached.try_event().unwrap();
@@ -319,18 +320,19 @@ fn detaching_and_terminating_are_different_session_facts() {
         .terminate_debuggee()
         .expect("terminate is admitted");
     assert_eq!(terminated.end_state(), None);
+    let request = adapter.control().expect("terminate sends a control");
+    let DapControl::Disconnect { terminate_debuggee } = request else {
+        panic!("terminate must send Disconnect");
+    };
+    assert!(terminate_debuggee, "terminate asks the program to end");
     adapter.event(
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
             stop_generation: 0,
             request_id: 1,
-            request: Some(DapControl::Disconnect {
-                terminate_debuggee: true,
-            }),
-            response: DapResponse::Disconnected {
-                terminate_debuggee: true,
-            },
+            request: Some(request),
+            response: DapResponse::Disconnected { terminate_debuggee },
         },
     );
     terminated.try_event().unwrap();
@@ -362,8 +364,16 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
     // The program writes, the user asks, the adapter answers - in that order.
     owner.record_console_command("count".into());
     owner.record_console_evaluation("count = 3".into());
-    // An adapter Output event is program output; driven through the same path the session uses.
-    owner.record_program_output_for_test("hello".into());
+    let (service, adapter) = crate::debugger::test_session();
+    owner.service = service;
+    adapter.event(
+        0,
+        DapEvent::Output {
+            adapter: "same-name".into(),
+            output: "hello\n".into(),
+        },
+    );
+    assert!(matches!(owner.try_event(), Some(DapEvent::Output { .. })));
 
     let entries = owner.console().cloned().collect::<Vec<_>>();
     assert_eq!(entries.len(), 3, "all three origins are kept: {entries:?}");
@@ -398,66 +408,83 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
 
 #[test]
 fn a_value_from_a_previous_stop_can_never_be_presented_as_current() {
-    // W-24 verbatim: "Continuing, restarting or re-stopping invalidates stopped data and pending
-    // variable references so a previous value can never be presented as current."
-    let root = tempfile::tempdir().unwrap();
-    let state = WorkspaceState::new(
-        WorkspaceId(1),
-        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
-    )
-    .unwrap();
-    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
-    let policy = DebugConfig::default();
-    let mut owner = DebugSession::new(&policy, workspace.version());
+    let (mut owner, adapter) = paginated_owner();
+    for (value, running) in [("1", true), ("2", false)] {
+        adapter.event(
+            1,
+            DapEvent::Stopped {
+                adapter: "same-name".into(),
+                reason: "breakpoint".into(),
+                thread_id: Some(1),
+            },
+        );
+        assert!(owner.try_event().is_some());
+        let epoch = owner.stop_epoch();
+        // Follow the stop through the same responses that populate the inspector.
+        for response in [
+            DapResponse::Threads(vec![crate::debugger::DapThread {
+                id: 1,
+                name: "main".into(),
+            }]),
+            DapResponse::Stack(vec![DapStackFrame {
+                id: 42,
+                name: "main".into(),
+                path: None,
+                line: 1,
+                column: 1,
+                source_reference: None,
+            }]),
+            DapResponse::Scopes(vec![crate::debugger::DapScope {
+                name: "locals".into(),
+                variables_reference: 7,
+                expensive: false,
+            }]),
+            DapResponse::Variables(vec![crate::debugger::DapVariable {
+                name: "count".into(),
+                value: value.into(),
+                type_name: None,
+                variables_reference: 0,
+            }]),
+        ] {
+            assert!(matches!(owner.response(response), DebugResponse::Absorbed));
+        }
+        assert_eq!(owner.variables(), [format!("count = {value}")]);
 
-    // A STOP happens and a value is read: it IS current.
-    owner.begin_stop();
-    let first_epoch = owner.stop_epoch();
-    owner.record_stopped_value(42, "count = 1".into());
-    assert_eq!(
-        owner.current_stopped_value(42),
-        Some("count = 1"),
-        "a value read at the current stop is presentable"
-    );
+        // The variables picker also offers the current value and a usable selection.
+        prime_for(&mut owner, &adapter);
+        let DebugResponse::Picker { rows, .. } = owner.response(DapResponse::Variables(vec![
+            crate::debugger::DapVariable {
+                name: "count".into(),
+                value: value.into(),
+                type_name: None,
+                variables_reference: 0,
+            },
+        ])) else {
+            panic!("expected variables picker");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, format!("count = {value}"));
+        let key = rows[0].key.clone();
+        assert!(owner.choices.is_some());
 
-    // CONTINUE: execution runs on, and the value read while stopped is NOT current any more.
-    owner.begin_running();
-    assert_ne!(
-        owner.stop_epoch(),
-        first_epoch,
-        "running advances the stop identity"
-    );
-    assert_eq!(
-        owner.current_stopped_value(42),
-        None,
-        "a value from a previous stop CANNOT be presented as current"
-    );
-
-    // RE-STOP: a NEW stop with fresh data, and the old value is still not presentable.
-    owner.begin_stop();
-    let second_epoch = owner.stop_epoch();
-    assert_ne!(second_epoch, first_epoch, "a re-stop is a different stop");
-    assert_eq!(
-        owner.current_stopped_value(42),
-        None,
-        "the previous stop's value is still unpresentable at the new stop, before anything is read"
-    );
-    // The adapter reports a DIFFERENT value at this stop, which is what makes "fresh" measurable.
-    owner.record_stopped_value(42, "count = 2".into());
-    assert_eq!(
-        owner.current_stopped_value(42),
-        Some("count = 2"),
-        "the value read at THIS stop is current"
-    );
-    assert_ne!(
-        owner.current_stopped_value(42),
-        Some("count = 1"),
-        "and it is not the value from the previous stop"
-    );
-
-    // RESTART is the same rule: it also invalidates.
-    owner.begin_running();
-    assert_eq!(owner.current_stopped_value(42), None);
+        adapter.event(
+            1,
+            if running {
+                DapEvent::Running { adapter: "same-name".into() }
+            } else {
+                DapEvent::Stopped {
+                    adapter: "same-name".into(),
+                    reason: "step".into(),
+                    thread_id: Some(1),
+                }
+            },
+        );
+        assert!(owner.try_event().is_some());
+        assert_ne!(owner.stop_epoch(), epoch);
+        assert!(owner.variables().is_empty(), "old locals must leave the inspector");
+        assert!(owner.choices.is_none(), "old picker rows must be retired");
+        assert!(owner.take_selection(&key).is_err());
+    }
 }
 
 #[test]
@@ -477,25 +504,6 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     let (service, adapter) = crate::debugger::test_session();
     owner.service = service;
 
-    // An answer is only accepted while the session has an open actor, and presenting one CONSUMES
-    // it, so each answer below is preceded by the event that re-opens it, exactly as the app does.
-    let prime = |owner: &mut DebugSession| {
-        adapter.event(
-            1,
-            DapEvent::Response {
-                adapter: "same-name".into(),
-                stop_generation: 1,
-                request_id: 0,
-                request: None,
-                response: crate::debugger::DapResponse::Threads(Vec::new()),
-            },
-        );
-        assert!(
-            owner.try_event().is_some(),
-            "the session accepts an event from its actor"
-        );
-    };
-
     let variable = |value: &str| crate::debugger::DapVariable {
         name: "count".into(),
         value: value.into(),
@@ -514,17 +522,14 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     owner
         .control(request())
         .expect("the fake adapter accepts a variables request");
-    prime(&mut owner);
+    prime_for(&mut owner, &adapter);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("1")]));
-    assert_eq!(
-        owner.current_stopped_value(7),
-        Some("count = 1"),
-        "an answer to the stop that asked for it IS current"
-    );
     let DebugResponse::Picker { rows, .. } = &presented else {
         panic!("expected a variables picker, not a retired or bare result")
     };
     assert_eq!(rows.len(), 1, "the current answer IS presented");
+    assert_eq!(rows[0].label, "count = 1");
+    let previous_key = rows[0].key.clone();
 
     // (i) EARLIER STOP: the request is issued at one stop, execution RUNS ON, and only then does
     // the answer arrive. It answers the earlier stop, so it can never be presented as current.
@@ -548,150 +553,28 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
         owner.try_event().is_none(),
         "the transport retires the original stopped request"
     );
-    assert_eq!(owner.current_stopped_value(7), None);
+    assert!(owner.variables().is_empty());
+    assert!(owner.take_selection(&previous_key).is_err());
 
     // A RE-STOP then answers for the NEW stop, and that value IS current.
     owner.begin_stop();
     owner
         .control(request())
         .expect("the fake adapter accepts a variables request");
-    prime(&mut owner);
+    prime_for(&mut owner, &adapter);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("2")]));
-    assert_eq!(
-        owner.current_stopped_value(7),
-        Some("count = 2"),
-        "a value read at the new stop is current"
-    );
     let DebugResponse::Picker { rows, .. } = &presented else {
         panic!("expected a variables picker, not a retired or bare result")
     };
     assert_eq!(rows.len(), 1, "the fresh answer is presented");
+    assert_eq!(rows[0].label, "count = 2");
 }
 
-#[test]
-fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
-    // W-25: "Console submission captures the actor, stop and frame that produced it, and a late
-    // result updates its own record rather than an unrelated draft."
-    super::launch::original_launch_fixture();
-    let root = tempfile::tempdir().unwrap();
-    let state = WorkspaceState::new(
-        WorkspaceId(1),
-        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
-    )
-    .unwrap();
-    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
-    let policy = DebugConfig::default();
-    let mut owner = DebugSession::new(&policy, workspace.version());
+pub(in crate::editor::session) fn attach_adapter(owner: &mut DebugSession) -> crate::debugger::TestAdapter {
     let (service, adapter) = crate::debugger::test_session();
     owner.service = service;
-
-    let prime = |owner: &mut DebugSession| {
-        adapter.event(
-            1,
-            DapEvent::Response {
-                adapter: "same-name".into(),
-                stop_generation: 1,
-                request_id: 0,
-                request: None,
-                response: crate::debugger::DapResponse::Threads(Vec::new()),
-            },
-        );
-        assert!(
-            owner.try_event().is_some(),
-            "the session accepts an event from its actor"
-        );
-    };
-
-    // A stop, and a FRAME selected from that stop: selecting it binds the console to it.
-    owner.begin_stop();
-    let stop = owner.stop_epoch();
-    prime(&mut owner);
-    let presented = owner.response(crate::debugger::DapResponse::Stack(vec![
-        crate::debugger::DapStackFrame {
-            id: 42,
-            name: "main".into(),
-            path: None,
-            line: 1,
-            column: 1,
-            source_reference: None,
-        },
-    ]));
-    let DebugResponse::Picker { rows, .. } = &presented else {
-        panic!("expected a frames picker");
-    };
-    assert_eq!(rows.len(), 1, "the frame is offered");
-    let _frame = owner
-        .take_selection(&rows[0].key)
-        .expect("the frame is selectable");
-
-    // The user submits an expression, then types a NEWER one before the first answer arrives.
-    owner.record_console_command("first".into());
-    owner.record_console_command("second".into());
-
-    // The answer to the FIRST arrives LATE, after the newer draft exists.
-    owner.record_console_evaluation("first = 1".into());
-
-    let entries: Vec<&crate::debugger::DapConsoleEntry> = owner.console().collect();
-    let first = entries
-        .iter()
-        .find(|entry| entry.text == "first")
-        .expect("the first submission is a record");
-    let second = entries
-        .iter()
-        .find(|entry| entry.text == "second")
-        .expect("the newer draft is a record");
-    let answer = entries
-        .iter()
-        .find(|entry| entry.text == "first = 1")
-        .expect("the answer is a record");
-
-    // (1) The submission captured the ACTOR, the STOP and the FRAME that produced it.
-    assert_eq!(
-        first.actor.as_deref(),
-        Some("same-name"),
-        "the actor is captured"
-    );
-    assert_eq!(first.stop, Some(stop), "the stop is captured");
-    assert_eq!(
-        first.frame,
-        Some(42),
-        "the frame the console is bound to is captured"
-    );
-    assert!(
-        first.submission.is_some(),
-        "a submission has its own identity"
-    );
-    assert_ne!(
-        first.submission, second.submission,
-        "the newer draft has its OWN identity, not the first one's"
-    );
-
-    // (2) The late result updated ITS OWN record, and names the submission it answers.
-    assert_eq!(
-        first.result.as_deref(),
-        Some("first = 1"),
-        "the late result lands on the record that ASKED for it"
-    );
-    assert_eq!(
-        answer.submission, first.submission,
-        "the answer names its submission"
-    );
-    assert_eq!(
-        answer.frame,
-        Some(42),
-        "the answer carries the frame that produced it"
-    );
-
-    // (3) The NEWER draft is untouched: no result, and still waiting for its own.
-    assert_eq!(
-        second.result, None,
-        "the newer draft is NOT updated by a late result"
-    );
-    assert_eq!(
-        owner.pending_submissions.len(),
-        1,
-        "the newer submission is still the one waiting for an answer"
-    );
+    prime_for(owner, &adapter);
+    adapter
 }
 
 fn paginated_owner() -> (DebugSession, crate::debugger::TestAdapter) {
@@ -1190,8 +1073,7 @@ fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
     while let Some(DapControl::Evaluate { expression, .. }) = adapter.control() {
         seen.push(expression);
     }
-    assert_eq!(seen.len(), 101);
-    assert_eq!(seen.last().unwrap(), "watch100");
+    assert_eq!(seen, (0..101).map(|i| format!("watch{i}")).collect::<Vec<_>>());
     owner.event_source = owner.service.context();
     owner.watch_refresh.push_back("retired stop".into());
     adapter.advance(1);

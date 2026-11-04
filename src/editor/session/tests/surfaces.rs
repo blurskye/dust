@@ -4840,6 +4840,113 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     }));
 }
 
+#[test]
+fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
+    use crate::debugger::{DapControl, DapEvent, DapResponse, DapStackFrame, DapVariable};
+    use crate::editor::session::debugger::{DebugResponse, tests::attach_adapter};
+
+    let mut app = app();
+    let owner = &mut app.debugger_session;
+    owner.begin_stop();
+    let stop = owner.stop_epoch();
+    let adapter = attach_adapter(owner);
+    let DebugResponse::Picker { rows, .. } = owner.response(DapResponse::Stack(vec![DapStackFrame {
+        id: 42,
+        name: "main".into(),
+        path: None,
+        line: 1,
+        column: 1,
+        source_reference: None,
+    }])) else {
+        panic!("expected a frames picker");
+    };
+    assert_eq!(rows.len(), 1);
+    let _frame = owner.take_selection(&rows[0].key).unwrap();
+
+    // Leave an older request pending so the reply must be matched by request ID, not FIFO.
+    app.process_effect(AppEffect::DapEvaluate("older".into()));
+    app.process_effect(AppEffect::DapEvaluate("first".into()));
+    let older_request = adapter.control().expect("the older evaluation was sent");
+    assert!(matches!(
+        &older_request,
+        DapControl::Evaluate { expression, frame_id: Some(42), context }
+            if expression == "older" && context == "repl"
+    ));
+    let request = adapter.control().expect("the evaluation was sent");
+    assert!(matches!(
+        &request,
+        DapControl::Evaluate { expression, frame_id: Some(42), context }
+            if expression == "first" && context == "repl"
+    ));
+
+    app.open_prompt(crate::ui::PromptKind::Command, "dap.evaluate ".into());
+    app.prompt_insert("second");
+    let draft = app.input.prompt().unwrap().clone();
+
+    adapter.event(
+        1,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 1,
+            request_id: 2,
+            request: Some(request),
+            response: DapResponse::Evaluate(DapVariable {
+                name: "result".into(),
+                value: "1".into(),
+                type_name: None,
+                variables_reference: 0,
+            }),
+        },
+    );
+    app.process_dap_events();
+
+    let entries = app.debugger_session.console().cloned().collect::<Vec<_>>();
+    let first = entries.iter().find(|entry| entry.text == "first").unwrap();
+    let older = entries.iter().find(|entry| entry.text == "older").unwrap();
+    let answer = entries.iter().find(|entry| entry.text == "result = 1").unwrap();
+    assert_eq!(first.actor.as_deref(), Some("same-name"));
+    assert_eq!(first.stop, Some(stop));
+    assert_eq!(first.frame, Some(42));
+    assert!(first.submission.is_some());
+    assert_ne!(first.submission, older.submission);
+    assert_eq!(first.result.as_deref(), Some("result = 1"));
+    assert_eq!(answer.submission, first.submission);
+    assert_eq!(answer.actor, first.actor);
+    assert_eq!(answer.stop, first.stop);
+    assert_eq!(answer.frame, first.frame);
+    assert_eq!(older.result, None, "the reply must not update the oldest request");
+    assert_eq!(entries.len(), 3, "the draft has not been submitted");
+
+    let prompt = app.input.prompt().expect("the draft stays open");
+    assert_eq!(prompt.kind, draft.kind);
+    assert_eq!(prompt.input, "dap.evaluate second");
+    assert_eq!(prompt.input, draft.input);
+    assert_eq!(prompt.cursor, draft.cursor);
+
+    // The older request remains independently answerable after the out-of-order reply.
+    adapter.event(
+        1,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 1,
+            request_id: 1,
+            request: Some(older_request),
+            response: DapResponse::Evaluate(DapVariable {
+                name: "result".into(),
+                value: "0".into(),
+                type_name: None,
+                variables_reference: 0,
+            }),
+        },
+    );
+    app.process_dap_events();
+    let older = app.debugger_session.console().find(|entry| entry.text == "older").unwrap();
+    assert_eq!(older.result.as_deref(), Some("result = 0"));
+    let prompt = app.input.prompt().expect("the draft stays open after both replies");
+    assert_eq!(prompt.input, draft.input);
+    assert_eq!(prompt.cursor, draft.cursor);
+}
+
 #[cfg(unix)]
 #[test]
 fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
