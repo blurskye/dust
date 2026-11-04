@@ -262,8 +262,8 @@ impl PackageManager {
         for package in &lock.packages {
             let plugin = self.plugin_manifest(package)?;
             let object = self.root.join("store").join(&package.content_sha256);
-            let object_lock = protect_object(&object)?;
             let component = read_bounded_regular(&object, self.maximum_object_bytes as u64)?;
+            let object_lock = protect_object(&object)?;
             let actual = format!("{:x}", Sha256::digest(&component));
             if !actual.eq_ignore_ascii_case(&package.content_sha256) {
                 return Err(PackageError::ChecksumMismatch);
@@ -877,6 +877,19 @@ mod tests {
             assert_eq!(result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), 1);
             worker.join().unwrap();
         }
+    }
+
+    #[test]
+    fn startup_rejects_nonregular_objects_before_opening_them() {
+        use nix::{sys::stat::Mode, unistd::mkfifo};
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        fs::remove_file(&object).unwrap();
+        mkfifo(&object, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        assert!(matches!(manager.activations(), Err(PackageError::InvalidManifest)));
     }
 
     #[test]
