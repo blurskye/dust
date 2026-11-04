@@ -855,9 +855,7 @@ impl WindowGraph {
                             .windows
                             .values()
                             .find(|window| {
-                                window.tab == tab
-                                    && window.focusable
-                                    && window.placement != WindowPlacement::Hidden
+                                candidate.eligible_focus(window.id, tab)
                             })
                             .map(|window| window.id)
                     });

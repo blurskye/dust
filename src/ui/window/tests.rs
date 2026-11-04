@@ -1166,7 +1166,7 @@ fn fullscreen_moves_focus_and_rejects_suppressed_windows() {
 
 #[test]
 fn non_focusable_content_can_move_to_fullscreen() {
-    let (mut graph, _, view, tab) = graph_with_content();
+    let (mut graph, text_content, view, tab) = graph_with_content();
     let tile = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
     let mut capabilities = ContentCapabilities::for_adapter(ContentAdapterKind::DeclarativeUi);
     capabilities.focusable = false;
@@ -1183,6 +1183,16 @@ fn non_focusable_content_can_move_to_fullscreen() {
     graph.place(window, WindowPlacement::Fullscreen).unwrap();
     assert_eq!(graph.focused(), None);
     assert!(!graph.can_focus(tile));
+    graph.validate().unwrap();
+
+    // Returning to this tab must not select its suppressed tile as a fallback.
+    let other_tab = graph.create_workspace_tab("builtin", 1).unwrap();
+    let other_view = graph.create_view(text_content, "builtin", 1).unwrap();
+    graph.open_window(other_tab, other_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    graph.set_active_tab(other_tab).unwrap();
+    graph.set_active_tab(tab).unwrap();
+    assert_eq!(graph.active_tab(), Some(tab));
+    assert_eq!(graph.focused(), None);
     graph.validate().unwrap();
     graph.place(window, WindowPlacement::Hidden).unwrap();
     graph.focus(tile).unwrap();
