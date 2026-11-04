@@ -1751,8 +1751,9 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
     }
     let name = relative.file_name().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
     let result = (|| -> io::Result<()> {
-        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let mut directory = File::open("/")?;
+        // Ancestors need search permission, not directory-listing permission.
+        let flags = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut directory = File::from(openat(rustix::fs::CWD, "/", flags, Mode::empty())?);
         // Walk the root too: an ancestor substituted since resolution must not
         // redirect the initial directory open outside the resolved workspace.
         for part in root.components() {
@@ -1769,6 +1770,9 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
                 directory = openat(&directory, name, flags, Mode::empty())?.into();
             }
         }
+        let directory = File::from(openat(&directory, ".",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty())?);
         let permissions = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
             Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile =>
                 Some(Mode::from_raw_mode(stat.st_mode)),
@@ -1780,12 +1784,13 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
         let (temporary_name, mut temporary) = loop {
             attempts += 1;
             let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-            let name = format!(".dust-{}-{sequence}.tmp", std::process::id());
-            match openat(&directory, &name,
+            let temporary_name = format!(".dust-{}-{sequence}.tmp", std::process::id());
+            if std::ffi::OsStr::new(&temporary_name) == name { continue; }
+            match openat(&directory, &temporary_name,
                 OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                 Mode::RUSR | Mode::WUSR)
             {
-                Ok(fd) => break (name, File::from(fd)),
+                Ok(fd) => break (temporary_name, File::from(fd)),
                 Err(rustix::io::Errno::EXIST) if attempts < 16 => continue,
                 Err(error) => return Err(error.into()),
             }
@@ -1795,10 +1800,13 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
             temporary.write_all(bytes)?;
             temporary.sync_all()?;
             renameat(&directory, &temporary_name, &directory, name)?;
-            directory.sync_all()
+            Ok(())
         })();
-        let _ = unlinkat(&directory, &temporary_name, AtFlags::empty());
-        result
+        if result.is_err() {
+            let _ = unlinkat(&directory, &temporary_name, AtFlags::empty());
+        }
+        result?;
+        directory.sync_all()
     })();
     result.map_err(|source| VfsError::Io { operation: "agent write", path: path.into(), source })
 }
@@ -1911,6 +1919,22 @@ mod lifecycle_tests {
         assert!(!outside.path().join("escape").exists());
         fs::remove_file(&root).unwrap();
         fs::rename(&moved, &root).unwrap();
+    }
+
+    #[test]
+    fn agent_writes_traverse_search_only_ancestors() {
+        use std::os::unix::fs::PermissionsExt;
+        let temporary = tempfile::tempdir().unwrap();
+        let ancestor = temporary.path().join("search-only");
+        let workspace = ancestor.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let root = fs::canonicalize(&workspace).unwrap();
+        let path = root.join("file");
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o111)).unwrap();
+        let result = agent_atomic_write(&root, &path, b"inside");
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o700)).unwrap();
+        result.unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"inside");
     }
 
     #[test]

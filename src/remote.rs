@@ -1,6 +1,7 @@
 //! Requests to a running Dust from programs it starts. Dust listens on a Unix socket named
 //! in `DUST_SERVER`. `dust --remote FILE` (lazygit's edit key) sends one line per file,
-//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits. `dust --agent-tools`
+//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits after admission
+//! is acknowledged. `dust --agent-tools`
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
@@ -148,7 +149,7 @@ impl RemoteServer {
                     if listener_stop.load(Ordering::Acquire) {
                         break;
                     }
-                    let stream = match listener.accept() {
+                    let mut stream = match listener.accept() {
                         Ok((stream, _)) => stream,
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
                         Err(_) => break,
@@ -166,6 +167,7 @@ impl RemoteServer {
                     };
                     let mut reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
                     let mut line = Vec::new();
+                    let mut complete = false;
                     loop {
                         let remaining = deadline.saturating_duration_since(Instant::now());
                         if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
@@ -174,14 +176,21 @@ impl RemoteServer {
                         // fill_buf performs at most one socket read, so each read
                         // gets the remaining overall deadline, even for partial lines.
                         let Ok(buffer) = reader.fill_buf() else { break };
-                        if buffer.is_empty() { break; }
-                        let end = buffer.iter().position(|byte| *byte == b'\n');
-                        let length = end.map_or(buffer.len(), |end| end + 1);
-                        line.extend_from_slice(&buffer[..length]);
-                        reader.consume(length);
-                        if end.is_none() { continue; }
+                        let eof = buffer.is_empty();
+                        if eof {
+                            complete = line.is_empty();
+                            if complete { break; }
+                        } else {
+                            let end = buffer.iter().position(|byte| *byte == b'\n');
+                            let length = end.map_or(buffer.len(), |end| end + 1);
+                            line.extend_from_slice(&buffer[..length]);
+                            reader.consume(length);
+                            if end.is_none() { continue; }
+                        }
                         let Ok(text) = std::str::from_utf8(&line) else { break };
-                        let text = text.trim_end_matches(['\r', '\n']);
+                        let text = text.strip_suffix('\n')
+                            .map(|text| text.strip_suffix('\r').unwrap_or(text))
+                            .unwrap_or(text);
                         let request = match text.strip_prefix(AGENT_PREFIX) {
                             Some(body) => stream.try_clone().ok().and_then(|reply| {
                                 parse_agent(
@@ -209,6 +218,15 @@ impl RemoteServer {
                         if asked_for_agent {
                             break;
                         }
+                        if eof {
+                            complete = true;
+                            break;
+                        }
+                    }
+                    // A successful socket write alone does not mean the bounded
+                    // request queue accepted every file in a bulk open.
+                    if complete && stream.set_write_timeout(Some(REQUEST_TIMEOUT)).is_ok() {
+                        let _ = stream.write_all(b"ok\n");
                     }
                     *listener_reading.lock().unwrap() = None;
                 }
@@ -315,7 +333,18 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
         message.push_str(&entry);
     }
     let mut stream = UnixStream::connect(server)?;
-    stream.write_all(message.as_bytes())
+    stream.set_write_timeout(Some(REQUEST_TIMEOUT))?;
+    stream.set_read_timeout(Some(REQUEST_TIMEOUT * 2))?;
+    stream.write_all(message.as_bytes())?;
+    stream.shutdown(Shutdown::Write)?;
+    let mut answer = [0; 3];
+    stream.read_exact(&mut answer).map_err(|error| {
+        io::Error::new(error.kind(), format!("Dust did not accept all remote files: {error}"))
+    })?;
+    if &answer != b"ok\n" {
+        return Err(io::Error::other("Dust did not accept all remote files"));
+    }
+    Ok(())
 }
 
 /// Write a lazygit config whose edit keys open files in this Dust, and return the
@@ -416,6 +445,39 @@ mod tests {
             }
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn bulk_opens_report_rejected_admission_instead_of_silent_success() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING];
+        send(server.path(), &paths, None).unwrap();
+        assert!(send(server.path(), &[PathBuf::from("/rejected.rs")], None).is_err());
+        let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
+        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        assert!(send(server.path(), &[PathBuf::from("/next.rs")], None).is_ok());
+
+        let server = RemoteServer::start(&directory.path().join("bulk")).unwrap();
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING + 1];
+        assert!(send(server.path(), &paths, None).is_err());
+    }
+
+    #[test]
+    fn final_unterminated_remote_lines_and_trailing_carriage_returns_are_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(b"0\t/first\r\r\n0\t/last\r").unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let mut answer = String::new();
+        client.read_to_string(&mut answer).unwrap();
+        assert_eq!(answer, "ok\n");
+        for expected in ["/first\r", "/last\r"] {
+            let Some(RemoteRequest::Open(open)) = server.try_request() else { panic!("missing file") };
+            assert_eq!(open.path, Path::new(expected));
         }
     }
 
