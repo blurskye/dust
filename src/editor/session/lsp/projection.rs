@@ -1442,7 +1442,7 @@ mod tests {
     fn cancelled_completion_rejects_a_late_secondary_response() {
         let mut editor = EditorState::new("/root".into());
         let (buffer, view) =
-            editor.open_text(TextBuffer::from_text("a"), Some("/root/a.rs".into()));
+            editor.open_text(TextBuffer::from_text("a"), Some("/root/a.rs".into())).unwrap();
         let source = LspProjectionOwner {
             server: "first".into(),
             buffer,
@@ -1496,7 +1496,7 @@ mod tests {
         let (buffer, _) = editor.open_text(
             TextBuffer::from_text("fooo tail"),
             Some(root.join("source.rs")),
-        );
+        ).unwrap();
         let document = LspDocument {
             path: root.join("source.rs"),
             language_id: "rust".into(),
@@ -1543,7 +1543,7 @@ mod tests {
         let mut state = owner.sessions.remove("owned").unwrap();
         for index in 0..70 {
             let path = std::path::PathBuf::from(format!("/fixture/{index}.rs"));
-            let (id, _) = editor.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone()));
+            let (id, _) = editor.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone())).unwrap();
             state.documents.insert(
                 id,
                 LspDocument {
@@ -1817,7 +1817,7 @@ mod tests {
         let (buffer, view) = editor.open_text(
             TextBuffer::from_text("<div class=\"\">"),
             Some(root.path().join("index.html")),
-        );
+        ).unwrap();
         let source = LspProjectionOwner {
             server: "html".into(),
             buffer,
@@ -1868,7 +1868,7 @@ mod tests {
         let (buffer, view) = editor.open_text(
             TextBuffer::from_text("ab"),
             Some(root.path().join("source.rs")),
-        );
+        ).unwrap();
         let source = LspProjectionOwner {
             server: "owned".into(),
             buffer,
@@ -1993,7 +1993,7 @@ mod tests {
     fn completion_items_and_resolves_reject_a_reloaded_text_incarnation() {
         let (mut editor, buffer, view) = {
             let mut editor = EditorState::new("/workspace".into());
-            let (buffer, view) = editor.open_text(TextBuffer::from_text("old"), None);
+            let (buffer, view) = editor.open_text(TextBuffer::from_text("old"), None).unwrap();
             (editor, buffer, view)
         };
         let source = LspProjectionOwner {
@@ -2036,7 +2036,7 @@ mod tests {
     #[test]
     fn retiring_a_save_format_request_rejects_its_late_result() {
         let mut editor = EditorState::new("/workspace".into());
-        let (buffer, view) = editor.open_text(TextBuffer::from_text("text"), None);
+        let (buffer, view) = editor.open_text(TextBuffer::from_text("text"), None).unwrap();
         let source = LspProjectionOwner {
             server: "formatter".into(),
             buffer,

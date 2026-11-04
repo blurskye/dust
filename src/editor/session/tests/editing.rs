@@ -152,7 +152,7 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
 fn dot_repeats_semantic_insert_session() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("one"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("one"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in ['i', 'X'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -169,7 +169,7 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
     let mut character = app();
     character
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None).unwrap();
     character.set_dashboard_visibility(false);
     for key in ['v', 'l', 'd', 'l', '.'] {
         character.handle_configured_key(KeyEvent::character(key));
@@ -184,7 +184,7 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
     line.state.open_text(
         crate::editor::text::TextBuffer::from_text("a\nb\nc\nd\n"),
         None,
-    );
+    ).unwrap();
     line.set_dashboard_visibility(false);
     for key in ['V', 'j', 'd', '.'] {
         line.handle_configured_key(KeyEvent::character(key));
@@ -199,7 +199,7 @@ fn normalized_blockwise_change_repeats_without_a_stale_selection() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\njkl"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.handle_configured_key("ctrl-v".parse().expect("block key"));
     app.handle_configured_key(KeyEvent::character('l'));
@@ -220,7 +220,7 @@ fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abcd\nx\npqrs\n----\ny\n----"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     let view = app.state.active_view.expect("view");
     app.state.views[view].cursor = ByteOffset(10);
@@ -251,7 +251,7 @@ fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
 fn replace_mode_session_is_semantically_repeatable() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.handle_configured_key(KeyEvent::character('R'));
     app.handle_configured_key(KeyEvent::character('X'));
@@ -268,7 +268,7 @@ fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\njkl"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.handle_configured_key(KeyEvent::character('q'));
     app.handle_configured_key(KeyEvent::character('a'));
@@ -284,7 +284,7 @@ fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
 fn macro_replay_honors_configured_counts() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in ['q', 'a', 'x', 'q', '3', '@', 'a'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -302,7 +302,7 @@ fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
     ));
     app.clock = clock.clone();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("hint"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("hint"), None).unwrap();
     app.set_dashboard_visibility(false);
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -494,7 +494,7 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     app.configuration.install_bindings(keymaps, false);
-    let (_, view) = app.state.open_text(TextBuffer::from_text(""), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(""), None).unwrap();
     app.set_dashboard_visibility(false);
     let text = |app: &InteractiveApplication| {
         app.state.buffers[app.state.views[view].buffer]
@@ -533,7 +533,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
     app.start_open(path.clone());
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("new unsaved"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("new unsaved"), Some(path.clone())).unwrap();
     app.state.set_buffer_dirty(buffer, true);
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "new unsaved");
@@ -625,7 +625,7 @@ fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("one\n  two\n"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     let view = app.state.active_view.expect("view");
     let line = |app: &InteractiveApplication| {
@@ -831,7 +831,7 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
     app.set_dashboard_visibility(false);
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("abcdef\n\nab\nabcdef\n"), None);
+        .open_text(TextBuffer::from_text("abcdef\n\nab\nabcdef\n"), None).unwrap();
     app.state.views[view].cursor = ByteOffset(4);
     for _ in 0..3 {
         press(&mut app, "j");
@@ -857,7 +857,7 @@ fn vim_edits_that_lazyvim_users_reach_for() {
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("The cat sat.\n"), None);
+        .open_text(TextBuffer::from_text("The cat sat.\n"), None).unwrap();
     app.state.views[view].cursor = ByteOffset(4);
     // `cw` keeps the space after the word.
     press_keys(&mut app, &["c", "w", "d", "o", "g", "escape"]);
@@ -865,7 +865,7 @@ fn vim_edits_that_lazyvim_users_reach_for() {
 
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("a\nb\n\nc\n"), None);
+        .open_text(TextBuffer::from_text("a\nb\n\nc\n"), None).unwrap();
     app.state.views[view].cursor = ByteOffset(0);
     // Visual `>` with a count indents that many levels and leaves blank lines alone.
     press_keys(&mut app, &["V", "j", "j", "2", ">"]);
@@ -882,7 +882,7 @@ fn vim_edits_that_lazyvim_users_reach_for() {
 
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("one two\nthree\n"), None);
+        .open_text(TextBuffer::from_text("one two\nthree\n"), None).unwrap();
     app.state.views[view].cursor = ByteOffset(0);
     // Visual `U`, `J` and `p`.
     press_keys(&mut app, &["v", "e", "U"]);
@@ -954,7 +954,7 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
     let mut app = app();
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("foo bar food foo\nx\nyy\n"), None);
+        .open_text(TextBuffer::from_text("foo bar food foo\nx\nyy\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     let press = |app: &mut InteractiveApplication, key: &str| {
         let event = match key.chars().collect::<Vec<_>>()[..] {
@@ -1009,7 +1009,7 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
     let (_, view) = app.state.open_text(
         TextBuffer::from_text("cat one\ncat two\n// cat three\ncat four\n"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     let press = |app: &mut InteractiveApplication, key: &str| {
         let event = match key.chars().collect::<Vec<_>>()[..] {
@@ -1077,7 +1077,7 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     let (_, view) = app.state.open_text(
         TextBuffer::from_text("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = cat;\n"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     let press = |app: &mut InteractiveApplication, key: &str| {
         let event = match key.chars().collect::<Vec<_>>()[..] {
@@ -1158,7 +1158,7 @@ fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
     let mut app = app();
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("foobar\nxfoo\n"), None);
+        .open_text(TextBuffer::from_text("foobar\nxfoo\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in ["v", "l", "l"] {
         app.handle_configured_key(KeyEvent::character(key.chars().next().unwrap()));
@@ -1177,7 +1177,7 @@ fn visual_block_i_and_a_type_before_and_after_every_row() {
     let mut app = app();
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
+        .open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     let keys = |app: &mut InteractiveApplication, keys: &str| {
         for character in keys.chars() {
@@ -1228,7 +1228,7 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
 fn conflict_accept_rejects_unknown_sides_and_preserves_malformed_blocks() {
     let mut app = app();
     let source = "<<<<<<< orphan\n>>>>>>> early\nunrelated\n<<<<<<<content\n<<<<< ours\nours\n=====\ntheirs\n>>>>> other\n";
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), None);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), None).unwrap();
     let revision = app.state.buffers[buffer].text.revision();
     app.process_effect(AppEffect::GitConflictAccept { side: "our".into() });
     assert_eq!(app.state.buffers[buffer].text.to_string(), source);
@@ -1303,7 +1303,7 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("let word = 1;"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
     let word = ByteRange::new(ByteOffset(4), ByteOffset(8)).unwrap();
@@ -1329,7 +1329,7 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
 fn recovery_failure_and_retired_reads_preserve_the_journal() {
     let mut app = app();
     app.recovery.skip_maintenance();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), None);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), None).unwrap();
     app.state.buffers[buffer].read_only = true;
     assert!(app.replace_with_recovered(buffer, "draft".into()).is_err());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "saved");
@@ -1359,7 +1359,7 @@ fn flash_cancels_cached_targets_after_a_reload() {
     let mut app = app();
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("abc abc abc"), None);
+        .open_text(TextBuffer::from_text("abc abc abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.begin_flash();
     press_keys(&mut app, &["a"]);
@@ -1402,7 +1402,7 @@ fn cursor_only_commands_do_not_enter_the_change_list() {
     let mut app = app();
     let path = app.state.workspace_root.join("changes.txt");
     app.state
-        .open_text(TextBuffer::from_text("abc def"), Some(path));
+        .open_text(TextBuffer::from_text("abc def"), Some(path)).unwrap();
     app.set_dashboard_visibility(false);
     press_keys(&mut app, &["l", "w", "h"]);
     assert!(app.persistence.changes().is_empty());
@@ -1413,7 +1413,7 @@ fn cursor_only_commands_do_not_enter_the_change_list() {
 #[test]
 fn count_errors_return_operator_pending_views_to_normal() {
     let mut app = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     press_keys(
         &mut app,
@@ -1430,7 +1430,7 @@ fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
     let mut app = app();
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("cat cat\nkeep\n"), None);
+        .open_text(TextBuffer::from_text("cat cat\nkeep\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.run_substitute("%", "cat", "dog", "gn");
     assert_eq!(
@@ -1457,14 +1457,14 @@ fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
 #[test]
 fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
     let mut app = app();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None).unwrap();
     app.set_dashboard_visibility(false);
     press_keys(&mut app, &["x", "q", "a", ".", "q", "@", "a"]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "def");
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
     press_keys(&mut app, &["i", "X", "delete", "escape", "."]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "Xbc");
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
     press_keys(&mut app, &["x", "y", "y", "."]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "c");
 }
@@ -1472,7 +1472,7 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 #[test]
 fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     let mut app = app();
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in "qafzxq".chars() {
         app.handle_configured_key(KeyEvent::character(key));
@@ -1489,7 +1489,7 @@ fn star_and_hash_repeat_only_whole_identifiers() {
     let mut app = app();
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("foo foobar foo"), None);
+        .open_text(TextBuffer::from_text("foo foobar foo"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.search_word_under_cursor(true);
     assert_eq!(app.state.views[view].cursor, ByteOffset(11));
@@ -1506,7 +1506,7 @@ fn operator_arrow_motions_are_linewise_like_j_and_k() {
         let (buffer, view) = app.state.open_text(
             crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\n"),
             None,
-        );
+        ).unwrap();
         app.set_dashboard_visibility(false);
         app.state.views[view].cursor = crate::editor::text::ByteOffset(cursor);
         app.handle_configured_key(KeyEvent::character('d'));

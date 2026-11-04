@@ -12,7 +12,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(path),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
@@ -62,7 +62,7 @@ fn a_server_the_user_stopped_stays_stopped_until_asked_for() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(path),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
@@ -128,7 +128,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     let source = fs::canonicalize(source).unwrap();
     let nested = fs::canonicalize(nested).unwrap();
     app.state
-        .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(source)).unwrap();
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
@@ -275,7 +275,7 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
     let source = fs::canonicalize(source).unwrap();
     let nested = fs::canonicalize(nested).unwrap();
     app.state
-        .open_text(TextBuffer::from_text("fn main() {}"), Some(source.clone()));
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(source.clone())).unwrap();
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Dap);
     let false_executable = crate::tools::discover_executable("false").expect("false executable");
@@ -329,7 +329,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(path),
-    );
+    ).unwrap();
     fs::create_dir_all(app.state.workspace_root.join("bin")).expect("server bin");
     fs::write(
         app.state.workspace_root.join("bin/server"),
@@ -458,7 +458,7 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
     let (first_buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_bytes(b"abc").expect("text"),
         Some(first.clone()),
-    );
+    ).unwrap();
     let range = |start, end| crate::language::lsp::LspRange {
         start: crate::language::lsp::LspPosition {
             line: 0,
@@ -644,7 +644,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn ma"),
         Some(path),
-    );
+    ).unwrap();
     app.state.views[view].cursor = ByteOffset(5);
     app.set_dashboard_visibility(false);
     let owner = super::LspProjectionOwner {
@@ -752,7 +752,7 @@ fn stale_lsp_workspace_edit_is_rejected_without_mutation() {
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc"),
         Some(path.clone()),
-    );
+    ).unwrap();
     let edit = crate::language::lsp::LspWorkspaceEdit {
         documents: vec![crate::language::lsp::LspDocumentEdit {
             uri: crate::language::lsp::file_uri(&path),
@@ -923,7 +923,7 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("console.l"),
         Some(path),
-    );
+    ).unwrap();
     app.state.views[view].cursor = ByteOffset(9);
     let (_, document) = app.active_lsp_document().expect("document");
     let key = "typing".to_owned();
@@ -1100,7 +1100,7 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
     let mut app = app();
     let source = app.state.workspace_root.join("main.rs");
     app.state
-        .open_text(TextBuffer::from_text("fn main() {}"), Some(source));
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(source)).unwrap();
     app.set_dashboard_visibility(false);
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
@@ -1450,7 +1450,7 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("éab"),
         Some(path.clone()),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let (manager, endpoint) = ExecutionFixture::new(2);
@@ -1609,7 +1609,7 @@ fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("person.na"),
         Some(path),
-    );
+    ).unwrap();
     app.state.views[view].cursor = ByteOffset(9);
     let (_, document) = app.active_lsp_document().expect("document");
     let key = "owner".to_owned();
@@ -1664,7 +1664,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("person.na"),
         Some(path),
-    );
+    ).unwrap();
     app.state.views[view].cursor = ByteOffset(9);
     app.set_dashboard_visibility(false);
     let owner = super::LspProjectionOwner {
@@ -1770,7 +1770,7 @@ fn save_notifications_reach_every_document_owner_after_buffer_switch() {
     fs::write(&path, "old").unwrap();
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
     let first = fixture_owned_lsp(&mut app, "first", buffer);
     let second = fixture_owned_lsp(&mut app, "second", buffer);
     app.replace_with_recovered(buffer, "saved".into()).unwrap();
@@ -1778,7 +1778,7 @@ fn save_notifications_reach_every_document_owner_after_buffer_switch() {
     let other_path = app.state.workspace_root.join("other.rs");
     let (other, _) = app
         .state
-        .open_text(TextBuffer::from_text("other"), Some(other_path));
+        .open_text(TextBuffer::from_text("other"), Some(other_path)).unwrap();
     let unrelated = fixture_owned_lsp(&mut app, "unrelated", other);
     app.language.select("unrelated");
     wait_vfs(&mut app);
@@ -1799,7 +1799,7 @@ fn save_as_detaches_previous_project_ownership_before_sync() {
     let path = app.state.workspace_root.join("old.rs");
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("text"), Some(path));
+        .open_text(TextBuffer::from_text("text"), Some(path)).unwrap();
     let _transport = fixture_owned_lsp(&mut app, "old-project", buffer);
     app.language.select("old-project");
     fs::create_dir(app.state.workspace_root.join("new-project")).unwrap();
@@ -1827,7 +1827,7 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
         let path = app.state.workspace_root.join("problem.rs");
         let (buffer, _) = app
             .state
-            .open_text(TextBuffer::from_text("text"), Some(path.clone()));
+            .open_text(TextBuffer::from_text("text"), Some(path.clone())).unwrap();
         let _transport = fixture_owned_lsp(&mut app, "owned", buffer);
         app.language.select("owned");
         for prefix in ["lsp.", "lsp-pull:"] {
@@ -1876,7 +1876,7 @@ fn code_action_command_waits_for_approval_of_its_edits() {
     let path = app.state.workspace_root.join("action.rs");
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
     let transport = fixture_owned_lsp(&mut app, "action-server", buffer);
     app.language.select("action-server");
     let uri = file_uri(&path);
@@ -1933,7 +1933,7 @@ fn explicit_detach_survives_autostart_until_attach() {
     let path = app.state.workspace_root.join("detach.rs");
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("text"), Some(path));
+        .open_text(TextBuffer::from_text("text"), Some(path)).unwrap();
     let _transport = fixture_owned_lsp(&mut app, "owned", buffer);
     app.language.select("owned");
     app.process_effect(AppEffect::LspDetach);
@@ -1960,7 +1960,7 @@ fn stopping_a_starting_server_retires_its_launch() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(path),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);

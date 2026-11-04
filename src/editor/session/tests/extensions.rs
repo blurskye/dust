@@ -148,7 +148,7 @@ fn hidden_confirmation_suffix_cannot_be_submitted() {
 fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
     for (width, height, token) in [(100, 4, 44), (1, 10, 45)] {
         let mut app = app();
-        app.state.open_text(TextBuffer::from_text("x"), None);
+        app.state.open_text(TextBuffer::from_text("x"), None).unwrap();
         app.set_dashboard_visibility(false);
         app.handle_event(crate::ui::UiEvent::Resize(width, height));
         app.reconcile_editor_windows();
@@ -210,7 +210,7 @@ fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
 #[test]
 fn docked_layout_render_and_protection_share_confirmation_bounds() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("x"), None);
+    app.state.open_text(TextBuffer::from_text("x"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.handle_event(crate::ui::UiEvent::Resize(100, 20));
     app.process_effect(AppEffect::ExplorerOpen);
@@ -510,7 +510,7 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
     for keys in [vec!['2'], vec!['d'], vec!['"', 'a'], vec!['r']] {
         for delayed in [false, true] {
             let mut app = app();
-            app.state.open_text(TextBuffer::from_text("abc"), None);
+            app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
             app.set_dashboard_visibility(false);
             app.reconcile_editor_windows();
             let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
@@ -663,7 +663,7 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
     let a_path = app.state.workspace_root.join("a.txt");
     let b_path = app.state.workspace_root.join("b.txt");
     app.state
-        .open_text(TextBuffer::from_text("A"), Some(a_path.clone()));
+        .open_text(TextBuffer::from_text("A"), Some(a_path.clone())).unwrap();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
@@ -684,7 +684,7 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
     );
     app.process_plugin_events();
     app.state
-        .open_text(TextBuffer::from_text("B"), Some(b_path));
+        .open_text(TextBuffer::from_text("B"), Some(b_path)).unwrap();
     app.handle_configured_key("enter".parse().unwrap());
     let answer = fixture.take();
     assert!(answer.snapshot().is_none());
@@ -707,7 +707,7 @@ fn changed_confirmation_document_gets_a_terminal_failure() {
     let path = app.state.workspace_root.join("a.txt");
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("A"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("A"), Some(path.clone())).unwrap();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
@@ -863,7 +863,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     write_plugin_manifest(store.path(), &manifest);
 
     let mut app = app_with_plugin_queue(64);
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let load = app
@@ -1006,7 +1006,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
 
     for (command, private) in [("drive", false), ("private", true)] {
         let mut app = app();
-        app.state.open_text(TextBuffer::from_text("editor"), None);
+        app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
         app.set_dashboard_visibility(false);
         app.reconcile_editor_windows();
         let load = app
@@ -1168,7 +1168,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     write_plugin_manifest(store.path(), &manifest);
 
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     assert!(app.window_session.graph().revision().is_some());
@@ -1298,7 +1298,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
 #[test]
 fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1414,7 +1414,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
 #[test]
 fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1634,7 +1634,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
 #[test]
 fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1742,7 +1742,7 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
 #[test]
 fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -2424,7 +2424,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
             )
             .is_err()
     );
-    let (ordinary, view) = app.state.open_text(TextBuffer::from_text("ordinary"), None);
+    let (ordinary, view) = app.state.open_text(TextBuffer::from_text("ordinary"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let focus = app.window_session.graph().focused();

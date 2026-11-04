@@ -95,7 +95,9 @@ fn load_headless_startup(
             }
         };
         let text = TextBuffer::from_bytes(&bytes)?;
-        let (buffer, _) = state.open_text(text, Some(resolved));
+        let (buffer, _) = state.open_text(text, Some(resolved)).map_err(|error| {
+            ApplicationError::Command(CommandError::InvalidArguments(error.into()))
+        })?;
         first_buffer.get_or_insert(buffer);
     }
     if let Some(buffer) = first_buffer {

@@ -137,7 +137,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     let (id, _) = editor.open_text(
         TextBuffer::from_text("abc\n"),
         Some(root.path().join("open")),
-    );
+    ).unwrap();
     for name in ["first", "second"] {
         let task = completed(
             &mut tasks,
@@ -196,7 +196,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     editor.open_text(
         TextBuffer::from_text("unrelated"),
         Some(root.path().join("other")),
-    );
+    ).unwrap();
     editor.buffers[id].text = TextBuffer::from_text("abc\n");
     assert!(matches!(
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
@@ -488,7 +488,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
             .contains("unowned")
     );
     assert_eq!(TextBuffer::test_materializations(), before);
-    editor.open_text(TextBuffer::from_text("new"), Some(root.path().join("a")));
+    editor.open_text(TextBuffer::from_text("new"), Some(root.path().join("a"))).unwrap();
     let after_open = TextBuffer::test_materializations();
     release.send(()).unwrap();
     tasks
@@ -634,7 +634,7 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
     let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
     std::fs::create_dir_all(root.path().join("sub/src")).unwrap();
     let path = root.path().join("sub/src/main.rs");
-    editor.open_text(TextBuffer::from_text("text"), Some(path.clone()));
+    editor.open_text(TextBuffer::from_text("text"), Some(path.clone())).unwrap();
     let mut task = completed(
         &mut tasks,
         &config,
@@ -672,7 +672,7 @@ fn a_failing_dependency_publishes_its_matched_diagnostics() {
     editor.open_text(
         TextBuffer::from_text("text"),
         Some(root.path().join("source")),
-    );
+    ).unwrap();
     let mut dependency = config.tasks["first"].clone();
     dependency.matcher = None;
     dependency.arguments = vec![

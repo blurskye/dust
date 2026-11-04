@@ -1170,7 +1170,7 @@ mod lineage_tests {
         use crate::editor::{EditorState, text::TextBuffer};
         let mut editor = EditorState::new("/fixture".into());
         let first = TextBuffer::from_text("first");
-        let (buffer, _) = editor.open_text(first.clone(), Some("/fixture/main.rs".into()));
+        let (buffer, _) = editor.open_text(first.clone(), Some("/fixture/main.rs".into())).unwrap();
         let document = LspDocument {
             path: "/fixture/main.rs".into(),
             language_id: "rust".into(),

@@ -377,7 +377,7 @@ mod tests {
         let (buffer, _) = editor.open_text(
             crate::editor::text::TextBuffer::from_text("abc"),
             Some(path),
-        );
+        ).unwrap();
         owner.set_mark("a".into(), location, 10, &editor);
         let text = &mut editor.buffers[buffer].text;
         text.apply_edits(&crate::editor::text::TextEditSet::new(

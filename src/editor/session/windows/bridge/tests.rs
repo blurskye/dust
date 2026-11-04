@@ -22,7 +22,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     let (buffer, first_view) = state.open_text(
         TextBuffer::from_text("one"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let first_pane = state.tabs[state.active_tab.expect("tab")].focused;
     let second_view = state.split_active(Axis::Horizontal, 500).expect("split");
     let second_pane = state.tabs[state.active_tab.expect("tab")].focused;
@@ -80,7 +80,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
 #[test]
 fn editor_reconciliation_preserves_foreign_tiled_windows_and_identity() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    state.open_text(TextBuffer::from_text("one"), None);
+    state.open_text(TextBuffer::from_text("one"), None).unwrap();
     let mut bridge = EditorWindowBridge::default();
     let mut graph = WindowGraph::default();
     reconcile(&mut bridge, &mut graph, &state);
@@ -136,7 +136,7 @@ fn editor_reconciliation_preserves_foreign_tiled_windows_and_identity() {
 #[test]
 fn pane_close_retires_only_its_view_and_keeps_shared_content() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    let (buffer, _) = state.open_text(TextBuffer::from_text("one"), None);
+    let (buffer, _) = state.open_text(TextBuffer::from_text("one"), None).unwrap();
     state.split_active(Axis::Vertical, 500).expect("split");
     let mut bridge = EditorWindowBridge::default();
     let mut graph = WindowGraph::default();
@@ -152,7 +152,7 @@ fn pane_close_retires_only_its_view_and_keeps_shared_content() {
 #[test]
 fn workspace_tabs_are_distinct_from_one_shared_buffer_entry() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    let (buffer, _) = state.open_text(TextBuffer::from_text("one"), None);
+    let (buffer, _) = state.open_text(TextBuffer::from_text("one"), None).unwrap();
     let first_tab = state.active_tab.expect("tab");
     let second_tab = state.new_tab().expect("new tab");
     let mut bridge = EditorWindowBridge::default();
@@ -174,7 +174,7 @@ fn reset_then_session_shaped_state_has_no_stale_resources() {
     first.open_text(
         TextBuffer::from_text("old"),
         Some(PathBuf::from("/workspace/old.rs")),
-    );
+    ).unwrap();
     let mut bridge = EditorWindowBridge::default();
     let mut graph = WindowGraph::default();
     reconcile(&mut bridge, &mut graph, &first);
@@ -185,7 +185,7 @@ fn reset_then_session_shaped_state_has_no_stale_resources() {
     restored.open_text(
         TextBuffer::from_text("new"),
         Some(PathBuf::from("/workspace/new.rs")),
-    );
+    ).unwrap();
     restored.new_tab().expect("restored second tab");
     reconcile(&mut bridge, &mut graph, &restored);
     assert_eq!(graph.counts(), (1, 2, 2, 2));
@@ -231,7 +231,7 @@ fn native_reset_reconstructs_runtime_ids_but_retains_semantic_policy() {
 #[test]
 fn plugin_focus_survives_metadata_reconciliation_and_tab_close() {
     let mut state = crate::editor::EditorState::new("/workspace".into());
-    let (buffer, _) = state.open_text(crate::editor::text::TextBuffer::from_text("a"), None);
+    let (buffer, _) = state.open_text(crate::editor::text::TextBuffer::from_text("a"), None).unwrap();
     state.new_tab().unwrap();
     let mut bridge = EditorWindowBridge::default();
     let mut graph = WindowGraph::default();

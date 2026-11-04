@@ -296,7 +296,7 @@ mod tests {
     use crate::editor::{EditorState, TransactionId};
     fn fixture() -> (EditorState, BufferId, InputSession) {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("x x"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("x x"), None).unwrap();
         (state, buffer, InputSession::new(100))
     }
     fn document<'a>(
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn typing_into_an_empty_placeholder_keeps_it_around_the_typed_text() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("fn () {}"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("fn () {}"), None).unwrap();
         let mut input = InputSession::new(100);
         let source = state.window_version();
         input.install_snippet(
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn adjacent_empty_placeholder_does_not_expand_the_previous_one() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), None).unwrap();
         let mut input = InputSession::new(100);
         let source = state.window_version();
         input.install_snippet(
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn coincident_empty_mirrors_insert_once_per_occurrence() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("[]"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("[]"), None).unwrap();
         let mut input = InputSession::new(100);
         let source = state.window_version();
         input.install_snippet(

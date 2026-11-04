@@ -1487,7 +1487,7 @@ impl InteractiveApplication {
         if self.window_session.dashboard_visible()
             && !candidate.view().settings.startup.show_dashboard
         {
-            self.state.open_text(TextBuffer::from_text(""), None);
+            self.state.open_text(TextBuffer::from_text(""), None)?;
             self.set_dashboard_visibility(false);
         }
         let window_contribution = candidate.window_contribution();
@@ -1834,8 +1834,13 @@ impl InteractiveApplication {
                     if let Some(NavigationRead::Recovered(journal, content)) = &pending
                         && result.is_err()
                     {
-                        let (buffer, _) =
-                            self.state.open_text(TextBuffer::from_text(""), Some(path));
+                        let (buffer, _) = match self.state.open_text(TextBuffer::from_text(""), Some(path)) {
+                            Ok(opened) => opened,
+                            Err(error) => {
+                                self.show_error(error);
+                                continue;
+                            }
+                        };
                         if let Err(error) = self.replace_with_recovered(buffer, content.clone()) {
                             self.show_error(error);
                             continue;
@@ -1848,7 +1853,13 @@ impl InteractiveApplication {
                     }) {
                         Ok(text) => match pending {
                             Some(NavigationRead::Matcher(source)) => {
-                                let (buffer, view) = self.state.open_text(text, Some(path.clone()));
+                                let (buffer, view) = match self.state.open_text(text, Some(path.clone())) {
+                                    Ok(opened) => opened,
+                                    Err(error) => {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                };
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
                                 let start = self.state.buffers[buffer]
@@ -1875,7 +1886,13 @@ impl InteractiveApplication {
                                 self.ensure_cursor_visible();
                             }
                             Some(NavigationRead::Persisted(location)) => {
-                                let (buffer, view) = self.state.open_text(text, Some(path.clone()));
+                                let (buffer, view) = match self.state.open_text(text, Some(path.clone())) {
+                                    Ok(opened) => opened,
+                                    Err(error) => {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                };
                                 let length = self.state.buffers[buffer].text.len_bytes();
                                 let clamp = |offset: usize| {
                                     let mut offset = offset.min(length);
@@ -1942,7 +1959,13 @@ impl InteractiveApplication {
                                     }
                                     continue;
                                 }
-                                let (buffer, view) = self.state.open_text(text, Some(path.clone()));
+                                let (buffer, view) = match self.state.open_text(text, Some(path.clone())) {
+                                    Ok(opened) => opened,
+                                    Err(error) => {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                };
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
                                 let position = self.state.buffers.get(buffer).and_then(|buffer| {
@@ -1985,7 +2008,13 @@ impl InteractiveApplication {
                                     );
                                     continue;
                                 }
-                                let (buffer, view) = self.state.open_text(text, Some(path));
+                                let (buffer, view) = match self.state.open_text(text, Some(path)) {
+                                    Ok(opened) => opened,
+                                    Err(error) => {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                };
                                 let transaction = EditorTransaction::new(self.transaction_id())
                                     .with_precondition(Precondition::ViewDisplays { view, buffer })
                                     .with_operation(EditorOperation::SetCursor {
@@ -2000,7 +2029,13 @@ impl InteractiveApplication {
                                 self.ensure_cursor_visible();
                             }
                             Some(NavigationRead::Recovered(journal, content)) => {
-                                let (buffer, _) = self.state.open_text(text, Some(path.clone()));
+                                let (buffer, _) = match self.state.open_text(text, Some(path.clone())) {
+                                    Ok(opened) => opened,
+                                    Err(error) => {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                };
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
                                 self.record_recent_file(path);
@@ -2123,7 +2158,10 @@ impl InteractiveApplication {
                     self.show_error(error);
                     return;
                 }
-                draft.open_document(text, path);
+                if let Err(error) = draft.open_document(text, path) {
+                    self.show_error(error);
+                    return;
+                }
             } else {
                 draft.load_document(text, path);
             }

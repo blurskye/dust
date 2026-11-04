@@ -17,7 +17,7 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     let (buffer, view) = app.state.open_text(
         TextBuffer::from_text("aa界界\naa\t\t\ne\u{301}界x\ntail"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let viewport = active_pane_viewport(
@@ -103,7 +103,7 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         "{}\nfold\nhidden 界\nhidden e\u{301}\ntail",
         "x".repeat(150)
     );
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
     let buffer = app.state.views[view].buffer;
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
@@ -300,7 +300,7 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
         app.configuration.install_fixture(fixture);
     }
     let text = (0..30).map(|n| format!("line {n}\n")).collect::<String>();
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = app.state.buffers[app.state.views[view].buffer]
         .text
@@ -336,7 +336,7 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
         app.configuration.install_fixture(fixture);
     }
     let text = "a\t界e\u{301}bcdefghijklmnopqrstuvwxyz";
-    let (_, view) = app.state.open_text(TextBuffer::from_text(text), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(text), None).unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(text.len());
     app.ensure_cursor_visible();
@@ -382,7 +382,7 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
 #[test]
 fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let mut app = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("a\tX"), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text("a\tX"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset("a\t".len());
     {
@@ -534,7 +534,7 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
     let path = PathBuf::from("/workspace/main.rs");
     let text = TextBuffer::from_text("abcdefghijklmnopqrstuvwxyz");
     let mut source = crate::editor::EditorState::new(PathBuf::from("/workspace"));
-    let (_, first) = source.open_text(text.clone(), Some(path.clone()));
+    let (_, first) = source.open_text(text.clone(), Some(path.clone())).unwrap();
     source.views[first].scroll_column = 4;
     let second = source
         .split_active(crate::editor::Axis::Horizontal, 500)
@@ -560,14 +560,14 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
 fn session_capture_keeps_project_panes_after_external_navigation() {
     let mut state = crate::editor::EditorState::new("/workspace".into());
     let path = PathBuf::from("/workspace/main.rs");
-    state.open_text(TextBuffer::from_text("project"), Some(path.clone()));
+    state.open_text(TextBuffer::from_text("project"), Some(path.clone())).unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .unwrap();
     let (external, _) = state.open_text(
         TextBuffer::from_text("library"),
         Some("/library/lib.rs".into()),
-    );
+    ).unwrap();
     state.buffers[external].read_only = true;
     let tab = state.active_tab.unwrap();
     let roots = std::slice::from_ref(&state.workspace_root);
@@ -584,7 +584,7 @@ fn session_capture_keeps_project_panes_after_external_navigation() {
 fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let mut app = app();
     let text = format!("{}\nx", "0123456789".repeat(8));
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
     app.set_dashboard_visibility(false);
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -791,7 +791,7 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
 fn dragging_the_border_between_two_windows_resizes_them() {
     let mut app = app();
     app.window_session.observe_size((100, 30));
-    app.state.open_text(TextBuffer::from_text("a\n"), None);
+    app.state.open_text(TextBuffer::from_text("a\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -832,7 +832,7 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
  {
     let mut app = app();
     app.window_session.observe_size((160, 45));
-    app.state.open_text(TextBuffer::from_text("a\n"), None);
+    app.state.open_text(TextBuffer::from_text("a\n"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in [' ', 'a', 't'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -898,7 +898,7 @@ fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
     let mut app = app();
     app.window_session.observe_size((80, 44));
     let text = (0..200).map(|_| "line\n").collect::<String>();
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(30).unwrap();
@@ -928,7 +928,7 @@ fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
     app.configuration.install_fixture(config);
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text(&"x".repeat(60)), None);
+        .open_text(TextBuffer::from_text(&"x".repeat(60)), None).unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(20);
     app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
@@ -961,7 +961,7 @@ fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
     let mut app = app();
     app.window_session.observe_size((80, 24));
     app.state
-        .open_text(TextBuffer::from_text(&"line\n".repeat(60)), None);
+        .open_text(TextBuffer::from_text(&"line\n".repeat(60)), None).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let before = app.compositor_projection().unwrap().workspace_bounds.height;

@@ -1908,7 +1908,10 @@ impl InteractiveApplication {
                 // The only window cannot close: an empty buffer and the dashboard take its
                 // place instead, as when the last file is closed.
                 if self.state.is_last_pane() {
-                    self.state.open_text(TextBuffer::from_text(""), None);
+                    if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
+                        self.show_error(error);
+                        return;
+                    }
                     self.set_dashboard_visibility(true);
                 } else {
                     self.apply_layout_action(LayoutAction::ClosePane);
@@ -1941,16 +1944,16 @@ impl InteractiveApplication {
             {
                 Some(buffer) => self.state.show_buffer(buffer).map(|_| ()),
                 None => {
-                    let (buffer, _) = self.state.open_virtual_read_only(
+                    self.state.open_virtual_read_only(
                         TextBuffer::from_text(""),
                         TRANSCRIPT_OWNER.into(),
                         0,
                         0,
                         1,
-                    );
-                    self.agent.buffer = Some(buffer);
-                    self.state.kept_buffer = Some(buffer);
-                    Ok(())
+                    ).map(|(buffer, _)| {
+                        self.agent.buffer = Some(buffer);
+                        self.state.kept_buffer = Some(buffer);
+                    })
                 }
             };
             if let Err(error) = shown {
@@ -3233,7 +3236,7 @@ mod tests {
     fn agent_block_attachments_use_the_selected_display_columns() {
         use crate::editor::{Selection, SelectionKind, text::ByteOffset};
         let mut state = crate::editor::EditorState::new("/work".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\nDEF\n"), None);
+        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\nDEF\n"), None).unwrap();
         state.views[view].selection = Some(Selection {
             anchor: ByteOffset(1),
             head: ByteOffset(5),
@@ -3248,7 +3251,7 @@ mod tests {
             ),
             "b\nE"
         );
-        let (buffer, view) = state.open_text(TextBuffer::from_text("a界z\nx\tQ\n"), None);
+        let (buffer, view) = state.open_text(TextBuffer::from_text("a界z\nx\tQ\n"), None).unwrap();
         state.views[view].selection = Some(Selection {
             anchor: ByteOffset(1),
             head: ByteOffset(7),

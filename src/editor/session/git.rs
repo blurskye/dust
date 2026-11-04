@@ -1289,7 +1289,7 @@ mod regression_tests {
         editor.open_text(
             TextBuffer::from_text(&changed),
             Some(dir.path().join("a.txt")),
-        );
+        ).unwrap();
         let mut session = GitSession::default();
         refresh(&mut session, &editor, dir.path());
         let status = session.status_snapshot.as_ref().unwrap();
@@ -1321,7 +1321,7 @@ mod regression_tests {
         editor.open_text(
             TextBuffer::from_text("other\n"),
             Some(dir.path().join("b.txt")),
-        );
+        ).unwrap();
         assert!(
             session
                 .mutate(&editor, true, true, 1)

@@ -17,7 +17,7 @@ fn main() {
     let (_, view) = state.open_text(
         TextBuffer::from_text(&source),
         Some(PathBuf::from("bench.rs")),
-    );
+    ).expect("benchmark buffer");
     let loaded = load_bundled_config();
     let config = loaded.config;
     let dashboard = loaded.dashboard;

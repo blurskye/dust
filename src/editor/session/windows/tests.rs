@@ -9,7 +9,7 @@ use crate::{
 
 fn editor_fixture() -> (crate::editor::EditorState, WindowSession) {
     let mut state = crate::editor::EditorState::new("/workspace".into());
-    state.open_text(crate::editor::text::TextBuffer::from_text("editor"), None);
+    state.open_text(crate::editor::text::TextBuffer::from_text("editor"), None).unwrap();
     let mut windows = WindowSession::default();
     let candidate = windows
         .prepare_editor(&(&state).into(), "[scratch]")
@@ -232,7 +232,7 @@ fn editor_transition_rejects_changed_and_foreign_sources_without_window_publicat
     state.open_text(
         crate::editor::text::TextBuffer::from_text("intervening"),
         None,
-    );
+    ).unwrap();
     assert!(
         windows
             .accept_editor_transition(transition, &state.version(), &catalog)
@@ -616,7 +616,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
     state.open_text(
         crate::editor::text::TextBuffer::from_text("intervening source"),
         None,
-    );
+    ).unwrap();
     assert_eq!(windows.epoch, epoch);
     let copies = crate::ui::window::WindowGraph::test_clone_count();
     assert!(
@@ -793,7 +793,7 @@ fn window_admission_cost_probe() {
         state.open_text(
             TextBuffer::from_text(&contents),
             Some(format!("/workspace/{n}.txt").into()),
-        );
+        ).unwrap();
     }
     let mut windows = WindowSession::default();
     let candidate = windows.prepare_editor(&(&state).into(), "scratch").unwrap();
@@ -802,7 +802,7 @@ fn window_admission_cost_probe() {
     let mut exhausted = state.clone();
     exhausted.exhaust_window_source_for_test();
     let mut changed = state.clone();
-    changed.open_text(TextBuffer::from_text("changed"), None);
+    changed.open_text(TextBuffer::from_text("changed"), None).unwrap();
     let current = state.version();
     let source = state.window_version();
     let catalog = crate::extensions::PluginCatalogVersion::default();
@@ -911,7 +911,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
     draft.open_document(
         crate::editor::text::TextBuffer::from_text("startup"),
         "/workspace/new.txt".into(),
-    );
+    ).unwrap();
     let transition = windows
         .prepare_document_transition(draft, &current, catalog.clone(), "scratch", descriptions())
         .unwrap();
@@ -929,7 +929,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
     let (buffer, _) = draft.open_document(
         crate::editor::text::TextBuffer::from_text("startup"),
         "/workspace/new.txt".into(),
-    );
+    ).unwrap();
     let transition = windows
         .prepare_document_transition(draft, &current, catalog.clone(), "scratch", descriptions())
         .unwrap();

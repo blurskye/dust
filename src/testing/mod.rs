@@ -31,7 +31,7 @@ pub struct HeadlessEditor {
 impl HeadlessEditor {
     pub fn with_text(text: &str) -> Self {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
-        state.open_text(TextBuffer::from_text(text), None);
+        state.open_text(TextBuffer::from_text(text), None).unwrap();
         let mut registry = CommandRegistry::default();
         register_builtin_commands(&mut registry).expect("built-in registry must be valid");
         register_app_commands(&mut registry).expect("application registry must be valid");

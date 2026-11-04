@@ -147,7 +147,7 @@ impl WindowSession {
                                 | "builtin.output"
                                 | "builtin.logs"
                                 | "builtin.debug"
-                        ))
+                        ) && content.active)
                 })
                 // The agent panel has its own tab line.
                 .filter(|content| {
@@ -215,21 +215,15 @@ impl WindowSession {
                                 config.ui.explorer.active_glyphs().file.clone()
                             } else if state.is_virtual_read_only() {
                                 VIRTUAL_ICON.to_owned()
-                            } else if let Some(extension) = state
-                                .path
-                                .as_ref()
-                                .and_then(|path| path.extension())
-                                .and_then(|value| value.to_str())
-                                .map(str::to_ascii_lowercase)
-                            {
-                                config
-                                    .ui
-                                    .buffer_line
-                                    .extension_icons
-                                    .get(&extension)
-                                    .cloned()
+                            } else if let Some(path) = &state.path {
+                                path.extension()
+                                    .and_then(|value| value.to_str())
+                                    .map(str::to_ascii_lowercase)
+                                    .and_then(|extension| {
+                                        config.ui.buffer_line.extension_icons.get(&extension).cloned()
+                                    })
                                     .or_else(|| {
-                                        let name = state.path.as_ref()?.file_name()?.to_str()?;
+                                        let name = path.file_name()?.to_str()?;
                                         crate::files::file_icon(name)
                                             .map(|icon| icon.glyph.to_owned())
                                     })

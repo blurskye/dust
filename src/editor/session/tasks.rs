@@ -965,7 +965,7 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), None);
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), None).unwrap();
         let mut tasks = TaskSession::new(&Config::default());
         tasks.fixture_formatter_result("format", buffer, b"formatted", &editor, &workspace, 1);
         tasks.events.push_front(JobEvent::Output {
@@ -998,7 +998,7 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None);
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None).unwrap();
         let mut tasks = TaskSession::new(&Config::default());
         tasks.fixture_formatter_result("format", buffer, b"text", &editor, &workspace, 1);
         assert!(tasks.stop("format").is_ok());
@@ -1016,7 +1016,7 @@ mod tests {
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         for bytes in [b"a\r\n".as_slice(), b"\xef\xbb\xbfa\r\n".as_slice()] {
             let mut editor = EditorState::new(root.path().into());
-            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(bytes).unwrap(), None);
+            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(bytes).unwrap(), None).unwrap();
             let source = FormatterSource::capture(&editor, buffer).unwrap();
             let mut owner = TaskSession::new(&Config::default());
             let key = RunKey {
@@ -1057,7 +1057,7 @@ mod tests {
         let (buffer, _) = editor.open_text(
             TextBuffer::from_text("abc"),
             Some(root.path().join("source")),
-        );
+        ).unwrap();
         let mut config = Config::default();
         config.tasks.insert(
             "task".into(),

@@ -445,7 +445,7 @@ fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
 #[test]
 fn confirmation_visibility_uses_render_workspace_and_button_width() {
     let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
-    state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    state.open_text(crate::editor::text::TextBuffer::from_text("x"), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::PluginConfirmation);
     prompt.confirmation = Some(crate::ui::ConfirmationState {
@@ -552,7 +552,7 @@ fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text(&vec!["X".repeat(100); 10].join("\n")),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let base_ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
@@ -616,7 +616,7 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("cursor\nline\nline\nline\nline\nline"),
         None,
-    );
+    ).unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         documentation_popup: Some(DocumentationPopupState {
@@ -771,7 +771,7 @@ fn block_selection_projection_uses_shared_display_cell_ranges() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("\tZ\n界ab"),
         None,
-    );
+    ).unwrap();
     state.views[view].mode = crate::editor::EditorMode::VisualBlock;
     state.views[view].selection = Some(crate::editor::Selection {
         anchor: crate::editor::text::ByteOffset(0),
@@ -804,7 +804,7 @@ fn missing_application_window_snapshot_fails_closed() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("not rendered"),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState::default();
     assert!(super::pane_viewports(&state, &ui, &loaded.config, 40, 8).is_empty());
@@ -827,7 +827,7 @@ fn split_tree_and_tab_line_render_real_independent_views() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("left\nright"),
         None,
-    );
+    ).unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
@@ -845,15 +845,15 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
     let (first, _) = state.open_text(
         crate::editor::text::TextBuffer::from_text("first"),
         Some(PathBuf::from("/workspace/src/main.rs")),
-    );
+    ).unwrap();
     state.open_text(
         crate::editor::text::TextBuffer::from_text("second"),
         Some(PathBuf::from("/workspace/tests/main.rs")),
-    );
+    ).unwrap();
     state.open_text(
         crate::editor::text::TextBuffer::from_text("third"),
         Some(PathBuf::from("/workspace/very-long-active-buffer-name.rs")),
-    );
+    ).unwrap();
     state.buffers[first].dirty = true;
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
@@ -998,11 +998,11 @@ fn buffer_line_begins_after_the_explorer_dock() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("one"),
         Some(PathBuf::from("/workspace/one.rs")),
-    );
+    ).unwrap();
     state.open_text(
         crate::editor::text::TextBuffer::from_text("two"),
         Some(PathBuf::from("/workspace/two.rs")),
-    );
+    ).unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         content_tabs: vec![
@@ -1059,7 +1059,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let mut ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         explorer: Some(super::ExplorerUiState {
@@ -1145,7 +1145,7 @@ fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
             "a\t界e\u{301}zz\nfold\nhidden one\nhidden two\ntail tail",
         ),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.wrap = true;
@@ -1198,7 +1198,7 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
 
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (buffer, view) =
-        state.open_text(crate::editor::text::TextBuffer::from_text("aa界界"), None);
+        state.open_text(crate::editor::text::TextBuffer::from_text("aa界界"), None).unwrap();
     let ui = ui_with_editor_layout(&state);
     let model =
         super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 3, true);
@@ -1297,7 +1297,7 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
         for width in 1..=4 {
             let mut state = EditorState::new(PathBuf::from("/tmp"));
             let (buffer, view) =
-                state.open_text(crate::editor::text::TextBuffer::from_text(sample), None);
+                state.open_text(crate::editor::text::TextBuffer::from_text(sample), None).unwrap();
             let ui = ui_with_editor_layout(&state);
             let model = super::VisualRowModel::new(
                 &state.buffers[buffer].text,
@@ -1358,7 +1358,7 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
     let (buffer, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("zero\none\ntwo\nthree\nfour\nfive"),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState {
         lsp_folds: vec![super::UiFold {
@@ -1407,7 +1407,7 @@ fn configured_wrapping_uses_visual_rows() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("abcdefghij"),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.wrap = true;
@@ -1433,7 +1433,7 @@ fn configured_wrapping_uses_visual_rows() {
 fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() {
     let text = "let value = build();";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     state.views[view].cursor = crate::editor::text::ByteOffset("let value".len());
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
@@ -1484,7 +1484,7 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
 fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs() {
     let text = "a\t界e\u{301}bcdef";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.wrap = false;
@@ -1575,7 +1575,7 @@ fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("root\n    one\n        two\n\t\ttab\n"),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -1618,7 +1618,7 @@ fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
             "fn first() {\n    first();\n}\nfn second() {\n    second();\n}\n",
         ),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     state.views[view].cursor = state.buffers[state.views[view].buffer]
         .text
         .line_to_byte(5)
@@ -1649,7 +1649,7 @@ fn active_indent_scope_tracks_the_cursor_display_column() {
                 "fn run() {\n    if outer {\n        if inner {\n            work();\n        }\n    }\n}\n",
             ),
             Some(PathBuf::from("/workspace/file.rs")),
-        );
+        ).unwrap();
     let work_start = state.buffers[state.views[view].buffer]
         .text
         .line_to_byte(3)
@@ -1715,7 +1715,7 @@ fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
                 "fn run() {\n    if outer {\n        if inner {\n            work();\n        }\n    }\n}\n",
             ),
             Some(PathBuf::from("/workspace/file.rs")),
-        );
+        ).unwrap();
     let closing_start = state.buffers[state.views[view].buffer]
         .text
         .line_to_byte(4)
@@ -1764,7 +1764,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     let (buffer, _) = state.open_text(
         crate::editor::text::TextBuffer::from_text("added\nchanged\ndeleted\n"),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     let revision = state.buffers[buffer].text.revision().0;
@@ -1855,7 +1855,7 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("a deliberately wrapped line"),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.wrap = true;
@@ -1888,7 +1888,7 @@ fn end_of_buffer_markers_right_align_with_line_number_digits() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text(&source),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     state.views[view].scroll_line = 999;
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
@@ -1917,14 +1917,14 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     let (short, short_view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("short\n"),
         Some(PathBuf::from("/workspace/short.rs")),
-    );
+    ).unwrap();
     let first_tab = state.active_tab.unwrap();
     state.new_tab().unwrap();
     let long_text = (0..1_000).map(|_| "long\n").collect::<String>();
     let (long, long_view) = state.open_text(
         crate::editor::text::TextBuffer::from_text(&long_text),
         Some(PathBuf::from("/workspace/long.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     assert_eq!(super::editor_line_number_digits(&state), 4);
     let short_gutter = super::editor_state_gutter_width(
@@ -1964,7 +1964,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
 #[test]
 fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text("a\tX"), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text("a\tX"), None).unwrap();
     state.views[view].cursor = crate::editor::text::ByteOffset("a\t".len());
     state.views[view].scroll_column = 4;
     let loaded = crate::config::load_bundled_config();
@@ -1987,7 +1987,7 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     assert!(zero.cursor.is_none());
 
     let mut split_state = EditorState::new(PathBuf::from("/tmp"));
-    split_state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    split_state.open_text(crate::editor::text::TextBuffer::from_text("x"), None).unwrap();
     split_state
         .split_active(crate::editor::Axis::Horizontal, 100)
         .expect("minimum-ratio split");
@@ -2040,7 +2040,7 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
 #[test]
 fn a_long_notification_wraps_so_its_end_stays_readable() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.notification = Some(format!("{} says why at the very end", "failed ".repeat(20)));
@@ -2052,7 +2052,7 @@ fn a_long_notification_wraps_so_its_end_stays_readable() {
 #[test]
 fn a_long_path_in_a_notification_breaks_so_its_name_stays_readable() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.notification = Some(format!(
@@ -2070,7 +2070,7 @@ fn wrapping_ignores_horizontal_offset() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("abcdefghij"),
         None,
-    );
+    ).unwrap();
     state.views[view].scroll_column = 7;
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
@@ -2327,7 +2327,7 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
 #[test]
 fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    state.open_text(crate::editor::text::TextBuffer::from_text("one\ntwo"), None);
+    state.open_text(crate::editor::text::TextBuffer::from_text("one\ntwo"), None).unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 400)
         .expect("horizontal split");
@@ -2351,7 +2351,7 @@ fn completion_is_clipped_to_the_focused_split() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("left and right"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
@@ -2392,7 +2392,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("editor content"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         explorer: Some(super::ExplorerUiState {
@@ -2643,7 +2643,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("bad"),
         Some(path.clone()),
-    );
+    ).unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         diagnostics: vec![super::UiDiagnostic {
@@ -2698,7 +2698,7 @@ fn status_line_names_the_symbols_around_the_cursor() {
     let (buffer, _) = state.open_text(
         crate::editor::text::TextBuffer::from_text("one\ntwo\nthree\n"),
         Some(PathBuf::from("/tmp/main.rs")),
-    );
+    ).unwrap();
     let symbol = |name: &str, start, end| super::UiBreadcrumb {
         name: name.into(),
         range: crate::editor::text::ByteRange::new(
@@ -2747,7 +2747,7 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("bad\nfine\nodd\n"),
         Some(path.clone()),
-    );
+    ).unwrap();
     let diagnostic = |severity, start, end| super::UiDiagnostic {
         path: path.clone(),
         severity,
@@ -2799,7 +2799,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("bad\nnext\n"),
         Some(path.clone()),
-    );
+    ).unwrap();
     let range = crate::editor::text::ByteRange::new(
         crate::editor::text::ByteOffset(0),
         crate::editor::text::ByteOffset(3),
@@ -2841,7 +2841,7 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("text-blue-\nb\nc\n"),
         Some(PathBuf::from("/tmp/index.html")),
-    );
+    ).unwrap();
     if let Some(view) = state.active_view {
         state.views[view].cursor = crate::editor::text::ByteOffset(9);
     }
@@ -2893,7 +2893,7 @@ fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("div {\n co\n}\n"),
         Some(PathBuf::from("/tmp/completion.css")),
-    );
+    ).unwrap();
     if let Some(view) = state.active_view {
         state.views[view].cursor = crate::editor::text::ByteOffset(9);
     }
@@ -2949,7 +2949,7 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("value"),
         Some(PathBuf::from("/tmp/main.rs")),
-    );
+    ).unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         language_completion: Some(super::LanguageCompletionState {
@@ -2988,7 +2988,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("editor content\nsecond line"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 400)
         .expect("nested editor split");
@@ -3221,7 +3221,7 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config.clone();
     let dashboard = loaded.dashboard.clone();
@@ -3296,7 +3296,7 @@ fn a_conflict_free_pause_still_shows_the_bar() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config.clone();
     let dashboard = loaded.dashboard.clone();
@@ -3331,7 +3331,7 @@ fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config.clone();
     let dashboard = loaded.dashboard.clone();
@@ -3390,7 +3390,7 @@ fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
         Some(PathBuf::from("/workspace/main.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config.clone();
     let dashboard = loaded.dashboard.clone();
@@ -3677,7 +3677,7 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
     state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}\n"),
         None,
-    );
+    ).unwrap();
     let mut ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         ..UiState::default()
@@ -4325,7 +4325,7 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
     let (buffer, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text(text),
         Some(PathBuf::from("/workspace/file.rs")),
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -4405,7 +4405,7 @@ fn key_help_breaks_between_items_and_keeps_its_end() {
 #[test]
 fn a_notification_too_long_to_show_points_at_the_messages_list() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None);
+    let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.notification = Some("conflict ".repeat(200));
@@ -4437,7 +4437,7 @@ fn terminal_tabs_are_named_by_profile_and_numbered_when_repeated() {
 #[test]
 fn the_status_line_puts_the_server_and_root_on_the_right() {
     let mut state = EditorState::new(PathBuf::from("/tmp/some-project"));
-    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.lsp_server = Some("rust-analyzer".into());
@@ -4478,7 +4478,7 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
 fn the_status_line_names_a_worktree_with_its_repository() {
     let mut state = EditorState::new(PathBuf::from("/tmp/repo/.worktree/feature"));
     state.workspace_repository = Some("repo".into());
-    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = ui_with_editor_layout(&state);
     let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
@@ -4488,7 +4488,7 @@ fn the_status_line_names_a_worktree_with_its_repository() {
 #[test]
 fn the_status_line_keeps_fields_from_running_into_the_position() {
     let mut state = EditorState::new(PathBuf::from("/tmp/a-rather-long-project-name"));
-    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None);
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("x"), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = ui_with_editor_layout(&state);
     let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
@@ -4502,7 +4502,7 @@ fn eof_fold_stops_forward_scrolling() {
     let (buffer, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("header\nlast"),
         None,
-    );
+    ).unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState {
         lsp_folds: vec![super::UiFold {
@@ -4561,7 +4561,7 @@ fn large_diff_rows_share_number_width() {
 fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
     use crate::editor::text::{ByteOffset, TextBuffer};
     let mut state = EditorState::new("/tmp".into());
-    let (buffer, view) = state.open_text(TextBuffer::from_text(&"x".repeat(40)), None);
+    let (buffer, view) = state.open_text(TextBuffer::from_text(&"x".repeat(40)), None).unwrap();
     let mut config = crate::config::load_bundled_config().config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.editor.wrap = true;
@@ -4603,7 +4603,7 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
     use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
     let mut state = EditorState::new("/tmp".into());
     let path = PathBuf::from("/tmp/file");
-    let (buffer, view) = state.open_text(TextBuffer::from_text("a\nb\nc\nd"), Some(path.clone()));
+    let (buffer, view) = state.open_text(TextBuffer::from_text("a\nb\nc\nd"), Some(path.clone())).unwrap();
     let mut config = crate::config::load_bundled_config().config;
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
@@ -4654,7 +4654,7 @@ fn debugger_markers_survive_disabled_git_signs() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("line"),
         Some(path.clone()),
-    );
+    ).unwrap();
     let mut config = crate::config::load_bundled_config().config;
     config.editor.git_signs.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
@@ -4851,7 +4851,7 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
     let (_, view) = state.open_text(
         crate::editor::text::TextBuffer::from_text("first\nsecond"),
         None,
-    );
+    ).unwrap();
     state.views[view].cursor = crate::editor::text::ByteOffset(6);
     let config = crate::config::load_bundled_config().config;
     let ui = ui_with_editor_layout(&state);
@@ -4883,7 +4883,7 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
 #[test]
 fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
     let mut state = EditorState::new("/tmp".into());
-    state.open_text(crate::editor::text::TextBuffer::from_text("source\n"), None);
+    state.open_text(crate::editor::text::TextBuffer::from_text("source\n"), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.debug_panes = Some(super::DebugPanesUiState {
@@ -4946,7 +4946,7 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     use crate::language::syntax::MarkdownMark;
     let text = "# Title\n- item [x](u)\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -5018,7 +5018,7 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
     use crate::language::syntax::MarkdownMark;
     let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -5071,7 +5071,7 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
     use crate::language::syntax::MarkdownMark;
     let text = "| a | b |\n|---|---|\n| c | d |\n| e | f |\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -5135,7 +5135,7 @@ fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
     use crate::language::syntax::MarkdownMark;
     let text = "x\n| a | b |\n|---|---|\n| c | d |\n";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
@@ -5182,7 +5182,7 @@ fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
     // Unaligned, the second row without its outer pipes and the last one short of a cell.
     let text = "\n| `a` | long head |\n|---|--:|\nwide cell | b\n| c |\n\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;

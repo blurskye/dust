@@ -2403,6 +2403,12 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
     })
     .unwrap();
     let linked = root.join(".worktree/feat");
+    let mut service = GitStatusService::default();
+    service.start(GitStatusPolicy {
+        root: linked.clone(), root_revision: 1, maximum_files: 10,
+        maximum_path_bytes: 1024, deadline: Duration::from_secs(5),
+    }).unwrap();
+    assert_eq!(wait_status(&mut service).worktree_repository.as_deref(), root.file_name().and_then(|name| name.to_str()));
 
     let GitBranchResult::List(list) = run_branch(crate::workspace::git::GitBranchRequest::List(
         crate::workspace::git::GitBranchListRequest {

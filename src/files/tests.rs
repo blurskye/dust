@@ -622,6 +622,26 @@ fn repository_with_worktree() -> tempfile::TempDir {
 }
 
 #[test]
+fn linked_worktree_metadata_rejects_nonregular_and_oversized_files() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    let git = root.path().join(".git");
+    fs::write(&git, "x".repeat(4097)).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    fs::remove_file(&git).unwrap();
+    symlink("/dev/zero", &git).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    fs::remove_file(&git).unwrap();
+    nix::unistd::mkfifo(&git, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    let mut state = crate::editor::EditorState::new(root.path().into());
+    assert_eq!(state.workspace_repository, None);
+    state.set_workspace_root(root.path().join("other"));
+    state.set_workspace_root(root.path().into());
+    assert_eq!(state.workspace_repository, None);
+}
+
+#[test]
 fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     let repository = repository_with_worktree();
     let root = repository.path().canonicalize().expect("root");

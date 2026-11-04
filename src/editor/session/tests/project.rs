@@ -21,7 +21,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     let (buffer, view) = app.state.open_text(
         TextBuffer::from_text("ok\nerror\nwarning\n"),
         Some(path.clone()),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let uri = crate::language::lsp::file_uri(&path);
@@ -120,7 +120,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     app.state.open_text(
         TextBuffer::from_text("unrelated"),
         Some(root.path().join("other")),
-    );
+    ).unwrap();
     assert!(run.document(&path, &app.state).unwrap().is_some());
     assert!(!run.current(&app.diagnostics, &app.workspace, configuration + 1));
     let next = crate::editor::session::tasks::TaskDiagnosticRun::capture(
@@ -166,7 +166,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
     fs::create_dir(root.join("nested")).unwrap();
     let (buffer, first) = app
         .state
-        .open_text(TextBuffer::from_text("dirty text"), Some(source.clone()));
+        .open_text(TextBuffer::from_text("dirty text"), Some(source.clone())).unwrap();
     app.state.set_buffer_dirty(buffer, true);
     let second = app
         .state
@@ -347,10 +347,10 @@ fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
         fs::write(&source_file, "source text").unwrap();
         let (buffer, _) = app.state.open_text(
             TextBuffer::from_text("source text"), Some(source_file.clone()),
-        );
+        ).unwrap();
         let (destination, _) = app.state.open_text(
             TextBuffer::from_text("unsaved destination"), Some(target_file.clone()),
-        );
+        ).unwrap();
         app.state.set_buffer_dirty(destination, true);
         app.open_explorer();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -379,7 +379,7 @@ fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
     let source = app.state.workspace_root.join("before.txt");
     let target = app.state.workspace_root.join("after.txt");
     fs::write(&source, "kept").unwrap();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("kept"), Some(source.clone()));
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("kept"), Some(source.clone())).unwrap();
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.explorer.tree().id_for_path(&source).is_none() {
@@ -421,7 +421,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let (buffer, _) = app.state.open_text(
         TextBuffer::from_text("kept plus unsaved"),
         Some(source.clone()),
-    );
+    ).unwrap();
     app.state.set_buffer_dirty(buffer, true);
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -836,7 +836,7 @@ fn explorer_follow_lazily_expands_to_active_file() {
     let path = directory.join("follow.txt");
     fs::write(&path, "follow").unwrap();
     app.state
-        .open_text(TextBuffer::from_text("follow"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("follow"), Some(path.clone())).unwrap();
     app.set_dashboard_visibility(false);
     app.follow_active_file_in_explorer();
     wait_explorer(&mut app);
@@ -1103,7 +1103,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("focus"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("focus"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -1174,7 +1174,7 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("dirty"),
         Some(dirty_path),
-    );
+    ).unwrap();
     app.state.buffers[buffer].dirty = true;
     app.remove_workspace_root(second);
     assert_eq!(app.workspace.roots().len(), 2);
@@ -1227,7 +1227,7 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("plain\n"),
         Some(path),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -1263,7 +1263,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("one\ntwo\nthree\n"),
         Some(path),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
 
     app.reconcile_git_signs();
@@ -2035,7 +2035,7 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("prefix needle\n"),
         Some(path),
-    );
+    ).unwrap();
     app.state.buffers[buffer].dirty = true;
     app.start_workspace_search("needle".into(), Some("changed".into()));
     wait_workspace_search(&mut app);
@@ -2052,7 +2052,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
     let mut app = app();
     let root = app.state.workspace_root.clone();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.start_save(false, Some(PathBuf::from("missing/new.txt")), false);
     assert_eq!(
@@ -2100,7 +2100,7 @@ fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
     let mut app = app();
     let (_, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None).unwrap();
     let buffer = app.state.active_buffer_id().expect("buffer");
     app.state.buffers[buffer].dirty = true;
     let quit = crate::editor::CommandInvocation::new("editor.quit", InvocationSource::Test)
@@ -2121,7 +2121,7 @@ fn search_moves_forward_wraps_and_repeats() {
     let (_, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("one two one"),
         None,
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.ui.search_query = Some("one".into());
     app.perform_search(true);
@@ -2198,7 +2198,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
     fs::write(&path, "abc").unwrap();
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("abc"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     prepare_trust_identity(&mut app);
@@ -2452,7 +2452,7 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     let (buffer, _) = app.state.open_text(
         TextBuffer::from_text("abc\n"),
         Some(root.path().join("open.txt")),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     prepare_trust_identity(&mut app);
@@ -3561,7 +3561,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     let (main_buffer, main_view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_bytes(b"x\n").expect("text"),
         Some(main_file.clone()),
-    );
+    ).unwrap();
     app.state.active_view = Some(main_view);
 
     let invoke = |app: &mut InteractiveApplication, id: &str| {
@@ -3813,7 +3813,7 @@ fn help_preserves_a_buffer_selection_byte_for_byte() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("alpha beta gamma delta\n"),
         None,
-    );
+    ).unwrap();
     app.state.active_view = Some(view);
     app.state.views[view].buffer = buffer;
     app.state.views[view].cursor = crate::editor::text::ByteOffset(15);
@@ -4322,7 +4322,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text(&String::from_utf8_lossy(&on_disk)),
         Some(conflicted.clone()),
-    );
+    ).unwrap();
     app.state.active_view = Some(view);
     app.state.views[view].buffer = buffer;
     let before_choose = app.state.buffers[buffer].text.to_string();
@@ -4403,7 +4403,7 @@ fn choosing_a_side_for_an_unconflicted_path_is_refused() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("clean\n"),
         Some(root.join("clean.txt")),
-    );
+    ).unwrap();
     app.state.active_view = Some(view);
     app.state.views[view].buffer = buffer;
 
@@ -5317,7 +5317,7 @@ fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsaved_file() {
     let (buffer, _) = app.state.open_text(
         TextBuffer::from_text("unsaved\n"),
         Some(nested.join("notes.txt")),
-    );
+    ).unwrap();
     app.state.set_buffer_dirty(buffer, true);
 
     app.switch_workspace_root(main.clone());
@@ -5713,7 +5713,7 @@ fn cached_hunk_reset_never_targets_a_previous_buffer() {
     let other = app.state.workspace_root.join("other.txt");
     fs::write(&other, "other\n").unwrap();
     app.state
-        .open_text(TextBuffer::from_text("other\n"), Some(other));
+        .open_text(TextBuffer::from_text("other\n"), Some(other)).unwrap();
     app.request_reset_selected_git_hunk();
     app.confirm_reset_selected_git_hunk("reset this hunk".into());
     settle_git_work(&mut app);
@@ -5767,7 +5767,7 @@ fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
     });
     let (newer, _) = app
         .state
-        .open_text(TextBuffer::from_text("newer choice"), None);
+        .open_text(TextBuffer::from_text("newer choice"), None).unwrap();
     wait_vfs(&mut app);
     assert_eq!(app.state.active_buffer_id(), Some(newer));
 }
@@ -5843,7 +5843,7 @@ fn save_and_stage_writes_the_refused_file_and_refreshes_its_hunks() {
     fs::write(&other, "other\n").unwrap();
     let (other_buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("other\n"), Some(other.clone()));
+        .open_text(TextBuffer::from_text("other\n"), Some(other.clone())).unwrap();
     app.replace_with_recovered(other_buffer, "other unsaved\n".into())
         .unwrap();
     app.open_git_status_picker();
@@ -5911,7 +5911,7 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
         fs::write(&path, "old").unwrap();
         let (buffer, _) = app
             .state
-            .open_text(TextBuffer::from_text("old"), Some(path.clone()));
+            .open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
         buffers.push((buffer, path));
     }
     app.next_disk_check = None;

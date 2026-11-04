@@ -189,9 +189,9 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
 fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
     use crate::editor::{EditorMode, EditorState, text::TextBuffer};
     let mut first = EditorState::new(Default::default());
-    first.open_text(TextBuffer::from_text("first"), None);
+    first.open_text(TextBuffer::from_text("first"), None).unwrap();
     let mut other = EditorState::new(Default::default());
-    other.open_text(TextBuffer::from_text("other"), None);
+    other.open_text(TextBuffer::from_text("other"), None).unwrap();
     assert_eq!(first.active_view, other.active_view);
     let mut input = InputSession::new(100);
     assert_eq!(

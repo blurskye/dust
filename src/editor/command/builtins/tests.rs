@@ -10,7 +10,7 @@ use crate::editor::{
 #[test]
 fn movement_and_edit_commands_apply_through_registry_transactions() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (_, view) = state.open_text(TextBuffer::from_text("one two"), None);
+    let (_, view) = state.open_text(TextBuffer::from_text("one two"), None).unwrap();
     let mut registry = CommandRegistry::<()>::default();
     register_builtin_commands(&mut registry).expect("builtins");
     let mut move_word = CommandInvocation::new("view.cursor.move", InvocationSource::Test)
@@ -74,7 +74,7 @@ fn editing(
     cursor: usize,
 ) -> (EditorState, crate::editor::BufferId, crate::editor::ViewId) {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
-    let (buffer, view) = state.open_text(TextBuffer::from_text(text), None);
+    let (buffer, view) = state.open_text(TextBuffer::from_text(text), None).unwrap();
     state.views[view].cursor = crate::editor::text::ByteOffset(cursor);
     (state, buffer, view)
 }

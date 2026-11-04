@@ -580,7 +580,7 @@ mod tests {
             WorkspaceSession::new(state, root.path().join("trust.json"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
         fn context<'a>(editor: &'a EditorState, workspace: &WorkspaceSession) -> LaunchContext<'a> {
             LaunchContext {
                 editor,
@@ -599,7 +599,7 @@ mod tests {
             ..context(&editor, &workspace)
         }));
         let mut foreign = EditorState::new(root.path().into());
-        foreign.open_text(editor.buffers[buffer].text.clone(), Some(path.clone()));
+        foreign.open_text(editor.buffers[buffer].text.clone(), Some(path.clone())).unwrap();
         assert!(!source.current(&context(&foreign, &workspace)));
         editor.buffers[buffer].text = TextBuffer::from_text("new");
         assert!(
@@ -622,7 +622,7 @@ mod tests {
         let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
         let definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|d| d.id == "rust-analyzer")

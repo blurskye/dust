@@ -458,7 +458,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
 fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
@@ -1632,7 +1632,7 @@ fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
 #[test]
 fn reload_preserves_zen_exit_and_plugin_command_titles() {
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("a"), None);
+    app.state.open_text(TextBuffer::from_text("a"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     app.process_effect(AppEffect::Zen);

@@ -5891,13 +5891,16 @@ impl InteractiveApplication {
                                     continue;
                                 }
                                 let mut draft = self.state.draft();
-                                draft.open_virtual_read_only(
+                                if let Err(error) = draft.open_virtual_read_only(
                                     TextBuffer::from_text(&content),
                                     "dap".into(),
                                     0,
                                     0,
                                     0,
-                                );
+                                ) {
+                                    self.show_error(error);
+                                    continue;
+                                }
                                 if let Err(error) = self.commit_editor_draft(draft, None, false) {
                                     self.show_error(error);
                                     continue;
@@ -7890,6 +7893,9 @@ impl InteractiveApplication {
             Ok(true) => {}
             Err(error) => self.show_error(error),
         }
+        self.state.workspace_repository = self.git.status()
+            .filter(|snapshot| snapshot.scope_root == self.state.workspace_root)
+            .and_then(|snapshot| snapshot.worktree_repository.clone());
         if self.git.status().is_none() {
             self.ui.git_signs.clear();
             self.git.open_changes_when_ready = false;
@@ -13602,7 +13608,10 @@ impl InteractiveApplication {
             AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
             AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
             AppEffect::NewBuffer => {
-                self.state.open_text(TextBuffer::from_text(""), None);
+                if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
+                    self.show_error(error);
+                    return Ok(());
+                }
                 self.set_dashboard_visibility(false);
                 self.notify_message(self.message("new_scratch", &[]), false);
             }
@@ -13623,7 +13632,10 @@ impl InteractiveApplication {
                         }
                     }
                     None => {
-                        self.state.open_text(TextBuffer::from_text(""), None);
+                        if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
+                            self.show_error(error);
+                            return Ok(());
+                        }
                     }
                 }
                 self.set_dashboard_visibility(false);
@@ -14129,7 +14141,10 @@ impl InteractiveApplication {
         let path = crate::editor::new_file_path(&absolute);
         self.record_jump();
         let mut candidate = self.state.draft();
-        candidate.open_document(TextBuffer::from_text(""), path.clone());
+        if let Err(error) = candidate.open_document(TextBuffer::from_text(""), path.clone()) {
+            self.show_error(error);
+            return;
+        }
         if let Err(error) = self.commit_editor_draft(candidate, None, true) {
             self.show_error(error);
             return;
@@ -14230,7 +14245,13 @@ impl InteractiveApplication {
             }
             return;
         }
-        let (buffer, _) = self.state.open_text(TextBuffer::from_text(""), None);
+        let (buffer, _) = match self.state.open_text(TextBuffer::from_text(""), None) {
+            Ok(opened) => opened,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
         if let Err(error) = self.replace_with_recovered(buffer, record.content) {
             self.show_error(error);
             return;
@@ -14716,7 +14737,10 @@ impl InteractiveApplication {
                         self.state.active_view,
                     );
                 if activate {
-                    candidate.open_document(text, path.clone());
+                    if let Err(error) = candidate.open_document(text, path.clone()) {
+                        self.show_error(error);
+                        return;
+                    }
                 } else {
                     candidate.load_document(text, path.clone());
                 }

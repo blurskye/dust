@@ -31,6 +31,7 @@ pub(in crate::editor::session) enum VirtualDocumentEditorError {
     InvalidInitial,
     StaleRevision,
     Ceiling,
+    Layout(&'static str),
     GenerationMismatch,
 }
 #[derive(Clone, Debug, Default)]
@@ -107,7 +108,7 @@ impl VirtualDocumentEditorBridge {
             snapshot.load.0,
             snapshot.document,
             snapshot.revision,
-        );
+        ).map_err(VirtualDocumentEditorError::Layout)?;
         self.entries.insert(
             key,
             VirtualDocumentEditorEntry {

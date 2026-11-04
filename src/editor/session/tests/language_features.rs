@@ -77,7 +77,7 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("let 界 = build();"),
         Some(path.clone()),
-    );
+    ).unwrap();
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.lsp.inlay_hint_level = crate::config::InlayHintLevel::Max;
@@ -181,7 +181,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
     let path = app.state.workspace_root.join("inlay-failure.rs");
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("fn value() {}"), Some(path));
+        .open_text(TextBuffer::from_text("fn value() {}"), Some(path)).unwrap();
     let owner = super::LspProjectionOwner {
         server: "rust-analyzer".into(),
         buffer,
@@ -232,7 +232,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     let path = app.state.workspace_root.join("completion.rs");
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("let value = 1;"), Some(path));
+        .open_text(TextBuffer::from_text("let value = 1;"), Some(path)).unwrap();
     app.set_dashboard_visibility(false);
     let owner = super::LspProjectionOwner {
         server: "fake-server".into(),
@@ -354,7 +354,7 @@ fn app_waiting_to_save_formatted(
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("a  b\n"),
         Some(path.clone()),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
@@ -500,7 +500,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text(source),
         Some(path.clone()),
-    );
+    ).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(8);
@@ -583,7 +583,7 @@ fn loading_a_session_refuses_to_replace_unsaved_work() {
 #[test]
 fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
     let mut app = app();
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None).unwrap();
     app.state.views[view].cursor = ByteOffset(4);
     app.state.views[view].selection = Some(crate::editor::Selection {
         anchor: ByteOffset(0),
@@ -623,7 +623,7 @@ fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
 #[test]
 fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
     let (mut app, buffer, path, ..) = app_waiting_to_save_formatted("save-in-background.txt");
-    app.state.open_text(TextBuffer::from_text("other"), None);
+    app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
     let other = app.state.active_buffer_id();
     app.finish_format_on_save();
     super::wait_vfs(&mut app);
@@ -636,7 +636,7 @@ fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
 fn delayed_lsp_navigation_loads_without_stealing_focus() {
     use crate::language::lsp::{LspLocation, LspPosition, LspRange, file_uri};
     let mut app = app();
-    app.state.open_text(TextBuffer::from_text("first"), None);
+    app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
     let path = app.state.workspace_root.join("definition.txt");
     fs::write(&path, "definition").unwrap();
     app.navigate_lsp_location_encoded(
@@ -655,7 +655,7 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
         },
         crate::editor::text::PositionEncoding::Utf16,
     );
-    let (_, view) = app.state.open_text(TextBuffer::from_text("second"), None);
+    let (_, view) = app.state.open_text(TextBuffer::from_text("second"), None).unwrap();
     super::wait_vfs(&mut app);
     assert_eq!(app.state.active_view, Some(view));
     assert!(
@@ -669,7 +669,7 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
 #[test]
 fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
     let mut app = app();
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), None);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(5);
     app.language.install_selection_ranges(vec![
@@ -693,7 +693,7 @@ fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
     let path = app.state.workspace_root.join("encoded.rs");
     let (_, view) = app
         .state
-        .open_text(TextBuffer::from_text("é def"), Some(path.clone()));
+        .open_text(TextBuffer::from_text("é def"), Some(path.clone())).unwrap();
     app.set_dashboard_visibility(false);
     app.open_lsp_locations_picker(
         vec![crate::language::lsp::LspLocation {
@@ -719,7 +719,7 @@ fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
 fn an_unrelated_formatter_cannot_release_a_pending_save() {
     let (mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
     app.format_on_save.as_mut().unwrap().formatter = Some("wanted".into());
-    let (other, _) = app.state.open_text(TextBuffer::from_text("other"), None);
+    let (other, _) = app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
     app.tasks.fixture_formatter_result(
         "unrelated",
         other,
@@ -752,7 +752,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     let path = app.state.workspace_root.join("snippet.rs");
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text("\nfoo"), Some(path));
+        .open_text(TextBuffer::from_text("\nfoo"), Some(path)).unwrap();
     app.state.views[view].cursor = ByteOffset(4);
     app.set_dashboard_visibility(false);
     let document = app.active_lsp_document().unwrap().1;

@@ -781,7 +781,7 @@ impl EditorDraft {
         &mut self,
         text: TextBuffer,
         path: std::path::PathBuf,
-    ) -> (BufferId, ViewId) {
+    ) -> Result<(BufferId, ViewId), &'static str> {
         self.state.open_text(text, Some(path))
     }
     pub(crate) fn split_document(&mut self, ratio: u16) -> Result<(), &'static str> {
@@ -892,7 +892,7 @@ impl EditorDraft {
         generation: u64,
         document: u64,
         revision: u64,
-    ) -> (BufferId, ViewId) {
+    ) -> Result<(BufferId, ViewId), &'static str> {
         self.state
             .open_virtual_read_only(text, owner, generation, document, revision)
     }
@@ -903,43 +903,7 @@ impl EditorDraft {
         revision: u64,
         text: TextBuffer,
     ) -> bool {
-        // Preserve the same cursor/selection/scroll policy as the virtual bridge,
-        // without lending that bridge mutable editor stores.
-        let views = self
-            .state
-            .views
-            .iter()
-            .filter(|(_, v)| v.buffer == buffer)
-            .map(|(id, v)| (id, v.cursor, v.selection, v.scroll_line, v.scroll_column))
-            .collect::<Vec<_>>();
-        if !self
-            .state
-            .replace_virtual_read_only(buffer, expected, revision, text)
-        {
-            return false;
-        }
-        let text = &self.state.buffers[buffer].text;
-        let len = text.len_bytes();
-        for (id, cursor, selection, line, column) in views {
-            if let Some(view) = self.state.views.get_mut(id) {
-                view.cursor = ByteOffset(cursor.get().min(len));
-                while !text.is_char_boundary(view.cursor) {
-                    view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
-                }
-                view.selection = selection.filter(|s| {
-                    s.anchor.get() <= len
-                        && s.head.get() <= len
-                        && text.is_char_boundary(s.anchor)
-                        && text.is_char_boundary(s.head)
-                });
-                if let Some(selection) = &mut view.selection {
-                    selection.head = view.cursor;
-                }
-                view.scroll_line = line.min(text.len_lines().saturating_sub(1));
-                view.scroll_column = column;
-            }
-        }
-        true
+        self.state.replace_virtual_read_only(buffer, expected, revision, text)
     }
 }
 
@@ -1025,7 +989,7 @@ mod tests {
         state.undo_directory = Some(directory.path().to_path_buf());
         state.undo_maximum_bytes = 1 << 20;
         let (buffer, _) =
-            state.open_text(TextBuffer::from_text("one two three"), Some(path.clone()));
+            state.open_text(TextBuffer::from_text("one two three"), Some(path.clone())).unwrap();
         edit(&mut state, buffer, &[(0, 3, "1"), (8, 13, "3!")]);
         edit(&mut state, buffer, &[(2, 6, "")]);
         assert_eq!(state.buffers[buffer].text.to_string(), "1 3!");
@@ -1066,10 +1030,10 @@ mod tests {
         let (changed, _) = changed_on_disk.open_text(
             TextBuffer::from_text("edited elsewhere"),
             Some(path.clone()),
-        );
+        ).unwrap();
         assert!(changed_on_disk.buffers[changed].undo.is_empty());
         let mut restarted = restart();
-        let (reopened, _) = restarted.open_text(TextBuffer::from_text("1 two 3!"), Some(path));
+        let (reopened, _) = restarted.open_text(TextBuffer::from_text("1 two 3!"), Some(path)).unwrap();
         assert_eq!(history(&mut restarted, reopened, true), "one two three");
         assert_eq!(history(&mut restarted, reopened, false), "1 two 3!");
         assert_eq!(history(&mut restarted, reopened, false), "1 3!");
@@ -1078,7 +1042,7 @@ mod tests {
     #[test]
     fn failed_late_operation_rolls_back_earlier_edit() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
-        let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
         let transaction = EditorTransaction::new(TransactionId(1))
             .with_operation(EditorOperation::ApplyEdits {
                 buffer,
@@ -1101,7 +1065,7 @@ mod tests {
     #[test]
     fn failed_late_operation_rolls_back_scroll_column() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
-        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None);
+        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
         let transaction = EditorTransaction::new(TransactionId(2))
             .with_operation(EditorOperation::SetScrollColumn {
                 view,
@@ -1119,7 +1083,7 @@ mod tests {
     fn virtual_origin_rejects_edits_undo_redo_and_refreshes_only_by_host_revision() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let (buffer, view) =
-            state.open_virtual_read_only(TextBuffer::from_text("héllo"), "demo".into(), 7, 11, 1);
+            state.open_virtual_read_only(TextBuffer::from_text("héllo"), "demo".into(), 7, 11, 1).unwrap();
         let before = state.buffers[buffer].text.to_string();
         let edit =
             EditorTransaction::new(TransactionId(4)).with_operation(EditorOperation::ApplyEdits {
@@ -1165,7 +1129,7 @@ mod tests {
     fn mixed_line_endings_follow_surviving_text_through_undo() {
         let mut state = EditorState::new("/tmp".into());
         let original = b"one\r\ntwo\nthree\r";
-        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None).unwrap();
         edit(&mut state, buffer, &[(0, 4, "")]);
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
         history(&mut state, buffer, true);
@@ -1177,7 +1141,7 @@ mod tests {
     #[test]
     fn history_maps_multi_cursor_anchors() {
         let mut state = EditorState::new("/tmp".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text("foo"), None);
+        let (buffer, view) = state.open_text(TextBuffer::from_text("foo"), None).unwrap();
         edit(&mut state, buffer, &[(0, 0, "xx ")]);
         state.views[view].multi_marks = vec![ByteRange::new(ByteOffset(3), ByteOffset(6)).unwrap()];
         state.views[view].block_insert = vec![ByteOffset(6)];
@@ -1193,10 +1157,44 @@ mod tests {
     }
 
     #[test]
+    fn virtual_refresh_clears_editing_positions_in_every_view() {
+        let mut state = EditorState::new("/tmp".into());
+        let (buffer, first) = state.open_virtual_read_only(TextBuffer::from_text("long text"), "demo".into(), 1, 1, 1).unwrap();
+        let second = state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+        for id in [first, second] {
+            let view = &mut state.views[id];
+            view.cursor = ByteOffset(8);
+            view.mode = crate::editor::EditorMode::Multi;
+            view.multi_marks = vec![ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()];
+            view.block_insert = vec![ByteOffset(8)];
+            view.preferred_column = Some(8);
+            view.replace_history.push(crate::editor::state::ReplaceRecord {
+                start: ByteOffset(8), original: "t".into(), inserted_len: 1,
+            });
+            view.scroll_line = 10;
+            view.scroll_wrap_row = 3;
+        }
+        let mut draft = state.draft();
+        assert!(draft.replace_virtual_read_only(buffer, 1, 2, TextBuffer::from_text("x")));
+        let state = draft.accept(&state.version()).unwrap();
+        for id in [first, second] {
+            let view = &state.views[id];
+            assert_eq!(view.cursor, ByteOffset(1));
+            assert_eq!(view.mode, crate::editor::EditorMode::Normal);
+            assert!(view.multi_marks.is_empty());
+            assert!(view.block_insert.is_empty());
+            assert!(view.replace_history.is_empty());
+            assert_eq!(view.preferred_column, None);
+            assert_eq!(view.scroll_line, 0);
+            assert_eq!(view.scroll_wrap_row, 0);
+        }
+    }
+
+    #[test]
     fn virtual_refresh_drops_selection_inside_a_character() {
         let mut state = EditorState::new("/tmp".into());
         let (buffer, view) =
-            state.open_virtual_read_only(TextBuffer::from_text("ab"), "demo".into(), 1, 1, 1);
+            state.open_virtual_read_only(TextBuffer::from_text("ab"), "demo".into(), 1, 1, 1).unwrap();
         state.views[view].cursor = ByteOffset(1);
         state.views[view].selection = Some(crate::editor::Selection {
             anchor: ByteOffset(0),
@@ -1212,7 +1210,7 @@ mod tests {
     #[test]
     fn stale_precondition_changes_nothing() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
-        let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
+        let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
         let transaction = EditorTransaction::new(TransactionId(3)).with_precondition(
             Precondition::BufferRevision {
                 buffer,

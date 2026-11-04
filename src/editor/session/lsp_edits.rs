@@ -592,7 +592,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.rs");
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path.clone())).unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let edit = || LspWorkspaceEdit {
             documents: vec![LspDocumentEdit {
@@ -1029,7 +1029,7 @@ mod diagnostic_tests {
         let path = root.path().join("open.rs");
         let uri = crate::language::lsp::file_uri(&path);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path)).unwrap();
         let mut service = LspService::new();
         let endpoint = service.replace_edit_source_fixture(
             uri.clone(),
@@ -1085,7 +1085,7 @@ mod diagnostic_tests {
         editor.open_text(
             TextBuffer::from_text("new contents"),
             Some(root.path().join("unopened.rs")),
-        );
+        ).unwrap();
         assert!(
             LspEditSources::diagnostic_batch(
                 &event.context,
@@ -1105,7 +1105,7 @@ mod diagnostic_tests {
         let path = root.path().join("source");
         let uri = crate::language::lsp::file_uri(&path);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path)).unwrap();
         let mut service = LspService::new();
         let mut endpoint = service.replace_edit_source_fixture(
             uri.clone(),

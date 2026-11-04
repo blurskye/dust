@@ -601,7 +601,7 @@ mod tests {
             let (buffer, _) = state.open_text(
                 TextBuffer::from_text(source),
                 Some("/workspace/file".into()),
-            );
+            ).unwrap();
             let mut config = crate::config::load_bundled_config().config;
             config.editor.final_newline = policy;
             let bytes = configured_file_bytes(&state.buffers[buffer].text, &config.editor);
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn read_only_files_reject_save_and_reload_collisions_are_checked() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()));
+        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into())).unwrap();
         state.buffers[buffer].read_only = true;
         let workspace = workspace();
         let mut documents = owner(&state);
@@ -654,7 +654,7 @@ mod tests {
             path: "/workspace/b".into(),
             result: Ok(b"b".to_vec()),
         };
-        let (other, _) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()));
+        let (other, _) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into())).unwrap();
         assert!(
             reply
                 .check_save_destination(std::iter::once((
@@ -671,7 +671,7 @@ mod tests {
         let (buffer, _) = state.open_text(
             TextBuffer::from_text("saved"),
             Some("/workspace/file".into()),
-        );
+        ).unwrap();
         let old = workspace();
         let current = workspace();
         let version = view(&state, buffer).save_version();
@@ -711,7 +711,7 @@ mod tests {
     #[test]
     fn reload_rejects_edits_reloaded_incarnations_closed_targets_and_foreign_roots_before_decode() {
         let mut state = EditorState::new("/workspace".into());
-        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into()));
+        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into())).unwrap();
         let owner = owner(&state);
         let workspace = workspace();
         let reply = reload(&state, &workspace, id);
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     fn stale_save_cannot_clean_new_edits_or_replace_reload_metadata() {
         let mut state = EditorState::new("/workspace".into());
-        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into()));
+        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into())).unwrap();
         let owner = owner(&state);
         let workspace = workspace();
         let reply = |state: &EditorState| FileReply {

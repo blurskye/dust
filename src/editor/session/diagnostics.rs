@@ -498,7 +498,7 @@ mod tests {
     fn equivalent_unsorted_reports_keep_keys_and_metadata_updates_replace_payloads() {
         let mut editor = EditorState::new("/workspace".into());
         let path = std::path::PathBuf::from("/workspace/file");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
         let mut owner = DiagnosticSession::new(10, 10);
@@ -542,7 +542,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let old = DiagnosticProducer::new(DiagnosticOwner::new("same name").unwrap());
         let other = DiagnosticProducer::new(DiagnosticOwner::new("independent").unwrap());
@@ -637,7 +637,7 @@ mod tests {
         disk.validity = DiagnosticValidity::DiskReport;
         owner.publish(disk, &editor).unwrap();
         let key = owner.choices().next().unwrap().0;
-        editor.open_text(TextBuffer::from_text("new"), Some(disk_path));
+        editor.open_text(TextBuffer::from_text("new"), Some(disk_path)).unwrap();
         assert!(
             owner.resolve(&key, &editor).is_none(),
             "an unbound disk report cannot adopt a newly opened buffer"
@@ -649,7 +649,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc\ndef\n"), Some(path.clone()));
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc\ndef\n"), Some(path.clone())).unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("server").unwrap());
         let mut owner = DiagnosticSession::new(4, 2);

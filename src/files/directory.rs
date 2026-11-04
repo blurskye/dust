@@ -208,7 +208,8 @@ pub(super) fn root_worktrees(root: &Path) -> Vec<PathBuf> {
 /// `<repository>/.git/worktrees/<name>`.
 #[must_use]
 pub fn linked_worktree_repository(root: &Path) -> Option<String> {
-    let link = std::fs::read_to_string(root.join(".git")).ok()?;
+    let bytes = super::vfs::read_file_with_ceiling(&root.join(".git"), 4096).ok()?;
+    let link = std::str::from_utf8(&bytes).ok()?;
     let git_directory = Path::new(link.strip_prefix("gitdir:")?.trim());
     let repository = git_directory.ancestors().nth(3)?;
     Some(repository.file_name()?.to_string_lossy().into_owned())

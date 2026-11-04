@@ -172,6 +172,8 @@ pub struct GitStatusSnapshot {
     pub repository: PathBuf,
     /// The folder holding this checkout's index and HEAD.
     pub git_dir: PathBuf,
+    /// The parent repository's name when the scope is a linked worktree.
+    pub worktree_repository: Option<String>,
     pub scope_root: PathBuf,
     pub repository_id: GitRepositoryId,
     pub entries: Vec<GitStatusEntry>,
@@ -511,6 +513,7 @@ pub(super) fn read_status(
         root_revision: p.root_revision,
         repository: workdir,
         git_dir: repo.path().to_path_buf(),
+        worktree_repository: crate::files::linked_worktree_repository(&root),
         scope_root: root,
         repository_id,
         entries,

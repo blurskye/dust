@@ -879,15 +879,15 @@ mod tests {
     #[test]
     fn discarded_text_is_revalidated_after_another_save() {
         let mut state = EditorState::new("/workspace".into());
-        let (a, _) = state.open_text(TextBuffer::from_text("a"), None);
+        let (a, _) = state.open_text(TextBuffer::from_text("a"), None).unwrap();
         state.buffers[a].dirty = true;
         state
             .split_active(crate::editor::Axis::Vertical, 500)
             .unwrap();
-        let (b, _) = state.open_text(TextBuffer::from_text("b"), None);
+        let (b, _) = state.open_text(TextBuffer::from_text("b"), None).unwrap();
         state.buffers[b].dirty = true;
         state.new_tab().unwrap();
-        state.open_text(TextBuffer::from_text("other"), None);
+        state.open_text(TextBuffer::from_text("other"), None).unwrap();
         state.focus_tab(-1, true).unwrap();
         let mut windows = WindowSession::default();
         windows

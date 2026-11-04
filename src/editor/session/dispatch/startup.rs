@@ -54,7 +54,8 @@ impl InteractiveApplication {
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;
         if matches!(startup, StartupTarget::Dashboard { .. }) && !dashboard_visible {
-            state.open_text(TextBuffer::from_text(""), None);
+            state.open_text(TextBuffer::from_text(""), None)
+                .map_err(|error| InteractiveError::Configuration(error.into()))?;
         }
         let workspace = WorkspaceState::new(
             WorkspaceId(1),
@@ -212,7 +213,7 @@ impl InteractiveApplication {
         self.window_session
             .check_editor_admission(&(&*self.state).into())?;
         let mut candidate = self.state.draft();
-        let (buffer, _) = candidate.open_document(text, path);
+        let (buffer, _) = candidate.open_document(text, path)?;
         self.commit_editor_draft(candidate, None, true)?;
         Ok(buffer)
     }

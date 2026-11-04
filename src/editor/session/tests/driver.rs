@@ -674,7 +674,7 @@ impl TestSession {
         fs::write(&path, b"disk").unwrap();
         let (buffer, _) = app
             .state
-            .open_text(TextBuffer::from_text("disk"), Some(path.clone()));
+            .open_text(TextBuffer::from_text("disk"), Some(path.clone())).unwrap();
         app.reconcile_editor_windows();
         let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(2);
         app.documents = crate::editor::session::documents::DocumentSession::new(
@@ -707,7 +707,7 @@ impl TestSession {
         app.start_open(path.clone());
         let (other, view) = app
             .state
-            .open_text(TextBuffer::from_text("other"), Some(root.join("other.txt")));
+            .open_text(TextBuffer::from_text("other"), Some(root.join("other.txt"))).unwrap();
         app.reconcile_editor_windows();
         gate.send(()).unwrap();
         wait_vfs(app);
@@ -734,7 +734,7 @@ impl TestSession {
         let (source, _) = app.state.open_text(
             TextBuffer::from_text("source"),
             Some(root.join("source.txt")),
-        );
+        ).unwrap();
         app.reconcile_editor_windows();
         app.start_save(false, Some(target.clone()), true);
         wait_vfs(app);

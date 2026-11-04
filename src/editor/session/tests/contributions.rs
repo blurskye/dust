@@ -722,7 +722,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
 fn macros_record_replay_last_register_and_stop_at_limits() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
     for key in ['q', 'a', 'x', 'q', '@', 'a', '@', '@'] {
         app.handle_configured_key(KeyEvent::character(key));

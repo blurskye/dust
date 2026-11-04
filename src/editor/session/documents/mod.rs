@@ -997,7 +997,7 @@ mod tests {
             7,
         );
         assert!(owner.check_admission().is_ok());
-        let (id, _) = state.open_text(TextBuffer::from_text("tiny"), None);
+        let (id, _) = state.open_text(TextBuffer::from_text("tiny"), None).unwrap();
         let policy = crate::config::LargeFileConfig::default();
         owner.set_large_file_mode(id, None, LargeFileOverride::On);
         assert_eq!(
@@ -1012,7 +1012,7 @@ mod tests {
             vec![id]
         );
         let mut foreign = EditorState::new("/workspace".into());
-        let (reused, _) = foreign.open_text(TextBuffer::from_text("tiny"), None);
+        let (reused, _) = foreign.open_text(TextBuffer::from_text("tiny"), None).unwrap();
         assert_eq!(id, reused);
         assert!(
             owner

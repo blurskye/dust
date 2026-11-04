@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn mouse_plans_reject_new_input_or_editor_changes_and_publish_anchors_only_after_commit() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text("éab"), None);
+        let (buffer, view) = state.open_text(TextBuffer::from_text("éab"), None).unwrap();
         let mut input = InputSession::new(100);
         input.observe_mouse(1, 0);
         let pending = plan(&input, &state);
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn plain_click_leaves_visual_mode_with_no_selection() {
         let mut state = EditorState::new("/workspace".into());
-        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None);
+        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
         state.views[view].mode = EditorMode::VisualChar;
         state.views[view].selection = Some(crate::editor::Selection {
             anchor: ByteOffset(0),

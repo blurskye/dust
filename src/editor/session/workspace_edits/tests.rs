@@ -26,7 +26,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let path = root.path().join("open");
     let hidden = root.path().join("hidden");
     let mut editor = EditorState::new(root.path().into());
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
     let prepared = |ticket| PreparedEdits {
         ticket,
         label: "preview".into(),
@@ -675,7 +675,7 @@ fn combined_text_and_rename_is_rejected_before_publication() {
     );
     let mut editor = EditorState::new(root.path().into());
     let path = root.path().join("old");
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
     let mut owner = WorkspaceEditSession::default();
     let ticket = owner
         .begin(
