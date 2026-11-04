@@ -6590,6 +6590,7 @@ impl InteractiveApplication {
                 ) {
                     Ok(()) => {
                         if let Some(reply) = reply {
+                            self.terminal_session.set_debugger_owned(id);
                             self.debugger_session.register_terminal(id, reply);
                             self.close_debug_terminal();
                             self.debug_terminal = Some(id);

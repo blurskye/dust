@@ -255,6 +255,67 @@ impl PtyScreen {
         }
         self.term.resize(size(columns, rows));
     }
+    /// Keep selections on the same logical text while the grid reflows wrapped rows.
+    pub fn resize_tracked(
+        &mut self,
+        columns: u16,
+        rows: u16,
+        cursor: &mut Option<(usize, usize)>,
+        anchor: &mut Option<(usize, usize)>,
+        offset: &mut usize,
+    ) {
+        if cursor.is_none() || self.alternate_active() {
+            self.resize(columns, rows);
+            return;
+        }
+        let before = self.logical_rows();
+        let old_reference = before[self.scrollback_len() + self.cursor().1].0;
+        let position = |point: Option<(usize, usize)>| {
+            let (row, column) = point?;
+            let &(line, start) = before.get(row)?;
+            Some((line as isize - old_reference as isize, start + column))
+        };
+        let old_cursor = *cursor;
+        let cursor_position = position(*cursor);
+        let anchor_position = position(*anchor);
+        self.resize(columns, rows);
+        let after = self.logical_rows();
+        let reference = after[self.scrollback_len() + self.cursor().1].0;
+        let restore = |position: Option<(isize, usize)>| {
+            let (delta, column) = position?;
+            let line = reference.checked_add_signed(delta)?;
+            after.iter().enumerate().rev().find_map(|(row, &(candidate, start))| {
+                (candidate == line && start <= column)
+                    .then(|| (row, (column - start).min(self.term.columns() - 1)))
+            })
+        };
+        *cursor = restore(cursor_position);
+        *anchor = restore(anchor_position);
+        if let (Some(old), Some(new)) = (old_cursor, *cursor) {
+            *offset = offset.saturating_sub(old.0.saturating_sub(new.0));
+        } else {
+            *cursor = Some((0, 0));
+            *anchor = None;
+            *offset = 0;
+        }
+    }
+    fn logical_rows(&self) -> Vec<(usize, usize)> {
+        let mut line = 0;
+        let mut column = 0;
+        (0..self.history_len()).map(|row| {
+            let position = (line, column);
+            let grid_row = &self.term.grid()[Line(row as i32 - self.scrollback_len() as i32)];
+            let last = &grid_row[Column(self.term.columns() - 1)];
+            if last.flags.contains(Flags::WRAPLINE) {
+                column += self.term.columns()
+                    - usize::from(last.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER));
+            } else {
+                line += 1;
+                column = 0;
+            }
+            position
+        }).collect()
+    }
     #[must_use]
     pub fn dimensions(&self) -> (usize, usize) {
         (self.term.columns(), self.term.screen_lines())

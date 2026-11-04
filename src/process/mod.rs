@@ -214,7 +214,7 @@ impl Default for PtyPolicy {
 pub struct PtyRequest {
     pub program: PathBuf,
     pub argv0: Option<PathBuf>,
-    pub arguments: Vec<String>,
+    pub arguments: Vec<std::ffi::OsString>,
     pub cwd: PathBuf,
     pub environment: BTreeMap<String, String>,
     pub columns: u16,

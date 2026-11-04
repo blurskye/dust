@@ -5932,10 +5932,10 @@ fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
 #[test]
 fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
     use super::driver::TestSession;
-    for close_on_exit in [false, true] {
+    for (profile, close_on_exit) in [("completed", false), ("completed", true), ("debug", false), ("debug", true)] {
         let mut loaded = crate::config::load_bundled_config();
         loaded.config.terminals.profiles.insert(
-            "completed".into(),
+            profile.into(),
             crate::config::TerminalProfileConfig {
                 program: "/bin/sh".into(),
                 arguments: vec!["-c".into(), "printf 'finished-output'".into()],
@@ -5950,7 +5950,7 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
         let mut driver = TestSession::new(loaded);
         driver.new_buffer();
         driver.trust_owned_terminal_fixture();
-        driver.terminal_open("completed");
+        driver.terminal_open(profile);
         let deadline = Instant::now() + Duration::from_secs(4);
         loop {
             driver.pump_terminal();

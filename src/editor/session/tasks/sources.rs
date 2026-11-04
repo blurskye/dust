@@ -53,7 +53,7 @@ impl TaskDiagnosticRun {
                     .iter()
                     .filter_map(|(id, buffer)| {
                         Some((
-                            buffer.path.clone()?,
+                            source_path(buffer.path.as_deref()?),
                             (
                                 crate::editor::session::diagnostics::DiagnosticDocument::capture(
                                     state, id,
@@ -105,20 +105,24 @@ impl TaskDiagnosticRun {
                     && state
                         .buffers
                         .iter()
-                        .any(|(_, b)| b.path.as_deref() == Some(path) && !b.dirty) =>
+                        .any(|(_, b)| b.path.as_deref().is_some_and(|p| source_path(p) == path) && !b.dirty) =>
             {
                 Ok(Some(document))
             }
             None if !state
                 .buffers
                 .iter()
-                .any(|(_, b)| b.path.as_deref() == Some(path)) =>
+                .any(|(_, b)| b.path.as_deref().is_some_and(|p| source_path(p) == path)) =>
             {
                 Ok(None)
             }
             _ => Err("linter source document changed or was unsaved".into()),
         }
     }
+}
+
+pub(super) fn source_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 impl TaskSession {

@@ -297,6 +297,45 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
             .contains("identity exhausted")
     );
 }
+#[cfg(unix)]
+#[test]
+fn linter_symlinks_share_canonical_reads_and_respect_open_buffers() {
+    let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
+    let path = root.path().join("real");
+    std::fs::write(&path, "abc\n").unwrap();
+    std::os::unix::fs::symlink(&path, root.path().join("link")).unwrap();
+    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"link:1:1:alias\nreal:1:2:real\n");
+    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
+    assert_eq!(tasks.linters.builds.values().next().unwrap().unread.len(), 1);
+    let mut docs = documents(VfsWorker::start(1), &editor, &workspace);
+    docs.submit_linter_read(tasks.linter_read(&editor, &workspace, &1, &diagnostics).unwrap()).unwrap();
+    tasks.accept_linter_read(reply(&mut docs, &editor, &workspace), &editor, &workspace, 1, &diagnostics).unwrap();
+    let Some(LinterUpdate::Publish { batches, .. }) = tasks.next_linter_update(&editor, &workspace, 1, &diagnostics) else {
+        panic!("symlink read was not published");
+    };
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].items.len(), 2);
+    assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&path));
+
+    let (id, _) = editor.open_text(TextBuffer::from_text("abc\n"), Some(root.path().join("link")));
+    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"real:1:1:open\n");
+    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
+    assert!(matches!(tasks.next_linter_update(&editor, &workspace, 1, &diagnostics), Some(LinterUpdate::Publish { .. })));
+    editor.buffers[id].dirty = true;
+    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"real:1:1:dirty\n");
+    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).is_err());
+
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("source"), "text").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("source"), root.path().join("escape")).unwrap();
+    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"escape:1:1:outside\n");
+    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap_err().contains("outside"));
+}
+
 #[test]
 fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_decode() {
     let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
@@ -633,6 +672,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
 fn relative_linter_and_test_paths_use_the_task_working_directory() {
     let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
     std::fs::create_dir_all(root.path().join("sub/src")).unwrap();
+    std::fs::create_dir(root.path().join("sub/build")).unwrap();
     let path = root.path().join("sub/src/main.rs");
     editor.open_text(TextBuffer::from_text("text"), Some(path.clone()));
     let mut task = completed(
@@ -655,6 +695,8 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
         matcher,
         lint: true,
     };
+    task.cwd = root.path().join("sub/build");
+    task.output = b"../src/main.rs:1:1:problem\n".to_vec();
     tasks
         .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
@@ -664,6 +706,10 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
         panic!("publication missing")
     };
     assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&path));
+    let mut task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"../../../outside:1:1:problem\n");
+    task.cwd = root.path().join("sub/build");
+    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap_err().contains("outside"));
 }
 
 #[test]
@@ -737,6 +783,25 @@ fn a_failing_dependency_publishes_its_matched_diagnostics() {
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
         Some(LinterUpdate::Publish { .. })
     ));
+}
+
+#[test]
+fn linter_columns_match_the_codec_for_sorted_repeated_unicode_positions() {
+    use crate::editor::text::{PositionCodec, PositionEncoding};
+    let text = TextBuffer::from_text(&format!("{}\nlast", "a😀é".repeat(100_000)));
+    let codec = PositionCodec::new(&text);
+    for encoding in [PositionEncoding::Utf8, PositionEncoding::Utf16, PositionEncoding::Utf32] {
+        let end_column = codec.byte_to_lsp(crate::editor::text::ByteOffset(699_993), encoding).unwrap().1;
+        let raw = (0..10_000).map(|_| Raw {
+            line: 0, column: end_column, encoding, severity: DiagnosticSeverity::Error, message: "end".into(),
+        }).collect();
+        let items = convert(Path::new("/source"), raw, &text, None, "test").unwrap();
+        assert_eq!(items.len(), 10_000);
+        assert!(items.iter().all(|item| item.range.start.get() == 699_993));
+        let invalid = Raw { line: 0, column: 2, encoding, severity: DiagnosticSeverity::Error, message: "split".into() };
+        assert_eq!(convert(Path::new("/source"), vec![invalid], &text, None, "test").is_err(),
+            codec.lsp_to_byte(0, 2, encoding).is_err());
+    }
 }
 
 #[test]
