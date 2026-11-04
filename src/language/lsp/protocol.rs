@@ -1133,6 +1133,10 @@ pub(super) fn markup_content(value: &Value) -> Option<LspMarkupContent> {
         let source = value.get("value").and_then(Value::as_str)?;
         let kind = match value.get("kind").and_then(Value::as_str) {
             Some("plaintext") => LspMarkupKind::PlainText,
+            // A language-tagged MarkedString contains literal code, not Markdown.
+            None if value.get("language").and_then(Value::as_str).is_some() => {
+                LspMarkupKind::PlainText
+            }
             _ => LspMarkupKind::Markdown,
         };
         (kind, source)
@@ -1174,16 +1178,16 @@ pub(super) fn sanitize_log(text: &str, limit: usize) -> String {
 }
 
 pub(super) fn lsp_progress_event(server: &str, message: &Value) -> Option<LspEvent> {
-    let token = message.pointer("/params/token").and_then(|token| {
-        token
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| token.as_i64().map(|value| value.to_string()))
-            .or_else(|| token.as_u64().map(|value| value.to_string()))
-    })?;
-    if token.is_empty() || token.chars().count() > 128 || token.chars().any(char::is_control) {
+    let token = message.pointer("/params/token")?;
+    if let Some(text) = token.as_str() {
+        if text.is_empty() || text.chars().count() > 128 || text.chars().any(char::is_control) {
+            return None;
+        }
+    } else if token.as_i64().is_none() && token.as_u64().is_none() {
         return None;
     }
+    // JSON quoting keeps string tokens distinct from numeric tokens in progress rows.
+    let token = token.to_string();
     let value = message.pointer("/params/value")?;
     let kind = match value.get("kind").and_then(Value::as_str)? {
         "begin" => LspProgressKind::Begin,
