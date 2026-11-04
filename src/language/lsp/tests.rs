@@ -887,6 +887,24 @@ fn document_colors_and_color_completions_carry_rgb() {
 }
 
 #[test]
+fn color_completions_find_hex_colors_after_non_color_hashes() {
+    let items = completion_items(&json!([
+        {"label":"red","kind":16,"documentation":{"kind":"markdown","value":"### Preview\n\n#ff0000"}},
+        {"label":"short","kind":16,"documentation":"#no-color #12 #0f0"},
+        {"label":"alpha","kind":16,"detail":"#invalid #11223344"},
+        {"label":"rgb","kind":16,"documentation":"### Preview\nrgb(14, 165, 233)"},
+        {"label":"invalid","kind":16,"documentation":"### Preview\n#12 #12345"}
+    ])).unwrap();
+    assert_eq!(items.iter().map(|item| item.color()).collect::<Vec<_>>(), [
+        Some((255, 0, 0)),
+        Some((0, 255, 0)),
+        Some((17, 34, 51)),
+        Some((14, 165, 233)),
+        None,
+    ]);
+}
+
+#[test]
 fn workspace_mutations_reject_oversized_documents_and_edit_lists() {
     let edit = json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"x"});
     let mut changes = serde_json::Map::new();

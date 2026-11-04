@@ -414,7 +414,7 @@ impl LspCompletionItem {
 
 /// The first `#rgb`, `#rrggbb` or `rgb()`/`rgba()` colour in `text`.
 pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
-    if let Some(at) = text.find('#') {
+    for (at, _) in text.match_indices('#') {
         let digits: String = text[at + 1..]
             .chars()
             .take_while(char::is_ascii_hexdigit)
