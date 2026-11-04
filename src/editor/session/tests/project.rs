@@ -4468,6 +4468,31 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         app.ui.notification
     );
 
+    // Escape must retire the preview, and neither kind of destructive confirmation
+    // may inherit the other kind's target.
+    app.invoke(
+        crate::editor::CommandInvocation::new(
+            "workspace.git.conflict.replace", InvocationSource::Test,
+        ).unwrap()
+        .with_argument("side", CommandValue::String("theirs".into()))
+        .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    let replacement = app.git.take_pending_replacement().unwrap();
+    app.git.set_pending_replacement(replacement.clone());
+    app.git.set_pending_destructive(crate::editor::session::git::GitDestructiveAction::RemoveWorktree("missing".into()));
+    assert!(!app.git.has_pending_replacement());
+    app.git.set_pending_replacement(replacement);
+    assert!(app.git.take_pending_destructive().is_none());
+    app.close_prompt();
+    assert!(!app.git.has_pending_replacement(), "Escape cancels the replacement");
+    app.git.set_pending_destructive(crate::editor::session::git::GitDestructiveAction::RemoveWorktree("missing".into()));
+    app.open_confirmation(
+        crate::ui::PromptKind::GitDestructive,
+        "Remove worktree".into(), "Remove missing?".into(), crate::ui::ConfirmationChoice::Yes,
+    );
+    app.submit_prompt();
+    assert_eq!(fs::read(&target).unwrap(), before, "the later confirmation cannot replace the file");
+
     // CONFIRM: the file is replaced with the chosen side's content.
     app.invoke(
         crate::editor::CommandInvocation::new(
@@ -5414,6 +5439,39 @@ fn opening_changes_before_status_arrives_opens_them_when_it_does() {
         crate::ui::PickerSurfaceKind::Changes,
         "the change list opens once status arrives"
     );
+}
+
+#[test]
+fn opening_changes_refreshes_cached_unsaved_document_information() {
+    let mut app = app();
+    history_fixture(&app.state.workspace_root, &["base"]);
+    let path = app.state.workspace_root.join("h0.txt");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let id = app.state.active_buffer_id().unwrap();
+    app.state.buffers[id].text = TextBuffer::from_text("unsaved\n");
+    app.state.buffers[id].text.bump_revision().unwrap();
+    app.state.buffers[id].dirty = true;
+    let status_revision = app.git.status().unwrap().revision;
+    app.open_git_status_picker();
+    assert!(!app.git.status_pending(), "editor-only changes need no disk refresh");
+    assert_eq!(app.git.status().unwrap().revision, status_revision);
+    let projection = app.search.picker_projection().unwrap();
+    assert!(projection.rows.iter().any(|row| row.label == "h0.txt"));
+    let entry = app.git.status().unwrap().entries.iter().find(|entry| entry.relative_path == std::path::Path::new("h0.txt")).unwrap();
+    assert!(entry.sources.unsaved_document_revision.is_some());
+    app.close_picker();
+    app.state.buffers[id].dirty = false;
+    app.open_git_status_picker();
+    assert!(app.git.status().unwrap().entries.iter().all(|entry| entry.sources.unsaved_document_revision.is_none()));
+    assert!(!app.search.picker_projection().unwrap().rows.iter().any(|row| row.label == "h0.txt"));
 }
 
 fn palette_row_for(app: &mut InteractiveApplication, query: &str) -> String {

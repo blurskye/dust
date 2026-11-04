@@ -578,7 +578,8 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
     symlink(outside.path().join("outside.txt"), root.join("linked.txt")).unwrap();
     let mut symlink_policy = policy.clone();
     symlink_policy.file = "linked.txt".into();
-    let linked_hash = worktree_hash(&root.join("linked.txt")).unwrap().0;
+    let linked_hash = worktree_hash(&outside.path().join("outside.txt")).unwrap().0;
+    assert!(worktree_hash(&root.join("linked.txt")).is_err());
     service
         .start(GitMutationRequest::StageHunk(request_for(
             symlink_policy,

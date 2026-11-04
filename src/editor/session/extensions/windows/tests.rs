@@ -1030,10 +1030,14 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         trapped,
         Err(crate::extensions::PluginError::Execution(_))
     ));
-    assert!(
-        host.snapshots().is_empty(),
-        "trapped proposals never escape execution"
-    );
+    let state = trapped_outcome.runtime.store.data();
+    assert!(state.ui_requests.is_empty(), "trapped UI effects are discarded");
+    assert!(state.proposals.is_empty());
+    assert!(state.messages.is_empty());
+    assert!(state.confirmation_requests.is_empty());
+    assert!(state.storage_requests.is_empty());
+    assert!(state.provider_chunks.is_empty());
+    assert!(state.virtual_document_proposals.is_empty());
 
     let mut deadline_outcome = crate::extensions::load_component(
         store.path(),
@@ -1079,10 +1083,14 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         interrupted,
         Err(crate::extensions::PluginError::Execution(_))
     ));
-    assert!(
-        host.snapshots().is_empty(),
-        "interrupted proposals never escape execution"
-    );
+    let state = deadline_outcome.runtime.store.data();
+    assert!(state.ui_requests.is_empty(), "interrupted UI effects are discarded");
+    assert!(state.proposals.is_empty());
+    assert!(state.messages.is_empty());
+    assert!(state.confirmation_requests.is_empty());
+    assert!(state.storage_requests.is_empty());
+    assert!(state.provider_chunks.is_empty());
+    assert!(state.virtual_document_proposals.is_empty());
 
     let mut events = Vec::new();
     let mut opaque_handle = None;

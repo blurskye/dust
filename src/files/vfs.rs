@@ -1542,7 +1542,7 @@ pub(super) fn list_directory(
     Ok(paths)
 }
 
-pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
+pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .read(true)

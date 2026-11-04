@@ -187,7 +187,8 @@ impl GitHunk {
     /// Whether this one-based line is part of the hunk, its context included.
     #[must_use]
     pub fn covers_line(&self, line: u32) -> bool {
-        line >= self.new_start && line < self.new_start + self.new_lines.max(1)
+        let start = self.new_start.max(1);
+        line >= start && line < start + self.new_lines.max(1)
     }
 }
 

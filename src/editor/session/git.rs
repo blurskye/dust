@@ -1,6 +1,6 @@
 //! Git runtime, accepted snapshots and hunk actions. No mutable editor/UI authority.
 use crate::{
-    editor::{BufferId, EditorState},
+    editor::{BufferId, EditorState, text::TextVersion},
     ui::{UiGitSign, UiGitSignKind},
     workspace::git::{
         GitBranchGeneration, GitBranchList, GitBranchListRequest, GitBranchRequest,
@@ -11,7 +11,7 @@ use crate::{
         GitRepositoryId, GitResetHunkRequest, GitStatusGeneration, GitStatusPolicy,
         GitStatusService, GitStatusSnapshot, GitUnsavedDocument, aggregate_git_status,
         git_branch_name, git_head_id, git_hunk_signs, git_index_fingerprint, git_staged_signs,
-        index_line_in_buffer, worktree_hash,
+        index_line_in_buffer,
     },
 };
 use std::{
@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-type SignSource = (u64, u64, GitRepositoryId, PathBuf, BufferId, u64);
+type SignSource = (u64, u64, GitRepositoryId, PathBuf, BufferId, u64, TextVersion);
 
 #[derive(Default)]
 pub(super) struct GitSession {
@@ -36,6 +36,8 @@ pub(super) struct GitSession {
     hunk_generation: Option<GitHunkGeneration>,
     hunk_expected: Option<(u64, u64, GitRepositoryId, PathBuf, GitDiffLayer)>,
     hunk_action: Option<GitHunkAction>,
+    hunk_source: Option<(BufferId, TextVersion)>,
+    hunk_selection_line: Option<u32>,
     hunk_snapshot: Option<GitHunkSnapshot>,
     reset_target: Option<(u64, GitHunkId, PathBuf)>,
     sign_hunks: GitHunkService,
@@ -124,6 +126,7 @@ impl GitSession {
         &mut self,
         plan: crate::workspace::git::GitReplacementPlan,
     ) {
+        self.pending_destructive = None;
         self.pending_replacement = Some(plan);
     }
     /// Take the previewed replacement, so it can be answered exactly once.
@@ -132,7 +135,12 @@ impl GitSession {
     ) -> Option<crate::workspace::git::GitReplacementPlan> {
         self.pending_replacement.take()
     }
+    pub(super) fn cancel_destructive(&mut self) {
+        self.pending_replacement = None;
+        self.pending_destructive = None;
+    }
     /// Whether a replacement is waiting for an answer.
+    #[cfg(test)]
     pub(super) fn has_pending_replacement(&self) -> bool {
         self.pending_replacement.is_some()
     }
@@ -151,8 +159,10 @@ impl GitSession {
                 })
         })
     }
-    pub(super) fn hunks_match(&self, path: &Path, layer: GitDiffLayer, revision: u64) -> bool {
-        self.hunk_snapshot
+    pub(super) fn hunks_match(&self, editor: &EditorState, path: &Path, layer: GitDiffLayer, revision: u64) -> bool {
+        self.hunk_source.as_ref().is_none_or(|(id, version)| {
+            editor.buffers.get(*id).is_some_and(|buffer| buffer.text.source_version() == *version)
+        }) && self.hunk_snapshot
             .as_ref()
             .zip(self.status_snapshot.as_ref())
             .is_some_and(|(hunks, status)| {
@@ -196,6 +206,8 @@ impl GitSession {
         self.hunk_generation = None;
         self.hunk_expected = None;
         self.hunk_action = None;
+        self.hunk_source = None;
+        self.hunk_selection_line = None;
         self.hunk_snapshot = None;
         self.reset_target = None;
         self.selected = None;
@@ -203,7 +215,7 @@ impl GitSession {
     }
     pub(super) fn clear(&mut self) {
         self.clear_hunks();
-        self.pending_destructive = None;
+        self.cancel_destructive();
         self.clear_signs();
         self.staged_sign_hunks.cancel();
         self.staged_sign_generation = None;
@@ -218,6 +230,12 @@ impl GitSession {
         self.silent = false;
     }
 
+    pub(super) fn reconcile_status_documents(&mut self, editor: &EditorState) {
+        if let Some(snapshot) = &mut self.status_snapshot {
+            let documents = Self::unsaved_documents(editor, &snapshot.scope_root);
+            snapshot.reconcile_unsaved_documents(&documents, 100_000, 16 * 1024 * 1024);
+        }
+    }
     pub(super) fn needs_status(&mut self, revision: u64, root: Option<&Path>) -> bool {
         let current = self
             .status_snapshot
@@ -342,6 +360,7 @@ impl GitSession {
             relative.to_owned(),
             id,
             buffer.text.revision().0,
+            buffer.text.source_version(),
         ))
     }
     /// True means the previous derived signs must be cleared.
@@ -367,10 +386,15 @@ impl GitSession {
         let Some(buffer) = editor
             .buffers
             .get(source.4)
-            .filter(|b| b.text.revision().0 == source.5 && b.path.is_some())
+            .filter(|b| b.text.source_version() == source.6 && b.path.is_some())
         else {
             return true;
         };
+        // Remember failures too; retry only when the source changes.
+        self.sign_source = Some(source.clone());
+        if buffer.text.len_bytes() > policy.maximum_bytes {
+            return true;
+        }
         if let Ok(generation) = self.sign_hunks.start_buffer(
             policy,
             GitHunkBufferInput {
@@ -380,7 +404,6 @@ impl GitSession {
         ) {
             self.sign_generation = Some(generation);
             let staged_source = (source.0, source.1, source.2, source.3.clone());
-            self.sign_source = Some(source);
             if self.staged_sign_source.as_ref() != Some(&staged_source) {
                 // Without a staged diff the unstaged signs still show.
                 self.staged_signs = None;
@@ -429,7 +452,9 @@ impl GitSession {
             }
             Ok(None) => {}
             Err(_) => {
-                self.clear_signs();
+                self.sign_generation = None;
+                self.unstaged_signs = None;
+                self.last_unstaged = None;
                 return Some(Vec::new());
             }
         }
@@ -485,11 +510,15 @@ impl GitSession {
     }
     pub(super) fn start_hunks(
         &mut self,
+        editor: &EditorState,
         path: Option<&Path>,
         revision: u64,
         action: Option<GitHunkAction>,
         layer: GitDiffLayer,
     ) -> Result<(), String> {
+        let selection_line = self.selected.as_ref()
+            .filter(|(_, _, selected)| Some(selected.as_path()) == path)
+            .and_then(|_| self.selected_line());
         self.clear_hunks();
         let status = self
             .status_snapshot
@@ -500,10 +529,29 @@ impl GitSession {
         let relative = path
             .strip_prefix(&status.scope_root)
             .map_err(|_| "active file is outside Git scope")?;
-        let generation = self
-            .hunks
-            .start(Self::policy(status, relative.to_owned(), layer))
-            .map_err(|e| e.to_string())?;
+        let policy = Self::policy(status, relative.to_owned(), layer);
+        let generation = if layer == GitDiffLayer::Unstaged {
+            let (id, buffer) = editor.buffers.iter()
+                .find(|(_, buffer)| buffer.path.as_deref() == Some(path))
+                .ok_or("Git hunk buffer is no longer open")?;
+            if buffer.text.len_bytes() > policy.maximum_bytes {
+                return Err("Git hunk buffer exceeds the size limit".into());
+            }
+            // Clean buffers use the disk snapshot needed by stage/reset. Unsaved buffers
+            // use their displayed text, so navigation and previews follow their line numbers.
+            let generation = if buffer.dirty {
+                self.hunks.start_buffer(policy, GitHunkBufferInput {
+                    revision: buffer.text.revision().0,
+                    bytes: buffer.text.to_bytes(),
+                })
+            } else {
+                self.hunks.start(policy)
+            }.map_err(|e| e.to_string())?;
+            self.hunk_source = Some((id, buffer.text.source_version()));
+            generation
+        } else {
+            self.hunks.start(policy).map_err(|e| e.to_string())?
+        };
         self.hunk_generation = Some(generation);
         self.hunk_expected = Some((
             status.root_revision,
@@ -513,9 +561,16 @@ impl GitSession {
             layer,
         ));
         self.hunk_action = action;
+        self.hunk_selection_line = selection_line;
         Ok(())
     }
-    pub(super) fn poll_hunks(&mut self) -> Result<Option<HunkReady>, String> {
+    pub(super) fn poll_hunks(&mut self, editor: &EditorState) -> Result<Option<HunkReady>, String> {
+        if self.hunk_source.as_ref().is_some_and(|(id, version)| {
+            editor.buffers.get(*id).is_none_or(|buffer| buffer.text.source_version() != *version)
+        }) {
+            self.clear_hunks();
+            return Ok(None);
+        }
         let Some(expected) = self.hunk_expected.as_ref() else {
             return Ok(None);
         };
@@ -536,6 +591,10 @@ impl GitSession {
                 let path = expected.3.clone();
                 self.hunk_generation = None;
                 self.hunk_expected = None;
+                // Keep the earlier selection when a refreshed cursor is outside every hunk.
+                if let Some(line) = self.hunk_selection_line.take() {
+                    self.select_at(line);
+                }
                 Ok(Some(HunkReady {
                     path,
                     action: self.hunk_action.take(),
@@ -629,6 +688,7 @@ impl GitSession {
             .ok_or("Git status is not ready; is this a Git repository?")?;
         let path = status.scope_root.join(&snapshot.file);
         let line = target.saturating_sub(1) as usize;
+        self.selected_change = hunk.change_at(target);
         self.selected = Some((snapshot.clone(), hunk.clone(), path.clone()));
         Ok((path, line))
     }
@@ -823,6 +883,9 @@ impl GitSession {
         selected_lines: Vec<u32>,
         file: Option<PathBuf>,
     ) -> Result<(), String> {
+        if self.mutation_generation.is_some() {
+            return Err("a Git mutation is already running".into());
+        }
         if !trusted {
             return Err("Git staging requires a trusted workspace".into());
         }
@@ -841,10 +904,6 @@ impl GitSession {
             .status_snapshot
             .as_ref()
             .ok_or("Git status is not ready; is this a Git repository?")?;
-        let from_worktree = matches!(
-            kind,
-            GitMutationKind::StageFile | GitMutationKind::StageHunk | GitMutationKind::StageLines
-        );
         let layer = if matches!(
             kind,
             GitMutationKind::UnstageFile | GitMutationKind::UnstageHunk
@@ -871,20 +930,6 @@ impl GitSession {
             maximum_patch_bytes: 1024 * 1024,
             deadline: Duration::from_secs(5),
         };
-        if from_worktree {
-            plan.hunk_snapshot_revision = 1;
-            let path = scope_root.join(&relative);
-            plan.expected_worktree = match std::fs::symlink_metadata(&path) {
-                Err(error)
-                    if kind == GitMutationKind::StageFile
-                        && error.kind() == std::io::ErrorKind::NotFound =>
-                {
-                    None
-                }
-                Err(error) => return Err(error.to_string()),
-                Ok(_) => Some(worktree_hash(&path).map_err(|e| e.to_string())?.0),
-            };
-        }
         if matches!(
             kind,
             GitMutationKind::StageHunk | GitMutationKind::UnstageHunk | GitMutationKind::StageLines
@@ -918,6 +963,10 @@ impl GitSession {
     }
     /// Read the worktree list.
     pub(super) fn start_branches(&mut self, repository: &Path) -> Result<(), String> {
+        // A running list will supply the picker; mutations already reopen it on completion.
+        if self.branch_generation.is_some() {
+            return Ok(());
+        }
         let request = GitBranchRequest::List(GitBranchListRequest {
             repository: repository.to_path_buf(),
             deadline: Duration::from_secs(10),
@@ -926,6 +975,7 @@ impl GitSession {
         Ok(())
     }
     pub(super) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
+        self.pending_replacement = None;
         self.pending_destructive = Some(action);
     }
     pub(super) fn take_pending_destructive(&mut self) -> Option<GitDestructiveAction> {
@@ -934,9 +984,21 @@ impl GitSession {
     /// Remove a worktree and its directory. This never deletes a branch.
     pub(super) fn start_worktree_remove(
         &mut self,
+        editor: &EditorState,
         repository: &Path,
         name: &str,
     ) -> Result<(), String> {
+        if self.branch_generation.is_some() {
+            return Err("a Git worktree request is already running".into());
+        }
+        let repo = git2::Repository::open(repository).map_err(|e| e.to_string())?;
+        let worktree = repo.find_worktree(name).map_err(|e| e.to_string())?;
+        let path = worktree.path();
+        if editor.buffers.values().any(|buffer| {
+            buffer.dirty && buffer.path.as_ref().is_some_and(|file| file.starts_with(path))
+        }) {
+            return Err("worktree has unsaved editor changes".into());
+        }
         let request = GitBranchRequest::RemoveWorktree {
             repository: repository.to_path_buf(),
             name: name.to_owned(),
@@ -960,6 +1022,9 @@ impl GitSession {
         path: &Path,
         reference: &str,
     ) -> Result<(), String> {
+        if self.branch_generation.is_some() {
+            return Err("a Git worktree request is already running".into());
+        }
         let request = GitBranchRequest::CreateWorktree {
             repository: repository.to_path_buf(),
             name: name.to_owned(),
@@ -1001,6 +1066,9 @@ impl GitSession {
         trusted: bool,
         revision: u64,
     ) -> Result<(), String> {
+        if self.mutation_generation.is_some() {
+            return Err("a Git mutation is already running".into());
+        }
         if !trusted {
             return Err(if reset {
                 "Git reset requires a trusted workspace"
@@ -1315,6 +1383,208 @@ mod regression_tests {
         }
     }
 
+    fn read_signs(session: &mut GitSession, editor: &EditorState) -> Vec<UiGitSign> {
+        session.reconcile_signs(editor, 1, true);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut signs = Vec::new();
+        while session.signs_pending() {
+            if let Some(result) = session.poll_signs(editor, 1, true) {
+                signs = result;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        signs
+    }
+
+    fn read_hunks(session: &mut GitSession, editor: &EditorState, path: &Path) {
+        session.start_hunks(editor, Some(path), 1, None, GitDiffLayer::Unstaged).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while session.hunks_pending() {
+            session.poll_hunks(editor).unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn reloaded_text_invalidates_signs_even_at_the_same_revision() {
+        let (_dir, _, mut editor, mut session) = fixture();
+        let before = read_signs(&mut session, &editor);
+        assert!(before.iter().any(|sign| sign.line == 1));
+        let id = editor.active_buffer_id().unwrap();
+        assert_eq!(editor.buffers[id].text.revision().0, 0);
+        let replacement = (1..=40).map(|n| format!("line {n}\n")).collect::<String>()
+            .replace("line 20\n", "changed 20\n");
+        editor.buffers[id].text = TextBuffer::from_text(&replacement);
+        assert_eq!(editor.buffers[id].text.revision().0, 0);
+        // An old in-flight reply cannot publish against the reloaded buffer either.
+        assert!(session.poll_signs(&editor, 1, true).unwrap().is_empty());
+        let after = read_signs(&mut session, &editor);
+        assert_eq!(after.iter().filter(|sign| !sign.staged).map(|sign| sign.line).collect::<Vec<_>>(), vec![19]);
+    }
+
+    #[test]
+    fn failed_sign_sources_are_not_retried_until_the_text_changes() {
+        let (_dir, _, mut editor, mut session) = fixture();
+        let id = editor.active_buffer_id().unwrap();
+        editor.buffers[id].text = TextBuffer::from_text(&"x".repeat(8 * 1024 * 1024 + 1));
+        let materializations = TextBuffer::test_materializations();
+        assert!(session.reconcile_signs(&editor, 1, true));
+        assert!(!session.signs_pending());
+        assert!(!session.reconcile_signs(&editor, 1, true));
+        assert_eq!(TextBuffer::test_materializations(), materializations);
+
+        // A worker failure, such as unsupported binary text, is remembered as well.
+        editor.buffers[id].text = TextBuffer::from_text("binary\0text");
+        read_signs(&mut session, &editor);
+        assert!(!session.reconcile_signs(&editor, 1, true));
+        editor.buffers[id].text = TextBuffer::from_text("changed\n");
+        assert!(session.reconcile_signs(&editor, 1, true));
+    }
+
+    #[test]
+    fn interactive_hunks_follow_unsaved_buffer_lines_and_reject_stale_text() {
+        let (dir, _, mut editor, mut session) = fixture();
+        let id = editor.active_buffer_id().unwrap();
+        let path = dir.path().join("a.txt");
+        let saved = editor.buffers[id].text.to_string();
+        editor.buffers[id].text = TextBuffer::from_text(&format!("{}{}", "inserted\n".repeat(10), saved));
+        editor.buffers[id].text.bump_revision().unwrap();
+        editor.buffers[id].dirty = true;
+        read_hunks(&mut session, &editor, &path);
+        assert_eq!(session.navigate(1, 15).unwrap().1, 39);
+        session.select_at(40);
+        assert!(session.preview().unwrap().1.contains("+changed 30"));
+        assert!(session.hunks_match(&editor, &path, GitDiffLayer::Unstaged, 1));
+        // Staging this buffer-only hunk must offer the unsaved refusal, not apply it to disk.
+        session.mutate(&editor, false, true, 1).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(outcome) = session.poll_mutation().unwrap() {
+                assert_eq!(outcome, GitMutationOutcome::UnsavedDocument);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        session.start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Unstaged).unwrap();
+        editor.buffers[id].text = TextBuffer::from_text("reloaded\n");
+        assert!(session.poll_hunks(&editor).unwrap().is_none());
+        assert!(!session.hunks_pending());
+        assert!(!session.hunks_match(&editor, &path, GitDiffLayer::Unstaged, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+    }
+
+    #[test]
+    fn navigating_hunks_replaces_the_selected_change_indices() {
+        let (_, _, _, mut session) = fixture();
+        let snapshot = session.hunk_snapshot.as_mut().unwrap();
+        let mut extra = snapshot.hunks[0].lines.last().unwrap().clone();
+        extra.kind = GitDiffLineKind::Add;
+        extra.new_line = Some(4);
+        extra.text = "extra change\n".into();
+        snapshot.hunks[0].lines.push(extra);
+        session.select_at(2);
+        assert!(!session.selected_change.is_empty());
+        assert_eq!(session.navigate(1, 10).unwrap().1, 29);
+        let (_, hunk, _) = session.selected.as_ref().unwrap();
+        assert_eq!(session.selected_change, hunk.change_at(30));
+        session.select_at(20); // Outside the destination hunk, keep the navigation selection.
+        let preview = session.preview().unwrap().1;
+        assert!(preview.contains("-line 30") && preview.contains("+changed 30"), "{preview}");
+    }
+
+    #[test]
+    fn whole_file_deletion_is_selectable_from_the_empty_buffer() {
+        let (dir, _, mut editor, mut session) = fixture();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "").unwrap();
+        let id = editor.active_buffer_id().unwrap();
+        editor.buffers[id].text = TextBuffer::from_text("");
+        read_hunks(&mut session, &editor, &path);
+        session.select_at(1);
+        assert!(session.has_selection());
+        assert!(session.preview().unwrap().1.contains("-line 1"));
+        session.start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while session.mutation_pending() {
+            session.poll_mutation().unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let entry = repo.index().unwrap().get_path(Path::new("a.txt"), 0).unwrap();
+        assert!(repo.find_blob(entry.id).unwrap().content().is_empty());
+    }
+
+    #[test]
+    fn stage_requests_reject_special_files_on_the_worker() {
+        let (dir, _, editor, mut session) = fixture();
+        std::os::unix::fs::symlink("/dev/zero", dir.path().join("device")).unwrap();
+        session.start_plan_for(&editor, GitMutationKind::StageFile, 1, true, vec![], Some("device".into())).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match session.poll_mutation() {
+                Err(error) => {
+                    assert!(error.contains("outside the canonical workspace scope"), "{error}");
+                    break;
+                }
+                Ok(None) => {}
+                Ok(Some(_)) => panic!("special file was staged"),
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(git2::Repository::open(dir.path()).unwrap().index().unwrap().get_path(Path::new("device"), 0).is_none());
+    }
+
+    #[test]
+    fn concurrent_mutations_are_refused_without_losing_the_first_result() {
+        let (_dir, _, editor, mut session) = fixture();
+        session.start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![]).unwrap();
+        let generation = session.mutation_generation;
+        assert!(session.start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![]).unwrap_err().contains("already running"));
+        assert!(session.mutate(&editor, true, true, 1).unwrap_err().contains("already running"));
+        assert_eq!(session.mutation_generation, generation);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(outcome) = session.poll_mutation().unwrap() {
+                assert_eq!(outcome, GitMutationOutcome::Staged("Git file staged"));
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn worktree_removal_refuses_unsaved_buffers_including_new_files() {
+        let (dir, _, mut editor, mut session) = fixture();
+        let path = dir.path().join("review");
+        session.start_worktree_create(dir.path(), "review", &path, "review").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while session.branch_pending() {
+            session.poll_branch_outcome().unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        let (id, _) = editor.open_text(TextBuffer::from_text("unsaved\n"), Some(path.join("new.txt")));
+        editor.buffers[id].dirty = true;
+        assert!(session.start_worktree_remove(&editor, dir.path(), "review").unwrap_err().contains("unsaved"));
+        assert!(!session.branch_pending());
+        assert!(path.join("a.txt").is_file());
+        editor.buffers[id].dirty = false;
+        session.start_worktree_remove(&editor, dir.path(), "review").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while session.branch_pending() {
+            session.poll_branch_outcome().unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(!path.exists());
+    }
+
     #[test]
     fn cached_hunks_cannot_mutate_another_buffers_file() {
         let (dir, _, mut editor, mut session) = fixture();
@@ -1375,13 +1645,19 @@ mod regression_tests {
 
     #[test]
     fn hunk_reads_preserve_worktree_mutation_outcomes() {
-        let (dir, _, _, mut session) = fixture();
+        let (dir, _, editor, mut session) = fixture();
         let path = dir.path().join("review");
         session
             .start_worktree_create(dir.path(), "review", &path, "review")
             .unwrap();
+        session.show_worktrees_after_change();
+        let generation = session.branch_generation;
+        session.start_branches(dir.path()).unwrap();
+        assert_eq!(session.branch_generation, generation);
+        assert!(session.take_show_worktrees());
         session
             .start_hunks(
+                &editor,
                 Some(&dir.path().join("a.txt")),
                 1,
                 None,

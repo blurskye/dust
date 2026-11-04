@@ -4990,6 +4990,9 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
+        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive) {
+            self.git.cancel_destructive();
+        }
         if let Some((view, cursor)) = self.input.take_search_origin() {
             self.move_search_cursor(view, cursor);
         }
@@ -5365,14 +5368,14 @@ impl InteractiveApplication {
                 let selected = prompt
                     .confirmation
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                let replacement = self.git.take_pending_replacement();
+                let action = self.git.take_pending_destructive();
                 self.close_prompt();
-                // A previewed whole-file replacement is answered by this same confirmation, and
-                // it is answered through the REBUILT plan rather than the previewed one.
-                if self.git.has_pending_replacement() {
-                    self.apply_git_replacement(selected);
+                // Rebuild the replacement against current repository state before applying it.
+                if let Some(replacement) = replacement {
+                    self.apply_git_replacement(selected, replacement);
                     return;
                 }
-                let action = self.git.take_pending_destructive();
                 if selected == crate::ui::ConfirmationChoice::Yes {
                     self.confirm_git_destructive(action);
                 } else if action.is_some() {
@@ -7185,7 +7188,7 @@ impl InteractiveApplication {
             .and_then(|id| self.state.buffers[id].path.as_deref());
         if let Err(error) =
             self.git
-                .start_hunks(path, self.workspace.root_revision(), action, layer)
+                .start_hunks(&self.state, path, self.workspace.root_revision(), action, layer)
         {
             self.show_error(error);
         }
@@ -7266,7 +7269,7 @@ impl InteractiveApplication {
         let result = match action {
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
                 self.git.show_worktrees_after_change();
-                self.git.start_worktree_remove(&status.repository, &name)
+                self.git.start_worktree_remove(&self.state, &status.repository, &name)
             }
         };
         if let Err(error) = result {
@@ -7382,7 +7385,7 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn process_git_hunk_events(&mut self) {
-        match self.git.poll_hunks() {
+        match self.git.poll_hunks(&self.state) {
             Ok(Some(ready)) => {
                 if let Some(action) = ready.action {
                     if let GitHunkAction::Stage(line) | GitHunkAction::StageLines(line, _) = action
@@ -7526,7 +7529,7 @@ impl InteractiveApplication {
             .and_then(|id| self.state.buffers[id].path.as_deref())
             .is_some_and(|path| {
                 self.git
-                    .hunks_match(path, layer, self.workspace.root_revision())
+                    .hunks_match(&self.state, path, layer, self.workspace.root_revision())
             })
     }
     pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
@@ -7795,6 +7798,7 @@ impl InteractiveApplication {
                     _ => GitHunkAction::Stage(line),
                 };
                 self.git.start_hunks(
+                    &self.state,
                     Some(path),
                     self.workspace.root_revision(),
                     Some(action),
@@ -7898,6 +7902,7 @@ impl InteractiveApplication {
         self.project_debug_panes();
     }
     pub(in crate::editor::session) fn open_git_status_picker(&mut self) {
+        self.git.reconcile_status_documents(&self.state);
         self.git.open_changes_when_ready = false;
         let root = self
             .workspace
@@ -9887,10 +9892,8 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn apply_git_replacement(
         &mut self,
         answer: crate::ui::ConfirmationChoice,
+        previewed: crate::workspace::git::GitReplacementPlan,
     ) {
-        let Some(previewed) = self.git.take_pending_replacement() else {
-            return;
-        };
         if answer != crate::ui::ConfirmationChoice::Yes {
             self.notify_message("Replacement cancelled; nothing was written".into(), false);
             return;

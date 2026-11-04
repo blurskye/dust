@@ -330,10 +330,12 @@ impl Drop for GitMutationService {
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path).map_err(|_| GitMutationError::Backend)?;
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Err(GitMutationError::Invalid);
-    }
+    let bytes = crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024)
+        .map_err(|error| match error {
+            crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
+            crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
+            _ => GitMutationError::Backend,
+        })?;
     let hash = Sha256::digest(&bytes).into();
     Ok((hash, bytes))
 }
@@ -663,6 +665,9 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
     }
     let whole_file =
         plan.hunk_id.is_none() && plan.selected.is_none() && plan.selected_lines.is_empty();
+    // Buffer-only hunks have no disk hash. They can still reach the worker's unsaved
+    // refusal, which offers save-and-stage without applying buffer coordinates to disk.
+    let unsaved = unsaved_document_revision(&plan.unsaved_documents, &plan.policy.file).is_some();
     match plan.kind {
         GitMutationKind::StageFile | GitMutationKind::UnstageFile => {
             if !whole_file {
@@ -676,7 +681,7 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || !plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none() && !unsaved)
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -699,7 +704,7 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none() && !unsaved)
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -1094,7 +1099,9 @@ pub(super) fn apply_change_plan(
     if from_worktree {
         match (&worktree, p.expected_worktree) {
             (WorktreeState::Regular { sha256 }, Some(expected)) if *sha256 == expected => {}
-            (WorktreeState::Missing, None) if p.kind == GitMutationKind::StageFile => {}
+            // Whole-file staging reads its input on this worker, like git add. Hunk plans
+            // still require the worktree hash captured with their preview.
+            (_, None) if p.kind == GitMutationKind::StageFile => {}
             _ => return Err(GitMutationError::StaleWorktree),
         }
     }
@@ -1175,6 +1182,23 @@ pub(super) fn apply_change_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_hash_rejects_special_files_and_bounds_regular_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, "regular\n").unwrap();
+        assert_eq!(worktree_hash(&file).unwrap().1, b"regular\n");
+        let symlink = dir.path().join("link");
+        std::os::unix::fs::symlink(&file, &symlink).unwrap();
+        assert!(worktree_hash(&symlink).is_err(), "even regular-file links are not followed");
+        let fifo = dir.path().join("fifo");
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).unwrap();
+        assert_eq!(worktree_hash(&fifo), Err(GitMutationError::UnsupportedPath));
+        let large = std::fs::File::create(&file).unwrap();
+        large.set_len(8 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(worktree_hash(&file), Err(GitMutationError::Invalid));
+    }
 
     #[test]
     fn index_mutations_hold_git_lock() {
