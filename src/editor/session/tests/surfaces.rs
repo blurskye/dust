@@ -5289,21 +5289,24 @@ fn live_marks_follow_command_edits_before_saving_and_jumping() {
     app.state.views[view].cursor = ByteOffset(2);
     app.process_effect(AppEffect::MarkSet("a".into()));
     app.state.views[view].cursor = ByteOffset(0);
-    for key in ['i', 'x', 'x'] {
-        app.handle_configured_key(KeyEvent::character(key));
+    app.handle_configured_key(KeyEvent::character('i'));
+    // More edits than TextBuffer retains, without a save or lookup between them.
+    for _ in 0..100 {
+        app.handle_configured_key(KeyEvent::character('x'));
     }
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.save_persistence();
-    assert_eq!(app.persistence.marks()[0].location.byte, 4);
+    assert_eq!(app.persistence.marks()[0].location.byte, 102);
     app.state.views[view].cursor = ByteOffset(0);
-    for key in ['i', 'y'] {
-        app.handle_configured_key(KeyEvent::character(key));
+    app.handle_configured_key(KeyEvent::character('i'));
+    for _ in 0..80 {
+        app.handle_configured_key(KeyEvent::character('y'));
     }
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.process_effect(AppEffect::MarkJump("a".into()));
     wait_vfs(&mut app);
-    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
-    assert_eq!(app.persistence.marks()[0].location.anchor, 5);
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(182));
+    assert_eq!(app.persistence.marks()[0].location.anchor, 182);
 }
 
 #[test]

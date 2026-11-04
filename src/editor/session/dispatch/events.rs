@@ -1365,6 +1365,8 @@ impl InteractiveApplication {
                         self.show_error(error);
                         return false;
                     }
+                    // Map marks before a long typing session or macro evicts the edit history.
+                    self.persistence.reconcile_marks(&self.state);
                     if let Some(update) = update {
                         let source = self.state.window_version();
                         let document = self.input.snippet_buffer().and_then(|id| {
