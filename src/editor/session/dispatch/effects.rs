@@ -10571,7 +10571,7 @@ impl InteractiveApplication {
         self.close_picker();
         match self.workspace.add_root_request(target, Some(id)) {
             Ok(()) => {
-                self.switch_approved_terminals = self.terminal_session.running_ids_in_root(&current_path);
+                self.switch_approved_terminals = self.terminal_session.ids_in_root(&current_path);
                 self.notify_message("switching…".to_owned(), false);
             },
             Err(e) => self.show_workspace_failure(e),
@@ -15113,7 +15113,7 @@ impl InteractiveApplication {
             let dirty = self.state.buffers.values().any(|buffer| {
                 buffer.dirty && buffer.path.as_deref().is_some_and(|file| leaves_root(file, old, new))
             });
-            let new_terminal = self.terminal_session.running_ids_in_root(old).iter()
+            let new_terminal = self.terminal_session.ids_in_root(old).iter()
                 .any(|id| !self.switch_approved_terminals.contains(id));
             if dirty || new_terminal {
                 self.workspace.cancel_root_switch();

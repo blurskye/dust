@@ -1462,7 +1462,7 @@ fn leaving_a_worktree_closes_shared_buffers_without_alternating_fallbacks() {
 
 #[test]
 fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
-    for terminal in [false, true] {
+    for terminal in [None, Some(false), Some(true)] {
         let mut app = app();
         let old = app.state.workspace_root.clone();
         let new = old.join(".worktree/topic");
@@ -1471,11 +1471,12 @@ fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
         let (buffer, _) = app.state.open_text(TextBuffer::from_text("clean"), Some(old.join("file.txt")));
         app.switch_workspace_root(new);
         assert!(app.workspace.root_operation_pending());
-        if terminal {
+        if let Some(running) = terminal {
+            // A newly opened terminal must also block before its process reports Running.
             app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
                 profile: "shell".into(),
                 screen: crate::ui::PtyScreen::new(80, 8, 100),
-                running: true,
+                running,
                 exit_code: None,
                 truncated: false,
             }, app.workspace.version());
@@ -1492,7 +1493,10 @@ fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
         }
         assert_eq!(app.state.workspace_root, old);
         assert!(app.state.buffers.contains_key(buffer));
-        if terminal { assert_eq!(app.terminal_session.running_count(), 1); }
+        if let Some(running) = terminal {
+            assert!(app.terminal_session.contains(PtyId(1)));
+            assert_eq!(app.terminal_session.running_count(), usize::from(running));
+        }
     }
 }
 

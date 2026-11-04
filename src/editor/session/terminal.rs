@@ -637,11 +637,11 @@ impl TerminalSession {
         self.tabs.values().any(|tab| tab.cwd.starts_with(root))
     }
     pub(in crate::editor::session) fn running_in_root(&self, root: &std::path::Path) -> usize {
-        self.running_ids_in_root(root).len()
+        self.tabs.values().filter(|tab| tab.running && tab.cwd.starts_with(root)).count()
     }
-    pub(in crate::editor::session) fn running_ids_in_root(&self, root: &std::path::Path) -> Vec<PtyId> {
+    pub(in crate::editor::session) fn ids_in_root(&self, root: &std::path::Path) -> Vec<PtyId> {
         self.tabs.iter()
-            .filter_map(|(id, tab)| (tab.running && tab.cwd.starts_with(root)).then_some(*id))
+            .filter_map(|(id, tab)| tab.cwd.starts_with(root).then_some(*id))
             .collect()
     }
     pub(in crate::editor::session) fn close_root(&mut self, root: &std::path::Path) {

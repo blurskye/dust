@@ -389,6 +389,7 @@ impl WorkspaceSession {
                 Ok(())
             }
             Err(e) => {
+                self.probe_cancelled.store(true, Ordering::Release);
                 self.state.set_trust(WorkspaceTrust::Untrusted);
                 Err(WorkspaceFailure::Diagnostic(
                     "workspace_trust_state_failed",
@@ -544,6 +545,7 @@ impl WorkspaceSession {
                                 self.store.revoke(&root.identity);
                             }
                         }
+                        self.probe_cancelled.store(true, Ordering::Release);
                         self.state.set_trust(WorkspaceTrust::Untrusted);
                         updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
                             "workspace_trust_state_failed",
@@ -660,6 +662,26 @@ mod tests {
         assert!(cancelled.load(Ordering::Acquire));
         owner.safe_mode = true;
         owner.reconcile_trust();
+        assert!(owner.probe_cancellation().is_none());
+    }
+    #[test]
+    fn failed_trust_persistence_cancels_queued_probes() {
+        let (mut owner, _directory) = fixture();
+        let cancelled = owner.probe_cancellation().expect("trusted");
+        owner.persist = Some(Persist {
+            generation: 7,
+            source: owner.version(),
+            target: None,
+        });
+        owner.accept_event(
+            TrustEvent::Persisted {
+                generation: 7,
+                result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
+            },
+            &mut Vec::new(),
+        );
+        assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+        assert!(cancelled.load(Ordering::Acquire));
         assert!(owner.probe_cancellation().is_none());
     }
     #[test]
