@@ -5,6 +5,9 @@ use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     config::{AmbiguousWidth, EditorConfig, MarkdownGlyphs},
     editor::{
@@ -26,6 +29,8 @@ pub(super) struct MarkdownMarks<'a> {
     text: &'a TextBuffer,
     ambiguous: AmbiguousWidth,
     marks: Vec<&'a UiMarkdownMark>,
+    /// Greatest end offset through each mark, for finding spans that started on earlier lines.
+    mark_ends: Vec<ByteOffset>,
     /// Code blocks span lines, so they are looked up apart from the marks within a line.
     blocks: Vec<ByteRange>,
     tables: Vec<Table>,
@@ -51,6 +56,8 @@ struct Table {
     rows: Vec<Vec<ByteRange>>,
     /// Each column's width, narrower than its widest cell when the table is narrowed to fit.
     widths: Vec<usize>,
+    /// Display widths shared by the left, inner and right borders on every row.
+    borders: [usize; 3],
     alignments: Vec<Alignment>,
 }
 
@@ -143,6 +150,14 @@ impl<'a> MarkdownMarks<'a> {
                 Table::new(text, &marks, table.range, &config.glyphs, ambiguous, width)
             })
             .collect();
+        let mut end = ByteOffset(0);
+        let mark_ends = marks
+            .iter()
+            .map(|mark| {
+                end = end.max(mark.range.end);
+                end
+            })
+            .collect();
         let group = |name: &str, fallback| Highlight::named(name).unwrap_or(fallback);
         let list = group("@markup.list", Highlight::KEYWORD);
         Some(Self {
@@ -150,6 +165,7 @@ impl<'a> MarkdownMarks<'a> {
             text,
             ambiguous,
             marks,
+            mark_ends,
             blocks: blocks.into_iter().map(|mark| mark.range).collect(),
             tables,
             table_bottom: config.table_bottom,
@@ -177,7 +193,7 @@ impl<'a> MarkdownMarks<'a> {
         let start = self.text.line_to_byte(line).ok()?;
         let source = self.text.line(line).ok()?;
         let end = ByteOffset(start.get() + source.strip_suffix('\n').unwrap_or(&source).len());
-        let first = self.marks.partition_point(|mark| mark.range.start < start);
+        let first = self.mark_ends.partition_point(|end| *end <= start);
         let last = self.marks.partition_point(|mark| mark.range.start < end);
         let glyphs = self.glyphs;
         let code = self
@@ -195,7 +211,10 @@ impl<'a> MarkdownMarks<'a> {
         };
         self.table_line(line, start, end, &mut drawn);
         let glyph = |text: &'a str, style| Shown::Glyph(Cow::Borrowed(text), style);
-        for mark in &self.marks[first..last] {
+        for mark in self.marks[first..last]
+            .iter()
+            .filter(|mark| mark.range.end > start)
+        {
             let shown = match mark.mark {
                 MarkdownMark::Hide | MarkdownMark::Code | MarkdownMark::Table => Shown::Hidden,
                 MarkdownMark::Heading(level) => {
@@ -308,7 +327,8 @@ impl<'a> MarkdownMarks<'a> {
         let mut frames = Vec::new();
         let mut places = Vec::new();
         let own_border = |line: Option<usize>, bottom: bool| {
-            line.and_then(|line| self.blank_border(line))
+            line.filter(|line| *line != self.cursor_line)
+                .and_then(|line| self.blank_border(line))
                 .is_none_or(|(other, other_bottom)| {
                     other.first_line != table.first_line || other_bottom != bottom
                 })
@@ -320,17 +340,22 @@ impl<'a> MarkdownMarks<'a> {
             frames.push(self.border(table, 3, 4, 5, true));
         } else {
             let pipe = self.part(9);
-            let mut frame = format!("{pipe} ");
+            let pipe_width = text_width(pipe, self.ambiguous);
+            let mut frame = format!("{pipe}{} ", " ".repeat(table.borders[0] - pipe_width));
+            let mut origin = table.borders[0] + 1;
             let mut rows = 1;
             let top = frames.len();
             for (column, width) in table.widths.iter().enumerate() {
-                let origin = frame.chars().count();
                 frame.push_str(&" ".repeat(*width));
                 frame.push(' ');
                 frame.push_str(pipe);
-                if column + 1 < table.widths.len() {
+                let border = if column + 1 < table.widths.len() { 1 } else { 2 };
+                frame.push_str(&" ".repeat(table.borders[border] - pipe_width));
+                if border == 1 {
                     frame.push(' ');
                 }
+                let cell_origin = origin;
+                origin += width + 2 + table.borders[border];
                 // A row with fewer cells than its header is drawn with empty ones.
                 let Some(cell) = cells.get(column) else {
                     continue;
@@ -346,7 +371,7 @@ impl<'a> MarkdownMarks<'a> {
                         Alignment::Center => spare / 2,
                         Alignment::Right => spare,
                     };
-                    (at, top + row, origin + leading + offset)
+                    (at, top + row, cell_origin + leading + offset)
                 }));
             }
             places.sort_by_key(|(at, _, _)| *at);
@@ -404,9 +429,11 @@ impl<'a> MarkdownMarks<'a> {
         let line = self.part(10);
         let indicator = self.glyphs.table_alignment.as_str();
         let mut border = self.part(left).to_owned();
+        border.push_str(&" ".repeat(table.borders[0] - text_width(self.part(left), self.ambiguous)));
         for (column, width) in table.widths.iter().enumerate() {
             if column > 0 {
                 border.push_str(self.part(cross));
+                border.push_str(&" ".repeat(table.borders[1] - text_width(self.part(cross), self.ambiguous)));
             }
             let alignment = if aligned {
                 table.alignments[column]
@@ -419,24 +446,34 @@ impl<'a> MarkdownMarks<'a> {
                 Alignment::Center => (true, true),
                 Alignment::Right => (false, true),
             };
-            border.push_str(if start { indicator } else { line });
-            border.push_str(&line.repeat(*width));
-            border.push_str(if end { indicator } else { line });
+            let indicator_width = text_width(indicator, self.ambiguous);
+            let indicators = usize::from(start) + usize::from(end);
+            let room = width + 2;
+            let aligned = indicator_width * indicators <= room;
+            if start && aligned {
+                border.push_str(indicator);
+            }
+            let fill = room - if aligned { indicator_width * indicators } else { 0 };
+            border.push_str(&table_fill(line, fill, self.ambiguous));
+            if end && aligned {
+                border.push_str(indicator);
+            }
         }
         border.push_str(self.part(right));
+        border.push_str(&" ".repeat(table.borders[2] - text_width(self.part(right), self.ambiguous)));
         border
     }
 
     fn part(&self, index: usize) -> &str {
-        self.glyphs
-            .table
-            .get(index)
-            .map_or(TABLE[index], String::as_str)
+        table_part(self.glyphs, index)
     }
 
     /// The configured title and colour of the callout whose `[!NAME]` starts at `at`.
     fn callout(&self, at: usize) -> Option<(&'a str, Style)> {
-        let end = (at + 32).min(self.text.len_bytes());
+        let mut end = (at + 32).min(self.text.len_bytes());
+        while !self.text.is_char_boundary(ByteOffset(end)) {
+            end -= 1;
+        }
         let text = self
             .text
             .slice(ByteRange::new(ByteOffset(at), ByteOffset(end)).ok()?)
@@ -584,11 +621,11 @@ impl Table {
         fit: usize,
     ) -> Option<Self> {
         let first_line = text.byte_to_line(range.start).ok()?;
-        let last_line = text
-            .byte_to_line(ByteOffset(
-                range.end.get().saturating_sub(1).max(range.start.get()),
-            ))
-            .ok()?;
+        let mut last = ByteOffset(range.end.get().saturating_sub(1).max(range.start.get()));
+        while !text.is_char_boundary(last) {
+            last = ByteOffset(last.get() - 1);
+        }
+        let last_line = text.byte_to_line(last).ok()?;
         let mut rows = Vec::new();
         let mut cell_widths: Vec<Vec<usize>> = Vec::new();
         for line in first_line..=last_line {
@@ -596,9 +633,19 @@ impl Table {
             let source = text.line(line).ok()?;
             let source = source.trim_end_matches(['\n', '\r']);
             let end = ByteOffset(start.get() + source.len());
-            let pipes = marks[marks.partition_point(|mark| mark.range.start < start)..]
+            let line_marks = &marks[marks.partition_point(|mark| mark.range.start < start)
+                ..marks.partition_point(|mark| mark.range.start < end)];
+            // A quoted table's syntax range starts after its first quote prefix; later rows
+            // have their own quote marks. Neither prefix is part of a table cell.
+            let start = line_marks
                 .iter()
-                .take_while(|mark| mark.range.start < end)
+                .filter(|mark| matches!(mark.mark, MarkdownMark::Quote { .. }))
+                .map(|mark| mark.range.end)
+                .max()
+                .unwrap_or(start)
+                .max(start.max(range.start));
+            let pipes = line_marks
+                .iter()
                 .filter(|mark| mark.mark == MarkdownMark::TablePipe)
                 .map(|mark| mark.range);
             // The text between pipes, and before the first and after the last when a row
@@ -668,8 +715,19 @@ impl Table {
                 widths[column] = widths[column].max(*width);
             }
         }
+        let borders = [[0, 3, 6, 9], [1, 4, 7, 9], [2, 5, 8, 9]].map(|parts| {
+            parts.into_iter()
+                .map(|index| text_width(table_part(glyphs, index), ambiguous))
+                .max()
+                .unwrap_or(0)
+        });
         // Each column draws its text between a border and a space on either side.
-        narrow(&mut widths, fit.saturating_sub(columns * 3 + 1));
+        let overhead = columns * 2 + borders[0] + borders[2]
+            + columns.saturating_sub(1) * borders[1];
+        if overhead + columns > fit {
+            return None;
+        }
+        narrow(&mut widths, fit - overhead);
         let mut alignments = alignments;
         alignments.resize(columns, Alignment::Default);
         Some(Self {
@@ -677,18 +735,38 @@ impl Table {
             last_line,
             rows,
             widths,
+            borders,
             alignments,
         })
     }
+}
+
+fn table_part(glyphs: &MarkdownGlyphs, index: usize) -> &str {
+    glyphs.table.get(index).map_or(TABLE[index], String::as_str)
+}
+
+/// Repeat a border glyph without exceeding the allotted display cells.
+fn table_fill(glyph: &str, cells: usize, ambiguous: AmbiguousWidth) -> String {
+    let width = text_width(glyph, ambiguous);
+    if width == 0 {
+        return " ".repeat(cells);
+    }
+    format!("{}{}", glyph.repeat(cells / width), " ".repeat(cells % width))
 }
 
 /// Narrows columns to fit `room` cells together, the widest first, so narrow columns keep
 /// their text on one row.
 fn narrow(widths: &mut [usize], room: usize) {
     let capped = |cap: usize, widths: &[usize]| widths.iter().map(|width| (*width).min(cap)).sum();
-    let mut cap = widths.iter().copied().max().unwrap_or(1);
-    while cap > 1 && capped(cap, widths) > room {
-        cap -= 1;
+    let mut cap = 1;
+    let mut upper = widths.iter().copied().max().unwrap_or(1);
+    while cap < upper {
+        let middle = cap + (upper - cap).div_ceil(2);
+        if capped(middle, widths) <= room {
+            cap = middle;
+        } else {
+            upper = middle - 1;
+        }
     }
     let mut spare = room.saturating_sub(capped(cap, widths));
     for width in widths {
@@ -711,21 +789,23 @@ fn cell_graphemes(
     ambiguous: AmbiguousWidth,
 ) -> Vec<(ByteOffset, usize, bool)> {
     let source = text.slice(cell).unwrap_or_default();
-    let marks = &marks[marks.partition_point(|mark| mark.range.start < cell.start)..];
+    let mut marks = marks[marks.partition_point(|mark| mark.range.start < cell.start)
+        ..marks.partition_point(|mark| mark.range.start < cell.end)]
+        .iter()
+        .copied()
+        .filter(|mark| matches!(
+            mark.mark,
+            MarkdownMark::Hide | MarkdownMark::Link { .. } | MarkdownMark::Image
+        ))
+        .peekable();
     source
         .grapheme_indices(true)
         .map(|(offset, grapheme)| {
             let at = ByteOffset(cell.start.get() + offset);
-            let mark = marks
-                .iter()
-                .take_while(|mark| mark.range.start <= at)
-                .find(|mark| {
-                    mark.range.contains(at)
-                        && matches!(
-                            mark.mark,
-                            MarkdownMark::Hide | MarkdownMark::Link { .. } | MarkdownMark::Image
-                        )
-                });
+            while marks.peek().is_some_and(|mark| mark.range.end <= at) {
+                marks.next();
+            }
+            let mark = marks.peek().copied().filter(|mark| mark.range.contains(at));
             let width = match mark {
                 None => text_width(grapheme, ambiguous),
                 Some(mark) if mark.range.start != at => 0,

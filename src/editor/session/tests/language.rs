@@ -1127,6 +1127,37 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
         status: ToolStatus::Installed(echo.clone()),
     });
 
+    assert!(app.workspace.execution_allowed().is_err());
+    app.open_tool_menu("lsp".into());
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "observed-rust")
+        .unwrap().definition.clone();
+    assert_eq!(
+        app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0,
+        "detecting…",
+        "opening the tool menu must not probe an untrusted workspace"
+    );
+    app.queue_tool_version_probe(&definition, LspRuntimeSource::Path, echo.clone());
+    assert_eq!(
+        app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0,
+        "detecting…",
+        "individual probes must also respect workspace trust"
+    );
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity);
+    }
+    app.reconcile_workspace_trust();
+    app.workspace.fixture_safe_mode(true);
+    app.open_tool_menu("lsp".into());
+    assert_eq!(
+        app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0,
+        "detecting…",
+        "safe mode must not run probes even in a trusted workspace"
+    );
+    app.workspace.fixture_safe_mode(false);
+    app.reconcile_workspace_trust();
+    assert!(app.workspace.execution_allowed().is_ok());
     app.open_tool_menu("lsp".into());
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {

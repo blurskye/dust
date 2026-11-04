@@ -348,7 +348,7 @@ impl ThemeConfig {
                         cterm
                             .map(ThemeColor::Indexed)
                             .or_else(|| nearest_256(colour)),
-                        nearest_16(colour),
+                        nearest_16(cterm.map(ThemeColor::Indexed).unwrap_or(colour)),
                     ),
                     None => match cterm {
                         Some(index) => (
@@ -517,6 +517,7 @@ impl ThemeStyle {
         if let Some(background) = background {
             self.background = background;
             self.background_256 = nearest_256(background);
+            self.background_16 = nearest_16(background);
         }
     }
 }

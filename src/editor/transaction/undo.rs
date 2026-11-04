@@ -169,9 +169,13 @@ impl UndoTree {
         self.current < self.nodes.len()
             && self.nodes[0].parent.is_none()
             && self.nodes.iter().enumerate().all(|(index, node)| {
-                node.children
-                    .iter()
-                    .all(|&child| child > index && child < self.nodes.len())
+                let mut children = std::collections::BTreeSet::new();
+                node.children.iter().all(|&child| {
+                    child > index
+                        && child < self.nodes.len()
+                        && self.nodes[child].parent == Some(index)
+                        && children.insert(child)
+                })
                     && node.parent.is_none_or(|parent| {
                         parent < index && self.nodes[parent].children.contains(&index)
                     })
@@ -224,8 +228,11 @@ pub(crate) fn save_undo_history(
     text: TextBuffer,
     tree: UndoTree,
     maximum_bytes: usize,
-) {
-    type Save = (PathBuf, PathBuf, TextBuffer, UndoTree, usize);
+) -> std::sync::mpsc::Receiver<Result<(), String>> {
+    type Save = (
+        PathBuf, PathBuf, TextBuffer, UndoTree, usize,
+        Vec<std::sync::mpsc::Sender<Result<(), String>>>,
+    );
     type Queue = (
         std::sync::Mutex<std::collections::BTreeMap<PathBuf, Save>>,
         std::sync::Condvar,
@@ -243,19 +250,27 @@ pub(crate) fn save_undo_history(
                 while jobs.is_empty() {
                     jobs = worker.1.wait(jobs).expect("undo queue");
                 }
-                let (_, (directory, path, text, tree, maximum_bytes)) =
+                let (_, (directory, path, text, tree, maximum_bytes, replies)) =
                     jobs.pop_first().expect("queued undo save");
                 drop(jobs);
-                write_undo_history(directory, path, text, tree, maximum_bytes);
+                let result = write_undo_history(directory, path, text, tree, maximum_bytes)
+                    .map_err(|error| error.to_string());
+                for reply in replies {
+                    let _ = reply.send(result.clone());
+                }
             }
         });
         queue
     });
-    queue.0.lock().expect("undo queue").insert(
-        undo_file(&directory, &path),
-        (directory, path, text, tree, maximum_bytes),
-    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let mut jobs = queue.0.lock().expect("undo queue");
+    let key = undo_file(&directory, &path);
+    let mut replies = jobs.remove(&key).map_or_else(Vec::new, |save| save.5);
+    replies.push(sender);
+    jobs.insert(key, (directory, path, text, tree, maximum_bytes, replies));
+    drop(jobs);
     queue.1.notify_one();
+    receiver
 }
 
 fn write_undo_history(
@@ -264,27 +279,34 @@ fn write_undo_history(
     text: TextBuffer,
     tree: UndoTree,
     maximum_bytes: usize,
-) {
+) -> std::io::Result<()> {
     let file = undo_file(&directory, &path);
     if tree.is_empty() {
-        let _ = fs::remove_file(file);
-        return;
+        return remove_undo_file(&file);
     }
     let saved = UndoFile {
         text_sha256: text_sha256(&text),
         tree,
     };
-    let Ok(json) = serde_json::to_vec(&saved) else {
-        return;
-    };
+    let json = serde_json::to_vec(&saved)?;
     if json.len() > maximum_bytes {
-        let _ = fs::remove_file(file);
-        return;
+        return remove_undo_file(&file);
     }
     let partial = file.with_extension(format!("{}.partial", std::process::id()));
-    let _ = fs::create_dir_all(&directory)
+    let result = fs::create_dir_all(&directory)
         .and_then(|()| fs::write(&partial, json))
         .and_then(|()| fs::rename(&partial, &file));
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result
+}
+
+fn remove_undo_file(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 #[cfg(test)]
@@ -307,6 +329,22 @@ mod tests {
             removed_endings: Vec::new(),
             inserted_endings: Vec::new(),
         }]
+    }
+
+    #[test]
+    fn history_save_reports_failure_and_removes_partial_files() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("file");
+        let file = super::undo_file(root.path(), &path);
+        std::fs::create_dir(&file).unwrap(); // Publishing over a directory must fail.
+        let mut tree = UndoTree::default();
+        tree.record(insert(0, "x"), false);
+        let reply = super::save_undo_history(
+            root.path().into(), path, crate::editor::text::TextBuffer::from_text("x"),
+            tree, 1 << 20,
+        );
+        assert!(reply.recv_timeout(std::time::Duration::from_secs(5)).unwrap().is_err());
+        assert!(!file.with_extension(format!("{}.partial", std::process::id())).exists());
     }
 
     #[test]
@@ -353,6 +391,27 @@ mod tests {
         assert_eq!(tree.redo_branch_count(), 2);
         apply(&mut text, &tree.redo().unwrap());
         assert_eq!(text, "abX");
+    }
+
+    #[test]
+    fn saved_undo_trees_reject_inconsistent_and_duplicate_child_links() {
+        let mut tree = UndoTree::default();
+        tree.record(insert(0, "a"), false);
+        tree.record(insert(1, "b"), false);
+        assert!(tree.is_well_formed());
+
+        let mut inconsistent = tree.clone();
+        std::sync::Arc::make_mut(&mut inconsistent.nodes[0]).children.push(2);
+        let restored: UndoTree = serde_json::from_str(
+            &serde_json::to_string(&inconsistent).unwrap(),
+        ).unwrap();
+        assert!(!restored.is_well_formed());
+
+        std::sync::Arc::make_mut(&mut tree.nodes[0]).children.push(1);
+        let restored: UndoTree = serde_json::from_str(
+            &serde_json::to_string(&tree).unwrap(),
+        ).unwrap();
+        assert!(!restored.is_well_formed());
     }
 
     #[test]

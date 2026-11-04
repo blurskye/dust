@@ -237,11 +237,13 @@ impl TestSession {
     pub(super) fn terminal_fixture(&mut self) {
         let app = &mut self.application;
         for id in [1, 2] {
+            let mut screen = crate::ui::PtyScreen::new(80, 8, 100);
+            screen.feed_bytes(format!("terminal {id} contents").as_bytes());
             app.terminal_session.fixture(
                 crate::process::PtyId(id),
                 crate::editor::session::terminal::TerminalFixture {
                     profile: format!("fixture-{id}"),
-                    screen: crate::ui::PtyScreen::new(80, 8, 100),
+                    screen,
                     running: true,
                     exit_code: None,
                     truncated: false,
@@ -252,6 +254,21 @@ impl TestSession {
         app.terminal_session.select(crate::process::PtyId(1));
         app.set_terminal_focus(true);
         app.sync_terminal_panel();
+    }
+    pub(super) fn terminal_snapshots(&self) -> Vec<(u64, Vec<String>)> {
+        self.application
+            .terminal_session
+            .descriptions()
+            .into_iter()
+            .map(|(id, _, _)| {
+                let lines = self.application.terminal_session
+                    .fixture_lines(crate::process::PtyId(id))
+                    .into_iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .collect();
+                (id, lines)
+            })
+            .collect()
     }
     pub(super) fn background_completion_fixture(&mut self) {
         self.application.ui.language_completion = Some(crate::ui::LanguageCompletionState {
@@ -777,6 +794,14 @@ impl TestSession {
                 }
             ))
         ));
+        let admitted = self.application.persistence.pending();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while self.application.persistence.pending() {
+            self.application.process_persistence_events();
+            assert!(Instant::now() < deadline, "persistence worker did not drain");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!admitted, "expired shutdown admitted a persistence request");
         assert!(
             !self._state.path().join(STATE_FILE).exists(),
             "expired shutdown wrote an exit snapshot"
@@ -1018,6 +1043,23 @@ impl TestSession {
         let path = self._workspace.path().join("debuggee");
         std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    pub(super) fn debug_start_native_program_fixture(&mut self) {
+        let source = self._workspace.path().join("main.rs");
+        std::fs::write(&source, "fn main() {}\n").unwrap();
+        self.application.state.open_text(
+            crate::editor::text::TextBuffer::from_text("fn main() {}\n"), Some(source),
+        ).unwrap();
+        let definition = crate::tools::bundled_tool_catalog().into_iter()
+            .find(|d| d.id == "codelldb").unwrap();
+        self.application.tooling.fixture_retain(|entry| entry.definition.id != "codelldb");
+        self.application.tooling.fixture_insert(crate::tools::ToolEntry {
+            definition,
+            status: crate::tools::ToolStatus::Installed(std::env::current_exe().unwrap()),
+        });
+        self.application.start_dap(
+            Some("codelldb".into()), Some(self._workspace.path().join("debuggee")),
+        );
     }
     pub(super) fn debug_program_pending(&self) -> bool {
         self.application.debugger_session.debug_program_pending()

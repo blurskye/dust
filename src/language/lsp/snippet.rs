@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SnippetTabstop {
     pub index: u32,
@@ -10,175 +12,370 @@ pub struct ParsedSnippet {
     pub first_tabstop: Option<usize>,
     pub tabstops: Vec<SnippetTabstop>,
 }
+
 pub fn parse_snippet(source: &str, maximum_bytes: usize) -> Result<ParsedSnippet, String> {
+    parse_snippet_with_variables(source, maximum_bytes, &HashMap::new())
+}
+
+pub fn parse_snippet_with_variables(
+    source: &str,
+    maximum_bytes: usize,
+    variables: &HashMap<String, String>,
+) -> Result<ParsedSnippet, String> {
     if source.len() > maximum_bytes {
         return Err("snippet exceeds byte ceiling".into());
     }
-    let mut values = std::collections::HashMap::new();
-    expand(
-        source,
-        &mut 0,
-        false,
-        0,
-        &mut values,
-        &mut Vec::new(),
-        &mut String::new(),
-        maximum_bytes,
-    )?;
+    // TextEdit performs this same normalization when the completion is inserted.
+    let normalized = crate::editor::text::TextEdit::new(
+        crate::editor::text::ByteRange::empty(crate::editor::text::ByteOffset(0)), source,
+    );
+    let mut parser = Parser { source: normalized.replacement(), cursor: 0 };
+    let pieces = parser.parse(false, 0)?;
+    let mut resolver = Resolver {
+        definitions: HashMap::new(), values: HashMap::new(), active: Vec::new(),
+        unknown_variables: HashMap::new(), highest_index: 0,
+        variables, maximum_bytes,
+    };
+    resolver.collect(&pieces);
     let mut text = String::new();
     let mut tabstops = Vec::new();
-    expand(
-        source,
-        &mut 0,
-        false,
-        0,
-        &mut values,
-        &mut tabstops,
-        &mut text,
-        maximum_bytes,
-    )?;
+    resolver.expand(&pieces, &mut text, &mut tabstops, 0)?;
     tabstops.sort_by_key(|stop| (stop.index == 0, stop.index, stop.start));
     Ok(ParsedSnippet {
-        first_tabstop: tabstops.first().map(|stop| stop.start),
-        text,
-        tabstops,
+        first_tabstop: tabstops.first().map(|stop| stop.start), text, tabstops,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn expand(
-    source: &str,
-    cursor: &mut usize,
-    nested: bool,
-    depth: usize,
-    values: &mut std::collections::HashMap<u32, String>,
-    stops: &mut Vec<SnippetTabstop>,
-    text: &mut String,
-    maximum_bytes: usize,
-) -> Result<(), String> {
-    if depth > 32 {
-        return Err("snippet nesting exceeds limit".into());
+#[derive(Clone)]
+enum Key {
+    Tabstop(u32),
+    Variable(String),
+}
+#[derive(Clone)]
+enum Piece {
+    Text(String),
+    Value(Key, Option<Vec<Piece>>),
+    Transform(Key, Transform),
+}
+#[derive(Clone)]
+struct Transform {
+    pattern: String,
+    replacement: String,
+    options: String,
+}
+struct Parser<'a> {
+    source: &'a str,
+    cursor: usize,
+}
+impl Parser<'_> {
+    fn peek(&self) -> Option<u8> {
+        self.source.as_bytes().get(self.cursor).copied()
     }
-    let bytes = source.as_bytes();
-    while *cursor < bytes.len() {
-        if text.len() > maximum_bytes {
+    fn character(&mut self) -> Result<char, String> {
+        let character = self.source[self.cursor..].chars().next().ok_or("unexpected snippet end")?;
+        self.cursor += character.len_utf8();
+        Ok(character)
+    }
+    fn parse(&mut self, nested: bool, depth: usize) -> Result<Vec<Piece>, String> {
+        if depth > 32 {
+            return Err("snippet nesting exceeds limit".into());
+        }
+        let mut pieces = Vec::new();
+        let mut literal = String::new();
+        while let Some(byte) = self.peek() {
+            if byte == b'}' && nested {
+                self.cursor += 1;
+                if !literal.is_empty() { pieces.push(Piece::Text(literal)); }
+                return Ok(pieces);
+            }
+            if byte == b'\\' && self.source.as_bytes().get(self.cursor + 1)
+                .is_some_and(|b| matches!(b, b'$' | b'}' | b'\\')) {
+                self.cursor += 1;
+                literal.push(self.character()?);
+                continue;
+            }
+            if byte != b'$' {
+                literal.push(self.character()?);
+                continue;
+            }
+            self.cursor += 1;
+            let braced = self.peek() == Some(b'{');
+            if braced { self.cursor += 1; }
+            let start = self.cursor;
+            let numeric = self.peek().is_some_and(|b| b.is_ascii_digit());
+            if numeric {
+                while self.peek().is_some_and(|b| b.is_ascii_digit()) { self.cursor += 1; }
+            } else if self.peek().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
+                while self.peek().is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                    self.cursor += 1;
+                }
+            }
+            if start == self.cursor {
+                if braced { return Err("snippet placeholder has no index or variable".into()); }
+                literal.push('$');
+                continue;
+            }
+            if !literal.is_empty() { pieces.push(Piece::Text(std::mem::take(&mut literal))); }
+            let key = if numeric {
+                Key::Tabstop(self.source[start..self.cursor].parse().map_err(|_| "invalid tabstop")?)
+            } else { Key::Variable(self.source[start..self.cursor].into()) };
+            let piece = if !braced {
+                Piece::Value(key, None)
+            } else {
+                match self.peek() {
+                    Some(b'}') => { self.cursor += 1; Piece::Value(key, None) }
+                    Some(b':') => {
+                        self.cursor += 1;
+                        Piece::Value(key, Some(self.parse(true, depth + 1)?))
+                    }
+                    Some(b'|') if numeric => {
+                        self.cursor += 1;
+                        let choice = self.choice()?;
+                        Piece::Value(key, Some(vec![Piece::Text(choice)]))
+                    }
+                    Some(b'/') => {
+                        self.cursor += 1;
+                        let pattern = self.segment(false)?;
+                        let replacement = self.segment(true)?;
+                        let start = self.cursor;
+                        while self.peek().is_some_and(|b| b != b'}') { self.cursor += 1; }
+                        let options = self.source[start..self.cursor].into();
+                        if self.peek() != Some(b'}') { return Err("unterminated snippet transform".into()); }
+                        self.cursor += 1;
+                        Piece::Transform(key, Transform { pattern, replacement, options })
+                    }
+                    _ => return Err("invalid snippet placeholder".into()),
+                }
+            };
+            pieces.push(piece);
+        }
+        if nested { return Err("unterminated snippet default".into()); }
+        if !literal.is_empty() { pieces.push(Piece::Text(literal)); }
+        Ok(pieces)
+    }
+    fn choice(&mut self) -> Result<String, String> {
+        let mut choice = String::new();
+        let mut first = true;
+        loop {
+            match self.peek() {
+                Some(b'|') if self.source.as_bytes().get(self.cursor + 1) == Some(&b'}') => {
+                    self.cursor += 2;
+                    return Ok(choice);
+                }
+                Some(b',') => { first = false; self.cursor += 1; }
+                Some(_) => {
+                    if self.peek() == Some(b'\\') && self.source.as_bytes().get(self.cursor + 1)
+                        .is_some_and(|b| matches!(b, b',' | b'|' | b'\\')) { self.cursor += 1; }
+                    let character = self.character()?;
+                    if first { choice.push(character); }
+                }
+                None => return Err("unterminated snippet choice".into()),
+            }
+        }
+    }
+    fn segment(&mut self, format: bool) -> Result<String, String> {
+        let mut value = String::new();
+        let mut braces = 0usize;
+        while let Some(byte) = self.peek() {
+            if byte == b'/' && braces == 0 {
+                self.cursor += 1;
+                return Ok(value);
+            }
+            if byte == b'\\' {
+                self.cursor += 1;
+                let next = self.character()?;
+                if next != '/' { value.push('\\'); }
+                value.push(next);
+                continue;
+            }
+            if format {
+                if byte == b'$' && self.source.as_bytes().get(self.cursor + 1) == Some(&b'{') {
+                    braces += 1;
+                } else if byte == b'}' { braces = braces.saturating_sub(1); }
+            }
+            value.push(self.character()?);
+        }
+        Err("unterminated snippet transform".into())
+    }
+}
+
+struct Resolver<'a> {
+    definitions: HashMap<u32, &'a [Piece]>,
+    values: HashMap<u32, String>,
+    active: Vec<u32>,
+    unknown_variables: HashMap<String, u32>,
+    highest_index: u32,
+    variables: &'a HashMap<String, String>,
+    maximum_bytes: usize,
+}
+impl<'a> Resolver<'a> {
+    fn collect(&mut self, pieces: &'a [Piece]) {
+        for piece in pieces {
+            if let Piece::Value(Key::Tabstop(index), _) | Piece::Transform(Key::Tabstop(index), _) = piece {
+                self.highest_index = self.highest_index.max(*index);
+            }
+            if let Piece::Value(key, Some(default)) = piece {
+                if let Key::Tabstop(index) = key { self.definitions.entry(*index).or_insert(default); }
+                self.collect(default);
+            }
+        }
+    }
+    fn value(&mut self, key: &Key, depth: usize) -> Result<String, String> {
+        match key {
+            Key::Variable(name) => Ok(self.variables.get(name).cloned().unwrap_or_default()),
+            Key::Tabstop(index) => {
+                if let Some(value) = self.values.get(index) { return Ok(value.clone()); }
+                if self.active.contains(index) { return Err("cyclic snippet placeholders".into()); }
+                self.active.push(*index);
+                let mut value = String::new();
+                if let Some(default) = self.definitions.get(index).copied() {
+                    self.expand(default, &mut value, &mut Vec::new(), depth + 1)?;
+                }
+                self.active.pop();
+                self.values.insert(*index, value.clone());
+                Ok(value)
+            }
+        }
+    }
+    fn expand(&mut self, pieces: &[Piece], text: &mut String, stops: &mut Vec<SnippetTabstop>, depth: usize) -> Result<(), String> {
+        if depth > 32 { return Err("snippet nesting exceeds limit".into()); }
+        for piece in pieces {
+            match piece {
+                Piece::Text(literal) => text.push_str(literal),
+                Piece::Transform(key, transform) => {
+                    let value = self.value(key, depth)?;
+                    text.push_str(&transform.apply(&value, self.maximum_bytes)?);
+                }
+                Piece::Value(key, default) => {
+                    let start = text.len();
+                    match key {
+                        Key::Tabstop(index) => {
+                            if let Some(default) = default {
+                                self.expand(default, text, stops, depth + 1)?;
+                            } else {
+                                text.push_str(&self.value(key, depth)?);
+                            }
+                            stops.push(SnippetTabstop { index: *index, start, end: text.len() });
+                        }
+                        Key::Variable(name) => {
+                            if let Some(value) = self.variables.get(name) {
+                                text.push_str(value);
+                            } else if let Some(default) = default {
+                                self.expand(default, text, stops, depth + 1)?;
+                            } else {
+                                // Unknown variables become editable placeholders, as in TextMate.
+                                text.push_str(name);
+                                let index = if let Some(index) = self.unknown_variables.get(name) { *index } else {
+                                    self.highest_index = self.highest_index.checked_add(1).ok_or("too many snippet tabstops")?;
+                                    self.unknown_variables.insert(name.clone(), self.highest_index);
+                                    self.highest_index
+                                };
+                                stops.push(SnippetTabstop { index, start, end: text.len() });
+                            }
+                        }
+                    }
+                }
+            }
+            if text.len() > self.maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+        }
+        Ok(())
+    }
+}
+
+impl Transform {
+    fn apply(&self, value: &str, maximum_bytes: usize) -> Result<String, String> {
+        let mut builder = regex::RegexBuilder::new(&self.pattern);
+        for option in self.options.chars() {
+            match option {
+                'g' | 'u' => {},
+                'i' => { builder.case_insensitive(true); }
+                'm' => { builder.multi_line(true); }
+                's' => { builder.dot_matches_new_line(true); }
+                _ => return Err("unsupported snippet regex option".into()),
+            }
+        }
+        let regex = builder.build().map_err(|error| format!("invalid snippet regex: {error}"))?;
+        let mut output = String::new();
+        let mut end = 0;
+        for captures in regex.captures_iter(value) {
+            let matched = captures.get(0).expect("whole match");
+            output.push_str(&value[end..matched.start()]);
+            output.push_str(&format_capture(&self.replacement, &captures, maximum_bytes)?);
+            if output.len() > maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+            end = matched.end();
+            if !self.options.contains('g') { break; }
+        }
+        output.push_str(&value[end..]);
+        if output.len() > maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+        Ok(output)
+    }
+}
+
+fn format_capture(format: &str, captures: &regex::Captures<'_>, maximum_bytes: usize) -> Result<String, String> {
+    let mut parser = Parser { source: format, cursor: 0 };
+    let mut output = String::new();
+    while let Some(byte) = parser.peek() {
+        if byte == b'\\' {
+            parser.cursor += 1;
+            output.push(parser.character()?);
+            continue;
+        }
+        if byte != b'$' { output.push(parser.character()?); continue; }
+        parser.cursor += 1;
+        let braced = parser.peek() == Some(b'{');
+        if braced { parser.cursor += 1; }
+        let start = parser.cursor;
+        while parser.peek().is_some_and(|b| b.is_ascii_digit()) { parser.cursor += 1; }
+        if start == parser.cursor { output.push('$'); continue; }
+        let index: usize = format[start..parser.cursor].parse().map_err(|_| "invalid transform capture")?;
+        let value = captures.get(index).map_or("", |matched| matched.as_str());
+        if braced && parser.peek() == Some(b':') {
+            parser.cursor += 1;
+            let start = parser.cursor;
+            while parser.peek().is_some_and(|b| b != b'}') { parser.character()?; }
+            let modifier = &format[start..parser.cursor];
+            let replacement = if let Some(case) = modifier.strip_prefix('/') {
+                change_case(value, case)?
+            } else if let Some(yes) = modifier.strip_prefix('+') {
+                if value.is_empty() { String::new() } else { yes.into() }
+            } else if let Some(condition) = modifier.strip_prefix('?') {
+                let (yes, no) = condition.split_once(':').ok_or("invalid conditional snippet format")?;
+                if value.is_empty() { no.into() } else { yes.into() }
+            } else {
+                let no = modifier.strip_prefix('-').unwrap_or(modifier);
+                if value.is_empty() { no.into() } else { value.into() }
+            };
+            output.push_str(&replacement);
+        } else { output.push_str(value); }
+        if braced {
+            if parser.peek() != Some(b'}') { return Err("unterminated transform format".into()); }
+            parser.cursor += 1;
+        }
+        if output.len() > maximum_bytes {
             return Err("expanded snippet exceeds byte ceiling".into());
         }
-        let byte = bytes[*cursor];
-        if byte == b'}' && nested {
-            *cursor += 1;
-            return Ok(());
-        }
-        if byte == b'\\'
-            && bytes
-                .get(*cursor + 1)
-                .is_some_and(|b| matches!(b, b'$' | b'}' | b'\\'))
-        {
-            text.push(bytes[*cursor + 1] as char);
-            *cursor += 2;
-            continue;
-        }
-        if byte != b'$' {
-            let character = source[*cursor..]
-                .chars()
-                .next()
-                .ok_or("snippet UTF-8 boundary")?;
-            text.push(character);
-            *cursor += character.len_utf8();
-            continue;
-        }
-        *cursor += 1;
-        let braced = bytes.get(*cursor) == Some(&b'{');
-        if braced {
-            *cursor += 1;
-        }
-        let start = *cursor;
-        while bytes.get(*cursor).is_some_and(u8::is_ascii_digit) {
-            *cursor += 1;
-        }
-        if start == *cursor {
-            if braced {
-                return Err("snippet placeholder has no index".into());
-            }
-            text.push('$');
-            continue;
-        }
-        let number = source[start..*cursor]
-            .parse::<u32>()
-            .map_err(|_| "invalid tabstop")?;
-        let position = text.len();
-        let stop = stops.len();
-        stops.push(SnippetTabstop {
-            index: number,
-            start: position,
-            end: position,
-        });
-        let default = braced && bytes.get(*cursor) == Some(&b':');
-        if default {
-            *cursor += 1;
-            expand(
-                source,
-                cursor,
-                true,
-                depth + 1,
-                values,
-                stops,
-                text,
-                maximum_bytes,
-            )?;
-            values.insert(number, text[position..].to_owned());
-        } else if braced && bytes.get(*cursor) == Some(&b'|') {
-            *cursor += 1;
-            let mut choice = String::new();
-            let mut first = true;
-            loop {
-                match bytes.get(*cursor) {
-                    Some(b'|') if bytes.get(*cursor + 1) == Some(&b'}') => {
-                        *cursor += 2;
-                        break;
-                    }
-                    Some(b',') => {
-                        first = false;
-                        *cursor += 1;
-                    }
-                    Some(_) => {
-                        if bytes[*cursor] == b'\\' && *cursor + 1 < bytes.len() {
-                            *cursor += 1;
-                        }
-                        let character = source[*cursor..]
-                            .chars()
-                            .next()
-                            .ok_or("snippet choice boundary")?;
-                        if first {
-                            choice.push(character);
-                        }
-                        *cursor += character.len_utf8();
-                    }
-                    None => return Err("unterminated snippet choice".into()),
-                }
-            }
-            text.push_str(&choice);
-            values.insert(number, choice);
-        } else {
-            if braced {
-                if bytes.get(*cursor) != Some(&b'}') {
-                    return Err("unsupported snippet placeholder".into());
-                }
-                *cursor += 1;
-            }
-            if let Some(value) = values.get(&number) {
-                text.push_str(value);
-            }
-        }
-        stops[stop].end = text.len();
     }
-    if nested {
-        return Err("unterminated snippet default".into());
+    Ok(output)
+}
+
+fn change_case(value: &str, case: &str) -> Result<String, String> {
+    fn capitalize(value: &str) -> String {
+        let mut chars = value.chars();
+        chars.next().map_or_else(String::new, |first| first.to_uppercase().collect::<String>() + chars.as_str())
     }
-    if text.len() > maximum_bytes {
-        return Err("expanded snippet exceeds byte ceiling".into());
-    }
-    Ok(())
+    Ok(match case {
+        "upcase" => value.to_uppercase(),
+        "downcase" => value.to_lowercase(),
+        "capitalize" => capitalize(value),
+        "camelcase" | "pascalcase" => {
+            let mut words = value.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty());
+            let first = words.next().unwrap_or("");
+            let mut result = if case == "camelcase" { first.to_lowercase() } else { capitalize(first) };
+            for word in words { result.push_str(&capitalize(&word.to_lowercase())); }
+            result
+        }
+        _ => return Err("unsupported snippet case modifier".into()),
+    })
 }
 
 #[cfg(test)]
@@ -189,21 +386,61 @@ mod tests {
         let parsed = parse_snippet("call(${1:${2:value}})$0", 1024).unwrap();
         assert_eq!(parsed.text, "call(value)");
         assert_eq!((parsed.tabstops[0].start, parsed.tabstops[0].end), (5, 10));
-        assert_eq!(
-            (
-                parsed.tabstops[1].index,
-                parsed.tabstops[1].start,
-                parsed.tabstops[1].end
-            ),
-            (2, 5, 10)
-        );
+        assert_eq!((parsed.tabstops[1].index, parsed.tabstops[1].start, parsed.tabstops[1].end), (2, 5, 10));
         let parsed = parse_snippet("${1:name} = $1;$0", 1024).unwrap();
         assert_eq!(parsed.text, "name = name;");
         assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (7, 11));
-        assert_eq!(
-            parse_snippet("$1 = ${1:name}", 1024).unwrap().text,
-            "name = name"
-        );
+        assert_eq!(parse_snippet("$1 = ${1:name}", 1024).unwrap().text, "name = name");
         assert_eq!(parse_snippet("${1:a\\}b}", 1024).unwrap().text, "a}b");
+    }
+    #[test]
+    fn transitive_forward_references_resolve_before_emitting_ranges() {
+        let parsed = parse_snippet("$1 ${1:$2} ${2:$3} ${3:name}", 1024).unwrap();
+        assert_eq!(parsed.text, "name name name name");
+        for stop in parsed.tabstops { assert_eq!(&parsed.text[stop.start..stop.end], "name"); }
+        assert!(parse_snippet("${1:$2}${2:$1}", 1024).is_err());
+        assert!(parse_snippet("${1:$1}", 1024).is_err());
+        assert!(parse_snippet("$1$1${1:abcd}", 10).is_err());
+    }
+    #[test]
+    fn nested_defaults_expand_without_repeatedly_resolving_their_children() {
+        let mut source = "value".to_owned();
+        for index in (1..=25).rev() {
+            source = format!("${{{index}:{source}}}");
+        }
+        let parsed = parse_snippet(&source, 4096).unwrap();
+        assert_eq!(parsed.text, "value");
+        assert_eq!(parsed.tabstops.len(), 25);
+    }
+    #[test]
+    fn transform_replacements_obey_the_expansion_ceiling() {
+        let source = format!("${{1:{}}} ${{1/(.*)/{}/}}", "x".repeat(1024), "$1".repeat(1024));
+        assert!(parse_snippet(&source, 4096).is_err());
+    }
+    #[test]
+    fn tabstop_ranges_use_normalized_newlines() {
+        let parsed = parse_snippet("${1:a}\r\n${2:b}cd\r$0", 1024).unwrap();
+        assert_eq!(parsed.text, "a\nbcd\n");
+        assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (2, 3));
+        assert_eq!(parsed.tabstops[2].start, 6);
+    }
+    #[test]
+    fn variables_defaults_choices_and_transforms_follow_snippet_grammar() {
+        let variables = HashMap::from([("TM_FILENAME".into(), "hello_world.rs".into())]);
+        let source = "${TM_FILENAME} $TM_FILENAME ${MISSING:untitled} $UNKNOWN ${1|one\\,two,three|} ${1/(.*)/${1:/upcase}/} ${TM_FILENAME/(.*)\\..+$/${1:/pascalcase}/}";
+        let parsed = parse_snippet_with_variables(source, 4096, &variables).unwrap();
+        assert_eq!(parsed.text, "hello_world.rs hello_world.rs untitled UNKNOWN one,two ONE,TWO HelloWorld");
+        assert_eq!(parse_snippet("${TM_FILENAME:untitled}", 1024).unwrap().text, "untitled");
+        let parsed = parse_snippet("${1:abc123} ${1/([a-z]+)|(\\d+)/${1:+letters}${2:?digits:none}/g}", 1024).unwrap();
+        assert_eq!(parsed.text, "abc123 lettersnonedigits");
+        assert_eq!(parse_snippet("${1:AbC} ${1/a/x/i}", 1024).unwrap().text, "AbC xbC");
+        assert_eq!(parse_snippet("${1:a/b} ${1/a\\/b/c/}", 1024).unwrap().text, "a/b c");
+        assert_eq!(parse_snippet("${1:foo} ${1/z/x/}", 1024).unwrap().text, "foo foo");
+        assert_eq!(parse_snippet("${1:foo} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "foo foo");
+        assert_eq!(parse_snippet("${1:bar} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "bar absentbar");
+        let variables = HashMap::from([("TM_SELECTED_TEXT".into(), String::new())]);
+        assert_eq!(parse_snippet_with_variables("${TM_SELECTED_TEXT:body}", 1024, &variables).unwrap().text, "");
+        assert_eq!(parse_snippet_with_variables("$TM_SELECTED_TEXT", 1024, &variables).unwrap().text, "");
+        assert!(parse_snippet("${1/foo/bar", 1024).is_err());
     }
 }

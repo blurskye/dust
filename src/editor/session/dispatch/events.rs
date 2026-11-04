@@ -2101,6 +2101,9 @@ impl InteractiveApplication {
                 }
             }
         }
+        if self.search.preview_needs_retry() && self.documents.check_admission().is_ok() {
+            self.sync_picker_ui();
+        }
     }
 }
 

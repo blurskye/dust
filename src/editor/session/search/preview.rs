@@ -76,36 +76,10 @@ impl SearchSession {
         self.preview_path = Some(path);
         retired
     }
-    #[cfg(test)]
-    pub(in crate::editor::session) fn preview_snapshot(
-        &mut self,
-        found: &crate::files::WorkspaceSearchMatch,
-        maximum: usize,
-    ) -> Option<RequestId> {
-        if self
-            .preview_snapshot_key
-            .as_ref()
-            .is_some_and(|(bytes, range, limit)| {
-                Arc::ptr_eq(bytes, &found.snapshot) && *range == found.range && *limit == maximum
-            })
-            && self.preview_path.as_ref() == Some(&found.canonical_path)
-            && self
-                .preview
-                .as_ref()
-                .and_then(PickerPreview::as_text)
-                .is_some_and(|text| text.highlight_line == Some(found.line))
-        {
-            return None;
-        }
-        let retired = self.clear_preview();
-        self.preview = Some(search_picker_preview(found, maximum));
-        self.preview_path = Some(found.canonical_path.clone());
-        self.preview_snapshot_key = Some((found.snapshot.clone(), found.range.clone(), maximum));
-        retired
-    }
     pub(in crate::editor::session) fn prepare_preview(
         &mut self,
         path: PathBuf,
+        line: usize,
         title: String,
         loading: String,
         scope: WorkspaceVersion,
@@ -113,6 +87,8 @@ impl SearchSession {
     ) -> (Option<RequestId>, Option<PreviewTicket>) {
         if self.preview_path.as_ref() == Some(&path)
             && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration))
+            && self.preview.as_ref().and_then(PickerPreview::as_text)
+                .is_some_and(|text| text.highlight_line == Some(line))
         {
             return (None, None);
         }
@@ -122,8 +98,8 @@ impl SearchSession {
             title,
             body: PickerPreviewBody::Text(PickerTextPreview::new(
                 vec![loading],
-                0,
-                None,
+                line,
+                Some(line),
                 crate::language::syntax::language_for_path(&path),
             )),
         });
@@ -142,15 +118,23 @@ impl SearchSession {
         self.preview_read = Some((id, maximum));
         true
     }
+    pub(in crate::editor::session) fn preview_needs_retry(&self) -> bool {
+        self.preview_path.is_some()
+            && self.preview_scope.is_none()
+            && self.preview_snapshot_key.is_none()
+    }
     pub(in crate::editor::session) fn preview_failed(
         &mut self,
         ticket: PreviewTicket,
-        error: String,
+        error: VfsError,
     ) {
-        if Arc::ptr_eq(&ticket.0, &self.preview_epoch)
-            && let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut)
-        {
-            text.set_content(vec![format!("preview unavailable: {error}")], text.language());
+        if Arc::ptr_eq(&ticket.0, &self.preview_epoch) {
+            if matches!(error, VfsError::QueueFull) {
+                self.preview_scope = None;
+            }
+            if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
+                text.set_content(vec![format!("preview unavailable: {error}")], text.language());
+            }
         }
     }
     pub(in crate::editor::session) fn accept_preview(
@@ -176,9 +160,12 @@ impl SearchSession {
                 Ok(bytes) if bytes.len() > maximum => {
                     vec!["preview exceeds admitted byte limit".into()]
                 }
-                Ok(bytes) => std::str::from_utf8(bytes).map_or_else(
+                Ok(bytes) => crate::editor::text::TextBuffer::from_bytes(bytes).map_or_else(
                     |_| vec!["binary preview unavailable".into()],
-                    |text| picker_preview_lines(text, 512),
+                    |buffer| {
+                        text.first_line = text.highlight_line.unwrap_or(0).saturating_sub(8);
+                        picker_preview_lines_from(&buffer.to_string(), text.first_line, 512, None)
+                    },
                 ),
                 Err(error) => vec![format!("preview unavailable: {error}")],
             };
@@ -231,7 +218,11 @@ pub(super) fn search_picker_preview(
     let first_visible_offset = selected_offset.saturating_sub(8);
     let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
         |_| vec!["binary preview unavailable".into()],
-        |text| picker_preview_lines_from(text, first_visible_offset, 512),
+        |text| {
+            let column = bytes[start..match_start].iter().rposition(|byte| *byte == b'\n')
+                .map_or(match_start - start, |offset| match_start - start - offset - 1);
+            picker_preview_lines_from(text, first_visible_offset, 512, Some((selected_offset, column)))
+        },
     );
     first_line = first_line.saturating_add(first_visible_offset);
     PickerPreview {
@@ -245,16 +236,24 @@ pub(super) fn search_picker_preview(
     }
 }
 
-pub(super) fn picker_preview_lines(text: &str, maximum_lines: usize) -> Vec<String> {
-    picker_preview_lines_from(text, 0, maximum_lines)
-}
-
-fn picker_preview_lines_from(text: &str, first_line: usize, maximum_lines: usize) -> Vec<String> {
+fn picker_preview_lines_from(
+    text: &str,
+    first_line: usize,
+    maximum_lines: usize,
+    selected: Option<(usize, usize)>,
+) -> Vec<String> {
     text.lines()
+        .enumerate()
         .skip(first_line)
         .take(maximum_lines)
-        .map(|line| {
-            line.chars()
+        .map(|(index, line)| {
+            let start = selected
+                .filter(|(selected_line, _)| *selected_line == index)
+                .and_then(|(_, column)| line.get(..column))
+                .filter(|_| line.chars().take(4097).count() > 4096)
+                .and_then(|prefix| prefix.char_indices().rev().nth(16))
+                .map_or(0, |(offset, _)| offset);
+            line[start..].chars()
                 .filter(|character| !character.is_control() || *character == '\t')
                 .take(4096)
                 .collect()

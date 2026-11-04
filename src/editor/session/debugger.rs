@@ -123,6 +123,8 @@ pub(in crate::editor::session) struct DapTargetIdentity {
     pub request: crate::config::DebugRequestKind,
     /// The program a launch runs. An ATTACH has none.
     pub program: Option<std::path::PathBuf>,
+    /// Automatic source selection must keep targeting the same package on restart.
+    pub automatic_program: bool,
     pub document: Option<std::path::PathBuf>,
     /// The target an ATTACH names, taken from the configuration's own arguments.
     pub target: Option<String>,

@@ -510,13 +510,37 @@ impl<'a> VisualRowModel<'a> {
 
     #[must_use]
     pub fn byte_at_cell(&self, anchor: VisualRowAnchor, cell: usize) -> usize {
+        self.byte_at_scrolled_cell(anchor, cell, 0)
+    }
+
+    /// Hit test the same source slice the renderer uses after horizontal scrolling.
+    #[must_use]
+    pub fn byte_at_scrolled_cell(
+        &self,
+        anchor: VisualRowAnchor,
+        cell: usize,
+        scroll_column: usize,
+    ) -> usize {
         let anchor = self.normalize(anchor);
-        let row = self.row_slice(anchor);
+        let mut row = self.row_slice(anchor);
         let text = self.text.line(anchor.line).unwrap_or_default();
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let end = row.byte_end.min(content.len());
         let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
         let markdown = self.markdown_line(anchor.line);
+        if !self.wrap && markdown.as_ref().is_none_or(|line| line.table.is_none()) {
+            row.byte_start = super::editor::byte_offset_at_display_column(
+                content,
+                scroll_column,
+                self.tab_width,
+                self.ambiguous_width,
+            );
+            row.source_column_start = display_column(
+                &content[..row.byte_start],
+                self.tab_width,
+                self.ambiguous_width,
+            );
+        }
         let mut source_column = row.source_column_start;
         let mut used = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {

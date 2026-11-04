@@ -66,6 +66,20 @@ fn wait(mut predicate: impl FnMut() -> bool) {
     }
 }
 #[test]
+fn adapter_identifiers_with_nul_are_rejected_before_spawning() {
+    let root = tempfile::tempdir().unwrap();
+    let mut configuration = launch(root.path(), &root.path().join("unused.py"));
+    configuration.adapter = "bad\0adapter".into();
+    let mut service = DapService::new();
+    assert!(matches!(
+        service.start_absolute(configuration),
+        Err(DapError::InvalidConfiguration)
+    ));
+    assert!(!service.is_running());
+    assert_eq!(service.pending(), 0);
+}
+
+#[test]
 fn breakpoints_reach_the_adapter_before_the_program_runs() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     let body = r#"
@@ -80,17 +94,18 @@ while True:
  if c=='setBreakpoints':
   while not pathlib.Path('breakpoints-go').exists(): time.sleep(.002)
  send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
- if c=='launch': send({'type':'event','event':'initialized','body':{}})
+ if c=='launch':
+  while not pathlib.Path('configure').exists(): time.sleep(.002)
+  send({'type':'event','event':'initialized','body':{}})
 "#;
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("startup.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut configuration = launch(root.path(), &script);
-    let source = root.path().join("program.py");
-    configuration.breakpoints = (0..70).map(|index| {
-        let path = source.with_extension(format!("{index}.py"));
-        (path.clone(), vec![DapSourceBreakpoint {
-            path,
+    configuration.breakpoints = (0..96).map(|index| {
+        let source = root.path().join(format!("program{index}.py"));
+        (source.clone(), vec![DapSourceBreakpoint {
+            path: source,
             line: 2,
             column: None,
             condition: None,
@@ -100,20 +115,38 @@ while True:
     }).collect();
     let mut service = DapService::new();
     service.start_absolute(configuration).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
+    service.writer_gate(true);
+    service.control(DapControl::Scopes { frame_id: 1 }).unwrap();
+    wait(|| service.writer_waiting());
+    // Startup sends one breakpoint at a time, so fill the writer with independent
+    // controls before letting initialization proceed.
+    for _ in 0..32 {
+        service.control(DapControl::Scopes { frame_id: 1 }).unwrap();
+    }
+    wait(|| service.writes_queued() == 32);
+    std::fs::write(root.path().join("configure"), "go").unwrap();
+    assert!(service.is_running());
+    service.writer_gate(false);
     wait(|| request_log(root.path()).iter().any(|line| line == "setBreakpoints"));
     assert!(!request_log(root.path()).iter().any(|line| line == "configurationDone"));
     std::fs::write(root.path().join("breakpoints-go"), "go").unwrap();
+    let mut answers = 0;
     wait(|| {
-        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
-        request_log(root.path())
-            .iter()
-            .any(|line| line == "configurationDone")
+        while let Some(event) = service.try_event() {
+            match event {
+                DapEvent::Response { response: DapResponse::Breakpoints(_), .. } => answers += 1,
+                DapEvent::Failed { message, .. } => panic!("{message}"),
+                _ => {}
+            }
+        }
+        answers == 96 && request_log(root.path()).iter().any(|line| line == "configurationDone")
     });
-    assert_eq!(request_log(root.path()).iter().filter(|line| *line == "setBreakpoints").count(), 70);
     let log = request_log(root.path());
+    assert_eq!(log.iter().filter(|line| *line == "setBreakpoints").count(), 96);
     let position = |name: &str| log.iter().position(|line| line == name).expect(name);
     assert!(
-        position("setBreakpoints") < position("configurationDone"),
+        log.iter().rposition(|line| line == "setBreakpoints").unwrap() < position("configurationDone"),
         "breakpoints come first, or the program runs past them: {log:?}"
     );
     service.stop().unwrap();

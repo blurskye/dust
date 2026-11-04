@@ -618,6 +618,9 @@ fn run_adapter(
     let mut reverse = Vec::<reverse::ReverseRequest>::new();
     let mut last_reverse_sequence = 0;
     while !stopping && !events.actor.cancel.load(Ordering::Acquire) {
+        if stdin.flush().is_err() {
+            break;
+        }
         if sequence > i64::MAX - 128 {
             break;
         }

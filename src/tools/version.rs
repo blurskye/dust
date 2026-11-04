@@ -97,12 +97,15 @@ impl ToolVersionService {
         }
     }
 
-    pub fn probe(&self, request: ToolVersionRequest) -> Result<(), String> {
+    pub fn probe(
+        &self,
+        request: &ToolVersionRequest,
+    ) -> Result<(), TrySendError<()>> {
         self.sender
-            .try_send(ToolVersionCommand::Probe(request))
+            .try_send(ToolVersionCommand::Probe(request.clone()))
             .map_err(|error| match error {
-                TrySendError::Full(_) => "tool-version probe queue is full".into(),
-                TrySendError::Disconnected(_) => "tool-version probe worker stopped".into(),
+                TrySendError::Full(_) => TrySendError::Full(()),
+                TrySendError::Disconnected(_) => TrySendError::Disconnected(()),
             })
     }
 
@@ -154,8 +157,10 @@ pub(super) fn probe_tool_version(
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use std::os::unix::process::CommandExt;
 
     let mut command = Command::new(&request.executable);
+    command.process_group(0);
     command
         .args(&request.arguments)
         .envs(&request.environment)
@@ -168,16 +173,9 @@ pub(super) fn probe_tool_version(
     let mut child = command
         .spawn()
         .map_err(|error| format!("cannot start version probe: {error}"))?;
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("version probe stdout was unavailable".into());
-    };
-    let Some(stderr) = child.stderr.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("version probe stderr was unavailable".into());
-    };
+    let result = (|| {
+    let stdout = child.stdout.take().ok_or("version probe stdout was unavailable")?;
+    let stderr = child.stderr.take().ok_or("version probe stderr was unavailable")?;
     for pipe in [
         &stdout as &dyn std::os::fd::AsFd,
         &stderr as &dyn std::os::fd::AsFd,
@@ -190,11 +188,7 @@ pub(super) fn probe_tool_version(
                     .map(|_| ())
                     .map_err(|error| format!("cannot bound version probe pipe: {error}"))
             });
-        if let Err(error) = configured {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
+        configured?;
     }
 
     let mut stdout_bytes = Vec::new();
@@ -205,43 +199,19 @@ pub(super) fn probe_tool_version(
     let deadline = Instant::now() + request.timeout.min(Duration::from_secs(30));
     let status = loop {
         if !stdout_closed {
-            match drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized) {
-                Ok(closed) => stdout_closed = closed,
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
+            stdout_closed = drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized)?;
         }
         if !stderr_closed {
-            match drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized) {
-                Ok(closed) => stderr_closed = closed,
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
+            stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
         }
         if cancelled.load(Ordering::Acquire) {
-            let _ = child.kill();
-            let _ = child.wait();
             return Err("version probe cancelled".into());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("version probe timed out".into());
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("version probe failed: {error}"));
-            }
+            Ok(None) => return Err("version probe timed out".into()),
+            Err(error) => return Err(format!("version probe failed: {error}")),
         }
     };
     let close_deadline = Instant::now() + Duration::from_millis(125);
@@ -292,6 +262,11 @@ pub(super) fn probe_tool_version(
     }
     let version = version.strip_prefix("Version: ").unwrap_or(&version);
     Ok(version.chars().take(MAXIMUM_TOOL_VERSION_CHARS).collect())
+    })();
+    crate::process::terminate_process_group(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    result
 }
 
 #[cfg(not(unix))]

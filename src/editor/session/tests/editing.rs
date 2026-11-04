@@ -1092,6 +1092,170 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
 }
 
 #[test]
+fn substitute_rejects_out_of_range_addresses_without_editing() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("foo\nfoo"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.run_substitute("999", "foo", "bar", "");
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo\nfoo");
+    app.run_global_delete("1,999", "foo", false);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo\nfoo");
+}
+
+#[test]
+fn substitute_cursor_stays_on_a_normal_mode_grapheme() {
+    for flags in ["", "c"] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("a"), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.run_substitute("", "a", "e\u{301}", flags);
+        if flags == "c" {
+            app.answer_substitution(true, false);
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "e\u{301}");
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        press_keys(&mut app, &["x"]);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+    }
+}
+
+#[test]
+fn substitute_cursor_does_not_split_a_grapheme_after_partial_replacement() {
+    for flags in ["", "c"] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("a\u{301}!"), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.run_substitute("", "a", "e", flags);
+        if flags == "c" {
+            app.answer_substitution(true, false);
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "e\u{301}!");
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        press_keys(&mut app, &["x"]);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "!");
+    }
+}
+
+#[test]
+fn substitute_and_global_delete_record_change_locations() {
+    for flags in ["", "c"] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("substitute.txt");
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("cat"), Some(path)).unwrap();
+        app.set_dashboard_visibility(false);
+        assert!(app.persistence.changes().is_empty());
+        app.run_substitute("", "cat", "cow", flags);
+        if flags == "c" {
+            app.answer_substitution(true, false);
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "cow");
+        assert_eq!(app.persistence.changes().len(), 1);
+    }
+    let mut app = app();
+    let path = app.state.workspace_root.join("global.txt");
+    app.state.open_text(TextBuffer::from_text("drop\nkeep\n"), Some(path)).unwrap();
+    app.set_dashboard_visibility(false);
+    assert!(app.persistence.changes().is_empty());
+    app.run_global_delete("", "drop", false);
+    assert_eq!(app.persistence.changes().len(), 1);
+}
+
+#[test]
+fn global_delete_updates_the_linewise_register_and_paste() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("drop one\nkeep\ndrop two\n"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["y", "y"]);
+    app.run_global_delete("", "drop", false);
+    let register = app.state.registers.get('"').unwrap();
+    assert_eq!(register.text, "drop one\ndrop two\n");
+    assert_eq!(register.shape, crate::editor::RegisterShape::Line);
+    press_keys(&mut app, &["p"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "keep\ndrop one\ndrop two\n");
+}
+
+#[test]
+fn substitute_confirmation_refuses_reloaded_text_at_the_same_revision() {
+    for finish in [false, true] {
+        let mut app = app();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("cat cat cat"), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.run_substitute("%", "cat", "cow", "gc");
+        app.answer_substitution(true, false);
+        let revision = app.state.buffers[buffer].text.revision();
+        app.state.buffers[buffer].text = TextBuffer::from_text("dog dog dog");
+        assert_eq!(app.state.buffers[buffer].text.revision(), revision);
+        if finish {
+            app.finish_substitution();
+        } else {
+            app.answer_substitution(true, false);
+        }
+        assert!(app.substitute_confirm.is_none());
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "dog dog dog");
+    }
+}
+
+#[test]
+fn substitute_confirmation_bounds_long_match_and_replacement_previews() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text(&"a".repeat(2000)), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.window_session.observe_size((80, 24));
+    app.run_substitute("", ".*", &"b".repeat(2000), "c");
+    let prompt = app.input.prompt().unwrap();
+    assert!(crate::ui::confirmation_fully_visible(80, 24, app.configuration.settings(), prompt));
+    assert!(prompt.confirmation.as_ref().unwrap().message.contains('…'));
+    press_keys(&mut app, &["y"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "b".repeat(2000));
+}
+
+#[test]
+fn substitute_confirmation_keeps_empty_matches_as_insertion_points() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("one\ntwo\n"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.run_substitute("%", "^", ">", "gc");
+    app.answer_substitution(true, false);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(4));
+    assert!(app.state.views[view].selection.is_none());
+    app.answer_substitution(true, false);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), ">one\n>two\n");
+}
+
+#[test]
+fn substitute_confirmation_scrolls_visual_rows_above_the_dialog() {
+    for wrap in [false, true] {
+        let mut app = app();
+        let text = if wrap {
+            format!("{}cat\n", "padding ".repeat(150))
+        } else {
+            format!("{}cat\n", "padding\n".repeat(16))
+        };
+        let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.window_session.observe_size((80, 24));
+        let mut configuration = app.configuration.fixture_snapshot();
+        configuration.settings.editor.wrap = wrap;
+        app.configuration.install_fixture(configuration);
+        app.run_substitute("%", "cat", &"界".repeat(400), "c");
+        let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, view).unwrap();
+        let prompt = app.input.prompt().unwrap();
+        let geometry = crate::ui::prompt_geometry_for_state(80, 24, app.configuration.settings(), prompt);
+        assert!(geometry.height > 6);
+        let target = &app.state.views[view];
+        let rows = crate::ui::VisualRowModel::new_for_state(
+            &app.state, &app.state.buffers[target.buffer].text, view, &app.ui,
+            app.configuration.settings(), viewport.width, wrap,
+        );
+        let row = rows.screen_row(
+            crate::ui::VisualRowAnchor { line: target.scroll_line, wrap_row: target.scroll_wrap_row },
+            rows.cursor_anchor(target.cursor), usize::from(viewport.height),
+        ).expect("match is visible");
+        assert!(usize::from(viewport.y) + row < usize::from(geometry.top));
+    }
+}
+
+#[test]
 fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     let mut app = app();
     let (_, view) = app.state.open_text(

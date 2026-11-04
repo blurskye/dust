@@ -115,11 +115,16 @@ impl InteractiveApplication {
         if !incomplete && Instant::now() < deadline {
             self.save_persistence();
         }
-        while (self.persistence.pending() || !self.documents.worker_finished())
+        while (self.persistence.pending()
+            || self.persistence.undo_pending()
+            || !self.documents.worker_finished())
             && Instant::now() < deadline
         {
             self.process_persistence_events();
             std::thread::sleep(Duration::from_millis(2));
+        }
+        for error in self.persistence.poll_undo_saves() {
+            self.show_error(error);
         }
         self.process_trust_events();
         self.workspace.trust_shutdown_result().map_err(|message| {
@@ -149,16 +154,20 @@ impl InteractiveApplication {
                 ),
             }));
         }
-        if !self.finish_agent_history(deadline) {
-            return Err(InteractiveError::Vfs(VfsError::Io {
+        self.finish_agent_history(deadline).map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
                 operation: "finish agent history shutdown",
                 path: self.state.workspace_root.clone(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "agent history writes did not finish",
-                ),
-            }));
-        }
+                source: std::io::Error::other(message),
+            })
+        })?;
+        self.persistence.undo_shutdown_result().map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
+                operation: "finish undo history shutdown",
+                path: self.state.workspace_root.clone(),
+                source: std::io::Error::other(message),
+            })
+        })?;
         self.persistence.shutdown_result().map_err(|message| {
             InteractiveError::Vfs(VfsError::Io {
                 operation: "finish persistence shutdown",

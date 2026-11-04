@@ -36,6 +36,8 @@ fn multi_root_prefers_the_narrowest_containing_root_and_defaults_untrusted() {
         ],
     )
     .expect("workspace");
+    let outer = &workspace.roots()[0].identity.canonical_path;
+    let nested = &workspace.roots()[1].identity.canonical_path;
     assert_eq!(workspace.trust(), WorkspaceTrust::Untrusted);
     assert_eq!(
         workspace
@@ -50,7 +52,7 @@ fn multi_root_prefers_the_narrowest_containing_root_and_defaults_untrusted() {
     );
     assert!(
         workspace
-            .require_path(&directory.path().join("nested/../../escape"))
+            .require_path(&outer.join("nested/../../escape"))
             .is_err()
     );
 }
@@ -283,6 +285,33 @@ fn trust_database_missing_corrupt_oversize_and_atomic_failure_are_safe() {
 
 #[cfg(unix)]
 #[test]
+fn failed_trust_database_replacement_preserves_existing_bytes() {
+    let root = tempdir().expect("root");
+    let state = tempdir().expect("state");
+    let path = state.path().join("trust.toml");
+    let original = TrustDatabase::default();
+    persist_trust_database(&path, &original).expect("persist original");
+    let bytes = fs::read(&path).expect("original bytes");
+    let identity = RootIdentity::capture(root.path()).expect("identity");
+    let update = TrustDatabase {
+        version: TRUST_STATE_VERSION,
+        identities: vec![identity.clone()],
+        seen: vec![identity],
+    };
+    // A trailing separator rejects the rename onto a regular file, even as root.
+    let mut destination = path.as_os_str().to_os_string();
+    destination.push("/");
+    assert!(matches!(
+        persist_trust_database(Path::new(&destination), &update),
+        Err(TrustStateError::Io { operation: "replace", .. })
+    ));
+    assert_eq!(fs::read(&path).expect("preserved bytes"), bytes);
+    assert_eq!(load_trust_database(&path).expect("preserved database"), original);
+    assert_eq!(fs::read_dir(state.path()).expect("state directory").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
 fn persisted_trust_does_not_follow_replaced_root_inode() {
     let parent = tempdir().expect("parent");
     let root = parent.path().join("root");
@@ -354,7 +383,8 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
     assert!(!explorer.apply_load(root_id, 8, 3, Vec::new()));
     assert!(!explorer.apply_load(root_id, 9, 2, Vec::new()));
     assert_eq!(explorer.projection_generation(), loading_generation);
-    let child_path = root.path().join("child");
+    let root_path = &workspace.roots()[0].identity.canonical_path;
+    let child_path = root_path.join("child");
     assert!(explorer.apply_load(
         root_id,
         9,
@@ -387,7 +417,7 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
         11,
         3,
         vec![ExplorerChild {
-            path: root.path().join("child/nested"),
+            path: root_path.join("child/nested"),
             name: "nested".into(),
             kind: ExplorerKind::File,
         }]
@@ -610,7 +640,55 @@ fn diagnostics_replace_by_owner_reject_stale_and_obey_bounds() {
             .map(|row| row.message),
         Some("two".into())
     );
+    store
+        .replace(
+            owner.clone(),
+            "file:///a".into(),
+            Some(BufferRevision(2)),
+            Some(BufferRevision(2)),
+            vec![diagnostic("file:///a", 2, 0, "replacement")],
+        )
+        .expect("replace existing set");
+    assert_eq!(store.len(), 1);
+    assert_eq!(store.problems(None, None)[0].message, "replacement");
+    store
+        .replace(
+            owner.clone(),
+            "file:///b".into(),
+            Some(BufferRevision(1)),
+            Some(BufferRevision(1)),
+            vec![diagnostic("file:///b", 1, 0, "other URI")],
+        )
+        .expect("same owner, other URI");
+    let other_owner = DiagnosticOwner::new("lint.fake").expect("other owner");
+    store
+        .replace(
+            other_owner.clone(),
+            "file:///a".into(),
+            Some(BufferRevision(2)),
+            Some(BufferRevision(2)),
+            vec![
+                diagnostic("file:///a", 2, 2, "other owner"),
+                diagnostic("file:///a", 2, 4, "over total limit"),
+            ],
+        )
+        .expect("other owner, same URI");
+    assert_eq!(store.len(), 3);
+    let rows = store.problems(None, None);
+    assert_eq!(
+        rows.iter()
+            .map(|row| (&row.owner, row.uri.as_str(), row.message.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (&owner, "file:///a", "replacement"),
+            (&other_owner, "file:///a", "other owner"),
+            (&owner, "file:///b", "other URI"),
+        ]
+    );
     store.clear_owner(&owner);
+    assert_eq!(store.len(), 1);
+    assert_eq!(store.problems(None, None), vec![rows[1].clone()]);
+    store.clear_owner(&other_owner);
     assert!(store.is_empty());
 }
 
@@ -676,6 +754,13 @@ fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
         ],
         true
     ));
+    let presentation = picker.presentation();
+    assert_eq!(
+        presentation.rows.iter()
+            .map(|row| (row.id.0.as_str(), row.label.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("a", "alpha"), ("b", "beta")]
+    );
     picker.set_query("bt".into());
     assert_eq!(
         picker.selected_item().map(|item| item.id.0.as_str()),
@@ -719,6 +804,27 @@ fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
     proposal.reject().expect("reject");
     assert_eq!(proposal.state, ProposalState::Rejected);
     assert!(proposal.accept().is_err());
+
+    let outside = tempdir().expect("outside root");
+    let outside_path = outside.path().join("outside.txt");
+    fs::write(&outside_path, "abc").expect("outside file");
+    let outside_path = fs::canonicalize(outside_path).expect("canonical outside path");
+    assert!(matches!(
+        WorkspaceEditProposal::build(
+            ProposalId(4),
+            "outside root".into(),
+            &workspace,
+            vec![WorkspaceEditDraft {
+                canonical_path: outside_path.clone(),
+                ..draft.clone()
+            }],
+            vec![FileSnapshot {
+                canonical_path: outside_path.clone(),
+                ..snapshot.clone()
+            }],
+        ),
+        Err(WorkspaceError::PathOutsideRoots(path)) if path == outside_path
+    ));
 
     let stale = WorkspaceEditDraft {
         expected_revision: Some(BufferRevision(8)),
@@ -775,10 +881,12 @@ fn nested_explorer_roots_keep_their_identity_and_children() {
     let revision = workspace.root_revision();
     let mut explorer = ExplorerState::default();
     explorer.reset_roots(workspace.roots(), revision);
-    let outer = explorer.id_for_path(dir.path()).unwrap();
-    let inner = explorer.id_for_path(&nested).unwrap();
-    explorer.begin_load(inner, 1);
-    explorer.apply_load(
+    let outer_path = &workspace.roots()[0].identity.canonical_path;
+    let nested = &workspace.roots()[1].identity.canonical_path;
+    let outer = explorer.id_for_path(outer_path).unwrap();
+    let inner = explorer.id_for_path(nested).unwrap();
+    assert!(explorer.begin_load(inner, 1));
+    assert!(explorer.apply_load(
         inner,
         1,
         revision,
@@ -787,19 +895,22 @@ fn nested_explorer_roots_keep_their_identity_and_children() {
             name: "file".into(),
             kind: ExplorerKind::File,
         }],
-    );
+    ));
+    let child = explorer.id_for_path(&nested.join("file")).unwrap();
+    assert_eq!(explorer.node(inner).unwrap().children, vec![child]);
+    assert_eq!(explorer.node(child).unwrap().parent, Some(inner));
     let before = explorer.node(inner).unwrap().clone();
-    explorer.begin_load(outer, 2);
-    explorer.apply_load(
+    assert!(explorer.begin_load(outer, 2));
+    assert!(explorer.apply_load(
         outer,
         2,
         revision,
         vec![ExplorerChild {
-            path: nested,
+            path: nested.clone(),
             name: "sub".into(),
             kind: ExplorerKind::Directory,
         }],
-    );
+    ));
     assert_eq!(explorer.node(inner), Some(&before));
     assert!(explorer.node(outer).unwrap().children.is_empty());
 }
@@ -811,11 +922,21 @@ fn explorer_refresh_preserves_a_later_collapse() {
     let mut explorer = ExplorerState::default();
     explorer.reset_roots(workspace.roots(), 1);
     let root = explorer.selected_id().unwrap();
-    explorer.begin_load(root, 1);
-    explorer.apply_load(root, 1, 1, vec![]);
-    explorer.begin_load(root, 2);
+    assert!(explorer.begin_load(root, 1));
+    assert!(explorer.apply_load(root, 1, 1, vec![]));
+    assert!(explorer.begin_load(root, 2));
     explorer.toggle_loaded(root);
     assert!(!explorer.is_expanded(root));
-    explorer.apply_load(root, 2, 1, vec![]);
+    let path = workspace.roots()[0].identity.canonical_path.join("new.txt");
+    assert!(explorer.apply_load(root, 2, 1, vec![ExplorerChild {
+        path: path.clone(),
+        name: "new.txt".into(),
+        kind: ExplorerKind::File,
+    }]));
+    let child = explorer.id_for_path(&path).expect("refreshed child");
+    let node = explorer.node(root).unwrap();
+    assert_eq!(node.load, ExplorerLoadState::Loaded);
+    assert_eq!(node.children, vec![child]);
+    assert_eq!(explorer.node(child).unwrap().name, "new.txt");
     assert!(!explorer.is_expanded(root));
 }

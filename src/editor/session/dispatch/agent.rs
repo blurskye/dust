@@ -642,11 +642,13 @@ impl InteractiveApplication {
         }
         let mut parts = std::mem::take(&mut self.agent.context);
         let context = parts.iter().map(context_label).collect();
+        let attachments = parts.clone();
         parts.push(PromptPart::Text(question.clone()));
         let signing_in = if let Some(session) = self.active_agent_mut() {
             session.entries.push(Entry::User {
                 text: question,
                 context,
+                attachments,
             });
             session.queued.push_back(parts);
             if session.phase == Phase::Ready {
@@ -1175,6 +1177,7 @@ impl InteractiveApplication {
         session.entries.push(Entry::User {
             text: request.prompt.clone(),
             context: Vec::new(),
+            attachments: Vec::new(),
         });
         session
             .queued
@@ -1414,6 +1417,9 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_agent_events(&mut self) {
+        for error in history::take_errors() {
+            self.show_error(error);
+        }
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
             let mut save = false;
@@ -1486,7 +1492,7 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn finish_agent_history(&self, deadline: std::time::Instant) -> bool {
+    pub(super) fn finish_agent_history(&self, deadline: std::time::Instant) -> Result<(), String> {
         for index in 0..self.agent.sessions.len() {
             self.save_agent_history(index);
         }
@@ -2808,7 +2814,7 @@ fn transcript(
                     out.wrapped(&text, quote, plain, plain, width);
                 }
             }
-            Entry::User { text, context } => {
+            Entry::User { text, context, .. } => {
                 if !out.text.is_empty() {
                     out.push("\n", None);
                 }
@@ -3182,6 +3188,68 @@ mod tests {
     }
 
     #[test]
+    fn agent_fallback_prompt_keeps_saved_attachments() {
+        let mut app = test_app();
+        let mut config = app.configuration.fixture_snapshot();
+        config.settings.persistence.enabled = true;
+        app.configuration.install_fixture(config);
+        let index = tab(&mut app);
+        app.agent.active = index;
+        let session = &mut app.agent.sessions[index];
+        session.process = Some(
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap(),
+        );
+        session.phase = Phase::Initializing(1);
+        let history = session.history.clone();
+        let attachments = vec![
+            PromptPart::File {
+                path: app.state.workspace_root.join("unsaved.rs"),
+                text: Some("let unsaved = 42;".into()),
+            },
+            PromptPart::Text("Diagnostics:\nmissing semicolon".into()),
+        ];
+        app.agent.context = attachments.clone();
+        app.agent_ask("Explain this fragment".into());
+        assert!(app.agent.context.is_empty());
+        assert!(matches!(
+            app.agent.sessions[index].entries.last(),
+            Some(Entry::User { attachments: saved, .. }) if saved == &attachments
+        ));
+        app.finish_agent_history(std::time::Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        app.agent.sessions.clear();
+        let index = app.reopen_conversation(&history).unwrap();
+        let session = &mut app.agent.sessions[index];
+        // Echo the actual ACP prompt to stderr, where AgentProcess exposes it as a log.
+        session.process = Some(
+            AgentProcess::spawn(
+                Path::new("sh"),
+                &["-c".into(), "cat >&2".into()],
+                &BTreeMap::new(),
+                &session.root,
+            ).unwrap(),
+        );
+        session.id = Some("fresh".into());
+        session.phase = Phase::Ready;
+        session.recap = true;
+        app.agent_ask("What next?".into());
+        let process = app.agent.sessions[index].process.as_ref().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let prompt = loop {
+            if let Some(AgentMessage::Log(line)) = process.try_message() {
+                break serde_json::from_str::<Value>(&line).unwrap();
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(prompt["method"], "session/prompt");
+        let recap = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
+        for expected in ["Explain this fragment", "unsaved.rs (1 lines selected)", "let unsaved = 42;", "Diagnostics:\nmissing semicolon"] {
+            assert!(recap.contains(expected), "missing {expected}: {recap}");
+        }
+        assert_eq!(prompt["params"]["prompt"][1]["text"], "What next?");
+    }
+
+    #[test]
     fn agent_shutdown_saves_an_unfinished_turn() {
         let mut app = test_app();
         let directory = app.agent.directory.clone();
@@ -3195,6 +3263,7 @@ mod tests {
             Entry::User {
                 text: "question".into(),
                 context: Vec::new(),
+                attachments: Vec::new(),
             },
             Entry::Agent("streamed answer".into()),
         ];
@@ -3383,6 +3452,7 @@ mod tests {
             Entry::User {
                 text: "why".into(),
                 context: vec!["main.rs".into()],
+                attachments: Vec::new(),
             },
             Entry::Tool {
                 id: "t".into(),

@@ -1473,6 +1473,54 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
 }
 
 #[test]
+fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
+    use super::{HighlightDefinition, ThemeColor};
+    use crate::language::syntax::Highlight;
+    for (index, expected) in [(1, ThemeColor::DarkRed), (196, ThemeColor::Red)] {
+        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        theme.highlights.insert(
+            "@function".into(),
+            HighlightDefinition {
+                fg: Some(ThemeColor::Rgb(0, 0, 255)),
+                bg: Some(ThemeColor::Rgb(0, 255, 0)),
+                ctermfg: Some(index),
+                ctermbg: Some(index),
+                ..Default::default()
+            },
+        );
+        let style = theme.highlight(Highlight::FUNCTION).unwrap();
+        assert_eq!(style.foreground, ThemeColor::Rgb(0, 0, 255));
+        assert_eq!(style.background, ThemeColor::Rgb(0, 255, 0));
+        assert_eq!(style.foreground_256, Some(ThemeColor::Indexed(index)));
+        assert_eq!(style.background_256, Some(ThemeColor::Indexed(index)));
+        assert_eq!(style.foreground_16, Some(expected));
+        assert_eq!(style.background_16, Some(expected));
+    }
+}
+
+#[test]
+fn markdown_code_recomputes_both_background_fallbacks() {
+    use super::{HighlightDefinition, ThemeColor};
+    use crate::language::syntax::Highlight;
+    for background in [ThemeColor::DarkRed, ThemeColor::Indexed(9)] {
+        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        theme.styles.default.foreground = ThemeColor::Rgb(255, 255, 255);
+        theme.styles.default.background = ThemeColor::Rgb(0, 0, 0);
+        theme.highlights.insert(
+            "@function".into(),
+            HighlightDefinition {
+                bg: Some(background),
+                ..Default::default()
+            },
+        );
+        let style = theme.markdown_code(Some(Highlight::FUNCTION));
+        assert_eq!(style.background, ThemeColor::Rgb(20, 20, 20));
+        assert_eq!(style.background_256, Some(ThemeColor::Indexed(233)));
+        assert_eq!(style.background_16, Some(ThemeColor::Black));
+    }
+}
+
+#[test]
 fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
     use super::{HighlightDefinition, ThemeColor};
     use crate::language::syntax::Highlight;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::{EditorOperation, EditorState, EditorTransaction, TransactionId};
 use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 
 #[test]
@@ -1184,6 +1185,228 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     app.queue_dirty_recovery_before_exit();
     assert!(!app.recovery.writing(None));
     assert!(app.capture_session().is_none());
+}
+
+#[test]
+fn ordinary_read_only_files_can_reload_without_becoming_writable() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("external.txt");
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    app.state.buffers[buffer].read_only = true;
+    fs::write(&path, "new").unwrap();
+    app.start_reload(true);
+    assert!(app.documents.file_work_pending());
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
+    assert!(app.state.buffers[buffer].read_only);
+}
+
+fn gate_document_worker(app: &mut InteractiveApplication) -> std::sync::mpsc::Sender<()> {
+    let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(8);
+    app.documents = crate::editor::session::documents::DocumentSession::new(
+        worker,
+        &StartupTarget::Dashboard { root: app.state.workspace_root.clone() },
+        app.state.window_version(),
+        app.workspace.root_revision(),
+        8,
+    );
+    gate
+}
+
+#[test]
+fn a_pending_open_reserves_its_save_destination() {
+    for alias in [false, true] {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let destination = root.join("b.txt");
+        fs::write(&destination, "original B").unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        app.state.open_text(TextBuffer::from_text("A"), Some(root.join("a.txt"))).unwrap();
+        let gate = gate_document_worker(&mut app);
+        app.start_open(if alias { root.join("sub/../b.txt") } else { destination.clone() });
+        app.start_save(false, Some(destination.clone()), true);
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert_eq!(fs::read(&destination).unwrap(), b"original B");
+        assert!(app.state.buffers.values().any(|b| {
+            b.path.as_ref() == Some(&destination) && b.text.to_string() == "original B"
+        }));
+    }
+}
+
+#[test]
+fn saves_and_reloads_wait_for_the_same_buffers_completion() {
+    for reload_first in [false, true] {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let original = root.join("a.txt");
+        fs::write(&original, "disk").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("buffer"), Some(original.clone())).unwrap();
+        let gate = gate_document_worker(&mut app);
+        if reload_first {
+            app.start_reload(true);
+        } else {
+            app.start_save(false, Some(root.join("b.txt")), false);
+        }
+        app.start_save(false, Some(root.join("c.txt")), true);
+        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        app.start_reload(true);
+        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert!(!root.join("c.txt").exists());
+        if reload_first {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "disk");
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
+        } else {
+            assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"buffer");
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("b.txt")));
+        }
+        // Admission resumes after the first result has been reconciled.
+        app.start_save(false, Some(root.join("c.txt")), false);
+        wait_vfs(&mut app);
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("c.txt")));
+        assert_eq!(fs::read(root.join("c.txt")).unwrap(), app.state.buffers[buffer].text.to_bytes());
+    }
+}
+
+#[test]
+fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let path = root.join("file.txt");
+    fs::create_dir(root.join("sub")).unwrap();
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    app.invoke_insert_text("new ".into());
+    app.start_save(false, Some(root.join("sub/../file.txt")), false);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"new old");
+    assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    // The resolved identity must not bypass external-modification protection.
+    fs::write(&path, "external").unwrap();
+    app.start_save(false, Some(root.join("sub/../file.txt")), false);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"external");
+}
+
+#[cfg(unix)]
+#[test]
+fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let original = root.join("original.txt");
+    let other = root.join("other.txt");
+    let alias = root.join("alias.txt");
+    fs::write(&original, "old").unwrap();
+    fs::write(&other, "unrelated").unwrap();
+    std::os::unix::fs::symlink(&original, &alias).unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(original.clone())).unwrap();
+    app.invoke_insert_text("new ".into());
+    let gate = gate_document_worker(&mut app);
+    app.start_save(false, Some(alias.clone()), false);
+    fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(&other, &alias).unwrap();
+    gate.send(()).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&original).unwrap(), b"old");
+    assert_eq!(fs::read(&other).unwrap(), b"unrelated");
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
+}
+
+#[test]
+fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
+    for edit_during_save in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("file.txt");
+        fs::write(&path, "a\nb\n").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("a\nb\n"), Some(path.clone())).unwrap();
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::CrLf;
+        app.configuration.install_fixture(fixture);
+        let gate = gate_document_worker(&mut app);
+        app.start_save(false, None, false);
+        if edit_during_save {
+            app.invoke_insert_text("new\n".into());
+        }
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert_eq!(fs::read(&path).unwrap(), b"a\r\nb\r\n");
+        assert_eq!(app.state.buffers[buffer].dirty, edit_during_save);
+        assert_eq!(app.state.buffers[buffer].text.format().preferred_line_ending, crate::editor::text::LineEnding::CrLf);
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::Preserve;
+        app.configuration.install_fixture(fixture);
+        app.start_save(false, None, false);
+        wait_vfs(&mut app);
+        let expected = if edit_during_save { b"new\r\na\r\nb\r\n".as_slice() } else { b"a\r\nb\r\n".as_slice() };
+        assert_eq!(fs::read(&path).unwrap(), expected);
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+}
+
+#[test]
+fn shutdown_saves_normalized_text_with_resumable_undo_history() {
+    for (source, policy, saved) in [
+        ("base", crate::config::FinalNewlinePolicy::Insert, "Xbase\n"),
+        ("base\n\n", crate::config::FinalNewlinePolicy::Remove, "Xbase"),
+    ] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("normalized.txt");
+        fs::write(&path, source).unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), Some(path.clone())).unwrap();
+        app.set_dashboard_visibility(false);
+        let directory = app.persistence.undo_directory();
+        app.state.undo_directory = Some(directory.clone());
+        app.state.undo_maximum_bytes = 1 << 20;
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.final_newline = policy;
+        app.configuration.install_fixture(fixture);
+        app.invoke_insert_text("X".into());
+        app.start_save(true, None, false);
+        app.finish_shutdown_before(Instant::now() + Duration::from_secs(5)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), saved);
+        assert!(!app.persistence.undo_pending());
+        let mut reopened = EditorState::new(app.state.workspace_root.clone());
+        reopened.undo_directory = Some(directory);
+        reopened.undo_maximum_bytes = 1 << 20;
+        let (id, _) = reopened.open_text(TextBuffer::from_text(saved), Some(path)).unwrap();
+        for expected in [format!("X{source}"), source.into()] {
+            reopened.apply_transaction(
+                &EditorTransaction::new(TransactionId(1))
+                    .with_operation(EditorOperation::Undo { buffer: id }),
+            ).unwrap();
+            assert_eq!(reopened.buffers[id].text.to_string(), expected);
+        }
+    }
+}
+
+#[test]
+fn undo_history_failures_are_notified_and_fail_shutdown() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("history.txt");
+    fs::write(&path, "base").unwrap();
+    app.state.open_text(TextBuffer::from_text("base"), Some(path)).unwrap();
+    app.set_dashboard_visibility(false);
+    let invalid = app.state.workspace_root.join("not-a-directory");
+    fs::write(&invalid, "occupied").unwrap();
+    app.state.undo_directory = Some(invalid);
+    app.state.undo_maximum_bytes = 1 << 20;
+    app.invoke_insert_text("X".into());
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.persistence.undo_pending() {
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.ui.notification.as_ref().is_some_and(|text| text.contains("could not save undo history")));
+    assert!(app.finish_shutdown_before(deadline).is_err());
 }
 
 #[test]
@@ -5111,17 +5334,18 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.debug_stop();
     drain(&mut driver);
     assert!(!starts.exists(), "retired preflight launched adapter");
-    driver.debug_start("owned");
-    assert_eq!(driver.debug_preflights(), 1);
+    // Configured adapters may run scripts; exercise executable preflight through a native tool.
+    driver.debug_start_native_program_fixture();
     let program_deadline = Instant::now() + Duration::from_secs(3);
     while !driver.debug_program_pending() {
         driver.pump_debug();
         assert!(
             Instant::now() < program_deadline,
-            "program preflight not admitted"
+            "program preflight not admitted: {:?}", driver.projection().notification
         );
         std::thread::sleep(Duration::from_millis(2));
     }
+    assert_eq!(driver.debug_preflights(), 1);
     driver.debug_stop();
     drain(&mut driver);
     assert!(

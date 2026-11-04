@@ -641,6 +641,7 @@ pub(super) fn render_editor_view(
             }
             let style = if is_selected(
                 view.selection,
+                view.mode,
                 global,
                 &buffer.text,
                 DisplayWidthPolicy {
@@ -1468,6 +1469,7 @@ pub(super) fn byte_column(text: &crate::editor::text::TextBuffer, offset: ByteOf
 
 pub(super) fn is_selected(
     selection: Option<crate::editor::Selection>,
+    mode: EditorMode,
     offset: ByteOffset,
     text: &crate::editor::text::TextBuffer,
     width_policy: DisplayWidthPolicy,
@@ -1479,7 +1481,7 @@ pub(super) fn is_selected(
         SelectionKind::Character => {
             let start = selection.anchor.min(selection.head);
             let end = selection.anchor.max(selection.head);
-            offset >= start && offset <= end
+            offset >= start && if mode == EditorMode::Insert { offset < end } else { offset <= end }
         }
         SelectionKind::Line => {
             let line = text.byte_to_line(offset).unwrap_or(usize::MAX);

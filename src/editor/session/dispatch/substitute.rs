@@ -6,6 +6,7 @@ use super::{
     Precondition, PromptKind, TextEdit, TextEditSet,
 };
 use crate::editor::text::TextBuffer;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// A replacement in regex-crate template form.
 fn replacement_template(replacement: &str) -> String {
@@ -21,6 +22,7 @@ fn replacement_template(replacement: &str) -> String {
                 }
                 Some('n') => template.push('\n'),
                 Some('t') => template.push('\t'),
+                Some('$') => template.push_str("$$"),
                 Some(other) => template.push(other),
                 None => template.push('\\'),
             },
@@ -28,6 +30,21 @@ fn replacement_template(replacement: &str) -> String {
         }
     }
     template
+}
+
+/// A bounded, single-line sample for a replacement question.
+fn substitute_preview(text: &str) -> String {
+    let mut characters = text.chars();
+    let mut preview: String = characters.by_ref().take(80).map(|character| match character {
+        '\n' => '⏎',
+        '\t' => '⇥',
+        character if character.is_control() => '�',
+        character => character,
+    }).collect();
+    if characters.next().is_some() {
+        preview.push('…');
+    }
+    preview
 }
 
 /// The zero-based lines a range covers, in order. `current` is the cursor's line, `selection` the
@@ -43,8 +60,10 @@ fn range_lines(
         "$" => Ok(last),
         number => number
             .parse::<usize>()
-            .map(|line| line.saturating_sub(1).min(last))
-            .map_err(|_| format!("invalid range `{range}`")),
+            .ok()
+            .and_then(|line| line.checked_sub(1))
+            .filter(|line| *line <= last)
+            .ok_or_else(|| format!("invalid range `{range}`")),
     };
     let (start, end) = match range {
         "" => (current, current),
@@ -61,6 +80,29 @@ fn range_lines(
     Ok((start.min(end), start.max(end)))
 }
 
+/// Translate Vim's directional word boundaries without changing escaped backslashes.
+fn substitute_pattern(pattern: &str) -> String {
+    let mut translated = String::new();
+    let mut characters = pattern.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            translated.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('<') => translated.push_str(r"\b{start}"),
+            Some('>') => translated.push_str(r"\b{end}"),
+            escaped => {
+                translated.push('\\');
+                if let Some(escaped) = escaped {
+                    translated.push(escaped);
+                }
+            }
+        }
+    }
+    translated
+}
+
 /// The edits for lines `start..=end`, and how many lines changed.
 fn substitution_edits(
     text: &TextBuffer,
@@ -75,7 +117,7 @@ fn substitution_edits(
     if flags.chars().any(|flag| !"gicn".contains(flag)) {
         return Err("unsupported substitute flag".into());
     }
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let pattern = substitute_pattern(pattern);
     let regex = regex::RegexBuilder::new(&pattern)
         .case_insensitive(flags.contains('i'))
         .build()
@@ -141,7 +183,7 @@ fn global_lines(
         .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
     let last = text.visible_lines().saturating_sub(1);
     let (start, end) = range_lines(range, line_of(view.cursor), selection, last)?;
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let pattern = substitute_pattern(pattern);
     let regex = regex::Regex::new(&pattern).map_err(|error| error.to_string())?;
     let mut lines = Vec::new();
     for number in start..=end {
@@ -253,6 +295,7 @@ impl InteractiveApplication {
                 view: view_id,
                 buffer: buffer_id,
                 revision,
+                source: text.source_version(),
                 edits,
                 next: 0,
                 accepted: Vec::new(),
@@ -278,6 +321,9 @@ impl InteractiveApplication {
         if selection {
             self.set_mode(EditorMode::Normal);
         }
+        self.normalize_substitute_cursor(view_id);
+        self.ensure_cursor_visible();
+        self.push_change_location();
         self.notify_message(format!("{count} substitutions on {lines} lines"), false);
     }
 
@@ -310,7 +356,9 @@ impl InteractiveApplication {
             return;
         }
         let mut edits: Vec<TextEdit> = Vec::new();
+        let mut deleted = String::new();
         for line in &lines {
+            deleted.push_str(&text.line(*line).expect("a matched line exists"));
             let start = text.line_to_byte(*line).map_or(0, ByteOffset::get);
             let end = text
                 .line_to_byte(line + 1)
@@ -338,6 +386,11 @@ impl InteractiveApplication {
             .with_operation(EditorOperation::ApplyEdits {
                 buffer: buffer_id,
                 edits: TextEditSet::new(revision, edits),
+            })
+            .with_operation(EditorOperation::SetRegister {
+                name: '"',
+                text: deleted,
+                shape: super::RegisterShape::Line,
             });
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
@@ -348,6 +401,7 @@ impl InteractiveApplication {
         }
         self.keep_cursor_off_final_newline();
         self.ensure_cursor_visible();
+        self.push_change_location();
         self.notify_message(format!("{} lines deleted", lines.len()), false);
     }
 
@@ -365,7 +419,7 @@ impl InteractiveApplication {
             .buffers
             .get(confirm.buffer)
             .map(|buffer| &buffer.text);
-        if text.map(TextBuffer::revision) != Some(confirm.revision) {
+        if !text.is_some_and(|text| text.source_version() == confirm.source) {
             self.substitute_confirm = None;
             self.show_error("the file changed, so replacing stopped");
             return;
@@ -374,17 +428,25 @@ impl InteractiveApplication {
             .and_then(|text| text.slice(edit.range()).ok())
             .unwrap_or_default();
         let message = format!(
-            "Replace `{found}` with `{}`? Match {} of {}; a replaces the rest, esc stops.",
-            edit.replacement(),
+            "Replace `{}` with `{}`? Match {} of {}; a replaces the rest, esc stops.",
+            substitute_preview(&found),
+            substitute_preview(edit.replacement()),
             confirm.next + 1,
             confirm.edits.len()
         );
         let (view, range) = (confirm.view, edit.range());
-        if !self.select_text(view, range.start.get(), range.end.get()) {
+        if range.is_empty() {
+            self.set_specific_mode(view, EditorMode::Normal);
+            let Some(target) = self.state.views.get_mut(view) else {
+                self.substitute_confirm = None;
+                return;
+            };
+            target.cursor = range.start;
+            self.ensure_cursor_visible();
+        } else if !self.select_text(view, range.start.get(), range.end.get()) {
             self.substitute_confirm = None;
             return;
         }
-        self.scroll_above_substitute_question(view, range.start);
         self.open_confirmation_actions(
             PromptKind::SubstituteConfirm,
             "Replace".into(),
@@ -393,29 +455,50 @@ impl InteractiveApplication {
             "Replace",
             "Skip",
         );
+        self.scroll_above_substitute_question(view);
     }
 
-    /// Keep the match in the top part of the pane, clear of the question at the bottom.
-    fn scroll_above_substitute_question(&mut self, view: crate::editor::ViewId, at: ByteOffset) {
-        const QUESTION_ROWS: usize = 6;
-        let Some(height) = crate::ui::view_pane_viewport(&self.state, &self.ui, view)
-            .map(|viewport| usize::from(viewport.height))
-        else {
+    /// Keep the match in the visible rows above the actual question.
+    fn scroll_above_substitute_question(&mut self, view: crate::editor::ViewId) {
+        let Some(viewport) = crate::ui::view_pane_viewport(&self.state, &self.ui, view) else {
             return;
         };
-        let Some((line, first_line)) = self.state.views.get(view).and_then(|target| {
-            let text = &self.state.buffers.get(target.buffer)?.text;
-            Some((text.byte_to_line(at).ok()?, target.scroll_line))
-        }) else {
+        let Some(prompt) = self.input.prompt() else {
             return;
         };
-        if line >= first_line && line < first_line + height.saturating_sub(QUESTION_ROWS).max(1) {
+        let (width, height) = crate::ui::prompt_surface_dimensions(
+            &self.state, &self.ui, self.window_session.width(), self.window_session.height(),
+        );
+        let question = crate::ui::prompt_geometry_for_state(
+            width, height, self.configuration.settings(), prompt,
+        );
+        let height = usize::from(viewport.height.min(question.top.saturating_sub(viewport.y))).max(1);
+        let Some(target) = self.state.views.get(view) else {
+            return;
+        };
+        let text = &self.state.buffers[target.buffer].text;
+        let settings = self.configuration.settings();
+        let wrap = settings.editor.wrap && !self.ui.large_file_buffers.contains(&target.buffer);
+        let rows = crate::ui::VisualRowModel::new_for_state(
+            &self.state, text, view, &self.ui, settings, viewport.width, wrap,
+        );
+        let start = rows.normalize(crate::ui::VisualRowAnchor {
+            line: target.scroll_line,
+            wrap_row: target.scroll_wrap_row,
+        });
+        let cursor = rows.cursor_anchor(target.cursor);
+        if rows.screen_row(start, cursor, height).is_some() {
             return;
         }
+        let first = rows.backward(cursor, height / 3);
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetScroll {
                 view,
-                first_line: line.saturating_sub(height / 3),
+                first_line: first.line,
+            })
+            .with_operation(EditorOperation::SetScrollWrapRow {
+                view,
+                first_wrap_row: first.wrap_row,
             })
             .with_undo_policy(super::UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
@@ -462,6 +545,12 @@ impl InteractiveApplication {
         if self.state.views.contains_key(confirm.view) {
             self.set_specific_mode(confirm.view, EditorMode::Normal);
         }
+        if !self.state.buffers.get(confirm.buffer).is_some_and(|buffer| {
+            buffer.text.source_version() == confirm.source
+        }) {
+            self.show_error("the file changed, so replacing stopped");
+            return;
+        }
         let count = confirm.accepted.len();
         if count == 0 {
             self.notify_message("nothing was replaced".into(), false);
@@ -481,7 +570,32 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
+        self.normalize_substitute_cursor(confirm.view);
+        self.ensure_cursor_visible();
+        self.push_change_location();
         self.notify_message(format!("{count} substitutions"), false);
+    }
+
+    fn normalize_substitute_cursor(&mut self, view: crate::editor::ViewId) {
+        let Some(target) = self.state.views.get(view) else {
+            return;
+        };
+        if target.mode != EditorMode::Normal {
+            return;
+        }
+        let text = &self.state.buffers[target.buffer].text;
+        let line = text.byte_to_line(target.cursor).unwrap_or(0)
+            .min(text.visible_lines().saturating_sub(1));
+        let start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
+        let content = text.line(line).unwrap_or_default();
+        let content = content.trim_end_matches('\n');
+        let relative = target.cursor.get().saturating_sub(start.get());
+        let cursor = ByteOffset(start.get() + content.grapheme_indices(true)
+            .map(|(offset, _)| offset)
+            .take_while(|offset| *offset <= relative)
+            .last()
+            .unwrap_or(0));
+        self.state.views[view].cursor = cursor;
     }
 }
 
@@ -490,6 +604,7 @@ pub(super) struct SubstituteConfirm {
     view: crate::editor::ViewId,
     buffer: crate::editor::BufferId,
     revision: crate::editor::text::BufferRevision,
+    source: crate::editor::text::TextVersion,
     edits: Vec<TextEdit>,
     next: usize,
     accepted: Vec<TextEdit>,
@@ -529,6 +644,31 @@ mod tests {
             "dog scatter\n"
         );
         assert_eq!(applied("A\n", (0, 0), "a", "$1", "i"), "$1\n");
+    }
+
+    #[test]
+    fn escaped_dollars_stay_literal_in_replacements() {
+        assert_eq!(applied("foo", (0, 0), "(foo)", r"\$1", ""), "$1");
+        assert_eq!(applied("foo", (0, 0), "(foo)", r"\$\1", ""), "$foo");
+    }
+
+    #[test]
+    fn word_boundaries_are_directional_and_preserve_escaped_backslashes() {
+        let text = TextBuffer::from_text("foo\\< foo\\>\nfoo\n");
+        let view = crate::editor::state::View::new(crate::editor::BufferId::default());
+        for (pattern, lines) in [
+            (r"foo\<", vec![]),
+            (r"\>foo", vec![]),
+            (r"\<foo\>", vec![0, 1]),
+            (r"\\<", vec![0]),
+            (r"\\>", vec![0]),
+        ] {
+            assert_eq!(global_lines(&view, &text, "%", pattern, false), Ok(lines));
+        }
+        assert_eq!(applied("foo", (0, 0), r"foo\<", "X", ""), "foo");
+        assert_eq!(applied("foo", (0, 0), r"\>foo", "X", ""), "foo");
+        assert_eq!(applied(r"foo\<", (0, 0), r"\\<", "X", ""), "fooX");
+        assert_eq!(applied(r"foo\>", (0, 0), r"\\>", "X", ""), "fooX");
     }
 
     #[test]
@@ -573,5 +713,9 @@ mod tests {
         assert_eq!(range_lines(".,$", 4, None, 9), Ok((4, 9)));
         assert_eq!(range_lines("'<,'>", 4, Some((6, 2)), 9), Ok((2, 6)));
         assert!(range_lines("'<,'>", 4, None, 9).is_err());
+        for range in ["0", "11", "999", "1,999", "999,1", "18446744073709551616"] {
+            assert!(range_lines(range, 4, None, 9).is_err(), "{range}");
+        }
+        assert_eq!(range_lines("10", 4, None, 9), Ok((9, 9)));
     }
 }

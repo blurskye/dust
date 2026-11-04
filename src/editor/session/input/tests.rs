@@ -38,6 +38,19 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 }
 
 #[test]
+fn prompt_word_moves_and_backspace_keep_combining_characters_together() {
+    let mut input = InputSession::new(100);
+    input.open_prompt(PromptKind::SearchForward, "cafe\u{301} next".into(), None);
+    input.prompt_move(PromptMove::Home);
+    input.prompt_move(PromptMove::WordRight);
+    assert_eq!(input.prompt().unwrap().cursor, "cafe\u{301} ".len());
+    input.prompt_backspace();
+    input.prompt_backspace();
+    assert_eq!(input.prompt().unwrap().input, "cafnext");
+    assert_eq!(input.prompt().unwrap().cursor, 3);
+}
+
+#[test]
 fn confirmation_choice_is_typed_and_does_not_accept_text() {
     let mut input = InputSession::new(10);
     input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
@@ -155,6 +168,12 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     assert_eq!(popup.sections[0].lines, ["éé", "line"]);
     // Three-byte characters straddle the 65,536-byte ceiling.
     let long = format!("{}\n", "界".repeat(4000)).repeat(40);
+    let mut end = super::documentation::DOCUMENTATION_MAXIMUM_BYTES;
+    while !long.is_char_boundary(end) {
+        end -= 1;
+    }
+    // The source bound includes newlines, which are not stored in rendered rows.
+    let expected = long[..end].replace('\n', "");
     input.present_documentation(
         DocumentationPopupKind::Git,
         "Diff".into(),
@@ -166,8 +185,8 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     );
     let lines = &input.documentation().unwrap().sections[0].lines;
     let bytes = lines.iter().map(String::len).sum::<usize>();
-    assert_eq!(bytes, super::documentation::DOCUMENTATION_MAXIMUM_BYTES - 1);
-    assert_eq!(lines.concat(), "界".repeat(super::documentation::DOCUMENTATION_MAXIMUM_BYTES / 3));
+    assert_eq!(bytes, expected.len());
+    assert_eq!(lines.concat(), expected);
     let total = input.documentation().unwrap().line_count();
     input.scroll_documentation(
         1,

@@ -810,12 +810,21 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
 #[test]
 fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
+    for (snippet, expected, first, second) in [
+        ("foo(${1:arg})$0", "use thing;\n\nfoo(arg)", "arg", None),
+        ("${TM_SELECTED_TEXT:foo(${1:arg})}$0", "use thing;\n\nfoo(arg)", "arg", None),
+        (
+            "${TM_FILENAME:untitled} $TM_FILENAME ${1:a}\r\n${2:b}cd ${1/(.*)/${1:/upcase}/}$0",
+            "use thing;\n\nsnippet.rs snippet.rs a\nbcd A", "a", Some("b"),
+        ),
+    ] {
     let mut app = app();
     let path = app.state.workspace_root.join("snippet.rs");
     let (buffer, view) = app
         .state
         .open_text(TextBuffer::from_text("\nfoo"), Some(path)).unwrap();
     app.state.views[view].cursor = ByteOffset(4);
+    app.state.views[view].mode = crate::editor::EditorMode::Insert;
     app.set_dashboard_visibility(false);
     let document = app.active_lsp_document().unwrap().1;
     app.language.fixture_completion_source(Some((
@@ -848,7 +857,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
                         character: 3,
                     },
                 },
-                new_text: "foo(${1:arg})$0".into(),
+                new_text: snippet.into(),
             }),
             additional_edits: vec![LspTextEdit {
                 range: LspRange {
@@ -882,12 +891,20 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     });
     app.accept_lsp_completion();
     let text = app.state.buffers[buffer].text.to_string();
-    assert_eq!(text, "use thing;\n\nfoo(arg)");
+    assert_eq!(text, expected);
     assert_eq!(app.input.snippet_buffer(), Some(buffer));
     assert_eq!(
         app.state.views[view].selection.unwrap().anchor.get(),
-        text.find("arg").unwrap()
+        text.find(first).unwrap()
     );
     app.navigate_snippet(1);
-    assert!(app.state.views[view].selection.is_none());
+    if let Some(second) = second {
+        let selection = app.state.views[view].selection.unwrap();
+        assert_eq!(&text[selection.anchor.get()..selection.head.get()], second);
+        app.invoke_insert_text("X".into());
+        assert_eq!(app.state.buffers[buffer].text.to_string(), expected.replace("bcd", "Xcd"));
+    } else {
+        assert!(app.state.views[view].selection.is_none());
+    }
+    }
 }

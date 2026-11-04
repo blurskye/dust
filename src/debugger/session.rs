@@ -3,6 +3,7 @@ use super::{DapControl, DapError, DapEvent, DapLaunch, run_adapter};
 use crate::process::write_content_length_message;
 use serde_json::Value;
 use std::{
+    collections::VecDeque,
     sync::{
         Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
@@ -173,7 +174,10 @@ impl DapService {
             .load(Ordering::Acquire)
     }
     pub(crate) fn available(&self) -> bool {
-        !self.closed && self.session.is_none() && self.pending() < RESIDENT
+        self.session.is_none() && self.restart_available()
+    }
+    pub(crate) fn restart_available(&self) -> bool {
+        !self.closed && self.pending() < RESIDENT
     }
     pub(crate) fn admission(&mut self) -> Result<DapAdmission<'_>, DapError> {
         if self.closed {
@@ -202,7 +206,8 @@ impl DapService {
         scope: Option<ExecutionScope>,
         resident: Arc<()>,
     ) -> Result<(), DapError> {
-        if !launch.executable.is_absolute()
+        if launch.adapter.contains('\0')
+            || !launch.executable.is_absolute()
             || !launch.root.is_absolute()
             || !matches!(launch.request.as_str(), "launch" | "attach")
             || launch.arguments.len() > 4096
@@ -350,7 +355,8 @@ impl DapService {
         let session = self.session.as_mut()?;
         for _ in 0..CAPACITY {
             let result = session.receiver.try_recv();
-            let result = if result.is_err() && session.actor.done.load(Ordering::Acquire) {
+            let done = result.is_err() && session.actor.done.load(Ordering::Acquire);
+            let result = if done {
                 // Acquire completion, then recheck the queue before synthesizing a terminal.
                 session.receiver.try_recv()
             } else {
@@ -375,20 +381,28 @@ impl DapService {
                         DapEvent::Response { .. }
                             | DapEvent::RequestFailed { .. }
                             | DapEvent::Stopped { .. }
-                    ) && source.generation != session.actor.generation.load(Ordering::Acquire)
+                    ) && !session_scoped
+                        && source.generation != session.actor.generation.load(Ordering::Acquire)
                     {
                         continue;
                     }
                     if let DapEvent::Failed { message, .. } = &mut event {
                         append_stderr(message, &session.actor);
                     }
-                    if matches!(event, DapEvent::Terminated { .. } | DapEvent::Failed { .. }
-                        | DapEvent::Response { response: super::DapResponse::Disconnected { .. }, .. }) {
+                    if matches!(
+                        event,
+                        DapEvent::Terminated { .. }
+                            | DapEvent::Failed { .. }
+                            | DapEvent::Response {
+                                response: super::DapResponse::Disconnected { .. },
+                                ..
+                            }
+                    ) {
                         session.reported = true;
                     }
                     return Some((source, event));
                 }
-                Err(_) if session.actor.done.load(Ordering::Acquire) && !session.reported => {
+                Err(_) if done && !session.reported => {
                     session.reported = true;
                     let mut message = session
                         .actor
@@ -440,6 +454,7 @@ impl Drop for DapService {
 
 pub(super) struct Writer {
     sender: SyncSender<(Value, Option<Arc<AtomicU8>>)>,
+    pending: VecDeque<Value>,
     actor: Arc<Actor>,
 }
 impl Writer {
@@ -503,9 +518,19 @@ impl Writer {
                     }
                 }
             })?;
-        Ok((Self { sender, actor }, worker))
+        Ok((Self { sender, pending: VecDeque::new(), actor }, worker))
     }
     pub(super) fn reply(&mut self, value: Value, receipt: Arc<AtomicU8>) -> Result<(), Value> {
+        if self.flush().is_err() {
+            receipt.store(super::DapReplyOutcome::Unknown as u8, Ordering::Release);
+            return Err(value);
+        }
+        // Replies cannot overtake requests that already have wire sequence IDs.
+        if !self.pending.is_empty() {
+            #[cfg(test)]
+            self.actor.reverse_retries.fetch_add(1, Ordering::AcqRel);
+            return Err(value);
+        }
         #[cfg(test)]
         self.actor.writes_queued.fetch_add(1, Ordering::AcqRel);
         match self.sender.try_send((value, Some(receipt.clone()))) {
@@ -541,18 +566,31 @@ impl Writer {
         }
     }
     pub(super) fn submit(&mut self, value: Value) -> Result<(), ()> {
-        // Full is an explicit failed session, not silent loss or a blocking write.
-        #[cfg(test)]
-        self.actor.writes_queued.fetch_add(1, Ordering::AcqRel);
-        if self.sender.try_send((value, None)).is_err() {
+        self.pending.push_back(value);
+        self.flush()
+    }
+    pub(super) fn flush(&mut self) -> Result<(), ()> {
+        while let Some(value) = self.pending.pop_front() {
             #[cfg(test)]
-            self.actor.writes_queued.fetch_sub(1, Ordering::AcqRel);
-            if let Ok(mut failure) = self.actor.failure.lock() {
-                *failure = Some("DAP writer full/stopped; admitted write outcomes unknown".into());
+            self.actor.writes_queued.fetch_add(1, Ordering::AcqRel);
+            if let Err(error) = self.sender.try_send((value, None)) {
+                #[cfg(test)]
+                self.actor.writes_queued.fetch_sub(1, Ordering::AcqRel);
+                match error {
+                    mpsc::TrySendError::Full((value, _)) => {
+                        self.pending.push_front(value);
+                        break;
+                    }
+                    mpsc::TrySendError::Disconnected(_) => {
+                        if let Ok(mut failure) = self.actor.failure.lock() {
+                            *failure = Some("DAP writer stopped; admitted write outcomes unknown".into());
+                        }
+                        self.actor.live.store(false, Ordering::Release);
+                        self.actor.cancel.store(true, Ordering::Release);
+                        return Err(());
+                    }
+                }
             }
-            self.actor.live.store(false, Ordering::Release);
-            self.actor.cancel.store(true, Ordering::Release);
-            return Err(());
         }
         Ok(())
     }
@@ -726,6 +764,20 @@ mod request_tests {
     use super::*;
     use crate::debugger::{DapResponse, DapSourceBreakpoint};
     #[test]
+    fn restart_requires_a_free_resident_slot_before_stopping() {
+        let (mut service, _adapter) = fixture();
+        let residents: Vec<_> = (0..RESIDENT).map(|_| Arc::new(())).collect();
+        service.residents = residents.iter().map(Arc::downgrade).collect();
+        assert!(service.is_running());
+        assert!(!service.restart_available());
+        assert!(!service.available());
+        drop(residents);
+        assert!(service.restart_available());
+        assert!(!service.available());
+        service.begin_shutdown();
+        assert!(!service.restart_available());
+    }
+    #[test]
     fn unsupported_detach_is_refused_before_admission() {
         let (service, adapter) = fixture();
         service
@@ -819,6 +871,114 @@ while True:
         service.stop().unwrap();
     }
 
+    #[test]
+    fn successful_disconnect_is_a_terminal_outcome() {
+        for completed_before_poll in [false, true] {
+            let (mut service, adapter) = fixture();
+            adapter.event(0, DapEvent::Response {
+                adapter: "same-name".into(),
+                stop_generation: 0,
+                request_id: 1,
+                request: Some(DapControl::Disconnect { terminate_debuggee: false }),
+                response: DapResponse::Disconnected { terminate_debuggee: false },
+            });
+            adapter.advance(1);
+            adapter.events.actor.done.store(completed_before_poll, Ordering::Release);
+            assert!(matches!(service.try_event(), Some(DapEvent::Response {
+                response: DapResponse::Disconnected { terminate_debuggee: false }, ..
+            })));
+            adapter.events.actor.done.store(true, Ordering::Release);
+            assert!(service.try_event().is_none());
+            assert!(service.try_event().is_none());
+        }
+    }
+    #[test]
+    fn completion_drains_terminal_events_before_reporting_failure() {
+        for _ in 0..128 {
+            let (mut service, adapter) = fixture();
+            assert!(service.try_event().is_none());
+            thread::scope(|scope| {
+                scope.spawn(move || {
+                    adapter.event(0, DapEvent::Output { adapter: "same-name".into(), output: "done".into() });
+                    adapter.event(0, DapEvent::Terminated { adapter: "same-name".into() });
+                    adapter.events.actor.done.store(true, Ordering::Release);
+                });
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                let mut output_seen = false;
+                loop {
+                    assert!(std::time::Instant::now() < deadline, "completion deadline");
+                    match service.try_event() {
+                        Some(DapEvent::Output { .. }) => output_seen = true,
+                        Some(DapEvent::Terminated { .. }) => {
+                            assert!(output_seen);
+                            break;
+                        }
+                        Some(event) => panic!("unexpected completion: {event:?}"),
+                        None => thread::yield_now(),
+                    }
+                }
+            });
+            assert!(service.try_event().is_none());
+        }
+    }
+    #[test]
+    fn completion_without_a_terminal_event_reports_failure_once() {
+        let (mut service, adapter) = fixture();
+        adapter.events.actor.done.store(true, Ordering::Release);
+        assert!(matches!(service.try_event(), Some(DapEvent::Failed { .. })));
+        assert!(service.try_event().is_none());
+    }
+    #[test]
+    fn writer_retries_full_queue_in_wire_order() {
+        let (service, _adapter) = fixture();
+        let actor = service.session.as_ref().unwrap().actor.clone();
+        let (sender, receiver) = mpsc::sync_channel(CAPACITY);
+        let mut writer = Writer { sender, pending: VecDeque::new(), actor: actor.clone() };
+        for sequence in 0..CAPACITY * 3 {
+            writer.submit(serde_json::json!({"seq": sequence})).unwrap();
+        }
+        assert_eq!(writer.pending.len(), CAPACITY * 2);
+        assert!(!actor.cancel.load(Ordering::Acquire));
+        let receipt = Arc::new(AtomicU8::new(super::super::DapReplyOutcome::Ready as u8));
+        let reply = serde_json::json!({"seq": CAPACITY * 3});
+        assert_eq!(writer.reply(reply.clone(), receipt.clone()), Err(reply.clone()));
+        for sequence in 0..CAPACITY * 3 {
+            let (value, state) = receiver.try_recv().unwrap();
+            actor.writes_queued.fetch_sub(1, Ordering::AcqRel);
+            assert_eq!(value["seq"], sequence);
+            assert!(state.is_none());
+            writer.flush().unwrap();
+        }
+        assert!(writer.pending.is_empty());
+        writer.reply(reply.clone(), receipt).unwrap();
+        assert_eq!(receiver.try_recv().unwrap().0, reply);
+        assert!(!actor.cancel.load(Ordering::Acquire));
+        drop(receiver);
+        assert!(writer.submit(Value::Null).is_err());
+        assert!(actor.cancel.load(Ordering::Acquire));
+    }
+    #[test]
+    fn session_scoped_failures_survive_but_execution_responses_are_filtered() {
+        let (mut service, adapter) = fixture();
+        for command in ["stackTrace", "setBreakpoints", "disconnect"] {
+            adapter.event(0, DapEvent::RequestFailed {
+                adapter: "same-name".into(),
+                stop_generation: 0,
+                request_seq: 1,
+                request_id: 1,
+                request: None,
+                command: command.into(),
+                message: "rejected".into(),
+            });
+        }
+        adapter.advance(1);
+        for expected in ["setBreakpoints", "disconnect"] {
+            let (context, event) = service.try_owned_event().unwrap();
+            assert_eq!(context.generation, 1);
+            assert!(matches!(event, DapEvent::RequestFailed { command, .. } if command == expected));
+        }
+        assert!(service.try_event().is_none());
+    }
     #[test]
     fn queued_breakpoint_answers_survive_new_stop_generations() {
         let (mut service, adapter) = fixture();

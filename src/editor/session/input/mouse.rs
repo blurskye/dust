@@ -1,14 +1,10 @@
 use super::InputSession;
-use crate::editor::session::configuration::{
-    configured_byte_offset_at_display_column, configured_grapheme_width, configured_text_width,
-};
 use crate::editor::text::{BufferRevision, ByteOffset, TextBuffer};
 use crate::editor::{
     BufferId, EditorMode, EditorOperation, EditorTransaction, EditorWindowVersion, PaneId,
     Precondition, TransactionId, UndoPolicy, View, ViewId,
 };
-use crate::ui::{UiInlayHint, VisualRowAnchor, VisualRowModel, snap_display_column};
-use unicode_segmentation::UnicodeSegmentation;
+use crate::ui::{VisualRowAnchor, VisualRowModel};
 
 pub(super) struct MouseState {
     position: Option<(u16, u16)>,
@@ -43,9 +39,7 @@ pub(in crate::editor::session) struct MouseGeometry<'a> {
     pub row: u16,
     pub body_height: u16,
     pub gutter: u16,
-    pub wrap: bool,
     pub rows: &'a VisualRowModel<'a>,
-    pub inlays: &'a [UiInlayHint],
 }
 pub(in crate::editor::session) struct MousePlan {
     transaction: EditorTransaction,
@@ -105,7 +99,6 @@ impl InputSession {
         &self,
         document: MouseDocument<'_>,
         geometry: MouseGeometry<'_>,
-        policy: &crate::config::EditorConfig,
         transaction_id: TransactionId,
         extend_selection: bool,
     ) -> Option<MousePlan> {
@@ -115,9 +108,7 @@ impl InputSession {
             row,
             body_height,
             gutter,
-            wrap: wrap_enabled,
             rows: visual_rows,
-            ..
         } = geometry;
         if row >= body_height {
             return None;
@@ -139,78 +130,11 @@ impl InputSession {
         let target_anchor = visual_rows.painted_row(start_anchor, usize::from(row))?;
         let line_index = target_anchor.line;
         let line_start = text.line_to_byte(line_index).unwrap_or(ByteOffset(0));
-        let byte = if wrap_enabled {
-            visual_rows.byte_at_cell(target_anchor, usize::from(column.saturating_sub(gutter)))
-        } else {
-            let line = text.line(line_index).unwrap_or_default();
-            let content = line.strip_suffix('\n').unwrap_or(&line);
-            let snapped_scroll = snap_display_column(
-                content,
-                view.scroll_column,
-                policy.tab_width,
-                policy.ambiguous_width,
-            );
-            let target_column =
-                usize::from(column.saturating_sub(gutter)).saturating_add(snapped_scroll);
-            let skipped_bytes = configured_byte_offset_at_display_column(
-                content,
-                view.scroll_column,
-                policy.tab_width,
-                policy.ambiguous_width,
-            );
-            let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
-            let line_end = ByteOffset(line_start.get().saturating_add(content.len()));
-            let mut hints = geometry
-                .inlays
-                .iter()
-                .filter(|hint| {
-                    hint.buffer == buffer_id
-                        && hint.revision == revision
-                        && hint.position >= visible_start
-                        && hint.position <= line_end
-                })
-                .collect::<Vec<_>>();
-            hints.sort_unstable_by_key(|hint| hint.position);
-            hints.truncate(32);
-            let mut hint_cursor = 0usize;
-            let mut display_column = 0_usize;
-            let mut virtual_cells = 0usize;
-            'target: {
-                for (relative, grapheme) in content.grapheme_indices(true) {
-                    let global = ByteOffset(line_start.get().saturating_add(relative));
-                    while let Some(hint) = hints
-                        .get(hint_cursor)
-                        .filter(|hint| hint.position == global)
-                    {
-                        let width = configured_text_width(
-                            &hint.label,
-                            policy.tab_width,
-                            policy.ambiguous_width,
-                        );
-                        let start = display_column.saturating_add(virtual_cells);
-                        if start.saturating_add(width) > target_column {
-                            break 'target relative;
-                        }
-                        virtual_cells = virtual_cells.saturating_add(width);
-                        hint_cursor = hint_cursor.saturating_add(1);
-                    }
-                    let width = if grapheme == "\t" {
-                        policy.tab_width - (display_column % policy.tab_width)
-                    } else {
-                        configured_grapheme_width(grapheme, policy.ambiguous_width)
-                    };
-                    if display_column
-                        .saturating_add(virtual_cells)
-                        .saturating_add(width)
-                        > target_column
-                    {
-                        break 'target relative;
-                    }
-                    display_column = display_column.saturating_add(width);
-                }
-                content.len()
-            }
-        };
+        let byte = visual_rows.byte_at_scrolled_cell(
+            target_anchor,
+            usize::from(column.saturating_sub(gutter)),
+            view.scroll_column,
+        );
         let position = ByteOffset(line_start.get().saturating_add(byte));
         let mut transaction = EditorTransaction::new(transaction_id)
             .with_precondition(Precondition::BufferRevision {
@@ -224,21 +148,28 @@ impl InputSession {
             })
             .with_undo_policy(UndoPolicy::Ignore);
         if extend_selection {
+            let mut anchor = self
+                .mouse
+                .anchor
+                .as_ref()
+                .filter(|anchor| {
+                    anchor.editor.same_editor(document.editor.window())
+                        && anchor.view == view_id
+                        && anchor.buffer == buffer_id
+                        && anchor.revision == revision
+                })
+                .map_or(original_cursor, |anchor| anchor.position);
+            let mut head = position;
+            if document.view.mode == EditorMode::Insert {
+                // Insert selections (including snippet placeholders) are half-open.
+                let end = if anchor <= head { &mut head } else { &mut anchor };
+                *end = crate::editor::text::next_grapheme_boundary(text, *end);
+            }
             transaction.operations.push(EditorOperation::SetSelection {
                 view: view_id,
                 selection: Some(crate::editor::Selection {
-                    anchor: self
-                        .mouse
-                        .anchor
-                        .as_ref()
-                        .filter(|anchor| {
-                            anchor.editor.same_editor(document.editor.window())
-                                && anchor.view == view_id
-                                && anchor.buffer == buffer_id
-                                && anchor.revision == revision
-                        })
-                        .map_or(original_cursor, |anchor| anchor.position),
-                    head: position,
+                    anchor,
+                    head,
                     kind: crate::editor::SelectionKind::Character,
                 }),
             });
@@ -284,12 +215,21 @@ mod tests {
     use super::*;
     use crate::editor::EditorState;
     fn plan(input: &InputSession, state: &EditorState) -> MousePlan {
+        plan_at(input, state, &crate::ui::UiState::default(), 1, 0, false)
+    }
+    fn plan_at(
+        input: &InputSession,
+        state: &EditorState,
+        ui: &crate::ui::UiState,
+        column: u16,
+        row: u16,
+        extend: bool,
+    ) -> MousePlan {
         let config = crate::config::load_bundled_config().config;
         let view_id = state.active_view.unwrap();
         let view = &state.views[view_id];
         let text = &state.buffers[view.buffer].text;
-        let ui = crate::ui::UiState::default();
-        let rows = VisualRowModel::new_for_state(state, text, view_id, &ui, &config, 80, false);
+        let rows = VisualRowModel::new_for_state(state, text, view_id, ui, &config, 80, false);
         input
             .mouse_plan(
                 MouseDocument {
@@ -300,17 +240,14 @@ mod tests {
                     text,
                 },
                 MouseGeometry {
-                    column: 1,
-                    row: 0,
+                    column,
+                    row,
                     body_height: 5,
                     gutter: 0,
-                    wrap: false,
                     rows: &rows,
-                    inlays: &[],
                 },
-                &config.editor,
                 TransactionId(1),
-                false,
+                extend,
             )
             .unwrap()
     }
@@ -348,6 +285,72 @@ mod tests {
         assert_eq!(input.mouse.anchor.as_ref().unwrap().position, ByteOffset(2));
         assert_eq!(state.views[view].cursor, ByteOffset(2));
     }
+    #[test]
+    fn scrolled_mouse_hit_testing_ignores_inlays_beyond_the_logical_line_limit() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text(&"a".repeat(50)), None).unwrap();
+        state.views[view].scroll_column = 33;
+        let mut ui = crate::ui::UiState::default();
+        ui.lsp_inlay_hints = (0..40).map(|position| crate::ui::UiInlayHint {
+            buffer,
+            revision: state.buffers[buffer].text.revision(),
+            position: ByteOffset(position),
+            label: ":".into(),
+        }).collect();
+        let input = InputSession::new(100);
+        let pending = plan_at(&input, &state, &ui, 1, 0, false);
+        state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+        assert_eq!(state.views[view].cursor, ByteOffset(34));
+    }
+
+    #[test]
+    fn unwrapped_mouse_hit_testing_uses_rendered_markdown_after_source_scrolling() {
+        for (scroll, column) in [(0, 3), (3, 2)] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, view) = state.open_text(TextBuffer::from_text("**abc**def\ncursor"), None).unwrap();
+            state.views[view].cursor = ByteOffset(11);
+            state.views[view].scroll_column = scroll;
+            let mut ui = crate::ui::UiState::default();
+            ui.markdown_marks = [(0, 2), (5, 7)].into_iter().map(|(start, end)| crate::ui::UiMarkdownMark {
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                range: crate::editor::text::ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+                mark: crate::language::syntax::MarkdownMark::Hide,
+            }).collect();
+            let input = InputSession::new(100);
+            let pending = plan_at(&input, &state, &ui, column, 0, false);
+            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+            assert_eq!(state.views[view].cursor, ByteOffset(7));
+        }
+    }
+
+    #[test]
+    fn insert_mouse_drags_replace_both_endpoint_graphemes_in_either_direction() {
+        for (start, end) in [(0, 2), (2, 0)] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, view) = state.open_text(TextBuffer::from_text("abé\u{301}d"), None).unwrap();
+            state.views[view].mode = EditorMode::Insert;
+            let ui = crate::ui::UiState::default();
+            let mut input = InputSession::new(100);
+            let pending = plan_at(&input, &state, &ui, start, 0, false);
+            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+            input.accept_mouse_plan(pending, &state.window_version(), Some((view, buffer, state.buffers[buffer].text.revision())));
+            let pending = plan_at(&input, &state, &ui, end, 0, true);
+            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+            assert_eq!(state.views[view].mode, EditorMode::Insert);
+            let selection = state.views[view].selection.unwrap();
+            assert_eq!(selection.anchor.min(selection.head), ByteOffset(0));
+            assert_eq!(selection.anchor.max(selection.head), ByteOffset("abé\u{301}".len()));
+            let mut registry = crate::editor::CommandRegistry::<()>::default();
+            crate::editor::register_builtin_commands(&mut registry).unwrap();
+            let invocation = crate::editor::CommandInvocation::new("edit.insert_text", crate::editor::InvocationSource::Test).unwrap()
+                .with_argument("text", crate::editor::CommandValue::String("X".into()));
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+            assert_eq!(state.buffers[buffer].text.to_string(), "Xd");
+        }
+    }
+
     #[test]
     fn plain_click_leaves_visual_mode_with_no_selection() {
         let mut state = EditorState::new("/workspace".into());

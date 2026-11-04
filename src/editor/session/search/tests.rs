@@ -36,6 +36,98 @@ fn found() -> WorkspaceSearchMatch {
     }
 }
 #[test]
+fn preview_retries_full_admission_but_caches_permanent_failures() {
+    use crate::files::{RequestId, VfsError};
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let prepare = |owner: &mut SearchSession| {
+        owner.prepare_preview("file".into(), 0, "File".into(), "Loading".into(), source.clone(), 1)
+    };
+    let ticket = prepare(&mut owner).1.unwrap();
+    owner.preview_failed(ticket, VfsError::QueueFull);
+    let ticket = prepare(&mut owner).1.expect("retry after temporary refusal");
+    assert!(owner.admit_preview(ticket, RequestId(1), 64));
+    assert!(prepare(&mut owner).1.is_none(), "do not duplicate an admitted read");
+    assert!(owner.accept_preview(RequestId(1), &Ok(b"ready".to_vec()), source.clone(), 1));
+    assert!(prepare(&mut owner).1.is_none());
+    assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().lines(), ["ready"]);
+
+    owner.clear_preview();
+    let ticket = prepare(&mut owner).1.unwrap();
+    owner.preview_failed(ticket, VfsError::WorkerStopped);
+    assert!(prepare(&mut owner).1.is_none(), "do not retry permanent failures every tick");
+}
+
+#[test]
+fn file_previews_follow_selected_lines_and_normalize_newlines() {
+    use crate::files::RequestId;
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let bytes = (0..1100).map(|line| format!("line {line}\n")).collect::<String>().into_bytes();
+    for (request, line) in [(1, 999), (2, 1050)] {
+        let ticket = owner.prepare_preview("file".into(), line, "File".into(), "Loading".into(), source.clone(), 1).1
+            .expect("a different location in the same file needs its own preview");
+        assert!(owner.admit_preview(ticket, RequestId(request), bytes.len()));
+        assert!(owner.accept_preview(RequestId(request), &Ok(bytes.clone()), source.clone(), 1));
+        let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+        assert_eq!(text.highlight_line, Some(line));
+        assert_eq!(text.first_line, line - 8);
+        assert_eq!(text.lines()[line - text.first_line], format!("line {line}"));
+        assert!(text.lines().len() <= 512);
+        assert!(owner.prepare_preview("file".into(), line, "File".into(), "Loading".into(), source.clone(), 1).1.is_none());
+    }
+    for bytes in [b"a\rb\rc".to_vec(), b"\xef\xbb\xbfa\r\nb\rc".to_vec()] {
+        owner.clear_preview();
+        let ticket = owner.prepare_preview("file".into(), 0, "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+        assert!(owner.admit_preview(ticket, RequestId(3), 64));
+        assert!(owner.accept_preview(RequestId(3), &Ok(bytes), source.clone(), 1));
+        assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().lines(), ["a", "b", "c"]);
+    }
+}
+
+#[test]
+fn location_preview_loading_and_errors_remain_visible() {
+    use crate::files::{RequestId, VfsError};
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let ticket = owner.prepare_preview("file".into(), 999, "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+    let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+    assert_eq!(text.first_line, 999);
+    assert_eq!(text.highlight_line, Some(999));
+    owner.preview_failed(ticket, VfsError::QueueFull);
+    assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().first_line, 999);
+    for result in [Err(VfsError::WorkerStopped), Ok(vec![255]), Ok(vec![0; 65])] {
+        let ticket = owner.prepare_preview("file".into(), 999, "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+        assert!(owner.admit_preview(ticket, RequestId(1), 64));
+        assert!(owner.accept_preview(RequestId(1), &result, source.clone(), 1));
+        let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+        assert_eq!(text.lines().len(), 1);
+        assert_eq!(text.highlight_line, Some(text.first_line));
+        owner.clear_preview();
+    }
+}
+
+#[test]
+fn search_previews_keep_matches_beyond_the_line_character_limit() {
+    for prefix in ["a".repeat(4095), "a".repeat(10_000), "é界".repeat(5_000)] {
+        let mut item = found();
+        item.range = prefix.len()..prefix.len() + 6;
+        item.snapshot = Arc::from(format!("{prefix}needle{}\n", "z".repeat(10_000)).into_bytes());
+        let mut owner = SearchSession { matches: vec![item], ..Default::default() };
+        owner.preview_match("one", 256 * 1024);
+        let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+        assert_eq!(text.highlight_line, Some(0));
+        assert_eq!(text.first_line, 0);
+        assert!(text.lines()[0].contains("needle"));
+        assert!(text.lines()[0].chars().take(24).collect::<String>().contains("needle"));
+        assert!(text.lines()[0].chars().count() <= 4096);
+    }
+}
+
+#[test]
 fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
@@ -43,6 +135,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "file".into(),
+            0,
             "title".into(),
             "loading".into(),
             source.clone(),
@@ -55,6 +148,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "second".into(),
+            0,
             "second".into(),
             "loading".into(),
             source.clone(),
@@ -74,6 +168,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "third".into(),
+            0,
             "third".into(),
             "loading".into(),
             source.clone(),
@@ -107,6 +202,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "fourth".into(),
+            0,
             "fourth".into(),
             "loading".into(),
             source.clone(),
@@ -134,6 +230,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "fifth".into(),
+            0,
             "fifth".into(),
             "loading".into(),
             source.clone(),
@@ -184,8 +281,15 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
         }),
         Some(SearchUpdate::Batch)
     ));
-    let item = found();
-    owner.preview_snapshot(&item, 64);
+    assert!(matches!(
+        owner.accept(WorkspaceSearchEvent::Complete {
+            generation: 1,
+            summary: crate::files::WorkspaceSearchSummary::default(),
+        }),
+        Some(SearchUpdate::Complete { .. })
+    ));
+    assert!(!owner.pending());
+    owner.preview_match("one", 64);
     let epoch = owner.preview_epoch.clone();
     let lines = owner
         .preview()
@@ -196,7 +300,7 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
         .lines()
         .as_ptr();
     for _ in 0..256 {
-        owner.preview_snapshot(&item, 64);
+        owner.preview_match("one", 64);
         assert!(Arc::ptr_eq(&epoch, &owner.preview_epoch));
         assert_eq!(
             lines,
@@ -210,10 +314,21 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
                 .as_ptr()
         );
     }
-    owner.poll(scope(directory.path()), 1);
-    assert!(owner.matches().is_empty());
-    assert!(!owner.pending());
-    assert!(owner.workflow().is_none());
+    for event in [
+        WorkspaceSearchEvent::Batch { generation: 1, matches: vec![found()] },
+        WorkspaceSearchEvent::Failed { generation: 1, error: "late failure".into() },
+        WorkspaceSearchEvent::Cancelled { generation: 1 },
+        WorkspaceSearchEvent::Complete {
+            generation: 1,
+            summary: crate::files::WorkspaceSearchSummary::default(),
+        },
+    ] {
+        assert!(owner.accept(event).is_none());
+        assert!(owner.poll(source.clone(), 1).is_empty());
+        assert_eq!(owner.matches().len(), 1);
+        assert!(owner.workflow().is_some());
+        assert!(Arc::ptr_eq(&epoch, &owner.preview_epoch));
+    }
 }
 #[test]
 #[ignore = "explicit search/preview ownership cost probe"]
@@ -229,8 +344,8 @@ fn search_owner_cost_probe() {
     item.range = 69632..69638;
     let mode = std::env::var("DUST_COST_CASE").unwrap_or("unchanged_snapshot".into());
     let max = 65536;
-    let mut owner = SearchSession::default();
-    owner.preview_snapshot(&item, max);
+    let mut owner = SearchSession { matches: vec![item], ..Default::default() };
+    owner.preview_match("one", max);
     let before = (
         crate::ui::window::WindowGraph::test_clone_count(),
         crate::editor::EditorState::test_clone_count(),
@@ -240,9 +355,9 @@ fn search_owner_cost_probe() {
     let start = Instant::now();
     for n in 0..count {
         if mode == "changed_snapshot" {
-            item.range = 69632 + (n % 2)..69638 + (n % 2);
+            owner.matches[0].range = 69632 + (n % 2)..69638 + (n % 2);
         }
-        std::hint::black_box(owner.preview_snapshot(&item, max));
+        std::hint::black_box(owner.preview_match("one", max));
     }
     let elapsed = start.elapsed();
     eprintln!("DUST_ALLOC_END");
@@ -367,7 +482,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         .unwrap();
     assert!(!owner.owns_picker_epoch(&epoch));
     let (_, ticket) =
-        owner.prepare_preview("file".into(), "File".into(), "Loading".into(), source, 1);
+        owner.prepare_preview("file".into(), 0, "File".into(), "Loading".into(), source, 1);
     assert!(owner.admit_preview(ticket.unwrap(), crate::files::RequestId(9), 64));
     assert_eq!(owner.close_picker(), Some(crate::files::RequestId(9)));
     assert!(!owner.owns_picker_epoch(&next));

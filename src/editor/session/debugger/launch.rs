@@ -85,6 +85,7 @@ impl Launch {
             adapter: self.session.adapter.clone(),
             request: self.session.request.clone(),
             program: self.program.clone(),
+            automatic_program: self.automatic_program,
             document: self.tool.as_ref().map(|tool| tool.document.clone()),
             target: match self.session.request {
                 DebugRequestKind::Attach => declared_target(&self.session.arguments),
@@ -119,7 +120,7 @@ impl DebugSession {
         });
         let intent = self.request_debug_inner(
             (target.configuration.as_deref(), Some(&target.adapter)),
-            target.program.clone(),
+            target.program.clone().filter(|_| !target.automatic_program),
             document,
             policy,
             workspace,
@@ -127,7 +128,10 @@ impl DebugSession {
             true,
         )?;
         let launch = self.launch.take();
-        self.stop().map_err(|error| error.to_string())?;
+        match self.stop() {
+            Ok(()) | Err(crate::debugger::DapError::NotRunning) => {}
+            Err(error) => return Err(error.to_string()),
+        }
         self.launch = launch;
         Ok(intent)
     }
@@ -145,7 +149,11 @@ impl DebugSession {
         let (name, requested) = selection;
         let automatic_program = name.is_none() && program.is_none();
         let (policy, terminals, revision) = policy;
-        if !(self.service.available() || restarting && self.service.is_running()) {
+        if !(if restarting {
+            self.service.restart_available()
+        } else {
+            self.service.available()
+        }) {
             return Err("debugger launch is closed or full".into());
         }
         self.refresh(policy, workspace.version());
@@ -240,13 +248,18 @@ impl DebugSession {
                 })
                 .ok_or("build the program, then run :dap.session.start program=<path to it>")?;
             let root_id = workspace.require_path(path).map_err(|e| e.to_string())?;
-            if workspace.require_path(&program).ok() != Some(root_id) {
-                return Err("debug program is outside its original root".into());
-            }
             let root = roots
                 .iter()
                 .find(|r| r.id == root_id)
                 .ok_or("debug root missing")?;
+            let program = if program.is_absolute() {
+                program
+            } else {
+                root.identity.canonical_path.join(program)
+            };
+            if workspace.require_path(&program).ok() != Some(root_id) {
+                return Err("debug program is outside its original root".into());
+            }
             let adapter = DebugAdapterConfig {
                 program: executable.clone(),
                 arguments: entry.definition.launch_args.clone(),
@@ -284,7 +297,9 @@ impl DebugSession {
                 Some(program),
             )
         };
-        let source_program = tools.iter().any(|e| {
+        // A configured adapter owns how its target is run; its arbitrary ID says nothing
+        // about whether that target needs an execute bit.
+        let source_program = configuration.is_some() || tools.iter().any(|e| {
             e.definition.id == session.adapter
                 && e.definition.debug_program_policy == DebugProgramPolicy::Source
         });
@@ -690,6 +705,7 @@ mod tests {
             adapter: "debugpy".into(),
             request: DebugRequestKind::Launch,
             program: Some(path.clone()),
+            automatic_program: true,
             document: Some(path.clone()),
             target: None,
         });
@@ -722,7 +738,50 @@ mod tests {
             path
         );
         assert_eq!(owner.launch.as_ref().unwrap().cwd, root.path());
+        owner.stop().unwrap();
+        owner
+            .request_restart((&policy, &terminals, 1), &workspace, &tools)
+            .expect("restart after an explicit stop");
+        assert!(owner.launch.is_some());
+        owner.stop().unwrap();
+        let (service, _adapter) = crate::debugger::test_session();
+        owner.service = service;
+        // The application's terminated-event handler retires the service directly.
+        owner.service.stop().unwrap();
+        owner
+            .request_restart((&policy, &terminals, 1), &workspace, &tools)
+            .expect("restart after normal termination");
+        assert!(owner.launch.is_some());
     }
+
+    #[test]
+    fn relative_programs_use_the_source_workspace_root_and_cannot_escape_it() {
+        let root = tempfile::tempdir().unwrap();
+        let identity = RootIdentity::capture(root.path()).unwrap();
+        let root_path = identity.canonical_path.clone();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity)],
+        ).unwrap();
+        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let policy = DebugConfig::default();
+        let terminals = crate::config::TerminalsConfig::default();
+        let mut owner = DebugSession::new(&policy, workspace.version());
+        let definition = crate::tools::bundled_tool_catalog().into_iter()
+            .find(|d| d.id == "codelldb").unwrap();
+        let tools = [ToolEntry { definition, status: ToolStatus::Installed(std::env::current_exe().unwrap()) }];
+        let source = root_path.join("main.rs");
+        owner.request_debug(
+            (None, Some("codelldb")), Some("target/debug/app".into()), Some((&source, "rust")),
+            (&policy, &terminals, 1), &workspace, &tools,
+        ).unwrap();
+        assert_eq!(owner.launch.as_ref().unwrap().program, Some(root_path.join("target/debug/app")));
+        assert!(owner.request_debug(
+            (None, Some("codelldb")), Some("../outside".into()), Some((&source, "rust")),
+            (&policy, &terminals, 1), &workspace, &tools,
+        ).unwrap_err().contains("outside its original root"));
+    }
+
     pub(in crate::editor::session::debugger) fn original_launch_fixture() {
         use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
         use std::time::{Duration, Instant};
@@ -974,12 +1033,18 @@ mod tests {
     }
 
     #[test]
-    fn configured_delve_targets_reach_the_adapter_unchanged() {
+    fn configured_targets_and_automatic_delve_restarts_reach_the_adapter() {
         use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
         use std::time::{Duration, Instant};
-        for directory in [true, false] {
+        for (adapter_id, directory, automatic) in [
+            ("delve", true, false),
+            ("delve", false, false),
+            ("my-debugpy", false, false),
+            ("delve", false, true),
+        ] {
             let root = tempfile::tempdir().unwrap();
-            let target = root.path().join("target");
+            let root_path = root.path().canonicalize().unwrap();
+            let target = root_path.join(if automatic { "main.go" } else { "target" });
             if directory {
                 std::fs::create_dir(&target).unwrap();
             } else {
@@ -1003,7 +1068,7 @@ mod tests {
             let python = crate::debugger::test_python();
             let mut policy = DebugConfig::default();
             policy.adapters.insert(
-                "delve".into(),
+                adapter_id.into(),
                 DebugAdapterConfig {
                     program: python.clone(),
                     arguments: vec!["-u".into(), script.display().to_string()],
@@ -1013,7 +1078,7 @@ mod tests {
             policy.sessions.insert(
                 "configured".into(),
                 DebugSessionConfig {
-                    adapter: "delve".into(),
+                    adapter: adapter_id.into(),
                     request: DebugRequestKind::Launch,
                     cwd: None,
                     program: Some(target.clone()),
@@ -1022,10 +1087,11 @@ mod tests {
                     path_maps: BTreeMap::new(),
                 },
             );
-            let definition = crate::tools::bundled_tool_catalog()
+            let mut definition = crate::tools::bundled_tool_catalog()
                 .into_iter()
                 .find(|d| d.id == "delve")
                 .unwrap();
+            definition.launch_args = vec!["-u".into(), script.display().to_string()];
             let tools = [ToolEntry {
                 definition,
                 status: ToolStatus::Installed(python),
@@ -1034,57 +1100,47 @@ mod tests {
             let terminals = crate::config::TerminalsConfig::default();
             let intent = owner
                 .request_debug(
-                    (Some("configured"), None),
+                    (if automatic { None } else { Some("configured") }, Some(adapter_id)),
                     None,
-                    None,
+                    Some((&target, "go")),
                     (&policy, &terminals, 1),
                     &workspace,
                     &tools,
                 )
                 .unwrap();
-            owner.authorize_debug(intent, &workspace).unwrap();
-            owner
-                .advance_debug(
-                    workspace.execution_lane(DiscoveryKind::Debugger),
-                    &policy,
-                    1,
-                    &tools,
-                )
-                .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                let events = workspace.preflight_events();
-                if !events.is_empty() {
-                    for event in events {
+            for run in 0..if automatic { 2 } else { 1 } {
+                let intent = if run == 0 { intent.clone() } else {
+                    owner.request_restart((&policy, &terminals, 1), &workspace, &tools).unwrap()
+                };
+                owner.authorize_debug(intent, &workspace).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    if let Some(result) = workspace.project_result(DiscoveryKind::Debugger) {
+                        owner.debug_root_result(result).unwrap();
+                    }
+                    for event in workspace.preflight_events() {
                         match event {
-                            WorkspacePreflightEvent::Ready(ready) => {
-                                owner.debug_preflight(ready).unwrap()
-                            }
+                            WorkspacePreflightEvent::Ready(ready) => owner.debug_preflight(ready).unwrap(),
                             _ => panic!("preflight failed"),
                         }
                     }
-                    break;
+                    owner.advance_debug(
+                        workspace.execution_lane(DiscoveryKind::Debugger), &policy, 1, &tools,
+                    ).unwrap();
+                    match owner.try_event() {
+                        Some(crate::debugger::DapEvent::Stopped { .. }) => break,
+                        Some(crate::debugger::DapEvent::Failed { message, .. }) => panic!("{message}"),
+                        _ => {}
+                    }
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(5));
                 }
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(5));
+                assert_eq!(
+                    std::fs::read_to_string(root_path.join("launch-program")).unwrap(),
+                    if automatic { &root_path } else { &target }.display().to_string()
+                );
+                owner.stop().unwrap();
             }
-            owner
-                .advance_debug(
-                    workspace.execution_lane(DiscoveryKind::Debugger),
-                    &policy,
-                    1,
-                    &tools,
-                )
-                .unwrap();
-            while !root.path().join("launch-program").exists() {
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            assert_eq!(
-                std::fs::read_to_string(root.path().join("launch-program")).unwrap(),
-                target.display().to_string()
-            );
-            owner.stop().unwrap();
         }
     }
 }

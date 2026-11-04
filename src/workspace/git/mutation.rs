@@ -1177,6 +1177,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancellation_suppresses_a_completion_delivered_after_cancel() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut service = GitMutationService {
+            next: 1,
+            active: Some(GitMutationGeneration(1)),
+            cancel: Some(Arc::clone(&cancellation)),
+            receiver: Some(rx),
+            accepted: None,
+        };
+        let (release, wait) = mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            wait.recv().unwrap();
+            tx.send(GitMutationEvent::Complete(Err(GitMutationError::StaleWorktree)))
+        });
+        service.cancel();
+        assert!(cancellation.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err(), "cancel drops the result receiver");
+        assert!(service.poll().unwrap().is_none());
+        assert_eq!(service.next, 1);
+    }
+
+    #[test]
     fn index_mutations_hold_git_lock() {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();

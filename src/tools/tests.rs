@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use reqwest::Url;
 
 use super::{
@@ -273,14 +271,16 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
         elf_interpreter(&installed).expect("ELF interpreter"),
         Some(runtime.loader.display().to_string())
     );
-    let output = std::process::Command::new(&installed)
-        .arg("--version")
-        .env_clear()
-        .envs(runtime.environment())
-        .output()
-        .expect("launch patched upstream executable");
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("0.3.3016"));
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: definition.id,
+        executable: installed,
+        arguments: vec!["--version".into()],
+        environment: runtime.environment(),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    })
+    .expect("launch patched upstream executable");
+    assert!(version.contains("0.3.3016"), "{version}");
 }
 
 #[test]
@@ -290,11 +290,7 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
         return;
     }
     let nix = discover_executable("nix").expect("Nix executable");
-    let definitions = bundled_tool_catalog()
-        .into_iter()
-        .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
-        .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 23);
+    let definitions = managed_lsp_definitions();
     let directory = tempfile::tempdir().expect("tool store");
     let (_, cancellations) = std::sync::mpsc::channel();
     let mut report = |_: &str, _: u64, _: Option<u64>| {};
@@ -311,24 +307,7 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
         let environment = nix_lsp_launch_environment_at(directory.path(), &definition)
             .expect("private launch environment");
         if definition.probe_args.is_empty() {
-            let mut child = std::process::Command::new(&installed)
-                .args(&definition.launch_args)
-                .current_dir(directory.path())
-                .env_clear()
-                .envs(&environment)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .unwrap_or_else(|error| panic!("launch {}: {error}", definition.id));
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            assert!(
-                child.try_wait().expect("launch status").is_none(),
-                "{} exited during launch smoke",
-                definition.id
-            );
-            child.kill().expect("stop launch smoke");
-            child.wait().expect("reap launch smoke");
+            lsp_protocol_smoke(&definition, &installed, directory.path());
         } else {
             let version = probe_tool_version(
                 ToolVersionRequest {
@@ -347,59 +326,201 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
     }
 }
 
+const MANAGED_LSP_FIXTURES: [(&str, &str, &str, &str); 24] = [
+    ("rust-analyzer", "rust", "src/main.rs", "fn main() { let value = 1; value; }\n"),
+    ("typescript-language-server", "typescript", "main.ts", "const value = 1;\nvalue;\n"),
+    ("pyright", "python", "main.py", "value = 1\nvalue\n"),
+    ("clangd", "c", "main.c", "int main(void) { return 0; }\n"),
+    ("gopls", "go", "main.go", "package main\nfunc main() { var value = 1; _ = value }\n"),
+    ("bash-language-server", "shellscript", "main.sh", "#!/bin/sh\necho value\n"),
+    ("vscode-html-language-server", "html", "index.html", "<main>value</main>\n"),
+    ("tailwindcss-language-server", "html", "index.html", "<main class=\"flex\">value</main>\n"),
+    ("taplo", "toml", "config.toml", "value = 1\n"),
+    ("vscode-css-language-server", "css", "style.css", "main { color: red; }\n"),
+    ("vscode-json-language-server", "json", "config.json", "{\"value\": 1}\n"),
+    ("yaml-language-server", "yaml", "config.yaml", "value: 1\n"),
+    ("marksman", "markdown", "README.md", "# Value\n\ntext\n"),
+    ("emmylua-ls", "lua", "main.lua", "local value = 1\nprint(value)\n"),
+    ("intelephense", "php", "main.php", "<?php\n$value = 1;\necho $value;\n"),
+    ("svelte-language-server", "svelte", "App.svelte", "<script>let value = 1;</script>\n{value}\n"),
+    ("vue-language-server", "vue", "App.vue", "<script setup>const value = 1</script>\n<template>{{ value }}</template>\n"),
+    ("dockerfile-language-server", "dockerfile", "Dockerfile", "FROM scratch\n"),
+    ("astro-language-server", "astro", "index.astro", "---\nconst value = 1;\n---\n<main>{value}</main>\n"),
+    ("biome", "javascript", "main.js", "const value = 1;\nvalue;\n"),
+    ("oxlint", "javascript", "main.js", "const value = 1;\nvalue;\n"),
+    ("oxfmt", "javascript", "main.js", "const value = 1;\nvalue;\n"),
+    ("tsgo", "typescript", "main.ts", "const value = 1;\nvalue;\n"),
+    ("ruff", "python", "main.py", "value = 1\nvalue\n"),
+];
+
+fn managed_lsp_definitions() -> Vec<super::catalog::ToolDefinition> {
+    let definitions = bundled_tool_catalog()
+        .into_iter()
+        .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
+        .collect::<Vec<_>>();
+    let mut actual = definitions.iter().map(|tool| tool.id.as_str()).collect::<Vec<_>>();
+    let mut expected = MANAGED_LSP_FIXTURES.iter().map(|fixture| fixture.0).collect::<Vec<_>>();
+    actual.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(actual, expected, "managed LSP fixtures must match the catalog before installation");
+    definitions
+}
+
+#[test]
+fn managed_lsp_protocol_fixtures_cover_the_exact_catalog_inventory() {
+    managed_lsp_definitions();
+}
+
+// Keep qualification launches independent of the developer's environment while
+// using the same bounded version probe as the tool manager. `env` execs the tool.
+fn probe_isolated_tool_version(mut request: ToolVersionRequest) -> Result<String, String> {
+    let env = discover_executable("env").ok_or("env executable unavailable")?;
+    let env = std::path::absolute(env).map_err(|error| error.to_string())?;
+    let mut arguments = vec!["-i".into()];
+    arguments.extend(request.environment.iter().map(|(key, value)| format!("{key}={value}")));
+    arguments.push(request.executable.to_str().ok_or("non-UTF-8 tool path")?.into());
+    arguments.append(&mut request.arguments);
+    request.executable = env;
+    request.arguments = arguments;
+    request.environment.clear();
+    probe_tool_version(request, &std::sync::atomic::AtomicBool::new(false))
+}
+
+#[cfg(unix)]
+#[test]
+fn isolated_version_probe_does_not_inherit_the_developer_environment() {
+    let directory = tempfile::tempdir().unwrap();
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: "isolated".into(),
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), "test -z \"${HOME+x}\" && printf '%s' \"$DUST_PROBE_FIXTURE\"".into()],
+        environment: std::collections::BTreeMap::from([("DUST_PROBE_FIXTURE".into(), "isolated".into())]),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    }).unwrap();
+    assert_eq!(version, "isolated");
+}
+
 fn write_lsp_message(
     stdin: &mut std::process::ChildStdin,
     message: &serde_json::Value,
 ) -> Result<(), String> {
-    let body = serde_json::to_vec(message).map_err(|error| error.to_string())?;
-    write!(stdin, "Content-Length: {}\r\n\r\n", body.len())
-        .and_then(|()| stdin.write_all(&body))
-        .and_then(|()| stdin.flush())
-        .map_err(|error| format!("write LSP frame: {error}"))
+    crate::process::write_content_length_message(stdin, message)
+        .map_err(|error| error.to_string())
 }
 
 fn lsp_reader(
-    stdout: std::process::ChildStdout,
+    stdout: impl std::io::Read,
     messages: std::sync::mpsc::Sender<Result<serde_json::Value, String>>,
 ) {
     let mut reader = std::io::BufReader::new(stdout);
     loop {
-        let mut content_length = None;
-        loop {
-            let mut line = String::new();
-            match std::io::BufRead::read_line(&mut reader, &mut line) {
-                Ok(0) => return,
-                Ok(_) if line == "\r\n" || line == "\n" => break,
-                Ok(_) => {
-                    if let Some(value) = line
-                        .trim()
-                        .strip_prefix("Content-Length:")
-                        .and_then(|value| value.trim().parse::<usize>().ok())
-                    {
-                        content_length = Some(value);
-                    }
-                }
-                Err(error) => {
-                    let _ = messages.send(Err(format!("read LSP header: {error}")));
+        match crate::process::read_content_length_message(&mut reader) {
+            Ok(Some(message)) => {
+                if messages.send(Ok(message)).is_err() {
                     return;
                 }
             }
-        }
-        let Some(length) = content_length.filter(|length| *length <= 8 * 1024 * 1024) else {
-            let _ = messages.send(Err("invalid LSP Content-Length".into()));
-            return;
-        };
-        let mut body = vec![0_u8; length];
-        if let Err(error) = std::io::Read::read_exact(&mut reader, &mut body) {
-            let _ = messages.send(Err(format!("read LSP body: {error}")));
-            return;
-        }
-        let message =
-            serde_json::from_slice(&body).map_err(|error| format!("decode LSP JSON: {error}"));
-        if messages.send(message).is_err() {
-            return;
+            Ok(None) => return,
+            Err(error) => {
+                let _ = messages.send(Err(error.to_string()));
+                return;
+            }
         }
     }
+}
+
+struct LspSmokeProcess {
+    child: std::process::Child,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+impl LspSmokeProcess {
+    fn spawn(command: &mut std::process::Command) -> (
+        Self,
+        std::sync::mpsc::Receiver<Result<serde_json::Value, String>>,
+    ) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let child = command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn().expect("launch LSP smoke");
+        let mut process = Self {
+            child,
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            reader: None,
+        };
+        let stdout = crate::process::CancellablePipe::new(
+            process.child.stdout.take().expect("LSP stdout"),
+            process.cancelled.clone(),
+        ).expect("cancellable LSP stdout");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        process.reader = Some(std::thread::spawn(move || lsp_reader(stdout, sender)));
+        (process, receiver)
+    }
+}
+
+impl Drop for LspSmokeProcess {
+    fn drop(&mut self) {
+        self.cancelled.store(true, std::sync::atomic::Ordering::Release);
+        #[cfg(unix)]
+        crate::process::terminate_process_group(self.child.id());
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+#[test]
+fn lsp_smoke_reader_accepts_lowercase_headers_and_shared_framing() {
+    let message = serde_json::json!({"id": 1, "result": {}});
+    let body = serde_json::to_string(&message).unwrap();
+    let mut frames = format!("content-length: {}\r\n\r\n{body}", body.len()).into_bytes();
+    crate::process::write_content_length_message(&mut frames, &message).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    lsp_reader(frames.as_slice(), sender);
+    let received = receiver.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(received, [message.clone(), message]);
+}
+
+#[cfg(unix)]
+#[test]
+fn lsp_smoke_cleans_up_after_an_assertion_failure() {
+    let mut command = std::process::Command::new("/bin/sh");
+    command.args(["-c", "sleep 30"]);
+    let (process, _messages) = LspSmokeProcess::spawn(&mut command);
+    let pid = nix::unistd::Pid::from_raw(process.child.id() as i32);
+    let started = std::time::Instant::now();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _process = process;
+        panic!("fixture protocol assertion failure");
+    }));
+    assert!(result.is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(nix::sys::signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
+}
+
+#[cfg(unix)]
+#[test]
+fn lsp_smoke_reader_shutdown_is_bounded_after_the_child_exits() {
+    let mut command = std::process::Command::new("/bin/sh");
+    command.args(["-c", "sleep 30 & exit 0"]);
+    let (mut process, _messages) = LspSmokeProcess::spawn(&mut command);
+    assert!(process.child.wait().unwrap().success());
+    let (done, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(process);
+        done.send(()).unwrap();
+    });
+    receiver.recv_timeout(std::time::Duration::from_secs(2)).expect("reader shutdown");
 }
 
 fn await_lsp_response(
@@ -463,11 +584,7 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         return;
     }
     let nix = discover_executable("nix").expect("Nix executable");
-    let definitions = bundled_tool_catalog()
-        .into_iter()
-        .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
-        .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 23);
+    let definitions = managed_lsp_definitions();
     let directory = tempfile::tempdir().expect("tool store");
     let (_, cancellations) = std::sync::mpsc::channel();
     let mut report = |_: &str, _: u64, _: Option<u64>| {};
@@ -481,7 +598,16 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         )
         .unwrap_or_else(|error| panic!("install {}: {error}", definition.id))
         .expect("installed executable");
-        let project = directory.path().join("projects").join(&definition.id);
+        lsp_protocol_smoke(&definition, &installed, directory.path());
+    }
+}
+
+fn lsp_protocol_smoke(
+    definition: &super::catalog::ToolDefinition,
+    installed: &std::path::Path,
+    store: &std::path::Path,
+) {
+        let project = store.join("projects").join(&definition.id);
         std::fs::create_dir_all(project.join("src")).expect("project directory");
         std::fs::write(
             project.join("Cargo.toml"),
@@ -501,46 +627,10 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         )
         .expect("Go marker");
         std::fs::write(project.join(".clangd"), "CompileFlags: {}\n").expect("clangd marker");
-        let (language, source_name, text) = match definition.id.as_str() {
-            "rust-analyzer" => (
-                "rust",
-                "src/main.rs",
-                "fn main() { let value = 1; value; }\n",
-            ),
-            "typescript-language-server" => ("typescript", "main.ts", "const value = 1;\nvalue;\n"),
-            "pyright" => ("python", "main.py", "value = 1\nvalue\n"),
-            "clangd" => ("c", "main.c", "int main(void) { return 0; }\n"),
-            "gopls" => (
-                "go",
-                "main.go",
-                "package main\nfunc main() { var value = 1; _ = value }\n",
-            ),
-            "bash-language-server" => ("shellscript", "main.sh", "#!/bin/sh\necho value\n"),
-            "vscode-html-language-server" => ("html", "index.html", "<main>value</main>\n"),
-            "vscode-css-language-server" => ("css", "style.css", "main { color: red; }\n"),
-            "vscode-json-language-server" => ("json", "config.json", "{\"value\": 1}\n"),
-            "yaml-language-server" => ("yaml", "config.yaml", "value: 1\n"),
-            "marksman" => ("markdown", "README.md", "# Value\n\ntext\n"),
-            "emmylua-ls" => ("lua", "main.lua", "local value = 1\nprint(value)\n"),
-            "intelephense" => ("php", "main.php", "<?php\n$value = 1;\necho $value;\n"),
-            "svelte-language-server" => (
-                "svelte",
-                "App.svelte",
-                "<script>let value = 1;</script>\n{value}\n",
-            ),
-            "vue-language-server" => (
-                "vue",
-                "App.vue",
-                "<script setup>const value = 1</script>\n<template>{{ value }}</template>\n",
-            ),
-            "dockerfile-language-server" => ("dockerfile", "Dockerfile", "FROM scratch\n"),
-            "astro-language-server" => (
-                "astro",
-                "index.astro",
-                "---\nconst value = 1;\n---\n<main>{value}</main>\n",
-            ),
-            other => panic!("unexpected catalog LSP {other}"),
-        };
+        let &(_, language, source_name, text) = MANAGED_LSP_FIXTURES
+            .iter()
+            .find(|fixture| fixture.0 == definition.id)
+            .expect("catalog LSP fixture");
         let source = project.join(source_name);
         if let Some(parent) = source.parent() {
             std::fs::create_dir_all(parent).expect("source parent");
@@ -550,11 +640,28 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         let source_uri = Url::from_file_path(&source)
             .expect("source URI")
             .to_string();
-        let environment = nix_lsp_launch_environment_at(directory.path(), &definition)
-            .expect("private launch environment");
+        let runtime = nix_lsp_runtime_at(store, definition).expect("private runtime");
+        let mut environment = runtime.environment();
+        let path = std::env::join_paths(
+            std::iter::once(store.join(&definition.id).join("bin"))
+                .chain(std::env::split_paths(&runtime.runtime_path)),
+        ).expect("private runtime PATH");
+        environment.insert("PATH".into(), path.to_str().unwrap().into());
+        for (variable, name) in [
+            ("HOME", "home"),
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_STATE_HOME", "state"),
+            ("TMPDIR", "tmp"),
+        ] {
+            let path = store.join("environment").join(&definition.id).join(name);
+            std::fs::create_dir_all(&path).expect("isolated server directory");
+            environment.insert(variable.into(), path.to_str().unwrap().into());
+        }
         if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
             let node =
-                std::fs::canonicalize(directory.path().join(&definition.id).join("bin/node"))
+                std::fs::canonicalize(store.join(&definition.id).join("bin/node"))
                     .expect("private Node runtime");
             assert!(
                 node.starts_with("/nix/store") && node.to_string_lossy().contains("nodejs"),
@@ -563,21 +670,12 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
                 node.display()
             );
         }
-        let mut child = std::process::Command::new(&installed)
-            .args(&definition.launch_args)
-            .current_dir(&project)
-            .envs(environment)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap_or_else(|error| panic!("launch {}: {error}", definition.id));
-        let mut stdin = child.stdin.take().expect("LSP stdin");
-        let stdout = child.stdout.take().expect("LSP stdout");
-        let (messages_tx, messages_rx) = std::sync::mpsc::channel();
-        let reader = std::thread::spawn(move || lsp_reader(stdout, messages_tx));
+        let mut command = std::process::Command::new(installed);
+        command.args(&definition.launch_args).current_dir(&project).env_clear().envs(environment);
+        let (mut process, messages_rx) = LspSmokeProcess::spawn(&mut command);
+        let mut stdin = process.child.stdin.take().expect("LSP stdin");
         let configuration =
-            crate::language::lsp::LspServerConfiguration::for_server(&definition.id, &installed);
+            crate::language::lsp::LspServerConfiguration::for_server(&definition.id, installed);
         let mut initialize_request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -629,7 +727,11 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
             }),
         )
         .expect("didOpen frame");
-        if definition.id != "vue-language-server" {
+        assert!(initialize.pointer("/result/capabilities").is_some_and(serde_json::Value::is_object));
+        // Linters and formatters need not implement completion.
+        if initialize.pointer("/result/capabilities/completionProvider")
+            .is_some_and(|provider| provider.is_object() || provider == true)
+        {
             write_lsp_message(
                 &mut stdin,
                 &serde_json::json!({
@@ -677,18 +779,15 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
         drop(stdin);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            if child.try_wait().expect("LSP status").is_some() {
+            if process.child.try_wait().expect("LSP status").is_some() {
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                child.kill().expect("kill LSP after exit timeout");
-                child.wait().expect("reap LSP");
                 panic!("{} did not exit after shutdown", definition.id);
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        reader.join().expect("LSP reader");
-    }
+        drop(process);
 }
 
 #[test]
@@ -715,14 +814,19 @@ fn managed_bun_installs_and_launches_an_exact_javascript_tool_without_node_or_np
     .expect("tool executable");
     let bin = installed.parent().expect("tool bin");
     assert!(bin.join("node").is_file());
-    let status = std::process::Command::new(&installed)
-        .arg("--version")
-        .env_clear()
-        .env("HOME", directory.path())
-        .env("PATH", bin)
-        .status()
-        .expect("launch Bun-backed JavaScript executable");
-    assert!(status.success());
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: definition.id.clone(),
+        executable: installed.clone(),
+        arguments: vec!["--version".into()],
+        environment: std::collections::BTreeMap::from([
+            ("HOME".into(), directory.path().to_str().unwrap().into()),
+            ("PATH".into(), bin.to_str().unwrap().into()),
+        ]),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    })
+    .expect("launch Bun-backed JavaScript executable");
+    assert_eq!(Some(version.as_str()), definition.version.as_deref());
 }
 
 #[test]
@@ -777,12 +881,29 @@ fn installer_worker_routes_real_managed_uninstall_and_reports_its_operation() {
     assert!(!directory.path().join("rust-analyzer").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn installer_worker_queues_requests_made_while_one_is_running() {
+    use std::os::unix::fs::PermissionsExt;
+
     let directory = tempfile::tempdir().expect("tool store");
     let catalog = bundled_tool_catalog();
     let installer = ToolInstaller::start_at(directory.path().to_path_buf());
-    let ids = ["rust-analyzer", "claude-agent-acp", "codex-acp"];
+    let rustup = directory.path().join("rustup");
+    std::fs::write(&rustup, "#!/bin/sh\n: > .ready\nn=0\nwhile [ ! -f .release ]; do\n n=$((n+1))\n [ \"$n\" -lt 1000 ] || exit 1\n sleep 0.01\ndone\n").unwrap();
+    std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    std::fs::hard_link(&rustup, &proxy).unwrap();
+    let first = catalog.iter().find(|tool| tool.id == "rust-analyzer").unwrap().clone();
+    installer.install_rustup_component(
+        first, rustup, proxy, directory.path().into(), "rust-analyzer".into(),
+    ).expect("queue blocking install");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !directory.path().join(".ready").exists() {
+        assert!(std::time::Instant::now() < deadline, "installer did not start");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let ids = ["claude-agent-acp", "codex-acp"];
     for id in ids {
         let selected = directory.path().join(id).join("bin");
         std::fs::create_dir_all(&selected).expect("selected tool");
@@ -794,9 +915,11 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
         installer.uninstall(definition).expect("queue uninstall");
     }
 
+    assert!(installer.try_result().unwrap().is_none(), "first operation must still be running");
+    std::fs::write(directory.path().join(".release"), b"release").unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut finished = Vec::new();
-    while finished.len() < ids.len() {
+    while finished.len() < ids.len() + 1 {
         if let Some(result) = installer.try_result().expect("installer result") {
             assert!(result.result.is_ok(), "{result:?}");
             finished.push(result.id);
@@ -807,7 +930,7 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
         );
         std::thread::yield_now();
     }
-    assert_eq!(finished, ids);
+    assert_eq!(finished, ["rust-analyzer", "claude-agent-acp", "codex-acp"]);
     assert!(ids.iter().all(|id| !directory.path().join(id).exists()));
 }
 
@@ -914,6 +1037,88 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
 }
 
 #[cfg(unix)]
+fn wait_for_descendant(path: &std::path::Path) -> nix::unistd::Pid {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(path)
+            && let Ok(pid) = contents.trim().parse::<i32>()
+            && pid > 0
+        {
+            let pid = nix::unistd::Pid::from_raw(pid);
+            assert_eq!(nix::sys::signal::kill(pid, None), Ok(()), "descendant must be observable before cancellation");
+            return pid;
+        }
+        assert!(std::time::Instant::now() < deadline, "descendant PID was not published");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+fn assert_descendant_stopped(pid: nix::unistd::Pid) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match nix::sys::signal::kill(pid, None) {
+            Err(nix::errno::Errno::ESRCH) => return,
+            Ok(()) => {
+                // A killed orphan can remain a zombie until the host's init reaps it.
+                #[cfg(target_os = "linux")]
+                if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                    && stat.rsplit_once(") ").and_then(|(_, state)| state.chars().next()) == Some('Z')
+                {
+                    return;
+                }
+            }
+            Err(error) => panic!("cannot inspect descendant {pid}: {error}"),
+        }
+        assert!(std::time::Instant::now() < deadline, "descendant {pid} is still running");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn version_probe_terminates_descendants_on_every_exit_path() {
+    use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time::Duration};
+
+    for (action, expected_error) in [
+        ("wait", Some("cancelled")),
+        ("wait", Some("timed out")),
+        ("while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done", Some("exceeded its limit")),
+        ("printf version", Some("remained open")),
+        ("printf version; exec 1>&- 2>&-; exit 1", Some("exited with")),
+        ("printf version; exec 1>&- 2>&-", None),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let request = ToolVersionRequest {
+            id: "descendant".into(),
+            executable: "/bin/sh".into(),
+            arguments: vec!["-c".into(), format!(
+                "sleep 30 {} & echo $! > descendant; while [ ! -f release ]; do sleep 0.01; done; {action}",
+                if action.contains("exec") { ">/dev/null 2>&1" } else { "" },
+            )],
+            environment: Default::default(),
+            current_directory: Some(root.path().into()),
+            timeout: Duration::from_secs(10),
+        };
+        let worker_cancelled = cancelled.clone();
+        let worker = thread::spawn(move || probe_tool_version(request, &worker_cancelled));
+        let pid = wait_for_descendant(&root.path().join("descendant"));
+        std::fs::write(root.path().join("release"), b"").unwrap();
+        if expected_error == Some("cancelled") {
+            cancelled.store(true, Ordering::Release);
+        }
+        let result = worker.join().unwrap();
+        assert_descendant_stopped(pid);
+        if let Some(error) = expected_error {
+            assert!(result.as_ref().is_err_and(|result| result.contains(error)), "{result:?}");
+        } else {
+            assert_eq!(result.unwrap(), "version");
+        }
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn version_probe_is_bounded_when_a_descendant_keeps_output_open() {
     let shell = discover_executable("sh").expect("shell fixture");
@@ -952,20 +1157,37 @@ fn current_test_process_is_discoverable_without_a_shell() {
 fn version_service_shutdown_with_full_results_is_bounded() {
     use std::{sync::mpsc, thread, time::Duration};
     let service = super::ToolVersionService::start();
+    let directory = tempfile::tempdir().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
     for id in 0..40 {
         let request = ToolVersionRequest {
             id: id.to_string(),
-            executable: "/bin/echo".into(),
-            arguments: vec!["version".into()],
+            executable: "/bin/sh".into(),
+            arguments: vec!["-c".into(), if id == 32 {
+                // This cannot execute until all 32 preceding results have been queued.
+                "printf version; : > full".into()
+            } else {
+                "printf version".into()
+            }],
             environment: Default::default(),
-            current_directory: None,
+            current_directory: Some(directory.path().into()),
             timeout: Duration::from_secs(1),
         };
-        while service.probe(request.clone()).is_err() {
-            thread::sleep(Duration::from_millis(2));
+        loop {
+            match service.probe(&request) {
+                Ok(()) => break,
+                Err(std::sync::mpsc::TrySendError::Full(())) => {
+                    assert!(std::time::Instant::now() < deadline, "probe admission timed out");
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("probe worker stopped: {error}"),
+            }
         }
     }
-    thread::sleep(Duration::from_millis(500));
+    while !directory.path().join("full").exists() {
+        assert!(std::time::Instant::now() < deadline, "result queue did not fill");
+        thread::sleep(Duration::from_millis(2));
+    }
     let (done, receiver) = mpsc::channel();
     thread::spawn(move || {
         drop(service);
@@ -990,7 +1212,7 @@ fn version_probe_stops_continuous_oversized_output() {
             ],
             environment: Default::default(),
             current_directory: None,
-            timeout: std::time::Duration::from_millis(100),
+            timeout: std::time::Duration::from_secs(10),
         },
         &std::sync::atomic::AtomicBool::new(false),
     );
@@ -1299,9 +1521,21 @@ fn package_service_keeps_every_completion_under_backpressure() {
     let root = tempfile::tempdir().unwrap();
     let mut service = super::PackageService::start(root.path().into(), 1, 1024, 1024);
     let mut admitted = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
-        admitted.push(service.request(super::PackageOperation::List).unwrap());
-        thread::sleep(Duration::from_millis(50));
+        loop {
+            match service.request(super::PackageOperation::List) {
+                Ok(id) => {
+                    admitted.push(id);
+                    break;
+                }
+                Err(super::PackageError::QueueFull) => {
+                    assert!(Instant::now() < deadline, "package admission timed out");
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("package admission failed: {error}"),
+            }
+        }
     }
     let mut received = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -1338,15 +1572,23 @@ fn registry_service_keeps_every_result_under_backpressure() {
     )
     .unwrap();
     let mut admitted = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
-        admitted.push(
-            service
-                .request(super::RegistryRequest::Search {
-                    query: "fixture".into(),
-                })
-                .unwrap(),
-        );
-        thread::sleep(Duration::from_millis(50));
+        loop {
+            match service.request(super::RegistryRequest::Search {
+                query: "fixture".into(),
+            }) {
+                Ok(id) => {
+                    admitted.push(id);
+                    break;
+                }
+                Err(super::RegistryError::QueueFull) => {
+                    assert!(Instant::now() < deadline, "registry admission timed out");
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("registry admission failed: {error}"),
+            }
+        }
     }
     let mut received = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -1402,12 +1644,7 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
 #[cfg(unix)]
 #[test]
 fn installer_cancellation_terminates_descendant_processes() {
-    use std::{
-        fs,
-        sync::mpsc,
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{sync::mpsc, thread};
     let root = tempfile::tempdir().unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
@@ -1424,16 +1661,10 @@ fn installer_cancellation_terminates_descendant_processes() {
             None,
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !root.path().join("descendant").exists() {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    let pid = wait_for_descendant(&root.path().join("descendant"));
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
-    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
-    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+    assert_descendant_stopped(pid);
 }
 
 #[test]

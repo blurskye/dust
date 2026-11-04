@@ -1440,6 +1440,9 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_persistence_events(&mut self) {
+        for error in self.persistence.poll_undo_saves() {
+            self.show_error(error);
+        }
         self.read_persistence_events();
         // A project with no saved session file finishes loading without any event.
         if self.session_load_requested && !self.persistence.pending() {
@@ -4723,11 +4726,8 @@ impl InteractiveApplication {
                 row,
                 body_height,
                 gutter,
-                wrap: wrap_enabled,
                 rows: &visual_rows,
-                inlays: &self.ui.lsp_inlay_hints,
             },
-            &self.configuration.settings().editor,
             transaction_id,
             extend_selection,
         );
@@ -7039,7 +7039,41 @@ impl InteractiveApplication {
         };
         let mut tabstops = Vec::new();
         if snippet {
-            match crate::language::lsp::parse_snippet(&edit.new_text, 1024 * 1024) {
+            let path = &document.path;
+            let current_line = buffer.line(line).unwrap_or_default();
+            let line_start = buffer.line_to_byte(line).unwrap_or(ByteOffset(0)).get();
+            let column = offset.get().saturating_sub(line_start).min(current_line.len());
+            let word_start = current_line[..column].char_indices().rev()
+                .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
+                .map_or(0, |(at, c)| at + c.len_utf8());
+            let word_end = current_line[column..].char_indices()
+                .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
+                .map_or(current_line.len(), |(at, _)| column + at);
+            let selected = self.state.active_view
+                .and_then(|view| self.state.views[view].selection)
+                .and_then(|selection| {
+                    let start = selection.anchor.min(selection.head);
+                    let end = selection.anchor.max(selection.head);
+                    buffer.slice(ByteRange::new(start, end).ok()?).ok()
+                }).unwrap_or_default();
+            let mut variables = std::collections::HashMap::from([
+                ("TM_FILENAME".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+                ("TM_FILENAME_BASE".into(), path.file_stem().unwrap_or_default().to_string_lossy().into_owned()),
+                ("TM_DIRECTORY".into(), path.parent().unwrap_or(path).to_string_lossy().into_owned()),
+                ("TM_FILEPATH".into(), path.to_string_lossy().into_owned()),
+                ("RELATIVE_FILEPATH".into(), path.strip_prefix(&self.state.workspace_root).unwrap_or(path).to_string_lossy().into_owned()),
+                ("WORKSPACE_NAME".into(), self.state.workspace_root.file_name().unwrap_or_default().to_string_lossy().into_owned()),
+                ("WORKSPACE_FOLDER".into(), self.state.workspace_root.to_string_lossy().into_owned()),
+                ("TM_LINE_INDEX".into(), line.to_string()),
+                ("TM_LINE_NUMBER".into(), (line + 1).to_string()),
+                ("TM_CURRENT_WORD".into(), current_line[word_start..word_end].into()),
+                ("TM_CURRENT_LINE".into(), current_line.trim_end_matches('\n').into()),
+                ("TM_SELECTED_TEXT".into(), selected),
+            ]);
+            if variables.get("TM_SELECTED_TEXT").is_some_and(String::is_empty) {
+                variables.remove("TM_SELECTED_TEXT");
+            }
+            match crate::language::lsp::parse_snippet_with_variables(&edit.new_text, 1024 * 1024, &variables) {
                 Ok(parsed) => {
                     edit.new_text = parsed.text;
                     tabstops = parsed.tabstops;
@@ -9340,6 +9374,7 @@ impl InteractiveApplication {
             PickerPayload::MatcherSource(source) => {
                 let (retired, ticket) = self.search.prepare_preview(
                     source.path.clone(),
+                    source.line,
                     label,
                     "loading…".into(),
                     self.workspace.version(),
@@ -9367,7 +9402,7 @@ impl InteractiveApplication {
                             self.documents.cancel_request(id);
                         }
                     }
-                    Err(error) => self.search.preview_failed(ticket, error.to_string()),
+                    Err(error) => self.search.preview_failed(ticket, error),
                 }
             }
             _ => self.clear_picker_preview(),
@@ -10838,12 +10873,18 @@ impl InteractiveApplication {
         source: LspRuntimeSource,
         executable: PathBuf,
     ) {
+        if self.workspace.execution_allowed().is_err() {
+            return;
+        }
         self.set_tool_probe_directory();
         self.tooling
             .queue_tool_version_probe(definition, source, executable)
     }
 
     pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
+        if self.workspace.execution_allowed().is_err() {
+            return;
+        }
         self.set_tool_probe_directory();
         self.tooling.queue_tool_version_probes(category)
     }
@@ -11843,7 +11884,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
-        let (changed, unavailable_rustup) = self.tooling.poll_versions();
+        let (changed, unavailable_rustup) = self
+            .tooling
+            .poll_versions(self.workspace.execution_allowed().is_ok());
         if changed {
             self.language.reset_autostart();
             let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());
@@ -13701,7 +13744,6 @@ impl InteractiveApplication {
             AppEffect::GitConflictReplace { side, files } => {
                 self.preview_git_replacement(&side, &files);
             }
-            AppEffect::GitConflictReplaceSubmit => {}
             AppEffect::Tutor => self.open_tutor(),
             AppEffect::TutorNext => self.tutor_next(),
             AppEffect::WalkJumps(back) => self.walk_jumps(back),
@@ -14805,6 +14847,7 @@ impl InteractiveApplication {
                 revision,
                 bytes,
                 snapshot,
+                line_ending,
                 target: path,
                 quit: quit_after,
                 close,
@@ -14816,6 +14859,9 @@ impl InteractiveApplication {
                         self.window_session.fail_editor_close_save(token);
                     }
                     return;
+                }
+                if let Some(ending) = line_ending {
+                    candidate.set_document_line_ending(buffer, ending);
                 }
                 if let Err(e) = self.commit_editor_draft(candidate, None, false) {
                     self.input.clear_pending_stage();
@@ -14830,13 +14876,13 @@ impl InteractiveApplication {
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
                 if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
-                    crate::editor::save_undo_history(
+                    self.persistence.track_undo_save(path.clone(), crate::editor::save_undo_history(
                         directory.clone(),
                         path.clone(),
                         buffer_state.text.clone(),
                         buffer_state.undo.clone(),
                         self.state.undo_maximum_bytes,
-                    );
+                    ));
                 }
                 let lsp_document = buffer_state.path.clone().and_then(|path| {
                     Some(LspDocument {

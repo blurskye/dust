@@ -29,7 +29,7 @@ pub use paths::{file_uri, language_id_for_path, path_from_file_uri};
 mod error;
 pub use error::LspError;
 mod snippet;
-pub use snippet::{ParsedSnippet, SnippetTabstop, parse_snippet};
+pub use snippet::{ParsedSnippet, SnippetTabstop, parse_snippet, parse_snippet_with_variables};
 mod markdown;
 pub use markdown::sanitize_markdown;
 

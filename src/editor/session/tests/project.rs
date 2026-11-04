@@ -2038,6 +2038,48 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
 }
 
 #[test]
+fn file_preview_retries_after_capacity_returns_without_picker_input() {
+    use crate::editor::session::search::{MatcherSource, PickerPayload};
+    let mut app = app();
+    let path = app.state.workspace_root.join("preview.txt");
+    fs::write(&path, "ready\n").unwrap();
+    let roots = vec![app.state.workspace_root.clone()];
+    let mut requests = Vec::new();
+    loop {
+        match app.documents.read_scoped_bounded(path.clone(), roots.clone(), 64) {
+            Ok(id) => requests.push(id),
+            Err(crate::files::VfsError::QueueFull) => break,
+            Err(error) => panic!("unexpected admission error: {error}"),
+        }
+    }
+    app.install_picker("Preview".into(), vec![(
+        crate::workspace::PickerItem {
+            id: crate::workspace::PickerItemId("preview".into()),
+            label: "preview.txt".into(),
+            detail: String::new(),
+            source: String::new(),
+            badge: String::new(),
+            action: crate::workspace::PickerAction::None,
+            kind: crate::workspace::PickerItemKind::Entry,
+        },
+        PickerPayload::MatcherSource(MatcherSource { path, line: 0, column: 0, encoding: crate::editor::text::PositionEncoding::Utf8 }),
+    )]);
+    assert!(app.search.preview_needs_retry());
+    for id in requests {
+        app.documents.cancel_request(id);
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.search.preview_needs_retry() || app.documents.has_work() {
+        app.process_vfs_results();
+        assert!(Instant::now() < deadline, "preview retry timed out");
+        thread::yield_now();
+    }
+    let text = app.ui.picker.as_ref().unwrap().preview.as_ref().unwrap().as_text().unwrap();
+    assert_eq!(text.lines(), ["ready"]);
+    assert!(!app.search.preview_needs_retry());
+}
+
+#[test]
 fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     let mut app = app();
     let path = app.state.workspace_root.join("match.txt");
