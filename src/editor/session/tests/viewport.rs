@@ -891,7 +891,7 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 
 #[test]
 fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
-    for mode in [crate::editor::EditorMode::Normal, crate::editor::EditorMode::Insert] {
+    for mode in [crate::editor::EditorMode::Normal, crate::editor::EditorMode::Insert, crate::editor::EditorMode::Replace] {
         let mut app = app();
         app.window_session.observe_size((80, 24));
         let mut fixture = app.configuration.fixture_snapshot();
@@ -907,7 +907,7 @@ fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
         let cursor = app.state.views[view].cursor;
         let line = text.byte_to_line(cursor).unwrap();
         assert!(line > 0);
-        assert_eq!(cursor.get() - text.line_to_byte(line).unwrap().get(), usize::from(mode == crate::editor::EditorMode::Insert));
+        assert_eq!(cursor.get() - text.line_to_byte(line).unwrap().get(), usize::from(matches!(mode, crate::editor::EditorMode::Insert | crate::editor::EditorMode::Replace)));
         if mode == crate::editor::EditorMode::Normal {
             app.handle_configured_key(KeyEvent::character('x'));
             assert_eq!(app.state.buffers[buffer].text.line(line).unwrap(), "\n");

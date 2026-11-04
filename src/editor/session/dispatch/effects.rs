@@ -4905,7 +4905,7 @@ impl InteractiveApplication {
             target_byte
         };
         let mut target = ByteOffset(target_start.get().saturating_add(target_byte));
-        if view.mode != EditorMode::Insert {
+        if !matches!(view.mode, EditorMode::Insert | EditorMode::Replace) {
             let line = buffer.text.line(target_line).unwrap_or_default();
             let content = line.strip_suffix('\n').unwrap_or(&line);
             if !content.is_empty() && target_byte >= content.len() {
