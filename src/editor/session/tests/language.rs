@@ -505,6 +505,7 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
     assert_eq!(app.state.buffers[first_buffer].text.to_string(), "abc");
     assert_eq!(fs::read_to_string(&second).expect("disk"), "xyz");
     app.accept_workspace_proposal();
+    wait_workspace_approval(&mut app);
     assert_eq!(app.state.buffers[first_buffer].text.to_string(), "aBc");
     let second_buffer = app
         .state

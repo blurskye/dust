@@ -61,15 +61,18 @@ pub fn display_spans(text: &str, policy: DisplayWidthPolicy) -> Vec<DisplaySpan>
 /// to the start of the containing grapheme rather than splitting it.
 #[must_use]
 pub fn display_column_at(text: &str, byte_offset: usize, policy: DisplayWidthPolicy) -> usize {
+    if byte_offset == 0 {
+        return 0;
+    }
     let mut column = 0_usize;
-    for span in display_spans(text, policy) {
-        if byte_offset <= span.byte_start {
-            return span.column_start;
+    for (byte_start, grapheme) in text.grapheme_indices(true) {
+        if byte_offset < byte_start.saturating_add(grapheme.len()) {
+            return column;
         }
-        if byte_offset < span.byte_end {
-            return span.column_start;
+        column = column.saturating_add(grapheme_cell_width(grapheme, column, policy));
+        if byte_offset == byte_start.saturating_add(grapheme.len()) {
+            return column;
         }
-        column = span.column_end;
     }
     column
 }
@@ -124,6 +127,17 @@ mod tests {
         DisplayWidthPolicy, byte_range_for_display_columns, display_column_at,
         insertion_at_display_column,
     };
+
+    #[test]
+    fn display_column_lookup_handles_long_lines_and_interior_offsets() {
+        let policy = DisplayWidthPolicy::default();
+        let text = format!("\t界e\u{301}{}", "x".repeat(1_000_000));
+        assert_eq!(display_column_at(&text, 0, policy), 0);
+        assert_eq!(display_column_at(&text, 2, policy), 4);
+        assert_eq!(display_column_at(&text, 6, policy), 6);
+        assert_eq!(display_column_at(&text, 7, policy), 7);
+        assert_eq!(display_column_at("\t界", usize::MAX, policy), 6);
+    }
 
     #[test]
     fn display_ranges_never_split_tabs_wide_or_combining_graphemes() {

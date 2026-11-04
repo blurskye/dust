@@ -194,6 +194,15 @@ fn wait_vfs(app: &mut InteractiveApplication) {
     }
 }
 
+fn wait_workspace_approval(app: &mut InteractiveApplication) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.workspace_edits.proposal().is_some() {
+        app.process_workspace_approval();
+        assert!(Instant::now() < deadline, "workspace approval timed out: {:?}", app.ui.notification);
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
 fn prepare_trust_identity(app: &mut InteractiveApplication) {
     let identity =
         crate::workspace::RootIdentity::capture(&app.state.workspace_root).expect("identity");

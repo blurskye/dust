@@ -360,6 +360,7 @@ pub fn run_interactive(
         application.maybe_prompt_for_unseen_workspace();
         application.process_configuration_result();
         application.process_theme_results();
+        application.process_workspace_approval();
         application.process_tool_progress();
         application.process_tool_results();
         application.process_tool_version_results();

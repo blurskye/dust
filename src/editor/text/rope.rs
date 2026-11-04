@@ -60,27 +60,27 @@ impl TextBuffer {
         TEXT_MATERIALIZATIONS.with(std::cell::Cell::get)
     }
 
+    /// Compare file bytes without allocating a second encoded copy of the document.
     #[must_use]
     pub(crate) fn matches_encoded_text(&self, bytes: &[u8]) -> bool {
-        let mut bytes = bytes
-            .strip_prefix(&[0xef, 0xbb, 0xbf])
-            .unwrap_or(bytes)
-            .iter()
-            .copied()
-            .peekable();
-        let normalized = std::iter::from_fn(|| {
-            Some(match bytes.next()? {
-                b'\r' => {
-                    if bytes.peek() == Some(&b'\n') {
-                        bytes.next();
-                    }
-                    b'\n'
+        let mut expected = bytes.iter().copied();
+        if self.format.utf8_bom && ![0xef, 0xbb, 0xbf].into_iter().all(|byte| expected.next() == Some(byte)) {
+            return false;
+        }
+        let mut endings = self.format.line_endings.iter();
+        for byte in self.rope.chunks().flat_map(str::bytes) {
+            if byte == b'\n' {
+                let ending = endings.next().copied().unwrap_or(self.format.preferred_line_ending);
+                if !ending.as_str().bytes().all(|byte| expected.next() == Some(byte)) {
+                    return false;
                 }
-                byte => byte,
-            })
-        });
-        self.rope.chunks().flat_map(str::bytes).eq(normalized)
+            } else if expected.next() != Some(byte) {
+                return false;
+            }
+        }
+        expected.next().is_none()
     }
+
     pub fn from_text(text: &str) -> Self {
         let normalized = normalize_newlines(text);
         let newline_count = normalized.bytes().filter(|byte| *byte == b'\n').count();

@@ -9,11 +9,16 @@ use crate::editor::{CommandInvocation, InvocationSource};
 fn cursor_belongs_to_view_not_shared_buffer() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (buffer, first) = state.open_text(TextBuffer::from_text("shared"), None).unwrap();
-    let second = state.views.insert(super::View::new(buffer));
-    state.views[first].cursor = ByteOffset(1);
-    state.views[second].cursor = ByteOffset(5);
+    let second = state.split_active(super::Axis::Horizontal, 500).unwrap();
+    let mut transaction = crate::editor::transaction::EditorTransaction::new(super::TransactionId(1));
+    transaction.operations.push(crate::editor::transaction::EditorOperation::SetCursor {
+        view: first,
+        position: ByteOffset(1),
+    });
+    state.apply_transaction(&transaction).unwrap();
     assert_eq!(state.buffers[buffer].text.to_string(), "shared");
-    assert_ne!(state.views[first].cursor, state.views[second].cursor);
+    assert_eq!(state.views[first].cursor, ByteOffset(1));
+    assert_eq!(state.views[second].cursor, ByteOffset(0));
 }
 
 #[test]
@@ -51,10 +56,11 @@ fn macro_registers_are_typed_and_uppercase_appends() {
         CommandInvocation::new("edit.delete_char", InvocationSource::Test).expect("invocation");
     let second =
         CommandInvocation::new("edit.toggle_case", InvocationSource::Test).expect("invocation");
-    registers.set_macro('a', vec![first]);
-    registers.set_macro('A', vec![second]);
-    assert_eq!(registers.get_macro('a').expect("macro").len(), 2);
-    assert_eq!(registers.get_macro('A').expect("macro").len(), 2);
+    registers.set_macro('a', vec![first.clone()]);
+    registers.set_macro('A', vec![second.clone()]);
+    let expected = vec![first, second];
+    assert_eq!(registers.get_macro('a').expect("macro"), expected);
+    assert_eq!(registers.get_macro('A').expect("macro"), expected);
 }
 
 #[test]
@@ -365,15 +371,21 @@ fn save_completion_for_old_revision_does_not_clear_newer_dirty_edit() {
     buffer.text.apply_edits(&first).expect("first edit");
     buffer.refresh_dirty();
     let persisted = buffer.text.revision();
+    let saved_bytes = buffer.text.to_bytes();
     let second = TextEditSet::new(
         buffer.text.revision(),
         vec![TextEdit::new(ByteRange::empty(ByteOffset(2)), "c")],
     );
     buffer.text.apply_edits(&second).expect("second edit");
     buffer.refresh_dirty();
-    buffer.mark_saved(persisted);
+    buffer.mark_saved_as(persisted, saved_bytes.clone(), None);
     assert!(buffer.dirty);
     assert_eq!(buffer.text.to_string(), "abc");
+    assert_eq!(buffer.saved_revision, persisted);
+    assert_eq!(buffer.persisted_bytes(), saved_bytes);
+    buffer.text.restore_text("ab").unwrap();
+    buffer.refresh_dirty();
+    assert!(!buffer.dirty, "dirty checks use the bytes that actually reached disk");
 }
 
 #[test]

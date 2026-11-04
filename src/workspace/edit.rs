@@ -37,6 +37,7 @@ pub struct ProposedFileEdit {
     pub proposed_bytes: Vec<u8>,
     pub selected: bool,
     pub edit_count: usize,
+    pub edits: Vec<TextEdit>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,6 +108,7 @@ impl WorkspaceEditProposal {
                 proposed_bytes: text.to_bytes(),
                 selected: true,
                 edit_count: draft.edits.len(),
+                edits: draft.edits,
             });
         }
         Ok(Self {

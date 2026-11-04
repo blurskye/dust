@@ -4,6 +4,74 @@ use crate::editor::{
     text::{ByteOffset, ByteRange, TextBuffer, TextEdit},
 };
 #[test]
+fn workspace_approval_restores_unopened_file_history_on_a_worker() {
+    use crate::editor::{transaction::{EditorOperation, EditorTransaction}, text::TextEditSet};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("file.txt");
+    let history = root.path().join("undo");
+    let maximum = 1_000_000;
+    let mut recorded = crate::editor::Buffer::new(TextBuffer::from_text("before"), Some(path.clone()));
+    let mut recording_editor = EditorState::new(root.path().into());
+    let (buffer, _) = recording_editor.open_text(recorded.text.clone(), Some(path.clone())).unwrap();
+    recording_editor.apply_transaction(&EditorTransaction::new(TransactionId(1))
+        .with_operation(EditorOperation::ApplyEdits {
+            buffer,
+            edits: TextEditSet::new(recorded.text.revision(), vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(6)).unwrap(), "old")]),
+        })).unwrap();
+    recorded = recording_editor.buffers[buffer].clone();
+    crate::editor::transaction::save_undo_history(history.clone(), path.clone(), recorded.text.clone(), recorded.undo, maximum);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while crate::editor::transaction::load_undo_history(&history, &path, &recorded.text, maximum).is_none() {
+        assert!(std::time::Instant::now() < deadline, "history save did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let scope = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())],
+    ).unwrap();
+    let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+        scope.clone(), root.path().join("trust.json"), 1, false, false, 1,
+    );
+    let version = workspace.version();
+    let mut editor = EditorState::new(root.path().into());
+    editor.undo_directory = Some(history.clone());
+    editor.undo_maximum_bytes = maximum;
+    let mut owner = WorkspaceEditSession::default();
+    let ticket = owner.begin(version.clone(), 1, editor.workspace_edit_sources().unwrap()).unwrap();
+    owner.build(PreparedEdits {
+        ticket, label: "replace".into(),
+        drafts: vec![WorkspaceEditDraft {
+            canonical_path: path.clone(), expected_revision: None,
+            edits: vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(), "NEW")],
+        }],
+        snapshots: vec![FileSnapshot { canonical_path: path.clone(), revision: None, bytes: b"old".to_vec() }],
+        resources: Vec::new(),
+    }, &scope, &version, 1).unwrap();
+    assert!(owner.prepare_approval(&editor, TransactionId(2), Vec::new(), &version, 1).unwrap().is_none());
+    assert!(editor.buffers.is_empty());
+    assert!(owner.toggle(0).is_err());
+    assert!(owner.prepare_approval(&editor, TransactionId(3), Vec::new(), &version, 1).is_err());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let (draft, changes) = loop {
+        if let Some(result) = owner.poll_approval(&version, 1) { break result.unwrap(); }
+        assert!(std::time::Instant::now() < deadline, "workspace preparation did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    };
+    // Publication needs no further access to the history directory.
+    std::fs::remove_dir_all(history).unwrap();
+    owner.stage_approval(&draft, changes).unwrap();
+    editor = draft.accept(&editor.version()).unwrap();
+    owner.accepted(editor.publication()).unwrap();
+    let buffer = editor.buffers.keys().next().unwrap();
+    assert_eq!(editor.buffers[buffer].text.to_string(), "NEW");
+    for (id, expected) in [(4, "old"), (5, "before")] {
+        editor.apply_transaction(&EditorTransaction::new(TransactionId(id))
+            .with_operation(EditorOperation::Undo { buffer })).unwrap();
+        assert_eq!(editor.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
 fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_before_clone() {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(

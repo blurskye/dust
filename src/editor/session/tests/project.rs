@@ -1997,6 +1997,7 @@ fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects
 
     fs::write(&first, "external\n").expect("external change");
     app.accept_workspace_proposal();
+    wait_workspace_approval(&mut app);
     assert_eq!(
         fs::read_to_string(&first).expect("still external"),
         "external\n"

@@ -56,6 +56,10 @@ struct Approval {
     check: WorkspaceCommitCheck,
     changes: Vec<BufferPathChange>,
 }
+struct PendingApproval {
+    worker: std::thread::JoinHandle<Result<EditorDraft, String>>,
+    changes: Vec<BufferPathChange>,
+}
 pub(super) struct ResourceApplication {
     proposal: ProposalId,
     intent: Option<CheckedResourceIntent>,
@@ -138,6 +142,7 @@ pub(super) struct WorkspaceEditSession {
     preparing: Option<Preparation>,
     preview: Option<Preview>,
     approval: Option<Approval>,
+    pending_approval: Option<PendingApproval>,
     accepted: Vec<ResourceApplication>,
     applying: HashMap<RequestId, (Arc<()>, ResourceApplication)>,
 }
@@ -149,6 +154,7 @@ impl Default for WorkspaceEditSession {
             preparing: None,
             preview: None,
             approval: None,
+            pending_approval: None,
             accepted: Vec::new(),
             applying: HashMap::new(),
         }
@@ -297,7 +303,7 @@ impl WorkspaceEditSession {
             .map_or(&[], |p| p.resources.as_slice())
     }
     pub(super) fn toggle(&mut self, index: usize) -> Result<(), String> {
-        if self.approval.is_some() {
+        if self.approval.is_some() || self.pending_approval.is_some() {
             return Err("workspace approval is already staged".into());
         }
         let p = self.preview.as_mut().ok_or("workspace preview is closed")?;
@@ -316,6 +322,51 @@ impl WorkspaceEditSession {
             return Err("workspace preview source changed".into());
         }
         Ok((&p.source.editor, &p.proposal))
+    }
+    pub(super) fn prepare_approval(
+        &mut self,
+        editor: &crate::editor::EditorState,
+        transaction: crate::editor::TransactionId,
+        changes: Vec<BufferPathChange>,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> Result<Option<(EditorDraft, Vec<BufferPathChange>)>, String> {
+        if self.pending_approval.is_some() || self.approval.is_some() {
+            return Err("workspace approval is already staged".into());
+        }
+        let (sources, proposal) = self.approval(workspace, configuration)?;
+        let needs_history = editor.undo_directory.is_some()
+            && proposal.files.iter().any(|file| file.selected && file.base_revision.is_none());
+        if !needs_history {
+            return editor.prepare_workspace_edit(sources, proposal, transaction)
+                .map(|draft| Some((draft, changes)));
+        }
+        // Unopened files restore persistent undo while constructing the draft.
+        // Keep that disk access and parsing off the input thread.
+        let editor = editor.clone();
+        let sources = sources.clone();
+        let proposal = proposal.clone();
+        let worker = std::thread::Builder::new().name("dust-workspace-edit".into())
+            .spawn(move || editor.prepare_workspace_edit(&sources, &proposal, transaction))
+            .map_err(|error| error.to_string())?;
+        self.pending_approval = Some(PendingApproval { worker, changes });
+        Ok(None)
+    }
+    pub(super) fn poll_approval(
+        &mut self,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> Option<Result<(EditorDraft, Vec<BufferPathChange>), String>> {
+        if !self.pending_approval.as_ref()?.worker.is_finished() {
+            return None;
+        }
+        let pending = self.pending_approval.take()?;
+        Some((|| {
+            self.approval(workspace, configuration)?;
+            let draft = pending.worker.join()
+                .map_err(|_| "workspace preparation worker failed".to_owned())??;
+            Ok((draft, pending.changes))
+        })())
     }
     pub(super) fn stage_approval(
         &mut self,
@@ -381,6 +432,8 @@ impl WorkspaceEditSession {
     }
     pub(super) fn reject(&mut self) -> Retirement {
         self.approval = None;
+        // A retired worker only owns a private draft; it cannot publish an edit.
+        self.pending_approval = None;
         let preview = self.preview.take();
         let preparing = self.preparing.take();
         Retirement {

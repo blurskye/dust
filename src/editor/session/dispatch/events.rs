@@ -4289,7 +4289,7 @@ impl InteractiveApplication {
         }
         let transaction = self.transaction_id();
         let prepared = (|| {
-            let (source, proposal) = self.workspace_edits.approval(
+            let (source, _) = self.workspace_edits.approval(
                 &self.workspace.version(),
                 self.configuration.binding_revision(),
             )?;
@@ -4306,18 +4306,44 @@ impl InteractiveApplication {
                     self.state.workspace_resource_change(source, &intent.source)
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            let draft = self
-                .state
-                .prepare_workspace_edit(source, proposal, transaction)?;
-            Ok::<_, String>((draft, changes))
+            self.workspace_edits.prepare_approval(
+                &self.state,
+                transaction,
+                changes,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )
         })();
         let (draft, changes) = match prepared {
-            Ok(value) => value,
+            Ok(Some(value)) => value,
+            Ok(None) => return,
             Err(error) => {
                 self.show_error(error);
                 return;
             }
         };
+        self.finish_workspace_approval(draft, changes);
+    }
+    pub(in crate::editor::session) fn process_workspace_approval(&mut self) {
+        let Some(result) = self.workspace_edits.poll_approval(
+            &self.workspace.version(), self.configuration.binding_revision(),
+        ) else {
+            return;
+        };
+        if let Err(error) = self.check_workspace_edit_origin() {
+            self.abort_workspace_edit(error);
+            return;
+        }
+        match result {
+            Ok((draft, changes)) => self.finish_workspace_approval(draft, changes),
+            Err(error) => self.show_error(error),
+        }
+    }
+    fn finish_workspace_approval(
+        &mut self,
+        draft: crate::editor::transaction::EditorDraft,
+        changes: Vec<crate::editor::transaction::BufferPathChange>,
+    ) {
         if let Err(error) = self.workspace_edits.stage_approval(&draft, changes) {
             self.show_error(error);
             return;
