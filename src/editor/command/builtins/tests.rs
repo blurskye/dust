@@ -121,6 +121,78 @@ fn block_put_extends_eof_and_repeats_rows_horizontally() {
 }
 
 #[test]
+fn counted_insert_repeats_the_finished_text_and_undoes_together() {
+    for placement in ["before", "after", "line_start", "line_end", "open_above", "open_below"] {
+        let (mut state, buffer, view) = editing("z", 0);
+        state.policy.autopairs = false;
+        apply(&mut state, "mode.insert", &[("placement", placement)], 3);
+        apply(&mut state, "edit.insert_text", &[("text", "e\u{301}x")], 1);
+        apply(&mut state, "edit.backspace", &[], 1);
+        apply(&mut state, "mode.normal", &[], 1);
+        let expected = match placement {
+            "before" | "line_start" => "e\u{301}e\u{301}e\u{301}z",
+            "after" | "line_end" => "ze\u{301}e\u{301}e\u{301}",
+            "open_above" => "e\u{301}\ne\u{301}\ne\u{301}\nz",
+            _ => "z\ne\u{301}\ne\u{301}\ne\u{301}",
+        };
+        assert_eq!(state.buffers[buffer].text.to_string(), expected, "{placement}");
+        assert_eq!(state.views[view].mode, crate::editor::EditorMode::Normal);
+        apply(&mut state, "history.undo", &[], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), "z", "{placement}");
+    }
+}
+
+#[test]
+fn counted_replace_requires_the_whole_count_and_lands_on_the_last_grapheme() {
+    for text in ["ab", "ab\ncd"] {
+        let (mut state, buffer, view) = editing(text, 0);
+        apply(&mut state, "edit.replace", &[("text", "x")], 3);
+        assert_eq!(state.buffers[buffer].text.to_string(), text);
+        assert_eq!(state.views[view].cursor.get(), 0);
+    }
+    let (mut state, buffer, view) = editing("abc", 0);
+    apply(&mut state, "edit.replace", &[("text", "e\u{301}")], 2);
+    assert_eq!(state.buffers[buffer].text.to_string(), "e\u{301}e\u{301}c");
+    assert_eq!(state.views[view].cursor.get(), 3);
+    apply(&mut state, "edit.delete_char", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "e\u{301}c");
+}
+
+#[test]
+fn normal_deletions_stay_on_the_last_remaining_character() {
+    for text in ["abe\u{301}", "abe\u{301}\nnext"] {
+        for operator in [false, true] {
+            let (mut state, buffer, view) = editing(text, 2);
+            if operator {
+                apply(&mut state, "edit.operator", &[("operator", "delete"), ("motion", "line_end"), ("linewise", "false")], 1);
+            } else {
+                apply(&mut state, "edit.delete_char", &[], 1);
+            }
+            assert_eq!(state.views[view].cursor.get(), 1);
+            apply(&mut state, "edit.delete_char", &[], 1);
+            assert_eq!(state.views[view].cursor.get(), 0);
+            assert_eq!(state.buffers[buffer].text.to_string(), if text.contains('\n') { "a\nnext" } else { "a" });
+        }
+    }
+    let (mut state, buffer, view) = editing("abc", 2);
+    state.views[view].mode = crate::editor::EditorMode::Insert;
+    apply(&mut state, "edit.delete_char", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "ab");
+    assert_eq!(state.views[view].cursor.get(), 2);
+}
+
+#[test]
+fn visual_put_repeats_the_register_before_replacing_the_selection() {
+    let (mut state, buffer, view) = editing("abc", 1);
+    state.registers.set('"', crate::editor::RegisterValue { text: "x".into(), shape: crate::editor::RegisterShape::Character }, true, true);
+    apply(&mut state, "mode.visual_char", &[], 1);
+    apply(&mut state, "edit.operator", &[("operator", "replace"), ("motion", "visual"), ("linewise", "false")], 2);
+    assert_eq!(state.buffers[buffer].text.to_string(), "axxc");
+    assert_eq!(state.registers.get('"').unwrap().text, "b");
+    assert_eq!(state.views[view].mode, crate::editor::EditorMode::Normal);
+}
+
+#[test]
 fn crlf_insert_and_replace_use_normalized_cursor_lengths() {
     for command in ["edit.insert_text", "edit.replace_text"] {
         let (mut state, buffer, view) = editing("", 0);
@@ -139,6 +211,48 @@ fn normal_horizontal_motion_stays_off_line_endings() {
     state.views[view].mode = crate::editor::EditorMode::Insert;
     apply(&mut state, "view.cursor.move", &[("motion", "right")], 1);
     assert_eq!(state.views[view].cursor.get(), 2);
+}
+
+#[test]
+fn replace_backspace_never_restores_text_over_another_views_edit() {
+    let (mut state, buffer, first) = editing("abc", 0);
+    let second = state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    state.focus_pane(-1, true).unwrap();
+    assert_eq!(state.active_view, Some(first));
+    apply(&mut state, "mode.replace", &[], 1);
+    apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
+    state.focus_pane(1, true).unwrap();
+    assert_eq!(state.active_view, Some(second));
+    state.views[second].cursor = crate::editor::text::ByteOffset(0);
+    apply(&mut state, "mode.replace", &[], 1);
+    apply(&mut state, "edit.replace_text", &[("text", "Y")], 1);
+    state.focus_pane(-1, true).unwrap();
+    assert!(state.views[first].replace_history.is_empty());
+    apply(&mut state, "edit.replace_backspace", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "Ybc");
+}
+
+#[test]
+fn replace_backspace_preserves_earlier_records_and_remaps_unaffected_ones() {
+    let (mut state, buffer, view) = editing("abc", 0);
+    apply(&mut state, "mode.replace", &[], 1);
+    apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
+    apply(&mut state, "edit.replace_text", &[("text", "Y")], 1);
+    apply(&mut state, "edit.replace_backspace", &[], 1);
+    assert_eq!(state.views[view].replace_history.len(), 1);
+    apply(&mut state, "edit.replace_backspace", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "abc");
+
+    state.views[view].cursor = crate::editor::text::ByteOffset(1);
+    apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
+    let second = state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    state.views[second].cursor = crate::editor::text::ByteOffset(0);
+    state.views[second].mode = crate::editor::EditorMode::Insert;
+    apply(&mut state, "edit.insert_text", &[("text", "zz")], 1);
+    state.focus_pane(-1, true).unwrap();
+    assert_eq!(state.views[view].replace_history[0].start.get(), 3);
+    apply(&mut state, "edit.replace_backspace", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "zzabc");
 }
 
 #[test]

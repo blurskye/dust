@@ -221,6 +221,11 @@ impl InputSession {
         let operator = invocation.arguments.get("operator")?.clone();
         let mut repeat = CommandInvocation::new("edit.repeat_visual", invocation.source).ok()?;
         repeat.arguments.insert("operator".into(), operator);
+        for name in ["comment", "character"] {
+            if let Some(value) = invocation.arguments.get(name) {
+                repeat.arguments.insert(name.into(), value.clone());
+            }
+        }
         repeat
             .arguments
             .insert("shape".into(), CommandValue::String(shape.into()));

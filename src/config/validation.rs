@@ -316,10 +316,7 @@ impl Config {
         {
             return Err("ui.buffer_line.extension_icons is invalid".into());
         }
-        if self.ui.theme.is_empty()
-            || !self.ui.theme.bytes().all(|byte| {
-                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
-            })
+        if !super::themes::valid_theme_name(&self.ui.theme)
         {
             return Err("ui.theme must be a safe lowercase theme identifier".into());
         }

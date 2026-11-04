@@ -181,7 +181,14 @@ impl Buffer {
 pub struct ReplaceRecord {
     pub start: ByteOffset,
     pub original: String,
-    pub inserted_len: usize,
+    pub inserted: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct InsertRepeat {
+    pub start: ByteOffset,
+    pub count: usize,
+    pub new_line: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -196,6 +203,7 @@ pub struct View {
     pub preferred_column: Option<usize>,
     pub mode: EditorMode,
     pub replace_history: Vec<ReplaceRecord>,
+    pub insert_repeat: Option<InsertRepeat>,
     pub block_insert: Vec<ByteOffset>,
     /// The ranges marked in `EditorMode::Multi`, in order. Empty ranges are plain cursors.
     pub multi_marks: Vec<crate::editor::text::ByteRange>,
@@ -204,6 +212,7 @@ pub struct View {
 impl View {
     pub(crate) fn clear_editing_state(&mut self) {
         self.replace_history.clear();
+        self.insert_repeat = None;
         self.block_insert.clear();
         self.multi_marks.clear();
         self.preferred_column = None;
@@ -221,6 +230,7 @@ impl View {
             preferred_column: None,
             mode: EditorMode::Normal,
             replace_history: Vec::new(),
+            insert_repeat: None,
             block_insert: Vec::new(),
             multi_marks: Vec::new(),
         }

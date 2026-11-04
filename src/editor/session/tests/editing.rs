@@ -165,6 +165,51 @@ fn dot_repeats_semantic_insert_session() {
 }
 
 #[test]
+fn counted_insert_and_dot_preserve_the_insertion_count() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("z"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["3", "i", "a", "b", "c", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abcabcabcz");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(8));
+    press_keys(&mut app, &["$", "."]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abcabcabcabcabcabcz");
+    press_keys(&mut app, &["u"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abcabcabcz");
+}
+
+#[test]
+fn visual_comment_and_surround_dot_retain_operator_arguments() {
+    let mut comment = app();
+    let path = comment.state.workspace_root.join("repeat.rs");
+    let (buffer, _) = comment.state.open_text(TextBuffer::from_text("a\nb\n"), Some(path));
+    comment.set_dashboard_visibility(false);
+    press_keys(&mut comment, &["V", "g", "c", "j", "."]);
+    assert_eq!(comment.state.buffers[buffer].text.to_string(), "// a\n// b\n");
+
+    let mut surround = app();
+    let (buffer, _) = surround.state.open_text(TextBuffer::from_text("ab\ncd\n"), None);
+    surround.set_dashboard_visibility(false);
+    press_keys(&mut surround, &["v", "l", "g", "s", "a", ")", "j", "0", "."]);
+    assert_eq!(surround.state.buffers[buffer].text.to_string(), "(ab)\n(cd)\n");
+}
+
+#[test]
+fn visual_indent_dot_retains_the_number_of_levels() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("a\nb\n"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["V", "2", ">", "j", "."]);
+    let level = if app.state.policy.expand_tabs {
+        " ".repeat(app.state.policy.indent_width)
+    } else {
+        "\t".into()
+    };
+    let indent = level.repeat(2);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), format!("{indent}a\n{indent}b\n"));
+}
+
+#[test]
 fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
     let mut character = app();
     character

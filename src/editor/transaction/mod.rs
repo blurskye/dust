@@ -82,6 +82,11 @@ pub enum EditorOperation {
         view: ViewId,
         mode: EditorMode,
     },
+    SetInsertRepeat {
+        view: ViewId,
+        count: usize,
+        new_line: bool,
+    },
     PushReplaceRecord {
         view: ViewId,
         record: crate::editor::ReplaceRecord,
@@ -342,13 +347,30 @@ fn apply_operation(
             } else {
                 target
                     .undo
-                    .record(changes, undo_policy == UndoPolicy::Merge);
+                    .record(changes, matches!(undo_policy, UndoPolicy::Merge | UndoPolicy::Boundary));
             }
             for (_, view) in state
                 .views
                 .iter_mut()
                 .filter(|(_, view)| view.buffer == *buffer)
             {
+                if let Some(repeat) = &mut view.insert_repeat {
+                    repeat.start = delta.map_offset(repeat.start, Affinity::Before);
+                }
+                view.replace_history.retain_mut(|record| {
+                    let end = ByteOffset(record.start.get() + record.inserted.len());
+                    if delta.spans().iter().any(|span| {
+                        if span.old.is_empty() {
+                            span.old.start > record.start && span.old.start < end
+                        } else {
+                            span.old.start < end && span.old.end > record.start
+                        }
+                    }) {
+                        return false;
+                    }
+                    record.start = delta.map_offset(record.start, Affinity::After);
+                    true
+                });
                 view.cursor = delta.map_offset(view.cursor, Affinity::After);
                 if let Some(selection) = &mut view.selection {
                     selection.anchor = delta.map_offset(selection.anchor, Affinity::Before);
@@ -390,6 +412,9 @@ fn apply_operation(
                 && matches!(undo_policy, UndoPolicy::Ignore | UndoPolicy::Boundary)
             {
                 target.replace_history.clear();
+            }
+            if target.cursor != *position && undo_policy == UndoPolicy::Boundary {
+                target.insert_repeat = None;
             }
             target.cursor = *position;
             target.preferred_column = None;
@@ -476,6 +501,7 @@ fn apply_operation(
                 target.replace_history.clear();
             }
             if *mode != EditorMode::Insert {
+                target.insert_repeat = None;
                 target.block_insert.clear();
             }
             if *mode != EditorMode::Multi {
@@ -484,6 +510,14 @@ fn apply_operation(
             if *mode == EditorMode::Normal {
                 target.clear_editing_state();
             }
+        }
+        EditorOperation::SetInsertRepeat { view, count, new_line } => {
+            let target = state.views.get_mut(*view).ok_or(TransactionError::MissingView)?;
+            target.insert_repeat = Some(crate::editor::state::InsertRepeat {
+                start: target.cursor,
+                count: *count,
+                new_line: *new_line,
+            });
         }
         EditorOperation::PushReplaceRecord { view, record } => {
             state
@@ -575,6 +609,7 @@ fn apply_operation(
                         mark.end = delta.map_offset(mark.end, Affinity::After);
                     }
                     view.replace_history.clear();
+                    view.insert_repeat = None;
                 }
             }
             target.refresh_dirty();
@@ -747,6 +782,23 @@ impl EditorDraft {
             .collect::<Vec<_>>();
         for operation in &transaction.operations {
             apply_operation(&mut self.state, operation, transaction.undo_policy)?;
+        }
+        for (_, view) in self.state.views.iter_mut().filter(|(_, view)| {
+            view.mode == EditorMode::Normal
+                && dirty_before.iter().any(|(buffer, _)| *buffer == view.buffer)
+        }) {
+            let text = &self.state.buffers[view.buffer].text;
+            let line = text.byte_to_line(view.cursor)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let start = text.line_to_byte(line)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let content = text.line(line)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let end = ByteOffset(start.get() + content.trim_end_matches('\n').len());
+            if view.cursor >= end && end > start {
+                view.cursor = crate::editor::text::previous_grapheme_boundary(text, end);
+                view.preferred_column = None;
+            }
         }
         if transaction.undo_policy == UndoPolicy::Boundary {
             for (_, buffer) in &mut self.state.buffers {

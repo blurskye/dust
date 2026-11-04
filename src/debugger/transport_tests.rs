@@ -32,6 +32,7 @@ while True:
  if c=='threads':
   pathlib.Path('flood-start').write_text('started')
   for n in range(300): send({'type':'event','event':'output','body':{'output':str(n)+'\n'}})
+  pathlib.Path('flood-finished').write_text('finished')
   body={'threads':[{'id':1,'name':'original-thread'}]}
  if c=='stackTrace': body={'stackFrames':[{'id':1,'name':'original-frame','line':1,'column':1,'source':{'sourceReference':7}}]}
  if c=='source': body={'name':'owned-source','content':'original adapter source\n'}
@@ -257,16 +258,52 @@ while True:
 }
 
 #[test]
+fn dap_result_queue_blocks_the_producer_until_results_are_drained() {
+    let (mut service, adapter) = session::fixture();
+    let (progress, received) = std::sync::mpsc::channel();
+    let producer = thread::spawn(move || {
+        for n in 0..32 {
+            adapter.event(0, DapEvent::Output {
+                adapter: "same-name".into(),
+                output: format!("{n}\n"),
+            });
+        }
+        progress.send("full").unwrap();
+        adapter.event(0, DapEvent::Output {
+            adapter: "same-name".into(),
+            output: "32\n".into(),
+        });
+        progress.send("resumed").unwrap();
+    });
+    assert_eq!(received.recv_timeout(Duration::from_secs(3)).unwrap(), "full");
+    assert_eq!(received.recv_timeout(Duration::from_millis(100)), Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+    assert!(matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "0\n"));
+    assert_eq!(received.recv_timeout(Duration::from_secs(3)).unwrap(), "resumed");
+    producer.join().unwrap();
+    for n in 1..=32 {
+        assert!(matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == format!("{n}\n")));
+    }
+    assert!(service.try_event().is_none());
+}
+
+#[test]
 fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("adapter.py");
-    std::fs::write(&script, ADAPTER).unwrap();
+    // Exceed both the event/message queues and OS pipe buffers so the adapter itself blocks.
+    let adapter = ADAPTER.replace("str(n)+'\\n'", "str(n)+' '+('x'*4000)+'\\n'");
+    std::fs::write(&script, adapter).unwrap();
     let mut service = DapService::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
     let old = service.context().unwrap();
     wait(|| root.path().join("flood-start").exists());
+    let undrained_until = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < undrained_until {
+        assert!(!root.path().join("flood-finished").exists(), "undrained results did not block the producer");
+        thread::sleep(Duration::from_millis(2));
+    }
     // Actual JSON/process stdout, undrained beyond the bounded event queue.
     let mut outputs = Vec::new();
     let mut response = false;
@@ -290,7 +327,7 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     });
     assert_eq!(
         outputs,
-        (0..300).map(|n| format!("{n}\n")).collect::<Vec<_>>()
+        (0..300).map(|n| format!("{n} {}\n", "x".repeat(4000))).collect::<Vec<_>>()
     );
     assert!(
         service.control_owned(&old, DapControl::Threads).is_err(),
@@ -383,16 +420,17 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     );
     let mut full = false;
     for _ in 0..256 {
-        if service
-            .control(DapControl::Evaluate {
-                expression: "x".repeat(64 * 1024),
-                frame_id: None,
-                context: "repl".into(),
-            })
-            .is_err()
-        {
-            full = true;
-            break;
+        match service.control(DapControl::Evaluate {
+            expression: "x".repeat(64 * 1024),
+            frame_id: None,
+            context: "repl".into(),
+        }) {
+            Ok(()) => {}
+            Err(DapError::Full) => {
+                full = true;
+                break;
+            }
+            Err(error) => panic!("adapter failed before its queue filled: {error}"),
         }
     }
     assert!(full, "actual producer queue must be bounded");
