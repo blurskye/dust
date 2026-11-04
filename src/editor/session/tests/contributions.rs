@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
     let manifest = crate::extensions::PluginManifest {
         id: "demo".into(),
@@ -104,7 +104,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
 
 #[test]
 fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.commands
         .register(
             crate::editor::CommandSpec {
@@ -256,7 +256,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
 
 #[test]
 fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let labels = &app.configuration.settings().command_labels;
     let hints = app
         .configuration
@@ -387,7 +387,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
 
 #[test]
 fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.groups.push(crate::config::KeyGroupEntry {
@@ -511,7 +511,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
 
 #[test]
 fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
-    let app = app();
+    let (_app_dirs, app) = app();
     for disabled in [false, true] {
         let mut loaded = crate::config::load_bundled_config().keymaps;
         loaded.entries.push(crate::config::KeymapEntry {
@@ -538,7 +538,7 @@ fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
 
 #[test]
 fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
-    let app = app();
+    let (_app_dirs, app) = app();
     for (group, expected) in [
         (
             crate::config::KeyGroupEntry {
@@ -747,7 +747,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
 
 #[test]
 fn macros_record_replay_last_register_and_stop_at_limits() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
@@ -775,7 +775,7 @@ fn macros_record_replay_last_register_and_stop_at_limits() {
 
 #[test]
 fn question_mark_still_navigates_and_only_the_leader_opens_help() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
 
     // `?` alone keeps its command-line binding in the editor normal context.
@@ -813,7 +813,7 @@ fn question_mark_still_navigates_and_only_the_leader_opens_help() {
 
 #[test]
 fn help_is_reachable_from_the_confirmation_and_from_a_form() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
 
     // The confirmation context: `?` is the action, and it is not an answer to the question.
@@ -848,7 +848,7 @@ fn help_is_reachable_from_the_confirmation_and_from_a_form() {
 
 #[test]
 fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let arguments = |query: &str, replacement: &str| BTreeMap::from([
         ("query".into(), toml::Value::String(query.into())),
@@ -871,7 +871,7 @@ fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
 
 #[test]
 fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut policy = app.configuration.settings().input.keymaps.clone();
     policy.leader = ",".into();
     policy.local_leader = ";".into();
@@ -959,7 +959,7 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
 
 #[test]
 fn binding_for_names_the_same_key_every_time_for_a_multi_bound_command() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
     // `command_line.open` answers to several keys and `reverse` is a HashMap, so before this was
     // pinned the SHIPPED hint text could name a different key between runs.

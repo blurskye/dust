@@ -140,7 +140,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
 
 #[test]
 fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_explorer();
     app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());
     app.prompt_insert("new.txt");
@@ -157,7 +157,7 @@ fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
 
 #[test]
 fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let source = root.join("source.rs");
     let other = root.join("other.rs");
@@ -241,7 +241,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
 
 #[test]
 fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     let target = app.state.workspace_root.join("target.txt");
     fs::write(&source, "original").unwrap();
@@ -333,7 +333,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
 
 #[test]
 fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     fs::write(&source, "kept").unwrap();
     let (buffer, _) = app.state.open_text(
@@ -498,7 +498,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
 #[test]
 fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
     let key = |name: &str| name.parse::<KeyEvent>().expect("key");
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     app.notify_message("stale notification".into(), true);
     app.request_workspace_trust();
@@ -558,7 +558,7 @@ fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
 
 #[test]
 fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let identity = app.workspace.roots()[0].identity.clone();
     assert!(!app.workspace.seen(&identity));
@@ -583,7 +583,7 @@ fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
 
 #[test]
 fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
     app.maybe_prompt_for_unseen_workspace();
@@ -599,7 +599,7 @@ fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
 
 #[test]
 fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.confirm_workspace_trust();
     assert_eq!(
         app.workspace.trust(),
@@ -619,7 +619,7 @@ fn wait_explorer(app: &mut InteractiveApplication) {
 
 #[test]
 fn explorer_lazily_loads_and_opens_scoped_file() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("explorer.txt");
     fs::write(&path, "explorer content\n").expect("fixture");
     app.open_explorer();
@@ -717,7 +717,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
 
 #[test]
 fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("README.md"), "# Dust\n").unwrap();
     fs::write(app.state.workspace_root.join("notes.md"), "notes\n").unwrap();
     fs::write(app.state.workspace_root.join("main.rs"), "fn main() {}\n").unwrap();
@@ -748,7 +748,7 @@ fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
 
 #[test]
 fn explorer_follow_lazily_expands_to_active_file() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("a/b");
     fs::create_dir_all(&directory).unwrap();
     let path = directory.join("follow.txt");
@@ -773,7 +773,7 @@ fn explorer_follow_lazily_expands_to_active_file() {
 
 #[test]
 fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("dir");
     fs::create_dir_all(&directory).unwrap();
     let kept = directory.join("kept.txt");
@@ -861,7 +861,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
 
 #[test]
 fn explorer_projection_formats_only_the_terminal_viewport() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.window_session
         .observe_size((app.window_session.width(), 10));
     for index in 0..40 {
@@ -1019,7 +1019,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
 #[test]
 fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("focus"), None);
     app.set_dashboard_visibility(false);
@@ -1064,7 +1064,7 @@ fn wait_root_operation(app: &mut InteractiveApplication) {
 
 #[test]
 fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let first = app.workspace.active_root().expect("first root");
     let second_directory = tempdir().expect("second root");
     let second_path = fs::canonicalize(second_directory.path()).expect("canonical");
@@ -1104,7 +1104,7 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
 
 #[test]
 fn stale_async_root_add_and_pending_service_removal_are_rejected() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let second = tempdir().expect("second");
     let third = tempdir().expect("third");
     app.add_workspace_root(second.path().to_path_buf());
@@ -1139,7 +1139,7 @@ fn wait_workspace_search(app: &mut InteractiveApplication) {
 
 #[test]
 fn explorer_auto_git_status_is_silent_outside_a_repository() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("plain.txt");
     fs::write(&path, "plain\n").unwrap();
     app.state.open_text(
@@ -1166,7 +1166,7 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
 
 #[test]
 fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("live.txt");
     fs::write(&path, "one\ntwo\nthree\n").unwrap();
@@ -1215,7 +1215,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
 
 #[test]
 fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("hunks.txt");
     fs::write(&path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
@@ -1267,8 +1267,13 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
 }
 
 /// A trusted repository with one file whose two changes are close enough to share a hunk.
-fn near_changes_fixture() -> (InteractiveApplication, git2::Repository, std::path::PathBuf) {
-    let mut app = app();
+fn near_changes_fixture() -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+    git2::Repository,
+    std::path::PathBuf,
+) {
+    let (dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("near.txt");
     fs::write(&path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
@@ -1300,7 +1305,7 @@ fn near_changes_fixture() -> (InteractiveApplication, git2::Repository, std::pat
         assert!(Instant::now() < deadline);
         thread::yield_now();
     }
-    (app, repo, path)
+    (dirs, app, repo, path)
 }
 
 fn settle_git_work(app: &mut InteractiveApplication) {
@@ -1316,7 +1321,7 @@ fn settle_git_work(app: &mut InteractiveApplication) {
 
 #[test]
 fn hunk_preview_and_stage_take_the_change_under_the_cursor() {
-    let (mut app, repo, _) = near_changes_fixture();
+    let (_app_dirs, mut app, repo, _) = near_changes_fixture();
     app.process_effect(AppEffect::GitHunkNavigate(1));
     settle_git_work(&mut app);
     app.process_effect(AppEffect::GitHunkNavigate(1));
@@ -1349,7 +1354,7 @@ fn hunk_preview_and_stage_take_the_change_under_the_cursor() {
 
 #[test]
 fn hunk_reset_takes_the_change_under_the_cursor() {
-    let (mut app, _repo, path) = near_changes_fixture();
+    let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
     app.process_effect(AppEffect::GitHunkNavigate(1));
     settle_git_work(&mut app);
 
@@ -1368,7 +1373,7 @@ fn hunk_reset_takes_the_change_under_the_cursor() {
 
 #[test]
 fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let old = app.state.workspace_root.clone();
     let new = old.join(".worktree/topic");
     fs::create_dir_all(&new).unwrap();
@@ -1392,7 +1397,7 @@ fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
 
 #[test]
 fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("tracked.txt");
     fs::write(&path, "normal\n").unwrap();
@@ -1609,7 +1614,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
 
 #[test]
 fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("two-hunks.txt");
     let original = (1..=20).map(|n| format!("line {n}\n")).collect::<String>();
@@ -1775,7 +1780,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
 
 #[test]
 fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("find-me.txt");
     let mut contents = String::from("found\n");
     contents.push_str(&"x".repeat(140 * 1024));
@@ -1817,7 +1822,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
 
 #[test]
 fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("match.txt");
     let text = (0..1_200)
         .map(|line| {
@@ -1865,7 +1870,7 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 
 #[test]
 fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
     fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
     app.start_workspace_search("needle".into(), None);
@@ -1895,7 +1900,7 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
 
 #[test]
 fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects_conflict() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let first = app.state.workspace_root.join("a.txt");
     let second = app.state.workspace_root.join("b.txt");
     fs::write(&first, "needle one\n").expect("first");
@@ -1947,7 +1952,7 @@ fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects
 
 #[test]
 fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("stale.txt");
     fs::write(&path, "needle\n").expect("disk");
     let (buffer, _) = app.state.open_text(
@@ -1967,7 +1972,7 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
 
 #[test]
 fn save_as_reload_close_and_external_change_protection_work() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
@@ -2015,7 +2020,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
 
 #[test]
 fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, _) = app
         .state
         .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None);
@@ -2035,7 +2040,7 @@ fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
 
 #[test]
 fn search_moves_forward_wraps_and_repeats() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("one two one"),
         None,
@@ -2506,7 +2511,7 @@ fn named_staging_commands_change_only_the_index() {
         let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
         String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("commands.txt");
     let original = "a\nb\nc\nd\ne\n";
@@ -2648,7 +2653,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
         let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
         String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("choice.txt");
     fs::write(&path, "disk\n").unwrap();
@@ -2766,7 +2771,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
 
 #[test]
 fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("unsaved-only.txt");
     fs::write(&path, "disk\n").unwrap();
@@ -2849,7 +2854,7 @@ fn git_change_source_labels_cover_every_combination() {
 
 #[test]
 fn git_status_rows_label_each_source_without_conflating_them() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let original = "one\n";
     for name in ["staged.txt", "unstaged.txt", "unsaved.txt", "both.txt"] {
@@ -2993,7 +2998,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
     fn last_segment(detail: &str) -> String {
         detail.rsplit(" · ").next().unwrap_or_default().to_owned()
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("layers.txt");
     let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -3075,7 +3080,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
 
 #[test]
 fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("unstage.txt");
     let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -3215,7 +3220,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
 
 #[test]
 fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("pair.txt");
     let original = (1..=20).map(|n| format!("line {n}\n")).collect::<String>();
@@ -3274,7 +3279,7 @@ fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
 
 #[test]
 fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("undo.txt");
     let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -3360,7 +3365,7 @@ fn history_fixture(root: &std::path::Path, subjects: &[&str]) -> git2::Repositor
 
 #[test]
 fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     // Two linked worktrees, both OUTSIDE the main worktree so the main worktree stays clean.
@@ -3449,7 +3454,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
 
 #[test]
 fn switching_to_a_worktree_moves_the_editor_there() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     let outside = tempfile::tempdir().unwrap().keep();
@@ -3571,7 +3576,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
 
 #[test]
 fn a_locked_worktree_refuses_removal() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     let outside = tempfile::tempdir().unwrap().keep();
@@ -3654,7 +3659,7 @@ fn a_locked_worktree_refuses_removal() {
 
 #[test]
 fn help_preserves_a_draft_and_a_pending_confirmation() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());
     app.prompt_insert("draft-name.txt");
     app.project_input_prompt();
@@ -3727,7 +3732,7 @@ fn help_preserves_a_draft_and_a_pending_confirmation() {
 
 #[test]
 fn help_preserves_a_buffer_selection_byte_for_byte() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("alpha beta gamma delta\n"),
         None,
@@ -3763,7 +3768,7 @@ fn help_preserves_a_buffer_selection_byte_for_byte() {
 
 #[test]
 fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     app.picker_insert("overlay.help.");
     let palette = app.search.picker_projection().expect("palette");
@@ -3830,7 +3835,7 @@ fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
 
 #[test]
 fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
         "Discard changes?".into(),
@@ -3900,7 +3905,7 @@ fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_
 
 #[test]
 fn the_advertised_help_key_is_the_key_that_resolves() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
         "Discard changes?".into(),
@@ -3952,7 +3957,7 @@ fn the_advertised_help_key_is_the_key_that_resolves() {
 
 #[test]
 fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     let palette = app.search.picker_projection().expect("palette");
@@ -3992,7 +3997,7 @@ fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
 
 #[test]
 fn a_surface_installed_over_help_discards_the_snapshot() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     app.invoke(
@@ -4017,7 +4022,7 @@ fn a_surface_installed_over_help_discards_the_snapshot() {
 
 #[test]
 fn help_opened_over_help_keeps_the_original_surface() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     let palette = app.search.picker_projection().expect("palette");
@@ -4065,7 +4070,7 @@ fn help_opened_over_help_keeps_the_original_surface() {
 
 #[test]
 fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -4171,7 +4176,7 @@ fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
 
 #[test]
 fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -4301,7 +4306,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
 fn choosing_a_side_for_an_unconflicted_path_is_refused() {
     // Its own app: opening a second buffer INVALIDATES the earlier view key, so this case must
     // not share a session with the conflict fixture.
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     // A real repository, so the git status the command consults exists.
     let _repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
@@ -4356,7 +4361,7 @@ fn choosing_a_side_for_an_unconflicted_path_is_refused() {
 
 #[test]
 fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let (our_tip, _their_tip) = {
         let repo = history_fixture(&root, &["base"]);
@@ -4505,7 +4510,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
 /// provenance columns, an unsaved badge and its own footer — proved from the rendered grid.
 #[test]
 fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     let write = |name: &str, text: &str| {
@@ -4707,7 +4712,7 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
 /// switches it between the two comparisons.
 #[test]
 fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     fs::write(app.state.workspace_root.join("f.txt"), "one\ntwo\nthree\n").unwrap();
@@ -4815,7 +4820,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
 /// and the page keys move through the rest.
 #[test]
 fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     let lines = |changed: &str| {
@@ -4917,7 +4922,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
 /// A commit made outside Dust shows after the explorer's refresh key.
 #[test]
 fn refreshing_the_explorer_also_refreshes_git_status() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     git2::Repository::init(&app.state.workspace_root).unwrap();
     prepare_trust_identity(&mut app);
     for root in app.workspace.roots().to_vec() {
@@ -4937,7 +4942,7 @@ fn refreshing_the_explorer_also_refreshes_git_status() {
 /// `:e` on a path with nothing there starts that file, and the first save creates it.
 #[test]
 fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("new-file.txt");
     app.edit_path(PathBuf::from("new-file.txt"));
     let buffer = app
@@ -4986,7 +4991,7 @@ fn page_keys_parse_and_count_as_terminal_navigation() {
 /// W-26: a refresh does not move the selection or reorder the list under the cursor.
 #[test]
 fn a_change_refresh_keeps_the_selection_on_the_same_row() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     for name in ["a.txt", "b.txt", "c.txt"] {
@@ -5041,7 +5046,7 @@ fn a_change_refresh_keeps_the_selection_on_the_same_row() {
 /// THE CURSOR rather than whatever buffer happens to be active.
 #[test]
 fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     for name in ["a.txt", "b.txt"] {
@@ -5145,7 +5150,7 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
 /// the active buffer.
 #[test]
 fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     let path = app.state.workspace_root.join("changed.txt");
@@ -5252,7 +5257,7 @@ fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsaved_file() {
 
 #[test]
 fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     for name in ["unsaved.txt", "other.txt"] {
@@ -5348,7 +5353,7 @@ fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
 /// W-26: `Ctrl-q` sends the changed-path list to the shared Results surface.
 #[test]
 fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     fs::write(app.state.workspace_root.join("a.txt"), "one\n").unwrap();
@@ -5401,7 +5406,7 @@ fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
 
 #[test]
 fn opening_changes_before_status_arrives_opens_them_when_it_does() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     git2::Repository::init(&app.state.workspace_root).unwrap();
     fs::write(app.state.workspace_root.join("a.txt"), "one\n").unwrap();
     prepare_trust_identity(&mut app);
@@ -5439,7 +5444,7 @@ fn palette_row_for(app: &mut InteractiveApplication, query: &str) -> String {
 
 #[test]
 fn palette_finds_commands_by_the_words_people_type() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     for (query, expected) in [
         ("theme", "Select Color Theme"),
         ("color", "Select Color Theme"),
@@ -5458,7 +5463,7 @@ fn palette_finds_commands_by_the_words_people_type() {
 
 #[test]
 fn palette_runs_flagged_commands_with_the_flag_off() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     palette_row_for(&mut app, "quit dust");
     app.accept_picker();
     assert!(app.should_quit);
@@ -5466,7 +5471,7 @@ fn palette_runs_flagged_commands_with_the_flag_off() {
 
 #[test]
 fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     palette_row_for(&mut app, "file.open");
     app.accept_picker();
     assert_eq!(app.input.prompt().expect("prompt").input, "e ");
@@ -5487,7 +5492,7 @@ fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
 
 #[test]
 fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "wor".into());
     app.refresh_completions();
     let completions = |app: &InteractiveApplication| -> Vec<String> {
@@ -5524,7 +5529,7 @@ fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments
 
 #[test]
 fn completing_a_path_after_w_keeps_the_save_command() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("q!"), b"").expect("file");
     app.open_prompt(crate::ui::PromptKind::Command, "w q".into());
     wait_vfs(&mut app);
@@ -5535,7 +5540,7 @@ fn completing_a_path_after_w_keeps_the_save_command() {
 
 #[test]
 fn an_empty_plugin_list_says_how_to_get_one() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.process_effect(AppEffect::PluginList);
     assert_eq!(
         app.ui.picker.as_ref().expect("picker").footer.as_deref(),
@@ -5590,7 +5595,7 @@ fn switching_folders_with_open_terminals_warns_before_ending_them() {
 
 #[test]
 fn reloading_terminal_settings_keeps_running_terminals() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.terminal_session.fixture(
         crate::process::PtyId(1),
         crate::editor::session::terminal::TerminalFixture {
@@ -5624,7 +5629,7 @@ fn reloading_terminal_settings_keeps_running_terminals() {
 
 #[test]
 fn cached_hunk_reset_never_targets_a_previous_buffer() {
-    let (mut app, _repo, path) = near_changes_fixture();
+    let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
     app.process_effect(AppEffect::GitHunkNavigate(1));
     settle_git_work(&mut app);
     let before = fs::read(&path).unwrap();
@@ -5640,7 +5645,7 @@ fn cached_hunk_reset_never_targets_a_previous_buffer() {
 
 #[test]
 fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let first = app.workspace.active_root().unwrap();
     let path = app.state.workspace_root.clone();
@@ -5675,7 +5680,7 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
 
 #[test]
 fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("late.txt");
     fs::write(&path, "destination").unwrap();
     app.navigate_matcher_source(crate::editor::session::search::MatcherSource {
@@ -5692,7 +5697,7 @@ fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
 
 #[test]
 fn location_labels_read_only_the_required_prefix_of_a_large_file() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let path = app.state.workspace_root.join("sparse.txt");
     let file = fs::File::create(&path).unwrap();
     file.set_len(4 * 1024 * 1024 * 1024).unwrap();
@@ -5708,7 +5713,7 @@ fn location_labels_read_only_the_required_prefix_of_a_large_file() {
 
 #[test]
 fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     app.picker_insert("file");
     let before = app.ui.picker.as_ref().unwrap().query.clone();
@@ -5728,7 +5733,7 @@ fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
 
 #[test]
 fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
-    let (mut app, _repo, path) = near_changes_fixture();
+    let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
     app.process_effect(AppEffect::GitLinesStage {
         start: 999,
         end: 999,
@@ -5753,7 +5758,7 @@ fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
 
 #[test]
 fn save_and_stage_writes_the_refused_file_and_refreshes_its_hunks() {
-    let (mut app, repo, path) = near_changes_fixture();
+    let (_app_dirs, mut app, repo, path) = near_changes_fixture();
     let buffer = app.state.active_buffer_id().unwrap();
     app.replace_with_recovered(buffer, "one\nNEW\nthree\nFOUR\nfive\n".into())
         .unwrap();
@@ -5815,14 +5820,14 @@ fn save_and_stage_writes_the_refused_file_and_refreshes_its_hunks() {
 
 #[test]
 fn failed_conflict_staging_cannot_arm_the_next_save() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.stage_git_conflict();
     assert!(app.input.take_pending_stage().is_none());
 }
 
 #[test]
 fn disk_polling_retries_reloads_refused_by_document_capacity() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut buffers = Vec::new();
     for index in 0..9 {
         let path = app.state.workspace_root.join(format!("poll-{index}"));
@@ -5852,7 +5857,7 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
 
 #[test]
 fn save_and_stage_refreshes_the_pre_save_hunk_snapshot() {
-    let (mut app, repo, _) = near_changes_fixture();
+    let (_app_dirs, mut app, repo, _) = near_changes_fixture();
     app.open_explorer();
     app.process_effect(AppEffect::GitHunkNavigate(1));
     settle_git_work(&mut app);
@@ -5895,7 +5900,7 @@ fn save_and_stage_refreshes_the_pre_save_hunk_snapshot() {
 #[test]
 fn file_picker_can_filter_an_entry_after_the_display_limit() {
     use crate::editor::session::search::{PickerOrigin, PickerPayload};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.start_workspace_file_picker();
     let items = (0..10_001)
         .map(|i| {
@@ -5927,7 +5932,7 @@ fn file_picker_can_filter_an_entry_after_the_display_limit() {
 
 #[test]
 fn truncated_workspace_search_does_not_offer_partial_replacement() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("many.txt");
     fs::write(&path, "needle\n").unwrap();
     app.process_effect(AppEffect::WorkspaceReplace {
@@ -6034,7 +6039,7 @@ fn conflict_picker_resolves_paths_from_the_repository_root() {
 
 #[test]
 fn failed_save_and_stage_does_not_leak_into_a_later_save() {
-    let (mut app, repo, path) = near_changes_fixture();
+    let (_app_dirs, mut app, repo, path) = near_changes_fixture();
     let buffer = app.state.active_buffer_id().unwrap();
     app.replace_with_recovered(buffer, "unsaved\n".into())
         .unwrap();

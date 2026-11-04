@@ -12,7 +12,7 @@ fn press(app: &mut InteractiveApplication, key: char) {
 #[test]
 fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
     for macro_commands in [false, true] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         app.set_dashboard_visibility(false);
         let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
         app.state.views[view].cursor = ByteOffset(1);
@@ -52,7 +52,7 @@ fn paste() -> CommandInvocation {
 
 #[test]
 fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
@@ -74,7 +74,7 @@ fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
 
 #[test]
 fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
@@ -97,7 +97,7 @@ fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
 
 #[test]
 fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("a"), None);
     app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
@@ -117,7 +117,7 @@ fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
 
 #[test]
 fn clipboard_deferred_macros_expand_before_later_input() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
@@ -138,7 +138,7 @@ fn clipboard_deferred_macros_expand_before_later_input() {
 
 #[test]
 fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
@@ -158,7 +158,7 @@ fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
 
 #[test]
 fn clipboard_failed_paste_reports_error_and_releases_later_input() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.state.registers.set('"', RegisterValue {
@@ -182,7 +182,7 @@ fn clipboard_failed_paste_reports_error_and_releases_later_input() {
 #[test]
 fn clipboard_imported_selection_is_used_by_the_requested_paste_register() {
     for register in [None, Some('+'), Some('*')] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         app.set_dashboard_visibility(false);
         if register.is_some() {
             let mut fixture = app.configuration.fixture_snapshot();

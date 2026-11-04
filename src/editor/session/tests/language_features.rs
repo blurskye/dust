@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notification() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.notify_message("keep unrelated notification".into(), false);
     app.present_lsp_result(
         "rust-analyzer",
@@ -72,7 +72,7 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
 
 #[test]
 fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hints.rs");
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("let 界 = build();"),
@@ -149,7 +149,7 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
 
 #[test]
 fn content_modified_before_any_loading_is_asked_again_a_few_times() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let failure = |app: &mut InteractiveApplication| {
         app.handle_lsp_request_failure(
             "rust-analyzer".into(),
@@ -177,7 +177,7 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
 
 #[test]
 fn background_inlay_failures_never_replace_the_user_notification() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("inlay-failure.rs");
     let (buffer, view) = app
         .state
@@ -228,7 +228,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
 
 #[test]
 fn completion_documentation_is_typed_and_exact_request_owned() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("completion.rs");
     let (buffer, view) = app
         .state
@@ -343,12 +343,13 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
 fn app_waiting_to_save_formatted(
     name: &str,
 ) -> (
+    (tempfile::TempDir, tempfile::TempDir),
     InteractiveApplication,
     crate::editor::BufferId,
     std::path::PathBuf,
     String,
 ) {
-    let mut app = app();
+    let (dirs, mut app) = app();
     let path = app.state.workspace_root.join(name);
     std::fs::write(&path, "a  b\n").unwrap();
     let (buffer, _) = app.state.open_text(
@@ -368,7 +369,7 @@ fn app_waiting_to_save_formatted(
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
     });
     let uri = format!("file://{}", path.display());
-    (app, buffer, path, uri)
+    (dirs, app, buffer, path, uri)
 }
 
 #[test]
@@ -376,7 +377,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
     use crate::language::lsp::{
         LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
     };
-    let (mut app, buffer, path, uri) = app_waiting_to_save_formatted("formatted.txt");
+    let (_app_dirs, mut app, buffer, path, uri) = app_waiting_to_save_formatted("formatted.txt");
     let position = |character| LspPosition { line: 0, character };
     app.present_lsp_result(
         "formatter",
@@ -407,7 +408,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
 #[test]
 fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
     use crate::language::lsp::{LspFeatureResult, LspProgressKind};
-    let (mut app, _, _, uri) = app_waiting_to_save_formatted("loading.rs");
+    let (_app_dirs, mut app, _, _, uri) = app_waiting_to_save_formatted("loading.rs");
     app.format_on_save = None;
     app.update_lsp_progress(
         "server".into(),
@@ -454,7 +455,7 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
 #[test]
 fn code_actions_wait_for_every_server_and_list_them_together() {
     use crate::language::lsp::{LspCodeAction, LspFeatureResult, LspWorkspaceEdit};
-    let (mut app, _, _, uri) = app_waiting_to_save_formatted("actions.py");
+    let (_app_dirs, mut app, _, _, uri) = app_waiting_to_save_formatted("actions.py");
     app.format_on_save = None;
     let action = |title: &str| LspCodeAction {
         title: title.into(),
@@ -493,7 +494,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     use crate::language::lsp::{
         LspDocumentEdit, LspFeatureResult, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit,
     };
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("whole.py");
     let source = "x  =  1\ny  =  2\nz  =  3\n";
     std::fs::write(&path, source).unwrap();
@@ -537,7 +538,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
 
 #[test]
 fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
-    let (mut app, _, path, uri) = app_waiting_to_save_formatted("nothing.txt");
+    let (_nothing_dirs, mut app, _, path, uri) = app_waiting_to_save_formatted("nothing.txt");
     app.present_lsp_result(
         "formatter",
         1,
@@ -550,7 +551,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "a  b\n");
     assert!(!app.state.buffers[app.state.active_buffer_id().unwrap()].dirty);
 
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("failed.txt");
+    let (_failed_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("failed.txt");
     app.handle_lsp_request_failure(
         "formatter".into(),
         1,
@@ -561,7 +562,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     super::wait_vfs(&mut app);
     assert!(!app.state.buffers[buffer].dirty);
 
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("slow.txt");
+    let (_slow_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("slow.txt");
     app.process_format_on_save_deadline();
     assert!(app.format_on_save.is_some());
     app.format_on_save.as_mut().unwrap().deadline = std::time::Instant::now();
@@ -573,7 +574,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
 
 #[test]
 fn loading_a_session_refuses_to_replace_unsaved_work() {
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("unsaved.txt");
+    let (_app_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("unsaved.txt");
     app.load_session_on_request();
     assert!(!app.session_load_requested);
     assert!(app.state.buffers.contains_key(buffer));
@@ -582,7 +583,7 @@ fn loading_a_session_refuses_to_replace_unsaved_work() {
 
 #[test]
 fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None);
     app.state.views[view].cursor = ByteOffset(4);
     app.state.views[view].selection = Some(crate::editor::Selection {
@@ -608,7 +609,7 @@ fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
 
 #[test]
 fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
-    let (mut app, buffer, ..) = app_waiting_to_save_formatted("newer-save.txt");
+    let (_app_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("newer-save.txt");
     app.format_on_save.as_mut().unwrap().request = Some(("formatter".into(), 2));
     app.handle_lsp_request_failure(
         "formatter".into(),
@@ -622,7 +623,7 @@ fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
 
 #[test]
 fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
-    let (mut app, buffer, path, ..) = app_waiting_to_save_formatted("save-in-background.txt");
+    let (_app_dirs, mut app, buffer, path, ..) = app_waiting_to_save_formatted("save-in-background.txt");
     app.state.open_text(TextBuffer::from_text("other"), None);
     let other = app.state.active_buffer_id();
     app.finish_format_on_save();
@@ -635,7 +636,7 @@ fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
 #[test]
 fn delayed_lsp_navigation_loads_without_stealing_focus() {
     use crate::language::lsp::{LspLocation, LspPosition, LspRange, file_uri};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(TextBuffer::from_text("first"), None);
     let path = app.state.workspace_root.join("definition.txt");
     fs::write(&path, "definition").unwrap();
@@ -668,7 +669,7 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
 
 #[test]
 fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), None);
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(5);
@@ -689,7 +690,7 @@ fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
 
 #[test]
 fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("encoded.rs");
     let (_, view) = app
         .state
@@ -717,7 +718,7 @@ fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
 
 #[test]
 fn an_unrelated_formatter_cannot_release_a_pending_save() {
-    let (mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
+    let (_app_dirs, mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
     app.format_on_save.as_mut().unwrap().formatter = Some("wanted".into());
     let (other, _) = app.state.open_text(TextBuffer::from_text("other"), None);
     app.tasks.fixture_formatter_result(
@@ -748,7 +749,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
 #[test]
 fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("snippet.rs");
     let (buffer, view) = app
         .state

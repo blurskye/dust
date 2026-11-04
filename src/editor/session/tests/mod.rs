@@ -76,9 +76,10 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
         .into_iter()
         .find(|tool| tool.id == "rust-analyzer")
         .expect("Rust analyzer catalog definition");
+    let root = tempdir().expect("isolated tool directory");
     let launch = super::LspLaunch::NixWorkspace {
-        nix: PathBuf::from("/home/user/.local/state/dust/tools/rust-analyzer/bin/rust-analyzer"),
-        workspace_root: PathBuf::from("/home/user/.local/state/dust/tools/nix-lsp-workspace"),
+        nix: root.path().join("rust-analyzer/bin/rust-analyzer"),
+        workspace_root: root.path().join("nix-lsp-workspace"),
         shell: "rust-analyzer".into(),
     };
     assert!(launch.arguments(&definition).is_empty());
@@ -87,17 +88,22 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
     assert!(launch.environment(&definition).is_err());
 }
 
-pub(super) fn app() -> InteractiveApplication {
+pub(super) fn app() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
     app_with_optional_plugin_queue(None)
 }
 
-fn app_with_plugin_queue(plugin_queue_capacity: usize) -> InteractiveApplication {
+fn app_with_plugin_queue(
+    plugin_queue_capacity: usize,
+) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
     app_with_optional_plugin_queue(Some(plugin_queue_capacity))
 }
 
-fn app_with_optional_plugin_queue(plugin_queue_capacity: Option<usize>) -> InteractiveApplication {
-    let root = tempdir().expect("tempdir").keep();
-    let startup = StartupTarget::Dashboard { root: root.clone() };
+fn app_with_optional_plugin_queue(
+    plugin_queue_capacity: Option<usize>,
+) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+    let root = tempdir().expect("tempdir");
+    let state = tempdir().expect("isolated state directory");
+    let startup = StartupTarget::Dashboard { root: root.path().into() };
     let mut loaded = crate::config::load_bundled_config();
     if let Some(plugin_queue_capacity) = plugin_queue_capacity {
         loaded.config.plugins.queue_capacity = plugin_queue_capacity;
@@ -106,7 +112,7 @@ fn app_with_optional_plugin_queue(plugin_queue_capacity: Option<usize>) -> Inter
         startup,
         loaded,
         false,
-        tempdir().expect("isolated state directory").keep(),
+        state.path().into(),
         false,
         false,
         std::sync::Arc::new(crate::clock::SystemClock),
@@ -114,7 +120,20 @@ fn app_with_optional_plugin_queue(plugin_queue_capacity: Option<usize>) -> Inter
     .expect("application construction");
     app.window_session.observe_size((80, 24));
     app.notices.set_terminal_capabilities("test".into());
-    app
+    ((root, state), app)
+}
+
+#[test]
+fn application_fixture_cleans_up_workspace_and_state_after_drop() {
+    let (dirs, app) = app();
+    let root = dirs.0.path().to_path_buf();
+    let state = dirs.1.path().to_path_buf();
+    assert!(root.is_dir());
+    assert!(state.is_dir());
+    drop(app);
+    drop(dirs);
+    assert!(!root.exists());
+    assert!(!state.exists());
 }
 
 fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::extensions::PluginManifest {

@@ -4079,7 +4079,7 @@ mod tests {
             std::fs::write(&path, script).unwrap();
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        let mut app = super::super::tests::app();
+        let (_app_dirs, mut app) = super::super::tests::app();
         app.tooling
             .fixture_retain(|entry| entry.definition.kind != ToolKind::Agent);
         let definition = crate::tools::bundled_tool_catalog()

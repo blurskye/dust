@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("startup.txt");
     fs::write(&path, b"startup\n").expect("startup file");
     app.set_dashboard_visibility(false);
@@ -34,7 +34,7 @@ fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
 
 #[test]
 fn deferred_startup_additional_files_restore_the_primary_buffer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let primary = app.state.workspace_root.join("primary.txt");
     let additional = app.state.workspace_root.join("additional.txt");
     fs::write(&primary, b"primary").expect("primary");
@@ -61,7 +61,7 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
 
 #[test]
 fn path_completion_is_bounded_async_and_rejects_stale_generations() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
     app.open_prompt(crate::ui::PromptKind::Command, "e a".into());
     wait_vfs(&mut app);
@@ -89,7 +89,7 @@ fn path_completion_is_bounded_async_and_rejects_stale_generations() {
 
 #[test]
 fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
     fs::write(app.state.workspace_root.join("beta.txt"), b"b").expect("beta");
     wait_vfs(&mut app);
@@ -109,7 +109,7 @@ fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
 
 #[test]
 fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     {
         let mut fixture = app.configuration.fixture_snapshot();
         fixture
@@ -150,7 +150,7 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
 
 #[test]
 fn dot_repeats_semantic_insert_session() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("one"), None);
     app.set_dashboard_visibility(false);
@@ -166,7 +166,7 @@ fn dot_repeats_semantic_insert_session() {
 
 #[test]
 fn empty_insert_sessions_preserve_the_previous_dot_change() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
     for key in ["x", "i", "escape", "."] {
@@ -178,7 +178,7 @@ fn empty_insert_sessions_preserve_the_previous_dot_change() {
 
 #[test]
 fn insert_cursor_motion_splits_dot_recording() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("one"), None);
     app.set_dashboard_visibility(false);
     for key in ["i", "a", "left", "b", "escape", "."] {
@@ -194,7 +194,7 @@ fn insert_cursor_motion_splits_dot_recording() {
 
 #[test]
 fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("ab\ncd\n0123456789\nuvwxyz"), None);
     app.set_dashboard_visibility(false);
     for key in ["l", "v", "j", "h", "d", "j", "."] {
@@ -207,7 +207,7 @@ fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
 #[test]
 fn multiline_visual_repeat_at_document_end_deletes_the_remaining_text() {
     for terminated in [false, true] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let source = format!("ab\ncd\n0123456789{}", if terminated { "\n" } else { "" });
         app.state.open_text(crate::editor::text::TextBuffer::from_text(&source), None);
         app.set_dashboard_visibility(false);
@@ -226,7 +226,7 @@ fn normalized_visual_comment_and_surround_keep_operator_arguments() {
         ("surround_add", "character", ")", "(ab) (cd)"),
         ("comment", "comment", "//", "// ab\n// cd"),
     ] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let source = if operator == "comment" { "ab\ncd" } else { "ab cd" };
         app.state.open_text(crate::editor::text::TextBuffer::from_text(source), None);
         app.set_dashboard_visibility(false);
@@ -250,7 +250,7 @@ fn normalized_visual_comment_and_surround_keep_operator_arguments() {
 
 #[test]
 fn normalized_visual_indent_repeats_the_level_count() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("a\nb"), None);
     app.set_dashboard_visibility(false);
     for key in ["V", "3", ">", "j", "."] {
@@ -263,7 +263,7 @@ fn normalized_visual_indent_repeats_the_level_count() {
 
 #[test]
 fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
-    let mut character = app();
+    let (_character_dirs, mut character) = app();
     character
         .state
         .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None);
@@ -277,7 +277,7 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
         .expect("character buffer");
     assert_eq!(character.state.buffers[buffer].text.to_string(), "cf");
 
-    let mut line = app();
+    let (_line_dirs, mut line) = app();
     line.state.open_text(
         crate::editor::text::TextBuffer::from_text("a\nb\nc\nd\n"),
         None,
@@ -292,7 +292,7 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
 
 #[test]
 fn normalized_blockwise_change_repeats_without_a_stale_selection() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\njkl"),
         None,
@@ -313,7 +313,7 @@ fn normalized_blockwise_change_repeats_without_a_stale_selection() {
 
 #[test]
 fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abcd\nx\npqrs\n----\ny\n----"),
         None,
@@ -346,7 +346,7 @@ fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
 
 #[test]
 fn replace_mode_session_is_semantically_repeatable() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
@@ -361,7 +361,7 @@ fn replace_mode_session_is_semantically_repeatable() {
 
 #[test]
 fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\njkl"),
         None,
@@ -379,7 +379,7 @@ fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
 
 #[test]
 fn macros_record_command_line_edits_once() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("abcde"), None);
     app.set_dashboard_visibility(false);
     for key in ["q", "a", ":"] {
@@ -400,7 +400,7 @@ fn macros_record_command_line_edits_once() {
 
 #[test]
 fn macro_edits_replace_the_previous_dot_change() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
     for key in ["q", "a", "i", "X", "escape", "q", "x", "@", "a", "."] {
@@ -412,7 +412,7 @@ fn macro_edits_replace_the_previous_dot_change() {
 
 #[test]
 fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(crate::editor::text::TextBuffer::from_text("abcd"), None);
     app.set_dashboard_visibility(false);
     for key in ["q", "a", "x"] {
@@ -434,7 +434,7 @@ fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
 
 #[test]
 fn macro_replay_honors_configured_counts() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None);
     app.set_dashboard_visibility(false);
@@ -447,7 +447,7 @@ fn macro_replay_honors_configured_counts() {
 
 #[test]
 fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
         Instant::now(),
@@ -529,7 +529,7 @@ fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
 
 #[test]
 fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
         Instant::now(),
@@ -620,7 +620,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
 
 #[test]
 fn an_unfinished_insert_mapping_types_its_keys() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
         Instant::now(),
@@ -677,7 +677,7 @@ fn an_unfinished_insert_mapping_types_its_keys() {
 
 #[test]
 fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
     let path = app.state.workspace_root.join("late.txt");
@@ -711,7 +711,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
 #[ignore = "explicit startup lifecycle cost probe"]
 fn startup_lifecycle_cost_probe() {
     use crate::editor::session::extensions::ExtensionSession;
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
     let bytes = "0123456789abcdef\n".repeat(3856);
@@ -773,7 +773,7 @@ fn expired_shutdown_does_not_admit_or_report_an_exit_snapshot() {
 
 #[test]
 fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("one\n  two\n"),
         None,
@@ -857,7 +857,7 @@ fn tutor_moves_on_when_each_step_is_done() {
         wait_vfs(app);
         app.tutor_tick();
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let home = app.state.workspace_root.canonicalize().unwrap();
     // The first start asks for a language; Rust comes first.
     app.process_effect(AppEffect::Tutor);
@@ -979,7 +979,7 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
             kind: crate::ui::KeyInputKind::Press,
         });
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (_, view) = app
         .state
@@ -1005,7 +1005,7 @@ fn press_keys(app: &mut InteractiveApplication, keys: &[&str]) {
 
 #[test]
 fn vim_edits_that_lazyvim_users_reach_for() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
         .state
@@ -1059,7 +1059,7 @@ fn vim_edits_that_lazyvim_users_reach_for() {
 
 #[test]
 fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let path = app.state.workspace_root.join("jumps.txt");
     fs::write(&path, b"a\nb\n\nc\n").expect("jumps");
@@ -1085,7 +1085,7 @@ fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
 
 #[test]
 fn markdown_lines_comment_with_html_comments() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let path = app.state.workspace_root.join("notes.md");
     fs::write(&path, b"hello\n").expect("notes");
@@ -1103,7 +1103,7 @@ fn markdown_lines_comment_with_html_comments() {
 
 #[test]
 fn several_cursors_change_every_match_and_type_on_every_line() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
         .open_text(TextBuffer::from_text("foo bar food foo\nx\nyy\n"), None);
@@ -1157,7 +1157,7 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 
 #[test]
 fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app.state.open_text(
         TextBuffer::from_text("cat one\ncat two\n// cat three\ncat four\n"),
         None,
@@ -1225,7 +1225,7 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
 
 #[test]
 fn multi_cursors_take_every_match_skip_remove_and_move_together() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app.state.open_text(
         TextBuffer::from_text("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = cat;\n"),
         None,
@@ -1307,7 +1307,7 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
 
 #[test]
 fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
         .open_text(TextBuffer::from_text("foobar\nxfoo\n"), None);
@@ -1326,7 +1326,7 @@ fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
 
 #[test]
 fn visual_block_i_and_a_type_before_and_after_every_row() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
         .open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
@@ -1355,7 +1355,7 @@ fn visual_block_i_and_a_type_before_and_after_every_row() {
 
 #[test]
 fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("prefix.txt");
     fs::write(&path, b"Header\n").expect("file");
     app.start_open(path);
@@ -1378,7 +1378,7 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
 
 #[test]
 fn conflict_keys_move_between_markers_and_wrap() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("merged.txt");
     fs::write(&path, b"Header\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\nmid\n<<<<<<< ours\nc\n=======\nd\n>>>>>>> theirs\n").expect("file");
     app.start_open(path);
@@ -1403,7 +1403,7 @@ fn conflict_keys_move_between_markers_and_wrap() {
 
 #[test]
 fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("watched.txt");
     fs::write(&path, b"first\n").expect("file");
     app.start_open(path.clone());
@@ -1433,7 +1433,7 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
 
 #[test]
 fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("let word = 1;"),
         None,
@@ -1461,7 +1461,7 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
 
 #[test]
 fn recovery_failure_and_retired_reads_preserve_the_journal() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), None);
     app.state.buffers[buffer].read_only = true;
@@ -1490,7 +1490,7 @@ fn recovery_failure_and_retired_reads_preserve_the_journal() {
 
 #[test]
 fn flash_cancels_cached_targets_after_a_reload() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
         .open_text(TextBuffer::from_text("abc abc abc"), None);
@@ -1514,7 +1514,7 @@ fn flash_cancels_cached_targets_after_a_reload() {
 
 #[test]
 fn persisted_navigation_clamps_multibyte_offsets() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("mark.txt");
     fs::write(&path, "éx").unwrap();
     app.navigate_persisted_location(crate::persistence::PersistedLocation {
@@ -1533,7 +1533,7 @@ fn persisted_navigation_clamps_multibyte_offsets() {
 
 #[test]
 fn cursor_only_commands_do_not_enter_the_change_list() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("changes.txt");
     app.state
         .open_text(TextBuffer::from_text("abc def"), Some(path));
@@ -1546,7 +1546,7 @@ fn cursor_only_commands_do_not_enter_the_change_list() {
 
 #[test]
 fn count_errors_return_operator_pending_views_to_normal() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
     app.set_dashboard_visibility(false);
     press_keys(
@@ -1561,7 +1561,7 @@ fn count_errors_return_operator_pending_views_to_normal() {
 
 #[test]
 fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
         .open_text(TextBuffer::from_text("cat cat\nkeep\n"), None);
@@ -1590,7 +1590,7 @@ fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
 
 #[test]
 fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None);
     app.set_dashboard_visibility(false);
     press_keys(&mut app, &["x", "q", "a", ".", "q", "@", "a"]);
@@ -1605,7 +1605,7 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 
 #[test]
 fn macro_replay_stops_before_an_edit_after_a_failed_find() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None);
     app.set_dashboard_visibility(false);
     for key in "qafzxq".chars() {
@@ -1620,7 +1620,7 @@ fn macro_replay_stops_before_an_edit_after_a_failed_find() {
 
 #[test]
 fn star_and_hash_repeat_only_whole_identifiers() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
         .open_text(TextBuffer::from_text("foo foobar foo"), None);
@@ -1636,7 +1636,7 @@ fn star_and_hash_repeat_only_whole_identifiers() {
 #[test]
 fn operator_arrow_motions_are_linewise_like_j_and_k() {
     for (motion, cursor) in [("down", 1), ("up", 5)] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let (buffer, view) = app.state.open_text(
             crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\n"),
             None,
