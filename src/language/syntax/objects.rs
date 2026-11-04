@@ -78,8 +78,10 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
             objects.push(block(node, source, SyntaxObjectKind::Function));
         } else if node.is_named()
             && CLASSES.contains(&kind)
-            && !(kind == "type_declaration"
-                && node.named_child(0).is_some_and(|child| child.kind() == "type_spec"))
+            && !(kind == "type_declaration" && {
+                let mut walk = node.walk();
+                node.named_children(&mut walk).any(|child| child.kind() == "type_spec")
+            })
         {
             objects.push(block(node, source, SyntaxObjectKind::Class));
         } else if ARGUMENT_LISTS.contains(&kind) {
@@ -111,8 +113,9 @@ fn block(node: tree_sitter::Node<'_>, source: &str, kind: SyntaxObjectKind) -> S
     let mut body = node.child_by_field_name("body");
     if node.kind() == "type_spec" {
         if let Some(parent) = node.parent().filter(|parent| {
+            let mut walk = parent.walk();
             parent.kind() == "type_declaration"
-                && parent.child(1).is_some_and(|child| child.kind() != "(")
+                && !parent.children(&mut walk).any(|child| child.kind() == "(")
         }) {
             outer = (parent.start_byte(), parent.end_byte());
         }
@@ -300,26 +303,33 @@ mod tests {
     }
     #[test]
     fn go_struct_inner_is_its_field_list() {
-        let source = "package main\ntype Point struct { X int }\n";
-        let found = parsed(source, tree_sitter_go::LANGUAGE.into());
-        let class = found
-            .iter()
-            .find(|o| o.kind == SyntaxObjectKind::Class)
-            .unwrap();
-        assert_eq!(&source[class.inner.0..class.inner.1], " X int ");
-        assert_eq!(&source[class.outer.0..class.outer.1], "type Point struct { X int }");
+        for declaration in [
+            "type Point struct { X int }",
+            "type /* comment */ Point struct { X int }",
+        ] {
+            let source = format!("package main\n{declaration}\n");
+            let found = parsed(&source, tree_sitter_go::LANGUAGE.into());
+            let classes = found.iter().filter(|o| o.kind == SyntaxObjectKind::Class)
+                .collect::<Vec<_>>();
+            assert_eq!(classes.len(), 1);
+            let class = classes[0];
+            assert_eq!(&source[class.inner.0..class.inner.1], " X int ");
+            assert_eq!(&source[class.outer.0..class.outer.1], declaration);
+        }
     }
     #[test]
     fn grouped_go_types_have_separate_class_bodies() {
-        let source = "package main\ntype (\n A struct { X int }\n B struct { Y int }\n)\n";
-        let found = parsed(source, tree_sitter_go::LANGUAGE.into());
-        let classes = found.iter().filter(|o| o.kind == SyntaxObjectKind::Class)
-            .map(|o| (&source[o.outer.0..o.outer.1], &source[o.inner.0..o.inner.1]))
-            .collect::<Vec<_>>();
-        assert_eq!(classes, [
-            ("A struct { X int }", " X int "),
-            ("B struct { Y int }", " Y int "),
-        ]);
+        for prefix in ["type (", "type /* comment */ (", "type (\n // comment"] {
+            let source = format!("package main\n{prefix}\n A struct {{ X int }}\n B struct {{ Y int }}\n)\n");
+            let found = parsed(&source, tree_sitter_go::LANGUAGE.into());
+            let classes = found.iter().filter(|o| o.kind == SyntaxObjectKind::Class)
+                .map(|o| (&source[o.outer.0..o.outer.1], &source[o.inner.0..o.inner.1]))
+                .collect::<Vec<_>>();
+            assert_eq!(classes, [
+                ("A struct { X int }", " X int "),
+                ("B struct { Y int }", " Y int "),
+            ], "{source}");
+        }
     }
     #[test]
     fn argument_collection_respects_remaining_object_capacity() {
