@@ -677,6 +677,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
+        if let Some(request) = self.extension.expire_providers() {
+            self.present_plugin_picker(request);
+        }
         if self.extension.retire_stale_confirmations(
             &self.state,
             &self.workspace.version(),

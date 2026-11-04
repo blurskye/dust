@@ -323,6 +323,23 @@ impl PluginProviderBroker {
             .collect()
     }
 
+    pub fn expire(&mut self) -> Vec<u64> {
+        let now = crate::clock::monotonic();
+        let mut expired = Vec::new();
+        for (request, session) in &mut self.sessions {
+            if session.status == PluginProviderSessionStatus::Active && now > session.deadline {
+                session.status = PluginProviderSessionStatus::Failed;
+                session.error = Some(PluginProviderError::new(
+                    PluginProviderErrorCode::Expired,
+                    "provider request deadline elapsed",
+                ));
+                session.revision = session.revision.saturating_add(1);
+                expired.push(*request);
+            }
+        }
+        expired
+    }
+
     pub fn apply_chunk(
         &mut self,
         plugin: &str,
@@ -331,6 +348,7 @@ impl PluginProviderBroker {
         buffer_revision: Option<u64>,
         chunk: PluginPickerChunk,
     ) -> Result<PluginProviderSessionStatus, PluginProviderError> {
+        self.expire();
         let current = self.sessions.get(&chunk.request).ok_or_else(|| {
             PluginProviderError::new(
                 PluginProviderErrorCode::UnknownRequest,
@@ -349,16 +367,15 @@ impl PluginProviderBroker {
                 "provider request was cancelled",
             ));
         }
+        if let Some(error) = &current.error
+            && error.code == PluginProviderErrorCode::Expired
+        {
+            return Err(error.clone());
+        }
         if current.status != PluginProviderSessionStatus::Active {
             return Err(PluginProviderError::new(
                 PluginProviderErrorCode::Malformed,
                 "provider request already has a terminal state",
-            ));
-        }
-        if crate::clock::monotonic() > current.deadline {
-            return Err(PluginProviderError::new(
-                PluginProviderErrorCode::Expired,
-                "provider request deadline elapsed",
             ));
         }
         if current.workspace_revision != workspace_revision
@@ -546,18 +563,13 @@ pub fn validate_chunk(chunk: &PluginPickerChunk) -> Result<(), PluginProviderErr
 }
 
 fn rank(query: &str, items: &BTreeMap<String, PluginPickerItem>) -> Vec<String> {
-    let query = query.to_ascii_lowercase();
     let mut ranked = items
         .values()
         .filter_map(|item| {
-            let primary = item.primary.to_ascii_lowercase();
-            let secondary = item.secondary.as_deref().unwrap_or("").to_ascii_lowercase();
-            let position = if query.is_empty() {
-                0
-            } else {
-                primary.find(&query).or_else(|| secondary.find(&query))?
-            };
-            Some((position, primary, item.id.clone()))
+            let score = crate::workspace::fuzzy_score(
+                query, &item.primary, item.secondary.as_deref().unwrap_or(""),
+            )?;
+            Some((std::cmp::Reverse(score), item.primary.to_lowercase(), item.id.clone()))
         })
         .collect::<Vec<_>>();
     ranked.sort();
@@ -617,6 +629,14 @@ mod tests {
             secondary: None,
             action_data: Vec::new(),
         }
+    }
+
+    #[test]
+    fn provider_ranking_uses_picker_fuzzy_and_unicode_matching() {
+        let items = [item("foo", "foo_bar"), item("accent", "Éclair")]
+            .into_iter().map(|item| (item.id.clone(), item)).collect();
+        assert_eq!(rank("fb", &items), vec!["foo"]);
+        assert_eq!(rank("é", &items), vec!["accent"]);
     }
 
     #[test]
@@ -825,6 +845,8 @@ mod tests {
                 .requests("demo", PluginLoadId(2), "plugin.demo.run")
                 .is_empty()
         );
+        assert_eq!(broker.expire(), vec![request]);
+        assert_eq!(broker.projection(request).unwrap().status, PluginProviderSessionStatus::Failed);
         assert_eq!(
             broker
                 .apply_chunk(
@@ -856,7 +878,11 @@ mod tests {
                 })
                 .is_ok()
         );
+        assert!(broker.expire().is_empty());
         let stable = broker.projection(request);
+        let projection = stable.as_ref().unwrap();
+        assert_eq!(projection.status, PluginProviderSessionStatus::Failed);
+        assert_eq!(projection.error.as_ref().unwrap().code, PluginProviderErrorCode::Expired);
         for _ in 0..256 {
             assert_eq!(broker.projection(request), stable);
         }

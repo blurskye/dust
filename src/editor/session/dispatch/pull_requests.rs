@@ -26,7 +26,7 @@ pub(super) struct PullRequests {
 impl PullRequests {
     fn prepare(&mut self, source: crate::editor::session::workspace::WorkspaceVersion) {
         if self.source.as_ref() != Some(&source) {
-            self.jobs = ForgeJobs::default();
+            self.jobs.cancel();
             self.generation += 1;
             self.source = Some(source);
             self.comment_target = None;
@@ -50,19 +50,21 @@ impl InteractiveApplication {
 
     pub(super) fn list_pull_requests(&mut self) {
         let generation = self.pull_request_generation();
-        self.pull_requests
-            .jobs
-            .list(self.state.workspace_root.clone(), generation);
-        self.notify_message("loading pull requests…".into(), false);
+        match self.pull_requests.jobs.list(self.state.workspace_root.clone(), generation) {
+            Ok(()) => self.notify_message("loading pull requests…".into(), false),
+            Err(error) => self.show_error(error),
+        }
     }
 
     pub(super) fn list_review_comments(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
-        self.pull_requests.jobs.comments(
+        match self.pull_requests.jobs.comments(
             self.state.workspace_root.clone(),
             self.pull_requests.generation,
-        );
-        self.notify_message("loading review comments…".into(), false);
+        ) {
+            Ok(()) => self.notify_message("loading review comments…".into(), false),
+            Err(error) => self.show_error(error),
+        }
     }
 
     pub(super) fn begin_review_comment(&mut self) {
@@ -102,15 +104,17 @@ impl InteractiveApplication {
             return;
         }
         self.pull_requests.comment_body = Some(body.clone());
-        self.pull_requests.jobs.comment(
+        match self.pull_requests.jobs.comment(
             self.state.workspace_root.clone(),
             self.pull_requests.generation,
             path,
             line,
             body,
             text,
-        );
-        self.notify_message("sending comment…".into(), false);
+        ) {
+            Ok(()) => self.notify_message("sending comment…".into(), false),
+            Err(error) => self.show_error(error),
+        }
     }
 
     pub(super) fn checkout_pull_request(
@@ -131,19 +135,19 @@ impl InteractiveApplication {
             self.show_workspace_failure(failure);
             return;
         }
-        self.pull_requests.jobs.checkout(
+        match self.pull_requests.jobs.checkout(
             root,
             generation,
             number,
             self.workspace.edit_scope().clone(),
-        );
-        self.notify_message(format!("checking out #{number}…"), false);
+        ) {
+            Ok(()) => self.notify_message(format!("checking out #{number}…"), false),
+            Err(error) => self.show_error(error),
+        }
     }
 
     pub(super) fn process_pull_request_events(&mut self) {
-        if self.pull_requests.source.as_ref() != Some(&self.workspace.version()) {
-            return;
-        }
+        self.pull_requests.prepare(self.workspace.version());
         while let Some(event) = self.pull_requests.jobs.try_reply() {
             if !self.pull_request_is_current(&event.root, event.generation) {
                 continue;

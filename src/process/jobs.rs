@@ -99,6 +99,9 @@ pub(crate) struct JobAdmission<'a> {
 }
 impl JobSupervisor {
     pub fn new(event_capacity: usize) -> Self {
+        Self::try_new(event_capacity).expect("job worker")
+    }
+    pub(crate) fn try_new(event_capacity: usize) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<Submission>(256);
         let (events, receiver) = mpsc::sync_channel(event_capacity.clamp(1, 4096));
         let stop = Arc::new(AtomicBool::new(false));
@@ -153,9 +156,8 @@ impl JobSupervisor {
                         thread::sleep(Duration::from_millis(2));
                     }
                 }
-            })
-            .expect("job worker");
-        Self {
+            })?;
+        Ok(Self {
             next: Some(1),
             jobs: HashMap::new(),
             sender: tx,
@@ -163,7 +165,7 @@ impl JobSupervisor {
             stop,
             residents: Arc::new(AtomicUsize::new(0)),
             worker,
-        }
+        })
     }
     pub(crate) fn reserve(&mut self) -> Result<JobAdmission<'_>, JobError> {
         if self.stop.load(Ordering::Acquire) || self.worker.is_finished() {

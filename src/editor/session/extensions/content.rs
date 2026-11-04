@@ -138,6 +138,9 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn provider_visible(&self, request: u64) -> bool {
         self.active_picker == Some(request)
     }
+    pub(in crate::editor::session) fn expire_providers(&mut self) -> Option<u64> {
+        self.providers.expire().into_iter().find(|request| self.active_picker == Some(*request))
+    }
     pub(in crate::editor::session) fn provider_projection(
         &self,
         request: u64,
