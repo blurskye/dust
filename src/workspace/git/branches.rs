@@ -1,8 +1,6 @@
-//! Branch and worktree authority: what exists, what a mutation would affect, and what is
-//! refused. Every refusal is decided before the first write, so a refused request leaves the
-//! repository byte-unchanged.
+//! Branch and worktree listing, creation and removal. Check refusal conditions before writes;
+//! retain running mutations until their completion is handled.
 use std::{
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -15,44 +13,6 @@ use std::{
 
 use thiserror::Error;
 
-/// A worktree identity captured for a document at the moment it was opened.
-///
-/// This is deliberately not a `GitRepositoryId`: linked worktrees share a repository but are
-/// distinct roots with their own HEAD and index, so a resource bound to one must not be
-/// retargeted when another is opened.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WorktreeIdentity {
-    /// Canonical path of the document the identity was captured for.
-    pub document: PathBuf,
-    /// Canonical root of the worktree that contained the document.
-    pub root: PathBuf,
-    /// Stable id derived from the worktree root, in the same spirit as `GitRepositoryId`.
-    pub id: u64,
-}
-impl WorktreeIdentity {
-    /// Capture the worktree a document belongs to by walking up from it to the nearest
-    /// ancestor holding a `.git` entry. A linked worktree has a `.git` file pointing at its
-    /// administrative directory, so the nearest ancestor is that worktree rather than the main
-    /// checkout. A document outside any worktree has no identity rather than a fabricated one.
-    pub fn capture(document: &Path) -> Option<Self> {
-        let document = std::fs::canonicalize(document).ok()?;
-        let mut cursor = document.parent();
-        while let Some(directory) = cursor {
-            if directory.join(".git").exists() {
-                let root = directory.to_path_buf();
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                root.hash(&mut hasher);
-                return Some(Self {
-                    document,
-                    root,
-                    id: hasher.finish(),
-                });
-            }
-            cursor = directory.parent();
-        }
-        None
-    }
-}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GitBranchGeneration(pub u64);
 #[derive(Clone, Debug)]
@@ -145,6 +105,8 @@ pub enum GitBranchError {
     Deadline,
     #[error("Git branch request was cancelled")]
     Cancelled,
+    #[error("a worktree mutation is still running; wait for it to finish")]
+    Busy,
     #[error("Git branch worker stopped")]
     Stopped,
     #[error("Git failed: {0}")]
@@ -160,6 +122,7 @@ pub struct GitBranchService {
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<GitBranchEvent>>,
     accepted: Option<GitBranchResult>,
+    mutating: bool,
 }
 impl GitBranchService {
     pub fn start(
@@ -169,7 +132,11 @@ impl GitBranchService {
         if !valid_request(&request) {
             return Err(GitBranchError::Invalid);
         }
+        if self.mutating && self.receiver.is_some() {
+            return Err(GitBranchError::Busy);
+        }
         self.cancel();
+        let mutating = !matches!(request, GitBranchRequest::List(_));
         self.next = self.next.saturating_add(1);
         let generation = GitBranchGeneration(self.next);
         let cancel = Arc::new(AtomicBool::new(false));
@@ -182,6 +149,7 @@ impl GitBranchService {
                 let _ = tx.send(GitBranchEvent::Complete(result));
             })
             .map_err(|_| GitBranchError::Stopped)?;
+        self.mutating = mutating;
         self.active = Some(generation);
         self.cancel = Some(cancel);
         self.receiver = Some(rx);
@@ -191,8 +159,11 @@ impl GitBranchService {
         if let Some(cancel) = self.cancel.take() {
             cancel.store(true, Ordering::Release)
         }
-        self.active = None;
-        self.receiver = None
+        // A mutation may already be writing. Keep its completion owned until poll handles it.
+        if !self.mutating {
+            self.active = None;
+            self.receiver = None;
+        }
     }
     pub fn poll(&mut self) -> Result<Option<&GitBranchResult>, GitBranchError> {
         let event = match self.receiver.as_ref() {
@@ -204,6 +175,7 @@ impl GitBranchService {
                 let expected = self.active.take();
                 self.receiver = None;
                 self.cancel = None;
+                self.mutating = false;
                 let result = result?;
                 // A page carries its generation; a mutation is accepted for the active request.
                 if let GitBranchResult::List(list) = &result
@@ -216,6 +188,7 @@ impl GitBranchService {
             }
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => {
+                self.mutating = false;
                 self.cancel();
                 Err(GitBranchError::Stopped)
             }
@@ -274,6 +247,46 @@ fn open(repository: &Path) -> Result<git2::Repository, GitBranchError> {
     git2::Repository::open(repository).map_err(|_| GitBranchError::NotRepository)
 }
 
+fn check_request(cancel: &AtomicBool, expires: Instant) -> Result<(), GitBranchError> {
+    if cancel.load(Ordering::Acquire) {
+        Err(GitBranchError::Cancelled)
+    } else if Instant::now() >= expires {
+        Err(GitBranchError::Deadline)
+    } else {
+        Ok(())
+    }
+}
+
+fn main_repository(repository: &git2::Repository) -> Result<git2::Repository, GitBranchError> {
+    if !repository.is_worktree() {
+        return open(repository.workdir().ok_or(GitBranchError::NotRepository)?);
+    }
+    let main = open(repository.commondir())?;
+    // libgit2 honors core.worktree; otherwise it infers a conventional .git directory.
+    // A separate Git directory without core.worktree has no backlink to its primary checkout.
+    let path = main.workdir().ok_or(GitBranchError::NotRepository)?;
+    if !path.join(".git").exists() {
+        return Err(GitBranchError::Backend(
+            "cannot locate the primary checkout; open it directly or set core.worktree".into(),
+        ));
+    }
+    let checked = open(path)?;
+    if checked.is_worktree()
+        || checked.commondir().canonicalize().map_err(backend)?
+            != repository.commondir().canonicalize().map_err(backend)?
+    {
+        return Err(GitBranchError::NotRepository);
+    }
+    Ok(main)
+}
+
+fn checkout_options(cancel: &AtomicBool, expires: Instant) -> git2::build::CheckoutBuilder<'_> {
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.notify_on(git2::CheckoutNotificationType::all());
+    checkout.notify(move |_, _, _, _, _| check_request(cancel, expires).is_ok());
+    checkout
+}
+
 /// One linked worktree as read for attribution: name, path, branch and lock state.
 struct WorktreeRef {
     name: String,
@@ -283,10 +296,16 @@ struct WorktreeRef {
 }
 
 /// The linked worktrees and the branch each has checked out.
-fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, GitBranchError> {
+fn worktree_branches(
+    repository: &git2::Repository,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<Vec<WorktreeRef>, GitBranchError> {
+    check_request(cancel, expires)?;
     let names = repository.worktrees().map_err(backend)?;
     let mut found = Vec::new();
     for index in 0..names.len() {
+        check_request(cancel, expires)?;
         let Some(name) = names.get(index) else {
             continue;
         };
@@ -298,6 +317,7 @@ fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, 
             opened
                 .head()
                 .ok()
+                .filter(|head| head.is_branch())
                 .and_then(|head| head.shorthand().map(str::to_owned))
         });
         let locked = worktree
@@ -310,6 +330,7 @@ fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, 
             locked,
         });
     }
+    check_request(cancel, expires)?;
     Ok(found)
 }
 
@@ -344,21 +365,11 @@ fn read_list(
     generation: GitBranchGeneration,
     request: &GitBranchListRequest,
     cancel: &AtomicBool,
+    expires: Instant,
 ) -> Result<GitBranchResult, GitBranchError> {
+    check_request(cancel, expires)?;
     let repository = open(&request.repository)?;
-    let started = Instant::now();
-    // Opened from a linked worktree, `repository` is that worktree; the main checkout sits
-    // beside the common Git directory.
-    let linked_from = repository.is_worktree().then(|| {
-        repository
-            .commondir()
-            .parent()
-            .and_then(|root| git2::Repository::open(root).ok())
-    });
-    let main = linked_from
-        .as_ref()
-        .and_then(Option::as_ref)
-        .unwrap_or(&repository);
+    let main = main_repository(&repository)?;
     let main_path = main
         .workdir()
         .and_then(|path| std::fs::canonicalize(path).ok());
@@ -368,22 +379,18 @@ fn read_list(
         branch: main
             .head()
             .ok()
+            .filter(|head| head.is_branch())
             .and_then(|head| head.shorthand().map(str::to_owned)),
-        dirty: has_changes(main)?,
+        dirty: has_changes(&main, cancel, expires)?,
         operation: operation_name(main.state()),
         locked: false,
         main: true,
     }];
-    for linked in worktree_branches(&repository)? {
-        if cancel.load(Ordering::Acquire) {
-            return Err(GitBranchError::Cancelled);
-        }
-        if started.elapsed() > request.deadline {
-            return Err(GitBranchError::Deadline);
-        }
+    for linked in worktree_branches(&repository, cancel, expires)? {
+        check_request(cancel, expires)?;
         let opened = git2::Repository::open(&linked.path).ok();
         let (dirty, operation) = match &opened {
-            Some(opened) => (has_changes(opened)?, operation_name(opened.state())),
+            Some(opened) => (has_changes(opened, cancel, expires)?, operation_name(opened.state())),
             None => (false, None),
         };
         worktrees.push(GitWorktreeEntry {
@@ -400,9 +407,7 @@ fn read_list(
     for kind in [git2::BranchType::Local, git2::BranchType::Remote] {
         let iterator = repository.branches(Some(kind)).map_err(backend)?;
         for entry in iterator {
-            if cancel.load(Ordering::Acquire) {
-                return Err(GitBranchError::Cancelled);
-            }
+            check_request(cancel, expires)?;
             let (branch, _) = entry.map_err(backend)?;
             let Some(name) = branch.name().ok().flatten().map(str::to_owned) else {
                 continue;
@@ -424,6 +429,7 @@ fn read_list(
             });
         }
     }
+    check_request(cancel, expires)?;
     Ok(GitBranchResult::List(GitBranchList {
         generation,
         branches,
@@ -431,26 +437,32 @@ fn read_list(
     }))
 }
 
-fn has_changes(repository: &git2::Repository) -> Result<bool, GitBranchError> {
+fn has_changes(
+    repository: &git2::Repository,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<bool, GitBranchError> {
+    check_request(cancel, expires)?;
     let mut options = git2::StatusOptions::new();
     options
         .include_untracked(true)
         .recurse_untracked_dirs(false);
     let statuses = repository.statuses(Some(&mut options)).map_err(backend)?;
+    check_request(cancel, expires)?;
     Ok(!statuses.is_empty())
 }
 
 /// A worktree inside the main checkout would otherwise show as untracked in its status.
-fn exclude_from_status(repository: &git2::Repository, path: &Path) {
-    let Some(root) = repository.commondir().parent() else {
-        return;
-    };
+fn exclude_from_status(repository: &git2::Repository, path: &Path) -> Result<(), GitBranchError> {
+    use std::io::{Read, Write};
+    let main = main_repository(repository)?;
+    let root = main.workdir().ok_or(GitBranchError::NotRepository)?;
     let Ok(relative) = path.strip_prefix(root) else {
-        return;
+        return Ok(());
     };
     let relative = relative.to_string_lossy();
     if relative.is_empty() || relative.contains(['\n', '\r']) {
-        return;
+        return Ok(());
     }
     let mut line = String::from("/");
     for ch in relative.chars() {
@@ -461,31 +473,35 @@ fn exclude_from_status(repository: &git2::Repository, path: &Path) {
     }
     line.push('/');
     let exclude = repository.commondir().join("info").join("exclude");
-    let current = std::fs::read_to_string(&exclude).unwrap_or_default();
-    if current.lines().any(|existing| existing == line) {
-        return;
-    }
     if let Some(parent) = exclude.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(backend)?;
     }
-    let _ = std::fs::write(
-        &exclude,
-        format!(
-            "{current}{}{line}\n",
-            if current.is_empty() || current.ends_with('\n') {
-                ""
-            } else {
-                "\n"
-            }
-        ),
-    );
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .create(true)
+        .open(&exclude)
+        .map_err(backend)?;
+    let mut current = Vec::new();
+    file.read_to_end(&mut current).map_err(backend)?;
+    if current.split(|byte| *byte == b'\n').any(|existing| existing == line.as_bytes()) {
+        return Ok(());
+    }
+    let addition = format!("{}{line}\n", if current.is_empty() || current.ends_with(b"\n") {
+        ""
+    } else {
+        "\n"
+    });
+    file.write_all(addition.as_bytes()).map_err(backend)
 }
 
 fn checked_out_path(
     repository: &git2::Repository,
     name: &str,
+    cancel: &AtomicBool,
+    expires: Instant,
 ) -> Result<Option<PathBuf>, GitBranchError> {
-    Ok(worktree_branches(repository)?
+    Ok(worktree_branches(repository, cancel, expires)?
         .into_iter()
         .find(|linked| linked.branch.as_deref() == Some(name))
         .map(|linked| linked.path))
@@ -496,20 +512,24 @@ fn run(
     request: &GitBranchRequest,
     cancel: &AtomicBool,
 ) -> Result<GitBranchResult, GitBranchError> {
-    if cancel.load(Ordering::Acquire) {
-        return Err(GitBranchError::Cancelled);
-    }
+    let deadline = match request {
+        GitBranchRequest::List(request) => request.deadline,
+        GitBranchRequest::CreateWorktree { deadline, .. }
+        | GitBranchRequest::RemoveWorktree { deadline, .. }
+        | GitBranchRequest::CreateDetachedWorktree { deadline, .. } => *deadline,
+    };
+    let expires = Instant::now() + deadline;
+    check_request(cancel, expires)?;
     match request {
-        GitBranchRequest::List(request) => read_list(generation, request, cancel),
+        GitBranchRequest::List(request) => read_list(generation, request, cancel, expires),
         GitBranchRequest::CreateDetachedWorktree {
             repository,
             name,
             path,
             revision,
-            deadline,
+            ..
         } => {
             let repository = open(repository)?;
-            let _ = deadline;
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
@@ -541,6 +561,7 @@ fn run(
             // is made for the start, and REMOVED once HEAD is detached. The branch list is
             // therefore exactly what it was before the review was looked at.
             let temporary_branch = format!("dust-review/{name}");
+            check_request(cancel, expires)?;
             let starting = repository
                 .reference(
                     &format!("refs/heads/{temporary_branch}"),
@@ -551,15 +572,23 @@ fn run(
                 .map_err(backend)?;
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&starting));
-            let created = repository.worktree(name, path, Some(&options));
+            let created = check_request(cancel, expires).and_then(|()| {
+                repository.worktree(name, path, Some(&options)).map_err(backend)
+            });
             drop(starting);
-            created.map_err(backend)?;
+            if let Err(error) = created {
+                if let Ok(mut branch) = repository.find_branch(&temporary_branch, git2::BranchType::Local) {
+                    let _ = branch.delete();
+                }
+                check_request(cancel, expires)?;
+                return Err(error);
+            }
             // DETACHED: no branch is created and none is moved by looking at a review.
             let linked = git2::Repository::open(path).map_err(backend)?;
             linked.set_head_detached(oid).map_err(backend)?;
-            let mut checkout = git2::build::CheckoutBuilder::new();
+            let mut checkout = checkout_options(cancel, expires);
             checkout.force();
-            linked.checkout_head(Some(&mut checkout)).map_err(backend)?;
+            let checked_out = linked.checkout_head(Some(&mut checkout));
             // The starting branch has served its purpose: HEAD is detached now, so it can go and
             // no branch is left behind by looking at a review.
             if let Ok(mut branch) =
@@ -567,6 +596,8 @@ fn run(
             {
                 let _ = branch.delete();
             }
+            check_request(cancel, expires)?;
+            checked_out.map_err(backend)?;
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::CreateWorktree {
@@ -574,15 +605,12 @@ fn run(
             name,
             path,
             reference,
-            deadline,
+            ..
         } => {
             let repository = open(repository)?;
-            let _ = deadline;
-            // A relative path starts at the main checkout, from any worktree.
-            let main_root = repository.commondir().parent().map(Path::to_path_buf);
-            let path = main_root
-                .as_deref()
-                .map_or(path.clone(), |root| root.join(path));
+            // A relative path starts at the primary checkout, not its metadata directory.
+            let main = main_repository(&repository)?;
+            let path = main.workdir().ok_or(GitBranchError::NotRepository)?.join(path);
             let path = path.as_path();
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
@@ -596,7 +624,7 @@ fn run(
             let short = reference
                 .strip_prefix("refs/heads/")
                 .unwrap_or(reference.as_str());
-            if checked_out_path(&repository, short)?.is_some() {
+            if checked_out_path(&repository, short, cancel, expires)?.is_some() {
                 return Err(GitBranchError::RefusedBranchAlreadyCheckedOut(
                     short.to_owned(),
                 ));
@@ -613,6 +641,7 @@ fn run(
             // A branch that doesn't exist yet starts at HEAD, like `git worktree add -b`.
             let existing = repository.find_branch(short, git2::BranchType::Local).ok();
             let new_branch = existing.is_none();
+            check_request(cancel, expires)?;
             let branch = match existing {
                 Some(branch) => branch,
                 None => {
@@ -628,33 +657,35 @@ fn run(
             let reference = branch.into_reference();
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&reference));
-            let added = path
+            let added = check_request(cancel, expires).and_then(|()| path
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
                 .map_err(backend)
                 .and_then(|()| {
+                    check_request(cancel, expires)?;
                     repository
                         .worktree(name, path, Some(&options))
                         .map_err(backend)
-                });
+                }));
             if let Err(error) = added {
                 if new_branch
                     && let Ok(mut branch) = repository.find_branch(short, git2::BranchType::Local)
                 {
                     let _ = branch.delete();
                 }
+                check_request(cancel, expires)?;
                 return Err(error);
             }
-            exclude_from_status(&repository, path);
+            check_request(cancel, expires)?;
+            exclude_from_status(&repository, path)?;
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::RemoveWorktree {
             repository,
             name,
-            deadline,
+            ..
         } => {
             let repository = open(repository)?;
-            let _ = deadline;
             let worktree = repository
                 .find_worktree(name)
                 .map_err(|_| GitBranchError::UnknownWorktree(name.clone()))?;
@@ -673,7 +704,7 @@ fn run(
                 if workdir != Some(path.canonicalize().map_err(backend)?) {
                     return Err(GitBranchError::RefusedDirtyWorktree(name.clone()));
                 }
-                if has_changes(&opened)? {
+                if has_changes(&opened, cancel, expires)? {
                     return Err(GitBranchError::RefusedDirtyWorktree(name.clone()));
                 }
                 if let Some(operation) = operation_name(opened.state()) {
@@ -683,14 +714,15 @@ fn run(
                     ));
                 }
             }
-            let mut options = git2::WorktreePruneOptions::new();
-            options.valid(true);
-            worktree.prune(Some(&mut options)).map_err(backend)?;
-            // Pruning removes the worktree's administrative data. The directory itself is
-            // only removed here, after every dirtiness and operation check above.
+            check_request(cancel, expires)?;
+            // Keep the administrative data if deletion fails, so the checkout remains registered.
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(backend)?;
             }
+            let mut options = git2::WorktreePruneOptions::new();
+            options.valid(true);
+            worktree.prune(Some(&mut options)).map_err(backend)?;
+            check_request(cancel, expires)?;
             Ok(GitBranchResult::Changed)
         }
     }

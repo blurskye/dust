@@ -18,7 +18,7 @@ pub use status::{
 mod hunks;
 pub use branches::{
     GitBranchEntry, GitBranchError, GitBranchGeneration, GitBranchList, GitBranchListRequest,
-    GitBranchRequest, GitBranchResult, GitBranchService, GitWorktreeEntry, WorktreeIdentity,
+    GitBranchRequest, GitBranchResult, GitBranchService, GitWorktreeEntry,
 };
 pub use hunks::{
     GitDiffLayer, GitDiffLine, GitDiffLineKind, GitHunk, GitHunkBufferInput, GitHunkError,

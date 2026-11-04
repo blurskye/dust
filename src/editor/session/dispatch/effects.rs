@@ -7210,12 +7210,16 @@ impl InteractiveApplication {
     }
     /// Remove the selected worktree and its directory. This never deletes a branch.
     pub(in crate::editor::session) fn request_git_worktree_remove(&mut self) {
-        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, .. }) =
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, main, .. }) =
             self.search.selected_picker_payload().cloned()
         else {
             self.show_error("select a worktree first");
             return;
         };
+        if main {
+            self.show_error("the primary worktree cannot be removed");
+            return;
+        }
         self.git.set_pending_destructive(
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name.clone()),
         );
@@ -7343,7 +7347,11 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("git-worktree:{}", worktree.name)),
+                        id: PickerItemId(if worktree.main {
+                            "git-worktree:primary".into()
+                        } else {
+                            format!("git-worktree:linked:{}", worktree.name)
+                        }),
                         label: worktree.name.clone(),
                         detail,
                         source: "worktrees".into(),
@@ -7351,6 +7359,7 @@ impl InteractiveApplication {
                     },
                     crate::editor::session::search::PickerPayload::GitWorktree {
                         name: worktree.name.clone(),
+                        main: worktree.main,
                         path: worktree.path.clone(),
                     },
                 )

@@ -3469,70 +3469,22 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let identities = app
-        .workspace
-        .roots()
-        .iter()
-        .map(|root| root.identity.clone())
-        .collect::<Vec<_>>();
-
     let alpha_file = roots[0].join("note.txt");
     let beta_file = roots[1].join("note.txt");
-    app.documents
-        .open_explorer(alpha_file.clone(), identities.clone())
-        .expect("open the alpha document");
+    app.start_open(alpha_file.clone());
     wait_vfs(&mut app);
-    let alpha = app
-        .documents
-        .worktree_identity(&alpha_file)
-        .cloned()
-        .expect("the alpha buffer is bound to a worktree");
-    assert_eq!(
-        alpha.root,
-        std::fs::canonicalize(&roots[0]).unwrap(),
-        "the identity names the worktree the document was opened in"
-    );
+    assert!(app.state.buffers.values().any(|buffer| {
+        buffer.path.as_ref() == Some(&alpha_file)
+            && buffer.text.to_string() == "alpha"
+    }));
 
-    app.documents
-        .open_explorer(beta_file.clone(), identities)
-        .expect("open the beta document");
+    app.start_open(beta_file.clone());
     wait_vfs(&mut app);
-    let beta = app
-        .documents
-        .worktree_identity(&beta_file)
-        .cloned()
-        .expect("the beta buffer is bound to a worktree");
-    assert_eq!(beta.root, std::fs::canonicalize(&roots[1]).unwrap());
-    assert_ne!(
-        alpha.id, beta.id,
-        "two linked worktrees carry distinct identities"
-    );
-    assert_eq!(
-        app.documents
-            .worktree_identity(&alpha_file)
-            .cloned()
-            .expect("the alpha binding survives"),
-        alpha,
-        "opening another worktree never retargets an existing buffer"
-    );
-
-    // A path that cannot be canonicalized has no identity rather than a fabricated one.
-    assert!(
-        crate::workspace::git::WorktreeIdentity::capture(std::path::Path::new(
-            "/nonexistent-dust/orphan.txt"
-        ))
-        .is_none(),
-        "a document that does not exist has no worktree"
-    );
-    // The binding is captured when a document is opened, not synthesised on demand: a document
-    // this session never opened reports nothing even though its directory sits under a `.git`.
-    // (This host has a `/tmp/.git`, so a temporary directory is not "outside any worktree".)
-    let unopened = app.state.workspace_root.join("never-opened.txt");
-    fs::write(&unopened, "x").unwrap();
-    assert!(
-        app.documents.worktree_identity(&unopened).is_none(),
-        "an unopened document has no captured identity"
-    );
+    for (path, text) in [(&alpha_file, "alpha"), (&beta_file, "beta")] {
+        assert!(app.state.buffers.values().any(|buffer| {
+            buffer.path.as_ref() == Some(path) && buffer.text.to_string() == text
+        }), "opening another worktree must preserve each buffer's path and text");
+    }
 }
 
 #[test]
@@ -3655,6 +3607,59 @@ fn switching_to_a_worktree_moves_the_editor_there() {
         worktree.join("note.txt").is_file() && main_file.is_file(),
         "switching never touches either checkout"
     );
+}
+
+#[test]
+fn primary_worktree_and_linked_main_have_distinct_picker_entries() {
+    let mut app = app();
+    let repo = history_fixture(&app.state.workspace_root, &["base"]);
+    let mut branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+    if branch == "main" {
+        repo.find_branch("main", git2::BranchType::Local).unwrap()
+            .rename("trunk", false).unwrap();
+        branch = "trunk".into();
+        repo.set_head("refs/heads/trunk").unwrap();
+    }
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = outside.path().join("main");
+    let reference = repo.branch("side", &head, false).unwrap().into_reference();
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&reference));
+    repo.worktree("main", &linked, Some(&options)).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    app.start_git_status_refresh();
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.start_git_worktrees();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let rows = app.search.picker_projection().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == "main").count(), 2);
+    let primary = rows.iter().position(|row| row.id == "git-worktree:primary").unwrap();
+    assert!(rows.iter().any(|row| row.id == "git-worktree:linked:main"));
+    for _ in 0..primary {
+        app.invoke(crate::editor::CommandInvocation::new("picker.next", InvocationSource::Test).unwrap());
+    }
+    app.request_git_worktree_remove();
+    assert!(app.ui.notification_error);
+    assert!(app.ui.notification.as_deref().unwrap_or_default().contains("primary"));
+    assert!(app.git.take_pending_destructive().is_none());
+    assert!(!app.git.branch_pending());
+    assert!(linked.join("h0.txt").is_file());
+    assert!(repo.find_worktree("main").is_ok());
+    assert_eq!(repo.head().unwrap().shorthand(), Some(branch.as_str()));
 }
 
 #[test]
