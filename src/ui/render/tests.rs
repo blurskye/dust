@@ -4941,6 +4941,33 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
 }
 
 #[test]
+fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusive() {
+    use crate::editor::{EditorMode, Selection, SelectionKind};
+    use crate::editor::text::{ByteOffset, DisplayWidthPolicy, TextBuffer};
+    let text = TextBuffer::from_text("abc");
+    for (anchor, head) in [(0, 2), (2, 0)] {
+        let selection = Some(Selection {
+            anchor: ByteOffset(anchor),
+            head: ByteOffset(head),
+            kind: SelectionKind::Character,
+        });
+        for (mode, expected) in [
+            (EditorMode::Insert, [true, true, false]),
+            (EditorMode::VisualChar, [true, true, true]),
+        ] {
+            let selected = std::array::from_fn(|offset| super::editor::is_selected(
+                selection,
+                mode,
+                ByteOffset(offset),
+                &text,
+                DisplayWidthPolicy { tab_width: 4, ambiguous_wide: false },
+            ));
+            assert_eq!(selected, expected);
+        }
+    }
+}
+
+#[test]
 fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     use crate::editor::text::{ByteOffset, ByteRange};
     use crate::language::syntax::MarkdownMark;

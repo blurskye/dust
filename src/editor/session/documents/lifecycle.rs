@@ -1,7 +1,7 @@
 use super::{DocumentEvent, DocumentSession};
 use crate::editor::session::windows::NavigationStamp;
 use crate::editor::session::workspace::WorkspaceVersion;
-use crate::editor::text::{BufferRevision, TextBuffer, TextVersion};
+use crate::editor::text::{BufferRevision, LineEnding, TextBuffer, TextVersion};
 use crate::editor::{BufferId, EditorVersion, EditorWindowVersion};
 use crate::files::{RequestId, VfsError, VfsResult, WriteExpectation};
 use std::path::{Path, PathBuf};
@@ -69,6 +69,7 @@ enum Operation {
     Save {
         version: Version,
         bytes: Vec<u8>,
+        line_ending: Option<LineEnding>,
         target: PathBuf,
         quit: bool,
         close: Option<super::super::windows::EditorCloseSave>,
@@ -142,6 +143,7 @@ pub(in crate::editor::session) enum DocumentChange {
         snapshot: Arc<str>,
         revision: BufferRevision,
         bytes: Vec<u8>,
+        line_ending: Option<LineEnding>,
         target: PathBuf,
         quit: bool,
         close: Option<super::super::windows::EditorCloseSave>,
@@ -230,11 +232,12 @@ impl DocumentSession {
     ) -> Result<(), DocumentFailure> {
         self.check_file_admission(editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_reload"))?;
-        if view.virtual_read_only || view.read_only {
+        if view.virtual_read_only {
             return Err(DocumentFailure::Error(
                 "virtual document is read-only".into(),
             ));
         }
+        self.check_buffer_mutation(view.id)?;
         if view.dirty && !force {
             return Err(DocumentFailure::Policy("dirty_reload"));
         }
@@ -255,7 +258,7 @@ impl DocumentSession {
     pub(in crate::editor::session) fn request_save(
         &mut self,
         view: Option<DocumentView<'_>>,
-        request: SaveRequest<'_>,
+        mut request: SaveRequest<'_>,
     ) -> Result<RequestId, DocumentFailure> {
         self.check_file_admission(request.editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_save"))?;
@@ -264,6 +267,7 @@ impl DocumentSession {
                 "virtual document is read-only".into(),
             ));
         }
+        self.check_buffer_mutation(view.id)?;
         let path = request
             .path
             .or_else(|| view.path.map(Path::to_path_buf))
@@ -273,12 +277,19 @@ impl DocumentSession {
         } else {
             request.base.join(path)
         };
+        let target = target.canonicalize().unwrap_or(target);
+        request.other_open_paths.extend(self.pending_files.values().filter_map(|intent| {
+            match &intent.operation {
+                Operation::Open { requested, .. } => Some(requested.clone()),
+                Operation::Save { target, .. } => Some(target.clone()),
+                Operation::Reload(_) => None,
+            }
+        }));
         if request.other_open_paths.iter().any(|path| path == &target) {
             return Err(DocumentFailure::Error(
                 "save-as target belongs to another open buffer".into(),
             ));
         }
-        if self.pending_files.values().any(|intent|matches!(&intent.operation,Operation::Save {target:pending,..} if pending==&target)) {return Err(DocumentFailure::Error("a save for this target is already pending".into()));}
         let bytes = configured_file_bytes(view.text, request.policy);
         let expectation = if request.force {
             WriteExpectation::Any
@@ -303,6 +314,7 @@ impl DocumentSession {
                 operation: Operation::Save {
                     version: view.save_version(),
                     bytes,
+                    line_ending: configured_line_ending(request.policy),
                     target,
                     quit: request.quit,
                     close: request.close,
@@ -310,6 +322,15 @@ impl DocumentSession {
             },
         );
         Ok(id)
+    }
+    fn check_buffer_mutation(&self, buffer: BufferId) -> Result<(), DocumentFailure> {
+        if self.pending_files.values().any(|intent| match &intent.operation {
+            Operation::Reload(version) | Operation::Save { version, .. } => version.id == buffer,
+            Operation::Open { .. } => false,
+        }) {
+            return Err(DocumentFailure::Error("a save or reload for this buffer is already pending".into()));
+        }
+        Ok(())
     }
     fn check_file_admission(&self, editor: &EditorWindowVersion) -> Result<(), DocumentFailure> {
         if editor.revision().is_none() {
@@ -388,6 +409,7 @@ impl DocumentSession {
                 Operation::Save {
                     version,
                     bytes,
+                    line_ending,
                     target: _,
                     quit,
                     close,
@@ -416,6 +438,7 @@ impl DocumentSession {
                     snapshot: version.snapshot.expect("save snapshot"),
                     revision: version.revision,
                     bytes,
+                    line_ending,
                     target,
                     quit: quit && same_workspace,
                     close: if same_workspace { close } else { None },
@@ -491,7 +514,7 @@ pub(in crate::editor::session) fn configured_file_bytes(
     text: &TextBuffer,
     configured: &crate::config::EditorConfig,
 ) -> Vec<u8> {
-    use crate::config::{FinalNewlinePolicy, LineEndingPolicy};
+    use crate::config::FinalNewlinePolicy;
     let mut source = text.to_string();
     match configured.final_newline {
         FinalNewlinePolicy::Preserve => {}
@@ -504,17 +527,21 @@ pub(in crate::editor::session) fn configured_file_bytes(
         FinalNewlinePolicy::Insert => {}
     }
     let mut format = text.format().clone();
-    let configured_ending = match configured.line_endings {
-        LineEndingPolicy::Preserve => None,
-        LineEndingPolicy::Lf => Some(crate::editor::text::LineEnding::Lf),
-        LineEndingPolicy::CrLf => Some(crate::editor::text::LineEnding::CrLf),
-        LineEndingPolicy::Cr => Some(crate::editor::text::LineEnding::Cr),
-    };
-    if let Some(ending) = configured_ending {
+    if let Some(ending) = configured_line_ending(configured) {
         format.preferred_line_ending = ending;
         format.line_endings = vec![ending; source.bytes().filter(|byte| *byte == b'\n').count()];
     }
     crate::editor::text::encode_utf8(&source, &format)
+}
+
+fn configured_line_ending(configured: &crate::config::EditorConfig) -> Option<LineEnding> {
+    use crate::config::LineEndingPolicy;
+    match configured.line_endings {
+        LineEndingPolicy::Preserve => None,
+        LineEndingPolicy::Lf => Some(LineEnding::Lf),
+        LineEndingPolicy::CrLf => Some(LineEnding::CrLf),
+        LineEndingPolicy::Cr => Some(LineEnding::Cr),
+    }
 }
 
 #[cfg(test)]
@@ -685,6 +712,7 @@ mod tests {
                 operation: Operation::Save {
                     version,
                     bytes: b"saved".to_vec(),
+                    line_ending: None,
                     target: "/workspace/file".into(),
                     quit: false,
                     close: None,
@@ -779,6 +807,7 @@ mod tests {
                 operation: Operation::Save {
                     version: view(state, id).save_version(),
                     bytes: b"old".to_vec(),
+                    line_ending: None,
                     target: "/workspace/file".into(),
                     quit: true,
                     close: None,

@@ -168,6 +168,12 @@ impl TextBuffer {
         &self.format
     }
 
+    /// Reconcile an explicit save policy without replacing text edited during the save.
+    pub(crate) fn set_line_ending(&mut self, ending: super::LineEnding) {
+        self.format.preferred_line_ending = ending;
+        self.format.line_endings.fill(ending);
+    }
+
     pub fn validate_offset(&self, offset: ByteOffset) -> Result<(), PositionError> {
         if offset.get() > self.len_bytes() {
             return Err(PositionError::OutOfBounds {

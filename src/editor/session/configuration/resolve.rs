@@ -214,29 +214,6 @@ pub(in crate::editor::session) fn configured_grapheme_width(
     width.max(1)
 }
 
-pub(in crate::editor::session) fn configured_byte_offset_at_display_column(
-    text: &str,
-    target: usize,
-    tab_width: usize,
-    ambiguous_width: crate::config::AmbiguousWidth,
-) -> usize {
-    let mut column = 0usize;
-    let mut byte = 0usize;
-    for (relative, grapheme) in text.grapheme_indices(true) {
-        let width = if grapheme == "\t" {
-            tab_width - (column % tab_width)
-        } else {
-            configured_grapheme_width(grapheme, ambiguous_width)
-        };
-        if column.saturating_add(width) > target {
-            return relative;
-        }
-        column = column.saturating_add(width);
-        byte = relative.saturating_add(grapheme.len());
-    }
-    byte
-}
-
 pub(in crate::editor::session) fn configured_text_width(
     text: &str,
     tab_width: usize,

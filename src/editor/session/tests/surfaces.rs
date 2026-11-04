@@ -1139,6 +1139,142 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
 }
 
 #[test]
+fn ordinary_read_only_files_can_reload_without_becoming_writable() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("external.txt");
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    app.state.buffers[buffer].read_only = true;
+    fs::write(&path, "new").unwrap();
+    app.start_reload(true);
+    assert!(app.documents.file_work_pending());
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
+    assert!(app.state.buffers[buffer].read_only);
+}
+
+fn gate_document_worker(app: &mut InteractiveApplication) -> std::sync::mpsc::Sender<()> {
+    let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(8);
+    app.documents = crate::editor::session::documents::DocumentSession::new(
+        worker,
+        &StartupTarget::Dashboard { root: app.state.workspace_root.clone() },
+        app.state.window_version(),
+        app.workspace.root_revision(),
+        8,
+    );
+    gate
+}
+
+#[test]
+fn a_pending_open_reserves_its_save_destination() {
+    for alias in [false, true] {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let destination = root.join("b.txt");
+        fs::write(&destination, "original B").unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        app.state.open_text(TextBuffer::from_text("A"), Some(root.join("a.txt")));
+        let gate = gate_document_worker(&mut app);
+        app.start_open(if alias { root.join("sub/../b.txt") } else { destination.clone() });
+        app.start_save(false, Some(destination.clone()), true);
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert_eq!(fs::read(&destination).unwrap(), b"original B");
+        assert!(app.state.buffers.values().any(|b| {
+            b.path.as_ref() == Some(&destination) && b.text.to_string() == "original B"
+        }));
+    }
+}
+
+#[test]
+fn saves_and_reloads_wait_for_the_same_buffers_completion() {
+    for reload_first in [false, true] {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let original = root.join("a.txt");
+        fs::write(&original, "disk").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("buffer"), Some(original.clone()));
+        let gate = gate_document_worker(&mut app);
+        if reload_first {
+            app.start_reload(true);
+        } else {
+            app.start_save(false, Some(root.join("b.txt")), false);
+        }
+        app.start_save(false, Some(root.join("c.txt")), true);
+        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        app.start_reload(true);
+        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert!(!root.join("c.txt").exists());
+        if reload_first {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "disk");
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
+        } else {
+            assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"buffer");
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("b.txt")));
+        }
+        // Admission resumes after the first result has been reconciled.
+        app.start_save(false, Some(root.join("c.txt")), false);
+        wait_vfs(&mut app);
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("c.txt")));
+        assert_eq!(fs::read(root.join("c.txt")).unwrap(), app.state.buffers[buffer].text.to_bytes());
+    }
+}
+
+#[test]
+fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let path = root.join("file.txt");
+    fs::create_dir(root.join("sub")).unwrap();
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    app.invoke_insert_text("new ".into());
+    app.start_save(false, Some(root.join("sub/../file.txt")), false);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"new old");
+    assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    // The resolved identity must not bypass external-modification protection.
+    fs::write(&path, "external").unwrap();
+    app.start_save(false, Some(root.join("sub/../file.txt")), false);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&path).unwrap(), b"external");
+}
+
+#[test]
+fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
+    for edit_during_save in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("file.txt");
+        fs::write(&path, "a\nb\n").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("a\nb\n"), Some(path.clone()));
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::CrLf;
+        app.configuration.install_fixture(fixture);
+        let gate = gate_document_worker(&mut app);
+        app.start_save(false, None, false);
+        if edit_during_save {
+            app.invoke_insert_text("new\n".into());
+        }
+        gate.send(()).unwrap();
+        wait_vfs(&mut app);
+        assert_eq!(fs::read(&path).unwrap(), b"a\r\nb\r\n");
+        assert_eq!(app.state.buffers[buffer].dirty, edit_during_save);
+        assert_eq!(app.state.buffers[buffer].text.format().preferred_line_ending, crate::editor::text::LineEnding::CrLf);
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::Preserve;
+        app.configuration.install_fixture(fixture);
+        app.start_save(false, None, false);
+        wait_vfs(&mut app);
+        let expected = if edit_during_save { b"new\r\na\r\nb\r\n".as_slice() } else { b"a\r\nb\r\n".as_slice() };
+        assert_eq!(fs::read(&path).unwrap(), expected);
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+}
+
+#[test]
 fn configured_file_format_policy_is_applied_at_save_boundary() {
     let text = crate::editor::text::TextBuffer::from_bytes(b"a\r\nb").expect("CRLF text");
     let configured = crate::config::EditorConfig {

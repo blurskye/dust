@@ -4717,11 +4717,8 @@ impl InteractiveApplication {
                 row,
                 body_height,
                 gutter,
-                wrap: wrap_enabled,
                 rows: &visual_rows,
-                inlays: &self.ui.lsp_inlay_hints,
             },
-            &self.configuration.settings().editor,
             transaction_id,
             extend_selection,
         );
@@ -14753,6 +14750,7 @@ impl InteractiveApplication {
                 revision,
                 bytes,
                 snapshot,
+                line_ending,
                 target: path,
                 quit: quit_after,
                 close,
@@ -14764,6 +14762,9 @@ impl InteractiveApplication {
                         self.window_session.fail_editor_close_save(token);
                     }
                     return;
+                }
+                if let Some(ending) = line_ending {
+                    candidate.set_document_line_ending(buffer, ending);
                 }
                 if let Err(e) = self.commit_editor_draft(candidate, None, false) {
                     self.input.clear_pending_stage();

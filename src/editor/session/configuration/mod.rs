@@ -34,8 +34,8 @@ pub use model::{
 mod resolve;
 pub use resolve::validate_loaded_configuration;
 pub(in crate::editor::session) use resolve::{
-    configuration_generation_is_newer, configured_byte_offset_at_display_column,
-    configured_grapheme_width, configured_text_width, dashboard_actions, resolve_configuration,
+    configuration_generation_is_newer, configured_grapheme_width, configured_text_width,
+    dashboard_actions, resolve_configuration,
 };
 mod validation;
 pub(in crate::editor::session) use validation::{

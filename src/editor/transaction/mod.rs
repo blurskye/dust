@@ -826,6 +826,15 @@ impl EditorDraft {
         }
         true
     }
+    pub(crate) fn set_document_line_ending(
+        &mut self,
+        buffer: BufferId,
+        ending: crate::editor::text::LineEnding,
+    ) {
+        if let Some(buffer) = self.state.buffers.get_mut(buffer) {
+            buffer.text.set_line_ending(ending);
+        }
+    }
     pub(crate) fn close_document(
         &mut self,
         view: ViewId,
