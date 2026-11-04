@@ -2266,6 +2266,30 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     );
     assert_ne!(app.window_session.graph().focused(), Some(focused));
 
+    // Splits and workspace tabs share content entries rather than duplicating them.
+    assert_eq!(app.ui.content_tabs.len(), 2);
+    let identities = app.ui.content_tabs.iter().map(|entry| entry.identity.0).collect::<BTreeSet<_>>();
+    assert_eq!(identities.len(), 2);
+    let frame = render(
+        &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(),
+        app.window_session.width(), app.window_session.height(),
+    );
+    let row = u16::from(app.state.tabs.len() > 1);
+    let line = frame.grid.row_text(row);
+    for entry in &app.ui.content_tabs {
+        assert_eq!(line.matches(&entry.title).count(), 1, "{line:?}");
+        let columns = (0..frame.grid.width()).filter(|column| {
+            crate::ui::content_tab_at_column(
+                &app.ui.content_tabs, app.configuration.settings(), frame.grid.width(), *column,
+            ) == Some(entry.identity)
+        }).collect::<Vec<_>>();
+        assert!(!columns.is_empty(), "each tab is visible");
+        let dirty_cells = columns.iter().filter(|column| {
+            frame.grid.get(**column, row).unwrap().style == crate::ui::Style::BufferLineDirty
+        }).count();
+        assert_eq!(dirty_cells > 0, entry.dirty, "{} dirty indicator", entry.title);
+    }
+
     app.state.close_active_tab().expect("close workspace tab");
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.graph().counts(), (3, 3, 3, 1));
