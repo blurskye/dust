@@ -4288,6 +4288,10 @@ impl InteractiveApplication {
     }
 
     pub(super) fn replay_macro(&mut self, requested: char) {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::MacroReplay(requested));
+            return;
+        }
         let Ok(register) = self.input.macro_register(requested) else {
             self.show_error(self.message("no_previous_macro", &[]));
             return;
@@ -4307,7 +4311,11 @@ impl InteractiveApplication {
             ));
             return;
         }
-        for invocation in invocations {
+        self.continue_macro(invocations.into());
+    }
+
+    pub(super) fn continue_macro(&mut self, mut invocations: std::collections::VecDeque<CommandInvocation>) {
+        while let Some(invocation) = invocations.pop_front() {
             let Ok(invocation) = self.input.macro_step(invocation, MACRO_STEP_LIMIT) else {
                 self.show_error(self.message(
                     "macro_step_limit",
@@ -4317,6 +4325,11 @@ impl InteractiveApplication {
             };
             if !self.invoke_checked(invocation) {
                 break;
+            }
+            if self.clipboard.waiting() {
+                // Keep the replay depth and step budget until the suspended macro finishes.
+                self.clipboard.defer(super::super::clipboard::DeferredInput::MacroContinuation(invocations));
+                return;
             }
         }
         self.input.finish_macro_replay();

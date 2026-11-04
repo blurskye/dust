@@ -64,6 +64,8 @@ impl Tool {
 pub(super) enum DeferredInput {
     Event(crate::ui::UiEvent),
     Invocation(CommandInvocation),
+    MacroReplay(char),
+    MacroContinuation(VecDeque<CommandInvocation>),
 }
 
 #[derive(Debug, Default)]
@@ -142,6 +144,14 @@ impl ClipboardSession {
         self.deferred.push_back(input);
     }
 
+    pub(super) fn take_deferred(&mut self) -> VecDeque<DeferredInput> {
+        std::mem::take(&mut self.deferred)
+    }
+
+    pub(super) fn append_deferred(&mut self, mut inputs: VecDeque<DeferredInput>) {
+        self.deferred.append(&mut inputs);
+    }
+
     pub(super) fn next_input(&mut self) -> Option<DeferredInput> {
         if self.waiting() {
             None
@@ -214,8 +224,8 @@ impl ClipboardSession {
     }
 
     fn import(&mut self, registers: &mut RegisterStore, enabled: bool, register: char, text: String) {
-        let cached = registers.get(register).or_else(|| registers.get('"'))
-            .filter(|value| value.text == text);
+        let cached = registers.get(register).filter(|value| value.text == text)
+            .or_else(|| registers.get('"').filter(|value| value.text == text));
         let shape = cached.map_or_else(
             || {
                 if text.ends_with('\n') {
@@ -313,6 +323,17 @@ mod tests {
     use super::*;
 
     impl ClipboardSession {
+        pub(in crate::editor::session) fn pending_copy_fixture(generation: u64, text: &str) -> Self {
+            let (_, receiver) = mpsc::channel();
+            Self {
+                enabled: true,
+                tool: Some(Tool::Xclip),
+                synced_generation: generation,
+                copying: Some((receiver, text.into())),
+                ..Default::default()
+            }
+        }
+
         pub(in crate::editor::session) fn pending_read_fixture(
             invocation: CommandInvocation,
             source: EditorWindowVersion,
@@ -484,6 +505,19 @@ mod tests {
         session.import(&mut registers, true, '+', String::new());
         assert_eq!(registers.get('+').unwrap().text, "");
         assert_eq!(registers.get('"').unwrap().text, "");
+    }
+
+    #[test]
+    fn a_stale_selection_cache_does_not_hide_the_unnamed_register_shape() {
+        let mut session = ClipboardSession::default();
+        let mut registers = RegisterStore::default();
+        registers.set('+', value("old clipboard"), true, false);
+        registers.set('"', RegisterValue {
+            text: "block".into(),
+            shape: RegisterShape::Block,
+        }, true, false);
+        session.import(&mut registers, true, '+', "block".into());
+        assert_eq!(registers.get('+').unwrap().shape, RegisterShape::Block);
     }
 
     #[test]

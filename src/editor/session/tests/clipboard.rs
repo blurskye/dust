@@ -42,6 +42,120 @@ fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
     }
 }
 
+fn invocation(id: &str) -> CommandInvocation {
+    CommandInvocation::new(id, InvocationSource::Test).unwrap()
+}
+
+fn paste() -> CommandInvocation {
+    invocation("edit.put").with_argument("before", CommandValue::Bool(false))
+}
+
+#[test]
+fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.state.registers.set_macro('a', vec![
+        paste(),
+        invocation("view.cursor.move")
+            .with_argument("motion", CommandValue::String("find_forward".into()))
+            .with_argument("character", CommandValue::String("z".into())),
+        invocation("edit.delete_char"),
+    ]);
+    app.replay_macro('a');
+    assert!(app.clipboard.waiting());
+    assert_eq!(app.input.replay_depth(), 1);
+    app.process_clipboard_paste();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "aXbc");
+    assert!(app.ui.notification_error);
+    assert_eq!(app.input.replay_depth(), 0);
+}
+
+#[test]
+fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.state.registers.set_macro('a', vec![paste(), invocation("edit.delete_char")]);
+    app.replay_macro('a');
+    let continuation = app.clipboard.take_deferred();
+    let (session, reply) = ClipboardSession::pending_read_fixture(
+        paste(), app.state.window_version(), app.state.registers.generation(),
+    );
+    app.clipboard = session;
+    app.clipboard.append_deferred(continuation);
+    press(&mut app, 'l');
+    reply.send(None).unwrap();
+    app.process_clipboard_paste();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(1));
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
+fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("a"), None);
+    app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.state.registers.set_macro('a', vec![
+        paste(),
+        invocation("macro.replay").with_argument("register", CommandValue::String("a".into())),
+    ]);
+    app.replay_macro('a');
+    for _ in 0..=crate::editor::session::dispatch::MACRO_RECURSION_LIMIT {
+        app.process_clipboard_paste();
+    }
+    assert!(!app.clipboard.waiting());
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(app.ui.notification_error);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), format!("a{}", "X".repeat(crate::editor::session::dispatch::MACRO_RECURSION_LIMIT)));
+}
+
+#[test]
+fn clipboard_deferred_macros_expand_before_later_input() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.invoke(paste());
+    app.state.registers.set_macro('a', vec![
+        paste(),
+        invocation("view.cursor.move").with_argument("motion", CommandValue::String("right".into())),
+        invocation("edit.delete_char"),
+    ]);
+    app.invoke(invocation("macro.replay").with_argument("register", CommandValue::String("a".into())));
+    press(&mut app, 'h');
+    app.process_clipboard_paste();
+    app.process_clipboard_paste();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "aXXc");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(2));
+    assert_eq!(app.input.replay_depth(), 0);
+}
+
+#[test]
+fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
+    let mut app = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.clipboard = ClipboardSession::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.state.registers.set_macro('a', vec![paste()]);
+    for key in "20@ah".chars() {
+        press(&mut app, key);
+    }
+    for _ in 0..20 {
+        app.process_clipboard_paste();
+    }
+    assert!(!app.clipboard.waiting());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), format!("a{}bc", "X".repeat(20)));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(19));
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(!app.ui.notification_error);
+}
+
 #[test]
 fn clipboard_failed_paste_reports_error_and_releases_later_input() {
     let mut app = app();

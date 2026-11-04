@@ -942,6 +942,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Event(UiEvent::Key {
+                key,
+                kind: KeyInputKind::Press,
+            }));
+            return;
+        }
         let mut context = self.active_input_context();
         // While a snippet runs its keys come first; anything else is Insert as usual.
         if context == "editor.insert"
@@ -1256,20 +1263,41 @@ impl InteractiveApplication {
     pub(super) fn process_clipboard_paste(&mut self) {
         let source = self.state.window_version();
         let enabled = self.state.policy.registers_enabled;
-        match self.clipboard.finish_pull(
+        let was_waiting = self.clipboard.waiting();
+        let cancelled = match self.clipboard.finish_pull(
             &mut self.state.registers,
             enabled,
             &source,
         ) {
-            Ok(Some(invocation)) => self.invoke(invocation),
-            Ok(None) => {}
-            Err(error) => self.show_error(error),
+            Ok(Some(invocation)) => !self.invoke_checked(invocation),
+            Ok(None) => was_waiting && !self.clipboard.waiting(),
+            Err(error) => {
+                self.show_error(error);
+                true
+            }
+        };
+        if cancelled {
+            let mut deferred = self.clipboard.take_deferred();
+            while let Some(input) = deferred.front() {
+                match input {
+                    super::super::clipboard::DeferredInput::MacroContinuation(_) => self.input.finish_macro_replay(),
+                    super::super::clipboard::DeferredInput::MacroReplay(_) => {}
+                    _ => break,
+                }
+                deferred.pop_front();
+            }
+            self.clipboard.append_deferred(deferred);
         }
         while let Some(input) = self.clipboard.next_input() {
+            // Commands expanded by this input must finish before later queued input.
+            let later = self.clipboard.take_deferred();
             match input {
                 super::super::clipboard::DeferredInput::Event(event) => self.handle_event(event),
                 super::super::clipboard::DeferredInput::Invocation(invocation) => self.invoke(invocation),
+                super::super::clipboard::DeferredInput::MacroReplay(register) => self.replay_macro(register),
+                super::super::clipboard::DeferredInput::MacroContinuation(invocations) => self.continue_macro(invocations),
             }
+            self.clipboard.append_deferred(later);
         }
     }
 
