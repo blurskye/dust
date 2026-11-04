@@ -330,11 +330,25 @@ pub(super) fn run_workspace_search(
     for root in roots.iter().skip(1) {
         builder.add(root);
     }
-    for worktree in roots
-        .iter()
-        .flat_map(|root| super::directory::root_worktrees(root))
-    {
-        builder.add(worktree);
+    let mut summary = WorkspaceSearchSummary::default();
+    let mut scanned = 0;
+    for root in &roots {
+        if cancellation.load(Ordering::Acquire) {
+            return;
+        }
+        for worktree in super::directory::root_worktrees(root, || {
+            if cancellation.load(Ordering::Acquire) {
+                return false;
+            }
+            if scanned >= policy.maximum_files {
+                summary.truncated = true;
+                return false;
+            }
+            scanned += 1;
+            true
+        }) {
+            builder.add(worktree);
+        }
     }
     builder
         .follow_links(false)
@@ -344,7 +358,6 @@ pub(super) fn run_workspace_search(
         .git_global(!policy.include_ignored)
         .git_exclude(!policy.include_ignored)
         .parents(!policy.include_ignored);
-    let mut summary = WorkspaceSearchSummary::default();
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
     for entry in builder.build() {
@@ -512,4 +525,52 @@ pub(super) fn run_workspace_search(
             summary,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files::tests::{collect_search, isolated_git_test, search_policy};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
+        if !isolated_git_test() {
+            return;
+        }
+        let root = tempfile::tempdir().expect("root");
+        fs::write(root.path().join("matches.txt"), "needle ".repeat(100)).expect("file");
+        let mut service = WorkspaceSearchService::default();
+        let mut policy = search_policy(root.path(), "needle");
+        policy.batch_size = 1;
+        policy.event_queue_capacity = 1;
+        let first = service.start(policy).expect("first");
+        let cancellation = Arc::clone(service.cancellation.as_ref().unwrap());
+        let receiver = service.receiver.take().unwrap();
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(5)).expect("first batch"),
+            WorkspaceSearchEvent::Batch { generation, .. } if generation == first
+        ));
+        // There are 99 batches left and only one queue slot. Keeping the receiver
+        // alive ensures disconnection cannot substitute for cancellation.
+        assert!(!cancellation.load(Ordering::Acquire));
+        let mut policy = search_policy(root.path(), "needle");
+        policy.maximum_results = 3;
+        let second = service.start(policy).expect("second");
+        assert!(second > first);
+        assert!(cancellation.load(Ordering::Acquire));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(WorkspaceSearchEvent::Batch { generation, .. }) => assert_eq!(generation, first),
+                Ok(event) => panic!("cancelled worker completed instead: {event:?}"),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(error) => panic!("cancelled search did not stop: {error}"),
+            }
+        }
+        let (matches, summary) = collect_search(&service);
+        assert_eq!(matches.len(), 3);
+        assert!(summary.truncated);
+        assert!(matches.windows(2).all(|pair| pair[0].range.start < pair[1].range.start));
+    }
 }

@@ -196,11 +196,25 @@ pub(super) fn run_workspace_files(
     for root in roots.iter().skip(1) {
         builder.add(root);
     }
-    for worktree in roots
-        .iter()
-        .flat_map(|root| super::directory::root_worktrees(root))
-    {
-        builder.add(worktree);
+    let mut truncated = false;
+    let mut scanned = 0;
+    for root in &roots {
+        if cancel.load(Ordering::Acquire) {
+            return;
+        }
+        for worktree in super::directory::root_worktrees(root, || {
+            if cancel.load(Ordering::Acquire) {
+                return false;
+            }
+            if scanned >= policy.maximum_files {
+                truncated = true;
+                return false;
+            }
+            scanned += 1;
+            true
+        }) {
+            builder.add(worktree);
+        }
     }
     builder
         .follow_links(false)
@@ -213,7 +227,6 @@ pub(super) fn run_workspace_files(
     let mut accepted = Vec::new();
     let mut seen = HashSet::new();
     let mut bytes: usize = 0;
-    let mut truncated = false;
     for entry in builder.build() {
         if cancel.load(Ordering::Acquire) {
             let _ = send_file_event(

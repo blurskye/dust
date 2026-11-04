@@ -528,44 +528,74 @@ fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
     let root = tempdir().expect("tempdir");
     let journal = root.path().join("buffer.toml");
     let mut worker = VfsWorker::start(4);
-    worker
+    fn expect_completion(worker: &mut VfsWorker, id: super::RequestId, path: &Path, write: bool) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(reply) = worker.try_result().expect("worker") {
+                let (actual_id, actual_path, result) = match reply {
+                    VfsResult::RecoveryWritten { id, path, result } if write => (id, path, result),
+                    VfsResult::Deleted { id, path, result } if !write => (id, path, result),
+                    reply => panic!("unexpected recovery completion: {reply:?}"),
+                };
+                assert_eq!(actual_id, id);
+                assert_eq!(actual_path, path);
+                result.expect("recovery operation succeeds");
+                return;
+            }
+            assert!(Instant::now() < deadline, "worker timed out");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    let write = worker
         .write_recovery(journal.clone(), RecoveryRecord::new(None, 1, "old".into()))
         .expect("queue old write");
-    worker.delete(journal.clone()).expect("queue delete");
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut completions = 0;
-    while completions < 2 {
-        if worker.try_result().expect("worker").is_some() {
-            completions += 1;
-        }
-        assert!(Instant::now() < deadline, "worker timed out");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    let delete = worker.delete(journal.clone()).expect("queue delete");
+    expect_completion(&mut worker, write, &journal, true);
+    expect_completion(&mut worker, delete, &journal, false);
     assert!(
         !journal.exists(),
         "old write followed by delete stays deleted"
     );
 
-    worker.delete(journal.clone()).expect("queue barrier");
-    worker
+    let delete = worker.delete(journal.clone()).expect("queue barrier");
+    let write = worker
         .write_recovery(journal.clone(), RecoveryRecord::new(None, 2, "new".into()))
         .expect("queue new write");
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut completions = 0;
-    while completions < 2 {
-        if worker.try_result().expect("worker").is_some() {
-            completions += 1;
-        }
-        assert!(Instant::now() < deadline, "worker timed out");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    expect_completion(&mut worker, delete, &journal, false);
+    expect_completion(&mut worker, write, &journal, true);
     let recovered = discover_recovery(root.path());
     assert_eq!(recovered.records.len(), 1);
     assert_eq!(recovered.records[0].1.revision, 2);
     assert_eq!(recovered.records[0].1.content, "new");
 }
 
-fn search_policy(root: &Path, query: &str) -> WorkspaceSearchPolicy {
+// Re-execute only this test with private Git configuration; never mutate the parallel
+// test runner's environment while filesystem workers are running.
+pub(super) fn isolated_git_test() -> bool {
+    let thread = std::thread::current();
+    let name = thread.name().expect("test name");
+    if std::env::var("DUST_ISOLATED_GIT_TEST").as_deref() == Ok(name) {
+        return true;
+    }
+    let home = tempdir().expect("test home");
+    let config = home.path().join(".gitconfig");
+    fs::write(&config, "").expect("empty Git config");
+    let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        .args(["--exact", name, "--nocapture"])
+        .env("DUST_ISOLATED_GIT_TEST", name)
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .env("GIT_CONFIG_SYSTEM", &config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("isolated filesystem test");
+    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    false
+}
+
+pub(super) fn search_policy(root: &Path, query: &str) -> WorkspaceSearchPolicy {
     WorkspaceSearchPolicy {
         roots: vec![root.to_path_buf()],
         query: query.into(),
@@ -586,7 +616,7 @@ fn search_policy(root: &Path, query: &str) -> WorkspaceSearchPolicy {
     }
 }
 
-fn collect_search(
+pub(super) fn collect_search(
     service: &WorkspaceSearchService,
 ) -> (Vec<WorkspaceSearchMatch>, WorkspaceSearchSummary) {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -601,6 +631,29 @@ fn collect_search(
             }
         }
         assert!(Instant::now() < deadline, "search timed out");
+        std::thread::yield_now();
+    }
+}
+
+fn collect_files(policy: super::WorkspaceFilePolicy) -> (Vec<super::WorkspaceFileEntry>, super::WorkspaceFileSummary) {
+    let mut service = super::WorkspaceFileService::default();
+    let generation = service.start(policy.clone()).expect("start finder");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut entries = Vec::new();
+    loop {
+        match service.try_event() {
+            Some(super::WorkspaceFileEvent::Batch { generation: actual, root_revision, entries: batch }) => {
+                assert_eq!((actual, root_revision), (generation, policy.root_revision));
+                entries.extend(batch);
+            }
+            Some(super::WorkspaceFileEvent::Complete { generation: actual, root_revision, summary }) => {
+                assert_eq!((actual, root_revision), (generation, policy.root_revision));
+                return (entries, summary);
+            }
+            Some(event) => panic!("finder failed: {event:?}"),
+            None => {}
+        }
+        assert!(Instant::now() < deadline, "finder timed out");
         std::thread::yield_now();
     }
 }
@@ -623,6 +676,7 @@ fn repository_with_worktree() -> tempfile::TempDir {
 
 #[test]
 fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
+    if !isolated_git_test() { return; }
     let repository = repository_with_worktree();
     let root = repository.path().canonicalize().expect("root");
     let worktree = root.join(".worktree/feat");
@@ -698,6 +752,93 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         root.file_name().and_then(|name| name.to_str())
     );
     assert_eq!(super::linked_worktree_repository(&root), None);
+    fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
+    assert_eq!(
+        super::linked_worktree_repository(&worktree).as_deref(),
+        root.file_name().and_then(|name| name.to_str())
+    );
+}
+
+#[test]
+fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
+    let root = tempdir().unwrap();
+    for index in 0..20 {
+        let worktree = root.path().join(format!(".worktree/{index}"));
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/feat").unwrap();
+    }
+    let mut scanned = 0;
+    assert!(super::directory::root_worktrees(root.path(), || { scanned += 1; true }).next().is_some());
+    assert_eq!(scanned, 1, "asking for one worktree inspects only one candidate");
+    assert_eq!(super::directory::root_worktrees(root.path(), || false).count(), 0);
+    let mut remaining = 2;
+    let paths = super::directory::root_worktrees(root.path(), || {
+        if remaining == 0 { return false; }
+        remaining -= 1;
+        true
+    }).collect::<Vec<_>>();
+    assert_eq!(paths.len(), 2);
+}
+
+#[test]
+fn worktree_discovery_and_special_directory_respect_caller_limits() {
+    if !isolated_git_test() { return; }
+    let repository = repository_with_worktree();
+    let root = repository.path().canonicalize().unwrap();
+    let listing = list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 1).unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert!(listing.truncated, "the extra worktree entry did not fit");
+    fs::create_dir_all(root.join(".worktree/other")).unwrap();
+    fs::remove_file(root.join(".worktree/feat/feat.txt")).unwrap();
+    // Only main.txt is visible, so truncation comes from discovery, not file collection.
+    // Even non-worktree children consume the discovery budget.
+    let (entries, summary) = collect_files(super::WorkspaceFilePolicy {
+        roots: vec![root.clone()], root_revision: 1,
+        include_hidden: false, include_ignored: false,
+        maximum_files: 1, maximum_path_bytes: 4096,
+        batch_size: 1, event_queue_capacity: 1,
+    });
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].relative_path, Path::new("main.txt"));
+    assert!(summary.truncated);
+    let mut policy = search_policy(&root, "needle");
+    policy.maximum_files = 1;
+    let mut search = WorkspaceSearchService::default();
+    search.start(policy).unwrap();
+    let (matches, summary) = collect_search(&search);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].relative_path, Path::new("main.txt"));
+    assert!(summary.truncated);
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_symlinks_cannot_add_outside_files_to_finder_or_grep() {
+    if !isolated_git_test() { return; }
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    let outside = repository_with_worktree();
+    let worktrees = root.path().join(".worktree");
+    symlink(outside.path().join(".worktree"), &worktrees).unwrap();
+    for linked_directory in [true, false] {
+        if !linked_directory {
+            fs::remove_file(&worktrees).unwrap();
+            fs::create_dir(&worktrees).unwrap();
+            symlink(outside.path().join(".worktree/feat"), worktrees.join("feat")).unwrap();
+        }
+        assert_eq!(super::directory::root_worktrees(root.path(), || true).count(), 0);
+        let (entries, summary) = collect_files(super::WorkspaceFilePolicy {
+            roots: vec![root.path().to_path_buf()], root_revision: 1,
+            include_hidden: false, include_ignored: false,
+            maximum_files: 10, maximum_path_bytes: 4096,
+            batch_size: 1, event_queue_capacity: 1,
+        });
+        assert!(entries.is_empty());
+        assert!(!summary.truncated);
+        let mut search = WorkspaceSearchService::default();
+        search.start(search_policy(root.path(), "needle")).unwrap();
+        assert!(collect_search(&search).0.is_empty());
+    }
 }
 
 #[test]
@@ -713,6 +854,7 @@ fn explorer_natural_key_is_case_folded_numeric_and_stably_zero_aware() {
 
 #[test]
 fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
+    if !isolated_git_test() { return; }
     let root = tempdir().expect("root");
     fs::create_dir(root.path().join("z-dir")).expect("dir");
     fs::create_dir(root.path().join("dir10")).expect("dir10");
@@ -806,6 +948,7 @@ fn scoped_directory_listing_does_not_traverse_symlink_escape_and_handles_non_utf
 
 #[test]
 fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
+    if !isolated_git_test() { return; }
     use std::os::unix::ffi::OsStringExt;
     let root = tempdir().unwrap();
     let paths = [0xfe, 0xff].map(|byte| {
@@ -867,6 +1010,7 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
 
 #[test]
 fn workspace_search_positions_many_matches_after_a_large_prefix() {
+    if !isolated_git_test() { return; }
     let root = tempdir().unwrap();
     let prefix = 7 * 1024 * 1024;
     fs::write(
@@ -893,6 +1037,7 @@ fn workspace_search_positions_many_matches_after_a_large_prefix() {
 
 #[test]
 fn workspace_search_is_unicode_exact_regex_smart_case_and_whole_word() {
+    if !isolated_git_test() { return; }
     let root = tempdir().expect("root");
     fs::write(root.path().join("a.txt"), "café CAFE cat scatter cat\n").expect("a");
     fs::write(root.path().join("bom.txt"), b"\xef\xbb\xbfcat\r\n").expect("bom");
@@ -923,6 +1068,7 @@ fn workspace_search_is_unicode_exact_regex_smart_case_and_whole_word() {
 
 #[test]
 fn workspace_search_obeys_hidden_ignore_globs_binary_and_limits() {
+    if !isolated_git_test() { return; }
     let root = tempdir().expect("root");
     fs::create_dir(root.path().join(".git")).expect("git");
     fs::write(root.path().join(".gitignore"), "ignored.txt\n").expect("ignore");
@@ -959,6 +1105,7 @@ fn workspace_search_obeys_hidden_ignore_globs_binary_and_limits() {
 
 #[test]
 fn workspace_search_bounds_picker_preview_text() {
+    if !isolated_git_test() { return; }
     let root = tempdir().expect("root");
     fs::write(
         root.path().join("long"),
@@ -976,6 +1123,7 @@ fn workspace_search_bounds_picker_preview_text() {
 
 #[test]
 fn workspace_search_obeys_per_file_and_aggregate_byte_ceilings() {
+    if !isolated_git_test() { return; }
     let root = tempdir().expect("root");
     fs::write(root.path().join("a"), "needle plus").expect("a");
     fs::write(root.path().join("b"), "needle plus").expect("b");
@@ -998,6 +1146,7 @@ fn workspace_search_obeys_per_file_and_aggregate_byte_ceilings() {
 #[cfg(unix)]
 #[test]
 fn workspace_search_does_not_follow_symlink_escapes_and_nested_roots_deduplicate() {
+    if !isolated_git_test() { return; }
     use std::os::unix::fs::symlink;
     let root = tempdir().expect("root");
     let nested = root.path().join("nested");
@@ -1013,26 +1162,6 @@ fn workspace_search_does_not_follow_symlink_escapes_and_nested_roots_deduplicate
     let (matches, _) = collect_search(&service);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].root, nested);
-}
-
-#[test]
-fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
-    let root = tempdir().expect("root");
-    for index in 0..100 {
-        fs::write(root.path().join(format!("{index:03}.txt")), "needle needle").expect("file");
-    }
-    let mut service = WorkspaceSearchService::default();
-    let first = service
-        .start(search_policy(root.path(), "never"))
-        .expect("first");
-    let mut policy = search_policy(root.path(), "needle");
-    policy.maximum_results = 3;
-    let second = service.start(policy).expect("second");
-    assert!(second > first);
-    let (matches, summary) = collect_search(&service);
-    assert_eq!(matches.len(), 3);
-    assert!(summary.truncated);
-    assert!(matches.windows(2).all(|pair| pair[0].id < pair[1].id));
 }
 
 #[cfg(unix)]
@@ -1234,11 +1363,19 @@ fn worker_reports_write_completion() {
 }
 #[test]
 fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
+    if !isolated_git_test() { return; }
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("sub")).unwrap();
     fs::write(root.path().join("b.txt"), "b").unwrap();
     fs::write(root.path().join("sub/a.txt"), "a").unwrap();
     fs::write(root.path().join(".hidden"), "h").unwrap();
+    #[cfg(unix)]
+    let outside = tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
+    }
     let mut service = super::WorkspaceFileService::default();
     let generation = service
         .start(super::WorkspaceFilePolicy {
@@ -1274,6 +1411,7 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
         std::thread::yield_now();
     };
     assert_eq!(summary.files, 2);
+    assert!(!summary.truncated);
     assert_eq!(
         entries
             .iter()
@@ -1281,6 +1419,40 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
             .collect::<Vec<_>>(),
         vec!["b.txt", "sub/a.txt"]
     );
+}
+
+#[test]
+fn workspace_file_count_and_path_byte_limits_report_truncation() {
+    if !isolated_git_test() { return; }
+    let root = tempdir().unwrap();
+    for name in ["a", "b", "c"] {
+        fs::write(root.path().join(name), "text").unwrap();
+    }
+    let mut policy = super::WorkspaceFilePolicy {
+        roots: vec![root.path().to_path_buf()], root_revision: 7,
+        include_hidden: false, include_ignored: false,
+        maximum_files: 1, maximum_path_bytes: 4096,
+        batch_size: 1, event_queue_capacity: 1,
+    };
+    let (entries, summary) = collect_files(policy.clone());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(summary.files, 1);
+    assert!(summary.truncated);
+    let cost = entries[0].canonical_path.as_os_str().len() + entries[0].relative_path.as_os_str().len();
+    assert_eq!(summary.path_bytes, cost);
+    policy.maximum_files = 10;
+    policy.maximum_path_bytes = cost;
+    let (entries, summary) = collect_files(policy.clone());
+    assert_eq!(entries.len(), 1, "exactly one path fits the byte budget");
+    assert_eq!(summary.files, 1);
+    assert_eq!(summary.path_bytes, cost);
+    assert!(summary.truncated);
+    policy.maximum_path_bytes = cost - 1;
+    let (entries, summary) = collect_files(policy);
+    assert!(entries.is_empty());
+    assert_eq!(summary.files, 0);
+    assert_eq!(summary.path_bytes, 0);
+    assert!(summary.truncated);
 }
 
 #[test]
