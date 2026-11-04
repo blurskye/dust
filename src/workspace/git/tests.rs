@@ -2537,6 +2537,10 @@ fn worktree_paths_use_the_checkout_with_separate_git_metadata() {
     assert!(run_branch(GitBranchRequest::List(GitBranchListRequest {
         repository: linked.clone(), deadline: Duration::from_secs(5),
     })).is_err());
+    // An absolute destination is usable even when the primary checkout cannot be resolved.
+    let absolute = dir.path().join("absolute");
+    run_branch(branch_request(&linked, "worktree", "absolute", absolute.to_str().unwrap())).unwrap();
+    assert!(absolute.join("tracked.txt").is_file());
     repo.config().unwrap().set_str("core.worktree", root.to_str().unwrap()).unwrap();
     assert_eq!(branch_list(&linked).worktrees[0].path, root.canonicalize().unwrap());
     run_branch(branch_request(&linked, "worktree", "another", ".worktree/another")).unwrap();

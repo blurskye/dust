@@ -453,10 +453,14 @@ fn has_changes(
 }
 
 /// A worktree inside the main checkout would otherwise show as untracked in its status.
-fn exclude_from_status(repository: &git2::Repository, path: &Path) -> Result<(), GitBranchError> {
+fn exclude_from_status(
+    repository: &git2::Repository,
+    path: &Path,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<(), GitBranchError> {
     use std::io::{Read, Write};
-    let main = main_repository(repository)?;
-    let root = main.workdir().ok_or(GitBranchError::NotRepository)?;
+    let root = repository.workdir().ok_or(GitBranchError::NotRepository)?;
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(());
     };
@@ -473,9 +477,11 @@ fn exclude_from_status(repository: &git2::Repository, path: &Path) -> Result<(),
     }
     line.push('/');
     let exclude = repository.commondir().join("info").join("exclude");
+    check_request(cancel, expires)?;
     if let Some(parent) = exclude.parent() {
         std::fs::create_dir_all(parent).map_err(backend)?;
     }
+    check_request(cancel, expires)?;
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .append(true)
@@ -492,6 +498,7 @@ fn exclude_from_status(repository: &git2::Repository, path: &Path) -> Result<(),
     } else {
         "\n"
     });
+    check_request(cancel, expires)?;
     file.write_all(addition.as_bytes()).map_err(backend)
 }
 
@@ -608,9 +615,21 @@ fn run(
             ..
         } => {
             let repository = open(repository)?;
-            // A relative path starts at the primary checkout, not its metadata directory.
-            let main = main_repository(&repository)?;
-            let path = main.workdir().ok_or(GitBranchError::NotRepository)?.join(path);
+            // Absolute destinations do not require locating a separate primary checkout.
+            // Relative destinations must never be anchored to the metadata directory.
+            let main = if path.is_absolute() {
+                main_repository(&repository).ok()
+            } else {
+                Some(main_repository(&repository)?)
+            };
+            let path = if path.is_absolute() {
+                path.clone()
+            } else {
+                main.as_ref()
+                    .and_then(|main| main.workdir())
+                    .ok_or(GitBranchError::NotRepository)?
+                    .join(path)
+            };
             let path = path.as_path();
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
@@ -677,7 +696,10 @@ fn run(
                 return Err(error);
             }
             check_request(cancel, expires)?;
-            exclude_from_status(&repository, path)?;
+            if let Some(main) = main {
+                exclude_from_status(&main, path, cancel, expires)?;
+            }
+            check_request(cancel, expires)?;
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::RemoveWorktree {
