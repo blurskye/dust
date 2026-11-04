@@ -32,6 +32,7 @@ pub mod remote;
 /// Structured bounded redacted logs and health snapshots.
 pub mod telemetry;
 /// Headless fixtures exercising production editing and input paths.
+#[cfg(test)]
 pub mod testing;
 /// Typed tool catalog, executable discovery, registry, and explicit installer worker.
 pub mod tools;

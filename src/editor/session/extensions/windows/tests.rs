@@ -1429,7 +1429,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6"
+        "fd96d2ac94bc372426094dfc535cadc00e1ca471abd5431529f3c8cec7e7b3e5"
     );
     assert_eq!(
         include_str!("../../../../../docs/plugin-abi-next.wit"),

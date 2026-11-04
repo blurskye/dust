@@ -38,4 +38,4 @@ sha256sum target03-clone-guest.core.wasm
 ```
 
 Expected SHA-256:
-`2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6`.
+`fd96d2ac94bc372426094dfc535cadc00e1ca471abd5431529f3c8cec7e7b3e5`.
