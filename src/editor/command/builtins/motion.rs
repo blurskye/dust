@@ -241,16 +241,23 @@ pub(super) fn repeat_visual_ranges(
     match shape {
         "character" => {
             let first_line = text.byte_to_line(view.cursor).map_err(failed)?;
-            let last_line = first_line.saturating_add(height - 1).min(text.visible_lines() - 1);
-            let start = if height == 1 {
-                view.cursor
+            let last_line = first_line.saturating_add(height - 1);
+            let end = if last_line >= text.visible_lines() {
+                ByteOffset(text.len_bytes())
             } else {
-                text.line_to_byte(last_line).map_err(failed)?
+                let start = if height == 1 {
+                    view.cursor
+                } else {
+                    text.line_to_byte(last_line).map_err(failed)?
+                };
+                let line_end = text.line_to_byte(last_line).map_err(failed)?.get()
+                    + text.line(last_line).map_err(failed)?.len();
+                let remaining = text
+                    .slice(ByteRange::new(start, ByteOffset(line_end)).map_err(failed)?)
+                    .map_err(failed)?;
+                ByteOffset(start.get() + remaining.grapheme_indices(true).nth(width)
+                    .map_or(remaining.len(), |(offset, _)| offset))
             };
-            let line_end = text.line_to_byte(last_line).map_err(failed)?.get()
-                + text.line(last_line).map_err(failed)?.len();
-            let remaining = text.slice(ByteRange::new(start, ByteOffset(line_end)).map_err(failed)?).map_err(failed)?;
-            let end = ByteOffset(start.get() + remaining.grapheme_indices(true).nth(width).map_or(remaining.len(), |(offset, _)| offset));
             Ok((
                 vec![ByteRange::new(view.cursor, end).map_err(failed)?],
                 RegisterShape::Character,

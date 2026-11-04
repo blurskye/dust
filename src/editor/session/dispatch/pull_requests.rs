@@ -178,7 +178,12 @@ impl InteractiveApplication {
                 ForgeReply::CommentTarget(Ok(target)) => {
                     self.pull_requests.comment_loading = false;
                     self.pull_requests.comment_target = Some(target);
-                    self.open_prompt(PromptKind::ReviewComment, String::new());
+                    self.pull_requests.comment_body = Some(String::new());
+                    if self.input.prompt().is_none() {
+                        self.open_prompt(PromptKind::ReviewComment, String::new());
+                    } else {
+                        self.notify_message("review comment ready; open it again when finished with this prompt".into(), false);
+                    }
                 }
                 ForgeReply::Commented(Err(error)) => {
                     self.pull_requests.comment_sending = false;
@@ -399,6 +404,34 @@ mod tests {
         app.process_pull_request_events();
         assert!(!app.pull_requests.comment_sending);
         assert!(app.pull_requests.comment_body.is_none());
+    }
+
+    #[test]
+    fn loading_review_comments_does_not_replace_another_prompt() {
+        let mut app = app();
+        app.pull_requests.prepare(app.workspace.version());
+        app.pull_requests.comment_loading = true;
+        app.open_prompt(PromptKind::Command, "workspace.replace query=draft".into());
+        let target = ReviewCommentTarget {
+            path: app.state.workspace_root.join("file.txt"),
+            line: 3,
+            text: "source".into(),
+            head: crate::forge::PullRequestHead { number: 7, commit: "abc".into() },
+        };
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::CommentTarget(Ok(target)),
+        );
+        app.process_pull_request_events();
+        let prompt = app.input.prompt().unwrap();
+        assert_eq!(prompt.kind, PromptKind::Command);
+        assert_eq!(prompt.input, "workspace.replace query=draft");
+        app.close_prompt();
+        app.begin_review_comment();
+        assert_eq!(app.input.prompt().unwrap().kind, PromptKind::ReviewComment);
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().head.number, 7);
+        assert!(!app.pull_requests.comment_loading);
     }
 
     #[test]

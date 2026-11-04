@@ -76,7 +76,11 @@ impl InputSession {
                     self.last_change = pending;
                     self.last_change.push(CommandInvocation::new("mode.normal", invocation.source).expect("builtin"));
                 }
-                self.pending_change = Some(vec![CommandInvocation::new(mode, invocation.source).expect("builtin")]);
+                let mut transition = CommandInvocation::new(mode, invocation.source).expect("builtin");
+                if mode == "mode.insert" {
+                    transition = transition.with_argument("placement", CommandValue::String("before".into()));
+                }
+                self.pending_change = Some(vec![transition]);
                 self.pending_change_edited = false;
             }
             "mode.normal" => {

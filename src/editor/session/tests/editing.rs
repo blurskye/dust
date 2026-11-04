@@ -186,6 +186,10 @@ fn insert_cursor_motion_splits_dot_recording() {
     }
     let buffer = app.state.active_buffer_id().unwrap();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "bbaone");
+    let view = app.state.active_view.unwrap();
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 }
 
 #[test]
@@ -198,6 +202,22 @@ fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
     }
     let buffer = app.state.active_buffer_id().unwrap();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "ad\n0vwxyz");
+}
+
+#[test]
+fn multiline_visual_repeat_at_document_end_deletes_the_remaining_text() {
+    for terminated in [false, true] {
+        let mut app = app();
+        let source = format!("ab\ncd\n0123456789{}", if terminated { "\n" } else { "" });
+        app.state.open_text(crate::editor::text::TextBuffer::from_text(&source), None);
+        app.set_dashboard_visibility(false);
+        for key in ["l", "v", "j", "h", "d", "G", "$", "."] {
+            app.handle_configured_key(key.parse().unwrap());
+        }
+        let buffer = app.state.active_buffer_id().unwrap();
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "ad\n012345678");
+        assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    }
 }
 
 #[test]
