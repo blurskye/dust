@@ -227,6 +227,29 @@ fn background_inlay_failures_never_replace_the_user_notification() {
 }
 
 #[test]
+fn documentation_resize_clamps_scroll_to_the_new_layout() {
+    let mut app = app();
+    app.handle_event(UiEvent::Resize(120, 40));
+    app.present_documentation_popup(
+        DocumentationPopupKind::Hover, "hover".into(), "server".into(), None,
+        vec![crate::language::lsp::LspMarkupContent {
+            kind: crate::language::lsp::LspMarkupKind::PlainText,
+            value: (0..8).map(|_| "a ".repeat(30)).collect::<Vec<_>>().join("\n"),
+        }],
+    );
+    app.handle_event(UiEvent::Resize(24, 24));
+    app.process_effect(AppEffect::LspDocumentationScroll(1));
+    app.process_effect(AppEffect::LspDocumentationScroll(1));
+    assert!(app.ui.documentation_popup.as_ref().unwrap().scroll > 0);
+    app.handle_event(UiEvent::Resize(120, 40));
+    let popup = app.ui.documentation_popup.as_ref().unwrap();
+    let total = crate::ui::render::overlays::documentation_display_rows(popup, app.configuration.settings(), 120);
+    let maximum = total.saturating_sub(app.window_session.content().documentation_rows.max(1));
+    assert_eq!(maximum, 0);
+    assert_eq!(popup.scroll, 0);
+}
+
+#[test]
 fn completion_documentation_is_typed_and_exact_request_owned() {
     let mut app = app();
     let path = app.state.workspace_root.join("completion.rs");
@@ -307,10 +330,11 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     );
     assert!(app.ui.language_completion.is_some());
 
+    // An unrelated request advances the generation without changing the completion document.
     app.language.fixture_generation(8);
     app.invoke_mapped_command("lsp.completion.documentation.open");
-    assert!(app.ui.documentation_popup.is_none());
-    assert!(app.ui.notification_error);
+    assert!(app.ui.documentation_popup.is_some());
+    assert!(!app.ui.notification_error);
 
     app.language.fixture_generation(7);
     let revision = app.state.buffers[buffer].text.revision();

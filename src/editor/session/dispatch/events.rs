@@ -2876,7 +2876,7 @@ impl InteractiveApplication {
             } else {
                 self.append_lsp_log(format!("{label}: {method} failed: {message}"));
             }
-            if !self.language.request_pending() && (!main || self.language.has_offered_actions()) {
+            if !self.language.request_pending(generation) && (!main || self.language.has_offered_actions()) {
                 self.open_lsp_code_actions_picker(&server);
             }
             return;
@@ -3668,7 +3668,7 @@ impl InteractiveApplication {
                     .install_completions(server, items, incomplete, generation);
                 self.narrow_lsp_completion();
                 if self.ui.language_completion.is_none()
-                    && !self.language.request_pending()
+                    && !self.language.request_pending(generation)
                     && !self.language.completion_automatic()
                 {
                     self.show_lsp_no_result(server);
@@ -3765,7 +3765,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::CodeActions(actions) => {
                 self.language.offer_actions(server, actions, context);
-                if !self.language.request_pending() {
+                if !self.language.request_pending(generation) {
                     self.open_lsp_code_actions_picker(server);
                 }
             }
@@ -4009,11 +4009,11 @@ impl InteractiveApplication {
             // Only the last of several servers can say that nobody knows.
             LspFeatureResult::Empty
                 if method == "textDocument/hover"
-                    && (self.language.request_pending() || self.hover_is_showing()) => {}
+                    && (self.language.request_pending(generation) || self.hover_is_showing()) => {}
             // Completion asks by itself as you type, and nothing to offer is no news.
             LspFeatureResult::Empty
                 if method == "textDocument/completion"
-                    && (self.language.request_pending()
+                    && (self.language.request_pending(generation)
                         || self.language.completion_automatic()) => {}
             LspFeatureResult::Empty => self.show_lsp_no_result(server),
         }

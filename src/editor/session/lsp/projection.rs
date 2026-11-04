@@ -415,11 +415,6 @@ impl LspSession {
     ) -> Option<String> {
         const SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
         let current = (buffer, document.version);
-        if self.projection.breadcrumbs_asked == Some(current)
-            || self.projection.breadcrumb_retries >= 3
-        {
-            return None;
-        }
         match self.projection.breadcrumbs_seen {
             Some((seen, since)) if seen == current && now.duration_since(since) >= SETTLE => {}
             Some((seen, _)) if seen == current => return None,
@@ -428,6 +423,11 @@ impl LspSession {
                 self.projection.breadcrumbs_seen = Some((current, now));
                 return None;
             }
+        }
+        if self.projection.breadcrumbs_asked == Some(current)
+            || self.projection.breadcrumb_retries >= 3
+        {
+            return None;
         }
         self.supporting_server(buffer, document, &LspFeature::DocumentSymbols)
             .filter(|server| {
@@ -544,12 +544,12 @@ impl LspSession {
                 end: crate::language::lsp::LspPosition { line, character },
             },
         };
-        if self
-            .service
-            .request(&owner.server, feature, document, ByteOffset(0), generation)
-            .is_ok()
-        {
-            self.projection.inlay_request = Some((generation, owner));
+        match self.service.request(&owner.server, feature, document, ByteOffset(0), generation) {
+            Ok(()) => self.projection.inlay_request = Some((generation, owner)),
+            Err(LspError::Busy(_)) => {
+                self.projection.inlay_due = Some(Instant::now() + INLAY_DEBOUNCE);
+            }
+            Err(_) => {}
         }
     }
     pub(in crate::editor::session) fn accept_result(
@@ -619,24 +619,18 @@ impl LspSession {
         *request = None;
         true
     }
-    /// Whether another server still owes an answer to the current request.
-    pub(in crate::editor::session) fn request_pending(&self) -> bool {
-        !self.projection.request_servers.is_empty()
+    /// Whether another server still owes an answer to this request.
+    pub(in crate::editor::session) fn request_pending(&self, generation: u64) -> bool {
+        self.projection.requests.get(&generation).is_some_and(|(_, servers, _)| !servers.is_empty())
+            || (self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation)
+                && !self.projection.request_servers.is_empty())
     }
     pub(in crate::editor::session) fn retire_request(&mut self, server: &str, generation: u64) {
-        if self
-            .projection
-            .request
-            .as_ref()
-            .is_some_and(|(current, _)| *current == generation)
-            && self
-                .projection
-                .request_servers
-                .iter()
-                .any(|candidate| candidate == server)
+        self.forget_request(server, generation);
+        if self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation)
+            && self.projection.request_servers.is_empty()
         {
             self.projection.request = None;
-            self.projection.request_servers.clear();
         }
     }
     pub(in crate::editor::session) fn forget_request(&mut self, server: &str, generation: u64) {
@@ -646,7 +640,7 @@ impl LspSession {
                 self.projection.requests.remove(&generation);
             }
         }
-        if generation == self.projection.generation {
+        if self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation) {
             self.projection.request_servers.retain(|s| s != server);
         }
     }
@@ -880,14 +874,14 @@ impl LspSession {
         revision: crate::editor::text::BufferRevision,
     ) {
         let selected = self.projection.completion_selected;
-        let kept = (selected > 0)
-            .then(|| {
-                self.projection
-                    .completion_items
-                    .get(selected)
-                    .map(|item| item.label.clone())
-            })
+        let identity = |index: usize| {
+            self.projection.completion_servers.get(index).cloned()
+                .zip(self.projection.completion_items.get(index).cloned())
+        };
+        let kept = (selected > 0 || self.projection.resolve.is_some())
+            .then(|| identity(selected))
             .flatten();
+        let resolving = self.projection.resolve.as_ref().and_then(|(_, _, index, _)| identity(*index));
         let mut order = scores
             .iter()
             .enumerate()
@@ -906,21 +900,19 @@ impl LspSession {
             .into_iter()
             .map(|(index, _)| self.projection.completion_all[index].clone())
             .unzip();
-        if self.projection.completion_servers != servers
-            || self.projection.completion_items != items
-        {
-            self.projection.resolve = None;
+        let position = |identity: &(String, LspCompletionItem)| {
+            servers.iter().zip(&items).position(|(server, item)| server == &identity.0 && item == &identity.1)
+        };
+        if let Some(resolve) = &mut self.projection.resolve {
+            if let Some(index) = resolving.as_ref().and_then(&position) {
+                resolve.2 = index;
+            } else {
+                self.projection.resolve = None;
+            }
         }
+        self.projection.completion_selected = kept.as_ref().and_then(position).unwrap_or(0);
         self.projection.completion_servers = servers;
         self.projection.completion_items = items;
-        self.projection.completion_selected = kept
-            .and_then(|label| {
-                self.projection
-                    .completion_items
-                    .iter()
-                    .position(|item| item.label == label)
-            })
-            .unwrap_or(0);
         self.projection.completion_scroll = self
             .projection
             .completion_scroll
@@ -934,12 +926,6 @@ impl LspSession {
             .map(String::as_str)
     }
     pub(in crate::editor::session) fn cancel_completion(&mut self) {
-        if let Some((generation, _)) = self.projection.request.take() {
-            for server in std::mem::take(&mut self.projection.request_servers) {
-                let _ = self.service.cancel(&server, generation);
-            }
-        }
-        let _ = self.next_generation();
         self.clear_completion();
     }
     pub(in crate::editor::session) fn clear_completion(&mut self) {
@@ -962,9 +948,9 @@ impl LspSession {
         self.projection.requests.retain(|_, (_, _, method)| {
             method != "textDocument/completion" && method != "completionItem/resolve"
         });
-        if self.projection.completion_owner.is_some()
-            || pending_completion
-            || self.projection.resolve.is_some()
+        if pending_completion
+            || self.projection.completion_owner.as_ref().is_some_and(|(generation, _)| *generation == self.projection.generation)
+            || self.projection.resolve.as_ref().is_some_and(|(generation, _, _, _)| *generation == self.projection.generation)
         {
             for server in &self.projection.request_servers {
                 let _ = self.service.cancel(server, self.projection.generation);
@@ -1012,13 +998,12 @@ impl LspSession {
         editor: &EditorState,
         selected: usize,
     ) -> Result<(String, String, LspMarkupContent), &'static str> {
-        let (generation, owner) = self
+        let (_, owner) = self
             .projection
             .completion_owner
             .as_ref()
             .ok_or("completion documentation is stale")?;
-        if *generation != self.projection.generation
-            || self.projection.owner.as_ref() != Some(owner)
+        if self.projection.owner.as_ref() != Some(owner)
             || editor.active_view != Some(owner.view)
             || !editor
                 .views
@@ -1670,7 +1655,7 @@ mod tests {
         assert!(!owner.accept_result("second", 3, "textDocument/completion", &document.uri(), 0));
     }
     #[test]
-    fn narrowing_cannot_resolve_into_a_different_row() {
+    fn narrowing_keeps_a_resolve_on_its_original_item() {
         let (editor, _, _, mut owner) = fixture();
         owner.projection.generation = 3;
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
@@ -1681,8 +1666,66 @@ mod tests {
             ByteOffset(1),
             crate::editor::text::BufferRevision(0),
         );
+        assert_eq!(owner.completion_position().0, 1);
+        assert!(owner.accept_resolved(3, item("resolved abX"), &editor));
+        assert_eq!(owner.completion_items()[0].label, "aXb");
+        assert_eq!(owner.completion_items()[1].label, "resolved abX");
+    }
+    #[test]
+    fn narrowing_rejects_a_resolve_when_its_item_is_filtered_out() {
+        let (editor, _, _, mut owner) = fixture();
+        owner.projection.generation = 3;
+        owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
+        owner.projection.resolve = Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
+        owner.narrow_completions(vec![None, Some(2)], ByteOffset(0), super::BufferRevision(0));
         assert!(!owner.accept_resolved(3, item("resolved abX"), &editor));
         assert_eq!(owner.completion_items()[0].label, "aXb");
+    }
+    #[test]
+    fn narrowing_preserves_the_server_and_item_not_just_its_label() {
+        let (_, _, _, mut owner) = fixture();
+        owner.install_completions("owned", vec![item("foo"), item("foo")], false, 0);
+        let mut overload = item("foo");
+        overload.insert_text = "foo(value)".into();
+        owner.install_completions("second", vec![overload.clone()], false, 0);
+        owner.move_completion(1, 10);
+        owner.move_completion(1, 10);
+        owner.install_completions("third", vec![item("aaa")], false, 0);
+        owner.narrow_completions(vec![Some(1); 4], ByteOffset(0), super::BufferRevision(0));
+        let selected = owner.completion_position().0;
+        assert_eq!(owner.completion_server(selected), Some("second"));
+        assert_eq!(owner.completion_items()[selected], overload);
+    }
+    #[test]
+    fn cancelling_completion_keeps_an_unrelated_format_request() {
+        let (_, _, document, mut owner) = fixture();
+        let source = owner.projection.owner.clone().unwrap();
+        owner.install_completions("owned", vec![item("foo")], false, 1);
+        owner.projection.requests.insert(1, (source.clone(), vec!["second".into()], "textDocument/completion".into()));
+        owner.projection.generation = 2;
+        owner.projection.request = Some((2, source.clone()));
+        owner.projection.request_servers = vec!["owned".into()];
+        owner.projection.requests.insert(2, (source, vec!["owned".into()], "textDocument/formatting".into()));
+        owner.cancel_completion();
+        assert!(owner.completion_items().is_empty());
+        assert!(!owner.accept_result("second", 1, "textDocument/completion", &document.uri(), 0));
+        assert!(owner.request_pending(2));
+        assert!(owner.accept_result("owned", 2, "textDocument/formatting", &document.uri(), 0));
+    }
+    #[test]
+    fn pending_servers_belong_to_the_result_generation() {
+        let (_, _, document, mut owner) = fixture();
+        let source = owner.projection.owner.clone().unwrap();
+        owner.projection.requests.insert(1, (source.clone(), vec!["first".into(), "second".into()], "textDocument/codeAction".into()));
+        owner.projection.requests.insert(2, (source.clone(), vec!["owned".into()], "textDocument/hover".into()));
+        owner.projection.generation = 2;
+        owner.projection.request = Some((2, source));
+        owner.projection.request_servers = vec!["owned".into()];
+        assert!(owner.accept_result("first", 1, "textDocument/codeAction", &document.uri(), 0));
+        assert!(owner.request_pending(1));
+        assert!(owner.accept_result("second", 1, "textDocument/codeAction", &document.uri(), 0));
+        assert!(!owner.request_pending(1));
+        assert!(owner.request_pending(2));
     }
     #[test]
     fn formatting_and_hover_keep_independent_request_lifetimes() {
@@ -1783,7 +1826,7 @@ mod tests {
     }
     #[test]
     fn breadcrumb_failures_allow_only_bounded_retries() {
-        let (_, buffer, document, mut owner) = fixture();
+        let (_, buffer, mut document, mut owner) = fixture();
         owner.projection.breadcrumbs_seen =
             Some(((buffer, 0), Instant::now() - Duration::from_secs(1)));
         owner
@@ -1809,6 +1852,30 @@ mod tests {
                 .request_breadcrumbs(buffer, &document, Instant::now() + Duration::from_secs(1))
                 .is_none()
         );
+        document.version += 1;
+        let now = Instant::now();
+        assert!(owner.request_breadcrumbs(buffer, &document, now).is_none());
+        assert_eq!(owner.projection.breadcrumb_retries, 0);
+        assert_eq!(owner.request_breadcrumbs(buffer, &document, now + Duration::from_secs(1)), Some("owned".into()));
+    }
+    #[test]
+    fn inlay_refresh_retries_after_a_full_command_queue() {
+        let (editor, buffer, document, mut owner) = fixture();
+        owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap().inlay_hints = true;
+        let endpoint = owner.service.replace_edit_source_fixture_for(
+            "owned", document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16, 1,
+        );
+        endpoint.block_responses();
+        owner.request_inlays(document.clone());
+        assert!(owner.projection.inlay_request.is_none());
+        assert!(owner.inlay_pending());
+        endpoint.unblock_responses();
+        let config = crate::config::load_bundled_config().config.lsp;
+        assert!(owner.inlay_ready(&config, Instant::now() + Duration::from_secs(1)));
+        owner.request_inlays(document);
+        assert!(owner.projection.inlay_request.is_some());
+        assert!(!owner.inlay_pending());
     }
     #[test]
     fn completion_from_every_server_lands_in_one_list() {
@@ -1843,10 +1910,10 @@ mod tests {
         };
         assert!(accept(&mut owner, "tailwind"));
         owner.install_completions("tailwind", vec![item("bg-red-500")], false, 3);
-        assert!(owner.request_pending());
+        assert!(owner.request_pending(3));
         assert!(accept(&mut owner, "html"));
         owner.install_completions("html", vec![item("class")], false, 3);
-        assert!(!owner.request_pending());
+        assert!(!owner.request_pending(3));
         assert!(!accept(&mut owner, "html"));
         let labels = owner
             .completion_items()
@@ -2049,10 +2116,19 @@ mod tests {
         let mut session = LspSession::default();
         session.projection.owner = Some(source.clone());
         session.projection.generation = 1;
-        session.projection.request = Some((1, source));
+        session.projection.request = Some((1, source.clone()));
         session.projection.request_servers = vec!["formatter".into()];
+        session.projection.requests.insert(1, (source.clone(), vec!["formatter".into()], "textDocument/formatting".into()));
         session.retire_request("formatter", 1);
         assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0));
+        session.projection.requests.insert(1, (source.clone(), vec!["formatter".into()], "textDocument/formatting".into()));
+        session.projection.generation = 2;
+        session.projection.request = Some((2, source.clone()));
+        session.projection.request_servers = vec!["hover".into()];
+        session.projection.requests.insert(2, (source, vec!["hover".into()], "textDocument/hover".into()));
+        session.retire_request("formatter", 1);
+        assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0));
+        assert!(session.accept_result("hover", 2, "textDocument/hover", "uri", 0));
     }
 }
 

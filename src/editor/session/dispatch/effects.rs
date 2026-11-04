@@ -12827,7 +12827,7 @@ impl InteractiveApplication {
             return true;
         }
         typed.is_some_and(completion_word_char)
-            && !self.language.request_pending()
+            && !self.language.request_pending(self.language.generation())
             && self
                 .lsp_word_before_cursor()
                 .and_then(|word| word.chars().next())
