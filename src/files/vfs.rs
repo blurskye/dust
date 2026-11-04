@@ -1542,7 +1542,7 @@ pub(super) fn list_directory(
     Ok(paths)
 }
 
-pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
+pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .read(true)
@@ -1560,6 +1560,11 @@ pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
     })?;
     if !metadata.is_file() {
         return Err(VfsError::NotRegularFile(path.to_path_buf()));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(VfsError::DocumentTooLarge {
+            path: path.to_path_buf(), maximum_bytes,
+        });
     }
     read_bounded_bytes(file, maximum_bytes)
         .map_err(|source| VfsError::Io {

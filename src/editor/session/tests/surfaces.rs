@@ -6066,6 +6066,8 @@ fn a_saved_location_reads_as_file_and_line() {
         app.persisted_location_label(&location(0))
             .ends_with("marked-location.txt:1")
     );
+    std::fs::write(&path, b"\xef\xbb\xbfa\r\nb\r\nc\r\n").unwrap();
+    assert!(app.persisted_location_label(&location(4)).ends_with("marked-location.txt:3"));
     std::fs::remove_file(&path).unwrap();
     assert!(
         app.persisted_location_label(&location(13))

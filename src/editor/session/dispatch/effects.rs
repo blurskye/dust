@@ -7469,6 +7469,9 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn process_git_hunk_events(&mut self) {
+        if self.search.poll_diff_preview(self.workspace.version(), self.configuration.binding_revision()) {
+            self.sync_picker_ui();
+        }
         match self.git.poll_hunks() {
             Ok(Some(ready)) => {
                 if let Some(action) = ready.action {
@@ -7514,11 +7517,10 @@ impl InteractiveApplication {
                     match action {
                         GitHunkAction::Move(direction) => self.navigate_git_hunk(direction),
                         GitHunkAction::Preview => self.preview_selected_git_hunk(),
-                        GitHunkAction::Stage(_) => unreachable!("staging handled above"),
-                        GitHunkAction::Unstage => self.unstage_selected_git_hunk(),
-                        GitHunkAction::StageLines(start, end) => {
-                            self.stage_git_lines(i64::from(start), i64::from(end));
+                        GitHunkAction::Stage(_) | GitHunkAction::StageLines(_, _) => {
+                            unreachable!("staging handled above")
                         }
+                        GitHunkAction::Unstage => self.unstage_selected_git_hunk(),
                         GitHunkAction::Reset => self.request_reset_selected_git_hunk(),
                     }
                     return;
@@ -7598,13 +7600,11 @@ impl InteractiveApplication {
                 .find(|line| **line < current)
                 .or(markers.last())
         };
-        match (target, buffer.path.clone()) {
-            (Some(line), Some(path)) => self.navigate_matcher_source(MatcherSource {
-                path,
-                line: *line,
-                column: 0,
-            }),
-            _ => self.notify_message(self.message("conflict_none", &[]), false),
+        if let Some(line) = target {
+            let position = buffer.text.line_to_byte(*line).unwrap_or(ByteOffset(0));
+            self.move_search_cursor(self.state.active_view.expect("active view"), position);
+        } else {
+            self.notify_message(self.message("conflict_none", &[]), false);
         }
     }
     fn active_git_hunks(&self, layer: crate::workspace::git::GitDiffLayer) -> bool {
@@ -8170,23 +8170,7 @@ impl InteractiveApplication {
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
     /// their own codes; everything else names which side differs.
     fn change_code(entry: &crate::workspace::git::GitStatusEntry) -> String {
-        use crate::workspace::git::GitFileStatus;
-        if entry.status == crate::workspace::git::GitFileStatus::Conflicted {
-            return "UU".to_owned();
-        }
-        if entry.status == GitFileStatus::Untracked {
-            return "??".to_owned();
-        }
-        let letter = match entry.status {
-            GitFileStatus::Added => 'A',
-            GitFileStatus::Modified => 'M',
-            GitFileStatus::Deleted => 'D',
-            GitFileStatus::Renamed => 'R',
-            GitFileStatus::Conflicted | GitFileStatus::Untracked => unreachable!(),
-        };
-        let index = if entry.sources.staged { letter } else { ' ' };
-        let worktree = if entry.sources.unstaged { letter } else { ' ' };
-        format!("{index}{worktree}")
+        entry.status_code.iter().collect()
     }
 }
 
@@ -8195,29 +8179,31 @@ impl InteractiveApplication {
         &mut self,
         found: WorkspaceSearchMatch,
     ) {
-        if self
+        if let Some(buffer) = self
             .state
             .buffers
-            .iter()
-            .any(|(_, buffer)| buffer.path.as_ref() == Some(&found.canonical_path))
+            .values()
+            .find(|buffer| buffer.path.as_ref() == Some(&found.canonical_path))
+            && buffer.text.to_bytes().as_slice() != found.snapshot.as_ref()
         {
-            if let Ok(range) =
-                ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end))
-            {
-                self.navigate_byte_location(&file_uri(&found.canonical_path), range);
-            }
+            self.show_error(self.message("workspace_search_stale_result", &[]));
             return;
         }
-        let roots = self
-            .workspace
-            .roots()
-            .iter()
-            .map(|root| root.identity.canonical_path.clone())
-            .collect();
+        let Ok(range) = ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end)) else {
+            self.show_error(self.message("workspace_search_stale_result", &[]));
+            return;
+        };
+        self.record_jump();
+        if self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&found.canonical_path)) {
+            self.navigate_byte_location(&file_uri(&found.canonical_path), range);
+            return;
+        }
+        let roots = self.workspace.roots().iter()
+            .map(|root| root.identity.canonical_path.clone()).collect();
         match self.documents.read_scoped(found.canonical_path, roots) {
             Ok(id) => {
                 self.remember_navigation_read(id);
-                self.search.register_workspace_navigation(id, found.range);
+                self.search.register_byte_navigation(id, range, Some(found.snapshot));
             }
             Err(error) => self.show_error(error),
         }
@@ -8237,6 +8223,15 @@ impl InteractiveApplication {
             .iter()
             .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
         else {
+            let roots = self.workspace.roots().iter()
+                .map(|root| root.identity.canonical_path.clone()).collect();
+            match self.documents.read_scoped(path, roots) {
+                Ok(id) => {
+                    self.remember_navigation_read(id);
+                    self.search.register_byte_navigation(id, range, None);
+                }
+                Err(error) => self.show_error(error),
+            }
             return;
         };
         let transaction = self.transaction_id();
@@ -8389,6 +8384,25 @@ impl InteractiveApplication {
     ) {
         if !source.path.is_absolute() {
             self.show_error(self.message("navigation_outside_workspace", &[]));
+            return;
+        }
+        if let Some((buffer, document)) = self.state.buffers.iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(&source.path))
+        {
+            let position = document.text.line_to_byte(source.line).ok()
+                .map(|offset| ByteOffset(offset.get().saturating_add(source.column).min(document.text.len_bytes())))
+                .filter(|offset| document.text.validate_offset(*offset).is_ok())
+                .unwrap_or(ByteOffset(0));
+            let transaction = self.transaction_id();
+            match self.state.prepare_document_location(buffer, position, transaction)
+                .and_then(|draft| self.commit_editor_draft(draft, None, false))
+            {
+                Ok(()) => {
+                    self.set_dashboard_visibility(false);
+                    self.ensure_cursor_visible();
+                }
+                Err(error) => self.show_error(error),
+            }
             return;
         }
         let mut roots: Vec<_> = self
@@ -8665,7 +8679,7 @@ impl InteractiveApplication {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
                         id,
-                        label: format!("{path}:{}", line + 1),
+                        label: format!("{path}:{}", line.saturating_add(1)),
                         detail: code,
                         source: String::new(),
                         action: PickerAction::None,
@@ -8677,14 +8691,15 @@ impl InteractiveApplication {
         self.install_picker(self.message("picker_references_title", &[]), items);
     }
 
-    /// The line a location points at, from its open buffer or a file small enough to read here.
-    fn source_line_at(
+    /// Cache bounded excerpts, never complete files, for reference labels.
+    pub(in crate::editor::session) fn source_line_at(
         &self,
         path: &std::path::Path,
         line: usize,
-        files: &mut std::collections::HashMap<std::path::PathBuf, Option<String>>,
+        files: &mut std::collections::HashMap<(std::path::PathBuf, usize), String>,
     ) -> String {
         const MAXIMUM_FILE: u64 = 1024 * 1024;
+        const MAXIMUM_CACHE: usize = 1024 * 1024;
         if let Some((_, buffer)) = self
             .state
             .buffers
@@ -8694,18 +8709,23 @@ impl InteractiveApplication {
             return buffer
                 .text
                 .line(line)
-                .map_or_else(|_| String::new(), |line| line.trim().to_owned());
+                .map_or_else(|_| String::new(), |line| line.trim().chars().take(1024).collect());
         }
-        let contents = files.entry(path.to_owned()).or_insert_with(|| {
-            std::fs::metadata(path)
-                .is_ok_and(|metadata| metadata.len() <= MAXIMUM_FILE)
-                .then(|| std::fs::read_to_string(path).ok())
-                .flatten()
-        });
-        contents
-            .as_deref()
-            .and_then(|contents| contents.lines().nth(line))
-            .map_or_else(String::new, |line| line.trim().to_owned())
+        let key = (path.to_owned(), line);
+        if let Some(excerpt) = files.get(&key) {
+            return excerpt.clone();
+        }
+        let remaining = MAXIMUM_CACHE.saturating_sub(files.values().map(String::len).sum());
+        if remaining < 4096 {
+            return String::new();
+        }
+        let excerpt = crate::files::read_file_with_ceiling(path, MAXIMUM_FILE).ok()
+            .and_then(|bytes| crate::editor::text::decode_utf8(&bytes).ok())
+            .and_then(|text| text.text.lines().nth(line)
+                .map(|line| line.trim().chars().take(1024).collect::<String>()))
+            .unwrap_or_default();
+        files.insert(key, excerpt.clone());
+        excerpt
     }
 
     pub(in crate::editor::session) fn open_lsp_symbols_picker(
@@ -8713,6 +8733,7 @@ impl InteractiveApplication {
         server: &str,
         symbols: Vec<crate::language::lsp::LspSymbol>,
     ) {
+        let encoding = self.language.server_encoding(server);
         let server = self.lsp_server_label(server);
         let items = symbols
             .into_iter()
@@ -8722,7 +8743,7 @@ impl InteractiveApplication {
                 let payload = symbol.location.map_or_else(
                     || PickerPayload::Command(String::new()),
                     |location| {
-                        PickerPayload::LspLocation(location, self.language.server_encoding(&server))
+                        PickerPayload::LspLocation(location, encoding)
                     },
                 );
                 (
@@ -9107,13 +9128,26 @@ impl InteractiveApplication {
             Some(buffer) => buffer.text.byte_to_line(ByteOffset(location.byte)).ok(),
             None if location.byte <= READ_CEILING => {
                 use std::io::Read;
-                std::fs::File::open(&location.path).ok().and_then(|file| {
-                    let mut bytes = Vec::new();
-                    file.take(location.byte as u64)
-                        .read_to_end(&mut bytes)
-                        .ok()?;
-                    Some(bytes.iter().filter(|byte| **byte == b'\n').count())
-                })
+                use std::os::unix::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new().read(true)
+                    .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW)
+                    .open(&location.path).ok().and_then(|file| {
+                        if !file.metadata().ok()?.is_file() {
+                            return None;
+                        }
+                        let mut bytes = Vec::new();
+                        // CRLF takes two disk bytes for one normalized byte; allow a BOM
+                        // and a partial final UTF-8 character as well.
+                        file.take((location.byte * 2 + 7) as u64).read_to_end(&mut bytes).ok()?;
+                        if let Err(error) = std::str::from_utf8(&bytes) {
+                            if error.error_len().is_some() {
+                                return None;
+                            }
+                            bytes.truncate(error.valid_up_to());
+                        }
+                        TextBuffer::from_bytes(&bytes).ok()?
+                            .byte_to_line(ByteOffset(location.byte)).ok()
+                    })
             }
             None => None,
         };
@@ -9238,12 +9272,7 @@ impl InteractiveApplication {
         self.sync_picker_ui();
     }
 
-    /// Show the diff of the focused change row in the pane.
-    ///
-    /// The read is SYNCHRONOUS AND BOUNDED: `read_hunks` carries a deadline and maximum hunk,
-    /// line and byte counts, so it cannot hang the UI thread or read an unbounded file. It is
-    /// done here rather than through the hunk service because the service tracks the buffer's
-    /// own hunks and a second consumer would fight it for the accepted snapshot.
+    /// Read the focused change's diff on the preview's own hunk worker.
     fn sync_changes_diff_preview(&mut self) {
         let Some(crate::editor::session::search::PickerPayload::MatcherSource(source)) =
             self.selected_picker_payload().cloned()
@@ -9264,35 +9293,13 @@ impl InteractiveApplication {
         };
         let policy =
             crate::editor::session::git::GitSession::policy(&status, relative.to_owned(), layer);
-        match crate::workspace::git::read_hunks(&policy) {
-            Ok(snapshot) => {
-                // The pane names the comparison it is showing, so a diff is never read as
-                // another one.
-                let provenance = match layer {
-                    crate::workspace::git::GitDiffLayer::Staged => "HEAD -> index",
-                    crate::workspace::git::GitDiffLayer::Unstaged => "index -> disk",
-                };
-                let preview = crate::editor::session::git::diff_preview_from_hunks(
-                    &snapshot.hunks,
-                    provenance,
-                    false,
-                    0,
-                );
-                let retired = self.search.set_preview(crate::ui::PickerPreview {
-                    title: source
-                        .path
-                        .strip_prefix(&status.scope_root)
-                        .unwrap_or(&source.path)
-                        .display()
-                        .to_string(),
-                    body: crate::ui::PickerPreviewBody::Diff(preview),
-                });
-                if let Some(id) = retired {
-                    self.documents.cancel_request(id);
-                }
-            }
-            // A file whose diff cannot be read shows no diff rather than a stale one.
-            Err(_) => self.clear_picker_preview(),
+        if let Some(id) = self.search.prepare_diff_preview(
+            policy,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            relative.display().to_string(),
+        ) {
+            self.documents.cancel_request(id);
         }
     }
 
@@ -9425,6 +9432,7 @@ impl InteractiveApplication {
             PickerPayload::MatcherSource(source) => {
                 let (retired, ticket) = self.search.prepare_preview(
                     source.path.clone(),
+                    Some((source.line, source.column)),
                     label,
                     "loading…".into(),
                     self.workspace.version(),

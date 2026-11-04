@@ -43,6 +43,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "file".into(),
+            None,
             "title".into(),
             "loading".into(),
             source.clone(),
@@ -55,6 +56,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "second".into(),
+            None,
             "second".into(),
             "loading".into(),
             source.clone(),
@@ -74,6 +76,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "third".into(),
+            None,
             "third".into(),
             "loading".into(),
             source.clone(),
@@ -107,6 +110,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "fourth".into(),
+            None,
             "fourth".into(),
             "loading".into(),
             source.clone(),
@@ -134,6 +138,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let ticket = owner
         .prepare_preview(
             "fifth".into(),
+            None,
             "fifth".into(),
             "loading".into(),
             source.clone(),
@@ -145,6 +150,28 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     assert!(owner.accept_preview(crate::files::RequestId(5), &Ok(vec![255; 8]), source, 2));
     assert!(owner.preview().is_none());
 }
+#[test]
+fn matcher_previews_follow_the_source_location_within_one_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let ticket = owner.prepare_preview("file.rs".into(), Some((900, 2)), "File".into(),
+        "Loading".into(), source.clone(), 1).1.unwrap();
+    let bytes = (0..1000).map(|line| format!("line {line}\n")).collect::<String>().into_bytes();
+    assert!(owner.admit_preview(ticket, crate::files::RequestId(1), bytes.len()));
+    assert!(owner.accept_preview(crate::files::RequestId(1), &Ok(bytes), source.clone(), 1));
+    let preview = owner.preview().as_ref().unwrap().as_text().unwrap();
+    assert_eq!(preview.first_line, 892);
+    assert_eq!(preview.highlight_line, Some(900));
+    assert_eq!(preview.lines[8], "line 900");
+    assert!(owner.prepare_preview("file.rs".into(), Some((900, 2)), "File".into(),
+        "Loading".into(), source.clone(), 1).1.is_none());
+    assert!(owner.prepare_preview("file.rs".into(), Some((950, 0)), "File".into(),
+        "Loading".into(), source.clone(), 1).1.is_some());
+    assert!(owner.prepare_preview("file.rs".into(), Some((950, 3)), "File".into(),
+        "Loading".into(), source, 1).1.is_some());
+}
+
 #[test]
 fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     let directory = tempfile::tempdir().unwrap();
@@ -367,7 +394,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         .unwrap();
     assert!(!owner.owns_picker_epoch(&epoch));
     let (_, ticket) =
-        owner.prepare_preview("file".into(), "File".into(), "Loading".into(), source, 1);
+        owner.prepare_preview("file".into(), None, "File".into(), "Loading".into(), source, 1);
     assert!(owner.admit_preview(ticket.unwrap(), crate::files::RequestId(9), 64));
     assert_eq!(owner.close_picker(), Some(crate::files::RequestId(9)));
     assert!(!owner.owns_picker_epoch(&next));

@@ -1613,7 +1613,7 @@ enum NavigationRead {
         crate::editor::session::windows::NavigationStamp,
         crate::editor::session::workspace::WorkspaceVersion,
     ),
-    WorkspaceSearch(std::ops::Range<usize>),
+    ByteRange(ByteRange, Option<std::sync::Arc<[u8]>>),
     /// A recovery journal's path and text, to put into the file once it is open.
     Recovered(std::path::PathBuf, String),
 }
@@ -1824,8 +1824,8 @@ impl InteractiveApplication {
                         })
                         .or_else(|| {
                             self.search
-                                .take_workspace_navigation(id)
-                                .map(NavigationRead::WorkspaceSearch)
+                                .take_byte_navigation(id)
+                                .map(|(range, snapshot)| NavigationRead::ByteRange(range, snapshot))
                         })
                         .or_else(|| {
                             self.recovery.take_read(id, self.workspace.version()).map(
@@ -1853,6 +1853,16 @@ impl InteractiveApplication {
                         }
                         self.finish_recovery(journal, "recovery_restored");
                         continue;
+                    }
+                    if let Some(NavigationRead::ByteRange(_, Some(snapshot))) = &pending {
+                        let current = self.state.buffers.values()
+                            .find(|buffer| buffer.path.as_ref() == Some(&path))
+                            .map(|buffer| buffer.text.to_bytes());
+                        let bytes = current.as_deref().or_else(|| result.as_deref().ok());
+                        if bytes != Some(snapshot.as_ref()) {
+                            self.show_error(self.message("workspace_search_stale_result", &[]));
+                            continue;
+                        }
                     }
                     match result.map_err(InteractiveError::from).and_then(|bytes| {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
@@ -1985,11 +1995,14 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(NavigationRead::WorkspaceSearch(range)) => {
-                                let start = ByteOffset(range.start);
-                                let end = ByteOffset(range.end);
-                                if text.validate_offset(start).is_err()
-                                    || text.validate_offset(end).is_err()
+                            Some(NavigationRead::ByteRange(range, _)) => {
+                                let start = range.start;
+                                let end = range.end;
+                                let target = self.state.buffers.values()
+                                    .find(|buffer| buffer.path.as_ref() == Some(&path))
+                                    .map_or(&text, |buffer| &buffer.text);
+                                if target.validate_offset(start).is_err()
+                                    || target.validate_offset(end).is_err()
                                 {
                                     self.show_error(
                                         self.message("workspace_search_stale_result", &[]),

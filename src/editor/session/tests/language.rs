@@ -908,6 +908,54 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
 }
 
 #[test]
+fn reference_labels_cache_only_bounded_excerpts() {
+    let app = app();
+    let mut cache = HashMap::new();
+    let path = app.state.workspace_root.join("references.rs");
+    fs::write(&path, "x".repeat(900_000) + "\nshort line\n").unwrap();
+    assert_eq!(app.source_line_at(&path, 1, &mut cache), "short line");
+    assert_eq!(cache.values().map(String::len).sum::<usize>(), "short line".len());
+    assert_eq!(app.source_line_at(&path, 0, &mut cache).len(), 1024);
+    assert!(cache.values().map(String::len).sum::<usize>() < 4096);
+    cache.insert((PathBuf::from("filled"), 0), "x".repeat(1024 * 1024));
+    assert!(app.source_line_at(&path, 2, &mut cache).is_empty());
+    assert_eq!(cache.len(), 3);
+}
+
+#[test]
+fn symbol_picker_uses_the_session_key_to_resolve_position_encoding() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("symbol.rs");
+    let (_, view) = app.state.open_text(TextBuffer::from_text("éx"), Some(path.clone()));
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    let key = "rust-analyzer@nested-project";
+    app.language.fixture_session(key.into(), crate::editor::session::dispatch::LspRuntimeState {
+        root: app.workspace.active_root().unwrap(), root_path: app.state.workspace_root.clone(),
+        server_id: definition.id.clone(), definition,
+        launch: crate::editor::session::dispatch::LspLaunch::Direct {
+            executable: crate::tools::discover_executable("false").unwrap(), managed: false,
+        },
+        capabilities: Some(crate::language::lsp::LspCapabilities {
+            position_encoding: crate::editor::text::PositionEncoding::Utf8,
+            ..Default::default()
+        }),
+        documents: HashMap::new(), restart_count: 0, restart_due: None,
+        circuit_open: false, desired_running: true, activate_on_restart: true,
+    });
+    let position = crate::language::lsp::LspPosition { line: 0, character: 2 };
+    app.open_lsp_symbols_picker(key, vec![crate::language::lsp::LspSymbol {
+        name: "x".into(), kind: None, extent: None,
+        location: Some(crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }),
+    }]);
+    app.accept_picker();
+    assert_eq!(app.state.views[view].cursor, ByteOffset(2));
+}
+
+#[test]
 fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     use crate::editor::text::{ByteOffset, ByteRange, TextEdit, TextEditSet};
     let mut app = app();

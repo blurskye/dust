@@ -139,6 +139,42 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
 }
 
 #[test]
+fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("unopened.txt");
+    fs::write(&path, "first\nerror\n").unwrap();
+    let uri = crate::language::lsp::file_uri(&path);
+    let producer = crate::workspace::DiagnosticProducer::new(
+        crate::workspace::DiagnosticOwner::new("lint.test").unwrap());
+    app.diagnostics.activate(producer.clone());
+    app.diagnostics.publish(crate::editor::session::diagnostics::DiagnosticBatch {
+        producer, uri: uri.clone(), document: None,
+        validity: crate::editor::session::diagnostics::DiagnosticValidity::DiskReport,
+        items: vec![crate::workspace::Diagnostic {
+            uri, version: None, range: ByteRange::new(ByteOffset(6), ByteOffset(11)).unwrap(),
+            severity: DiagnosticSeverity::Error, source: "test".into(), code: None,
+            message: "error".into(), related: vec![], tags: vec![], fixes: vec![],
+            data: None, timestamp: std::time::SystemTime::UNIX_EPOCH,
+        }],
+    }, &app.state).unwrap();
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let view = &app.state.views[app.state.active_view.unwrap()];
+    assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
+    assert_eq!(view.cursor, ByteOffset(6));
+
+    let before = view.buffer;
+    let invalid = app.state.workspace_root.join("short.txt");
+    fs::write(&invalid, "x").unwrap();
+    app.navigate_byte_location(&crate::language::lsp::file_uri(&invalid),
+        ByteRange::new(ByteOffset(6), ByteOffset(11)).unwrap());
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), Some(before));
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     let mut app = app();
     app.open_explorer();
@@ -1905,6 +1941,10 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
         + "\n";
     let expected_cursor = text.find("needle").expect("needle offset");
     fs::write(&path, text).expect("fixture");
+    let departure = app.state.workspace_root.join("departure.txt");
+    fs::write(&departure, "origin\n").unwrap();
+    let (original, view) = app.state.open_text(TextBuffer::from_text("origin\n"), Some(departure));
+    app.state.views[view].cursor = ByteOffset(1);
     app.invoke_mapped_command("workspace.search.prompt");
     assert!(app.ui.prompt.is_none());
     assert_eq!(
@@ -1934,6 +1974,35 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
     let view = app.state.active_view.expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(expected_cursor));
+    app.walk_jumps(true);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), Some(original));
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(1));
+}
+
+#[test]
+fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "before needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let found = app.search.matches()[0].clone();
+        app.close_picker();
+        let (_, view) = if open {
+            app.state.open_text(TextBuffer::from_text("new prefix before needle\n"), Some(path.clone()))
+        } else {
+            fs::write(&path, "new prefix before needle\n").unwrap();
+            app.state.open_text(TextBuffer::from_text("unchanged active view"), None)
+        };
+        let buffer = app.state.views[view].buffer;
+        app.navigate_workspace_search_match(found);
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), Some(buffer));
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        assert!(app.ui.notification_error);
+    }
 }
 
 #[test]
@@ -4952,6 +5021,38 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     );
 }
 
+#[test]
+fn changes_rows_display_index_and_worktree_status_independently() {
+    let (mut app, repo, _) = near_changes_fixture();
+    let path = app.state.workspace_root.join("added.txt");
+    fs::write(&path, "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("added.txt")).unwrap();
+    index.write().unwrap();
+    fs::write(&path, "modified after staging\n").unwrap();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.open_git_status_picker();
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    let added = rows.iter().filter(|row| row.label == "added.txt").collect::<Vec<_>>();
+    assert_eq!(added.len(), 2);
+    assert!(added.iter().all(|row| row.source == "AM"));
+}
+
+fn wait_changes_preview(app: &mut InteractiveApplication) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !app.search.preview().as_ref().is_some_and(|preview| matches!(preview.body, crate::ui::PickerPreviewBody::Diff(_))) {
+        app.process_git_hunk_events();
+        assert!(Instant::now() < deadline, "{:?}", app.search.preview());
+        thread::yield_now();
+    }
+}
+
 /// W-26: the diff pane follows the focused row and shows that path's real diff, and `Tab`
 /// switches it between the two comparisons.
 #[test]
@@ -5009,6 +5110,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
             .join("\n")
     };
 
+    wait_changes_preview(&mut app);
     // The pane shows the focused row's UNSTAGED diff: index to disk. These strings are
     // produced only by the pane, so the row's own provenance column cannot satisfy them.
     let unstaged = frame(&mut app);
@@ -5032,6 +5134,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     )
     .expect("static command");
     app.invoke(switch);
+    wait_changes_preview(&mut app);
     let staged = frame(&mut app);
     assert!(
         staged.contains("HEAD -> index"),
@@ -5053,6 +5156,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
             .expect("static command");
         app.invoke(command);
     }
+    wait_changes_preview(&mut app);
     let staged_row = frame(&mut app);
     assert!(
         staged_row.contains("HEAD -> index"),
@@ -5120,6 +5224,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
             .join("\n")
     };
 
+    wait_changes_preview(&mut app);
     let opened = frame(&mut app);
     assert!(
         opened.contains("index -> disk"),
@@ -5920,6 +6025,33 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
     assert!(app.terminal_session.contains(PtyId(101)));
     app.process_pty_events();
     assert!(app.terminal_session.contains(PtyId(101)));
+}
+
+#[test]
+fn conflict_navigation_works_in_unnamed_buffers() {
+    let mut app = app();
+    let text = "intro\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n";
+    let (_, view) = app.state.open_text(TextBuffer::from_text(text), None);
+    app.process_effect(AppEffect::GitConflictNavigate(1));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+    app.state.views[view].cursor = ByteOffset(text.len());
+    app.process_effect(AppEffect::GitConflictNavigate(-1));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+}
+
+#[test]
+fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("deleted.txt");
+    fs::write(&path, "first\nsecond\n").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone()));
+    fs::remove_file(&path).unwrap();
+    app.state.open_text(TextBuffer::from_text("other"), None);
+    app.navigate_matcher_source(crate::editor::session::search::MatcherSource {
+        path, line: 1, column: 2,
+    });
+    assert_eq!(app.state.active_buffer_id(), Some(buffer));
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(8));
 }
 
 #[test]

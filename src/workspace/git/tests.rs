@@ -53,6 +53,7 @@ fn status_is_bounded_sorted_and_idle() {
                 original_path: None,
                 relative_path: "new.txt".into(),
                 status: GitFileStatus::Untracked,
+                status_code: ['?', '?'],
                 sources: GitChangeSources {
                     staged: false,
                     unstaged: true,
@@ -63,6 +64,7 @@ fn status_is_bounded_sorted_and_idle() {
                 original_path: None,
                 relative_path: "tracked.txt".into(),
                 status: GitFileStatus::Modified,
+                status_code: [' ', 'M'],
                 sources: GitChangeSources {
                     staged: false,
                     unstaged: true,
@@ -75,6 +77,35 @@ fn status_is_bounded_sorted_and_idle() {
         assert!(service.snapshot_if_changed(snapshot.revision).is_none())
     }
 }
+#[test]
+fn status_keeps_index_and_worktree_codes_independent() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "base.txt", "base\n");
+    std::fs::write(dir.path().join("added.txt"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("added.txt")).unwrap();
+    index.write().unwrap();
+    std::fs::write(dir.path().join("added.txt"), "modified after staging\n").unwrap();
+    let snapshot = super::status::read_status(GitStatusGeneration(1), &GitStatusPolicy {
+        root: dir.path().into(), root_revision: 1,
+        maximum_files: 10, maximum_path_bytes: 1024,
+        deadline: Duration::from_secs(2),
+    }, &[], &AtomicBool::new(false)).unwrap();
+    let entry = snapshot.entries.iter().find(|entry| entry.relative_path == Path::new("added.txt")).unwrap();
+    assert_eq!(entry.status_code, ['A', 'M']);
+    assert!(entry.sources.staged && entry.sources.unstaged);
+}
+
+#[test]
+fn worktree_hash_rejects_oversized_files_before_reading() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("large.bin");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(1024 * 1024 * 1024).unwrap();
+    assert!(matches!(worktree_hash(&path), Err(GitMutationError::Invalid)));
+}
+
 #[test]
 fn nested_root_is_scoped_and_ceilings_truncate() {
     let dir = tempdir().unwrap();
@@ -646,6 +677,7 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "src/a.rs".into(),
             status: GitFileStatus::Modified,
+            status_code: [' ', 'M'],
             sources: GitChangeSources {
                 staged: false,
                 unstaged: true,
@@ -656,6 +688,7 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "src/nested/b.rs".into(),
             status: GitFileStatus::Conflicted,
+            status_code: ['U', 'U'],
             sources: GitChangeSources {
                 staged: true,
                 unstaged: true,
@@ -666,6 +699,7 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "docs/readme.md".into(),
             status: GitFileStatus::Untracked,
+            status_code: ['?', '?'],
             sources: GitChangeSources {
                 staged: false,
                 unstaged: true,
@@ -676,6 +710,7 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "../escape".into(),
             status: GitFileStatus::Conflicted,
+            status_code: ['U', 'U'],
             sources: GitChangeSources {
                 staged: true,
                 unstaged: true,

@@ -163,8 +163,30 @@ pub struct GitStatusEntry {
     /// Repository-relative source of a rename, including sources outside a nested scope.
     pub original_path: Option<PathBuf>,
     pub status: GitFileStatus,
+    /// Independent index/worktree status letters, as in Git's short status.
+    pub status_code: [char; 2],
     pub sources: GitChangeSources,
 }
+fn status_code(status: git2::Status) -> [char; 2] {
+    use git2::Status;
+    if status.is_conflicted() {
+        return ['U', 'U'];
+    }
+    if status.is_wt_new() {
+        return ['?', '?'];
+    }
+    let letter = |side: Status| {
+        if side.intersects(Status::INDEX_NEW | Status::WT_NEW) { 'A' }
+        else if side.intersects(Status::INDEX_DELETED | Status::WT_DELETED) { 'D' }
+        else if side.intersects(Status::INDEX_RENAMED | Status::WT_RENAMED) { 'R' }
+        else if side.intersects(Status::INDEX_TYPECHANGE | Status::WT_TYPECHANGE) { 'T' }
+        else if side.intersects(Status::INDEX_MODIFIED | Status::WT_MODIFIED) { 'M' }
+        else { ' ' }
+    };
+    [letter(status & (Status::INDEX_NEW | Status::INDEX_MODIFIED | Status::INDEX_DELETED | Status::INDEX_RENAMED | Status::INDEX_TYPECHANGE)),
+     letter(status & (Status::WT_NEW | Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE))]
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitStatusSnapshot {
     pub generation: GitStatusGeneration,
@@ -467,6 +489,7 @@ pub(super) fn read_status(
             relative_path: path,
             original_path,
             status,
+            status_code: status_code(s),
             sources: GitChangeSources {
                 staged,
                 unstaged,
@@ -497,6 +520,7 @@ pub(super) fn read_status(
                 relative_path: document.relative_path.clone(),
                 original_path: None,
                 status: GitFileStatus::Modified,
+                status_code: [' ', ' '],
                 sources: GitChangeSources {
                     staged: false,
                     unstaged: false,
