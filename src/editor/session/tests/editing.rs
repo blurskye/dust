@@ -1314,9 +1314,39 @@ fn the_first_disk_poll_detects_changes_since_opening() {
     fs::write(&path, "after opening\n").unwrap();
     app.next_disk_check = None;
     app.process_disk_changes();
+    assert!(app.documents.file_work_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "before\n");
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "after opening\n");
     assert!(!app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn disk_checks_preserve_unsaved_edits_and_warn_only_when_disk_contents_differ() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("dirty-before-poll.txt");
+    fs::write(&path, "disk\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    app.replace_with_recovered(buffer, "unsaved\n".into()).unwrap();
+    let source = app.state.buffers[buffer].text.source_version();
+    app.clear_notice();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert!(app.ui.notification.is_none());
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
+    assert!(app.state.buffers[buffer].dirty);
+    fs::write(&path, "different disk contents\n").unwrap();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "unsaved\n");
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message(
+        "file_changed_on_disk", &[("path", app.workspace_relative_label(&path))],
+    ).as_str()));
 }
 
 #[test]
@@ -1351,8 +1381,11 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("buffer");
+    let source = app.state.buffers[buffer].text.source_version();
     app.next_disk_check = None;
     app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
 
     // Longer content, so the length differs even if the clock did not tick.
     fs::write(&path, b"from outside\n").expect("rewrite");

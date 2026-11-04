@@ -14642,27 +14642,15 @@ impl InteractiveApplication {
             if self.disk_stamps.get(&id) == Some(&stamp) {
                 continue;
             }
-            let view = Self::document_view(id, &self.state.buffers[id]);
-            // Our own save moves the stamp too, and then the bytes on disk are what we wrote.
-            if metadata.len() == view.persisted.len() as u64
-                && crate::files::read_file_with_ceiling(&path, metadata.len())
-                    .is_ok_and(|disk| disk == view.persisted)
-            {
-                self.disk_stamps.insert(id, stamp);
-                continue;
-            }
-            if view.dirty {
-                self.disk_stamps.insert(id, stamp);
-                let shown = self.workspace_relative_label(&path);
-                self.notify_warning(self.message("file_changed_on_disk", &[("path", shown)]));
-                continue;
+            if matches!(self.documents.check_admission(), Err(crate::files::VfsError::QueueFull)) {
+                break;
             }
             let editor = self.state.window_version();
             let workspace = self.workspace.version();
             let view = Self::document_view(id, &self.state.buffers[id]);
             match self
                 .documents
-                .request_reload(Some(view), false, &editor, workspace)
+                .request_disk_check(view, &editor, workspace)
             {
                 Ok(()) => {
                     self.reload_stamps.insert(id, stamp);
@@ -14937,7 +14925,6 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let mut candidate = self.state.draft();
         match change {
             DocumentChange::Open {
                 text,
@@ -14946,6 +14933,7 @@ impl InteractiveApplication {
                 navigation,
                 activate,
             } => {
+                let mut candidate = self.state.draft();
                 let activate = activate
                     && self.window_session.navigation_current(
                         &navigation,
@@ -14982,7 +14970,17 @@ impl InteractiveApplication {
                     self.clear_notice();
                 }
             }
+            DocumentChange::DiskChecked { buffer, path, changed } => {
+                if let Some(stamp) = self.reload_stamps.remove(&buffer) {
+                    self.disk_stamps.insert(buffer, stamp);
+                }
+                if changed {
+                    let shown = self.workspace_relative_label(&path);
+                    self.notify_warning(self.message("file_changed_on_disk", &[("path", shown)]));
+                }
+            }
             DocumentChange::Reload { buffer, text, path } => {
+                let mut candidate = self.state.draft();
                 let stamp = self.reload_stamps.remove(&buffer);
                 if !candidate.reload_document(buffer, text, path.clone()) {
                     self.show_error(self.message("reload_closed", &[]));
@@ -15019,6 +15017,7 @@ impl InteractiveApplication {
                 quit: quit_after,
                 close,
             } => {
+                let mut candidate = self.state.draft();
                 if !candidate.save_document(buffer, &text, revision, bytes, path.clone(), snapshot)
                 {
                     self.input.clear_pending_stage();
@@ -15072,6 +15071,12 @@ impl InteractiveApplication {
                     false,
                 );
                 if let Some(document) = lsp_document {
+                    let current = LspDocument {
+                        text: self.state.buffers[buffer].text.to_string(),
+                        version: self.state.buffers[buffer].text.revision().0,
+                        ..document.clone()
+                    };
+                    let source = self.state.buffers[buffer].text.source_version();
                     let servers = self
                         .language
                         .sessions()
@@ -15085,10 +15090,18 @@ impl InteractiveApplication {
                         })
                         .collect::<Vec<_>>();
                     for server in servers {
+                        // Formatting and save policies can change text since the last sync.
+                        // Publish the current buffer before didSave, never the older disk snapshot.
+                        if !self.language.synced(&server, buffer, &source)
+                            && let Err(error) = self.language.sync_owned(
+                                &server, current.clone(), (buffer, source.clone()),
+                            )
+                        {
+                            self.show_error(error);
+                        }
                         if let Err(error) = self.language.save(&server, document.clone()) {
                             self.show_error(error);
                         }
-                        self.language.invalidate_document(&server, buffer);
                     }
                 }
                 if let Some((effect, line)) = stage.filter(|_| !still_dirty) {

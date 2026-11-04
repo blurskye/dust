@@ -2096,6 +2096,8 @@ fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
     let saved = transport.saved_document().unwrap();
     assert_eq!(saved.text, "written\n");
     assert_eq!(saved.version, revision);
+    assert_eq!(app.language.sessions()["owner"].documents[&buffer].text, "newer unsaved text");
+    assert!(app.language.synced("owner", buffer, &app.state.buffers[buffer].text.source_version()));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "newer unsaved text");
     assert!(app.state.buffers[buffer].dirty);
 }
@@ -2128,6 +2130,10 @@ fn save_notifications_reach_every_document_owner_after_buffer_switch() {
         Some(crate::language::lsp::file_uri(&path))
     );
     assert_eq!(unrelated.saved_uri(), None);
+    for server in ["first", "second"] {
+        assert_eq!(app.language.sessions()[server].documents[&buffer].text, "saved");
+        assert!(app.language.synced(server, buffer, &app.state.buffers[buffer].text.source_version()));
+    }
 }
 
 #[test]

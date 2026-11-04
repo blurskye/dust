@@ -1335,6 +1335,7 @@ fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
     }
     app.next_disk_check = None;
     app.process_disk_changes();
+    wait_vfs(&mut app);
     let stamp = |name| fs::metadata(repo.path().join(name)).unwrap().modified().unwrap();
     let before = (stamp("index"), stamp("HEAD"));
     repo.reset(old.as_object(), git2::ResetType::Soft, None).unwrap();
@@ -6423,6 +6424,7 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
     }
     app.next_disk_check = None;
     app.process_disk_changes();
+    wait_vfs(&mut app);
     for (_, path) in &buffers {
         fs::write(path, "new contents").unwrap();
     }

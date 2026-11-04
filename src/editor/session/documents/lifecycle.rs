@@ -65,7 +65,7 @@ enum Operation {
         generation: Arc<()>,
         retired: Vec<PathBuf>,
     },
-    Reload(Version),
+    Reload { version: Version, check_disk: bool },
     Save {
         version: Version,
         bytes: Vec<u8>,
@@ -88,7 +88,7 @@ impl FileReply {
         paths: impl Iterator<Item = (BufferId, &'a Path)>,
     ) -> Result<(), DocumentFailure> {
         if let (
-            Operation::Save { version, .. } | Operation::Reload(version),
+            Operation::Save { version, .. } | Operation::Reload { version, .. },
             VfsResult::Write {
                 path,
                 result: Ok(()),
@@ -113,13 +113,13 @@ impl FileReply {
     ) -> Option<&super::super::windows::EditorCloseSave> {
         match &self.intent.operation {
             Operation::Save { close, .. } => close.as_ref(),
-            Operation::Open { .. } | Operation::Reload(_) => None,
+            Operation::Open { .. } | Operation::Reload { .. } => None,
         }
     }
     pub(in crate::editor::session) fn target(&self) -> Option<BufferId> {
         match &self.intent.operation {
             Operation::Open { .. } => None,
-            Operation::Reload(v) | Operation::Save { version: v, .. } => Some(v.id),
+            Operation::Reload { version, .. } | Operation::Save { version, .. } => Some(version.id),
         }
     }
 }
@@ -135,6 +135,11 @@ pub(in crate::editor::session) enum DocumentChange {
         buffer: BufferId,
         text: TextBuffer,
         path: PathBuf,
+    },
+    DiskChecked {
+        buffer: BufferId,
+        path: PathBuf,
+        changed: bool,
     },
     Saved {
         buffer: BufferId,
@@ -228,6 +233,24 @@ impl DocumentSession {
         editor: &EditorWindowVersion,
         workspace: WorkspaceVersion,
     ) -> Result<(), DocumentFailure> {
+        self.request_reload_inner(view, force, false, editor, workspace)
+    }
+    pub(in crate::editor::session) fn request_disk_check(
+        &mut self,
+        view: DocumentView<'_>,
+        editor: &EditorWindowVersion,
+        workspace: WorkspaceVersion,
+    ) -> Result<(), DocumentFailure> {
+        self.request_reload_inner(Some(view), true, true, editor, workspace)
+    }
+    fn request_reload_inner(
+        &mut self,
+        view: Option<DocumentView<'_>>,
+        force: bool,
+        check_disk: bool,
+        editor: &EditorWindowVersion,
+        workspace: WorkspaceVersion,
+    ) -> Result<(), DocumentFailure> {
         self.check_file_admission(editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_reload"))?;
         if view.virtual_read_only || view.read_only {
@@ -247,7 +270,7 @@ impl DocumentSession {
                     editor: editor.clone(),
                     workspace,
                 },
-                operation: Operation::Reload(view.version()),
+                operation: Operation::Reload { version: view.version(), check_disk },
             },
         );
         Ok(())
@@ -368,7 +391,7 @@ impl DocumentSession {
                         .map_err(|e| DocumentFailure::Error(e.to_string()))?,
                 }
             }
-            (Operation::Reload(version), VfsResult::Read { path, result, .. }) => {
+            (Operation::Reload { version, check_disk }, VfsResult::Read { path, result, .. }) => {
                 let current = view.ok_or_else(stale)?;
                 if current.id != version.id
                     || current.path != version.path.as_deref()
@@ -377,11 +400,21 @@ impl DocumentSession {
                 {
                     return Err(stale());
                 }
-                DocumentChange::Reload {
-                    buffer: version.id,
-                    path,
-                    text: TextBuffer::from_bytes(&result?)
-                        .map_err(|e| DocumentFailure::Error(e.to_string()))?,
+                let bytes = result?;
+                let changed = check_disk && bytes != current.persisted;
+                if check_disk && (!changed || current.dirty) {
+                    DocumentChange::DiskChecked {
+                        buffer: version.id,
+                        path,
+                        changed,
+                    }
+                } else {
+                    DocumentChange::Reload {
+                        buffer: version.id,
+                        path,
+                        text: TextBuffer::from_bytes(&bytes)
+                            .map_err(|e| DocumentFailure::Error(e.to_string()))?,
+                    }
                 }
             }
             (
@@ -439,7 +472,7 @@ impl DocumentSession {
     ) {
         self.pending_files.retain(|id, intent| {
             let keep = match &mut intent.operation {
-                Operation::Reload(v) | Operation::Save { version: v, .. } => v.id != buffer,
+                Operation::Reload { version, .. } | Operation::Save { version, .. } => version.id != buffer,
                 Operation::Open {
                     requested, retired, ..
                 } => match path {
@@ -574,7 +607,7 @@ mod tests {
                     editor: state.window_version(),
                     workspace: workspace.version(),
                 },
-                operation: Operation::Reload(view(state, id).version()),
+                operation: Operation::Reload { version: view(state, id).version(), check_disk: false },
             },
             event: VfsResult::Read {
                 id: RequestId(1),
