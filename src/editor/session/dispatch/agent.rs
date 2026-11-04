@@ -226,14 +226,6 @@ impl AgentSession {
             .request(method, params)
     }
 
-    fn respond(&mut self, id: Value, result: Result<Value, String>) {
-        if let Some(process) = &mut self.process
-            && let Err(error) = process.respond(id, result)
-        {
-            self.stop(&error);
-        }
-    }
-
     fn send_next_prompt(&mut self) {
         if self.phase != Phase::Ready || !self.requests.is_empty() {
             return;
@@ -441,6 +433,21 @@ impl AgentSession {
 }
 
 impl InteractiveApplication {
+    fn respond_to_agent(&mut self, index: usize, id: Value, result: Result<Value, String>) {
+        if let Some(process) = &mut self.agent.sessions[index].process
+            && let Err(error) = process.respond(id, result)
+        {
+            self.stop_agent_session(index, &error);
+        }
+    }
+
+    fn stop_agent_session(&mut self, index: usize, reason: &str) {
+        let number = self.agent.sessions[index].number;
+        self.agent.sessions[index].stop(reason);
+        self.cancel_agent_permissions(&[number]);
+        self.stop_agent_children(number);
+    }
+
     fn active_agent(&self) -> Option<&AgentSession> {
         self.agent.sessions.get(self.agent.active)
     }
@@ -726,13 +733,13 @@ impl InteractiveApplication {
             .take_if(|request| numbers.contains(&request.session));
         let prompt_open = asking.is_some();
         for request in cancelled.into_iter().chain(asking) {
-            if let Some(session) = self
+            if let Some(index) = self
                 .agent
                 .sessions
-                .iter_mut()
-                .find(|session| session.number == request.session)
+                .iter()
+                .position(|session| session.number == request.session)
             {
-                session.respond(request.id, Ok(agent::permission_cancelled()));
+                self.respond_to_agent(index, request.id, Ok(agent::permission_cancelled()));
             }
         }
         if prompt_open {
@@ -1432,17 +1439,18 @@ impl InteractiveApplication {
     pub(super) fn process_agent_events(&mut self) {
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
-            let session = &mut self.agent.sessions[index];
-            if let Some(process) = &mut session.process
+            let mut save = false;
+            if let Some(process) = &mut self.agent.sessions[index].process
                 && let Err(error) = process.flush_responses()
             {
-                session.stop(&error);
-                changed = true;
+                self.stop_agent_session(index, &error);
+                save = true;
             }
+            let session = &mut self.agent.sessions[index];
             let phase = session.phase;
             let entries = session.entries.len();
             session.send_next_prompt();
-            let mut save = phase != session.phase || entries != session.entries.len();
+            save |= phase != session.phase || entries != session.entries.len();
             changed |= save;
             for _ in 0..MESSAGES_PER_TICK {
                 let Some(message) = self.agent.sessions[index]
@@ -1618,15 +1626,14 @@ impl InteractiveApplication {
                 }
                 "fs/read_text_file" => {
                     let result = self.agent_read_file(&params);
-                    self.agent.sessions[index]
-                        .respond(id, result.map(|content| json!({"content": content})));
+                    self.respond_to_agent(index, id, result.map(|content| json!({"content": content})));
                 }
                 "fs/write_text_file" => {
                     let root = session.root.clone();
                     let result = self.agent_write_file(&root, &params);
-                    self.agent.sessions[index].respond(id, result.map(|()| Value::Null));
+                    self.respond_to_agent(index, id, result.map(|()| Value::Null));
                 }
-                _ => session.respond(id, Err(format!("{method} is not supported by Dust"))),
+                _ => self.respond_to_agent(index, id, Err(format!("{method} is not supported by Dust"))),
             },
             AgentMessage::Log(line) => session.last_log = line,
             AgentMessage::Exited(reason) => {
@@ -1864,11 +1871,11 @@ impl InteractiveApplication {
         let Some(request) = request else {
             return;
         };
-        let Some(session) = self
+        let Some(index) = self
             .agent
             .sessions
-            .iter_mut()
-            .find(|session| session.number == request.session)
+            .iter()
+            .position(|session| session.number == request.session)
         else {
             return;
         };
@@ -1891,18 +1898,18 @@ impl InteractiveApplication {
         let result = option.map_or_else(agent::permission_cancelled, |option| {
             agent::permission_selected(&option.id)
         });
-        session.respond(request.id, Ok(result));
+        self.respond_to_agent(index, request.id, Ok(result));
     }
 
     pub(super) fn cancel_agent_permission(&mut self) {
         if let Some(request) = self.agent.asking.take()
-            && let Some(session) = self
+            && let Some(index) = self
                 .agent
                 .sessions
-                .iter_mut()
-                .find(|session| session.number == request.session)
+                .iter()
+                .position(|session| session.number == request.session)
         {
-            session.respond(request.id, Ok(agent::permission_cancelled()));
+            self.respond_to_agent(index, request.id, Ok(agent::permission_cancelled()));
         }
     }
 
@@ -3109,6 +3116,50 @@ mod tests {
                     .contains("parent")
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_response_transport_failure_stops_children_and_permissions() {
+        let mut app = test_app();
+        let parent = tab(&mut app);
+        let number = app.agent.sessions[parent].number;
+        let child = child(&mut app, number, Phase::Creating(2));
+        app.agent.permissions.push_back(permission(number));
+        app.agent.permissions.push_back(permission(app.agent.sessions[child].number));
+        let mut process = AgentProcess::spawn(
+            Path::new("/bin/sh"),
+            &["-c".into(), "exec 0<&-; echo ready >&2; sleep 60".into()],
+            &BTreeMap::new(),
+            &app.state.workspace_root,
+        ).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if matches!(process.try_message(), Some(AgentMessage::Log(line)) if line == "ready") {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        process.notify("fixture", Value::Null).unwrap();
+        loop {
+            if matches!(process.try_message(), Some(AgentMessage::Exited(_))) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.agent.sessions[parent].process = Some(process);
+        app.agent.sessions[parent].phase = Phase::Prompting(1);
+        app.handle_agent_message(parent, AgentMessage::Request {
+            id: json!(3), method: "unsupported".into(), params: Value::Null,
+        });
+        assert!(app.agent.sessions[parent].process.is_none());
+        assert_eq!(app.agent.sessions[parent].phase, Phase::Stopped);
+        assert!(matches!(app.agent.sessions[parent].entries.last(), Some(Entry::Notice(error)) if error.contains("input is closed")));
+        assert_eq!(app.agent.sessions[child].phase, Phase::Stopped);
+        assert!(app.agent.sessions[child].queued.is_empty());
+        assert!(app.agent.permissions.is_empty());
     }
 
     #[cfg(unix)]
