@@ -48,6 +48,7 @@ use super::{
 };
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
 use crate::editor::session::git::GitHunkAction;
+use crate::editor::session::workspace::leaves_root;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
 use crate::ui::render::surfaces::{
     PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT,
@@ -9746,12 +9747,6 @@ impl InteractiveApplication {
     }
 }
 
-/// Whether a switch from `old` to `new` leaves this file behind. Worktrees nest under the main
-/// checkout: moving down keeps files inside the new root, moving up leaves all of the old one.
-fn leaves_root(file: &Path, old: &Path, new: &Path) -> bool {
-    file.starts_with(old) && (!file.starts_with(new) || old.starts_with(new))
-}
-
 impl InteractiveApplication {
     pub(in crate::editor::session) fn add_workspace_root(&mut self, path: PathBuf) {
         let requested_path = if path.is_absolute() {
@@ -14961,7 +14956,7 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn process_trust_events(&mut self) {
         let before = self.workspace.version();
-        let updates = self.workspace.poll();
+        let updates = self.workspace.poll(&self.state);
         if before != self.workspace.version() {
             self.documents.retire_workspace(&self.workspace.version());
         }

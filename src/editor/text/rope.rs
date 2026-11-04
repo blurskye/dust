@@ -182,6 +182,7 @@ impl TextBuffer {
     }
 
     pub fn validate_range(&self, range: ByteRange) -> Result<(), PositionError> {
+        ByteRange::new(range.start, range.end)?;
         self.validate_offset(range.start)?;
         self.validate_offset(range.end)
     }
@@ -419,6 +420,26 @@ fn normalize_newlines(text: &str) -> String {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[test]
+    fn reversed_ranges_are_rejected_without_changing_text() {
+        use crate::editor::text::{EditError, TextEdit, TextEditSet};
+        let mut text = TextBuffer::from_text("abc");
+        let revision = text.revision();
+        let range = ByteRange {
+            start: ByteOffset(2),
+            end: ByteOffset(1),
+        };
+        let error = PositionError::ReversedRange { start: 2, end: 1 };
+        assert_eq!(text.validate_range(range), Err(error.clone()));
+        assert_eq!(text.slice(range), Err(error.clone()));
+        assert_eq!(
+            text.apply_edits(&TextEditSet::new(revision, vec![TextEdit::new(range, "x")])),
+            Err(EditError::InvalidPosition(error))
+        );
+        assert_eq!(text.to_string(), "abc");
+        assert_eq!(text.revision(), revision);
+    }
+
     #[test]
     fn protocol_lines_are_delimited_only_by_lf() {
         let text = TextBuffer::from_text("a\u{000c}b\u{2028}d\nc");

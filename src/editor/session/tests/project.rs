@@ -582,6 +582,38 @@ fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
 }
 
 #[test]
+fn workspace_history_records_visits_without_trust_prompts() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let first = app.state.workspace_root.clone();
+    // Recording the startup visit must not suppress its first trust prompt.
+    app.process_trust_events();
+    assert!(app.workspace.seen_roots().contains(&first));
+    app.maybe_prompt_for_unseen_workspace();
+    assert_eq!(app.ui.prompt.as_ref().unwrap().kind, crate::ui::PromptKind::WorkspaceTrust);
+    app.close_prompt();
+    wait_trust(&mut app);
+
+    let second = tempdir().unwrap();
+    let second_path = second.path().canonicalize().unwrap();
+    app.switch_workspace_root(second_path.clone());
+    wait_root_operation(&mut app);
+    wait_trust(&mut app);
+    assert!(app.ui.prompt.is_none());
+    assert_eq!(app.workspace.trust(), crate::workspace::WorkspaceTrust::Untrusted);
+    app.switch_workspace_root(first.clone());
+    wait_root_operation(&mut app);
+    wait_trust(&mut app);
+    assert_eq!(app.state.workspace_root, first);
+    assert!(app.workspace.seen_roots().contains(&second_path));
+    let database: crate::workspace::TrustDatabase = toml::from_str(
+        &fs::read_to_string(app.workspace.state_path()).unwrap(),
+    ).unwrap();
+    assert!(database.seen.iter().any(|identity| identity.canonical_path == second_path));
+    assert!(database.identities.is_empty(), "visiting does not grant trust");
+}
+
+#[test]
 fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
     let mut app = app();
     prepare_trust_identity(&mut app);
@@ -1100,6 +1132,35 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     app.state.buffers[buffer].dirty = false;
     app.remove_workspace_root(second);
     assert_eq!(app.workspace.roots().len(), 1);
+}
+
+#[test]
+fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let original = app.state.workspace_root.clone();
+    let roots = app.workspace.roots().to_vec();
+    let version = app.workspace.version();
+    let target = tempdir().unwrap();
+    let (buffer, _) = app.state.open_text(
+        TextBuffer::from_text("clean"),
+        Some(original.join("notes.txt")),
+    );
+    app.switch_workspace_root(target.path().to_path_buf());
+    assert!(app.workspace.root_operation_pending());
+    // The inspection may have finished on its worker, but its result is not published yet.
+    app.state.set_buffer_dirty(buffer, true);
+    wait_root_operation(&mut app);
+    assert_eq!(app.workspace.roots(), roots);
+    assert_eq!(app.workspace.version(), version);
+    assert_eq!(app.state.workspace_root, original);
+    assert!(app.state.buffers[buffer].dirty);
+    assert!(app.ui.notification_error);
+
+    app.state.set_buffer_dirty(buffer, false);
+    app.switch_workspace_root(target.path().to_path_buf());
+    wait_root_operation(&mut app);
+    assert_eq!(app.state.workspace_root, target.path().canonicalize().unwrap());
 }
 
 #[test]
