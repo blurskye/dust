@@ -48,6 +48,33 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
 }
 
 #[test]
+fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("first"), None);
+    app.set_dashboard_visibility(false);
+    let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let second_view = app.state.active_view.unwrap();
+    let second_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let first = app.window_session.editor_ids().window_for(first_pane).unwrap();
+    let second = app.window_session.editor_ids().window_for(second_pane).unwrap();
+    let first_target = format!("window:{}", first.0);
+    let second_target = format!("window:{}", second.0);
+    app.place_graph_window(&second_target, WindowPlacement::Floating(WindowRect {
+        x: 1, y: 1, width: 30, height: 8,
+    })).unwrap();
+    app.place_graph_window(&first_target, WindowPlacement::Fullscreen).unwrap();
+    app.swap_graph_windows(&first_target, &second_target).unwrap();
+    assert_eq!(app.window_session.graph().focused(), Some(second));
+    assert_eq!(app.state.active_view, Some(second_view));
+    assert_eq!(app.state.tabs[app.state.active_tab.unwrap()].focused, second_pane);
+    app.reconcile_editor_windows();
+    assert_eq!(app.window_session.graph().focused(), Some(second));
+}
+
+#[test]
 fn directional_resize_uses_the_focused_explorer_clone() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
@@ -3253,6 +3280,20 @@ fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
     app.state.open_text(TextBuffer::from_text("editor"), None);
     app.set_dashboard_visibility(false);
     app.open_explorer();
+    app.terminal_session.fixture(
+        PtyId(7),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(7));
+    app.sync_terminal_panel();
+    let terminal = app.window_session.native_ids().terminal(7).unwrap();
     let candidate = app.prepare_configured_window_rules(&crate::config::WindowsConfig {
         rules: vec![crate::config::WindowRuleConfig {
             content_type: "builtin.terminal".into(),
@@ -3260,12 +3301,15 @@ fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
         }],
     }).unwrap();
     app.window_session.accept_current(candidate, &app.state.window_version()).unwrap();
+    app.reconcile_editor_windows();
+    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Fullscreen);
     app.apply_persisted_window_rules(&[
         PersistedWindowRule { content_type: "builtin.explorer".into(), placement: PersistedWindowPlacement::Fullscreen },
         PersistedWindowRule { content_type: "builtin.terminal".into(), placement: PersistedWindowPlacement::Hidden },
     ]).unwrap();
     let explorer = app.window_session.native_ids().explorer().unwrap();
     assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, WindowPlacement::Fullscreen);
+    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
     assert_eq!(app.window_session.native_ids().semantic_defaults(None), vec![
         ("builtin.explorer", WindowPlacement::Fullscreen),
         ("builtin.terminal", WindowPlacement::Hidden),

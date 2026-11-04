@@ -563,14 +563,16 @@ impl WindowSession {
                                 }
                                 _ => {
                                     let focused = self.core.graph.focused();
-                                    if focused == Some(first)
-                                        && second_placement == WindowPlacement::Hidden
+                                    if first_placement == WindowPlacement::Fullscreen
+                                        || (focused == Some(first)
+                                            && second_placement == WindowPlacement::Hidden)
                                     {
                                         plan.operations.push(EditorOperation::FocusPaneId {
                                             pane: second_pane,
                                         });
-                                    } else if focused == Some(second)
-                                        && first_placement == WindowPlacement::Hidden
+                                    } else if second_placement == WindowPlacement::Fullscreen
+                                        || (focused == Some(second)
+                                            && first_placement == WindowPlacement::Hidden)
                                     {
                                         plan.operations.push(EditorOperation::FocusPaneId {
                                             pane: first_pane,
