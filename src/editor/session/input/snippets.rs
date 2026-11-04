@@ -179,7 +179,6 @@ impl InputSession {
             self.snippet = None;
             return None;
         };
-        let primary_depth = primary.depth;
         let primary = primary.range();
         let mut target = None;
         for operation in &mut transaction.operations {
@@ -207,6 +206,14 @@ impl InputSession {
         let contains = |outer: ByteRange, inner: ByteRange| {
             outer.start <= inner.start && inner.end <= outer.end
         };
+        let is_ancestor = |outer: &SnippetTabstop, inner: &SnippetTabstop| {
+            outer.depth < inner.depth && outer.order < inner.order
+                && contains(outer.range(), inner.range())
+                && !session.groups.iter().flatten().any(|stop| {
+                    outer.order < stop.order && stop.order <= inner.order
+                        && stop.depth <= outer.depth
+                })
+        };
         let mut copies = Vec::new();
         let mut affected = Vec::new();
         for (occurrence, stop) in session.groups[session.current].iter().enumerate() {
@@ -228,12 +235,16 @@ impl InputSession {
                 return None;
             }
             group.iter().enumerate().find(|(_, stop)| {
-                contains(stop.range(), primary) && stop.depth < primary_depth
-            }).map(|(occurrence, stop)| (index, occurrence, stop.range()))
+                session.groups[session.current].iter().any(|child| is_ancestor(stop, child))
+            }).map(|(occurrence, stop)| (index, occurrence, stop.clone()))
         }).collect::<Vec<_>>();
-        parents.sort_by_key(|(_, _, range)| range.len());
-        for (index, defining, parent) in parents {
-            let local = copies.iter().filter(|(edit, _)| contains(parent, edit.range()))
+        parents.sort_by_key(|(_, _, stop)| std::cmp::Reverse(stop.depth));
+        for (index, defining, stop) in parents {
+            let parent = stop.range();
+            let local = copies.iter().filter(|(edit, owner)| {
+                contains(parent, edit.range())
+                    && is_ancestor(&stop, &session.groups[owner.0][owner.1])
+            })
                 .map(|(edit, _)| edit.clone()).collect::<Vec<_>>();
             for (occurrence, stop) in session.groups[index].iter().enumerate() {
                 let range = stop.range();
@@ -276,10 +287,13 @@ impl InputSession {
                 let key = (index, occurrence);
                 let grows = affected.contains(&key);
                 // Stops overwritten by an edit no longer describe placeholders.
-                if !grows && copies.iter().any(|(edit, _)| {
+                if !grows && copies.iter().any(|(edit, owner)| {
                     !edit.range().is_empty()
                         && if range.is_empty() {
-                            edit.range().start <= range.start && range.end < edit.range().end
+                            edit.range().start <= range.start
+                                && (range.end < edit.range().end
+                                    || (range.end == edit.range().end
+                                        && is_ancestor(&session.groups[owner.0][owner.1], stop)))
                         } else {
                             edit.range().start < range.end && range.start < edit.range().end
                         }
@@ -291,16 +305,10 @@ impl InputSession {
                     for (edit, owner) in &copies {
                         let edited = edit.range();
                         let owner_stop = &session.groups[owner.0][owner.1];
-                        let after = if range.is_empty() {
-                            if grows && stop.depth < owner_stop.depth {
-                                end
-                            } else {
-                                stop.order > owner_stop.order || (key == *owner && end)
-                            }
-                        } else if end {
-                            grows
+                        let after = if key == *owner || is_ancestor(stop, owner_stop) {
+                            end
                         } else {
-                            !grows
+                            stop.order > owner_stop.order
                         };
                         if edited.is_empty() {
                             if edited.start < position || (edited.start == position && after) {
@@ -325,11 +333,20 @@ impl InputSession {
                 groups.push(updated);
             }
         }
+        let cursor_shift = groups[current][0].start as i128 - primary.start.get() as i128;
+        let mut applied = false;
         for operation in &mut transaction.operations {
-            if let EditorOperation::ApplyEdits { buffer, edits } = operation
-                && *buffer == session.buffer
-            {
-                *edits = replacement_edits.clone();
+            match operation {
+                EditorOperation::ApplyEdits { buffer, edits } if *buffer == session.buffer => {
+                    *edits = replacement_edits.clone();
+                    applied = true;
+                }
+                EditorOperation::SetCursor { position, .. } if applied => {
+                    // Commands position the cursor after their primary edits, not after
+                    // extra mirrors inserted earlier in the document.
+                    *position = ByteOffset((position.get() as i128 + cursor_shift).max(0) as usize);
+                }
+                _ => {}
             }
         }
         Some(SnippetUpdate {
@@ -383,6 +400,92 @@ mod tests {
         state.apply_transaction(&transaction).unwrap();
         let source = state.window_version();
         assert!(input.accept_snippet_edit(update, Some(document(state, buffer, &source))));
+    }
+    #[test]
+    fn adjacent_nonempty_mirrors_keep_separate_ranges_at_insertion_boundaries() {
+        for at in [0, 1] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(TextBuffer::from_text("aa"), None);
+            let mut input = InputSession::new(100);
+            let source = state.window_version();
+            input.install_snippet(document(&state, buffer, &source), ByteOffset(0), stops("${1:a}$1"));
+            edit_snippet(&mut state, buffer, &mut input, at, at, "x");
+            assert_eq!(ranges(&input, 0), vec![
+                ByteRange::new(ByteOffset(0), ByteOffset(2)).unwrap(),
+                ByteRange::new(ByteOffset(2), ByteOffset(4)).unwrap(),
+            ]);
+            edit_snippet(&mut state, buffer, &mut input, 0, 2, "z");
+            assert_eq!(state.buffers[buffer].text.to_string(), "zz");
+        }
+    }
+    #[test]
+    fn coincident_unrelated_placeholders_are_not_treated_as_parents() {
+        let snippet = "${1:}${2:$3} / $1 / $2";
+        let parsed = crate::language::lsp::parse_snippet(snippet, 1024).unwrap();
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state.open_text(TextBuffer::from_text(&parsed.text), None);
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(document(&state, buffer, &source), ByteOffset(0), parsed.tabstops);
+        input.navigate_snippet(1);
+        input.navigate_snippet(1);
+        edit_snippet(&mut state, buffer, &mut input, 0, 0, "x");
+        assert_eq!(state.buffers[buffer].text.to_string(), "x /  / x");
+        assert_eq!(ranges(&input, 0)[0], ByteRange::empty(ByteOffset(0)));
+    }
+    #[test]
+    fn parent_mirrors_only_copy_child_occurrences_inside_the_parent() {
+        for (snippet, expected) in [
+            ("${1:$2}$2 $1", "xx x"),
+            ("$2 ${1:${2:foo}} $1", "x x x"),
+        ] {
+            let parsed = crate::language::lsp::parse_snippet(snippet, 1024).unwrap();
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(TextBuffer::from_text(&parsed.text), None);
+            let mut input = InputSession::new(100);
+            let source = state.window_version();
+            input.install_snippet(document(&state, buffer, &source), ByteOffset(0), parsed.tabstops);
+            input.navigate_snippet(1);
+            let end = input.snippet.as_ref().unwrap().groups[1][0].end;
+            edit_snippet(&mut state, buffer, &mut input, 0, end, "x");
+            assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        }
+    }
+    #[test]
+    fn nested_edits_shift_explicit_cursors_past_earlier_parent_mirrors() {
+        let parsed = crate::language::lsp::parse_snippet("$1 = ${1:${2:foo}}", 1024).unwrap();
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text(&parsed.text), None);
+        state.views[view].mode = crate::editor::EditorMode::Insert;
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(document(&state, buffer, &source), ByteOffset(0), parsed.tabstops);
+        input.navigate_snippet(1);
+        let mut transaction = EditorTransaction::new(TransactionId(1))
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(state.buffers[buffer].text.revision(), vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(6), ByteOffset(9)).unwrap(), "x",
+                )]),
+            })
+            .with_operation(EditorOperation::SetCursor { view, position: ByteOffset(7) });
+        let update = input.prepare_snippet_mirror(Some(document(&state, buffer, &source)), &mut transaction).unwrap();
+        state.apply_transaction(&transaction).unwrap();
+        let source = state.window_version();
+        assert!(input.accept_snippet_edit(update, Some(document(&state, buffer, &source))));
+        assert_eq!(state.buffers[buffer].text.to_string(), "x = x");
+        assert_eq!(state.views[view].cursor, ByteOffset(5));
+    }
+    #[test]
+    fn replacing_a_parent_removes_its_empty_stop_at_the_end() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None);
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(document(&state, buffer, &source), ByteOffset(0), stops("${1:abc$2}$0"));
+        edit_snippet(&mut state, buffer, &mut input, 0, 3, "x");
+        assert_eq!(input.snippet.as_ref().unwrap().groups.len(), 2);
+        assert_eq!(input.snippet.as_ref().unwrap().groups[1][0].index, 0);
     }
     #[test]
     fn nested_snippet_edits_update_enclosing_mirrors() {
