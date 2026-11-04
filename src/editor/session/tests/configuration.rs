@@ -93,6 +93,38 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
 }
 
 #[test]
+fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let mut installed = app.configuration.theme().clone();
+    installed.styles.accent.foreground = crate::config::ThemeColor::Red;
+    fs::create_dir(root.join("themes")).unwrap();
+    fs::write(
+        root.join("themes").join(format!("{}.toml", installed.name)),
+        toml::to_string(&installed).unwrap(),
+    ).unwrap();
+    let mut configuration = app.configuration.fixture_snapshot();
+    configuration.sources.settings = root.join("config.toml");
+    app.configuration.install_fixture(configuration);
+    app.process_effect(AppEffect::SelectTheme);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.ui.picker.as_ref().unwrap().loading {
+        app.process_theme_results();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let label = crate::config::theme_display_name(&installed.name);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == label).count(), 1);
+    let key = match app.selected_picker_payload().unwrap() {
+        crate::editor::session::search::PickerPayload::Theme(key) => key.clone(),
+        _ => panic!("theme key"),
+    };
+    assert_eq!(app.configuration.apply_theme(&key).unwrap(), installed.name);
+    assert_eq!(app.configuration.theme(), &installed);
+}
+
+#[test]
 fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();

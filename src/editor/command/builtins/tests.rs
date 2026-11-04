@@ -159,6 +159,19 @@ fn counted_replace_requires_the_whole_count_and_lands_on_the_last_grapheme() {
 }
 
 #[test]
+fn counted_replace_uses_normalized_text_and_the_final_grapheme() {
+    for (replacement, count, expected, cursor) in [
+        ("\r\n", 3, "\n\n\n", 2),
+        ("éx", 2, "éxéxc", 5),
+    ] {
+        let (mut state, buffer, view) = editing("abc", 0);
+        apply(&mut state, "edit.replace", &[("text", replacement)], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.views[view].cursor.get(), cursor);
+    }
+}
+
+#[test]
 fn normal_deletions_stay_on_the_last_remaining_character() {
     for text in ["abe\u{301}", "abe\u{301}\nnext"] {
         for operator in [false, true] {

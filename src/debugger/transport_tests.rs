@@ -287,6 +287,26 @@ fn dap_result_queue_blocks_the_producer_until_results_are_drained() {
 }
 
 #[test]
+fn dap_control_queue_reports_full_while_the_adapter_is_live() {
+    // Keep the consumer idle so writer failure cannot race control-queue saturation.
+    let (service, adapter) = session::fixture();
+    let mut full = false;
+    for _ in 0..256 {
+        match service.control(DapControl::Threads) {
+            Ok(()) => {}
+            Err(DapError::Full) => {
+                full = true;
+                break;
+            }
+            Err(error) => panic!("adapter failed before its queue filled: {error}"),
+        }
+    }
+    assert!(full, "producer queue must be bounded");
+    assert!(matches!(adapter.control(), Some(DapControl::Threads)));
+    service.control(DapControl::Threads).unwrap();
+}
+
+#[test]
 fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("adapter.py");
@@ -418,22 +438,11 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
             .control_owned(&stopped, DapControl::Threads)
             .is_err()
     );
-    let mut full = false;
-    for _ in 0..256 {
-        match service.control(DapControl::Evaluate {
-            expression: "x".repeat(64 * 1024),
-            frame_id: None,
-            context: "repl".into(),
-        }) {
-            Ok(()) => {}
-            Err(DapError::Full) => {
-                full = true;
-                break;
-            }
-            Err(error) => panic!("adapter failed before its queue filled: {error}"),
-        }
-    }
-    assert!(full, "actual producer queue must be bounded");
+    service.control(DapControl::Evaluate {
+        expression: "x".repeat(64 * 1024),
+        frame_id: None,
+        context: "repl".into(),
+    }).unwrap();
     let before = Instant::now();
     service.stop().unwrap();
     assert!(

@@ -580,7 +580,11 @@ pub(super) fn execute_builtin<E>(
             }
         }
         "edit.replace" => {
-            let replacement = string_argument(invocation, "text")?;
+            let normalized = TextEdit::new(
+                ByteRange::empty(view.cursor),
+                string_argument(invocation, "text")?,
+            );
+            let replacement = normalized.replacement();
             let mut end = view.cursor;
             let mut replaced = 0;
             for _ in 0..count {
@@ -598,19 +602,21 @@ pub(super) fn execute_builtin<E>(
                 replaced += 1;
             }
             if replaced == count {
+                let replacement = replacement.repeat(count);
+                let last = replacement.grapheme_indices(true).next_back().map_or(0, |(offset, _)| offset);
                 transaction.operations.push(EditorOperation::ApplyEdits {
                     buffer: buffer_id,
                     edits: TextEditSet::new(
                         buffer.text.revision(),
                         vec![TextEdit::new(
                             ByteRange::new(view.cursor, end).map_err(failed)?,
-                            replacement.repeat(count),
+                            replacement,
                         )],
                     ),
                 });
                 transaction.operations.push(EditorOperation::SetCursor {
                     view: view_id,
-                    position: ByteOffset(view.cursor.get() + replacement.len() * (count - 1)),
+                    position: ByteOffset(view.cursor.get() + last),
                 });
             }
         }
