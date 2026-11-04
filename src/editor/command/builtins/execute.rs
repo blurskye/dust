@@ -632,7 +632,7 @@ pub(super) fn execute_builtin<E>(
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
                 let original_motion = motion;
                 let motion = change_word_motion(operator, motion, &buffer.text, view.cursor);
-                let requested_linewise = bool_argument(invocation, "linewise")?;
+                let requested_linewise = bool_argument(invocation, "linewise")? || motion == "percentage";
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
                 } else {

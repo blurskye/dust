@@ -461,15 +461,26 @@ pub(super) fn operator_range(
     } else {
         motion_target(text, cursor, motion, count, character, policy, None)?
     };
-    // `dw`/`dW` stop before the newline when their final step reaches another line.
+    // `dw`/`dW` stop at the end of the last word's line, even when whitespace-only
+    // lines follow it. Counted motions spanning whole lines keep those lines whole.
     let target = if matches!(motion, "word_forward" | "big_word_forward") && target > cursor {
         let target_line = text.byte_to_line(target).map_err(failed)?;
         let cursor_line = text.byte_to_line(cursor).map_err(failed)?;
         let line_start = text.line_to_byte(target_line).map_err(failed)?;
         let prefix = text.slice(ByteRange::new(line_start, target).map_err(failed)?).map_err(failed)?;
-        if target_line > cursor_line && prefix.trim().is_empty()
-            && cursor < line_content_end(text, cursor_line)? {
-            line_content_end(text, target_line - 1)?
+        if target_line > cursor_line && prefix.trim().is_empty() {
+            let last_step = motion_target(text, cursor, motion, count.saturating_sub(1), character, policy, None)?;
+            let last_line = text.byte_to_line(last_step).map_err(failed)?;
+            let end = line_content_end(text, last_line)?;
+            if last_step < target && last_line > cursor_line && cursor <= first_nonblank(text, cursor_line)? {
+                return ByteRange::new(text.line_to_byte(cursor_line).map_err(failed)?,
+                    text.line_to_byte(last_line + 1).map_err(failed)?).map_err(failed);
+            }
+            if last_step < target && (last_line > cursor_line || last_step < end) {
+                end
+            } else {
+                target
+            }
         } else {
             target
         }
@@ -493,8 +504,7 @@ pub(super) fn operator_range(
             | "till_forward_again"
             | "till_backward"
             | "till_backward_again"
-    ) && !(motion == "line_end"
-        && end == text.line_to_byte(text.byte_to_line(end).map_err(failed)?).map_err(failed)?) {
+    ) && !(motion == "line_end" && end == line_content_end(text, text.byte_to_line(end).map_err(failed)?)?) {
         end = next_grapheme_boundary(text, end);
     }
     ByteRange::new(start, end).map_err(failed)

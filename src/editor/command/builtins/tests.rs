@@ -172,12 +172,23 @@ fn counted_line_end_moves_and_deletes_through_the_requested_line() {
         ], count);
         assert_eq!(state.buffers[buffer].text.to_string(), remaining);
     }
-    let (mut state, buffer, view) = editing("a\n\nb", 2);
-    apply(&mut state, "edit.operator", &[
-        ("operator", "delete"), ("motion", "line_end"), ("linewise", "false")
-    ], 1);
-    assert_eq!(state.buffers[buffer].text.to_string(), "a\n\nb");
-    assert_eq!(state.views[view].cursor.get(), 2);
+    for (source, cursor, count, expected) in [
+        ("a\n\nb", 2, 1, "a\n\nb"),
+        ("a\nb", 0, 1, "\nb"),
+        ("a", 0, 1, ""),
+        ("a\nb\nc", 0, 2, "\nc"),
+        ("a\n\nb", 0, 2, "\nb"),
+        ("e\u{301}\nb", 0, 1, "\nb"),
+    ] {
+        let (mut state, buffer, view) = editing(source, cursor);
+        apply(&mut state, "edit.operator", &[
+            ("operator", "delete"), ("motion", "line_end"), ("linewise", "false")
+        ], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        if source == "a\n\nb" && cursor == 2 {
+            assert_eq!(state.views[view].cursor.get(), 2);
+        }
+    }
 }
 
 #[test]
@@ -192,6 +203,19 @@ fn counted_percent_navigates_lines_and_document_start_skips_indent() {
         state.views[view].cursor = crate::editor::text::ByteOffset(70);
         apply(&mut state, "view.cursor.move", &[("motion", "document_start")], count);
         assert_eq!(state.views[view].cursor.get(), 2);
+    }
+}
+
+#[test]
+fn counted_percent_operators_cover_whole_lines() {
+    for cursor in [0, 8] {
+        let (mut state, buffer, _) = editing("  one\ntwo\nthree\nfour\n", cursor);
+        apply(&mut state, "edit.operator", &[
+            ("operator", "delete"), ("motion", "matching_pair"), ("linewise", "false")
+        ], 50);
+        let expected = if cursor == 0 { "three\nfour\n" } else { "  one\nthree\nfour\n" };
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.registers.get('"').unwrap().shape, crate::editor::RegisterShape::Line);
     }
 }
 
@@ -288,14 +312,21 @@ fn word_motions_stop_on_empty_lines_in_both_directions() {
 #[test]
 fn word_forward_operators_keep_the_final_words_newline() {
     for motion in ["word_forward", "big_word_forward"] {
-        for (source, count, expected) in [
-            ("one\ntwo", 1, "\ntwo"),
-            ("\ntwo", 1, "two"),
-            ("one  \n  two", 1, "\n  two"),
-            ("one two\nthree", 2, "\nthree"),
-            ("one\ntwo three", 2, "three"),
+        for (source, cursor, count, expected) in [
+            ("one\ntwo", 0, 1, "\ntwo"),
+            ("\ntwo", 0, 1, "two"),
+            ("one  \n  two", 0, 1, "\n  two"),
+            ("one two\nthree", 0, 2, "\nthree"),
+            ("one\ntwo three", 0, 2, "three"),
+            ("one\n  \ntwo", 0, 1, "\n  \ntwo"),
+            ("one\ntwo\nthree", 0, 2, "three"),
+            ("one\ntwo\nthree", 1, 2, "o\nthree"),
+            ("one\n\ntwo", 0, 2, "two"),
+            ("one\n\ntwo", 1, 2, "o\ntwo"),
+            ("  one\ntwo\nthree", 2, 2, "three"),
+            ("one\ntwo\n", 0, 100, ""),
         ] {
-            let (mut state, buffer, _) = editing(source, 0);
+            let (mut state, buffer, _) = editing(source, cursor);
             apply(&mut state, "edit.operator", &[
                 ("operator", "delete"), ("motion", motion), ("linewise", "false")
             ], count);
