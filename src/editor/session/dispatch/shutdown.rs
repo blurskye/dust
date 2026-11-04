@@ -124,13 +124,6 @@ impl InteractiveApplication {
         for error in self.persistence.poll_undo_saves() {
             self.show_error(error);
         }
-        self.persistence.undo_shutdown_result().map_err(|message| {
-            InteractiveError::Vfs(VfsError::Io {
-                operation: "finish undo history shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::other(message),
-            })
-        })?;
         if self.language.pending_replies() {
             return Err(InteractiveError::Vfs(VfsError::Io {
                 operation: "finish requesting-server edit responses",
@@ -161,6 +154,13 @@ impl InteractiveApplication {
                 ),
             }));
         }
+        self.persistence.undo_shutdown_result().map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
+                operation: "finish undo history shutdown",
+                path: self.state.workspace_root.clone(),
+                source: std::io::Error::other(message),
+            })
+        })?;
         self.persistence.shutdown_result().map_err(|message| {
             InteractiveError::Vfs(VfsError::Io {
                 operation: "finish persistence shutdown",

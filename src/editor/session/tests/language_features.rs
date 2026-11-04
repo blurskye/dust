@@ -750,6 +750,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
     for (snippet, expected, first, second) in [
         ("foo(${1:arg})$0", "use thing;\n\nfoo(arg)", "arg", None),
+        ("${TM_SELECTED_TEXT:foo(${1:arg})}$0", "use thing;\n\nfoo(arg)", "arg", None),
         (
             "${TM_FILENAME:untitled} $TM_FILENAME ${1:a}\r\n${2:b}cd ${1/(.*)/${1:/upcase}/}$0",
             "use thing;\n\nsnippet.rs snippet.rs a\nbcd A", "a", Some("b"),

@@ -48,8 +48,8 @@ pub(in crate::editor::session) struct PersistenceSession {
     save_notice: bool,
     saved_notice: bool,
     failure: Option<String>,
-    undo_saves: Vec<std::sync::mpsc::Receiver<Result<(), String>>>,
-    undo_failure: Option<String>,
+    undo_saves: Vec<(PathBuf, std::sync::mpsc::Receiver<Result<(), String>>)>,
+    undo_failures: std::collections::BTreeMap<PathBuf, String>,
     closing: bool,
     save_expected: bool,
     saved_on_exit: bool,
@@ -80,7 +80,7 @@ impl PersistenceSession {
             saved_notice: false,
             failure: None,
             undo_saves: Vec::new(),
-            undo_failure: None,
+            undo_failures: Default::default(),
             closing: false,
             save_expected: false,
             saved_on_exit: false,
@@ -90,24 +90,28 @@ impl PersistenceSession {
     }
     pub(in crate::editor::session) fn track_undo_save(
         &mut self,
+        path: PathBuf,
         reply: std::sync::mpsc::Receiver<Result<(), String>>,
     ) {
-        self.undo_saves.push(reply);
+        self.undo_saves.push((path, reply));
     }
     pub(in crate::editor::session) fn undo_pending(&self) -> bool {
         !self.undo_saves.is_empty()
     }
     pub(in crate::editor::session) fn poll_undo_saves(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
-        self.undo_saves.retain(|reply| {
+        self.undo_saves.retain(|(path, reply)| {
             let error = match reply.try_recv() {
-                Ok(Ok(())) => return false,
+                Ok(Ok(())) => {
+                    self.undo_failures.remove(path);
+                    return false;
+                },
                 Ok(Err(error)) => error,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return true,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => "undo history worker stopped".into(),
             };
             let message = format!("could not save undo history: {error}");
-            self.undo_failure = Some(message.clone());
+            self.undo_failures.insert(path.clone(), message.clone());
             errors.push(message);
             false
         });
@@ -117,7 +121,7 @@ impl PersistenceSession {
         if self.undo_pending() {
             return Err("undo history writes did not finish before the exit deadline".into());
         }
-        self.undo_failure.clone().map_or(Ok(()), Err)
+        self.undo_failures.values().next().cloned().map_or(Ok(()), Err)
     }
     pub(in crate::editor::session) fn register_navigation_read(
         &mut self,
@@ -271,6 +275,24 @@ mod tests {
             owner.poll();
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn successful_undo_retry_clears_only_that_files_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut owner = PersistenceSession::new(PersistenceService::start(1), root.path().join("state.json"));
+        for path in ["a", "b"] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            sender.send(Err("write failed".into())).unwrap();
+            owner.track_undo_save(path.into(), receiver);
+        }
+        assert_eq!(owner.poll_undo_saves().len(), 2);
+        for path in ["a", "b"] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            sender.send(Ok(())).unwrap();
+            owner.track_undo_save(path.into(), receiver);
+            assert!(owner.poll_undo_saves().is_empty());
+            assert_eq!(owner.undo_shutdown_result().is_ok(), path == "b");
         }
     }
     #[test]

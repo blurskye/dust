@@ -838,7 +838,21 @@ impl EditorDraft {
                 return false;
             }
             self.state.buffers[buffer].undo.boundary();
-            saved_revision = self.state.buffers[buffer].text.revision();
+            let text = &self.state.buffers[buffer].text;
+            let end = ByteOffset(start);
+            for (_, view) in self.state.views.iter_mut().filter(|(_, view)| view.buffer == buffer) {
+                // Writing a final newline must not move an insertion cursor onto a
+                // new blank line, or leave a Normal cursor past the remaining text.
+                view.cursor = view.cursor.min(end);
+                if view.mode == EditorMode::Normal && view.cursor.get() == text.len_bytes() && !text.is_empty() {
+                    view.cursor = crate::editor::text::previous_grapheme_boundary(text, view.cursor);
+                }
+                if let Some(selection) = &mut view.selection {
+                    selection.anchor = selection.anchor.min(end);
+                    selection.head = selection.head.min(end);
+                }
+            }
+            saved_revision = text.revision();
         }
         if !self
             .state
@@ -1013,7 +1027,7 @@ mod tests {
     use crate::editor::text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet};
 
     use crate::editor::{
-        EditorOperation, EditorState, EditorTransaction, Precondition, TransactionId,
+        EditorMode, EditorOperation, EditorState, EditorTransaction, Precondition, TransactionId,
     };
 
     fn edit(
@@ -1193,6 +1207,26 @@ mod tests {
         assert_eq!(state.views[view].buffer, buffer);
         assert_eq!(state.buffers[buffer].text.to_string(), "héllo refreshed");
         assert!(state.buffers[buffer].is_virtual_read_only());
+    }
+
+    #[test]
+    fn save_newline_normalization_preserves_valid_cursor_positions() {
+        for (source, saved, mode, cursor, expected_cursor) in [
+            ("abc", "abc\n", EditorMode::Insert, 3, 3),
+            ("", "\n", EditorMode::Normal, 0, 0),
+            ("abc\n\n", "abc", EditorMode::Normal, 4, 2),
+            ("abc\n\n", "abc", EditorMode::Insert, 4, 3),
+        ] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, view) = state.open_text(TextBuffer::from_text(source), None);
+            state.views[view].mode = mode;
+            state.views[view].cursor = ByteOffset(cursor);
+            let text = &state.buffers[buffer].text;
+            let mut draft = state.draft();
+            assert!(draft.save_document(buffer, &text.source_version(), text.revision(), saved.as_bytes().to_vec(), "/workspace/file".into(), source.into()));
+            state = draft.accept(&state.version()).unwrap();
+            assert_eq!(state.views[view].cursor, ByteOffset(expected_cursor));
+        }
     }
 
     #[test]

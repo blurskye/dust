@@ -7028,7 +7028,7 @@ impl InteractiveApplication {
                     let end = selection.anchor.max(selection.head);
                     buffer.slice(ByteRange::new(start, end).ok()?).ok()
                 }).unwrap_or_default();
-            let variables = std::collections::HashMap::from([
+            let mut variables = std::collections::HashMap::from([
                 ("TM_FILENAME".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned()),
                 ("TM_FILENAME_BASE".into(), path.file_stem().unwrap_or_default().to_string_lossy().into_owned()),
                 ("TM_DIRECTORY".into(), path.parent().unwrap_or(path).to_string_lossy().into_owned()),
@@ -7042,6 +7042,9 @@ impl InteractiveApplication {
                 ("TM_CURRENT_LINE".into(), current_line.trim_end_matches('\n').into()),
                 ("TM_SELECTED_TEXT".into(), selected),
             ]);
+            if variables.get("TM_SELECTED_TEXT").is_some_and(String::is_empty) {
+                variables.remove("TM_SELECTED_TEXT");
+            }
             match crate::language::lsp::parse_snippet_with_variables(&edit.new_text, 1024 * 1024, &variables) {
                 Ok(parsed) => {
                     edit.new_text = parsed.text;
@@ -14822,7 +14825,7 @@ impl InteractiveApplication {
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
                 if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
-                    self.persistence.track_undo_save(crate::editor::save_undo_history(
+                    self.persistence.track_undo_save(path.clone(), crate::editor::save_undo_history(
                         directory.clone(),
                         path.clone(),
                         buffer_state.text.clone(),

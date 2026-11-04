@@ -250,10 +250,11 @@ impl<'a> Resolver<'a> {
                     let start = text.len();
                     match key {
                         Key::Tabstop(index) => {
-                            let value = self.value(key, depth)?;
                             if let Some(default) = default {
                                 self.expand(default, text, stops, depth + 1)?;
-                            } else { text.push_str(&value); }
+                            } else {
+                                text.push_str(&self.value(key, depth)?);
+                            }
                             stops.push(SnippetTabstop { index: *index, start, end: text.len() });
                         }
                         Key::Variable(name) => {
@@ -299,7 +300,7 @@ impl Transform {
         for captures in regex.captures_iter(value) {
             let matched = captures.get(0).expect("whole match");
             output.push_str(&value[end..matched.start()]);
-            output.push_str(&format_capture(&self.replacement, &captures)?);
+            output.push_str(&format_capture(&self.replacement, &captures, maximum_bytes)?);
             if output.len() > maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
             end = matched.end();
             if !self.options.contains('g') { break; }
@@ -310,7 +311,7 @@ impl Transform {
     }
 }
 
-fn format_capture(format: &str, captures: &regex::Captures<'_>) -> Result<String, String> {
+fn format_capture(format: &str, captures: &regex::Captures<'_>, maximum_bytes: usize) -> Result<String, String> {
     let mut parser = Parser { source: format, cursor: 0 };
     let mut output = String::new();
     while let Some(byte) = parser.peek() {
@@ -349,6 +350,9 @@ fn format_capture(format: &str, captures: &regex::Captures<'_>) -> Result<String
         if braced {
             if parser.peek() != Some(b'}') { return Err("unterminated transform format".into()); }
             parser.cursor += 1;
+        }
+        if output.len() > maximum_bytes {
+            return Err("expanded snippet exceeds byte ceiling".into());
         }
     }
     Ok(output)
@@ -399,6 +403,21 @@ mod tests {
         assert!(parse_snippet("$1$1${1:abcd}", 10).is_err());
     }
     #[test]
+    fn nested_defaults_expand_without_repeatedly_resolving_their_children() {
+        let mut source = "value".to_owned();
+        for index in (1..=25).rev() {
+            source = format!("${{{index}:{source}}}");
+        }
+        let parsed = parse_snippet(&source, 4096).unwrap();
+        assert_eq!(parsed.text, "value");
+        assert_eq!(parsed.tabstops.len(), 25);
+    }
+    #[test]
+    fn transform_replacements_obey_the_expansion_ceiling() {
+        let source = format!("${{1:{}}} ${{1/(.*)/{}/}}", "x".repeat(1024), "$1".repeat(1024));
+        assert!(parse_snippet(&source, 4096).is_err());
+    }
+    #[test]
     fn tabstop_ranges_use_normalized_newlines() {
         let parsed = parse_snippet("${1:a}\r\n${2:b}cd\r$0", 1024).unwrap();
         assert_eq!(parsed.text, "a\nbcd\n");
@@ -417,6 +436,11 @@ mod tests {
         assert_eq!(parse_snippet("${1:AbC} ${1/a/x/i}", 1024).unwrap().text, "AbC xbC");
         assert_eq!(parse_snippet("${1:a/b} ${1/a\\/b/c/}", 1024).unwrap().text, "a/b c");
         assert_eq!(parse_snippet("${1:foo} ${1/z/x/}", 1024).unwrap().text, "foo foo");
+        assert_eq!(parse_snippet("${1:foo} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "foo foo");
+        assert_eq!(parse_snippet("${1:bar} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "bar absentbar");
+        let variables = HashMap::from([("TM_SELECTED_TEXT".into(), String::new())]);
+        assert_eq!(parse_snippet_with_variables("${TM_SELECTED_TEXT:body}", 1024, &variables).unwrap().text, "");
+        assert_eq!(parse_snippet_with_variables("$TM_SELECTED_TEXT", 1024, &variables).unwrap().text, "");
         assert!(parse_snippet("${1/foo/bar", 1024).is_err());
     }
 }
