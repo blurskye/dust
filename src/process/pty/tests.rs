@@ -342,7 +342,11 @@ fn interactive_pty_output_has_no_lifetime_quota() {
             match event {
                 PtyEvent::Output { bytes, truncated, .. } => {
                     assert!(!truncated);
-                    assert!(bytes.iter().all(|byte| *byte == b'x'));
+                    assert!(
+                        bytes.iter().all(|byte| *byte == b'x'),
+                        "unexpected PTY output: {:?}",
+                        String::from_utf8_lossy(&bytes)
+                    );
                     received += bytes.len();
                 }
                 PtyEvent::Exited { code, .. } => assert_eq!(code, Some(0)),
