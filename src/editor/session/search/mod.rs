@@ -121,10 +121,10 @@ impl SearchSession {
         self.query.clear();
     }
     pub(in crate::editor::session) fn set_query(&mut self, query: String) {
-        self.query = query;
-        if self.query.is_empty() {
+        if self.query != query {
             self.cancel_grep();
         }
+        self.query = query;
     }
     pub(in crate::editor::session) fn cancel_grep(&mut self) {
         self.grep.cancel();

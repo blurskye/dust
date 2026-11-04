@@ -187,13 +187,13 @@ pub(super) fn resize_tiled_parent(
         return true;
     }
     let signed = if tiled_contains(first, target) {
-        delta
+        i32::from(delta)
     } else if tiled_contains(second, target) {
-        -delta
+        -i32::from(delta)
     } else {
         return false;
     };
-    let adjusted = i32::from(*ratio) + i32::from(signed);
+    let adjusted = i32::from(*ratio) + signed;
     *ratio = u16::try_from(adjusted.clamp(1, 999)).unwrap_or(*ratio);
     true
 }

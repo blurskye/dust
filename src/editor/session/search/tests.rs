@@ -146,6 +146,39 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     assert!(owner.preview().is_none());
 }
 #[test]
+fn rejected_live_query_retires_previous_results() {
+    let root = tempfile::tempdir().unwrap();
+    let source = scope(root.path());
+    let mut owner = SearchSession::default();
+    owner.open_live();
+    owner.set_query("needle".into());
+    owner.generation = Some(9);
+    owner.scope = Some((source.clone(), 1));
+    owner.matches.push(found());
+    owner.grep = WorkspaceSearchService::events_for_test(vec![WorkspaceSearchEvent::Batch {
+        generation: 9,
+        matches: vec![found()],
+    }]);
+    let query = "a".repeat(65_537);
+    owner.set_query(query.clone());
+    let policy = WorkspaceSearchPolicy {
+        roots: vec![root.path().into()], query: query.clone(), regex: false,
+        smart_case: true, whole_word: false, include_globs: Vec::new(),
+        exclude_globs: Vec::new(), include_hidden: false, include_ignored: false,
+        maximum_files: 10, maximum_results: 10, maximum_file_bytes: 1024,
+        maximum_total_bytes: 4096, maximum_preview_bytes: 100,
+        batch_size: 10, event_queue_capacity: 8,
+    };
+    assert!(owner.start(policy, source.clone(), 1, None).is_err());
+    assert!(owner.live());
+    assert_eq!(owner.query(), query);
+    assert!(!owner.pending());
+    assert!(owner.matches().is_empty());
+    assert!(owner.workflow().is_none());
+    assert!(owner.poll(source, 1).is_empty());
+}
+
+#[test]
 fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());

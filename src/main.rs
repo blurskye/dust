@@ -7,7 +7,7 @@ use crossterm::{
 };
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -203,11 +203,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(path) = &cli.migrate_config {
         let path = fs::canonicalize(path)?;
-        let metadata = fs::metadata(&path)?;
-        if metadata.len() > 16 * 1024 * 1024 {
+        if !fs::metadata(&path)?.is_file() {
+            return Err("configuration must be a regular file".into());
+        }
+        let file = fs::File::open(&path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err("configuration must be a regular file".into());
+        }
+        const MAXIMUM: u64 = 16 * 1024 * 1024;
+        if metadata.len() > MAXIMUM {
             return Err("configuration exceeds migration ceiling".into());
         }
-        let source = fs::read_to_string(&path)?;
+        let mut bytes = Vec::new();
+        file.take(MAXIMUM + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAXIMUM {
+            return Err("configuration exceeds migration ceiling".into());
+        }
+        let source = String::from_utf8(bytes)?;
         let (migrated, changed) = dust::config::migrate_config_source(&source)
             .map_err(|error| format!("migration failed: {error}"))?;
         if cli.apply_migration && changed {
@@ -274,13 +287,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn previous_crash_count(path: &Path) -> u64 {
-    let Ok(metadata) = fs::metadata(path) else {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
         return 0;
     };
-    if metadata.len() > 1024 * 1024 {
+    if !metadata.is_file() {
         return 0;
     }
-    let Ok(bytes) = fs::read(path) else { return 0 };
+    let Ok(file) = fs::File::open(path) else { return 0 };
+    let Ok(metadata) = file.metadata() else { return 0 };
+    const MAXIMUM: u64 = 1024 * 1024;
+    if !metadata.is_file() || metadata.len() > MAXIMUM {
+        return 0;
+    }
+    let mut bytes = Vec::new();
+    if file.take(MAXIMUM + 1).read_to_end(&mut bytes).is_err()
+        || bytes.len() as u64 > MAXIMUM
+    {
+        return 0;
+    }
     serde_json::from_slice::<serde_json::Value>(&bytes)
         .ok()
         .and_then(|value| value.get("crash_count").and_then(serde_json::Value::as_u64))
@@ -346,4 +370,37 @@ fn install_crash_hook() {
         }
         previous(info);
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_counts_accept_bounded_regular_reports() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("last-crash.json");
+        assert_eq!(previous_crash_count(&path), 0);
+        fs::write(&path, r#"{"crash_count":3}"#).unwrap();
+        assert_eq!(previous_crash_count(&path), 3);
+        fs::write(&path, "invalid report").unwrap();
+        assert_eq!(previous_crash_count(&path), 1);
+        fs::File::create(&path).unwrap().set_len(1024 * 1024 + 1).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        assert_eq!(previous_crash_count(root.path()), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn crash_counts_reject_special_files_and_symlinks() {
+        use nix::{sys::stat::Mode, unistd::mkfifo};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("last-crash.json");
+        std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        fs::remove_file(&path).unwrap();
+        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        assert_eq!(previous_crash_count(Path::new("/dev/zero")), 0);
+    }
 }

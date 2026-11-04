@@ -1132,7 +1132,7 @@ fn package_activation_identity_is_independent_of_component() {
     assert_eq!(
         plugins
             .iter()
-            .map(|(plugin, _)| plugin.id.as_str())
+            .map(|(plugin, _, _)| plugin.id.as_str())
             .collect::<Vec<_>>(),
         ["one", "two"]
     );

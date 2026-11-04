@@ -260,6 +260,19 @@ pub fn verify_lock_store(
 ) -> Result<usize, PackageError> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
+    let parent = lock_path.parent().ok_or(PackageError::InvalidManifest)?;
+    let transaction = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(parent.join("dust-packages.lock"))
+        .map_err(PackageError::Io)?;
+    #[cfg(unix)]
+    let _transaction = nix::fcntl::Flock::lock(transaction, nix::fcntl::FlockArg::LockExclusive)
+        .map_err(|(_, error)| PackageError::Io(error.into()))?;
+    #[cfg(not(unix))]
+    let _transaction = transaction;
     let metadata = fs::metadata(lock_path).map_err(PackageError::Io)?;
     if metadata.len() > maximum_bytes as u64 {
         return Err(PackageError::LockTooLarge);

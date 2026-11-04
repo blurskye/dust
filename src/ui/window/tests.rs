@@ -319,6 +319,20 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
 }
 
 #[test]
+fn tiled_resize_accepts_minimum_delta_for_either_child() {
+    let (mut graph, content, first_view, tab) = graph_with_content();
+    let second_view = graph.create_view(content, "builtin", 1).unwrap();
+    let first = graph.open_window(tab, first_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let second = graph.open_window(tab, second_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    for (window, expected) in [(second, 999), (first, 1)] {
+        graph.resize_tiled_split(tab, window, i16::MIN).unwrap();
+        let snapshot = graph.tiled_layout_snapshot(tab).unwrap();
+        assert!(matches!(snapshot.root, TiledLayoutNode::Split { ratio, .. } if ratio == expected));
+        graph.validate().unwrap();
+    }
+}
+
+#[test]
 fn nested_projection_tiny_fallback_resize_and_swap_preserve_window_ids() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let second_view = graph

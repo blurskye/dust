@@ -254,7 +254,7 @@ impl PackageManager {
     fn activations_for_lock(
         &self,
         lock: &PackageLock,
-    ) -> Result<Vec<(PluginManifest, PathBuf)>, PackageError> {
+    ) -> Result<Vec<(PluginManifest, PathBuf, Arc<fs::File>)>, PackageError> {
         let mut output = Vec::new();
         let mut config = wasmtime::Config::new();
         config.wasm_component_model(true);
@@ -262,6 +262,7 @@ impl PackageManager {
         for package in &lock.packages {
             let plugin = self.plugin_manifest(package)?;
             let object = self.root.join("store").join(&package.content_sha256);
+            let object_lock = protect_object(&object)?;
             let component = read_bounded_regular(&object, self.maximum_object_bytes as u64)?;
             let actual = format!("{:x}", Sha256::digest(&component));
             if !actual.eq_ignore_ascii_case(&package.content_sha256) {
@@ -269,11 +270,11 @@ impl PackageManager {
             }
             wasmtime::component::Component::from_binary(&engine, &component)
                 .map_err(|_| PackageError::InvalidManifest)?;
-            output.push((plugin, object));
+            output.push((plugin, object, object_lock));
         }
         Ok(output)
     }
-    pub fn activations(&self) -> Result<Vec<(PluginManifest, PathBuf)>, PackageError> {
+    pub fn activations(&self) -> Result<Vec<(PluginManifest, PathBuf, Arc<fs::File>)>, PackageError> {
         let _transaction = self.transaction()?;
         let lock = self.read_lock()?;
         self.activations_for_lock(&lock)
@@ -429,15 +430,15 @@ pub(super) struct PreparedInstall {
     manifest: PackageManifest,
     plugin: PluginManifest,
     object: PathBuf,
-    #[cfg(unix)]
-    _object_lock: nix::fcntl::Flock<fs::File>,
+    _object_lock: Arc<fs::File>,
 }
 
-#[cfg(unix)]
-fn protect_object(object: &Path) -> Result<nix::fcntl::Flock<fs::File>, PackageError> {
+fn protect_object(object: &Path) -> Result<Arc<fs::File>, PackageError> {
     let file = fs::File::open(object).map_err(PackageError::Io)?;
-    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockShared)
-        .map_err(|(_, error)| PackageError::Io(error.into()))
+    #[cfg(unix)]
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockShared)
+        .map_err(|error| PackageError::Io(error.into()))?;
+    Ok(Arc::new(file))
 }
 #[derive(Clone, Debug)]
 pub struct PackageOperationResult {
@@ -447,7 +448,7 @@ pub struct PackageOperationResult {
     pub verified: Option<usize>,
     pub removed: Option<usize>,
     pub prepared: Option<PreparedPackage>,
-    pub activations: Vec<(PluginManifest, PathBuf)>,
+    pub activations: Vec<(PluginManifest, PathBuf, Arc<fs::File>)>,
     pub cleanup_error: Option<String>,
 }
 impl PackageOperationResult {
@@ -595,7 +596,6 @@ impl PackageService {
                                         manifest: package.clone(),
                                         plugin: plugin.clone(),
                                         object: object.clone(),
-                                        #[cfg(unix)]
                                         _object_lock: protect_object(&object)?,
                                     },
                                 );
@@ -640,7 +640,6 @@ impl PackageService {
                                         manifest: metadata.package.clone(),
                                         plugin: metadata.plugin.clone(),
                                         object: object.clone(),
-                                        #[cfg(unix)]
                                         _object_lock: protect_object(&object)?,
                                     },
                                 );
@@ -848,6 +847,96 @@ mod tests {
             }
         }
         assert_eq!(manager.activations().unwrap()[0].0.id, "publisher/alpha");
+    }
+
+    #[test]
+    fn verification_waits_for_the_package_transaction() {
+        use std::time::Duration;
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        for direct in [false, true] {
+            let transaction = manager.transaction().unwrap();
+            let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+            let (started, ready) = mpsc::channel();
+            let (done, result) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                started.send(()).unwrap();
+                let verified = if direct {
+                    verify_lock_store(&other.lock_path(), &other.store_root(), 1024 * 1024)
+                } else {
+                    other.verify()
+                };
+                done.send(verified).unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(matches!(result.recv_timeout(Duration::from_millis(50)), Err(mpsc::RecvTimeoutError::Timeout)));
+            drop(transaction);
+            assert_eq!(result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), 1);
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn startup_objects_stay_locked_through_indexing_and_loading() {
+        use crate::extensions::{PluginActivationBehavior, PluginCommandContext, PluginCommandDeclaration, PluginEvent, PluginManager};
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
+        let (mut manifest, mut plugin, _) = super::super::tests::package_fixture("demo");
+        let core = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+        let bytes = wit_component::ComponentEncoder::default().module(core).unwrap().validate(true).encode().unwrap();
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if let PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
+            *archive_sha256 = digest.clone();
+        }
+        plugin.component_sha256 = digest;
+        plugin.commands = ["drive", "trap", "flood", "spin", "private", "events", "storage", "provider", "virtual", "confirmation", "confirmationprobe"]
+            .into_iter().map(|name| (name.into(), PluginCommandDeclaration {
+                title: name.into(), description: String::new(), arguments: BTreeMap::new(),
+                context: PluginCommandContext::Application, activation: PluginActivationBehavior::ActiveOnly,
+            })).collect();
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        let mut activations = manager.activations().unwrap();
+        let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
+        other.remove("demo").unwrap();
+        let (mut replacement, mut replacement_plugin, mut bytes) = super::super::tests::package_fixture("other");
+        bytes.extend_from_slice(&[0, 2, 1, b'x']); // Empty component with a custom section.
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if let PackageSource::Registry { archive_sha256, .. } = &mut replacement.source {
+            *archive_sha256 = digest.clone();
+        }
+        replacement_plugin.component_sha256 = digest;
+        let replacement_object = other.stage_verified_object(&replacement, &bytes).unwrap();
+        other.commit_prepared(&replacement, &replacement_plugin, &replacement_object).unwrap();
+        other.gc(256).unwrap();
+        assert!(object.exists());
+
+        let (manifest, path, object_lock) = activations.pop().unwrap();
+        let checksum = manifest.component_sha256.clone();
+        let mut plugins = PluginManager::start(2);
+        let load = plugins.load_protected(manager.store_root(), path, manifest, PluginLimits::default(), Some(object_lock)).unwrap();
+        let next_event = |plugins: &mut PluginManager| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(event) = plugins.poll().unwrap().into_iter().next() {
+                    break event;
+                }
+                assert!(Instant::now() < deadline, "plugin load timed out");
+                thread::sleep(Duration::from_millis(2));
+            }
+        };
+        assert!(matches!(next_event(&mut plugins), PluginEvent::Indexed { .. }));
+        other.gc(256).unwrap();
+        assert!(object.exists());
+        plugins.activate_indexed("demo", load, checksum).unwrap();
+        let event = next_event(&mut plugins);
+        assert!(matches!(event, PluginEvent::Loaded { .. }), "{event:?}");
+        assert_eq!(other.gc(256).unwrap(), 1);
+        assert!(!object.exists());
     }
 
     #[test]

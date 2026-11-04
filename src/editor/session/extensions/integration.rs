@@ -421,7 +421,7 @@ impl ExtensionSession {
                     if let Some(prepared) = result.prepared.take() {
                         updates.extend(self.load_prepared(result.id, prepared, &limits));
                     }
-                    for (manifest, path) in std::mem::take(&mut result.activations) {
+                    for (manifest, path, object_lock) in std::mem::take(&mut result.activations) {
                         let plugin = manifest.id.clone();
                         if let Some(load) = self.manager.load_id(&plugin) {
                             if self.package_managed_plugins.get(&plugin) == Some(&load) {
@@ -431,11 +431,12 @@ impl ExtensionSession {
                             updates.extend(self.rollback_packages());
                             break;
                         }
-                        match self.manager.load(
+                        match self.manager.load_protected(
                             self.package_store.clone(),
                             path,
                             manifest,
                             limits.clone(),
+                            Some(object_lock),
                         ) {
                             Ok(load) => {
                                 self.package_startup_pending.insert(plugin.clone(), load);
