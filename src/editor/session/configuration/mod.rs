@@ -154,9 +154,16 @@ impl ConfigurationCandidate {
 }
 
 impl ConfigurationSession {
-    pub(super) fn new(accepted: ResolvedConfiguration, user_configuration: bool) -> Self {
-        let worker =
-            ConfigurationWorker::start(user_configuration, accepted.settings.ui.theme.clone());
+    pub(super) fn new(
+        accepted: ResolvedConfiguration,
+        user_configuration: bool,
+        source_fingerprint: Option<Vec<crate::config::SourceFingerprint>>,
+    ) -> Self {
+        let worker = ConfigurationWorker::start_with_fingerprint(
+            user_configuration,
+            accepted.settings.ui.theme.clone(),
+            source_fingerprint,
+        );
         Self {
             accepted,
             user_configuration,

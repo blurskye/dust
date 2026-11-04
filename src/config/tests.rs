@@ -678,8 +678,16 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     let path = super::user_config_path();
     fs::write(&path, "[editor]\ntab_width=2\n").unwrap();
     let loaded = super::load_user_config();
+    let unchanged = ConfigurationWorker::start_with_fingerprint(
+        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+    );
+    no_reload(&unchanged);
+    drop(unchanged);
+
     fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
-    let worker = ConfigurationWorker::start(true, loaded.config.ui.theme.clone());
+    let worker = ConfigurationWorker::start_with_fingerprint(
+        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+    );
     let initial = next(&worker);
     assert!(initial.automatic);
     assert_eq!(initial.candidate.unwrap().config.editor.tab_width, 3);
@@ -1373,6 +1381,20 @@ fn unknown_fields_in_window_rule_arrays_preserve_valid_settings() {
         assert_eq!(ignored.len(), 1);
         assert!(ignored[0].ends_with("misspelled"));
     }
+}
+
+#[test]
+fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants() {
+    let source = "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='floating',x=1,y=2,width=30,height=10}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='docked',edge='bottom',size=5,x=99}\n";
+    let (config, _, _, ignored) = super::load::settings_from_source(source).unwrap();
+    assert_eq!(config.windows.rules.len(), 2);
+    assert_eq!(config.windows.rules[0].placement, super::WindowPlacementConfig::Floating {
+        x: 1, y: 2, width: 30, height: 10,
+    });
+    assert_eq!(config.windows.rules[1].placement, super::WindowPlacementConfig::Docked {
+        edge: "bottom".into(), size: 5,
+    });
+    assert_eq!(ignored.len(), 1);
 }
 
 #[test]

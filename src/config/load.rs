@@ -150,6 +150,7 @@ fn parse_bundled_config() -> LoadedConfig {
         .validate()
         .expect("bundled theme fallbacks must be covered by tests");
     LoadedConfig {
+        source_fingerprint: None,
         installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
@@ -375,7 +376,11 @@ pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
 #[must_use]
 pub fn load_user_config() -> LoadedConfig {
     match capture_consistent_configuration_bundle("dust") {
-        Ok((bundle, _)) => bundle.into_loaded(),
+        Ok((bundle, fingerprint)) => {
+            let mut loaded = bundle.into_loaded();
+            loaded.source_fingerprint = Some(fingerprint);
+            loaded
+        }
         Err(diagnostic) => {
             let mut loaded = fallback_config(Some(diagnostic));
             loaded.user_configuration = true;
@@ -606,6 +611,7 @@ pub(super) fn parse_dashboard_capture(
 
 pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
     LoadedConfig {
+        source_fingerprint: None,
         installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
@@ -643,6 +649,7 @@ pub fn load_config(path: &Path) -> LoadedConfig {
 pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
     match settings_from_source(source) {
         Ok((config, user_setting_keys, _, ignored)) => LoadedConfig {
+            source_fingerprint: None,
             installed_plugins: BTreeSet::new(),
             user_configuration: false,
             user_setting_keys,
@@ -728,8 +735,14 @@ fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
             return array.get_mut(index)
                 .is_some_and(|value| remove_key(value, &key[1..]));
         }
-        // TOML's value deserializer omits array indices from its error paths.
-        return array.iter_mut().any(|value| remove_key(value, key));
+        // TOML's value deserializer omits array indices. Window rules are the only
+        // configuration array of tables; locate the rule that actually rejects this
+        // field, rather than deleting a valid field from an earlier placement variant.
+        return array.iter_mut().any(|value| {
+            let rejected = value.clone().try_into::<super::WindowRuleConfig>()
+                .err().and_then(|error| unknown_field(&error.to_string()));
+            rejected.as_deref() == Some(key) && remove_key(value, key)
+        });
     }
     let Some(table) = value.as_table_mut() else {
         return false;
@@ -856,20 +869,31 @@ const CONFIG_WATCH_DEBOUNCE_MS: u64 = 100;
 
 impl ConfigurationWorker {
     #[must_use]
-    pub fn start(use_user_configuration: bool, mut theme: String) -> Self {
+    pub fn start(use_user_configuration: bool, theme: String) -> Self {
+        Self::start_with_fingerprint(use_user_configuration, theme, None)
+    }
+
+    pub(crate) fn start_with_fingerprint(
+        use_user_configuration: bool,
+        mut theme: String,
+        initial_fingerprint: Option<Vec<SourceFingerprint>>,
+    ) -> Self {
         let (sender, requests) = mpsc::sync_channel(4);
         let (results, receiver) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("dust-configuration".into())
             .spawn(move || {
                 let mut generation = 0_u64;
+                // Without a loaded snapshot, verify startup with a reload. Otherwise
+                // compare against what was loaded so unchanged startup doesn't reset
+                // view toggles or cancel work the user has already started.
+                let mut changed_at = (use_user_configuration && initial_fingerprint.is_none())
+                    .then(Instant::now);
                 let mut fingerprint = if use_user_configuration {
-                    configuration_fingerprint(&theme)
+                    initial_fingerprint.unwrap_or_else(|| configuration_fingerprint(&theme))
                 } else {
                     Vec::new()
                 };
-                // Startup may have loaded before the worker observed these files.
-                let mut changed_at = use_user_configuration.then(Instant::now);
                 loop {
                     let request = if use_user_configuration {
                         requests.recv_timeout(Duration::from_millis(CONFIG_WATCH_POLL_MS))
@@ -1133,7 +1157,7 @@ pub(super) fn load_consistent_configuration(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct SourceFingerprint {
+pub(crate) struct SourceFingerprint {
     pub(super) path: PathBuf,
     pub(super) modified: Option<SystemTime>,
     pub(super) length: Option<u64>,
