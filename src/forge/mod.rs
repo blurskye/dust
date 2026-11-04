@@ -540,8 +540,9 @@ fn run_bytes(&self, cwd: &Path, program: &str, arguments: &[&str]) -> Result<Vec
         ("GIT_TERMINAL_PROMPT", "0"),
         ("GIT_ASKPASS", "/bin/false"),
         ("SSH_ASKPASS", "/bin/false"),
-        ("SSH_ASKPASS_REQUIRE", "never"),
-        ("GIT_SSH_COMMAND", "ssh -oBatchMode=yes"),
+        // Force the failing askpass helper instead of consulting the controlling
+        // terminal, without replacing the user's SSH command or identity options.
+        ("SSH_ASKPASS_REQUIRE", "force"),
     ] {
         environment.insert(key.into(), value.into());
     }
@@ -857,11 +858,21 @@ esac
     #[cfg(unix)]
     #[test]
     fn forge_commands_disable_prompts_and_bound_output() {
+        const FIXTURE: &str = "DUST_FORGE_SSH_FIXTURE";
+        if std::env::var_os(FIXTURE).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "forge::tests::forge_commands_disable_prompts_and_bound_output", "--nocapture"])
+                .env(FIXTURE, "1")
+                .env("GIT_SSH_COMMAND", "ssh -i /custom/key -p 2222")
+                .output().unwrap();
+            assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let output = COMMANDS.run(root.path(), "/bin/sh", &["-c",
-            "printf '%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GIT_SSH_COMMAND\" \"$SSH_ASKPASS_REQUIRE\" \"$GH_PROMPT_DISABLED\"; test ! -t 0"
+            "printf '%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GIT_SSH_COMMAND\" \"$SSH_ASKPASS_REQUIRE\" \"$GH_PROMPT_DISABLED\"; test ! -t 0 && test -n \"$SSH_ASKPASS\" && ! \"$SSH_ASKPASS\" ignored"
         ]).unwrap();
-        assert_eq!(output, "0\nssh -oBatchMode=yes\nnever\n1\n");
+        assert_eq!(output, "0\nssh -i /custom/key -p 2222\nforce\n1\n");
         let error = COMMANDS.run(root.path(), "/bin/sh", &["-c",
             "head -c 16777217 /dev/zero"
         ]).unwrap_err();

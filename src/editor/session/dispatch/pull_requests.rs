@@ -113,7 +113,12 @@ impl InteractiveApplication {
             text,
         ) {
             Ok(()) => self.notify_message("sending comment…".into(), false),
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                if let Some(body) = self.pull_requests.comment_body.clone() {
+                    self.open_prompt(PromptKind::ReviewComment, body);
+                }
+                self.show_error(error);
+            }
         }
     }
 
