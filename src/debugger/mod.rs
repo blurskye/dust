@@ -471,7 +471,7 @@ fn run_adapter(
     if let Some(scope) = &scope
         && let Err(message) = scope.check()
     {
-        events.send(DapEvent::Failed { adapter, message }).ok();
+        events.fail(message);
         return;
     }
     let mut command = adapter_command(executable, arguments);
@@ -488,12 +488,7 @@ fn run_adapter(
     let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
-            events
-                .send(DapEvent::Failed {
-                    adapter,
-                    message: error.to_string(),
-                })
-                .ok();
+            events.fail(error.to_string());
             return;
         }
     };
@@ -513,31 +508,9 @@ fn run_adapter(
     let _live = _live;
     let child = &mut child.0;
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        events
-            .send(DapEvent::Failed {
-                adapter,
-                message: "adapter pipes unavailable".into(),
-            })
-            .ok();
+        events.fail("adapter pipes unavailable".into());
         return;
     };
-    let stderr_events = events.clone();
-    let stderr = child.stderr.take().and_then(|stderr| {
-        thread::Builder::new().name("dust-dap-stderr".into()).spawn(move || {
-            let Ok(mut stderr) = crate::process::CancellablePipe::new(
-                stderr, stderr_events.actor.cancel.clone(),
-            ) else { return; };
-            let mut bytes = [0; 4096];
-            while let Ok(count) = stderr.read(&mut bytes) {
-                if count == 0 { break; }
-                if let Ok(mut captured) = stderr_events.actor.stderr.lock() {
-                    captured.extend_from_slice(&bytes[..count]);
-                    let discard = captured.len().saturating_sub(4096);
-                    captured.drain(..discard);
-                }
-            }
-        }).ok()
-    });
     let (messages, receiver) = mpsc::sync_channel(32);
     let reader_events = events.clone();
     let reader = thread::Builder::new()
@@ -563,12 +536,7 @@ fn run_adapter(
             }
         });
     if let Err(error) = reader {
-        events
-            .send(DapEvent::Failed {
-                adapter,
-                message: error.to_string(),
-            })
-            .ok();
+        events.fail(error.to_string());
         return;
     }
     // A pipe write cannot hold the controller hostage. Both I/O threads retain
@@ -576,15 +544,47 @@ fn run_adapter(
     let (mut stdin, writer) = match Writer::start(stdin, events.clone()) {
         Ok(writer) => writer,
         Err(error) => {
-            events
-                .send(DapEvent::Failed {
-                    adapter,
-                    message: error.to_string(),
-                })
-                .ok();
+            events.fail(error.to_string());
             return;
         }
     };
+    let stderr_events = events.clone();
+    let stderr = child.stderr.take().and_then(|mut stderr| {
+        thread::Builder::new().name("dust-dap-stderr".into()).spawn(move || {
+            #[cfg(unix)]
+            {
+                use nix::fcntl::{FcntlArg, OFlag, fcntl};
+                let Ok(flags) = fcntl(&stderr, FcntlArg::F_GETFL) else { return; };
+                if fcntl(&stderr, FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK)).is_err() {
+                    return;
+                }
+            }
+            let mut bytes = [0; 4096];
+            let mut remaining_after_cancel = 64_usize * 1024;
+            loop {
+                match stderr.read(&mut bytes) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if let Ok(mut captured) = stderr_events.actor.stderr.lock() {
+                            captured.extend_from_slice(&bytes[..count]);
+                            let discard = captured.len().saturating_sub(4096);
+                            captured.drain(..discard);
+                        }
+                        if stderr_events.actor.cancel.load(Ordering::Acquire) {
+                            remaining_after_cancel = remaining_after_cancel.saturating_sub(count);
+                            if remaining_after_cancel == 0 { break; }
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stderr_events.actor.cancel.load(Ordering::Acquire) { break; }
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        }).ok()
+    });
     let mut sequence = 1_i64;
     send_request(
         &mut stdin,
@@ -665,12 +665,7 @@ fn run_adapter(
                 continue;
             }
             if sequence > i64::MAX - 8 {
-                events
-                    .send(DapEvent::Failed {
-                        adapter: adapter.clone(),
-                        message: "DAP request capacity or sequence exhausted".into(),
-                    })
-                    .ok();
+                events.fail("DAP request capacity or sequence exhausted".into());
                 stopping = true;
                 break;
             }
@@ -771,12 +766,7 @@ fn run_adapter(
         }
         if !launched && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT
         {
-            events
-                .send(DapEvent::Failed {
-                    adapter: adapter.clone(),
-                    message: "it did not answer; check that it works from a terminal".into(),
-                })
-                .ok();
+            events.fail("it did not answer; check that it works from a terminal".into());
             break;
         }
         match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -788,12 +778,7 @@ fn run_adapter(
                         && !launched =>
                 {
                     if message.get("success").and_then(Value::as_bool) != Some(true) {
-                        events
-                            .send(DapEvent::Failed {
-                                adapter: adapter.clone(),
-                                message: "DAP initialize rejected".into(),
-                            })
-                            .ok();
+                        events.fail("DAP initialize rejected".into());
                         break;
                     }
                     events.actor.supports_terminate.store(
@@ -810,12 +795,7 @@ fn run_adapter(
                     if let Some(scope) = &scope
                         && let Err(message) = scope.check()
                     {
-                        events
-                            .send(DapEvent::Failed {
-                                adapter: adapter.clone(),
-                                message,
-                            })
-                            .ok();
+                        events.fail(message);
                         break;
                     }
                     send_request(&mut stdin, sequence, &request, request_arguments.clone());
@@ -835,12 +815,7 @@ fn run_adapter(
                         if message.get("success").and_then(Value::as_bool) != Some(true) {
                             let detail = rejection_detail(&message);
                             if is_startup_request(&command) {
-                                events
-                                    .send(DapEvent::Failed {
-                                        adapter: adapter.clone(),
-                                        message: detail,
-                                    })
-                                    .ok();
+                                events.fail(detail);
                                 break;
                             }
                             events
@@ -1113,13 +1088,7 @@ fn run_adapter(
                         .unwrap_or_default();
                     reverse.retain_mut(|request| !request.flush(&mut stdin, &mut sequence));
                     if request_seq <= last_reverse_sequence || reverse.len() >= 32 {
-                        events
-                            .send(DapEvent::Failed {
-                                adapter: adapter.clone(),
-                                message: "DAP reverse request identity reused or admission full"
-                                    .into(),
-                            })
-                            .ok();
+                        events.fail("DAP reverse request identity reused or admission full".into());
                         break;
                     }
                     last_reverse_sequence = request_seq;
@@ -1156,12 +1125,7 @@ fn run_adapter(
                 _ => {}
             },
             Ok(Err(message)) => {
-                events
-                    .send(DapEvent::Failed {
-                        adapter: adapter.clone(),
-                        message,
-                    })
-                    .ok();
+                events.fail(message);
                 stopping = true;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -1172,12 +1136,7 @@ fn run_adapter(
         }
         if writer.is_finished() && !events.actor.cancel.load(Ordering::Acquire) {
             live.store(false, Ordering::Release);
-            events
-                .send(DapEvent::Failed {
-                    adapter: adapter.clone(),
-                    message: "DAP writer stopped; pending write outcomes unknown".into(),
-                })
-                .ok();
+            events.fail("DAP writer stopped; pending write outcomes unknown".into());
             stopping = true;
         }
     }

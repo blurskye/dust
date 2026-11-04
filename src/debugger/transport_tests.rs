@@ -159,20 +159,28 @@ while True:
 
 #[test]
 fn adapter_startup_failures_include_bounded_stderr() {
-    let root = tempfile::tempdir().unwrap();
-    let script = root.path().join("failure.py");
-    std::fs::write(&script, "import sys\nsys.stderr.write('x'*20000+' missing library libadapter.so\\n')\nsys.stderr.flush()\n").unwrap();
-    let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
-    wait(|| match service.try_event() {
-        Some(DapEvent::Failed { message, .. }) => {
-            assert!(message.contains("missing library libadapter.so"), "{message}");
-            assert!(message.len() < 9000);
-            true
-        }
-        _ => false,
-    });
-    service.stop().unwrap();
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    for rejected in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("failure.py");
+        let rejection = if rejected {
+            "m=read()\nsend({'type':'response','request_seq':m['seq'],'command':'initialize','success':False})\ntime.sleep(30)\n"
+        } else { "" };
+        std::fs::write(&script, format!("{prefix}\nsys.stderr.write('x'*20000+' missing library libadapter.so\\n')\nsys.stderr.flush()\n{rejection}")).unwrap();
+        let mut service = DapService::new();
+        service.start_absolute(launch(root.path(), &script)).unwrap();
+        wait(|| match service.try_event() {
+            Some(DapEvent::Failed { message, .. }) => {
+                assert!(message.contains("missing library libadapter.so"), "{message}");
+                assert!(message.len() < 9000);
+                if rejected { assert!(message.contains("initialize rejected"), "{message}"); }
+                true
+            }
+            _ => false,
+        });
+        service.stop().unwrap();
+        wait(|| service.pending() == 0);
+    }
 }
 
 #[test]

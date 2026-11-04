@@ -53,6 +53,12 @@ pub(super) struct Events {
     _resident: Arc<()>,
 }
 impl Events {
+    // Report worker failures after cleanup, when stderr has finished draining.
+    pub(super) fn fail(&self, message: String) {
+        if let Ok(mut failure) = self.actor.failure.lock() {
+            *failure = Some(message);
+        }
+    }
     pub(super) fn send(&self, event: DapEvent) -> Result<(), ()> {
         let context = DapContext {
             actor: self.actor.clone(),

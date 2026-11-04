@@ -288,6 +288,9 @@ fn detaching_and_terminating_are_different_session_facts() {
     let mut detached = DebugSession::new(&policy, workspace.version());
     let (service, adapter) = crate::debugger::test_session();
     detached.service = service;
+    detached.execution = Some((root.path().join("main.rs"), 2));
+    detached.stop_reason = Some("breakpoint".into());
+    detached.variables.push("value = 1".into());
     detached.detach_debuggee().expect("detach is admitted");
     assert_eq!(detached.end_state(), None);
     adapter.event(
@@ -306,6 +309,9 @@ fn detaching_and_terminating_are_different_session_facts() {
     );
     detached.try_event().unwrap();
     assert!(detached.active_adapter().is_none(), "disconnect retires the service");
+    assert!(detached.execution.is_none());
+    assert!(detached.stop_reason.is_none());
+    assert!(detached.variables.is_empty());
     assert_eq!(
         detached.end_state(),
         Some(DapSessionEnd::Detached),
@@ -316,6 +322,9 @@ fn detaching_and_terminating_are_different_session_facts() {
     let mut terminated = DebugSession::new(&policy, workspace.version());
     let (service, adapter) = crate::debugger::test_session();
     terminated.service = service;
+    terminated.execution = Some((root.path().join("main.rs"), 2));
+    terminated.stop_reason = Some("breakpoint".into());
+    terminated.variables.push("value = 1".into());
     terminated
         .terminate_debuggee()
         .expect("terminate is admitted");
@@ -336,6 +345,9 @@ fn detaching_and_terminating_are_different_session_facts() {
     );
     terminated.try_event().unwrap();
     assert!(terminated.active_adapter().is_none(), "disconnect retires the service");
+    assert!(terminated.execution.is_none());
+    assert!(terminated.stop_reason.is_none());
+    assert!(terminated.variables.is_empty());
     assert_eq!(
         terminated.end_state(),
         Some(DapSessionEnd::Terminated),
