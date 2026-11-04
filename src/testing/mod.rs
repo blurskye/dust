@@ -100,7 +100,8 @@ impl HeadlessEditor {
                 }
                 Ok(InputAction::Pending)
             }
-            MappingResolution::Replay(_, replay) => {
+            MappingResolution::Replay(_, replay)
+            | MappingResolution::DisabledAndReplay(replay) => {
                 for key in replay {
                     self.feed(key)?;
                 }

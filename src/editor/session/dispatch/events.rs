@@ -998,6 +998,11 @@ impl InteractiveApplication {
                     }
                 }
             }
+            MappingResolution::DisabledAndReplay(replay) => {
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             MappingResolution::Disabled => {}
             MappingResolution::Pending | MappingResolution::Ambiguous => return,
             MappingResolution::Missing if context == "snippet" => {
@@ -1126,6 +1131,11 @@ impl InteractiveApplication {
         self.project_input_hints();
         match resolution {
             MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+            MappingResolution::DisabledAndReplay(replay) => {
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
             MappingResolution::Replay(prefix, _)
                 if !context.starts_with("editor.") || self.typing() =>

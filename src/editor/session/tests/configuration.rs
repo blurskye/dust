@@ -482,6 +482,44 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
 }
 
 #[test]
+fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
+    let mut app = app();
+    let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
+        std::time::SystemTime::now(), Instant::now(),
+    ));
+    app.clock = clock.clone();
+    app.state.open_text(TextBuffer::from_text(""), None);
+    app.set_dashboard_visibility(false);
+    app.handle_configured_key(KeyEvent::character('i'));
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    for (id, keys, command) in [
+        ("user.disabled-j", "j", None),
+        ("user.long-jk", "j k", Some("edit.insert_text")),
+    ] {
+        loaded.entries.push(crate::config::KeymapEntry {
+            id: id.into(), context: Some("editor".into()), mode: "insert".into(),
+            keys: Some(keys.into()), command: command.map(Into::into),
+            arguments: command.map(|_| [("text".into(), toml::Value::String("mapped".into()))].into_iter().collect()).unwrap_or_default(),
+            unmap: command.is_none(), disable: false, pass_through: false, desc: None,
+        });
+    }
+    let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    app.configuration.install_bindings(keymaps, false);
+    let buffer = app.state.active_buffer_id().unwrap();
+    app.handle_configured_key(KeyEvent::character('j'));
+    clock.advance(Duration::from_millis(app.configuration.settings().input.mapping_timeout_ms));
+    app.flush_keymap_timeout();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+    app.handle_configured_key(KeyEvent::character('j'));
+    app.handle_configured_key(KeyEvent::character('x'));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "x");
+    app.handle_configured_key(KeyEvent::character('j'));
+    app.handle_configured_key(KeyEvent::character('k'));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "xmapped");
+}
+
+#[test]
 fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let mut app = app();
     app.state
