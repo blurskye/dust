@@ -8184,7 +8184,8 @@ impl InteractiveApplication {
             .buffers
             .values()
             .find(|buffer| buffer.path.as_ref() == Some(&found.canonical_path))
-            && buffer.text.to_bytes().as_slice() != found.snapshot.as_ref()
+            && !crate::editor::text::decode_utf8(&found.snapshot)
+                .is_ok_and(|snapshot| buffer.text.to_string() == snapshot.text)
         {
             self.show_error(self.message("workspace_search_stale_result", &[]));
             return;
@@ -8658,7 +8659,7 @@ impl InteractiveApplication {
         locations: Vec<crate::language::lsp::LspLocation>,
         encoding: PositionEncoding,
     ) {
-        let mut files = std::collections::HashMap::new();
+        let excerpts = self.reference_excerpts(&locations);
         let items = locations
             .into_iter()
             .enumerate()
@@ -8667,7 +8668,7 @@ impl InteractiveApplication {
                 let path = path_from_file_uri(&location.uri);
                 let code = path
                     .as_deref()
-                    .map(|path| self.source_line_at(path, line, &mut files))
+                    .and_then(|path| excerpts.get(&(path.to_owned(), line)).cloned())
                     .unwrap_or_default();
                 let path = path.map_or_else(
                     || location.uri.clone(),
@@ -8691,41 +8692,57 @@ impl InteractiveApplication {
         self.install_picker(self.message("picker_references_title", &[]), items);
     }
 
-    /// Cache bounded excerpts, never complete files, for reference labels.
-    pub(in crate::editor::session) fn source_line_at(
+    /// Read each reference file once and retain only the requested, bounded excerpts.
+    pub(in crate::editor::session) fn reference_excerpts(
         &self,
-        path: &std::path::Path,
-        line: usize,
-        files: &mut std::collections::HashMap<(std::path::PathBuf, usize), String>,
-    ) -> String {
+        locations: &[crate::language::lsp::LspLocation],
+    ) -> std::collections::HashMap<(std::path::PathBuf, usize), String> {
         const MAXIMUM_FILE: u64 = 1024 * 1024;
-        const MAXIMUM_CACHE: usize = 1024 * 1024;
-        if let Some((_, buffer)) = self
-            .state
-            .buffers
-            .iter()
-            .find(|(_, buffer)| buffer.path.as_deref() == Some(path))
-        {
-            return buffer
-                .text
-                .line(line)
-                .map_or_else(|_| String::new(), |line| line.trim().chars().take(1024).collect());
+        let mut remaining = 1024 * 1024usize;
+        let mut requested = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
+        for location in locations {
+            if let Some(path) = path_from_file_uri(&location.uri) {
+                requested.entry(path).or_default().insert(location.range.start.line);
+            }
         }
-        let key = (path.to_owned(), line);
-        if let Some(excerpt) = files.get(&key) {
-            return excerpt.clone();
+        let mut excerpts = std::collections::HashMap::new();
+        for (path, lines) in requested {
+            if remaining < 4096 {
+                break;
+            }
+            let open = self.state.buffers.values()
+                .find(|buffer| buffer.path.as_ref() == Some(&path));
+            let disk = if open.is_none() {
+                crate::files::read_file_with_ceiling(&path, MAXIMUM_FILE).ok()
+                    .and_then(|bytes| crate::editor::text::decode_utf8(&bytes).ok())
+            } else {
+                None
+            };
+            // Walk a closed file once, rather than rescanning it for each reference.
+            let mut disk_lines = disk.as_ref().map(|text| text.text.lines().enumerate().peekable());
+            for line in lines {
+                if remaining < 4096 {
+                    break;
+                }
+                let excerpt = if let Some(buffer) = open {
+                    buffer.text.line(line).ok()
+                } else if let Some(source) = &mut disk_lines {
+                    while source.peek().is_some_and(|(index, _)| *index < line) {
+                        source.next();
+                    }
+                    source.next().filter(|(index, _)| *index == line)
+                        .map(|(_, text)| text.to_owned())
+                } else {
+                    None
+                };
+                if let Some(excerpt) = excerpt {
+                    let excerpt: String = excerpt.trim().chars().take(1024).collect();
+                    remaining -= excerpt.len();
+                    excerpts.insert((path.clone(), line), excerpt);
+                }
+            }
         }
-        let remaining = MAXIMUM_CACHE.saturating_sub(files.values().map(String::len).sum());
-        if remaining < 4096 {
-            return String::new();
-        }
-        let excerpt = crate::files::read_file_with_ceiling(path, MAXIMUM_FILE).ok()
-            .and_then(|bytes| crate::editor::text::decode_utf8(&bytes).ok())
-            .and_then(|text| text.text.lines().nth(line)
-                .map(|line| line.trim().chars().take(1024).collect::<String>()))
-            .unwrap_or_default();
-        files.insert(key, excerpt.clone());
-        excerpt
+        excerpts
     }
 
     pub(in crate::editor::session) fn open_lsp_symbols_picker(

@@ -1856,10 +1856,13 @@ impl InteractiveApplication {
                     }
                     if let Some(NavigationRead::ByteRange(_, Some(snapshot))) = &pending {
                         let current = self.state.buffers.values()
-                            .find(|buffer| buffer.path.as_ref() == Some(&path))
-                            .map(|buffer| buffer.text.to_bytes());
-                        let bytes = current.as_deref().or_else(|| result.as_deref().ok());
-                        if bytes != Some(snapshot.as_ref()) {
+                            .find(|buffer| buffer.path.as_ref() == Some(&path));
+                        let unchanged = current.map_or_else(
+                            || result.as_deref().is_ok_and(|bytes| bytes == snapshot.as_ref()),
+                            |buffer| crate::editor::text::decode_utf8(snapshot)
+                                .is_ok_and(|snapshot| buffer.text.to_string() == snapshot.text),
+                        );
+                        if !unchanged {
                             self.show_error(self.message("workspace_search_stale_result", &[]));
                             continue;
                         }

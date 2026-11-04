@@ -909,17 +909,28 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
 
 #[test]
 fn reference_labels_cache_only_bounded_excerpts() {
-    let app = app();
-    let mut cache = HashMap::new();
+    let mut app = app();
     let path = app.state.workspace_root.join("references.rs");
+    let location = |line| {
+        let position = crate::language::lsp::LspPosition { line, character: 0 };
+        crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }
+    };
     fs::write(&path, "x".repeat(900_000) + "\nshort line\n").unwrap();
-    assert_eq!(app.source_line_at(&path, 1, &mut cache), "short line");
-    assert_eq!(cache.values().map(String::len).sum::<usize>(), "short line".len());
-    assert_eq!(app.source_line_at(&path, 0, &mut cache).len(), 1024);
-    assert!(cache.values().map(String::len).sum::<usize>() < 4096);
-    cache.insert((PathBuf::from("filled"), 0), "x".repeat(1024 * 1024));
-    assert!(app.source_line_at(&path, 2, &mut cache).is_empty());
-    assert_eq!(cache.len(), 3);
+    let cache = app.reference_excerpts(&[location(0), location(1)]);
+    assert_eq!(cache[&(path.clone(), 1)], "short line");
+    assert_eq!(cache[&(path.clone(), 0)].len(), 1024);
+    assert_eq!(cache.len(), 2);
+    assert_eq!(cache.values().map(String::len).sum::<usize>(), 1024 + "short line".len());
+
+    let text = ("🦀".repeat(1024) + "\n").repeat(300);
+    app.state.open_text(TextBuffer::from_text(&text), Some(path.clone()));
+    let locations = (0..300).map(location).collect::<Vec<_>>();
+    let cache = app.reference_excerpts(&locations);
+    assert_eq!(cache.len(), 256);
+    assert_eq!(cache.values().map(String::len).sum::<usize>(), 1024 * 1024);
 }
 
 #[test]

@@ -1981,6 +1981,29 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 }
 
 #[test]
+fn workspace_search_accepts_normalized_open_buffers() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("crlf.txt");
+        let bytes = b"\xef\xbb\xbffirst\r\nneedle\r\n";
+        fs::write(&path, bytes).unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let found = app.search.matches()[0].clone();
+        app.close_picker();
+        if open {
+            app.state.open_text(TextBuffer::from_bytes(bytes).unwrap(), Some(path.clone()));
+        }
+        app.navigate_workspace_search_match(found);
+        wait_vfs(&mut app);
+        let view = &app.state.views[app.state.active_view.unwrap()];
+        assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
+        assert_eq!(view.cursor, ByteOffset(6));
+        assert!(!app.ui.notification_error);
+    }
+}
+
+#[test]
 fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
     for open in [false, true] {
         let mut app = app();
