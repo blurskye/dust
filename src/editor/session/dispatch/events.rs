@@ -1447,19 +1447,20 @@ impl InteractiveApplication {
                 }
 
                 self.keep_cursor_off_final_newline();
-                if invocation.target.buffer.and_then(|buffer| {
+                let text_changed = invocation.target.buffer.and_then(|buffer| {
                     self.state
                         .buffers
                         .get(buffer)
                         .map(|buffer| buffer.text.source_version())
-                }) != text_before
-                {
+                }) != text_before;
+                if text_changed {
                     self.push_change_location();
                 }
                 self.input.record_successful_invocation(
                     &invocation,
                     repeat_override.as_ref(),
                     suppress_repeat,
+                    text_changed,
                 );
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {

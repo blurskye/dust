@@ -10,6 +10,7 @@ impl InteractiveApplication {
         &mut self,
         deadline: Instant,
     ) -> Result<(), InteractiveError> {
+        let mut diagnostics = Vec::new();
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
@@ -24,7 +25,7 @@ impl InteractiveApplication {
             );
         }
         for notice in self.workspace_edits.discard_staged_resources("shutdown") {
-            self.show_error(notice);
+            diagnostics.push(notice.to_string());
         }
         self.retire_explorer_intents();
         for name in self.tasks.names() {
@@ -53,14 +54,14 @@ impl InteractiveApplication {
             && Instant::now() < deadline
         {
             for error in self.debugger_session.reply_failures() {
-                self.show_error(error);
+                diagnostics.push(error.to_string());
             }
             self.drain_job_events(Some(deadline));
             self.process_pty_events();
             self.process_vfs_results();
             self.queue_dirty_recovery_before_exit();
             for error in self.language.flush_edit_replies() {
-                self.show_error(error);
+                diagnostics.push(error.to_string());
             }
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -69,34 +70,40 @@ impl InteractiveApplication {
             .recovery
             .unwritten(&self.state, &self.configuration.settings().recovery);
         if unwritten != 0 {
-            self.show_error(format!("{unwritten} dirty buffer revisions could not be journaled before the shared shutdown deadline"));
+            diagnostics.push(format!("{unwritten} dirty buffer revisions could not be journaled before the shared shutdown deadline"));
+            let oversized = self.state.buffers.values().filter(|buffer| {
+                buffer.dirty && !crate::files::recovery_size_allowed(buffer.text.len_bytes() as u64)
+            }).count();
+            if oversized != 0 {
+                diagnostics.push(format!("{oversized} dirty buffers exceed the recovery journal size limit; their unsaved contents cannot be recovered"));
+            }
         }
         if self.language.preparation_pending() {
-            self.show_error("Nix workspace preparation remains at shared shutdown deadline; filesystem outcome unknown");
+            diagnostics.push("Nix workspace preparation remains at shared shutdown deadline; filesystem outcome unknown".into());
         }
         let unfinished_reads = self
             .tasks
             .finish_linter_obligations("linter source outcome unknown at shared shutdown deadline");
         if unfinished_reads != 0 {
-            self.show_error(format!(
+            diagnostics.push(format!(
                 "{unfinished_reads} linter source reads unfinished at shutdown"
             ));
         }
         self.drain_linter_sources();
         let unfinished_tasks = self.tasks.abandon();
         if unfinished_tasks != 0 {
-            self.show_error(format!("{unfinished_tasks} task outcomes are unknown at shutdown; admitted work may still complete"));
+            diagnostics.push(format!("{unfinished_tasks} task outcomes are unknown at shutdown; admitted work may still complete"));
         }
         for outcome in self.terminal_session.expire_shutdown() {
             if let super::TerminalUpdate::Unknown(id, message) = outcome {
-                self.show_error(format!("terminal #{} outcome is Unknown: {message}", id.0));
+                diagnostics.push(format!("terminal #{} outcome is Unknown: {message}", id.0));
             }
         }
         if self.terminal_session.pending() != 0 {
-            self.show_error(format!("{} PTY worker outcomes remain at shared shutdown deadline; detached I/O or descendants may remain",self.terminal_session.pending()));
+            diagnostics.push(format!("{} PTY worker outcomes remain at shared shutdown deadline; detached I/O or descendants may remain",self.terminal_session.pending()));
         }
         if self.debugger_session.pending() != 0 {
-            self.show_error(format!("{} DAP worker groups/reply receipts remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));
+            diagnostics.push(format!("{} DAP worker groups/reply receipts remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));
         }
         let incomplete = self.documents.has_work() || unwritten != 0;
         // Keep admitted resource outcomes owned through the drain; only retire
@@ -119,6 +126,7 @@ impl InteractiveApplication {
             self.process_persistence_events();
             std::thread::sleep(Duration::from_millis(2));
         }
+        let result = (|| {
         if self.language.pending_replies() {
             return Err(InteractiveError::Vfs(VfsError::Io {
                 operation: "finish requesting-server edit responses",
@@ -156,5 +164,20 @@ impl InteractiveApplication {
                 source: std::io::Error::other(message),
             })
         })
+        })();
+        if diagnostics.is_empty() {
+            return result;
+        }
+        for diagnostic in &diagnostics {
+            self.show_error(diagnostic);
+        }
+        if let Err(error) = result {
+            diagnostics.push(error.to_string());
+        }
+        Err(InteractiveError::Vfs(VfsError::Io {
+            operation: "finish shutdown",
+            path: self.state.workspace_root.clone(),
+            source: std::io::Error::other(diagnostics.join("; ")),
+        }))
     }
 }

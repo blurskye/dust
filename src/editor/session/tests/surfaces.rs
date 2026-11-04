@@ -1627,6 +1627,21 @@ fn recovery_rewrites_the_path_without_a_text_revision_change() {
 }
 
 #[test]
+fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    app.state.open_text(
+        crate::editor::text::TextBuffer::from_text(&"x".repeat(12 * 1024 * 1024)),
+        None,
+    );
+    let buffer = app.state.active_buffer_id().unwrap();
+    app.state.buffers[buffer].dirty = true;
+    let error = app.finish_shutdown_before(Instant::now()).unwrap_err().to_string();
+    assert!(error.contains("exceed the recovery journal size limit"), "{error}");
+    assert!(error.contains("unsaved contents cannot be recovered"), "{error}");
+}
+
+#[test]
 fn shutdown_retries_recovery_after_document_admission_drains() {
     let mut app = app();
     app.recovery.skip_maintenance();

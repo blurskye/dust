@@ -17,8 +17,12 @@ impl InputSession {
         invocation: &CommandInvocation,
         repeat_override: Option<&CommandInvocation>,
         suppress_repeat: bool,
+        text_changed: bool,
     ) {
-        if invocation.source != InvocationSource::Macro
+        if !matches!(invocation.source, InvocationSource::Macro | InvocationSource::Repeat)
+            && !(invocation.id.as_str().starts_with("command_line.")
+                && (self.prompt().is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::Command)
+                    || invocation.arguments.get("kind") == Some(&CommandValue::String("command".into()))))
             && (!invocation.id.as_str().starts_with("macro.")
                 || invocation.id.as_str() == "macro.replay")
             && !invocation.id.as_str().starts_with("input.")
@@ -28,7 +32,7 @@ impl InputSession {
             invocation.target = Default::default();
             recorded.push(invocation);
         }
-        if invocation.source == InvocationSource::Macro
+        if invocation.source == InvocationSource::Repeat
             || suppress_repeat
             || (matches!(
                 invocation.id.as_str(),
@@ -43,32 +47,55 @@ impl InputSession {
         match invocation.id.as_str() {
             "mode.insert" | "mode.replace" | "edit.substitute" => {
                 self.pending_change = Some(vec![semantic]);
+                self.pending_change_edited = text_changed;
             }
             "edit.operator" | "edit.repeat_visual"
                 if semantic.arguments.get("operator")
                     == Some(&CommandValue::String("change".into())) =>
             {
                 self.pending_change = Some(vec![semantic]);
+                self.pending_change_edited = text_changed;
             }
             "edit.insert_text"
             | "edit.backspace"
             | "edit.replace_text"
             | "edit.replace_backspace" => {
-                if let Some(pending) = &mut self.pending_change {
+                if text_changed && let Some(pending) = &mut self.pending_change {
                     pending.push(semantic);
+                    self.pending_change_edited = true;
                 }
             }
+            "view.cursor.move" if self.pending_change.is_some() => {
+                let pending = self.pending_change.take().expect("pending insert");
+                let mode = if pending[0].id.as_str() == "mode.replace" {
+                    "mode.replace"
+                } else {
+                    "mode.insert"
+                };
+                if self.pending_change_edited {
+                    self.last_change = pending;
+                    self.last_change.push(CommandInvocation::new("mode.normal", invocation.source).expect("builtin"));
+                }
+                self.pending_change = Some(vec![CommandInvocation::new(mode, invocation.source).expect("builtin")]);
+                self.pending_change_edited = false;
+            }
             "mode.normal" => {
-                if let Some(mut pending) = self.pending_change.take() {
+                if let Some(mut pending) = self.pending_change.take()
+                    && self.pending_change_edited
+                {
                     pending.push(semantic);
                     self.last_change = pending;
                 }
+                self.pending_change_edited = false;
             }
             "edit.delete_char" if self.pending_change.is_some() => {
-                self.pending_change
-                    .as_mut()
-                    .expect("pending insert")
-                    .push(semantic);
+                if text_changed {
+                    self.pending_change
+                        .as_mut()
+                        .expect("pending insert")
+                        .push(semantic);
+                    self.pending_change_edited = true;
+                }
             }
             "edit.delete_char"
             | "edit.delete_backward"
@@ -78,7 +105,7 @@ impl InputSession {
             | "edit.put"
             | "edit.surround"
             | "edit.operator"
-            | "edit.repeat_visual" => {
+            | "edit.repeat_visual" if text_changed => {
                 self.last_change = vec![semantic];
             }
             _ => {}
@@ -95,16 +122,22 @@ impl InputSession {
         if self.last_change.len() > limit {
             return Err(ReplayError::RepeatLimit);
         }
-        Ok(self.last_change.iter().cloned().map(replayed).collect())
+        Ok(self.last_change.iter().cloned().map(|mut invocation| {
+            invocation.source = InvocationSource::Repeat;
+            invocation.target = Default::default();
+            invocation
+        }).collect())
     }
 
     pub(in crate::editor::session) fn start_macro_recording(&mut self, register: char) {
         self.recording_macro = Some((register, Vec::new()));
+        self.modal.set_macro_recording(true);
     }
 
     pub(in crate::editor::session) fn finish_macro_recording(
         &mut self,
     ) -> Option<(char, Vec<CommandInvocation>)> {
+        self.modal.set_macro_recording(false);
         self.recording_macro.take()
     }
 
@@ -186,8 +219,15 @@ impl InputSession {
                 let low = selection.anchor.min(selection.head);
                 let high = selection.anchor.max(selection.head);
                 let end = next_grapheme_boundary(text, high);
-                let selected = text.slice(ByteRange::new(low, end).ok()?).ok()?;
-                ("character", selected.graphemes(true).count(), 1_usize)
+                let first_line = text.byte_to_line(low).ok()?;
+                let last_line = text.byte_to_line(high).ok()?;
+                let start = if first_line == last_line {
+                    low
+                } else {
+                    text.line_to_byte(last_line).ok()?
+                };
+                let selected = text.slice(ByteRange::new(start, end).ok()?).ok()?;
+                ("character", selected.graphemes(true).count(), last_line - first_line + 1)
             }
             crate::editor::SelectionKind::Line => {
                 let anchor = text.byte_to_line(selection.anchor).ok()?;
@@ -221,6 +261,11 @@ impl InputSession {
         let operator = invocation.arguments.get("operator")?.clone();
         let mut repeat = CommandInvocation::new("edit.repeat_visual", invocation.source).ok()?;
         repeat.arguments.insert("operator".into(), operator);
+        for name in ["character", "comment"] {
+            if let Some(value) = invocation.arguments.get(name) {
+                repeat.arguments.insert(name.into(), value.clone());
+            }
+        }
         repeat
             .arguments
             .insert("shape".into(), CommandValue::String(shape.into()));
@@ -256,9 +301,9 @@ mod tests {
         assert_eq!(input.repeat_plan(10), Err(ReplayError::NoChange));
         input.start_macro_recording('a');
         for id in ["mode.insert", "edit.insert_text", "mode.normal"] {
-            input.record_successful_invocation(&invocation(id), None, false);
+            input.record_successful_invocation(&invocation(id), None, false, id.starts_with("edit."));
         }
-        input.record_successful_invocation(&invocation("macro.record_stop"), None, false);
+        input.record_successful_invocation(&invocation("macro.record_stop"), None, false, false);
         let (register, recorded) = input.finish_macro_recording().unwrap();
         assert_eq!(register, 'a');
         assert_eq!(recorded.len(), 3);
@@ -272,12 +317,12 @@ mod tests {
         let plan = input.repeat_plan(3).unwrap();
         assert_eq!(plan.len(), 3);
         assert!(plan.iter().all(
-            |step| step.source == InvocationSource::Macro && step.target == Default::default()
+            |step| step.source == InvocationSource::Repeat && step.target == Default::default()
         ));
         for step in &plan {
-            input.record_successful_invocation(step, None, false);
+            input.record_successful_invocation(step, None, false, true);
         }
-        input.record_successful_invocation(&invocation("edit.operator"), None, true);
+        input.record_successful_invocation(&invocation("edit.operator"), None, true, true);
         assert_eq!(input.repeat_plan(3).unwrap(), plan);
     }
 
@@ -312,10 +357,10 @@ mod tests {
     fn macro_recording_keeps_repeat_commands_without_their_expansion() {
         let mut input = InputSession::new(100);
         input.start_macro_recording('a');
-        input.record_successful_invocation(&invocation("edit.repeat_last"), None, false);
+        input.record_successful_invocation(&invocation("edit.repeat_last"), None, false, false);
         let mut expanded = invocation("edit.delete_char");
-        expanded.source = InvocationSource::Macro;
-        input.record_successful_invocation(&expanded, None, false);
+        expanded.source = InvocationSource::Repeat;
+        input.record_successful_invocation(&expanded, None, false, true);
         let (_, recorded) = input.finish_macro_recording().unwrap();
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].id.as_str(), "edit.repeat_last");
@@ -330,7 +375,7 @@ mod tests {
             "edit.delete_char",
             "mode.normal",
         ] {
-            input.record_successful_invocation(&invocation(id), None, false);
+            input.record_successful_invocation(&invocation(id), None, false, id.starts_with("edit."));
         }
         let plan = input.repeat_plan(10).unwrap();
         assert_eq!(
@@ -349,7 +394,7 @@ mod tests {
             crate::editor::CommandValue::String("yank".into()),
         );
         input.start_macro_recording('a');
-        input.record_successful_invocation(&yank, None, false);
+        input.record_successful_invocation(&yank, None, false, false);
         assert_eq!(input.repeat_plan(10).unwrap(), plan);
         assert_eq!(input.finish_macro_recording().unwrap().1.len(), 1);
     }

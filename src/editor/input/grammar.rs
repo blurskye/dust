@@ -150,6 +150,10 @@ impl ModalResolver {
         self.macro_recording
     }
 
+    pub fn set_macro_recording(&mut self, recording: bool) {
+        self.macro_recording = recording;
+    }
+
     pub fn decorate_invocation(&mut self, invocation: &mut CommandInvocation) {
         if invocation.count.is_none() {
             invocation.count = count_nonzero(self.take_count());

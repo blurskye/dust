@@ -165,6 +165,83 @@ fn dot_repeats_semantic_insert_session() {
 }
 
 #[test]
+fn empty_insert_sessions_preserve_the_previous_dot_change() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["x", "i", "escape", "."] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "c");
+}
+
+#[test]
+fn insert_cursor_motion_splits_dot_recording() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("one"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["i", "a", "left", "b", "escape", "."] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "bbaone");
+}
+
+#[test]
+fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("ab\ncd\n0123456789\nuvwxyz"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["l", "v", "j", "h", "d", "j", "."] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "ad\n0vwxyz");
+}
+
+#[test]
+fn normalized_visual_comment_and_surround_keep_operator_arguments() {
+    for (operator, argument, value, expected) in [
+        ("surround_add", "character", ")", "(ab) (cd)"),
+        ("comment", "comment", "//", "// ab\n// cd"),
+    ] {
+        let mut app = app();
+        let source = if operator == "comment" { "ab\ncd" } else { "ab cd" };
+        app.state.open_text(crate::editor::text::TextBuffer::from_text(source), None);
+        app.set_dashboard_visibility(false);
+        for key in ["v", "l"] {
+            app.handle_configured_key(key.parse().unwrap());
+        }
+        app.invoke(crate::editor::CommandInvocation::new("edit.operator", InvocationSource::Test).unwrap()
+            .with_argument("operator", CommandValue::String(operator.into()))
+            .with_argument("motion", CommandValue::String("visual".into()))
+            .with_argument("linewise", CommandValue::Bool(false))
+            .with_argument(argument, CommandValue::String(value.into())));
+        let view = app.state.active_view.unwrap();
+        app.state.views[view].cursor = ByteOffset(if operator == "comment" { 6 } else { 5 });
+        app.state.views[view].selection = None;
+        app.state.views[view].mode = crate::editor::EditorMode::Normal;
+        app.handle_configured_key(".".parse().unwrap());
+        let buffer = app.state.active_buffer_id().unwrap();
+        assert_eq!(app.state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn normalized_visual_indent_repeats_the_level_count() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("a\nb"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["V", "3", ">", "j", "."] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    let indent = " ".repeat(app.state.policy.indent_width * 3);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), format!("{indent}a\n{indent}b"));
+}
+
+#[test]
 fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
     let mut character = app();
     character
@@ -278,6 +355,61 @@ fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
     }
     let buffer = app.state.active_buffer_id().expect("buffer");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "c\nf\ni\nl");
+}
+
+#[test]
+fn macros_record_command_line_edits_once() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("abcde"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["q", "a", ":"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    for character in "edit.delete_char".chars() {
+        app.handle_configured_key(KeyEvent::character(character));
+    }
+    for key in ["enter", "q", "@", "a"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "cde");
+    let recorded = app.state.registers.get_macro('a').unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].id.as_str(), "edit.delete_char");
+}
+
+#[test]
+fn macro_edits_replace_the_previous_dot_change() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("abc"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["q", "a", "i", "X", "escape", "q", "x", "@", "a", "."] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "XXabc");
+}
+
+#[test]
+fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
+    let mut app = app();
+    app.state.open_text(crate::editor::text::TextBuffer::from_text("abcd"), None);
+    app.set_dashboard_visibility(false);
+    for key in ["q", "a", "x"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    app.invoke(crate::editor::CommandInvocation::new("macro.record.stop", InvocationSource::Test).unwrap());
+    for key in ["q", "b", "x", "q"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert_eq!(app.state.registers.get_macro('a').unwrap().len(), 1);
+    assert_eq!(app.state.registers.get_macro('b').unwrap().len(), 1);
+    app.invoke(crate::editor::CommandInvocation::new("macro.record.start", InvocationSource::Test).unwrap()
+        .with_argument("register", CommandValue::String("c".into())));
+    for key in ["x", "q"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert_eq!(app.state.registers.get_macro('c').unwrap().len(), 1);
 }
 
 #[test]

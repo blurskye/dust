@@ -135,7 +135,9 @@ pub fn register_builtin_commands<E: 'static>(
             .field("operator", ArgumentType::String, true)
             .field("shape", ArgumentType::String, true)
             .field("width", ArgumentType::Integer, true)
-            .field("height", ArgumentType::Integer, true),
+            .field("height", ArgumentType::Integer, true)
+            .field("character", ArgumentType::String, false)
+            .field("comment", ArgumentType::String, false),
     )?;
     register(
         registry,
