@@ -199,6 +199,18 @@ fn word_motions_and_objects_keep_combining_graphemes_whole() {
         1,
     );
     assert_eq!(state.buffers[buffer].text.to_string(), " test");
+    let (mut state, buffer, _) = editing("e\u{301}!", 1);
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "delete"),
+            ("motion", "inner_word"),
+            ("linewise", "false"),
+        ],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), "!");
 }
 
 #[test]
@@ -241,6 +253,89 @@ fn counted_word_and_paragraph_objects_extend_the_range() {
             ],
             2,
         );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn counted_inner_words_include_whitespace_runs() {
+    for (text, motion, count, expected) in [
+        ("one two three", "inner_word", 2, "two three"),
+        ("one two three", "inner_word", 3, " three"),
+        ("one \t two three", "inner_big_word", 2, "two three"),
+        ("one! two", "inner_word", 2, " two"),
+        ("one! two", "inner_big_word", 2, "two"),
+        ("e\u{301} e\u{301}!", "inner_word", 2, "e\u{301}!"),
+    ] {
+        let (mut state, buffer, _) = editing(text, 0);
+        apply(
+            &mut state,
+            "edit.operator",
+            &[("operator", "delete"), ("motion", motion), ("linewise", "false")],
+            count,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected, "{motion}: {text}");
+    }
+}
+
+#[test]
+fn counted_text_objects_materialize_the_document_once() {
+    use crate::editor::text::ByteOffset;
+    for (unit, motion) in [("word ", "a_word"), ("word! ", "a_big_word"), ("word\n\n", "a_paragraph")] {
+        let text = TextBuffer::from_text(&unit.repeat(10_000));
+        let before = TextBuffer::test_materializations().1;
+        let range = super::text_object::text_object(&text, &[], ByteOffset(0), motion, 10_000)
+            .unwrap().unwrap();
+        assert_eq!(TextBuffer::test_materializations().1 - before, 1, "{motion}");
+        assert_eq!(range.end.get(), text.len_bytes());
+    }
+}
+
+#[test]
+fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
+    use crate::{editor::text::{ByteOffset, ByteRange}, language::syntax::{SyntaxObject, SyntaxObjectKind}};
+    let text = TextBuffer::from_text(" (a) (b)");
+    for (kind, motion) in [
+        (SyntaxObjectKind::Function, "inner_function"),
+        (SyntaxObjectKind::Class, "inner_class"),
+        (SyntaxObjectKind::Argument, "inner_argument"),
+    ] {
+        let objects = [
+            SyntaxObject { kind, outer: (1, 4), inner: (2, 3) },
+            SyntaxObject { kind, outer: (5, 8), inner: (6, 7) },
+        ];
+        assert!(super::text_object::text_object(&text, &objects, ByteOffset(2), motion, 2).is_err());
+        for cursor in [0, 2] {
+            assert_eq!(
+                super::text_object::text_object(&text, &objects, ByteOffset(cursor), motion, 1).unwrap(),
+                Some(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()),
+            );
+        }
+        let nested = [objects[0], SyntaxObject { kind, outer: (0, 8), inner: (1, 8) }];
+        assert_eq!(
+            super::text_object::text_object(&text, &nested, ByteOffset(2), motion, 2).unwrap(),
+            Some(ByteRange::new(ByteOffset(1), ByteOffset(8)).unwrap()),
+        );
+    }
+}
+
+#[test]
+fn bracket_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
+    use crate::editor::text::ByteOffset;
+    for (text, cursor, motion) in [
+        ("(a) (b)", 1, "inner_paren"),
+        ("(a) (b)", 0, "inner_paren"),
+        ("(a) (b)", 2, "inner_paren"),
+        ("[a] [b]", 1, "inner_bracket"),
+        ("{a} {b}", 1, "inner_brace"),
+        ("<a> <b>", 1, "inner_angle"),
+    ] {
+        let (state, buffer, _) = editing(text, cursor);
+        assert!(super::text_object::text_object(&state.buffers[buffer].text, &[], ByteOffset(cursor), motion, 2).is_err());
+    }
+    for (text, cursor, count, expected) in [(" (a) (b)", 0, 1, " () (b)"), ("((a)) (b)", 2, 2, "() (b)")] {
+        let (mut state, buffer, _) = editing(text, cursor);
+        apply(&mut state, "edit.operator", &[("operator", "delete"), ("motion", "inner_paren"), ("linewise", "false")], count);
         assert_eq!(state.buffers[buffer].text.to_string(), expected);
     }
 }
@@ -434,6 +529,26 @@ fn empty_objects_can_be_surrounded_and_symmetric_surrounds_removed() {
         1,
     );
     assert_eq!(state.buffers[buffer].text.to_string(), "word");
+}
+
+#[test]
+fn backslash_surrounds_can_be_deleted_and_replaced() {
+    for (action, expected) in [("delete", "word"), ("replace", "[word]")] {
+        let (mut state, buffer, view) = editing("word", 0);
+        apply(
+            &mut state,
+            "edit.operator",
+            &[("operator", "surround_add"), ("motion", "inner_word"), ("linewise", "false"), ("character", "\\")],
+            1,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), "\\word\\");
+        state.views[view].cursor = crate::editor::text::ByteOffset(1);
+        apply(&mut state, "edit.surround", &[("action", action), ("character", "\\"), ("replacement", "]")], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+    let (mut state, buffer, _) = editing("\"a\\\"b\"", 1);
+    apply(&mut state, "edit.surround", &[("action", "delete"), ("character", "\"")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "a\\\"b");
 }
 
 #[test]

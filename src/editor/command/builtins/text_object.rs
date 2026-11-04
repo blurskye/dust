@@ -37,15 +37,21 @@ pub(super) fn text_object(
         "argument" => syntax(objects, SyntaxObjectKind::Argument, cursor, around, count),
         _ => return Ok(None),
     };
-    if matches!(kind, "word" | "big_word" | "paragraph") {
+    if count > 1 && matches!(kind, "word" | "big_word" | "paragraph") {
+        let source = text.to_string();
         for _ in 1..count {
             let Some(previous) = range else {
                 break;
             };
-            let source = text.to_string();
             let next = source[previous.end.get()..]
                 .char_indices()
-                .find(|(_, character)| !character.is_whitespace())
+                .find(|(_, character)| {
+                    if around || kind == "paragraph" {
+                        !character.is_whitespace()
+                    } else {
+                        *character != '\n'
+                    }
+                })
                 .map(|(offset, _)| ByteOffset(previous.end.get() + offset));
             let Some(next) = next else {
                 break;
@@ -53,7 +59,13 @@ pub(super) fn text_object(
             let following = if kind == "paragraph" {
                 paragraph(text, next, around)?
             } else {
-                word(text, next, around, kind == "big_word")?
+                word_in(
+                    &source[next.get()..],
+                    next.get(),
+                    next,
+                    around,
+                    kind == "big_word",
+                )?
             };
             let Some(following) = following.filter(|following| following.end > previous.end) else {
                 break;
@@ -81,12 +93,14 @@ fn syntax(
         .filter(|object| object.kind == kind && object.outer.0 <= cursor && cursor < object.outer.1)
         .collect::<Vec<_>>();
     enclosing.sort_by_key(|object| object.outer.1 - object.outer.0);
-    let object = enclosing.get(count.max(1) - 1).copied().or_else(|| {
+    let object = if enclosing.is_empty() {
         objects
             .iter()
             .filter(|object| object.kind == kind && object.outer.0 > cursor)
             .min_by_key(|object| object.outer.0)
-    })?;
+    } else {
+        enclosing.get(count.max(1) - 1).copied()
+    }?;
     let (start, end) = if around { object.outer } else { object.inner };
     ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()
 }
@@ -133,10 +147,16 @@ fn word(
     big: bool,
 ) -> Result<Option<ByteRange>, CommandError> {
     let (start, content) = line_bounds(text, cursor)?;
-    let characters = content.grapheme_indices(true).collect::<Vec<_>>();
-    if characters.is_empty() {
-        return Ok(Some(ByteRange::empty(cursor)));
-    }
+    word_in(&content, start, cursor, around, big)
+}
+
+fn word_in(
+    content: &str,
+    start: usize,
+    cursor: ByteOffset,
+    around: bool,
+    big: bool,
+) -> Result<Option<ByteRange>, CommandError> {
     let class = |grapheme: &str| {
         let character = grapheme.chars().next().unwrap_or(' ');
         if big {
@@ -146,44 +166,42 @@ fn word(
         }
     };
     let relative = cursor.get().saturating_sub(start);
-    let at = characters
-        .iter()
-        .position(|(index, _)| *index >= relative)
-        .unwrap_or(characters.len() - 1);
-    let same = |index: usize, wanted: u8| class(characters[index].1) == wanted;
-    let current = class(characters[at].1);
-    let (mut first, mut last) = (at, at);
-    while first > 0 && same(first - 1, current) {
-        first -= 1;
+    let mut characters = content
+        .grapheme_indices(true)
+        .take_while(|(_, grapheme)| *grapheme != "\n")
+        .peekable();
+    let Some((mut first, grapheme)) = characters.next() else {
+        return Ok(Some(ByteRange::empty(cursor)));
+    };
+    let mut end = first + grapheme.len();
+    let mut current = class(grapheme);
+    let mut leading = first;
+    while characters.peek().is_some_and(|(index, _)| *index <= relative) {
+        let (index, grapheme) = characters.next().expect("peeked grapheme");
+        let next = class(grapheme);
+        if next != current {
+            leading = if current == 0 { first } else { index };
+            first = index;
+            current = next;
+        }
+        end = index + grapheme.len();
     }
-    while last + 1 < characters.len() && same(last + 1, current) {
-        last += 1;
+    while let Some((index, grapheme)) = characters.next_if(|(_, grapheme)| class(grapheme) == current) {
+        end = index + grapheme.len();
     }
     if around {
-        if current == 0 {
-            if last + 1 < characters.len() {
-                let next = class(characters[last + 1].1);
-                while last + 1 < characters.len() && same(last + 1, next) {
-                    last += 1;
-                }
+        if let Some((_, grapheme)) = characters.peek()
+            && (current == 0 || class(grapheme) == 0)
+        {
+            let next = class(grapheme);
+            while let Some((index, grapheme)) = characters.next_if(|(_, grapheme)| class(grapheme) == next) {
+                end = index + grapheme.len();
             }
-        } else if last + 1 < characters.len() && same(last + 1, 0) {
-            while last + 1 < characters.len() && same(last + 1, 0) {
-                last += 1;
-            }
-        } else {
-            while first > 0 && same(first - 1, 0) {
-                first -= 1;
-            }
+        } else if current != 0 {
+            first = leading;
         }
     }
-    let end = characters
-        .get(last + 1)
-        .map_or(content.len(), |(index, _)| *index);
-    ByteRange::new(
-        ByteOffset(start + characters[first].0),
-        ByteOffset(start + end),
-    )
+    ByteRange::new(ByteOffset(start + first), ByteOffset(start + end))
     .map(Some)
     .map_err(failed)
 }
@@ -269,6 +287,7 @@ fn pair(
     }
     let opening = match opening {
         Some(opening) => opening,
+        None if wanted < count.max(1) => return Ok(None),
         None => {
             let (start, content) = line_bounds(text, cursor)?;
             let relative = at.saturating_sub(start);
@@ -333,7 +352,7 @@ fn quote(
     for (index, character) in content.char_indices() {
         if escaped {
             escaped = false;
-        } else if character == '\\' {
+        } else if character == '\\' && mark != '\\' {
             escaped = true;
         } else if character == mark {
             positions.push(index);
