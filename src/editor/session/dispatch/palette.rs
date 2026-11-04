@@ -47,7 +47,7 @@ impl InteractiveApplication {
                     .command_labels
                     .get(&id)
                     .cloned()
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| spec.title.clone());
                 let category = palette
                     .categories
                     .iter()

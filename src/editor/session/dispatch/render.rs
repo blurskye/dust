@@ -2,7 +2,7 @@ use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
 };
 use super::{
-    AppEffect, CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId,
+    CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId,
     WindowPlacement, WindowRect, explorer_panel_width,
 };
 use super::{
@@ -277,17 +277,27 @@ impl InteractiveApplication {
             .debugger_session
             .persisted_breakpoints()
             .into_iter()
-            .map(|breakpoint| crate::ui::DebugSign {
-                path: breakpoint.path,
-                line: breakpoint.line.saturating_sub(1) as usize,
-                kind: if breakpoint.condition.is_some()
+            .map(|breakpoint| {
+                let state = self.debugger_session.breakpoint_state(&breakpoint.path, breakpoint.line);
+                let line = match state {
+                    Some(crate::debugger::DapBreakpointState::Verified { line }) => line,
+                    _ => breakpoint.line,
+                };
+                let kind = if state == Some(crate::debugger::DapBreakpointState::Disabled) {
+                    crate::ui::DebugSignKind::DisabledBreakpoint
+                } else if breakpoint.condition.is_some()
                     || breakpoint.hit_condition.is_some()
                     || breakpoint.log_message.is_some()
                 {
                     crate::ui::DebugSignKind::ConditionalBreakpoint
                 } else {
                     crate::ui::DebugSignKind::Breakpoint
-                },
+                };
+                crate::ui::DebugSign {
+                    path: breakpoint.path,
+                    line: line.saturating_sub(1) as usize,
+                    kind,
+                }
             })
             .collect();
         if let Some((path, line)) = self.debugger_session.execution() {
@@ -759,10 +769,7 @@ impl InteractiveApplication {
                     self.close_picker();
                 }
             }
-            CommandEffect::CloseTerminal(id) => {
-                self.terminal_session.select(PtyId(id));
-                self.process_effect(AppEffect::TerminalClose);
-            }
+            CommandEffect::CloseTerminal(id) => self.close_terminal(PtyId(id)),
         }
         self.reconcile_editor_windows();
         self.resize_active_terminal_to_panel();
@@ -781,8 +788,11 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn page_explorer_selection(&mut self, direction: isize) {
         let viewport = self
             .window_session
-            .content()
-            .explorer
+            .focused_explorer()
+            .and_then(|view| self.window_session.native_ids().explorer_view(view))
+            .and_then(|ids| self.window_session.layout()?.projection.window(ids.window))
+            .map(|window| crate::ui::geometry::explorer_body_geometry(window.rect))
+            .or(self.window_session.content().explorer)
             .map_or(0, |body| usize::from(body.height));
         self.move_explorer_selection(
             direction.saturating_mul(isize::try_from(viewport).unwrap_or(isize::MAX)),
@@ -1316,17 +1326,28 @@ impl InteractiveApplication {
                 .take(10_000)
                 .collect::<Vec<_>>();
             hints.sort_unstable_by_key(|hint| hint.position);
-            let virtual_width = hints
-                .into_iter()
-                .take(32)
-                .map(|hint| {
-                    crate::ui::geometry::text_width(
-                        &hint.label,
-                        self.configuration.settings().editor.ambiguous_width,
-                    )
-                })
-                .sum::<usize>();
-            let cursor_column = source_column.saturating_add(virtual_width);
+            let line_text = buffer.text.line(line).unwrap_or_default();
+            let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
+            let policy = crate::editor::text::DisplayWidthPolicy {
+                tab_width: self.configuration.settings().editor.tab_width,
+                ambiguous_wide: self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide,
+            };
+            let spans = crate::editor::text::display_spans(line_text, policy);
+            // Scrolling hides hints before the visible source range; they must not
+            // keep pushing the source scroll position farther to the right.
+            let virtual_width = |scroll| {
+                let skipped = spans.iter().find(|span| span.column_end > scroll)
+                    .map_or(line_text.len(), |span| span.byte_start);
+                let visible_start = line_start.get().saturating_add(skipped);
+                hints.iter()
+                    .filter(|hint| hint.position.get() >= visible_start)
+                    .take(32)
+                    .map(|hint| crate::ui::geometry::text_width(
+                        &hint.label, self.configuration.settings().editor.ambiguous_width,
+                    ))
+                    .fold(0usize, usize::saturating_add)
+            };
+            let cursor_column = source_column.saturating_add(virtual_width(view.scroll_column));
             let margin = usize::from(
                 self.configuration
                     .settings()
@@ -1347,23 +1368,22 @@ impl InteractiveApplication {
                 view.scroll_column
             }
             .min(source_column);
-            let line_text = buffer.text.line(line).unwrap_or_default();
-            let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
             let snapped = snap_display_column(
                 line_text,
                 target,
                 self.configuration.settings().editor.tab_width,
                 self.configuration.settings().editor.ambiguous_width,
             );
+            let cursor_column = source_column.saturating_add(virtual_width(snapped));
             if cursor_column.saturating_sub(snapped) < available {
                 snapped
             } else {
                 snap_display_column_forward(
                     line_text,
-                    cursor_column.saturating_add(1).saturating_sub(available),
+                    cursor_column.saturating_add(1).saturating_sub(available).min(source_column),
                     self.configuration.settings().editor.tab_width,
                     self.configuration.settings().editor.ambiguous_width,
-                )
+                ).min(source_column)
             }
         };
         if first == view.scroll_line

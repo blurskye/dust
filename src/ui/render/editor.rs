@@ -475,6 +475,7 @@ pub(super) fn render_editor_view(
                 let (symbol, fallback, style) = match sign.kind {
                     DebugSignKind::Breakpoint => ("●", "*", Style::Error),
                     DebugSignKind::ConditionalBreakpoint => ("◆", "?", Style::Error),
+                    DebugSignKind::DisabledBreakpoint => ("○", "o", Style::Muted),
                     DebugSignKind::Execution => ("▶", ">", Style::Warning),
                 };
                 grid.set_cell(

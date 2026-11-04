@@ -4665,6 +4665,10 @@ fn debugger_markers_survive_disabled_git_signs() {
     }];
     let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
     assert!(frame.grid.row_text(0).contains('●'));
+    ui.debug_signs[0].kind = super::DebugSignKind::DisabledBreakpoint;
+    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
+    assert!(frame.grid.row_text(0).contains('○'));
+    assert!(!frame.grid.row_text(0).contains('●'));
 }
 
 #[test]

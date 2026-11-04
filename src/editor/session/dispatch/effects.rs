@@ -4155,27 +4155,7 @@ impl InteractiveApplication {
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
                 if let Some(id) = self.displayed_terminal() {
-                    if self.terminal_session.stopping(id) {
-                        self.show_error("terminal stop is already pending");
-                    } else if self.terminal_session.requires_close_confirmation(id) {
-                        if self.input.prompt().is_some() {
-                            self.show_error(
-                                "close the active prompt before closing a running terminal",
-                            );
-                        } else if self.terminal_session.begin_close(id) {
-                            self.open_confirmation_actions(
-                                PromptKind::TerminalClose,
-                                format!("Terminal #{} is active", id.0),
-                                "Hide this terminal or stop its process?".into(),
-                                crate::ui::ConfirmationChoice::No,
-                                "Stop",
-                                "Hide",
-                            );
-                        }
-                    } else {
-                        self.terminal_session.cancel_open();
-                        self.retire_terminal(id, true);
-                    }
+                    self.close_terminal(id);
                 } else {
                     self.terminal_session.cancel_open();
                 }
@@ -5121,6 +5101,28 @@ impl InteractiveApplication {
             selected,
         );
     }
+    pub(super) fn close_terminal(&mut self, id: PtyId) {
+        if self.terminal_session.stopping(id) {
+            self.show_error("terminal stop is already pending");
+        } else if self.terminal_session.requires_close_confirmation(id) {
+            if self.input.prompt().is_some() {
+                self.show_error("close the active prompt before closing a running terminal");
+            } else if self.terminal_session.begin_close(id) {
+                self.open_confirmation_actions(
+                    PromptKind::TerminalClose,
+                    format!("Terminal #{} is active", id.0),
+                    "Hide this terminal or stop its process?".into(),
+                    crate::ui::ConfirmationChoice::No,
+                    "Stop",
+                    "Hide",
+                );
+            }
+        } else {
+            self.terminal_session.cancel_open();
+            self.retire_terminal(id, true);
+        }
+    }
+
     pub(super) fn submit_terminal_close(&mut self, selected: crate::ui::ConfirmationChoice) {
         let source = self.terminal_session.take_close();
         // Restore the pre-prompt focus first; Hide or Stop then performs the

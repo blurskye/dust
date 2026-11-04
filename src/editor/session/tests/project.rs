@@ -5457,6 +5457,23 @@ fn palette_finds_commands_by_the_words_people_type() {
 }
 
 #[test]
+fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() {
+    let mut app = app();
+    let mut manifest = super::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
+    manifest.commands.get_mut("run").unwrap().title = "Print Hello".into();
+    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+    app.register_indexed_plugin_commands(&index).unwrap();
+    assert!(!app.configuration.settings().command_labels.contains_key("plugin.demo.run"));
+    assert_eq!(palette_row_for(&mut app, "Print Hello"), "Plugins: Print Hello");
+
+    app.close_picker();
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.command_labels.insert("plugin.demo.run".into(), "Say Goodbye".into());
+    app.configuration.install_fixture(config);
+    assert_eq!(palette_row_for(&mut app, "Say Goodbye"), "Plugins: Say Goodbye");
+}
+
+#[test]
 fn palette_runs_flagged_commands_with_the_flag_off() {
     let mut app = app();
     palette_row_for(&mut app, "quit dust");

@@ -1899,6 +1899,57 @@ fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
 }
 
 #[test]
+fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
+    for running in [false, true] {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("source"), None);
+        app.set_dashboard_visibility(false);
+        for id in [PtyId(1), PtyId(2)] {
+            app.terminal_session.fixture(id, crate::editor::session::terminal::TerminalFixture {
+                profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
+                running, exit_code: (!running).then_some(0), truncated: false,
+            }, app.workspace.version());
+        }
+        app.terminal_session.select(PtyId(1));
+        app.set_terminal_focus(true);
+        app.sync_terminal_panel();
+        app.reconcile_editor_windows();
+        let target = app.window_session.native_ids().terminal(2).unwrap().window;
+        assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
+        app.close_graph_window(&format!("window:{}", target.0)).unwrap();
+        if running {
+            assert!(app.input.prompt().unwrap().confirmation.as_ref().unwrap().title.contains("#2"));
+            app.submit_terminal_close(crate::ui::ConfirmationChoice::Yes);
+        }
+        assert!(app.terminal_session.contains(PtyId(1)));
+        assert!(!app.terminal_session.contains(PtyId(2)));
+        assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
+    }
+}
+
+#[test]
+fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("source.rs");
+    app.state.open_text(TextBuffer::from_text(&"source\n".repeat(15)), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    app.debugger_session.breakpoint(crate::debugger::DapSourceBreakpoint {
+        path: path.clone(), line: 10, column: None,
+        condition: Some("ready".into()), hit_condition: None, log_message: None,
+    }, false).unwrap();
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 9);
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
+    app.debugger_session.set_breakpoint_disabled(&path, 10, true);
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 9);
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::DisabledBreakpoint);
+    app.debugger_session.set_breakpoint_disabled(&path, 10, false);
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
+}
+
+#[test]
 fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("source"), None);

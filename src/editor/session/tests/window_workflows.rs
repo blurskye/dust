@@ -204,6 +204,32 @@ fn cloned_explorer_rehosts_and_restores_without_replacing_shared_or_view_identit
 }
 
 #[test]
+fn explorer_clone_paging_uses_its_own_height() {
+    let mut session = TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    session.explorer_fixture();
+    let primary = session.explorer_selections()[&1];
+    session.clone_explorer();
+    let clone = session.explorer_window(2);
+    session.place_window(clone, crate::ui::window::WindowPlacement::Floating(crate::ui::window::WindowRect {
+        x: 25, y: 3, width: 40, height: 8,
+    })).unwrap();
+    session.reconcile_windows();
+    let rows = usize::from(session.explorer_body(2).height);
+    assert!(rows < usize::from(session.explorer_body(1).height));
+    assert_eq!(session.explorer_focus(), Some(2));
+    session.page_explorer(1);
+    let paged = session.explorer_selections()[&2];
+    assert_eq!(session.explorer_selections()[&1], primary);
+    session.page_explorer(-1);
+    assert_eq!(session.explorer_selections()[&2], primary);
+    for _ in 0..rows {
+        session.key("j");
+    }
+    assert_eq!(session.explorer_selections()[&2], paged);
+}
+
+#[test]
 fn explorer_clone_uses_the_exact_nonfocused_semantic_source() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();

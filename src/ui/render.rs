@@ -1303,6 +1303,7 @@ enum PluginRenderable<'a> {
 pub enum DebugSignKind {
     Breakpoint,
     ConditionalBreakpoint,
+    DisabledBreakpoint,
     Execution,
 }
 
