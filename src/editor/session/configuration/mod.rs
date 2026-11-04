@@ -268,9 +268,7 @@ impl ConfigurationSession {
         Ok(Some(result))
     }
     pub(super) fn retain_watch(&self) {
-        let _ = self
-            .worker
-            .configure_watch(self.accepted.settings.ui.theme.clone());
+        let _ = self.worker.verify_watch();
     }
     pub(super) fn prepare(
         &self,
@@ -315,7 +313,7 @@ impl ConfigurationSession {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         self.worker
-            .configure_watch(candidate.resolved.settings.ui.theme.clone())
+            .verify_watch()
             .map_err(|error| error.to_string())
     }
     fn check_catalog(
