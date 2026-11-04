@@ -1889,6 +1889,32 @@ fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
 }
 
 #[test]
+fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
+    for changed in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "head needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let before = app.state.active_buffer_id();
+        app.accept_picker();
+        let buffer = app.state.load_hidden_text(
+            TextBuffer::from_text(if changed { "prefix head needle\n" } else { "head needle\n" }),
+            path,
+        );
+        wait_vfs(&mut app);
+        if changed {
+            assert_eq!(app.state.active_buffer_id(), before);
+            assert!(app.ui.notification_error);
+            assert_eq!(app.ui.notification.as_deref(), Some(app.message("workspace_search_stale_result", &[]).as_str()));
+        } else {
+            assert_eq!(app.state.active_buffer_id(), Some(buffer));
+            assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
+        }
+    }
+}
+
+#[test]
 fn workspace_search_accepts_unchanged_encoded_snapshots() {
     for open in [false, true] {
         let mut app = app();

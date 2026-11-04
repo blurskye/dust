@@ -1975,6 +1975,10 @@ impl InteractiveApplication {
                                 let start = ByteOffset(found.range.start);
                                 let end = ByteOffset(found.range.end);
                                 if !text.matches_encoded_text(&found.snapshot)
+                                    || self.state.buffers.iter().any(|(_, buffer)| {
+                                        buffer.path.as_ref() == Some(&path)
+                                            && !buffer.text.matches_encoded_text(&found.snapshot)
+                                    })
                                     || text.validate_offset(start).is_err()
                                     || text.validate_offset(end).is_err()
                                 {
