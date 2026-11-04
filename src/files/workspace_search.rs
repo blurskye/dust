@@ -5,7 +5,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread,
 };
@@ -15,7 +15,7 @@ use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
-use super::recovery::read_bounded_bytes;
+use super::{error::VfsError, vfs::{read_file_with_ceiling, scoped_existing_path}};
 
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_FILES: usize = 1_000_000;
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_RESULTS: usize = 100_000;
@@ -241,21 +241,10 @@ pub(super) fn compile_workspace_pattern(policy: &WorkspaceSearchPolicy) -> Resul
 pub(super) fn send_search_event(
     sender: &SyncSender<WorkspaceSearchEvent>,
     cancellation: &AtomicBool,
-    mut event: WorkspaceSearchEvent,
+    event: WorkspaceSearchEvent,
 ) -> bool {
-    loop {
-        if cancellation.load(Ordering::Acquire) {
-            return false;
-        }
-        match sender.try_send(event) {
-            Ok(()) => return true,
-            Err(TrySendError::Full(returned)) => {
-                event = returned;
-                thread::yield_now();
-            }
-            Err(TrySendError::Disconnected(_)) => return false,
-        }
-    }
+    // Cancelling the service drops its receiver, waking a blocked send.
+    !cancellation.load(Ordering::Acquire) && sender.send(event).is_ok()
 }
 
 pub(super) fn is_word_character(character: char) -> bool {
@@ -323,7 +312,16 @@ pub(super) fn run_workspace_search(
             return;
         }
     };
-    let mut roots = policy.roots.clone();
+    let mut roots = Vec::new();
+    for root in &policy.roots {
+        match fs::canonicalize(root) {
+            Ok(root) => roots.push(root),
+            Err(error) => {
+                send_failure(format!("cannot resolve search root {}: {error}", root.display()));
+                return;
+            }
+        }
+    }
     roots.sort();
     roots.dedup();
     let mut builder = WalkBuilder::new(&roots[0]);
@@ -366,12 +364,21 @@ pub(super) fn run_workspace_search(
         if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
         }
+        let path = match scoped_existing_path(entry.path(), &roots) {
+            Ok(path) => path,
+            Err(_) => {
+                summary.walk_errors = summary.walk_errors.saturating_add(1);
+                continue;
+            }
+        };
+        if !seen.insert(path.clone()) {
+            continue;
+        }
         summary.files_considered = summary.files_considered.saturating_add(1);
         if summary.files_considered > policy.maximum_files {
             summary.truncated = true;
             break;
         }
-        let path = entry.into_path();
         let Some(root) = owner_root(&path, &roots) else {
             summary.walk_errors = summary.walk_errors.saturating_add(1);
             continue;
@@ -382,16 +389,22 @@ pub(super) fn run_workspace_search(
         {
             continue;
         }
-        if seen.insert(path.clone()) {
-            paths.push(path);
-        }
+        paths.push(path);
     }
     paths.sort();
     let mut matches = Vec::new();
-    'files: for path in paths {
+    let mut match_count = 0;
+    for path in paths {
         if cancellation.load(Ordering::Acquire) {
             return;
         }
+        let path = match scoped_existing_path(&path, &roots) {
+            Ok(path) => path,
+            Err(_) => {
+                summary.walk_errors = summary.walk_errors.saturating_add(1);
+                continue;
+            }
+        };
         let metadata = match fs::metadata(&path) {
             Ok(metadata) => metadata,
             Err(_) => {
@@ -407,16 +420,15 @@ pub(super) fn run_workspace_search(
             summary.truncated = true;
             break;
         }
-        let file = match fs::File::open(&path) {
-            Ok(file) => file,
-            Err(_) => {
-                summary.walk_errors = summary.walk_errors.saturating_add(1);
-                continue;
-            }
-        };
-        let bytes = match read_bounded_bytes(file, policy.maximum_file_bytes) {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => {
+        let remaining_bytes = policy.maximum_total_bytes.saturating_sub(summary.bytes_searched);
+        let read_limit = policy.maximum_file_bytes.min(remaining_bytes);
+        let bytes = match read_file_with_ceiling(&path, read_limit) {
+            Ok(bytes) => bytes,
+            Err(VfsError::DocumentTooLarge { .. }) => {
+                if read_limit < policy.maximum_file_bytes {
+                    summary.truncated = true;
+                    break;
+                }
                 summary.skipped_too_large = summary.skipped_too_large.saturating_add(1);
                 continue;
             }
@@ -460,9 +472,9 @@ pub(super) fn run_workspace_search(
             if policy.whole_word && !has_word_boundaries(&source, found.start(), found.end()) {
                 continue;
             }
-            if matches.len() >= policy.maximum_results {
+            if match_count >= policy.maximum_results {
                 summary.truncated = true;
-                break 'files;
+                break;
             }
             let line = line_starts.partition_point(|start| *start <= found.start()) - 1;
             let end_line = line_starts.partition_point(|start| *start <= found.end()) - 1;
@@ -490,20 +502,35 @@ pub(super) fn run_workspace_search(
                 ),
                 snapshot: Arc::clone(&bytes),
             });
+            match_count += 1;
+            if matches.len() >= policy.batch_size
+                && !send_search_event(
+                    &sender,
+                    &cancellation,
+                    WorkspaceSearchEvent::Batch {
+                        generation,
+                        matches: std::mem::take(&mut matches),
+                    },
+                )
+            {
+                return;
+            }
         }
-    }
-    for batch in matches.chunks(policy.batch_size) {
-        if !send_search_event(
+        if !matches.is_empty() && !send_search_event(
             &sender,
             &cancellation,
             WorkspaceSearchEvent::Batch {
                 generation,
-                matches: batch.to_vec(),
+                matches: std::mem::take(&mut matches),
             },
         ) {
             return;
         }
+        if match_count >= policy.maximum_results && summary.truncated {
+            break;
+        }
     }
+    summary.truncated |= summary.walk_errors > 0;
     let _ = send_search_event(
         &sender,
         &cancellation,

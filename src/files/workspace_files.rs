@@ -5,7 +5,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread,
 };
@@ -151,21 +151,10 @@ pub(super) fn validate_workspace_file_policy(
 pub(super) fn send_file_event(
     sender: &SyncSender<WorkspaceFileEvent>,
     cancel: &AtomicBool,
-    mut event: WorkspaceFileEvent,
+    event: WorkspaceFileEvent,
 ) -> bool {
-    loop {
-        if cancel.load(Ordering::Acquire) {
-            return false;
-        }
-        match sender.try_send(event) {
-            Ok(()) => return true,
-            Err(TrySendError::Full(v)) => {
-                event = v;
-                thread::yield_now()
-            }
-            Err(TrySendError::Disconnected(_)) => return false,
-        }
-    }
+    // Cancelling the service drops its receiver, waking a blocked send.
+    !cancel.load(Ordering::Acquire) && sender.send(event).is_ok()
 }
 pub(super) fn run_workspace_files(
     generation: u64,

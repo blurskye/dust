@@ -390,7 +390,10 @@ fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
     .unwrap();
     let discovery = discover_recovery(root.path());
     assert_eq!(discovery.records.len(), 2);
-    assert_eq!(discovery.records[0].1.path(), Some("old.txt".into()));
+    assert_eq!(
+        discovery.records.iter().find(|(path, _)| path.ends_with("legacy.toml")).unwrap().1.path(),
+        Some("old.txt".into())
+    );
     let ambiguous = RecoveryRecord {
         original_path: Some("x\u{fffd}".into()),
         ..legacy
@@ -497,6 +500,30 @@ fn recovery_discovery_bounds_records_and_aggregate_content() {
     );
     let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
     assert_eq!(cleanup.deleted.len(), 3);
+}
+
+#[test]
+fn recovery_discovery_keeps_the_same_newest_journals_as_cleanup() {
+    let root = tempdir().unwrap();
+    let now = crate::clock::system_time();
+    let mut newest = Vec::new();
+    for index in 0..200 {
+        let path = root.path().join(format!("{index:03}.toml"));
+        write_recovery(&path, &RecoveryRecord::new(None, index, "unsaved".into())).unwrap();
+        fs::File::open(&path).unwrap().set_modified(now - Duration::from_secs(200 - index)).unwrap();
+        if index >= 100 {
+            newest.push(path);
+        }
+    }
+    newest.reverse();
+    let discovery = discover_recovery(root.path());
+    assert!(discovery.diagnostics.is_empty());
+    assert_eq!(discovery.records.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>(), newest);
+    let cleanup = cleanup_recovery(root.path(), 100, 0, now);
+    assert_eq!(cleanup.deleted.len(), 100);
+    assert!(cleanup.diagnostics.is_empty());
+    assert!(discovery.records.iter().all(|(path, _)| path.exists()));
+    assert_eq!(discover_recovery(root.path()).records, discovery.records);
 }
 
 #[test]
@@ -886,6 +913,77 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
 }
 
 #[test]
+fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc};
+    use super::workspace_search::send_search_event;
+    use super::workspace_files::send_file_event;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (sender, receiver) = mpsc::sync_channel(1);
+    sender.send(WorkspaceSearchEvent::Cancelled { generation: 1 }).unwrap();
+    let worker_cancel = Arc::clone(&cancel);
+    let (finished, completion) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let sent = send_search_event(&sender, &worker_cancel, WorkspaceSearchEvent::Cancelled { generation: 2 });
+        finished.send(sent).unwrap();
+    });
+    assert!(matches!(completion.recv_timeout(Duration::from_millis(20)), Err(mpsc::RecvTimeoutError::Timeout)));
+    cancel.store(true, Ordering::Release);
+    drop(receiver);
+    assert!(!completion.recv_timeout(Duration::from_secs(2)).unwrap());
+    worker.join().unwrap();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (sender, receiver) = mpsc::sync_channel(1);
+    sender.send(super::WorkspaceFileEvent::Cancelled { generation: 1, root_revision: 1 }).unwrap();
+    let worker_cancel = Arc::clone(&cancel);
+    let (finished, completion) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let sent = send_file_event(&sender, &worker_cancel, super::WorkspaceFileEvent::Cancelled { generation: 2, root_revision: 1 });
+        finished.send(sent).unwrap();
+    });
+    assert!(matches!(completion.recv_timeout(Duration::from_millis(20)), Err(mpsc::RecvTimeoutError::Timeout)));
+    cancel.store(true, Ordering::Release);
+    drop(receiver);
+    assert!(!completion.recv_timeout(Duration::from_secs(2)).unwrap());
+    worker.join().unwrap();
+}
+
+#[test]
+fn workspace_search_streams_batches_before_reading_later_files_and_reports_read_failure() {
+    use std::sync::{Arc, atomic::AtomicBool, mpsc};
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "needle needle").unwrap();
+    let later = root.path().join("b.txt");
+    fs::write(&later, "needle").unwrap();
+    let mut policy = search_policy(root.path(), "needle");
+    policy.batch_size = 1;
+    // Each batch must be received before the worker proceeds to the next one.
+    let (sender, receiver) = mpsc::sync_channel(0);
+    let worker = std::thread::spawn(move || {
+        super::workspace_search::run_workspace_search(1, policy, Arc::new(AtomicBool::new(false)), sender);
+    });
+    let WorkspaceSearchEvent::Batch { matches, .. } = receiver.recv_timeout(Duration::from_secs(2)).unwrap() else {
+        panic!("expected the first file's first match");
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].relative_path, Path::new("a.txt"));
+    fs::remove_file(later).unwrap();
+    let WorkspaceSearchEvent::Batch { matches, .. } = receiver.recv_timeout(Duration::from_secs(2)).unwrap() else {
+        panic!("expected the first file's second match");
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].relative_path, Path::new("a.txt"));
+    let WorkspaceSearchEvent::Complete { summary, .. } = receiver.recv_timeout(Duration::from_secs(2)).unwrap() else {
+        panic!("expected completion after the unreadable file");
+    };
+    assert_eq!(summary.files_searched, 1);
+    assert_eq!(summary.walk_errors, 1);
+    assert!(summary.truncated, "an incomplete scan must not allow workspace replacement");
+    worker.join().unwrap();
+}
+
+#[test]
 fn workspace_search_positions_many_matches_after_a_large_prefix() {
     let root = tempdir().unwrap();
     let prefix = 7 * 1024 * 1024;
@@ -1036,6 +1134,49 @@ fn workspace_search_does_not_follow_symlink_escapes_and_nested_roots_deduplicate
 }
 
 #[test]
+fn workspace_search_overlapping_roots_do_not_exhaust_the_unique_file_limit() {
+    let root = tempdir().unwrap();
+    let first = root.path().join("a");
+    let nested = first.join("nested");
+    let last = root.path().join("z");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir(&last).unwrap();
+    for path in [first.join("one"), nested.join("two"), last.join("three")] {
+        fs::write(path, "needle").unwrap();
+    }
+    let mut policy = search_policy(&first, "needle");
+    policy.roots.extend([nested, last]);
+    policy.maximum_files = 3;
+    let mut service = WorkspaceSearchService::default();
+    service.start(policy).unwrap();
+    let (matches, summary) = collect_search(&service);
+    assert_eq!(matches.len(), 3);
+    assert_eq!(summary.files_considered, 3);
+    assert!(!summary.truncated);
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_search_rejects_worktrees_behind_an_escaping_directory_symlink() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("inside"), "needle").unwrap();
+    let outside = tempdir().unwrap();
+    let checkout = outside.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    fs::write(checkout.join(".git"), "gitdir: /elsewhere").unwrap();
+    fs::write(checkout.join("secret"), "needle").unwrap();
+    symlink(outside.path(), root.path().join(".worktree")).unwrap();
+    let mut service = WorkspaceSearchService::default();
+    service.start(search_policy(root.path(), "needle")).unwrap();
+    let (matches, summary) = collect_search(&service);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].relative_path, Path::new("inside"));
+    assert!(summary.walk_errors > 0);
+    assert!(summary.truncated);
+}
+
+#[test]
 fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
     let root = tempdir().expect("root");
     for index in 0..100 {
@@ -1047,6 +1188,7 @@ fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
         .expect("first");
     let mut policy = search_policy(root.path(), "needle");
     policy.maximum_results = 3;
+    policy.batch_size = 1;
     let second = service.start(policy).expect("second");
     assert!(second > first);
     let (matches, summary) = collect_search(&service);

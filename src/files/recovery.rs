@@ -176,7 +176,7 @@ pub(super) fn discover_recovery_bounded(
         return RecoveryDiscovery::default();
     }
     let mut limited = false;
-    let mut diagnostics = visit_recovery(directory, |path, record| {
+    let mut diagnostics = visit_recovery(directory, |path, record, _| {
         bytes += record.content.len() as u64
             + record.original_path.as_ref().map_or(0, String::len) as u64;
         if bytes > maximum_bytes {
@@ -199,7 +199,7 @@ pub(super) fn discover_recovery_bounded(
 
 fn visit_recovery(
     directory: &Path,
-    mut visit: impl FnMut(PathBuf, RecoveryRecord) -> bool,
+    mut visit: impl FnMut(PathBuf, RecoveryRecord, Option<SystemTime>) -> bool,
 ) -> Vec<String> {
     let mut diagnostics = Vec::new();
     let entries = match fs::read_dir(directory) {
@@ -221,15 +221,33 @@ fn visit_recovery(
     }
     let mut paths = scanned
         .into_iter()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry.path()),
+            Err(error) => {
+                diagnostics.push(format!(
+                    "cannot inspect entry in recovery directory {}: {error}",
+                    directory.display()
+                ));
+                None
+            }
+        })
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "toml")
         })
+        .map(|path| {
+            let modified = fs::metadata(&path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok());
+            (path, modified)
+        })
         .collect::<Vec<_>>();
-    paths.sort();
-    for path in paths {
+    paths.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
+        right_modified
+            .cmp(left_modified)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    for (path, modified) in paths {
         let result = read_recovery_source(&path).and_then(|source| {
             toml::from_str::<RecoveryRecord>(&source).map_err(|error| error.to_string())
         });
@@ -239,7 +257,7 @@ fn visit_recovery(
                     || (record.version == RECOVERY_VERSION
                         && (record.original_path.is_none() || record.path().is_some())) =>
             {
-                if !visit(path, record) {
+                if !visit(path, record, modified) {
                     break;
                 }
             }
@@ -269,10 +287,7 @@ pub fn cleanup_recovery(
 ) -> RecoveryCleanup {
     let mut records = Vec::new();
     // Retention needs only paths and timestamps; drop each payload before reading the next.
-    let diagnostics = visit_recovery(directory, |path, _| {
-        let modified = fs::metadata(&path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
+    let diagnostics = visit_recovery(directory, |path, _, modified| {
         records.push((path, modified));
         true
     });
@@ -282,11 +297,6 @@ pub fn cleanup_recovery(
     };
     let maximum_age = (maximum_age_days > 0)
         .then(|| Duration::from_secs(maximum_age_days.saturating_mul(86_400)));
-    records.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
-        right_modified
-            .cmp(left_modified)
-            .then_with(|| left_path.cmp(right_path))
-    });
     for (index, (path, modified)) in records.into_iter().enumerate() {
         let expired = maximum_age.is_some_and(|maximum| {
             modified
