@@ -58,7 +58,7 @@ struct Approval {
 }
 pub(super) struct ResourceApplication {
     proposal: ProposalId,
-    intent: Option<CheckedResourceIntent>,
+    intent: CheckedResourceIntent,
     target: Option<std::path::PathBuf>,
     change: BufferPathChange,
     workspace: WorkspaceVersion,
@@ -67,14 +67,7 @@ pub(super) struct ResourceApplication {
 }
 impl ResourceApplication {
     pub(super) fn intent(&self) -> &CheckedResourceIntent {
-        self.intent
-            .as_ref()
-            .expect("resource payload is only borrowed before admission")
-    }
-    pub(super) fn take_intent(&mut self) -> Result<CheckedResourceIntent, String> {
-        self.intent
-            .take()
-            .ok_or_else(|| "resource permit already consumed".into())
+        &self.intent
     }
     pub(super) fn change(&self) -> &BufferPathChange {
         &self.change
@@ -94,10 +87,10 @@ pub(super) struct ResourcePermit<'a> {
     _editor: &'a crate::editor::EditorState,
 }
 impl ResourcePermit<'_> {
-    pub(super) fn take_intent(
-        &mut self,
+    pub(super) fn intent(
+        &self,
         worker: &Arc<()>,
-    ) -> Result<CheckedResourceIntent, String> {
+    ) -> Result<&CheckedResourceIntent, String> {
         if self
             .applying
             .values()
@@ -105,20 +98,20 @@ impl ResourcePermit<'_> {
         {
             return Err("workspace resources already belong to another document worker".into());
         }
-        self.accepted[0].take_intent()
+        Ok(self.accepted[0].intent())
     }
     pub(super) fn finish(
         self,
         submission: crate::editor::session::documents::WorkspaceSubmission,
     ) -> Result<(), String> {
         let (worker, result) = submission.into_parts();
-        let request = self.accepted.remove(0);
         let id = result.map_err(|error| {
             format!(
                 "proposal {} resource admission failed: {error}",
-                request.proposal.0
+                self.accepted[0].proposal.0
             )
         })?;
+        let request = self.accepted.remove(0);
         match self.applying.entry(id) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert((worker, request));
@@ -255,13 +248,12 @@ impl WorkspaceEditSession {
             });
         }
         if p.resources.iter().any(|resource| {
-            matches!(resource.kind, ResourceIntentKind::Rename { .. })
-                && drafts
+            drafts
                     .iter()
                     .any(|draft| draft.canonical_path == resource.source && !draft.edits.is_empty())
         }) {
             return Err(
-                "text edits and renames of the same file cannot be applied together".into(),
+                "text edits and renames or deletions of the same file cannot be applied together".into(),
             );
         }
         let proposal = WorkspaceEditProposal::build(
@@ -368,7 +360,7 @@ impl WorkspaceEditSession {
                         };
                         ResourceApplication {
                             proposal: p.source.id,
-                            intent: Some(intent),
+                            intent,
                             target,
                             change,
                             workspace: p.source.workspace.clone(),

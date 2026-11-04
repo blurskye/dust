@@ -447,6 +447,96 @@ fn generic_picker_filters_and_invokes_registry_commands() {
 }
 
 #[test]
+fn workspace_edit_preparation_retries_unopened_files_after_queue_backpressure() {
+    use crate::language::lsp::{LspDocumentEdit, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit};
+    let mut app = app();
+    let paths = (0..17)
+        .map(|index| app.state.workspace_root.join(format!("file-{index}.rs")))
+        .collect::<Vec<_>>();
+    for path in &paths {
+        fs::write(path, "old").unwrap();
+    }
+    app.begin_workspace_proposal(
+        "many unopened files".into(),
+        LspWorkspaceEdit {
+            documents: paths.iter().map(|path| LspDocumentEdit {
+                uri: crate::language::lsp::file_uri(path),
+                version: None,
+                edits: vec![LspTextEdit {
+                    range: LspRange {
+                        start: LspPosition { line: 0, character: 0 },
+                        end: LspPosition { line: 0, character: 3 },
+                    },
+                    new_text: "new".into(),
+                }],
+            }).collect(),
+            resources: Vec::new(),
+        },
+        None,
+        PositionEncoding::Utf16,
+    );
+    assert!(app.workspace_edits.preparing());
+    assert_eq!(app.documents.pending_count(), 8);
+    wait_vfs(&mut app);
+    assert!(!app.workspace_edits.preparing());
+    assert_eq!(app.workspace_edits.proposal().unwrap().files.len(), paths.len());
+    app.accept_workspace_proposal();
+    for path in &paths {
+        let (_, buffer) = app.state.buffers.iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(path)).unwrap();
+        assert_eq!(buffer.text.to_string(), "new");
+        assert!(buffer.dirty);
+        assert_eq!(fs::read_to_string(path).unwrap(), "old");
+    }
+}
+
+#[test]
+fn staged_workspace_resources_survive_queue_backpressure_and_can_be_retried() {
+    use crate::language::lsp::{LspResourceOperation, LspWorkspaceEdit};
+    let mut app = app();
+    let paths = (0..9).map(|index| (
+        app.state.workspace_root.join(format!("old-{index}")),
+        app.state.workspace_root.join(format!("new-{index}")),
+    )).collect::<Vec<_>>();
+    // Independent previews can accumulate more resources than one admission batch.
+    for (source, target) in &paths {
+        fs::write(source, "resource").unwrap();
+        app.begin_workspace_proposal(
+            "rename".into(),
+            LspWorkspaceEdit {
+                documents: Vec::new(),
+                resources: vec![LspResourceOperation::Rename {
+                    old_uri: crate::language::lsp::file_uri(source),
+                    new_uri: crate::language::lsp::file_uri(target),
+                    overwrite: false,
+                    ignore_if_exists: false,
+                }],
+            },
+            None,
+            PositionEncoding::Utf16,
+        );
+        wait_vfs(&mut app);
+        assert!(app.workspace_edits.proposal().is_some());
+        app.accept_workspace_proposal();
+    }
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 8);
+    wait_vfs(&mut app);
+    for (source, target) in &paths[..8] {
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(target).unwrap(), "resource");
+    }
+    assert!(paths[8].0.exists() && !paths[8].1.exists());
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 1);
+    wait_vfs(&mut app);
+    assert!(!paths[8].0.exists());
+    assert_eq!(fs::read_to_string(&paths[8].1).unwrap(), "resource");
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 0);
+}
+
+#[test]
 fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffers() {
     let mut app = app();
     let first = app.state.workspace_root.join("first.rs");

@@ -3251,9 +3251,19 @@ impl InteractiveApplication {
                         break;
                     }
                 };
-                if let Err(error) = result {
-                    self.show_error(error);
-                    break;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.notify_message(
+                            "Document queue is full; remaining resources are still staged. Apply them again after pending work finishes.".into(),
+                            false,
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        self.show_error(error);
+                        break;
+                    }
                 }
             },
             effect => return Err(effect),

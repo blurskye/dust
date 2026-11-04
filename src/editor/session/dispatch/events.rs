@@ -2044,6 +2044,9 @@ impl InteractiveApplication {
                 }
             }
         }
+        if self.workspace_edits.preparing() {
+            self.submit_workspace_preparation();
+        }
     }
 }
 
@@ -4080,6 +4083,13 @@ impl InteractiveApplication {
             self.abort_workspace_edit(error);
             return;
         }
+        self.submit_workspace_preparation();
+        if self.workspace_edits.preparing() {
+            self.notify_message(self.message("workspace_edit_loading", &[]), false);
+        }
+    }
+    fn submit_workspace_preparation(&mut self) {
+        let maximum = crate::editor::session::search::SEARCH_MAXIMUM_FILE_BYTES;
         while let Some((index, file)) = self.workspace_edits.next_file() {
             let snapshot =
                 if let crate::editor::session::workspace_edits::InputFile::Read(path) = file {
@@ -4115,16 +4125,18 @@ impl InteractiveApplication {
                         &self.state,
                     )
                     .and_then(|permit| self.documents.submit_workspace_io(permit));
-                if let Err(error) = admitted {
-                    self.abort_workspace_edit(error);
-                    return;
+                match admitted {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(error) => {
+                        self.abort_workspace_edit(error);
+                        return;
+                    }
                 }
             }
         }
         if self.workspace_edits.files_ready() {
             self.finish_workspace_proposal();
-        } else {
-            self.notify_message(self.message("workspace_edit_loading", &[]), false);
         }
     }
     fn check_workspace_edit_origin(&self) -> Result<(), String> {

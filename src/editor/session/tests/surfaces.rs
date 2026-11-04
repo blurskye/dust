@@ -5503,10 +5503,16 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
         driver.application().debugger_session.is_running(),
         "hiding an inspector must not terminate the session"
     );
-    // AND HIDING ASKED NOTHING TO STOP: a count of ZERO read from the adapter's own log.
-    driver.pump_debug();
-    std::thread::sleep(Duration::from_millis(20));
-    driver.pump_debug();
+    // A fresh threads response acknowledges a request ordered after hiding.
+    // The adapter has consumed any earlier disconnect before this response.
+    driver.debug_threads();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while driver.projection().picker.is_none() {
+        driver.pump_debug();
+        assert!(Instant::now() < deadline, "the post-hide threads request was not acknowledged");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(driver.application().debugger_session.is_running());
     let log = std::fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.contains("launch"),
@@ -6060,7 +6066,10 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
             row: y + 3,
         });
         match &app.state.tabs[app.state.active_tab.unwrap()].root {
-            crate::editor::LayoutNode::Split { ratio, .. } => *ratio,
+            crate::editor::LayoutNode::Split { ratio, .. } => {
+                assert!(*ratio > 500, "dragging down must enlarge the top pane (right={right}): {ratio}");
+                *ratio
+            }
             _ => panic!("split"),
         }
     }
@@ -6096,20 +6105,20 @@ fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     app.recovery.skip_maintenance();
     let journal = app.recovery.directory().join("old-scratch.toml");
     fs::create_dir_all(journal.parent().unwrap()).unwrap();
-    fs::write(&journal, "durable copy").unwrap();
-    app.recovery.fixture_records(vec![(
-        journal.clone(),
-        crate::files::RecoveryRecord {
-            version: crate::files::RECOVERY_VERSION,
-            original_path: None,
-            revision: 1,
-            content: "recovered".into(),
-        },
-    )]);
+    let record = crate::files::RecoveryRecord::new(None, 1, "recovered".into());
+    crate::files::write_recovery(&journal, &record).unwrap();
+    let discovery = crate::files::discover_recovery(app.recovery.directory());
+    assert!(discovery.diagnostics.is_empty());
+    assert_eq!(discovery.records, vec![(journal.clone(), record.clone())]);
+    app.recovery.fixture_records(discovery.records);
     app.open_recovery_picker();
     app.accept_picker();
     let buffer = app.state.active_buffer_id().unwrap();
-    assert!(journal.exists());
+    wait_vfs(&mut app);
+    assert_eq!(
+        crate::files::discover_recovery(app.recovery.directory()).records,
+        vec![(journal.clone(), record)],
+    );
     assert_eq!(app.recovery.path(buffer), journal);
     app.replace_with_recovered(buffer, "changed".into())
         .unwrap();
@@ -6117,7 +6126,20 @@ fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "recovered");
     assert!(app.state.buffers[buffer].dirty);
     app.schedule_recovery_work();
-    assert!(journal.exists());
+    // Flush the debounced write as well as any queued deletion before checking
+    // what a fresh editor would discover after a restart.
+    app.queue_dirty_recovery_before_exit();
+    wait_vfs(&mut app);
+    let discovery = crate::files::discover_recovery(app.recovery.directory());
+    assert!(discovery.diagnostics.is_empty());
+    assert_eq!(discovery.records, vec![(
+        journal,
+        crate::files::RecoveryRecord::new(
+            None,
+            app.state.buffers[buffer].text.revision().0,
+            "recovered".into(),
+        ),
+    )]);
     app.invoke_mapped_command("history.undo");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
 }
