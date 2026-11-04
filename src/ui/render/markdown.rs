@@ -727,6 +727,7 @@ fn cell_graphemes(
                         )
                 });
             let width = match mark {
+                None if grapheme == "\t" => 1,
                 None => text_width(grapheme, ambiguous),
                 Some(mark) if mark.range.start != at => 0,
                 Some(mark) => match mark.mark {
