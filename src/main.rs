@@ -120,6 +120,12 @@ fn external_tui_fixture() -> ExitCode {
             }
         }
     }
+    let Ok((columns, rows)) = crossterm::terminal::size() else {
+        return ExitCode::from(2);
+    };
+    if write!(out, "SIZE:{columns}x{rows}\r\n").is_err() {
+        return ExitCode::from(2);
+    }
     if out.write_all(b"INPUT_OK\r\n\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b[?1049lPRIMARY_OK\r\n").and_then(|_|out.flush()).is_err(){ExitCode::from(2)}else{ExitCode::SUCCESS}
 }
 

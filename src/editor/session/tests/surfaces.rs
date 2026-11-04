@@ -4596,6 +4596,13 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
     assert_eq!(driver.terminal_cursor(), cursor);
 
     for placement in [
+        WindowPlacement::Tiled,
+        WindowPlacement::Floating(WindowRect {
+            x: 3,
+            y: 2,
+            width: 50,
+            height: 10,
+        }),
         WindowPlacement::Fullscreen,
         WindowPlacement::Docked {
             edge: DockEdge::Top,

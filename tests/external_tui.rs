@@ -68,6 +68,7 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
         .unwrap();
     let mut output = Vec::new();
     let mut code = None;
+    let mut io_complete = false;
     while Instant::now() < deadline {
         for event in ptys.poll().unwrap() {
             match event {
@@ -80,6 +81,10 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
                     id: event_id,
                     code: c,
                 } if event_id == id => code = Some(c),
+                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                    result.expect("version probe I/O");
+                    io_complete = true;
+                }
                 PtyEvent::Failed {
                     id: event_id,
                     message,
@@ -87,15 +92,16 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
                 _ => {}
             }
         }
-        if code.is_some() {
+        if io_complete {
             break;
         }
         thread::sleep(Duration::from_millis(5));
     }
+    assert!(io_complete, "version probe I/O timed out");
     assert_eq!(code, Some(Some(0)));
     let output = String::from_utf8_lossy(&output);
     assert!(
-        output.contains("version=0.61.1") && output.len() < 4096,
+        output.contains("version=") && output.contains("os=") && output.len() < 4096,
         "{output}"
     );
     eprintln!("{}", output.trim());
@@ -146,8 +152,11 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
         .unwrap();
     let mut screen = PtyScreen::new(100, 30, 4096);
     let mut saw_alternate = false;
+    let mut requested_resize = false;
+    let mut resized = false;
     let mut sent_quit = false;
     let mut exit = None;
+    let mut io_complete = false;
     while Instant::now() < deadline {
         for event in ptys.poll().unwrap() {
             match event {
@@ -158,14 +167,29 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
                 } if event_id == id => {
                     screen.feed_bytes(&bytes);
                     saw_alternate |= screen.alternate_active();
-                    if saw_alternate && !sent_quit {
+                    if saw_alternate && !requested_resize {
                         ptys.resize(id, 120, 40).unwrap();
-                        screen.resize(120, 40);
+                        requested_resize = true;
+                    }
+                    // LazyGit places its footer at the terminal's bottom edge. A
+                    // redraw there confirms the child observed the larger height.
+                    if resized && !sent_quit && !screen.lines()[39].trim().is_empty() {
                         ptys.input(id, b"q".to_vec(), 16).unwrap();
                         sent_quit = true;
                     }
                 }
+                PtyEvent::Resized {
+                    id: event_id, sequence: 0, columns: 120, rows: 40,
+                } if event_id == id => {
+                    assert!(requested_resize);
+                    screen.resize(120, 40);
+                    resized = true;
+                }
                 PtyEvent::Exited { id: event_id, code } if event_id == id => exit = Some(code),
+                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                    result.expect("LazyGit I/O");
+                    io_complete = true;
+                }
                 PtyEvent::Failed {
                     id: event_id,
                     message,
@@ -173,15 +197,16 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
                 _ => {}
             }
         }
-        if exit.is_some() {
+        if io_complete {
             break;
         }
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(saw_alternate && sent_quit);
+    assert!(saw_alternate && resized && sent_quit, "LazyGit resize redraw timed out");
+    assert!(io_complete, "LazyGit I/O timed out");
     assert_eq!(exit, Some(Some(0)));
     assert!(!screen.alternate_active());
-    eprintln!("LazyGit 0.61.1 launch/resize/q exit passed");
+    eprintln!("LazyGit launch/resize/q exit passed");
 }
 
 #[test]
@@ -221,8 +246,11 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     assert_eq!(id, PtyId(1), "one external TUI process was admitted");
     let mut screen = PtyScreen::new(40, 8, 1024);
     let mut raw = Vec::new();
+    let mut requested_resize = false;
+    let mut resized = false;
     let mut sent = false;
     let mut exited = None;
+    let mut io_complete = false;
     while Instant::now() < deadline {
         for event in ptys.poll().unwrap() {
             match event {
@@ -233,7 +261,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                 } if event_id == id => {
                     raw.extend_from_slice(&bytes);
                     screen.feed_bytes(&bytes);
-                    if !sent
+                    if !requested_resize
                         && raw.windows(9).any(|w| w == b"ALT_READY")
                         && screen.application_cursor()
                         && screen.bracketed_paste()
@@ -271,7 +299,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                         let view = graph
                             .create_view(content, "external-tui-test", 1)
                             .expect("authoritative external TUI view");
-                        let window = graph
+                        graph
                             .open_window(
                                 tab,
                                 view,
@@ -322,57 +350,30 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                         );
                         assert_eq!(ptys.pending(), 1);
 
-                        for placement in [
-                            WindowPlacement::Tiled,
-                            WindowPlacement::Docked {
-                                edge: dust::ui::window::DockEdge::Right,
-                                size: 12,
-                            },
-                            WindowPlacement::Fullscreen,
-                            WindowPlacement::Hidden,
-                            WindowPlacement::Floating(WindowRect {
-                                x: 3,
-                                y: 2,
-                                width: 50,
-                                height: 10,
-                            }),
-                        ] {
-                            graph
-                                .place(window, placement)
-                                .expect("move live external TUI view");
-                            assert_eq!(
-                                graph.window(window).expect("same live window").placement,
-                                placement
-                            );
-                            assert_eq!(graph.view(view).expect("same live view").content, content);
-                            assert_eq!(ptys.pending(), 1, "moving the view never restarts its PTY");
-                            assert_eq!(
-                                (
-                                    screen.cursor(),
-                                    screen.alternate_active(),
-                                    screen.application_cursor(),
-                                    screen.bracketed_paste(),
-                                ),
-                                (
-                                    screen_before.1,
-                                    screen_before.3,
-                                    screen_before.4,
-                                    screen_before.5,
-                                ),
-                                "window movement does not replace the live screen"
-                            );
-                        }
+                        // Live window movement is exercised through TestSession in
+                        // real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process.
 
                         ptys.resize(id, 50, 10).unwrap();
-                        screen.resize(50, 10);
-                        ptys.input(id, encode_key(PtyInputKey::Up, true).to_vec(), 1024)
-                            .unwrap();
-                        ptys.input(id, encode_paste("fixture", true, 1024).unwrap(), 1024)
-                            .unwrap();
-                        sent = true;
+                        requested_resize = true;
                     }
                 }
+                PtyEvent::Resized {
+                    id: event_id, sequence: 0, columns: 50, rows: 10,
+                } if event_id == id => {
+                    assert!(requested_resize);
+                    resized = true;
+                    screen.resize(50, 10);
+                    ptys.input(id, encode_key(PtyInputKey::Up, true).to_vec(), 1024)
+                        .unwrap();
+                    ptys.input(id, encode_paste("fixture", true, 1024).unwrap(), 1024)
+                        .unwrap();
+                    sent = true;
+                }
                 PtyEvent::Exited { id: event_id, code } if event_id == id => exited = Some(code),
+                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                    result.expect("fixture I/O");
+                    io_complete = true;
+                }
                 PtyEvent::Failed {
                     id: event_id,
                     message,
@@ -380,15 +381,17 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                 _ => {}
             }
         }
-        if exited.is_some() {
+        if io_complete {
             break;
         }
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(sent);
+    assert!(resized && sent, "fixture resize acknowledgement timed out");
+    assert!(io_complete, "fixture I/O timed out");
     assert_eq!(exited, Some(Some(0)));
     let raw = String::from_utf8_lossy(&raw);
-    assert!(raw.contains("INPUT_OK") && raw.contains("PRIMARY_OK"));
+    assert!(raw.contains("SIZE:50x10"), "child did not observe resize: {raw}");
+    assert!(raw.contains("INPUT_OK") && raw.contains("PRIMARY_OK"), "{raw}");
     assert!(!screen.alternate_active());
     assert!(!screen.bracketed_paste());
 }
