@@ -9,7 +9,7 @@ use crate::config::{
 };
 use crate::ui::{
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
-    settings_hit, settings_layout, settings_line_height,
+    settings_hit, settings_layout, settings_lines_height,
 };
 
 const MODIFIED_FILTER: &str = "@modified";
@@ -109,14 +109,14 @@ impl InteractiveApplication {
         else {
             return;
         };
+        let ambiguous = self.configuration.settings().editor.ambiguous_width;
         let Some(page) = self.ui.settings.as_mut() else {
             return;
         };
         let view = usize::from(layout.list_height);
-        let height = |lines: &[SettingsLine]| -> usize {
-            lines.iter().map(|line| settings_line_height(*line)).sum()
-        };
-        let top = height(&page.lines[..page.selected.min(page.lines.len())]);
+        let height = |lines| settings_lines_height(page, lines, layout, ambiguous);
+        let selected = page.selected.min(page.lines.len());
+        let top = height(0..selected);
         let start = match page.selected.checked_sub(1).map(|index| page.lines[index]) {
             Some(SettingsLine::Heading(_)) => top - 2,
             _ => top,
@@ -127,13 +127,15 @@ impl InteractiveApplication {
             }
             _ => 0,
         };
-        let end = top + 2 + below;
+        // The setting's title and description, without the blank row after it.
+        let end = top + height(selected..selected + 1).saturating_sub(1) + below;
+        let total = height(0..page.lines.len());
         if start < page.scroll {
             page.scroll = start;
         } else if end > page.scroll + view {
             page.scroll = (end - view).min(start);
         }
-        page.scroll = page.scroll.min(height(&page.lines).saturating_sub(view));
+        page.scroll = page.scroll.min(total.saturating_sub(view));
     }
 
     pub(super) fn settings_action(&mut self, action: SettingsAction) {
@@ -356,23 +358,21 @@ impl InteractiveApplication {
     pub(super) fn settings_mouse(&mut self, key: &super::KeyEvent, column: u16, row: u16) {
         use crate::editor::input::TerminalMouseInput;
         let (width, height) = (self.window_session.width(), self.settings_height());
+        let ambiguous = self.configuration.settings().editor.ambiguous_width;
         let Some(page) = self.ui.settings.as_mut() else {
             return;
         };
         match key.terminal_mouse() {
             Some(TerminalMouseInput::ScrollUp) => page.scroll = page.scroll.saturating_sub(3),
             Some(TerminalMouseInput::ScrollDown) => {
-                let total: usize = page
-                    .lines
-                    .iter()
-                    .map(|line| settings_line_height(*line))
-                    .sum();
-                let view = settings_layout(width, height)
-                    .map_or(0, |layout| usize::from(layout.list_height));
-                page.scroll = (page.scroll + 3).min(total.saturating_sub(view));
+                if let Some(layout) = settings_layout(width, height) {
+                    let total = settings_lines_height(page, 0..page.lines.len(), layout, ambiguous);
+                    let view = usize::from(layout.list_height);
+                    page.scroll = (page.scroll + 3).min(total.saturating_sub(view));
+                }
             }
             Some(TerminalMouseInput::LeftDown) => {
-                match settings_hit(page, width, height, column, row) {
+                match settings_hit(page, (width, height), ambiguous, column, row) {
                     Some(SettingsHit::Choice(selected)) => {
                         page.edit = Some(SettingsEdit::Choice { selected });
                         self.activate_setting();
@@ -409,12 +409,11 @@ impl InteractiveApplication {
 
     /// After a section is picked, put its heading at the top of the list.
     fn scroll_settings_to_top(&mut self) {
-        if let Some(page) = self.ui.settings.as_mut() {
-            let heading = page.selected.saturating_sub(1);
-            page.scroll = page.lines[..heading.min(page.lines.len())]
-                .iter()
-                .map(|line| settings_line_height(*line))
-                .sum();
+        let ambiguous = self.configuration.settings().editor.ambiguous_width;
+        let layout = settings_layout(self.window_session.width(), self.settings_height());
+        if let (Some(page), Some(layout)) = (self.ui.settings.as_mut(), layout) {
+            let heading = page.selected.saturating_sub(1).min(page.lines.len());
+            page.scroll = settings_lines_height(page, 0..heading, layout, ambiguous);
         }
         self.scroll_settings();
     }

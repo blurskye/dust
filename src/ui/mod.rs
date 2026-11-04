@@ -20,7 +20,7 @@ pub use render::{
     AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind,
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
     TutorCard, debug_pane_insets, debug_pane_tab_at, settings_hit, settings_layout,
-    settings_line_height, transcript_lines,
+    settings_lines_height, transcript_lines,
 };
 pub use render::{
     CellAlign, CompletionItem, CompositorLayoutState, ConfirmationChoice, ConfirmationState,

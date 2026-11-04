@@ -83,14 +83,56 @@ impl SettingsPageState {
     }
 }
 
-/// Screen rows a line of the list takes: a heading and a blank row, or a setting's title,
-/// description and a blank row.
+/// Screen rows the lines in `lines` take: a heading and a blank row, or a setting's title, its
+/// description wrapped to the list and a blank row.
 #[must_use]
-pub const fn settings_line_height(line: SettingsLine) -> usize {
-    match line {
-        SettingsLine::Heading(_) => 2,
-        SettingsLine::Setting(_) => 3,
+pub fn settings_lines_height(
+    page: &SettingsPageState,
+    lines: std::ops::Range<usize>,
+    layout: SettingsLayout,
+    ambiguous: AmbiguousWidth,
+) -> usize {
+    lines
+        .map(|index| match page.lines.get(index) {
+            Some(SettingsLine::Heading(_)) => 2,
+            Some(SettingsLine::Setting(_)) => 2 + about_lines(page, index, layout, ambiguous).len(),
+            None => 0,
+        })
+        .sum()
+}
+
+/// The description under the setting at `index`, wrapped to the list: the error while its
+/// value is being edited, and a note when the change applies after a restart.
+fn about_lines(
+    page: &SettingsPageState,
+    index: usize,
+    layout: SettingsLayout,
+    ambiguous: AmbiguousWidth,
+) -> Vec<String> {
+    let Some(SettingsLine::Setting(row)) = page.lines.get(index) else {
+        return Vec::new();
+    };
+    let Some(row) = page.rows.get(*row) else {
+        return Vec::new();
+    };
+    let error = match (index == page.selected, &page.edit) {
+        (
+            true,
+            Some(SettingsEdit::Text {
+                error: Some(error), ..
+            }),
+        ) => Some(error),
+        _ => None,
+    };
+    let mut about = error.cloned().unwrap_or_else(|| row.about.clone());
+    if error.is_none() && row.restart {
+        about.push_str(" Applies after a restart.");
     }
+    let width = usize::from(layout.list_width.saturating_sub(3)).max(1);
+    super::wrap_card_text(&about, width, ambiguous)
+        .into_iter()
+        .map(|line| line.into_iter().map(|(piece, _)| piece).collect())
+        .collect()
 }
 
 /// Where the page's parts go on a screen of this size.
@@ -152,6 +194,7 @@ pub enum SettingsHit {
 fn choice_geometry(
     page: &SettingsPageState,
     layout: SettingsLayout,
+    ambiguous: AmbiguousWidth,
 ) -> Option<(crate::ui::window::WindowRect, usize)> {
     let SettingsEdit::Choice { selected } = page.edit.as_ref()? else {
         return None;
@@ -159,10 +202,7 @@ fn choice_geometry(
     let SettingsValue::Choice { choices, .. } = &page.selected_row()?.value else {
         return None;
     };
-    let offset: usize = page.lines[..page.selected]
-        .iter()
-        .map(|line| settings_line_height(*line))
-        .sum();
+    let offset = settings_lines_height(page, 0..page.selected, layout, ambiguous);
     let y = layout
         .list_top
         .checked_add(u16::try_from(offset.checked_sub(page.scroll)?).ok()?)?;
@@ -206,13 +246,13 @@ fn choice_geometry(
 #[must_use]
 pub fn settings_hit(
     page: &SettingsPageState,
-    width: u16,
-    height: u16,
+    (width, height): (u16, u16),
+    ambiguous: AmbiguousWidth,
     column: u16,
     row: u16,
 ) -> Option<SettingsHit> {
     let layout = settings_layout(width, height)?;
-    if let Some((rect, first)) = choice_geometry(page, layout)
+    if let Some((rect, first)) = choice_geometry(page, layout, ambiguous)
         && column >= rect.x
         && column < rect.x + rect.width
         && row >= rect.y
@@ -249,7 +289,7 @@ pub fn settings_hit(
     let target = page.scroll + offset;
     let mut start = 0;
     for (index, line) in page.lines.iter().enumerate() {
-        let end = start + settings_line_height(*line);
+        let end = start + settings_lines_height(page, index..index + 1, layout, ambiguous);
         if (start..end).contains(&target) {
             // The blank row after a setting belongs to no one.
             return (matches!(line, SettingsLine::Setting(_)) && target + 1 < end)
@@ -418,7 +458,7 @@ pub(super) fn render_settings(
     let mut start = 0usize;
     for (index, line) in page.lines.iter().enumerate() {
         let line_start = start;
-        start += settings_line_height(*line);
+        start += settings_lines_height(page, index..index + 1, layout, ambiguous);
         if start <= page.scroll {
             continue;
         }
@@ -458,7 +498,8 @@ pub(super) fn render_settings(
                 } else {
                     Style::Default
                 };
-                for offset in 0..2 {
+                let about = about_lines(page, index, layout, ambiguous);
+                for offset in 0..1 + about.len() {
                     if let (Some(y), true) = (row_y(offset), selected) {
                         fill(frame, layout.list_x, y, layout.list_width, Style::Selection);
                     }
@@ -528,28 +569,16 @@ pub(super) fn render_settings(
                         .grid
                         .put_text(layout.list_x + 2, y, &title, title_style);
                 }
-                if let Some(y) = row_y(1) {
-                    let error = match editing {
-                        Some(SettingsEdit::Text {
-                            error: Some(error), ..
-                        }) => Some(error),
-                        _ => None,
-                    };
-                    let mut about = error.cloned().unwrap_or_else(|| row.about.clone());
-                    if error.is_none() && row.restart {
-                        about.push_str(" Applies after a restart.");
+                let error = matches!(editing, Some(SettingsEdit::Text { error: Some(_), .. }));
+                let style = match (error, selected) {
+                    (true, _) => Style::Error,
+                    (false, true) => Style::Selection,
+                    (false, false) => Style::Muted,
+                };
+                for (offset, text) in about.iter().enumerate() {
+                    if let Some(y) = row_y(1 + offset) {
+                        frame.grid.put_text(layout.list_x + 2, y, text, style);
                     }
-                    let style = match (error.is_some(), selected) {
-                        (true, _) => Style::Error,
-                        (false, true) => Style::Selection,
-                        (false, false) => Style::Muted,
-                    };
-                    let about = ellipsized(
-                        &about,
-                        usize::from(layout.list_width.saturating_sub(3)),
-                        ambiguous,
-                    );
-                    frame.grid.put_text(layout.list_x + 2, y, &about, style);
                 }
             }
         }
@@ -581,7 +610,7 @@ pub(super) fn render_settings(
             SettingsValue::Choice { current, choices } => (current.as_str(), choices.as_slice()),
             _ => ("", &[][..]),
         };
-        if let Some((rect, first)) = choice_geometry(page, layout) {
+        if let Some((rect, first)) = choice_geometry(page, layout, ambiguous) {
             let (box_x, box_top, box_width, box_height) = (rect.x, rect.y, rect.width, rect.height);
             draw_box(frame, box_x, box_top, box_width, box_height);
             let visible = usize::from(box_height - 2);
@@ -697,15 +726,57 @@ mod tests {
             ..Default::default()
         };
         let layout = settings_layout(100, 30).unwrap();
-        let (rect, first) = choice_geometry(&page, layout).unwrap();
+        let ambiguous = AmbiguousWidth::Narrow;
+        let (rect, first) = choice_geometry(&page, layout, ambiguous).unwrap();
         assert_eq!(first, 0);
         assert_eq!(
-            settings_hit(&page, 100, 30, rect.x + 2, rect.y + 3),
+            settings_hit(&page, (100, 30), ambiguous, rect.x + 2, rect.y + 3),
             Some(SettingsHit::Choice(2))
         );
         assert_eq!(
-            settings_hit(&page, 100, 30, rect.x, rect.y + 1),
+            settings_hit(&page, (100, 30), ambiguous, rect.x, rect.y + 1),
             Some(SettingsHit::Border)
+        );
+    }
+
+    #[test]
+    fn a_long_description_wraps_and_pushes_the_next_setting_down() {
+        let row = |title: &str, about: &str| SettingsRow {
+            key: title.into(),
+            section: 0,
+            title: title.into(),
+            about: about.into(),
+            value: SettingsValue::Bool(true),
+            modified: false,
+            restart: false,
+        };
+        let about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own \
+                     command-line program in a terminal on the side.";
+        let page = SettingsPageState {
+            rows: vec![row("Connection", about), row("Next", "Short.")],
+            lines: vec![SettingsLine::Setting(0), SettingsLine::Setting(1)],
+            ..Default::default()
+        };
+        let layout = settings_layout(60, 30).unwrap();
+        let ambiguous = AmbiguousWidth::Narrow;
+        let lines = about_lines(&page, 0, layout, ambiguous);
+        assert!(lines.len() > 1);
+        assert!(
+            lines
+                .iter()
+                .all(|line| width_of(line, ambiguous) <= layout.list_width - 3)
+        );
+        assert_eq!(lines.join(" "), about);
+        let first = settings_lines_height(&page, 0..1, layout, ambiguous);
+        assert_eq!(first, 2 + lines.len());
+        let next = layout.list_top + u16::try_from(first).unwrap();
+        assert_eq!(
+            settings_hit(&page, (60, 30), ambiguous, layout.list_x + 2, next),
+            Some(SettingsHit::Line(1))
+        );
+        assert_eq!(
+            settings_hit(&page, (60, 30), ambiguous, layout.list_x + 2, next - 2),
+            Some(SettingsHit::Line(0))
         );
     }
 }
