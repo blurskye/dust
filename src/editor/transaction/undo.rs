@@ -95,7 +95,9 @@ impl Default for UndoTree {
 
 impl UndoTree {
     pub fn record(&mut self, mut changes: Vec<Change>, merge: bool) {
-        changes.retain(|change| change.removed != change.inserted);
+        changes.retain(|change| {
+            change.removed != change.inserted || change.removed_endings != change.inserted_endings
+        });
         if changes.is_empty() {
             return;
         }

@@ -38,6 +38,7 @@ pub struct ProposedFileEdit {
     pub selected: bool,
     pub edit_count: usize,
     pub edits: Vec<TextEdit>,
+    pub(crate) preferred_line_ending: crate::editor::text::LineEnding,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,6 +110,7 @@ impl WorkspaceEditProposal {
                 selected: true,
                 edit_count: draft.edits.len(),
                 edits: draft.edits,
+                preferred_line_ending: text.format().preferred_line_ending,
             });
         }
         Ok(Self {

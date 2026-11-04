@@ -125,6 +125,10 @@ impl TextBuffer {
         self.revision
     }
 
+    pub(crate) fn set_preferred_line_ending(&mut self, ending: super::LineEnding) {
+        self.format.preferred_line_ending = ending;
+    }
+
     #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.rope.len_bytes()

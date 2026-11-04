@@ -162,6 +162,7 @@ impl EditorState {
         let mut edits = EditorTransaction::new(transaction);
         edits.label = Some(proposal.label.clone());
         let mut created = Vec::new();
+        let mut preferences = Vec::new();
         for file in proposal.files.iter().filter(|file| file.selected) {
             let existing = draft
                 .state
@@ -178,7 +179,12 @@ impl EditorState {
                 created.push(id);
                 id
             };
-            let revision = draft.state.buffers[buffer].text.revision();
+            let text = &mut draft.state.buffers[buffer].text;
+            preferences.push((buffer, text.format().preferred_line_ending));
+            // Preview construction decodes the snapshot, whose preferred separator may
+            // differ from a live buffer's after earlier edits removed some newlines.
+            text.set_preferred_line_ending(file.preferred_line_ending);
+            let revision = text.revision();
             edits
                 .preconditions
                 .push(Precondition::BufferRevision { buffer, revision });
@@ -191,6 +197,9 @@ impl EditorState {
             });
         }
         draft = draft.apply_operations(&edits).map_err(|e| e.to_string())?;
+        for (buffer, ending) in preferences {
+            draft.state.buffers[buffer].text.set_preferred_line_ending(ending);
+        }
         for buffer in created {
             draft.state.set_buffer_dirty(buffer, true);
         }
@@ -402,7 +411,7 @@ mod tests {
     use crate::{
         editor::{
             state::{EditorState, TransactionId},
-            text::{ByteOffset, ByteRange, TextBuffer, TextEdit},
+            text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet},
             transaction::{EditorOperation, EditorTransaction},
         },
         workspace::{FileSnapshot, ProposalId, WorkspaceEditDraft, WorkspaceEditProposal, WorkspaceId, WorkspaceState},
@@ -438,6 +447,44 @@ mod tests {
         let mut wrong = editor.draft();
         wrong.state.buffers[buffer].text = TextBuffer::from_bytes(b"\xef\xbb\xbfA\r\nb\n").unwrap();
         assert!(wrong.workspace_commit_check(&proposal).is_err());
+    }
+
+    #[test]
+    fn workspace_edits_use_preview_separators_and_undo_separator_only_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("endings.txt");
+        let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())]).unwrap();
+        for separator_only in [false, true] {
+            let mut editor = EditorState::new(root.path().into());
+            let original: &[u8] = if separator_only { b"a\r\nb\n" } else { b"a\r\nb\r\nc\n" };
+            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(original).unwrap(), Some(path.clone())).unwrap();
+            if !separator_only {
+                editor.apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: TextEditSet::new(editor.buffers[buffer].text.revision(), vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(), "")]),
+                })).unwrap();
+            }
+            let before = editor.buffers[buffer].text.to_bytes();
+            let preference = editor.buffers[buffer].text.format().preferred_line_ending;
+            let revision = editor.buffers[buffer].text.revision();
+            let replacement = if separator_only { "a\nb\n" } else { "C\nmore\n" };
+            let proposal = WorkspaceEditProposal::build(ProposalId(1), "replace".into(), &scope,
+                vec![WorkspaceEditDraft {
+                    canonical_path: path.clone(), expected_revision: Some(revision),
+                    edits: vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(editor.buffers[buffer].text.len_bytes())).unwrap(), replacement)],
+                }],
+                vec![FileSnapshot { canonical_path: path.clone(), revision: Some(revision), bytes: before.clone() }],
+            ).unwrap();
+            let draft = editor.prepare_workspace_edit(&editor.workspace_edit_sources().unwrap(), &proposal, TransactionId(2)).unwrap();
+            draft.workspace_commit_check(&proposal).unwrap();
+            editor = draft.accept(&editor.version()).unwrap();
+            assert_eq!(editor.buffers[buffer].text.to_bytes(), proposal.files[0].proposed_bytes);
+            assert_eq!(editor.buffers[buffer].text.format().preferred_line_ending, preference);
+            editor.apply_transaction(&EditorTransaction::new(TransactionId(3)).with_operation(EditorOperation::Undo { buffer })).unwrap();
+            assert_eq!(editor.buffers[buffer].text.to_bytes(), before);
+            editor.apply_transaction(&EditorTransaction::new(TransactionId(4)).with_operation(EditorOperation::Redo { buffer })).unwrap();
+            assert_eq!(editor.buffers[buffer].text.to_bytes(), proposal.files[0].proposed_bytes);
+        }
     }
 
     #[test]
