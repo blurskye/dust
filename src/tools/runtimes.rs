@@ -16,8 +16,8 @@ use super::{
         write_managed_tool_version,
     },
     compatibility::{
-        MANAGED_RUNTIME_MARKER, patch_nix_compatibility_tree, patch_nix_compatible_executable,
-        runtime_artifact,
+        MANAGED_RUNTIME_MARKER, elf_interpreter, patch_nix_compatibility_tree,
+        patch_nix_compatible_executable, runtime_artifact,
     },
     download::{
         ToolProgressReporter, download_checked, extract_one, extract_tar_gzip_tree,
@@ -58,10 +58,21 @@ pub(super) fn managed_runtime(
         && fs::read_to_string(&marker)
             .is_ok_and(|value| value.trim().eq_ignore_ascii_case(artifact.sha256))
     {
-        if let Some(compatibility) = compatibility {
-            patch_nix_compatible_executable(&executable, compatibility, &runtime, cancellations)?;
+        let refresh = if let Some(compatibility) = compatibility {
+            elf_interpreter(&executable)?.is_some_and(|loader| {
+                loader.starts_with("/nix/store/") && Path::new(&loader) != compatibility.loader
+            })
+        } else {
+            false
+        };
+        if !refresh {
+            if let Some(compatibility) = compatibility {
+                patch_nix_compatible_executable(&executable, compatibility, &runtime, cancellations)?;
+            }
+            return Ok(executable);
         }
-        return Ok(executable);
+        // Re-extract the verified artifact rather than patching another profile's loader.
+        report("refreshing runtime compatibility", 0, None);
     }
     fs::create_dir_all(runtime.parent().ok_or("runtime has no parent")?)
         .map_err(|error| format!("cannot create runtime directory: {error}"))?;
@@ -437,9 +448,10 @@ pub(super) fn install_path_rustup_component(
         .current_dir(&cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("failed to launch rustup: {error}"))?;
+    let installer_output = child.stderr.take().map(read_installer_output);
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
     loop {
         if cancellations.try_recv().is_ok() {
@@ -460,10 +472,13 @@ pub(super) fn install_path_rustup_component(
             Ok(Some(status)) if status.success() => break,
             Ok(Some(status)) => {
                 return Err(format!(
-                    "rustup component installation exited with {}",
+                    "rustup component installation exited with {}{}",
                     status
                         .code()
-                        .map_or_else(|| "signal".into(), |code| code.to_string())
+                        .map_or_else(|| "signal".into(), |code| code.to_string()),
+                    installer_output
+                        .and_then(|output| output.recv_timeout(Duration::from_secs(1)).ok())
+                        .unwrap_or_default()
                 ));
             }
             Ok(None) => thread::sleep(Duration::from_millis(50)),
@@ -692,8 +707,10 @@ pub(super) fn uninstall_nix_lsp_profile(
     let shell =
         nix_lsp_shell(definition).ok_or("this LSP has no Dust Nix compatibility runtime")?;
     let profiles = root.join("nix-lsp-workspace/profiles");
-    let Ok(metadata) = fs::symlink_metadata(&profiles) else {
-        return Ok(());
+    let metadata = match fs::symlink_metadata(&profiles) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect Dust Nix environments: {error}")),
     };
     if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
         return Err("Dust Nix environment store is not a real directory".into());

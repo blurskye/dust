@@ -243,6 +243,65 @@ fn bun_bootstrap_is_the_pinned_glibc_baseline_artifact() {
 }
 
 #[test]
+fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
+    use super::{catalog::NixCompatibilityRuntime, compatibility::MANAGED_RUNTIME_MARKER};
+    use std::{fs, sync::mpsc};
+
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = directory.path().join(".runtimes/bun");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    let executable = runtime.join("bin/bun");
+    fs::write(
+        runtime.join(MANAGED_RUNTIME_MARKER),
+        runtime_artifact("bun").unwrap().sha256,
+    )
+    .unwrap();
+    let compatibility = NixCompatibilityRuntime {
+        loader: "/nix/store/new-glibc/lib/ld-linux-x86-64.so.2".into(),
+        nix_ld: "/unused/nix-ld".into(),
+        patchelf: "/unused/patchelf".into(),
+        library_path: String::new(),
+        runtime_path: String::new(),
+    };
+    for (loader, refresh) in [
+        (compatibility.loader.to_str().unwrap(), false),
+        ("/nix/store/old-glibc/lib/ld-linux-x86-64.so.2", true),
+    ] {
+        // A minimal ELF64 with one PT_INTERP header; it is inspected, never executed.
+        let mut elf = vec![0; 120];
+        elf[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes());
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes());
+        elf[56..58].copy_from_slice(&1u16.to_le_bytes());
+        elf[64..68].copy_from_slice(&3u32.to_le_bytes());
+        elf[72..80].copy_from_slice(&120u64.to_le_bytes());
+        elf[96..104].copy_from_slice(&(loader.len() as u64 + 1).to_le_bytes());
+        elf.extend_from_slice(loader.as_bytes());
+        elf.push(0);
+        fs::write(&executable, &elf).unwrap();
+        let (cancel, cancellations) = mpsc::channel();
+        let result = super::runtimes::managed_runtime(
+            directory.path(),
+            "bun",
+            &cancellations,
+            &mut move |phase, _, _| {
+                assert_eq!(phase, "refreshing runtime compatibility");
+                // Stop before downloading, keeping this test offline.
+                cancel.send(()).unwrap();
+            },
+            Some(&compatibility),
+        );
+        if refresh {
+            assert_eq!(result.unwrap_err(), "tool installation cancelled");
+        } else {
+            assert_eq!(result.unwrap(), executable);
+        }
+        assert_eq!(fs::read(&executable).unwrap(), elf);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
 #[ignore = "operator qualification: requires Nix plus upstream artifact network access"]
 fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
     if !super::is_nixos_host() {
@@ -862,6 +921,44 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn failed_rustup_component_installation_reports_bounded_stderr() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+
+    let directory = tempfile::tempdir().unwrap();
+    let rustup = directory.path().join("rustup");
+    fs::write(
+        &rustup,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' '{}' 'downloading component' 'download failed' 'error: certificate verification failed' >&2\nexit 1\n",
+            "x".repeat(8192)
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
+    let (_cancel, cancellations) = mpsc::channel();
+    let error = super::runtimes::install_path_rustup_component(
+        &definition,
+        &rustup,
+        &proxy,
+        directory.path(),
+        "rust-analyzer",
+        &cancellations,
+        &mut |_, _, _| {},
+    )
+    .unwrap_err();
+    assert!(error.contains("exited with 1"), "{error}");
+    assert!(error.contains("certificate verification failed"), "{error}");
+    assert!(error.len() < 512, "stderr tail must be bounded");
+}
+
 #[test]
 fn managed_uninstall_atomically_removes_only_the_selected_tool() {
     let directory = tempfile::tempdir().expect("tool store");
@@ -911,6 +1008,19 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     assert!(!profiles.join("rust-analyzer-1-link").exists());
     assert!(!profiles.join("rust-analyzer-2-link").exists());
     assert!(profiles.join("clangd").exists());
+}
+
+#[test]
+fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
+    let directory = tempfile::tempdir().unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
+    uninstall_nix_lsp_profile(&definition, directory.path()).unwrap();
+    std::fs::write(directory.path().join("nix-lsp-workspace"), b"not a directory").unwrap();
+    let error = uninstall_nix_lsp_profile(&definition, directory.path()).unwrap_err();
+    assert!(error.contains("cannot inspect Dust Nix environments"), "{error}");
 }
 
 #[cfg(unix)]

@@ -154,6 +154,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
             "printf 'READY\n'; while :; do :; done",
         ))
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
     while !cancelled
         .poll()
         .unwrap()
@@ -266,12 +267,21 @@ fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
     let id = service
         .open(request(
             root.path(),
-            "trap '' HUP TERM; sleep 30 & printf 'READY\\n'; wait",
+            "trap '' HUP TERM; sleep 30 & printf 'REA'; while [ ! -f continue ]; do :; done; printf 'DY\\n'; wait",
         ))
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(4);
-    loop {
-        if service.poll().unwrap().iter().any(|event| matches!(event, PtyEvent::Output { bytes, .. } if bytes.windows(5).any(|text| text == b"READY"))) { break; }
+    let mut output = Vec::new();
+    while !output.windows(5).any(|text| text == b"READY") {
+        for event in service.poll().unwrap() {
+            if let PtyEvent::Output { bytes, .. } = event {
+                output.extend(bytes);
+            }
+        }
+        // Release the rest only after consuming the first fragment in a separate poll.
+        if output == b"REA" {
+            std::fs::write(root.path().join("continue"), b"").unwrap();
+        }
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
@@ -288,7 +298,7 @@ fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
 
 #[cfg(unix)]
 #[test]
-fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
+fn interactive_pty_keeps_invocation_name() {
     let root = tempfile::tempdir().unwrap();
     let invocation = root.path().join("custom-sh");
     std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
@@ -314,15 +324,52 @@ fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
 
 #[cfg(unix)]
 #[test]
+fn interactive_pty_output_has_no_lifetime_quota() {
+    let root = tempfile::tempdir().unwrap();
+    let mut service = PtyService::start(256);
+    // 4224 blocks of 8192 bytes exceed the former 32 MiB lifetime limit.
+    let mut request = request(
+        root.path(),
+        "block=x; i=0; while [ $i -lt 13 ]; do block=$block$block; i=$((i+1)); done; i=0; while [ $i -lt 4224 ]; do printf '%s' \"$block\"; i=$((i+1)); done",
+    );
+    request.policy.maximum_output_bytes = 0;
+    request.policy.event_capacity = 256;
+    let id = service.open(request).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut received = 0;
+    loop {
+        for event in service.poll().unwrap() {
+            match event {
+                PtyEvent::Output { bytes, truncated, .. } => {
+                    assert!(!truncated);
+                    assert!(bytes.iter().all(|byte| *byte == b'x'));
+                    received += bytes.len();
+                }
+                PtyEvent::Exited { code, .. } => assert_eq!(code, Some(0)),
+                PtyEvent::IoComplete { id: source, result } => {
+                    assert_eq!(source, id);
+                    result.unwrap();
+                    assert_eq!(received, 33 * 1024 * 1024);
+                    return;
+                }
+                PtyEvent::Started { .. } => {}
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert!(Instant::now() < deadline, "received only {received} bytes");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn pty_resize_ack_precedes_the_childs_resize_output() {
     let root = tempfile::tempdir().unwrap();
     let mut service = PtyService::start(1);
-    let script = root.path().join("resize.py");
-    std::fs::write(&script, "import os,signal,time\ndef resized(*_): os.write(1, b'\\x1b[1;999HX')\nsignal.signal(signal.SIGWINCH, resized)\nos.write(1, b'\\x1b[?1049hREADY')\ntime.sleep(30)\n").unwrap();
-    let mut request = request(root.path(), "");
-    request.program =
-        crate::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
-    request.arguments = vec![script.display().to_string()];
+    let request = request(
+        root.path(),
+        r#"trap 'printf "\033[1;999HX"' WINCH; printf '\033[?1049hREADY'; while :; do :; done"#,
+    );
     let id = service.open(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut screen = crate::ui::PtyScreen::new(80, 8, 8);
