@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         with: { components: clippy }
       - run: scripts/qualify-linux.sh test
       - run: scripts/qualify-linux.sh clippy
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
       - run: scripts/qualify-linux.sh release
       - run: scripts/qualify-linux.sh pty
   periodic-security-and-soak:
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
       - name: Advisory scan when cargo-audit is provisioned
         run: scripts/qualify-linux.sh advisory || test $? -eq 77
       - name: Fuzz smoke when targets/tool are provisioned

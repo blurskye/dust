@@ -133,6 +133,18 @@ def run(
     set_size(descriptor, 30, 100)
     output = bytearray()
     snapshots: list[bytes] = []
+    answered = 0
+
+    def read() -> None:
+        # Answer the device attributes query Dust sends at startup, as a terminal without the
+        # kitty keyboard protocol does; unanswered, Dust waits two seconds for a reply.
+        nonlocal answered
+        output.extend(os.read(descriptor, 65536))
+        queries = bytes(output).count(b"\x1b[c")
+        if queries > answered:
+            os.write(descriptor, b"\x1b[?62c" * (queries - answered))
+            answered = queries
+
     for stage_index, (delay, data, size) in enumerate(stages):
         deadline = time.time() + delay
         expected = (stage_expectations or {}).get(stage_index)
@@ -147,7 +159,7 @@ def run(
             readable, _, _ = select.select([descriptor], [], [], 0.02)
             if readable:
                 try:
-                    output.extend(os.read(descriptor, 65536))
+                    read()
                     last_read = time.time()
                 except OSError:
                     break
@@ -177,7 +189,7 @@ def run(
         readable, _, _ = select.select([descriptor], [], [], 0.05)
         if readable:
             try:
-                output.extend(os.read(descriptor, 65536))
+                read()
             except OSError:
                 pass
         exited, observed_status = os.waitpid(pid, os.WNOHANG)

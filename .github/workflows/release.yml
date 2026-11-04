@@ -22,7 +22,7 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version"; exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         with: { targets: x86_64-unknown-linux-musl }
       - name: Install musl and packaging tools
         env: { GH_TOKEN: '${{ github.token }}' }
