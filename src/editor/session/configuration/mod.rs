@@ -279,6 +279,9 @@ impl ConfigurationSession {
         catalog: &PluginContributionCatalog,
     ) -> Result<ConfigurationCandidate, String> {
         loaded.config.validate()?;
+        validation::validate_command_references(
+            commands, &loaded.config, &loaded.dashboard, &BTreeSet::new(),
+        )?;
         let mut resolved = match resolve_configuration(commands, loaded, true)? {
             (resolved, None) => resolved,
             (_, Some(error)) => return Err(error),

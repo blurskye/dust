@@ -1493,6 +1493,82 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
 }
 
 #[test]
+fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
+    let mut app = app();
+    let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
+    spec.source = crate::editor::CommandSource::Plugin("demo".into());
+    app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
+    for label in [None, Some(""), Some("\u{1b}bad")] {
+        if let Some(label) = label {
+            loaded.config.command_labels.insert("plugin.demo.run".into(), label.into());
+        }
+        let error = app.apply_configuration_candidate(loaded.clone(), false).unwrap_err();
+        assert!(error.contains("label"), "{error}");
+    }
+    loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
+    app.apply_configuration_candidate(loaded, false).unwrap();
+    app.open_prompt(crate::ui::PromptKind::Command, "Demo".into());
+    assert!(app.ui.prompt.as_ref().unwrap().completions.iter().any(|item| item.label == "Demo" && item.detail == "Run demo"));
+}
+
+#[test]
+fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
+    let mut app = app();
+    let mut manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
+    manifest.commands.get_mut("drive").unwrap().arguments.insert("text".into(), crate::extensions::PluginArgumentDeclaration {
+        kind: crate::extensions::PluginArgumentKind::String,
+        required: true,
+    });
+    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.installed_plugins.insert("demo".into());
+    loaded.config.command_labels.insert("plugin.demo.drive".into(), "Drive demo".into());
+    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.drive".into());
+    loaded.dashboard.action[0].command = "plugin.demo.drive".into();
+    loaded.dashboard.action[0].arguments = BTreeMap::from([("text".into(), toml::Value::String("hello".into()))]);
+    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
+    assert!(diagnostic.is_none());
+    assert!(resolved.deferred_plugin_keymaps);
+    let mut invalid_arguments = loaded.clone();
+    invalid_arguments.dashboard.action[0].arguments.insert("text".into(), toml::Value::Boolean(true));
+    let (invalid_arguments, _) = super::resolve_configuration(&app.commands, invalid_arguments, true).unwrap();
+    let mut undeclared_alias = loaded.clone();
+    undeclared_alias.config.input.command_aliases.insert("Unknown".into(), "plugin.demo.missing".into());
+    undeclared_alias.config.command_labels.insert("plugin.demo.missing".into(), "Missing".into());
+    let (undeclared_alias, _) = super::resolve_configuration(&app.commands, undeclared_alias, true).unwrap();
+    app.configuration.install_fixture(resolved.clone());
+    assert!(app.recompile_plugin_contributions().is_err(), "unindexed declarations cannot be accepted");
+    app.register_indexed_plugin_commands(&index).unwrap();
+    app.extension.fixture_contribution(index).unwrap();
+    app.recompile_plugin_contributions().unwrap();
+    for invalid in [invalid_arguments, undeclared_alias] {
+        app.configuration.install_fixture(invalid);
+        assert!(app.recompile_plugin_contributions().is_err());
+    }
+    app.configuration.install_fixture(resolved);
+    let mut invalid = loaded.clone();
+    invalid.dashboard.action[0].arguments.insert("text".into(), toml::Value::Boolean(true));
+    assert!(app.apply_configuration_candidate(invalid, false).is_err());
+    let mut missing = loaded.clone();
+    missing.config.input.command_aliases.insert("Unknown".into(), "plugin.demo.missing".into());
+    missing.config.command_labels.insert("plugin.demo.missing".into(), "Missing".into());
+    assert!(app.apply_configuration_candidate(missing, false).is_err());
+    loaded.dashboard.action[0].arguments.clear();
+    assert!(app.apply_configuration_candidate(loaded, false).is_err(), "required arguments are checked after indexing");
+}
+
+#[test]
+fn disabled_plugin_command_references_are_not_deferred() {
+    let app = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
+    loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
+    assert!(super::resolve_configuration(&app.commands, loaded, true).is_err());
+}
+
+#[test]
 fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
     let app = app();
     let mut loaded = crate::config::load_bundled_config();

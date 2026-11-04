@@ -1297,7 +1297,7 @@ impl InteractiveApplication {
                 == Some(&CommandValue::String("search_match".into())))
         .then(|| invocation.clone());
         if search_match.is_some() {
-            if !self.select_next_search_match() {
+            if !self.select_next_search_match(1) {
                 self.set_mode(EditorMode::Normal);
                 return false;
             }

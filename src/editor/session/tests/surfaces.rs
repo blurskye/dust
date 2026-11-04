@@ -76,6 +76,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
         .placement;
     app.process_effect(AppEffect::WindowResizeDirectional(
         crate::editor::FocusDirection::Right,
+        1,
     ));
     assert_eq!(
         app.window_session
@@ -3509,14 +3510,14 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.process_effect(crate::editor::AppEffect::TerminalResize(1));
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 11));
-    app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Up,
-    ));
-    assert_eq!(app.window_session.terminal_height(), 14);
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 13));
-    app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Down,
-    ));
+    let mut resize = crate::editor::CommandInvocation::new("window.resize.directional", InvocationSource::Test).unwrap()
+        .with_argument("direction", CommandValue::String("up".into()));
+    resize.count = std::num::NonZeroU64::new(3);
+    app.invoke(resize.clone());
+    assert_eq!(app.window_session.terminal_height(), 18);
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 17));
+    resize.arguments.insert("direction".into(), CommandValue::String("down".into()));
+    app.invoke(resize);
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.workspace_render_height(), 11);
     app.handle_event(crate::ui::UiEvent::Resize(60, 20));

@@ -249,7 +249,7 @@ fn remove_setting(table: &mut dyn toml_edit::TableLike, segments: &[String]) -> 
         None => (false, None),
     };
     if empty {
-        table.remove(first);
+        return remove_setting(table, &segments[..1]);
     }
     orphan
 }

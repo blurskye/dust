@@ -2890,8 +2890,10 @@ impl InteractiveApplication {
                 self.open_lsp_completion_documentation(true)
             }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::DiagnosticNavigate { direction, filter } => {
-                self.navigate_diagnostic(direction, filter)
+            AppEffect::DiagnosticNavigate { direction, filter, count } => {
+                for _ in 0..count {
+                    self.navigate_diagnostic(direction, filter);
+                }
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspRenamePrompt => self.open_rename_prompt(),
@@ -4270,9 +4272,9 @@ impl InteractiveApplication {
         )
     }
 
-    pub(super) fn repeat_last_change(&mut self) {
+    pub(super) fn repeat_last_change(&mut self, count: Option<std::num::NonZeroU64>) {
         let limit = REPEAT_STEP_LIMIT;
-        match self.input.repeat_plan(limit) {
+        match self.input.repeat_plan(limit, count) {
             Ok(invocations) => {
                 for invocation in invocations {
                     self.invoke(invocation);
@@ -4322,7 +4324,7 @@ impl InteractiveApplication {
         self.input.finish_macro_replay();
     }
 
-    pub(super) fn search_word_under_cursor(&mut self, forward: bool) {
+    pub(super) fn search_word_under_cursor(&mut self, forward: bool, count: u64) {
         let Some(view_id) = self.state.active_view else {
             return;
         };
@@ -4350,7 +4352,7 @@ impl InteractiveApplication {
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
         self.input.remember_word_search();
-        self.perform_search(forward);
+        self.perform_search(forward, count);
     }
 
     pub(super) fn apply_authoritative_editor_transaction(
@@ -5475,7 +5477,7 @@ impl InteractiveApplication {
                 self.ui.search_query = Some(prompt.input);
                 self.input.remember_search(forward);
                 self.close_prompt();
-                self.perform_search(forward);
+                self.perform_search(forward, 1);
             }
         }
     }
@@ -5528,7 +5530,7 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn perform_search(&mut self, forward: bool) {
+    pub(super) fn perform_search(&mut self, forward: bool, count: u64) {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
             return;
@@ -5543,7 +5545,7 @@ impl InteractiveApplication {
         let buffer = &self.state.buffers[buffer_id];
         let revision = buffer.text.revision();
         let source = buffer.text.to_string();
-        let start = if forward && cursor_offset.get() < buffer.text.len_bytes() {
+        let mut start = if forward && cursor_offset.get() < buffer.text.len_bytes() {
             cursor_offset.get()
                 + source[cursor_offset.get()..]
                     .graphemes(true)
@@ -5552,15 +5554,22 @@ impl InteractiveApplication {
         } else {
             cursor_offset.get()
         };
-        let found = crate::editor::input::search_match(
-            &source,
-            &query,
-            self.configuration.settings().search.smart_case,
-            self.input.whole_word_search(),
-            start,
-            forward,
-            self.configuration.settings().search.wrap,
-        );
+        let mut found = Ok(None);
+        for _ in 0..count {
+            found = crate::editor::input::search_match(
+                &source,
+                &query,
+                self.configuration.settings().search.smart_case,
+                self.input.whole_word_search(),
+                start,
+                forward,
+                self.configuration.settings().search.wrap,
+            );
+            let Ok(Some(matched)) = &found else { break };
+            start = matched.start + if forward {
+                source[matched.start..].graphemes(true).next().map_or(0, str::len)
+            } else { 0 };
+        }
         let target = match found {
             Ok(Some(found)) => found.start,
             Ok(None) => {
@@ -5591,7 +5600,7 @@ impl InteractiveApplication {
 
     /// `gn`: selects the search match under the cursor, else the next one, as Vim does.
     /// Returns false, having said why, when there is none.
-    pub(super) fn select_next_search_match(&mut self) -> bool {
+    pub(super) fn select_next_search_match(&mut self, count: u64) -> bool {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
             return false;
@@ -5616,13 +5625,18 @@ impl InteractiveApplication {
             }
         };
         let wrap = self.configuration.settings().search.wrap;
-        let mut found = matches.iter().filter(|found| !found.is_empty());
-        let Some(found) = found
-            .clone()
-            .find(|found| found.end > cursor)
-            .or_else(|| wrap.then(|| found.next()).flatten())
-            .cloned()
-        else {
+        let matches = matches.iter().filter(|found| !found.is_empty()).collect::<Vec<_>>();
+        let first = matches.iter().position(|found| found.end > cursor)
+            .or_else(|| (wrap && !matches.is_empty()).then_some(0));
+        let target = first.and_then(|first| {
+            let index = first as u128 + u128::from(count.saturating_sub(1));
+            if wrap {
+                Some((index % matches.len() as u128) as usize)
+            } else {
+                usize::try_from(index).ok().filter(|index| *index < matches.len())
+            }
+        });
+        let Some(found) = target.map(|index| matches[index]) else {
             self.show_error(self.message("pattern_not_found", &[("query", query)]));
             return false;
         };
@@ -13821,18 +13835,20 @@ impl InteractiveApplication {
             AppEffect::NotificationDismiss => {
                 self.clear_notice();
             }
-            AppEffect::SearchRepeat { reverse } => {
+            AppEffect::SearchRepeat { reverse, count } => {
                 let forward = self.input.search_direction(reverse);
-                self.perform_search(forward);
+                self.perform_search(forward, count);
             }
-            AppEffect::SearchWord { forward } => self.search_word_under_cursor(forward),
+            AppEffect::SearchWord { forward, count } => {
+                self.search_word_under_cursor(forward, count);
+            },
             AppEffect::SubstituteAll => {
                 if self.substitute_confirm.is_some() {
                     self.answer_substitution(true, true);
                 }
             }
-            AppEffect::SearchSelectNext => {
-                self.select_next_search_match();
+            AppEffect::SearchSelectNext(count) => {
+                self.select_next_search_match(count);
             }
             AppEffect::Scroll {
                 kind,
@@ -14018,9 +14034,12 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            AppEffect::WindowResizeDirectional(direction) => {
-                if let Err(error) = self.resize_focused_window(direction) {
-                    self.show_error(error);
+            AppEffect::WindowResizeDirectional(direction, count) => {
+                for _ in 0..count {
+                    if let Err(error) = self.resize_focused_window(direction) {
+                        self.show_error(error);
+                        break;
+                    }
                 }
             }
             AppEffect::WindowMove { target, x, y } => {
@@ -14034,7 +14053,7 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            AppEffect::RepeatLast => self.repeat_last_change(),
+            AppEffect::RepeatLast(count) => self.repeat_last_change(count),
             AppEffect::MacroRecordStart(register) => {
                 self.input.start_macro_recording(register);
                 self.notify_message(

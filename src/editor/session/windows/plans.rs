@@ -23,6 +23,7 @@ pub enum LayoutAction {
     NewTab,
     CloseTab,
     FocusTab(isize),
+    FocusTabNumber(usize),
     Zoom,
 }
 
@@ -720,6 +721,11 @@ impl WindowSession {
             LayoutAction::CloseTab => EditorOperation::CloseTab,
             LayoutAction::Zoom => EditorOperation::ToggleZoom,
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab { offset, wrap: true },
+            LayoutAction::FocusTabNumber(number) => EditorOperation::FocusTabId {
+                tab: source.tabs().keys().nth(number.saturating_sub(1)).ok_or_else(|| {
+                    LayoutPlanError::Rejected("tab number is out of range".into())
+                })?,
+            },
         });
         plan.hide_dashboard = true;
         Ok(plan)

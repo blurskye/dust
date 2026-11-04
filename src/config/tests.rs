@@ -1119,6 +1119,15 @@ fn settings_catalog_lists_every_bundled_setting_once() {
 }
 
 #[test]
+fn resetting_the_last_inline_setting_preserves_parent_comments() {
+    for tail in ["", "wrap = true\n"] {
+        let source = format!("# keep this\neditor = {{ tab_width = 2 }} # explanation\n{tail}");
+        let reset = super::catalog::edited_source(&source, "editor.tab_width", None).unwrap();
+        assert_eq!(reset, format!("# keep this\n# explanation\n{tail}"));
+    }
+}
+
+#[test]
 fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     let edited = |source: &str, key: &str, value: Option<toml::Value>| {
         super::catalog::edited_source(source, key, value).unwrap()

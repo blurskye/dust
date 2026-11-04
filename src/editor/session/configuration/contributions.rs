@@ -49,6 +49,9 @@ impl ConfigurationSession {
         commands: &CommandRegistry<AppEffect>,
         catalog: &PluginContributionCatalog,
     ) -> Result<ContributionCandidate, String> {
+        super::validation::validate_command_references(
+            commands, self.settings(), self.dashboard(), &std::collections::BTreeSet::new(),
+        )?;
         let keymaps = self.compile_contributions(commands, catalog, false)?;
         let windows = Self::resolve_plugin_window_rules(
             self.raw_windows(),

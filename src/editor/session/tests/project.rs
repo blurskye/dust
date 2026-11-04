@@ -2042,17 +2042,17 @@ fn search_moves_forward_wraps_and_repeats() {
     );
     app.set_dashboard_visibility(false);
     app.ui.search_query = Some("one".into());
-    app.perform_search(true);
+    app.perform_search(true, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)
     );
-    app.perform_search(true);
+    app.perform_search(true, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(0)
     );
-    app.perform_search(false);
+    app.perform_search(false, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)

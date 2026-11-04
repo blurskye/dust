@@ -152,7 +152,10 @@ pub(super) fn register_commands(
                     ));
                 }
             };
-            Ok(AppEffect::WindowResizeDirectional(direction))
+            Ok(AppEffect::WindowResizeDirectional(
+                direction,
+                invocation.count.map_or(1, |count| count.get()),
+            ))
         },
     )?;
     register(

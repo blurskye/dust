@@ -31,7 +31,7 @@ pub(super) fn register_commands(
         "Repeat last change",
         ContextRequirement::View,
         ArgumentSchema::default(),
-        |_| AppEffect::RepeatLast,
+        |invocation| AppEffect::RepeatLast(invocation.count),
     )?;
     register(
         registry,
@@ -254,7 +254,22 @@ pub(super) fn register_commands(
             title,
             ContextRequirement::View,
             ArgumentSchema::default(),
-            move |_| AppEffect::Layout(action),
+            move |invocation| {
+                let count = invocation.count.map_or(1, |count| count.get());
+                let steps = isize::try_from(count).unwrap_or(isize::MAX);
+                let action = match action {
+                    LayoutAction::ResizePane(direction) => LayoutAction::ResizePane(
+                        direction * i8::try_from(count).unwrap_or(i8::MAX),
+                    ),
+                    LayoutAction::FocusPane(direction) => LayoutAction::FocusPane(direction * steps),
+                    LayoutAction::FocusTab(1) if invocation.count.is_some() => {
+                        LayoutAction::FocusTabNumber(usize::try_from(count).unwrap_or(usize::MAX))
+                    }
+                    LayoutAction::FocusTab(direction) => LayoutAction::FocusTab(direction * steps),
+                    action => action,
+                };
+                AppEffect::Layout(action)
+            },
         )?;
     }
     for (id, title, toggle) in [
@@ -311,6 +326,7 @@ pub(super) fn register_commands(
         |invocation| {
             Ok(AppEffect::SearchWord {
                 forward: bool_arg(invocation, "forward")?,
+                count: invocation.count.map_or(1, |count| count.get()),
             })
         },
     )?;
@@ -328,7 +344,7 @@ pub(super) fn register_commands(
         "Select the next search match",
         ContextRequirement::Buffer,
         ArgumentSchema::default(),
-        |_| Ok(AppEffect::SearchSelectNext),
+        |invocation| Ok(AppEffect::SearchSelectNext(invocation.count.map_or(1, |count| count.get()))),
     )?;
     register(
         registry,
@@ -339,6 +355,7 @@ pub(super) fn register_commands(
         |invocation| {
             Ok(AppEffect::SearchRepeat {
                 reverse: bool_arg(invocation, "reverse")?,
+                count: invocation.count.map_or(1, |count| count.get()),
             })
         },
     )?;
