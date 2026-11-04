@@ -10804,12 +10804,18 @@ impl InteractiveApplication {
         source: LspRuntimeSource,
         executable: PathBuf,
     ) {
+        if self.workspace.execution_allowed().is_err() {
+            return;
+        }
         self.set_tool_probe_directory();
         self.tooling
             .queue_tool_version_probe(definition, source, executable)
     }
 
     pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
+        if self.workspace.execution_allowed().is_err() {
+            return;
+        }
         self.set_tool_probe_directory();
         self.tooling.queue_tool_version_probes(category)
     }
@@ -11809,7 +11815,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_tool_version_results(&mut self) {
-        let (changed, unavailable_rustup) = self.tooling.poll_versions();
+        let (changed, unavailable_rustup) = self
+            .tooling
+            .poll_versions(self.workspace.execution_allowed().is_ok());
         if changed {
             self.language.reset_autostart();
             let category = self.ui.tool_menu.as_ref().map(|menu| menu.category.clone());

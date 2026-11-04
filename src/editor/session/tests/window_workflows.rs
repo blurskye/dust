@@ -55,18 +55,27 @@ fn tiny_terminal_projection_clips_safely_and_restores_the_same_sessions() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.terminal_fixture();
+    let sessions = session.terminal_snapshots();
+    assert_eq!(sessions.len(), 2);
+    assert_ne!(sessions[0].0, sessions[1].0);
+    for (id, lines) in &sessions {
+        assert!(lines.iter().any(|line| line.contains(&format!("terminal {id} contents"))));
+    }
     session.resize(0, 0);
     let zero = session.frame();
     assert_eq!((zero.grid.width(), zero.grid.height()), (0, 0));
     assert_eq!(zero.cursor, None);
+    assert_eq!(session.terminal_snapshots(), sessions);
     session.resize(3, 3);
     let tiny = session.frame();
     assert_eq!((tiny.grid.width(), tiny.grid.height()), (3, 3));
     if let Some((x, y, _)) = tiny.cursor {
         assert!(x < 3 && y < 3);
     }
+    assert_eq!(session.terminal_snapshots(), sessions);
     session.resize(80, 24);
     let restored = session.frame();
+    assert_eq!(session.terminal_snapshots(), sessions);
     assert_eq!(
         session
             .projection()

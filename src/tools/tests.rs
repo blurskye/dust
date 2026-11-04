@@ -961,7 +961,7 @@ fn version_service_shutdown_with_full_results_is_bounded() {
             current_directory: None,
             timeout: Duration::from_secs(1),
         };
-        while service.probe(request.clone()).is_err() {
+        while service.probe(&request).is_err() {
             thread::sleep(Duration::from_millis(2));
         }
     }

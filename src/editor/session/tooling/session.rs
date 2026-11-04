@@ -7,8 +7,9 @@ use crate::tools::{
 };
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
+    sync::mpsc::TrySendError,
     time::Duration,
 };
 
@@ -25,6 +26,7 @@ pub(super) struct ToolingSession {
     version_service: ToolVersionService,
     probe_directory: RefCell<Option<PathBuf>>,
     version_pending: BTreeSet<String>,
+    version_queued: VecDeque<ToolVersionRequest>,
     versions: BTreeMap<String, Result<String, String>>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,6 +145,7 @@ impl ToolingSession {
             version_service: ToolVersionService::start(),
             probe_directory: RefCell::new(None),
             version_pending: BTreeSet::new(),
+            version_queued: VecDeque::new(),
             versions: BTreeMap::new(),
         }
     }
@@ -158,6 +161,7 @@ impl ToolingSession {
     pub(super) fn forget_probe(&mut self, key: &str) {
         self.versions.remove(key);
         self.version_pending.remove(key);
+        self.version_queued.retain(|request| request.id != key);
     }
     pub(super) fn refresh(&mut self) {
         self.reinspect(None);
@@ -186,8 +190,9 @@ impl ToolingSession {
         self.version_service = ToolVersionService::start();
         // A replacement cannot complete requests admitted by the old worker.
         self.version_pending.clear();
+        self.version_queued.clear();
     }
-    pub(super) fn poll_versions(&mut self) -> (bool, bool) {
+    pub(super) fn poll_versions(&mut self, execution_allowed: bool) -> (bool, bool) {
         let mut changed = false;
         let mut unavailable = false;
         let mut rustup_key = None;
@@ -212,6 +217,14 @@ impl ToolingSession {
             unavailable |= rustup_key.as_ref() == Some(&result.id) && result.result.is_err();
             self.versions.insert(result.id, result.result);
             changed = true;
+        }
+        if execution_allowed {
+            changed |= self.submit_version_probes();
+        } else {
+            for request in self.version_queued.drain(..) {
+                self.version_pending.remove(&request.id);
+                changed = true;
+            }
         }
         (changed, unavailable)
     }
@@ -541,7 +554,8 @@ impl ToolingSession {
             }
             LspRuntimeSource::Managed => self.selected_managed_executable(definition).is_some(),
             LspRuntimeSource::Nix => {
-                nix_lsp_tool_installed(definition)
+                nix_fallback
+                    && nix_lsp_tool_installed(definition)
                     && self.selected_managed_executable(definition).is_some()
             }
         }
@@ -561,11 +575,8 @@ impl ToolingSession {
             || format!("{}:{}", definition.id, source.key()),
             |path| format!("{}:{}:{}", definition.id, source.key(), path.display()),
         );
-        if definition.id == "rust-analyzer"
-            && source == LspRuntimeSource::Path
-            && let Some(directory) = self.probe_directory.borrow().as_ref()
-        {
-            return format!("{key}:{}", directory.display());
+        if let Some(directory) = self.probe_directory.borrow().as_ref() {
+            return format!("{key}:{directory:?}");
         }
         key
     }
@@ -702,21 +713,38 @@ impl ToolingSession {
             self.probe_directory.borrow().clone(),
             Duration::from_secs(2),
         );
-        match self.version_service.probe(ToolVersionRequest {
-            id: key.clone(),
+        self.version_pending.insert(key.clone());
+        self.version_queued.push_back(ToolVersionRequest {
+            id: key,
             executable,
             arguments,
             environment,
             current_directory,
             timeout,
-        }) {
-            Ok(()) => {
-                self.version_pending.insert(key);
-            }
-            Err(error) => {
-                self.versions.insert(key, Err(error));
+        });
+        self.submit_version_probes();
+    }
+
+    fn submit_version_probes(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(request) = self.version_queued.pop_front() {
+            match self.version_service.probe(&request) {
+                Ok(()) => {}
+                Err(TrySendError::Full(())) => {
+                    self.version_queued.push_front(request);
+                    break;
+                }
+                Err(TrySendError::Disconnected(())) => {
+                    self.version_pending.remove(&request.id);
+                    self.versions.insert(
+                        request.id,
+                        Err("tool-version probe worker stopped".into()),
+                    );
+                    changed = true;
+                }
             }
         }
+        changed
     }
 
     pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
@@ -769,7 +797,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rustup_probes_use_project_directory_and_separate_cached_results() {
+    fn full_probe_queue_retries_without_caching_admission_errors() {
+        use std::{fs, os::unix::fs::PermissionsExt, thread, time::Instant};
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("probe");
+        fs::write(&executable, "#!/bin/sh\nif [ \"$1\" = block ]; then\n  printf started > started\n  while [ ! -f release ]; do sleep 0.01; done\nfi\nprintf 'server 1.2.3'\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "gopls")
+            .unwrap();
+        let mut tooling = ToolingSession::new(Vec::new());
+        tooling.set_probe_directory(Some(root.path().into()));
+        definition.probe_args = vec!["block".into()];
+        tooling.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !root.path().join("started").exists() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        definition.probe_args.clear();
+        definition.probe_args.push("--version".into());
+        for id in 0..40 {
+            definition.id = format!("queued-{id}");
+            tooling.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable.clone());
+        }
+        assert_eq!(tooling.version_queued.len(), 8);
+        assert_eq!(tooling.version_pending.len(), 41);
+        assert!(tooling.versions.is_empty());
+        fs::write(root.path().join("release"), "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !tooling.version_pending.is_empty() {
+            tooling.poll_versions(true);
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(tooling.version_queued.is_empty());
+        assert_eq!(tooling.versions.len(), 41);
+        assert!(tooling.versions.values().all(|version| version.as_deref() == Ok("server 1.2.3")));
+    }
+
+    #[test]
+    fn tool_probes_use_project_directory_and_separate_cached_results() {
         use std::{fs, os::unix::fs::PermissionsExt, thread, time::Instant};
         let root = tempfile::tempdir().unwrap();
         let one = root.path().join("one");
@@ -780,30 +849,35 @@ mod tests {
         let executable = root.path().join("rust-analyzer");
         fs::write(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n").unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        let mut definition = crate::tools::bundled_tool_catalog()
-            .into_iter()
-            .find(|tool| tool.id == "rust-analyzer")
-            .unwrap();
-        definition.probe_args = vec!["--version".into()];
         let mut tooling = ToolingSession::new(Vec::new());
-        for (directory, success) in [(one, false), (two, true)] {
-            tooling.set_probe_directory(Some(directory));
-            let key =
-                tooling.tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
-            assert!(!tooling.versions.contains_key(&key));
-            tooling.queue_tool_version_probe(
-                &definition,
-                LspRuntimeSource::Path,
-                executable.clone(),
-            );
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while !tooling.versions.contains_key(&key) {
-                tooling.poll_versions();
-                assert!(Instant::now() < deadline);
-                thread::sleep(Duration::from_millis(2));
+        for id in ["rust-analyzer", "gopls"] {
+            let mut definition = crate::tools::bundled_tool_catalog()
+                .into_iter()
+                .find(|tool| tool.id == id)
+                .unwrap();
+            definition.probe_args = vec!["--version".into()];
+            for source in [LspRuntimeSource::Path, LspRuntimeSource::Managed, LspRuntimeSource::Nix] {
+                tooling.set_probe_directory(Some(one.clone()));
+                let first = tooling.tool_version_key(&definition, source, Some(&executable));
+                tooling.set_probe_directory(Some(two.clone()));
+                assert_ne!(first, tooling.tool_version_key(&definition, source, Some(&executable)));
             }
-            assert_eq!(tooling.versions[&key].is_ok(), success);
+            for source in [LspRuntimeSource::Path, LspRuntimeSource::Managed] {
+                for (directory, success) in [(&one, false), (&two, true)] {
+                    tooling.set_probe_directory(Some(directory.clone()));
+                    let key = tooling.tool_version_key(&definition, source, Some(&executable));
+                    assert!(!tooling.versions.contains_key(&key));
+                    tooling.queue_tool_version_probe(&definition, source, executable.clone());
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while !tooling.versions.contains_key(&key) {
+                        tooling.poll_versions(true);
+                        assert!(Instant::now() < deadline);
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    assert_eq!(tooling.versions[&key].is_ok(), success);
+                }
+            }
         }
-        assert_eq!(tooling.versions.len(), 2);
+        assert_eq!(tooling.versions.len(), 8);
     }
 }

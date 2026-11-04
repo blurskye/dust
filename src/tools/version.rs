@@ -97,12 +97,15 @@ impl ToolVersionService {
         }
     }
 
-    pub fn probe(&self, request: ToolVersionRequest) -> Result<(), String> {
+    pub fn probe(
+        &self,
+        request: &ToolVersionRequest,
+    ) -> Result<(), TrySendError<()>> {
         self.sender
-            .try_send(ToolVersionCommand::Probe(request))
+            .try_send(ToolVersionCommand::Probe(request.clone()))
             .map_err(|error| match error {
-                TrySendError::Full(_) => "tool-version probe queue is full".into(),
-                TrySendError::Disconnected(_) => "tool-version probe worker stopped".into(),
+                TrySendError::Full(_) => TrySendError::Full(()),
+                TrySendError::Disconnected(_) => TrySendError::Disconnected(()),
             })
     }
 

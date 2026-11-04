@@ -211,10 +211,11 @@ pub fn bundled_tool_catalog() -> Vec<ToolDefinition> {
 pub fn discover_executable(executable: &str) -> Option<PathBuf> {
     let candidate = Path::new(executable);
     if candidate.components().count() > 1 {
-        return executable_file(candidate).then(|| candidate.to_path_buf());
+        let path = std::path::absolute(candidate).ok()?;
+        return executable_file(&path).then_some(path);
     }
     env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
-        let path = directory.join(executable);
+        let path = std::path::absolute(directory.join(executable)).ok()?;
         executable_file(&path).then_some(path)
     })
 }
@@ -244,6 +245,9 @@ impl PathExecutables {
         let mut found = HashMap::new();
         let mut listed = BTreeSet::new();
         for directory in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
+            let Ok(directory) = std::path::absolute(directory) else {
+                continue;
+            };
             if !listed.insert(directory.clone()) {
                 continue;
             }
@@ -758,6 +762,18 @@ pub fn inspect_tools() -> Vec<ToolEntry> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn path_lookup_resolves_relative_executables_before_changing_directory() {
+        let cwd = env::current_dir().unwrap();
+        let root = tempfile::tempdir_in(&cwd).unwrap();
+        let path = root.path().join("clangd");
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        let relative = path.strip_prefix(&cwd).unwrap();
+        assert!(!relative.is_absolute());
+        assert_eq!(discover_executable(relative.to_str().unwrap()), Some(path));
+    }
 
     #[test]
     fn path_lookup_skips_nonexecutable_files() {
