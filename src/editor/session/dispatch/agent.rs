@@ -227,8 +227,10 @@ impl AgentSession {
     }
 
     fn respond(&mut self, id: Value, result: Result<Value, String>) {
-        if let Some(process) = &mut self.process {
-            let _ = process.respond(id, result);
+        if let Some(process) = &mut self.process
+            && let Err(error) = process.respond(id, result)
+        {
+            self.stop(&error);
         }
     }
 
@@ -239,10 +241,10 @@ impl AgentSession {
         let Some(id) = self.id.clone() else {
             return;
         };
-        let Some(mut parts) = self.queued.pop_front() else {
+        let Some(mut parts) = self.queued.front().cloned() else {
             return;
         };
-        if std::mem::take(&mut self.recap) {
+        if self.recap {
             let before = self
                 .entries
                 .iter()
@@ -254,8 +256,16 @@ impl AgentSession {
             );
         }
         match self.request("session/prompt", agent::prompt_params(&id, &parts)) {
-            Ok(request) => self.phase = Phase::Prompting(request),
-            Err(error) => self.entries.push(Entry::Notice(error)),
+            Ok(request) => {
+                self.queued.pop_front();
+                self.recap = false;
+                self.phase = Phase::Prompting(request);
+            }
+            Err(error) => {
+                if !matches!(self.entries.last(), Some(Entry::Notice(previous)) if previous == &error) {
+                    self.entries.push(Entry::Notice(error));
+                }
+            }
         }
     }
 
@@ -322,7 +332,6 @@ impl AgentSession {
         self.requests.clear();
         self.preferred = preferred;
         self.meta = meta;
-        self.recap = false;
     }
 
     fn working(&self) -> bool {
@@ -398,17 +407,18 @@ impl AgentSession {
                 offered.join(", ")
             ));
         };
-        self.preferred.insert("model".into(), value.value.clone());
+        let (id, value) = (option.id.clone(), value.value.clone());
+        self.preferred.remove("model");
+        self.preferred.insert(id, value);
         Ok(())
     }
 
     fn apply_preferred(&mut self) {
         for (key, value) in std::mem::take(&mut self.preferred) {
-            if self
-                .option(&key)
-                .is_some_and(|option| option.current != value)
-                && let Err(error) = self.set_option(&key, &value)
-            {
+            if self.option(&key).is_some_and(|option| option.current == value) {
+                continue;
+            }
+            if let Err(error) = self.set_option(&key, &value) {
                 if self.parent.is_some() {
                     self.stop(&error);
                     break;
@@ -492,8 +502,8 @@ impl InteractiveApplication {
             .terminal_session
             .descriptions()
             .into_iter()
-            .find(|(_, profile, lifecycle)| {
-                *profile == name
+            .find(|(id, profile, lifecycle)| {
+                self.agent_terminal(super::PtyId(*id)) && *profile == name
                     && matches!(
                         lifecycle,
                         ContentLifecycle::Preflight
@@ -502,7 +512,8 @@ impl InteractiveApplication {
                     )
             })
             .map(|(id, ..)| super::PtyId(id));
-        let selection = self.state.active_view.and_then(|view| {
+        let source_view = self.state.active_view;
+        let selection = source_view.and_then(|view| {
             self.state.views[view].selection?;
             let buffer = &self.state.buffers[self.state.views[view].buffer];
             let text = selected_text(&buffer.text, &self.state.views[view], self.state.policy);
@@ -516,19 +527,24 @@ impl InteractiveApplication {
         });
         if let Some(id) = running {
             self.reveal_terminal(id);
+            self.terminal_session.enter_terminal_input_mode(id);
             if let Some(text) = selection {
-                if let Some(view) = self.state.active_view {
-                    self.state.views[view].selection = None;
-                }
-                self.set_mode(EditorMode::Normal);
-                if let Err(error) = self.terminal_session.send(
+                match self.terminal_session.send(
                     id,
                     super::TerminalInput::Paste(&text),
                     &self.workspace,
                 ) {
-                    self.show_error(error);
+                    Ok(true) => {
+                        if let Some(view) = source_view {
+                            self.state.views[view].selection = None;
+                        }
+                        self.set_mode(EditorMode::Normal);
+                    }
+                    Ok(false) => self.show_error("the agent terminal did not accept the selection"),
+                    Err(error) => self.show_error(error),
                 }
             }
+            self.sync_terminal_panel();
             return;
         }
         let program = crate::config::TerminalProfileConfig {
@@ -548,6 +564,7 @@ impl InteractiveApplication {
             self.window_session
                 .navigation_stamp(self.state.window_version(), self.state.active_view),
             self.input.capture_epoch(),
+            true,
         ) {
             Ok(intent) => {
                 self.run_trusted(super::TrustedAction::OpenTerminal(intent));
@@ -616,7 +633,6 @@ impl InteractiveApplication {
     pub(super) fn agent_ask(&mut self, question: String) {
         let question = question.trim().to_owned();
         if question.is_empty() {
-            self.agent.context.clear();
             return;
         }
         if self.agent.sessions.is_empty() {
@@ -1416,7 +1432,18 @@ impl InteractiveApplication {
     pub(super) fn process_agent_events(&mut self) {
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
-            let mut save = false;
+            let session = &mut self.agent.sessions[index];
+            if let Some(process) = &mut session.process
+                && let Err(error) = process.flush_responses()
+            {
+                session.stop(&error);
+                changed = true;
+            }
+            let phase = session.phase;
+            let entries = session.entries.len();
+            session.send_next_prompt();
+            let mut save = phase != session.phase || entries != session.entries.len();
+            changed |= save;
             for _ in 0..MESSAGES_PER_TICK {
                 let Some(message) = self.agent.sessions[index]
                     .process
@@ -3082,6 +3109,118 @@ mod tests {
                     .contains("parent")
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_full_writer_preserves_prompt_context_and_recap_until_retry() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let session = &mut app.agent.sessions[index];
+        session.id = Some("s".into());
+        session.recap = true;
+        session.entries = vec![Entry::Agent("earlier answer".into()), Entry::User { text: "question".into(), context: vec![] }];
+        let parts = vec![PromptPart::File { path: session.root.join("file.rs"), text: Some("selection".into()) }, PromptPart::Text("question".into())];
+        session.queued.push_back(parts.clone());
+        session.process = Some(AgentProcess::spawn(Path::new("/bin/sh"), &["-c".into(), "sleep 60".into()], &BTreeMap::new(), &session.root).unwrap());
+        let process = session.process.as_mut().unwrap();
+        let mut full = false;
+        for _ in 0..32 {
+            if process.notify("busy", json!({"text": "x".repeat(128 * 1024)})).is_err() {
+                full = true;
+                break;
+            }
+        }
+        assert!(full);
+        session.send_next_prompt();
+        assert_eq!(session.phase, Phase::Ready);
+        assert_eq!(session.queued.front(), Some(&parts));
+        assert!(session.recap);
+        assert!(matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("queue is full")));
+        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.send_next_prompt();
+        assert!(matches!(session.phase, Phase::Prompting(_)));
+        assert!(session.queued.is_empty());
+        assert!(!session.recap);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(AgentMessage::Request { method, params, .. }) = session.process.as_ref().unwrap().try_message() {
+                assert_eq!(method, "session/prompt");
+                assert!(params["prompt"][0]["text"].as_str().unwrap().contains("earlier answer"));
+                assert_eq!(params["prompt"][1]["resource"]["text"], "selection");
+                assert_eq!(params["prompt"][2]["text"], "question");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_recap_survives_failed_session_creation_and_reattachment() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let session = &mut app.agent.sessions[index];
+        session.earlier = Some("old".into());
+        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.open_session();
+        let Phase::Creating(request) = session.phase else { panic!("new session"); };
+        assert!(session.recap && session.earlier.is_none());
+        app.handle_agent_response(index, request, Err("startup failed".into()));
+        let session = &mut app.agent.sessions[index];
+        assert!(session.process.is_none());
+        let process = AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap();
+        session.attach((process, Phase::Initializing(10), BTreeMap::new(), None));
+        assert!(session.recap);
+        assert!(session.earlier.is_none());
+    }
+
+    #[test]
+    fn agent_unsupported_profile_options_are_reported() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let session = &mut app.agent.sessions[index];
+        session.id = Some("s".into());
+        session.preferred.insert("mode".into(), "plan".into());
+        session.apply_preferred();
+        assert!(matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("has no option `mode`")));
+    }
+
+    #[test]
+    fn agent_empty_question_keeps_attached_context() {
+        let mut app = test_app();
+        let context = vec![PromptPart::File { path: app.state.workspace_root.join("file.rs"), text: Some("selection".into()) }];
+        app.agent.context = context.clone();
+        app.agent_ask("  \n ".into());
+        assert_eq!(app.agent.context, context);
+        assert!(app.agent.sessions.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_explicit_subagent_model_replaces_profile_alias_and_actual_id() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let session = &mut app.agent.sessions[index];
+        session.parent = Some(99);
+        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.phase = Phase::Creating(10);
+        session.preferred = BTreeMap::from([
+            (SUBAGENT_MODEL.into(), "a".into()),
+            ("model".into(), "b".into()),
+            ("provider_model".into(), "b".into()),
+        ]);
+        session.queued.push_back(vec![PromptPart::Text("task".into())]);
+        app.handle_agent_response(index, 10, Ok(json!({"sessionId": "s", "configOptions": [{
+            "id": "provider_model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "a", "options": [{"value": "a"}, {"value": "b"}],
+        }]})));
+        let session = &app.agent.sessions[index];
+        assert!(matches!(session.phase, Phase::Prompting(_)));
+        assert!(session.requests.is_empty());
+        assert!(session.queued.is_empty());
+        assert_eq!(session.option("model").unwrap().current, "a");
     }
 
     #[cfg(unix)]

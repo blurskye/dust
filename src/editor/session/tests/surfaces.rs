@@ -3907,6 +3907,93 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
+fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
+    let name = loaded.config.agents.default.clone();
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
+    loaded.config.terminals.profiles.insert(name.clone(), crate::config::TerminalProfileConfig {
+        program: "/bin/sh".into(), arguments: vec!["-c".into(), "echo SHELL_READY; cat".into()],
+        cwd: None, environment: Default::default(), columns: 80, rows: 24, float: false, close_on_exit: false,
+    });
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open(&name);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !driver.terminal_lines().iter().any(|line| line.contains("SHELL_READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let shell = driver.application_mut().displayed_terminal().unwrap();
+    assert!(!driver.application_mut().agent_terminal(shell));
+    driver.application_mut().process_effect(crate::editor::AppEffect::AgentAsk);
+    while !driver.terminal_lines().iter().any(|line| line.contains("AGENT_READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let app = driver.application_mut();
+    let agent = app.keyboard_terminal().unwrap();
+    assert_ne!(shell, agent);
+    assert!(app.agent_terminal(agent));
+    assert_eq!(app.terminal_session.descriptions().len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
+    let name = loaded.config.agents.default.clone();
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.application_mut().process_effect(crate::editor::AppEffect::AgentAsk);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !driver.terminal_lines().iter().any(|line| line.contains("AGENT_READY")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let app = driver.application_mut();
+    let agent = app.keyboard_terminal().unwrap();
+    app.terminal_session.enter_terminal_normal_mode(agent);
+    app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
+    let (_, view) = app.state.open_text(TextBuffer::from_text("SELECTION_SENT"), None);
+    app.reconcile_editor_windows();
+    app.state.views[view].selection = Some(crate::editor::Selection {
+        anchor: crate::editor::text::ByteOffset(0), head: crate::editor::text::ByteOffset(13), kind: crate::editor::SelectionKind::Character,
+    });
+    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    assert!(app.state.views[view].selection.is_none());
+    assert_eq!(app.terminal_session.mode(agent), Some(crate::ui::TerminalPanelMode::Input));
+    assert_eq!(app.terminal_session.descriptions().len(), 1);
+    while !driver.application_mut().terminal_session.fixture_lines(agent).iter().any(|line| line.contains("SELECTION_SENT")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline, "{:?}", driver.application_mut().terminal_session.fixture_lines(agent));
+        thread::sleep(Duration::from_millis(2));
+    }
+    let app = driver.application_mut();
+    app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
+    let text = "x".repeat(crate::editor::session::terminal::TERMINAL_MAXIMUM_INPUT_BYTES + 1);
+    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    app.reconcile_editor_windows();
+    let selection = crate::editor::Selection {
+        anchor: crate::editor::text::ByteOffset(0), head: crate::editor::text::ByteOffset(text.len() - 1), kind: crate::editor::SelectionKind::Character,
+    };
+    app.state.views[view].selection = Some(selection);
+    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    assert!(app.state.views[view].selection.is_some());
+    assert_eq!(app.terminal_session.descriptions().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();

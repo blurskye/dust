@@ -365,7 +365,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let app = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
-    let config_source = "editor = { tab_width = 7 }\n";
+    let config_source = "editor = { tab_width = 7, markdown = { glyphs = { bullets = ['*'] } } }\n";
     fs::write(&config_path, config_source).expect("config");
     let mut loaded = crate::config::load_config(&config_path);
 
@@ -394,6 +394,12 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     );
     assert_eq!(setting.contributors[0], "bundled defaults");
     assert_eq!(setting.contributors[1], setting.source);
+    let bullet = resolved.explain("editor.markdown.glyphs.bullets.0").expect("bullet");
+    assert_eq!(bullet.value, "\"*\"");
+    assert!(bullet.source.starts_with(&config_path.display().to_string()));
+    assert_eq!(bullet.contributors, ["bundled defaults", &bullet.source]);
+    let inherited = resolved.explain("editor.indent_width").expect("inherited");
+    assert_eq!(inherited.source, "bundled defaults");
 
     let dashboard = resolved
         .explain("dashboard.identity")

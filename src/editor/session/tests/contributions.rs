@@ -510,6 +510,33 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
 }
 
 #[test]
+fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
+    let app = app();
+    for disabled in [false, true] {
+        let mut loaded = crate::config::load_bundled_config().keymaps;
+        loaded.entries.push(crate::config::KeymapEntry {
+            id: "user.files-prefix".into(), context: Some("editor".into()), mode: "normal".into(),
+            keys: Some("<leader> f".into()), command: (!disabled).then(|| "health.open".into()),
+            arguments: BTreeMap::new(), unmap: disabled, disable: false, pass_through: false, desc: None,
+        });
+        let (resolved, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+        assert!(resolved.hints_for_prefix("editor.normal", "space f", &BTreeMap::new()).is_none());
+        let leader = resolved.hints_for_prefix("editor.normal", "space", &BTreeMap::new()).unwrap();
+        let files = leader.rows.iter().find(|row| row.next_key == "f");
+        if disabled {
+            assert!(files.is_none());
+        } else {
+            let files = files.unwrap();
+            assert!(files.direct);
+            assert_eq!(files.mappings.len(), 1);
+            assert_eq!(files.mappings[0].command.as_deref(), Some("health.open"));
+        }
+        assert!(!resolved.effective_binding("editor.normal", "buffer.picker.open").keys().contains(&"space f b".into()));
+    }
+}
+
+#[test]
 fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     let app = app();
     for (group, expected) in [
@@ -820,6 +847,29 @@ fn help_is_reachable_from_the_confirmation_and_from_a_form() {
 }
 
 #[test]
+fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
+    let app = app();
+    let mut loaded = crate::config::load_bundled_config().keymaps;
+    let arguments = |query: &str, replacement: &str| BTreeMap::from([
+        ("query".into(), toml::Value::String(query.into())),
+        ("replacement".into(), toml::Value::String(replacement.into())),
+    ]);
+    let first = arguments("a|replacement=string:b", "c");
+    let second = arguments("a", "b|replacement=string:c");
+    for (id, keys, arguments) in [("user.first", "ctrl-p", first.clone()), ("user.second", "ctrl-y", second.clone())] {
+        loaded.entries.push(crate::config::KeymapEntry {
+            id: id.into(), context: Some("editor".into()), mode: "normal".into(),
+            keys: Some(keys.into()), command: Some("workspace.replace".into()), arguments,
+            unmap: false, disable: false, pass_through: false, desc: None,
+        });
+    }
+    let (resolved, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    assert_eq!(resolved.binding_for_action("editor.normal", "workspace.replace", &first), Some("ctrl-p"));
+    assert_eq!(resolved.binding_for_action("editor.normal", "workspace.replace", &second), Some("ctrl-y"));
+}
+
+#[test]
 fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
     let app = app();
     let mut policy = app.configuration.settings().input.keymaps.clone();
@@ -874,14 +924,14 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
     let effective = remapped.effective_binding("editor.normal", "command_line.open");
     assert_eq!(
         effective.keys(),
-        ["/".to_owned(), "ctrl-p".to_owned()],
-        "the remapped key replaces the bundled binding for the same arguments, and the          unmapped key is gone"
+        ["/".to_owned(), ":".to_owned(), "ctrl-p".to_owned()],
+        "aliases remain usable while the unmapped key is gone"
     );
     assert!(
         !effective.keys().contains(&"?".to_owned()),
         "a key the user unmapped is never offered to a lesson"
     );
-    assert_eq!(effective.display(), "/ ctrl-p  command_line.open");
+    assert_eq!(effective.display(), "/ : ctrl-p  command_line.open");
 
     // A command with no binding in the asked context is reported as unbound, never defaulted.
     let unbound = remapped.effective_binding("editor.normal", "health.open");

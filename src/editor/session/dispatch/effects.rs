@@ -6346,11 +6346,7 @@ impl InteractiveApplication {
 
     /// A terminal running an agent profile's own program, for `agents.connection = "terminal"`.
     pub(super) fn agent_terminal(&self, id: PtyId) -> bool {
-        let agents = &self.configuration.settings().agents.profiles;
-        self.terminal_session
-            .descriptions()
-            .into_iter()
-            .any(|(terminal, profile, _)| terminal == id.0 && agents.contains_key(&profile))
+        self.terminal_session.agent(id)
     }
 
     /// An agent's terminal opens on the right at the agent panel's width, where the ACP panel goes.
@@ -6570,6 +6566,7 @@ impl InteractiveApplication {
             self.window_session
                 .navigation_stamp(self.state.window_version(), self.state.active_view),
             self.input.capture_epoch(),
+            false,
         ) {
             Ok(intent) => self.run_trusted(TrustedAction::OpenDapTerminal { intent, reply }),
             Err(error) => {
