@@ -1249,6 +1249,20 @@ fn the_pi_profile_says_how_to_give_pi_subagents() {
 }
 
 #[test]
+fn agents_own_subagents_are_off_over_acp_only() {
+    let app = app();
+    let profiles = &app.configuration.settings().agents.profiles;
+    assert_eq!(profiles["codex"].cli, ["codex"]);
+    assert!(profiles["codex"].acp_environment.contains_key("CODEX_CONFIG"));
+    assert_eq!(profiles["opencode"].cli, ["opencode"]);
+    assert!(profiles["opencode"].acp_environment.contains_key("OPENCODE_CONFIG_CONTENT"));
+    for profile in profiles.values() {
+        assert!(!profile.environment.contains_key("CODEX_CONFIG"));
+        assert!(!profile.environment.contains_key("OPENCODE_CONFIG_CONTENT"));
+    }
+}
+
+#[test]
 fn the_agent_panel_opens_over_the_dashboard() {
     let mut app = app();
     assert!(app.window_session.dashboard_visible());

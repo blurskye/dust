@@ -1163,6 +1163,7 @@ impl InteractiveApplication {
             return Err(self.missing_agent_program(&profile.program));
         };
         let mut environment = profile.environment.clone();
+        environment.extend(profile.acp_environment.clone());
         if let Some(server) = &self.remote {
             environment.insert(crate::remote::SERVER_VARIABLE.into(), server.path().display().to_string());
         }

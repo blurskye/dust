@@ -331,17 +331,19 @@ cli = ["claude"]
 arguments = []
 environment = {}
 options = {}
-# Subagents come from Dust's `agent` tool, so Claude Code's own subagent tools are off: Task
-# in older versions, Agent and Workflow in newer ones.
+# Over ACP, subagents come from Dust's `agent` tool, so Claude Code's own subagent tools are
+# off there (Task in older versions, Agent and Workflow in newer ones); the `claude` CLI in a
+# terminal keeps them.
 meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent", "Workflow"] } } }
 
 [agents.profiles.codex]
 program = "codex-acp"
-# Subagents come from Dust's `agent` tool, so Codex's own multi-agent tools are off: through
-# CODEX_CONFIG for the ACP adapter and with --disable for the CLI.
-cli = ["codex", "--disable", "multi_agent"]
+cli = ["codex"]
 arguments = []
-environment = { CODEX_CONFIG = '{"features":{"multi_agent":false}}' }
+environment = {}
+# Over ACP, subagents come from Dust's `agent` tool, so Codex's own multi-agent tools are off
+# there; the `codex` CLI in a terminal keeps them.
+acp_environment = { CODEX_CONFIG = '{"features":{"multi_agent":false}}' }
 options = {}
 
 [agents.profiles.pi]
@@ -359,8 +361,10 @@ note = "To give pi Dust's subagents, run this once: pi mcp add dust --exposure d
 program = "opencode"
 cli = ["opencode"]
 arguments = ["acp"]
-# Subagents come from Dust's `agent` tool, so OpenCode's own task tool is off.
-environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
+environment = {}
+# Over ACP, subagents come from Dust's `agent` tool, so OpenCode's own task tool is off there;
+# `opencode` in a terminal keeps it.
+acp_environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
 options = {}
 
 [agents.profiles.gemini]
