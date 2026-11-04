@@ -489,8 +489,9 @@ impl ExplorerSession {
             )
             .map_err(|e| e.to_string())?;
         if let Some(tree) = self.tree_for_mut(source_view) {
+            let expanded = tree.is_expanded(node) || request.expand;
             tree.begin_load(node, generation);
-            if request.expand && !tree.is_expanded(node) {
+            if tree.is_expanded(node) != expanded {
                 tree.toggle_loaded(node);
             }
         }
@@ -1077,6 +1078,27 @@ mod tests {
             assert!(owner.tree().is_expanded(node));
         }
         assert_eq!(owner.tree().node(b).unwrap().children.len(), 3);
+    }
+
+    #[test]
+    fn queued_search_load_does_not_expand_after_the_filter_is_cleared() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("dir")).unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let dir = owner.tree().id_for_path(&root.path().join("dir")).unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        owner.set_search("needle".into());
+        owner.load(dir, scope.clone(), 1, 100).unwrap();
+        owner.set_search(String::new());
+        drain(&mut owner, scope.clone());
+        let request = owner.next_reload().unwrap();
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope);
+        assert_eq!(owner.tree().node(dir).unwrap().load, ExplorerLoadState::Loaded);
+        assert!(!owner.tree().is_expanded(dir));
     }
 
     #[test]

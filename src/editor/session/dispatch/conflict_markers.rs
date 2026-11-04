@@ -48,7 +48,7 @@ fn read_block(lines: &[&str], start: usize) -> Option<ConflictBlock> {
     let mut base = None;
     let mut separator = None;
     for (index, line) in lines.iter().enumerate().skip(start + 1) {
-        if marker_width(line, '<').is_some() {
+        if marker_width(line, '<') == Some(width) {
             return None;
         }
         if marker_width(line, '|') == Some(width) && separator.is_none() {
@@ -201,6 +201,15 @@ mod tests {
             assert_eq!(resolved_text(&lines, block, "theirs").unwrap(), "theirs\n");
             assert_eq!(conflict_block_count(&lines), 1);
         }
+    }
+
+    #[test]
+    fn shorter_opening_runs_inside_a_conflict_remain_content() {
+        let text = "<<<<<<< HEAD\n< input\n<<<<< literal\n=======\n> output\n>>>>>>> other\n";
+        let lines = text.lines().collect::<Vec<_>>();
+        let block = conflict_block_at(&lines, 0).unwrap();
+        assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "< input\n<<<<< literal\n");
+        assert_eq!(conflict_block_count(&lines), 1);
     }
 
     #[test]
