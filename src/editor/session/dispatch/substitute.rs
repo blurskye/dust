@@ -6,6 +6,7 @@ use super::{
     Precondition, PromptKind, TextEdit, TextEditSet,
 };
 use crate::editor::text::TextBuffer;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// A replacement in regex-crate template form.
 fn replacement_template(replacement: &str) -> String {
@@ -586,12 +587,14 @@ impl InteractiveApplication {
         let line = text.byte_to_line(target.cursor).unwrap_or(0)
             .min(text.visible_lines().saturating_sub(1));
         let start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
-        let end = ByteOffset(start.get() + text.line(line).unwrap_or_default().trim_end_matches('\n').len());
-        let cursor = if target.cursor >= end && end > start {
-            crate::editor::text::previous_grapheme_boundary(text, end)
-        } else {
-            target.cursor.min(end)
-        };
+        let content = text.line(line).unwrap_or_default();
+        let content = content.trim_end_matches('\n');
+        let relative = target.cursor.get().saturating_sub(start.get());
+        let cursor = ByteOffset(start.get() + content.grapheme_indices(true)
+            .map(|(offset, _)| offset)
+            .take_while(|offset| *offset <= relative)
+            .last()
+            .unwrap_or(0));
         self.state.views[view].cursor = cursor;
     }
 }

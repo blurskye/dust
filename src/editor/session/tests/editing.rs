@@ -1100,6 +1100,23 @@ fn substitute_cursor_stays_on_a_normal_mode_grapheme() {
 }
 
 #[test]
+fn substitute_cursor_does_not_split_a_grapheme_after_partial_replacement() {
+    for flags in ["", "c"] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("a\u{301}!"), None);
+        app.set_dashboard_visibility(false);
+        app.run_substitute("", "a", "e", flags);
+        if flags == "c" {
+            app.answer_substitution(true, false);
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "e\u{301}!");
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        press_keys(&mut app, &["x"]);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "!");
+    }
+}
+
+#[test]
 fn substitute_and_global_delete_record_change_locations() {
     for flags in ["", "c"] {
         let mut app = app();
