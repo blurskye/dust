@@ -318,6 +318,23 @@ fn macro_replay_honors_configured_counts() {
 }
 
 #[test]
+fn counted_macro_replay_stops_when_a_nested_macro_fails() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None);
+    app.set_dashboard_visibility(false);
+    // b calls a, which does not exist. Neither b's deletion nor its next repetition may run.
+    let replay = crate::editor::CommandInvocation::new("macro.replay", InvocationSource::Test)
+        .unwrap()
+        .with_argument("register", CommandValue::String("a".into()));
+    let delete = crate::editor::CommandInvocation::new("edit.delete_char", InvocationSource::Test).unwrap();
+    app.state.registers.set_macro('b', vec![delete.clone(), replay, delete]);
+    assert!(!app.process_effect_checked(AppEffect::MacroReplay { register: 'b', count: 3 }));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "bcdef");
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
     let mut app = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(

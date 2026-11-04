@@ -193,6 +193,10 @@ impl InteractiveApplication {
             }
             AppEffect::SearchWord { forward } => return self.search_word_under_cursor(forward),
             AppEffect::SearchSelectNext => return self.select_next_search_match(),
+            AppEffect::MacroReplay { register, count } => {
+                self.input.begin_macro_batch();
+                return (0..count).all(|_| self.replay_macro(register));
+            }
             effect => effect,
         };
         let effect = match self.process_core_effect(effect) {
@@ -14239,13 +14243,8 @@ impl InteractiveApplication {
                     self.show_error(self.message("no_macro_recording", &[]));
                 }
             }
-            AppEffect::MacroReplay { register, count } => {
-                self.input.begin_macro_batch();
-                for _ in 0..count {
-                    if !self.replay_macro(register) {
-                        break;
-                    }
-                }
+            AppEffect::MacroReplay { .. } => {
+                unreachable!("macro effects return their status through process_effect_checked")
             }
             AppEffect::Grammar(input) => self.process_grammar_input(input),
             AppEffect::CancelPendingMapping => self.cancel_pending_mapping(),
