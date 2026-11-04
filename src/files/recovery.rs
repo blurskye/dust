@@ -266,10 +266,14 @@ pub fn cleanup_recovery(
     maximum_records: usize,
     maximum_age_days: u64,
     now: SystemTime,
+    protected: &[PathBuf],
 ) -> RecoveryCleanup {
     let mut records = Vec::new();
     // Retention needs only paths and timestamps; drop each payload before reading the next.
     let diagnostics = visit_recovery(directory, |path, _| {
+        if protected.contains(&path) {
+            return true;
+        }
         let modified = fs::metadata(&path)
             .ok()
             .and_then(|metadata| metadata.modified().ok());

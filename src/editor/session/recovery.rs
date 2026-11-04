@@ -1,4 +1,4 @@
-//! Recovery scheduling, original I/O obligations, retention and completion policy.
+//! Recovery scheduling, retention and completion policy.
 use super::documents::RecoveryIo;
 use crate::{
     config::RecoveryConfig,
@@ -54,7 +54,7 @@ pub(super) struct RecoverySession {
     recovered: HashMap<BufferId, PathBuf>,
     revisions: HashMap<BufferId, BufferRevision>,
     paths: HashMap<BufferId, Option<PathBuf>>,
-    pruned: HashMap<BufferId, BufferRevision>,
+    closed_journals: std::collections::HashSet<PathBuf>,
     oversized: std::collections::HashSet<BufferId>,
     pub(super) oversized_notice: bool,
     scheduled: HashMap<BufferId, (BufferRevision, Instant)>,
@@ -84,7 +84,7 @@ impl RecoverySession {
             recovered: HashMap::new(),
             revisions: HashMap::new(),
             paths: HashMap::new(),
-            pruned: HashMap::new(),
+            closed_journals: std::collections::HashSet::new(),
             oversized: std::collections::HashSet::new(),
             oversized_notice: false,
             scheduled: HashMap::new(),
@@ -120,7 +120,6 @@ impl RecoverySession {
         if old != new {
             self.discovery_queued = false;
             self.cleanup_queued = false;
-            self.pruned.clear();
         }
         if !new.enabled {
             self.scheduled.clear();
@@ -143,8 +142,17 @@ impl RecoverySession {
     }
     fn recorded(&self, buffer: BufferId, revision: BufferRevision, path: &Option<PathBuf>) -> bool {
         self.paths.get(&buffer) == Some(path)
-            && (self.revisions.get(&buffer) == Some(&revision)
-                || self.pruned.get(&buffer) == Some(&revision))
+            && self.revisions.get(&buffer) == Some(&revision)
+    }
+    pub(super) fn retire_buffer(&mut self, buffer: BufferId, clean: bool) {
+        if clean && (self.revisions.contains_key(&buffer) || self.recovered.contains_key(&buffer)) {
+            self.closed_journals.insert(self.path(buffer));
+        }
+        self.recovered.remove(&buffer);
+        self.revisions.remove(&buffer);
+        self.paths.remove(&buffer);
+        self.oversized.remove(&buffer);
+        self.scheduled.remove(&buffer);
     }
     pub(super) fn schedule(
         &mut self,
@@ -154,6 +162,20 @@ impl RecoverySession {
         exiting: bool,
         mut io: RecoveryIo<'_>,
     ) {
+        for path in &self.closed_journals {
+            if !self.pending.values().any(|pending| matches!(pending, Pending::Delete { path: deleting, .. } if deleting == path))
+                && let Ok(id) = io.delete(path)
+            {
+                self.pending.insert(id, Pending::Delete {
+                    path: path.clone(), buffer: None, announce: false,
+                });
+            }
+        }
+        let closed = self.paths.keys().chain(self.recovered.keys()).chain(self.scheduled.keys()).chain(self.oversized.iter())
+            .filter(|buffer| !editor.buffers.contains_key(**buffer)).copied().collect::<Vec<_>>();
+        for buffer in closed {
+            self.retire_buffer(buffer, false);
+        }
         if !config.enabled {
             return;
         }
@@ -170,6 +192,11 @@ impl RecoverySession {
                 &self.directory,
                 MAXIMUM_RETAINED_JOURNALS,
                 MAXIMUM_JOURNAL_AGE_DAYS,
+                editor.buffers.iter().map(|(buffer, _)| self.path(buffer))
+                    .chain(self.pending.values().filter_map(|pending| match pending {
+                        Pending::Write { path, .. } => Some(path.clone()),
+                        _ => None,
+                    })).collect(),
             )
         {
             self.cleanup_queued = true;
@@ -201,7 +228,6 @@ impl RecoverySession {
                 }
             } else {
                 self.scheduled.remove(&buffer);
-                self.pruned.remove(&buffer);
                 if let Some(revision) = self
                     .revisions
                     .get(&buffer)
@@ -245,7 +271,6 @@ impl RecoverySession {
             let path = self.path(buffer);
             if let Ok(id) = io.write(&path, state) {
                 self.scheduled.remove(&buffer);
-                self.pruned.remove(&buffer);
                 self.revisions.insert(buffer, revision);
                 self.paths.insert(buffer, state.path.clone());
                 self.pending.insert(
@@ -353,7 +378,7 @@ impl RecoverySession {
             (Pending::Cleanup, VfsResult::RecoveryCleaned { cleanup, .. }) => {
                 self.records
                     .retain(|(path, _)| !cleanup.deleted.contains(path));
-                let pruned =
+                let deleted =
                     self.revisions
                         .iter()
                         .filter_map(|(buffer, revision)| {
@@ -364,9 +389,8 @@ impl RecoverySession {
                                 .then_some((*buffer, *revision))
                         })
                         .collect::<Vec<_>>();
-                for (buffer, revision) in pruned {
+                for (buffer, _) in deleted {
                     self.revisions.remove(&buffer);
-                    self.pruned.insert(buffer, revision);
                 }
                 if !cleanup.diagnostics.is_empty() {
                     RecoveryUpdate::Error(cleanup.diagnostics.join("; "))
@@ -411,13 +435,15 @@ impl RecoverySession {
                 Err(error) => RecoveryUpdate::Error(error.to_string()),
                 Ok(()) => {
                     self.records.retain(|(p, _)| *p != path);
+                    if !self.pending.values().any(|pending| matches!(pending, Pending::Write { path: writing, .. } if *writing == path)) {
+                        self.closed_journals.remove(&path);
+                    }
                     if let Some((buffer, revision)) = buffer {
-                        self.recovered.remove(&buffer);
-                        if self.revisions.get(&buffer) == Some(&revision) {
+                        let writing = self.pending.values().any(|pending| matches!(pending, Pending::Write { buffer: writing, .. } if *writing == buffer));
+                        if !writing && self.revisions.get(&buffer).is_none_or(|current| *current == revision) {
+                            self.recovered.remove(&buffer);
                             self.revisions.remove(&buffer);
-                        }
-                        if self.pruned.get(&buffer) == Some(&revision) {
-                            self.pruned.remove(&buffer);
+                            self.paths.remove(&buffer);
                         }
                         RecoveryUpdate::Quiet
                     } else if announce {
@@ -485,5 +511,44 @@ impl RecoverySession {
         self.pending
             .values()
             .any(|p| matches!(p, Pending::Delete { .. }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::text::TextBuffer;
+
+    #[test]
+    fn recovery_retiring_a_buffer_drops_tracking_but_keeps_pending_writes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut recovery = RecoverySession::new(directory.path().into());
+        let mut editor = EditorState::new(directory.path().into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("draft"), None);
+        let revision = editor.buffers[buffer].text.revision();
+        let path = recovery.path(buffer);
+        crate::files::write_recovery(&path, &RecoveryRecord::new(None, revision.0, "draft".into())).unwrap();
+        recovery.recovered.insert(buffer, path.clone());
+        recovery.revisions.insert(buffer, revision);
+        recovery.paths.insert(buffer, None);
+        recovery.scheduled.insert(buffer, (revision, Instant::now()));
+        recovery.oversized.insert(buffer);
+        let id = RequestId(1);
+        recovery.pending.insert(id, Pending::Write {
+            buffer, revision, path: path.clone(), original_path: None,
+        });
+
+        recovery.retire_buffer(buffer, false);
+        assert!(recovery.recovered.is_empty());
+        assert!(recovery.revisions.is_empty());
+        assert!(recovery.paths.is_empty());
+        assert!(recovery.scheduled.is_empty());
+        assert!(recovery.oversized.is_empty());
+        assert!(recovery.pending.contains_key(&id));
+        assert!(path.exists(), "closing a dirty buffer preserves its journal");
+        assert!(recovery.accept(VfsResult::RecoveryWritten { id, path, result: Ok(()) }).is_break());
+        assert!(recovery.pending.is_empty());
+        assert!(recovery.revisions.is_empty());
+        assert!(recovery.paths.is_empty());
     }
 }

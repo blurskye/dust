@@ -466,7 +466,7 @@ fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
     let discovery = discover_recovery(root.path());
     assert!(discovery.records.is_empty());
     assert!(discovery.diagnostics[0].contains("recovery journal is not UTF-8"));
-    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time(), &[]);
     assert!(cleanup.deleted.is_empty());
     assert!(
         path.exists(),
@@ -495,7 +495,7 @@ fn recovery_discovery_bounds_records_and_aggregate_content() {
             .records
             .is_empty()
     );
-    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time(), &[]);
     assert_eq!(cleanup.deleted.len(), 3);
 }
 
@@ -509,7 +509,7 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
     write_recovery(&second, &RecoveryRecord::new(None, 2, "two".into())).expect("second");
     fs::write(&corrupt, "broken=[").expect("corrupt");
 
-    let cleanup = cleanup_recovery(root.path(), 1, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 1, 0, crate::clock::system_time(), &[]);
     assert_eq!(cleanup.deleted.len(), 1);
     assert!(
         corrupt.exists(),
@@ -518,9 +518,23 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
     assert_eq!(discover_recovery(root.path()).records.len(), 1);
 
     let future = crate::clock::system_time() + Duration::from_secs(2 * 86_400);
-    let cleanup = cleanup_recovery(root.path(), 10, 1, future);
+    let cleanup = cleanup_recovery(root.path(), 10, 1, future, &[]);
     assert_eq!(cleanup.deleted.len(), 1, "age policy removes the survivor");
     assert!(corrupt.exists());
+}
+
+#[test]
+fn recovery_cleanup_preserves_protected_journals_beyond_count_and_age_limits() {
+    let root = tempdir().unwrap();
+    let live = root.path().join("live.toml");
+    let old = root.path().join("old.toml");
+    for path in [&live, &old] {
+        write_recovery(path, &RecoveryRecord::new(None, 1, "draft".into())).unwrap();
+    }
+    let future = crate::clock::system_time() + Duration::from_secs(31 * 86_400);
+    let cleanup = cleanup_recovery(root.path(), 0, 30, future, std::slice::from_ref(&live));
+    assert_eq!(cleanup.deleted, vec![old]);
+    assert!(live.exists());
 }
 
 #[test]

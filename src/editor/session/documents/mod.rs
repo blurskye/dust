@@ -727,8 +727,9 @@ impl RecoveryIo<'_> {
         path: &Path,
         maximum: usize,
         days: u64,
+        protected: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        self.submit(|vfs| vfs.cleanup_recovery(path.to_owned(), maximum, days))
+        self.submit(|vfs| vfs.cleanup_recovery(path.to_owned(), maximum, days, protected))
     }
     pub(in crate::editor::session) fn delete(
         &mut self,

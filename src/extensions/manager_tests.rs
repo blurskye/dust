@@ -1069,6 +1069,9 @@ impl ExecutionFixture {
         manager.next_load = 2;
         (manager, Self { requests, events })
     }
+    pub(crate) fn assert_no_requests(&self) {
+        assert!(matches!(self.requests.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
     pub(crate) fn take(&self) -> CapturedExecution {
         match self
             .requests

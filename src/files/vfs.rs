@@ -95,6 +95,7 @@ pub enum VfsRequest {
         directory: PathBuf,
         maximum_records: usize,
         maximum_age_days: u64,
+        protected: Vec<PathBuf>,
     },
     Delete {
         id: RequestId,
@@ -675,6 +676,7 @@ impl VfsWorker {
                                     directory,
                                     maximum_records,
                                     maximum_age_days,
+                                    protected,
                                 } => VfsResult::RecoveryCleaned {
                                     id,
                                     cleanup: cleanup_recovery(
@@ -682,6 +684,7 @@ impl VfsWorker {
                                         maximum_records,
                                         maximum_age_days,
                                         crate::clock::system_time(),
+                                        &protected,
                                     ),
                                 },
                                 VfsRequest::Delete { id, path } => {
@@ -1007,6 +1010,7 @@ impl VfsWorker {
         directory: PathBuf,
         maximum_records: usize,
         maximum_age_days: u64,
+        protected: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
         self.submit(VfsRequest::CleanupRecovery {
@@ -1014,6 +1018,7 @@ impl VfsWorker {
             directory,
             maximum_records,
             maximum_age_days,
+            protected,
         })?;
         Ok(id)
     }

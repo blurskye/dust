@@ -1573,8 +1573,11 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
     let stable = app.extension.provider_projection(request);
     let stable_ui = app.ui.picker.clone();
     for _ in 0..256 {
+        app.present_plugin_picker(request);
         assert_eq!(app.extension.provider_projection(request), stable);
         assert_eq!(app.ui.picker, stable_ui);
+        assert_eq!(app.search.picker().unwrap().selected_item().unwrap().id, selected);
+        assert!(app.input.picker_normal());
     }
     app.install_picker("Another picker".into(), Vec::new());
     let replacement_ui = app.ui.picker.clone();
@@ -1810,6 +1813,8 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
             .map(|row| row.node),
         Some(2)
     );
+    app.window_session.invalidate_native();
+    app.reconcile_editor_windows();
     app.invoke_mapped_command("surface.retained.focus.next");
     assert_eq!(
         app.ui.plugin_surfaces[0]
@@ -1819,11 +1824,14 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
             .map(|row| row.node),
         Some(3)
     );
+    app.invoke_mapped_command("surface.retained.focus.previous");
+    assert_eq!(
+        app.ui.plugin_surfaces[0].rows.iter().find(|row| row.focused).map(|row| row.node),
+        Some(2)
+    );
     app.invoke_mapped_command("surface.retained.scroll.down");
     assert_eq!(app.ui.plugin_surfaces[0].scroll, 1);
     let window = app.ui.plugin_surfaces[0].window;
-    app.window_session.invalidate_native();
-    app.reconcile_editor_windows();
     let rect = app
         .compositor_projection()
         .and_then(|projection| projection.window(window).map(|window| window.rect))
@@ -2609,7 +2617,7 @@ fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
 #[test]
 fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
     let mut app = app();
-    let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -2637,10 +2645,11 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
     app.extension.fixture_contribution(index.clone()).unwrap();
     app.extension.fixture_virtual_request(&index);
     for _ in 0..2 {
-        assert!(matches!(
-            app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
-            Err(error) if error == "virtual document is already opening"
-        ));
+        app.process_effect(AppEffect::VirtualDocumentOpen {
+            source: "plugin.demo.virtual.help".into(),
+            key: "help".into(),
+        });
+        fixture.assert_no_requests();
     }
 }
 

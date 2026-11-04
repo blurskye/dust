@@ -1577,6 +1577,54 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
 }
 
 #[test]
+fn recovery_retention_keeps_all_live_dirty_journals() {
+    let mut app = app();
+    let mut journals = Vec::new();
+    for index in 0..101 {
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text(&format!("draft {index}")), None);
+        app.state.set_buffer_dirty(buffer, true);
+        journals.push(app.recovery.path(buffer));
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while app.recovery.unwritten(&app.state, &app.configuration.settings().recovery) > 0 {
+        assert!(Instant::now() < deadline);
+        app.queue_dirty_recovery_before_exit();
+        wait_vfs(&mut app);
+    }
+    app.schedule_recovery_work();
+    wait_vfs(&mut app);
+    assert!(journals.iter().all(|path| path.exists()), "retention must not delete live drafts");
+    assert_eq!(app.recovery.unwritten(&app.state, &app.configuration.settings().recovery), 0);
+}
+
+#[test]
+fn recovery_save_and_close_removes_the_older_journal() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let path = app.state.workspace_root.join("close-recovery.txt");
+    fs::write(&path, "saved").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    app.invoke_insert_text("A".into());
+    app.queue_dirty_recovery_before_exit();
+    wait_vfs(&mut app);
+    let journal = app.recovery.path(buffer);
+    assert!(journal.exists());
+    app.invoke_insert_text("B".into());
+    let expected = app.state.buffers[buffer].text.to_string();
+    app.reconcile_editor_windows();
+    app.close_active_buffer(false);
+    app.input.select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    wait_vfs(&mut app);
+    assert!(!app.state.buffers.contains_key(buffer));
+    assert_eq!(fs::read_to_string(path).unwrap(), expected);
+    app.schedule_recovery_work();
+    wait_vfs(&mut app);
+    assert!(!journal.exists());
+}
+
+#[test]
 fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
     let mut app = app();
     app.recovery.skip_maintenance();
@@ -1754,6 +1802,8 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
         .open_text(crate::editor::text::TextBuffer::from_text("base"), None);
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
+    let journal = app.recovery.directory().join("recovered-draft.toml");
+    app.recovery.retain_recovered(buffer, journal.clone());
     app.invoke_insert_text("A".into());
     app.schedule_recovery_work();
     std::thread::sleep(Duration::from_millis(
@@ -1782,8 +1832,13 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     assert_eq!(recovered.records.len(), 1);
     assert_eq!(recovered.records[0].1.revision, latest.0);
     assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
+    assert_eq!(app.recovery.path(buffer), journal);
     app.schedule_recovery_work();
     assert!(!app.recovery.writing(None));
+    app.state.buffers[buffer].mark_saved(latest);
+    app.schedule_recovery_work();
+    wait_vfs(&mut app);
+    assert!(!journal.exists(), "saving removes the recovered journal, not a new session path");
 }
 
 #[test]
