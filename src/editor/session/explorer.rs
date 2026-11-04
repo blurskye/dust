@@ -207,12 +207,12 @@ impl ExplorerSession {
             .into_iter()
             .collect()
     }
-    fn any_view_expanded(&self, id: ExplorerNodeId) -> bool {
-        self.primary.tree.is_expanded(id)
+    fn any_view_watches_directory(&self, id: ExplorerNodeId) -> bool {
+        self.primary.tree.is_watched_directory(id)
             || self
                 .cloned_views
                 .values()
-                .any(|view| view.tree.is_expanded(id))
+                .any(|view| view.tree.is_watched_directory(id))
     }
     pub(in crate::editor::session) fn remove_view(
         &mut self,
@@ -696,7 +696,7 @@ impl ExplorerSession {
             };
             if self.tree().node(id).is_some_and(|node| {
                 matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
-                    && self.any_view_expanded(id)
+                    && self.any_view_watches_directory(id)
                     && node.load == ExplorerLoadState::Loaded
             }) {
                 return Some(id);
@@ -997,6 +997,61 @@ mod tests {
                 .is_some()
         );
         assert_eq!(owner.tree().node(node).unwrap().children.len(), 5);
+    }
+
+    #[test]
+    fn filtered_collapsed_directories_are_watched_and_reloaded_across_views() {
+        for cloned in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("directory");
+            std::fs::create_dir(&directory).unwrap();
+            let old = directory.join("match-old.txt");
+            let new = directory.join("match-new.txt");
+            std::fs::write(&old, "old").unwrap();
+            let (mut owner, scope) = fixture(root.path());
+            let root_node = owner.tree().selected_id().unwrap();
+            owner.load(root_node, scope.clone(), 1, 100).unwrap();
+            drain(&mut owner, scope.clone());
+            if cloned {
+                let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+                let view = owner.accept_clone(candidate).unwrap();
+                owner.activate_view(view).unwrap();
+            }
+            owner.tree_mut().set_filter("match");
+            let directory_node = owner.next_reload().expect("search loads directory");
+            owner.load(directory_node, scope.clone(), 1, 100).unwrap();
+            drain(&mut owner, scope.clone());
+            assert!(!owner.tree().is_expanded(directory_node));
+            assert!(owner.tree().visible_index(directory_node).is_some());
+            let filtered_view = owner.active_view;
+            if cloned {
+                owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+                assert!(owner.tree().filter().is_empty());
+            }
+            assert!(owner.watched_directories().contains(&directory));
+            owner.reconcile_watch(true).unwrap();
+
+            std::fs::remove_file(&old).unwrap();
+            std::fs::write(&new, "new").unwrap();
+            owner.accept_watch(ExplorerWatchBatch {
+                generation: owner.watch_generation.unwrap(),
+                root_revision: owner.tree().root_revision(),
+                directories: vec![directory.clone()],
+            }, true);
+            assert_eq!(owner.next_reload(), Some(directory_node));
+            owner.load(directory_node, scope.clone(), 1, 100).unwrap();
+            drain(&mut owner, scope);
+            assert!(owner.tree().id_for_path(&old).is_none());
+            assert!(owner.tree().id_for_path(&new).is_some());
+            let filtered = owner.tree_for_mut(filtered_view).unwrap();
+            assert!(!filtered.is_expanded(directory_node));
+            let new_node = filtered.id_for_path(&new).unwrap();
+            assert!(filtered.visible_index(new_node).is_some());
+            filtered.set_filter("");
+            assert!(!owner.watched_directories().contains(&directory));
+            owner.watch_reload.push_back(directory);
+            assert_eq!(owner.next_reload(), None);
+        }
     }
 
     #[test]
