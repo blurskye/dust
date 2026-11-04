@@ -1939,9 +1939,16 @@ mod lifecycle_tests {
         let roots = vec![root.path().to_path_buf()];
         let target = scoped_missing_target(&target, &roots).unwrap();
         let rename = ExplorerMutation::Rename { source: source.clone(), target: target.clone() };
+        let intent = resolve_resource_intent(&source, Some(&target), &roots, 1024).unwrap();
         fs::write(&target, b"other writer").unwrap();
         assert!(matches!(
             apply_explorer_mutation(&rename, &roots, 1024),
+            Err(VfsError::DestinationExists(_))
+        ));
+        // The prepared resource reaches renameat without another missing-target
+        // check, so this also exercises the atomic no-replace guarantee.
+        assert!(matches!(
+            apply_resource_intent(&intent),
             Err(VfsError::DestinationExists(_))
         ));
         assert_eq!(fs::read(&source).unwrap(), b"source");
