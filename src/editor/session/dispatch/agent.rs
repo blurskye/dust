@@ -304,7 +304,14 @@ impl AgentSession {
             }
             None => agent::new_session_params(&self.root, &self.tools, self.meta.as_ref()),
         };
-        match params.and_then(|params| self.request(method, params)) {
+        let params = match params {
+            Ok(params) => params,
+            Err(error) => {
+                self.stop(&error);
+                return;
+            }
+        };
+        match self.request(method, params) {
             Ok(id) if method == "session/new" => self.phase = Phase::Creating(id),
             Ok(id) => self.phase = Phase::Rejoining(id),
             Err(error) => self.entries.push(Entry::Notice(error)),
@@ -3137,6 +3144,45 @@ mod tests {
                     matches!(session.entries.last(), Some(Entry::Notice(error)) if error == "model rejected")
                 );
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_workspace_paths_stop_session_startup_and_answer_subagents() {
+        use std::{io::BufRead, os::unix::ffi::OsStrExt};
+
+        for capabilities in [
+            json!({}),
+            json!({"sessionCapabilities": {"resume": {}}}),
+            json!({"loadSession": true}),
+        ] {
+            let mut app = test_app();
+            let index = child(&mut app, 99, Phase::Initializing(1));
+            let (reply, mut answer) = subagent_reply();
+            let session = &mut app.agent.sessions[index];
+            session.process = Some(
+                AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root)
+                    .unwrap(),
+            );
+            session.root = Path::new(std::ffi::OsStr::from_bytes(b"/workspace/\xff")).into();
+            session.earlier = Some("previous".into());
+            session.reply = Some(reply);
+
+            app.handle_agent_response(index, 1, Ok(json!({"agentCapabilities": capabilities})));
+
+            let session = &app.agent.sessions[index];
+            assert_eq!(session.phase, Phase::Stopped);
+            assert!(session.process.is_none());
+            assert!(session.queued.is_empty());
+            assert!(session.reply.is_none());
+            assert!(!session.working());
+            assert!(matches!(session.entries.last(), Some(Entry::Notice(error))
+                if error.contains("UTF-8 workspace path")));
+            let mut line = String::new();
+            answer.read_line(&mut line).unwrap();
+            assert!(serde_json::from_str::<Value>(&line).unwrap()["error"]
+                .as_str().unwrap().contains("UTF-8 workspace path"));
         }
     }
 
