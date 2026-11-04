@@ -1737,6 +1737,7 @@ impl InteractiveApplication {
                         self.navigation_reads.remove(&id);
                         self.recovery.take_read(id, self.workspace.version());
                     }
+                    self.fail_agent_files(&error);
                     self.recovery.stopped();
                     self.search.clear_preview();
                     self.explorer.retire_intents();
@@ -1807,6 +1808,7 @@ impl InteractiveApplication {
                 }
                 Continue(result) => result,
             };
+            let Some(result) = self.accept_agent_file(result) else { continue; };
             let result = match self.recovery.accept(result) {
                 Break(update) => {
                     use crate::editor::session::recovery::RecoveryUpdate;
@@ -1832,7 +1834,8 @@ impl InteractiveApplication {
                 Continue(result) => result,
             };
             match result {
-                VfsResult::RecoveryDiscovered { .. }
+                VfsResult::PathsResolved { .. }
+                | VfsResult::RecoveryDiscovered { .. }
                 | VfsResult::RecoveryCleaned { .. }
                 | VfsResult::RecoveryWritten { .. } => {
                     self.show_error(self.message("unexpected_completion", &[]))

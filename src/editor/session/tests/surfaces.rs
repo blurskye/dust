@@ -5830,27 +5830,29 @@ fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
         Some(path.clone()),
     );
     let root = app.state.workspace_root.clone();
+    let buffers = vec![(buffer, path.clone())];
+    let changes = |request: &serde_json::Value| crate::agent::permission_changes(request).iter().map(|path| root.join(path)).collect::<Vec<_>>();
     let request =
         serde_json::json!({"toolCall": {"kind": "edit", "rawInput": {"file_path": path}}});
     assert_eq!(
-        app.unsaved_agent_changes(&root, &request),
+        app.unsaved_agent_changes(&changes(&request), &buffers),
         "",
         "a clean file needs no warning"
     );
     app.state.buffers[buffer].dirty = true;
     assert_eq!(
-        app.unsaved_agent_changes(&root, &request),
+        app.unsaved_agent_changes(&changes(&request), &buffers),
         "! draft.txt has unsaved changes; this changes the saved copy\n"
     );
     let relative =
         serde_json::json!({"toolCall": {"kind": "edit", "locations": [{"path": "draft.txt"}]}});
     assert!(
-        app.unsaved_agent_changes(&root, &relative)
+        app.unsaved_agent_changes(&changes(&relative), &buffers)
             .contains("draft.txt")
     );
     let read = serde_json::json!({"toolCall": {"kind": "read", "rawInput": {"file_path": path}}});
     assert_eq!(
-        app.unsaved_agent_changes(&root, &read),
+        app.unsaved_agent_changes(&changes(&read), &buffers),
         "",
         "a read changes nothing"
     );

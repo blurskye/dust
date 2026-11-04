@@ -272,7 +272,8 @@ impl DocumentSession {
             };
         }
         let id = match &event {
-            VfsResult::ResourceResolved { id, .. }
+            VfsResult::PathsResolved { id, .. }
+            | VfsResult::ResourceResolved { id, .. }
             | VfsResult::ResourceApplied { id, .. }
             | VfsResult::ExplorerMutated { id, .. }
             | VfsResult::CreateTarget { id, .. }
@@ -497,6 +498,20 @@ impl DocumentSession {
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
         let id = self.vfs.read(path)?;
+        self.pending_legacy.insert(id);
+        Ok(id)
+    }
+
+    pub(in crate::editor::session) fn resolve_agent_paths(&mut self, paths: Vec<PathBuf>) -> Result<RequestId, VfsError> {
+        self.check_admission()?;
+        let id = self.vfs.resolve_paths(paths)?;
+        self.pending_legacy.insert(id);
+        Ok(id)
+    }
+
+    pub(in crate::editor::session) fn write_agent_file(&mut self, path: PathBuf, root: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
+        self.check_admission()?;
+        let id = self.vfs.agent_write(path, root, bytes)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }

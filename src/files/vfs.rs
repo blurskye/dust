@@ -30,6 +30,8 @@ pub struct RequestId(pub u64);
 
 #[derive(Debug)]
 pub enum VfsRequest {
+    ResolvePaths { id: RequestId, paths: Vec<PathBuf> },
+    AgentWrite { id: RequestId, path: PathBuf, root: PathBuf, bytes: Vec<u8> },
     Read {
         id: RequestId,
         path: PathBuf,
@@ -156,6 +158,7 @@ pub enum WriteExpectation {
 
 #[derive(Debug)]
 pub enum VfsResult {
+    PathsResolved { id: RequestId, paths: Vec<PathBuf> },
     ResourceResolved {
         id: RequestId,
         result: Result<CheckedResourceIntent, VfsError>,
@@ -212,7 +215,8 @@ pub enum VfsResult {
 impl VfsResult {
     pub(crate) fn request_id(&self) -> RequestId {
         match self {
-            Self::ResourceResolved { id, .. }
+            Self::PathsResolved { id, .. }
+            | Self::ResourceResolved { id, .. }
             | Self::ResourceApplied { id, .. }
             | Self::ExplorerMutated { id, .. }
             | Self::CreateTarget { id, .. }
@@ -248,7 +252,9 @@ impl Drop for WorkerFinished {
 impl VfsRequest {
     fn id(&self) -> Option<RequestId> {
         match self {
-            Self::Read { id, .. }
+            Self::ResolvePaths { id, .. }
+            | Self::AgentWrite { id, .. }
+            | Self::Read { id, .. }
             | Self::ReadScoped { id, .. }
             | Self::ReadScopedBounded { id, .. }
             | Self::ResolveCreate { id, .. }
@@ -434,6 +440,26 @@ impl VfsWorker {
                             }
                         } else {
                             match request {
+                                VfsRequest::ResolvePaths { id, paths } => VfsResult::PathsResolved {
+                                    id, paths: paths.iter().map(|path| resolve_existing_prefix(path)).collect(),
+                                },
+                                VfsRequest::AgentWrite { id, path, root, bytes } => {
+                                    let result = (|| {
+                                        let resolved = resolve_existing_prefix(&path);
+                                        let root = canonical_path(&root)?;
+                                        if resolved != path || !resolved.starts_with(&root) {
+                                            return Err(VfsError::OutsideScope(path.clone()));
+                                        }
+                                        if path.exists() && !path.is_file() {
+                                            return Err(VfsError::Io { operation: "agent write", path: path.clone(), source: io::Error::other("not a regular file") });
+                                        }
+                                        if let Some(parent) = path.parent() {
+                                            fs::create_dir_all(parent).map_err(|source| VfsError::Io { operation: "create directory", path: parent.into(), source })?;
+                                        }
+                                        atomic_write(&path, &bytes)
+                                    })();
+                                    VfsResult::Write { id, path, result }
+                                }
                                 VfsRequest::Read { id, path } => match canonical_path(&path) {
                                     Ok(path) => VfsResult::Read {
                                         id,
@@ -887,6 +913,18 @@ impl VfsWorker {
         Ok(id)
     }
 
+    pub(crate) fn resolve_paths(&mut self, paths: Vec<PathBuf>) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ResolvePaths { id, paths })?;
+        Ok(id)
+    }
+
+    pub(crate) fn agent_write(&mut self, path: PathBuf, root: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::AgentWrite { id, path, root, bytes })?;
+        Ok(id)
+    }
+
     pub fn write(&mut self, path: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
         self.write_checked(path, bytes, WriteExpectation::Any)
     }
@@ -1136,6 +1174,21 @@ impl Drop for VfsWorker {
     fn drop(&mut self) {
         self.begin_shutdown();
         self.thread.take();
+    }
+}
+
+/// Resolve symlinks in the existing prefix of a possibly new file path.
+fn resolve_existing_prefix(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            return rest.iter().rev().fold(resolved, |path, part| path.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => { rest.push(name.to_owned()); existing = parent; }
+            _ => return path.to_path_buf(),
+        }
     }
 }
 
