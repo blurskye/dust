@@ -509,7 +509,11 @@ impl LspSession {
                     continue;
                 };
                 let version = buffer.text.source_version();
-                if self.synced.contains_key(&(key.clone(), *id)) {
+                if self.synced.get(&(key.clone(), *id)).is_some_and(|synced| {
+                    synced == &version || editor.active_buffer_id() == Some(*id)
+                }) {
+                    // The active document is synchronized by dispatch so its changes also
+                    // refresh completion, colors and inlay hints.
                     continue;
                 }
                 document.text = buffer.text.to_string();

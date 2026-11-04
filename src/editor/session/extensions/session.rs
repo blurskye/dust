@@ -69,7 +69,7 @@ pub(super) struct ExtensionSession {
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
     packages: PackageService,
     registry: RegistryService,
-    registry_intents: HashMap<u64, bool>,
+    registry_intents: HashMap<u64, (bool, Option<super::search::PickerEpoch>)>,
     pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
     package_preparing: BTreeSet<u64>,
     package_prepared: HashMap<String, (PluginLoadId, u64)>,

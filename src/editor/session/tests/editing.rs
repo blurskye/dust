@@ -306,7 +306,11 @@ fn macro_replay_honors_configured_counts() {
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None);
     app.set_dashboard_visibility(false);
-    for key in ['q', 'a', 'x', 'q', '3', '@', 'a'] {
+    for key in ['q', 'a', 'x', 'q'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.show_error("an unrelated earlier error");
+    for key in ['3', '@', 'a'] {
         app.handle_configured_key(KeyEvent::character(key));
     }
     let buffer = app.state.active_buffer_id().expect("buffer");

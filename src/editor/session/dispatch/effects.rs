@@ -4332,14 +4332,14 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn replay_macro(&mut self, requested: char) {
+    pub(super) fn replay_macro(&mut self, requested: char) -> bool {
         let Ok(register) = self.input.macro_register(requested) else {
             self.show_error(self.message("no_previous_macro", &[]));
-            return;
+            return false;
         };
         let Some(invocations) = self.state.registers.get_macro(register).map(<[_]>::to_vec) else {
             self.show_error(self.message("empty_macro", &[("register", register.to_string())]));
-            return;
+            return false;
         };
         if self
             .input
@@ -4350,21 +4350,25 @@ impl InteractiveApplication {
                 "macro_recursion_limit",
                 &[("limit", MACRO_RECURSION_LIMIT.to_string())],
             ));
-            return;
+            return false;
         }
+        let mut succeeded = true;
         for invocation in invocations {
             let Ok(invocation) = self.input.macro_step(invocation, MACRO_STEP_LIMIT) else {
                 self.show_error(self.message(
                     "macro_step_limit",
                     &[("limit", MACRO_STEP_LIMIT.to_string())],
                 ));
+                succeeded = false;
                 break;
             };
             if !self.invoke_checked(invocation) {
+                succeeded = false;
                 break;
             }
         }
         self.input.finish_macro_replay();
+        succeeded
     }
 
     pub(super) fn search_word_under_cursor(&mut self, forward: bool) -> bool {
@@ -12421,8 +12425,8 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn process_tool_progress(&mut self) {
         let changed = self.tooling.poll_progress();
-        if let (Some(id), Some(menu)) = (changed, &self.ui.tool_menu) {
-            self.rebuild_tool_menu(&menu.category.clone(), Some(&id));
+        if let (Some(_), Some(menu)) = (changed, &self.ui.tool_menu) {
+            self.rebuild_tool_menu(&menu.category.clone(), None);
         }
     }
 
@@ -12468,7 +12472,7 @@ impl InteractiveApplication {
             if let Some(menu) = &self.ui.tool_menu {
                 let category = menu.category.clone();
                 self.queue_tool_version_probes(&category);
-                self.rebuild_tool_menu(&category, Some(&result.id));
+                self.rebuild_tool_menu(&category, None);
             }
         }
     }
@@ -12541,7 +12545,17 @@ impl InteractiveApplication {
     }
 
     pub(super) fn request_registry(&mut self, request: RegistryRequest, install: bool) {
-        if let Err(error) = self.extension.request_registry(request, install) {
+        let picker = if install {
+            None
+        } else {
+            let title = match &request {
+                RegistryRequest::Search { .. } => "package_registry_search_title",
+                _ => "package_registry_show_title",
+            };
+            self.install_picker(self.message(title, &[]), Vec::new());
+            self.search.picker_epoch().cloned()
+        };
+        if let Err(error) = self.extension.request_registry(request, install, picker) {
             self.show_error(error);
         }
     }
@@ -12549,7 +12563,9 @@ impl InteractiveApplication {
         use crate::editor::session::extensions::RegistryUpdate;
         for update in self.extension.poll_registry() {
             match update {
-                RegistryUpdate::Present(result) => match *result {
+                RegistryUpdate::Present(_, ref picker)
+                    if !picker.as_ref().is_some_and(|epoch| self.search.owns_picker_epoch(epoch)) => {}
+                RegistryUpdate::Present(result, _) => match *result {
                     RegistryResult::Search(result) => {
                         let items = result
                             .packages
@@ -12765,6 +12781,7 @@ impl InteractiveApplication {
                     && entry
                         .definition
                         .automatically_supports_language(&document.language_id)
+                    && !matches!(entry.status, ToolStatus::Installing { .. })
                     && self.selected_lsp_runtime_available(&entry.definition)
             })
             .collect::<Vec<_>>();
@@ -12775,7 +12792,11 @@ impl InteractiveApplication {
             .into_iter()
             .map(|entry| entry.definition.id.clone())
             .collect::<Vec<_>>();
-        if launchable.iter().any(|id| self.language.launch_pending(id)) {
+        if !self.workspace
+            .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language)
+            .discovery_available()
+            || launchable.iter().any(|id| self.language.launch_pending(id))
+        {
             return;
         }
         let launchable_server = launchable
@@ -12784,6 +12805,12 @@ impl InteractiveApplication {
                 !attached.contains(id)
                     && !self.language.is_stopped(id)
                     && !self.language.explicitly_detached(id, buffer)
+                    && !self.language.project_root_missing(
+                        id,
+                        &document.path,
+                        &self.workspace.version(),
+                        self.configuration.binding_revision(),
+                    )
             })
             .cloned();
         // Like mason-lspconfig, point at the server to install when none can start.
@@ -13158,7 +13185,13 @@ impl InteractiveApplication {
         let to = view.cursor.get().saturating_sub(line_start.get());
         content
             .get(from..to)
-            .map_or(0, |typed| u16::try_from(typed.chars().count()).unwrap_or(0))
+            .map_or(0, |typed| {
+                u16::try_from(configured_text_width(
+                    typed,
+                    self.configuration.settings().editor.tab_width,
+                    self.configuration.settings().editor.ambiguous_width,
+                )).unwrap_or(u16::MAX)
+            })
     }
 
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
@@ -13324,6 +13357,10 @@ impl InteractiveApplication {
             self.show_error(self.message("lsp_no_server", &[]));
             return;
         };
+        if matches!(entry.status, ToolStatus::Installing { .. }) {
+            self.show_error("language-server runtime is being changed");
+            return;
+        }
         let base_definition = entry.definition.clone();
         let source = self.selected_lsp_runtime_source(&base_definition);
         let definition = if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
@@ -13573,13 +13610,7 @@ impl InteractiveApplication {
             .sessions()
             .iter()
             .map(|(key, session)| {
-                let root = self
-                    .workspace
-                    .roots()
-                    .iter()
-                    .find(|root| root.id == session.root)
-                    .map(|root| root.identity.canonical_path.clone())
-                    .unwrap_or_default();
+                let root = &session.root_path;
                 let folder = root.file_name().map_or_else(
                     || root.display().to_string(),
                     |name| name.to_string_lossy().into_owned(),
@@ -14019,7 +14050,7 @@ impl InteractiveApplication {
             }
             AppEffect::Zen => {
                 let explorer_open = self.ui.explorer.is_some();
-                match self.configuration.toggle_zen(explorer_open) {
+                match self.configuration.toggle_zen(explorer_open, self.state.is_zoomed()) {
                     None => {
                         if explorer_open {
                             let _ = self.process_project_effect(AppEffect::ExplorerClose);
@@ -14028,8 +14059,8 @@ impl InteractiveApplication {
                             self.apply_layout_action(LayoutAction::Zoom);
                         }
                     }
-                    Some(reopen_explorer) => {
-                        if self.state.is_zoomed() {
+                    Some((reopen_explorer, undo_zoom)) => {
+                        if undo_zoom && self.state.is_zoomed() {
                             self.apply_layout_action(LayoutAction::Zoom);
                         }
                         if reopen_explorer {
@@ -14211,8 +14242,7 @@ impl InteractiveApplication {
             AppEffect::MacroReplay { register, count } => {
                 self.input.begin_macro_batch();
                 for _ in 0..count {
-                    self.replay_macro(register);
-                    if self.ui.notification_error {
+                    if !self.replay_macro(register) {
                         break;
                     }
                 }

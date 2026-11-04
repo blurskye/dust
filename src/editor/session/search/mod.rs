@@ -21,7 +21,7 @@ pub(crate) const SEARCH_BATCH_SIZE: usize = 128;
 pub(crate) const SEARCH_QUEUE_CAPACITY: usize = 8;
 
 pub(in crate::editor::session) use picker::{
-    MatcherSource, PickerContent, PickerOrigin, PickerPayload,
+    MatcherSource, PickerContent, PickerEpoch, PickerOrigin, PickerPayload,
 };
 
 type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8]>>);

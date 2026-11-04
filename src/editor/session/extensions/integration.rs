@@ -18,7 +18,7 @@ pub(in crate::editor::session) enum ExtensionUpdate {
     Failed { operation: String, error: String },
 }
 pub(in crate::editor::session) enum RegistryUpdate {
-    Present(Box<RegistryResult>),
+    Present(Box<RegistryResult>, Option<crate::editor::session::search::PickerEpoch>),
     ValidateArtifact,
     Error(String),
 }
@@ -152,20 +152,22 @@ impl ExtensionSession {
         &mut self,
         request: RegistryRequest,
         install: bool,
+        picker: Option<crate::editor::session::search::PickerEpoch>,
     ) -> Result<(), String> {
         let id = self.registry.request(request).map_err(|e| e.to_string())?;
-        self.registry_intents.insert(id, install);
+        self.registry_intents.insert(id, (install, picker));
         Ok(())
     }
     fn accept_registry(&mut self, event: RegistryEvent) -> Option<RegistryUpdate> {
         // A retired workspace/request must not turn a late artifact into a new install.
-        let install = self.registry_intents.remove(&event.id)?;
+        let (install, picker) = self.registry_intents.remove(&event.id)?;
         Some(match event.result {
             Ok(RegistryResult::Show(metadata)) if install => match self.request_registry(
                 RegistryRequest::Fetch {
                     metadata: Box::new(metadata),
                 },
                 true,
+                None,
             ) {
                 Ok(()) => return None,
                 Err(error) => RegistryUpdate::Error(error),
@@ -182,7 +184,7 @@ impl ExtensionSession {
                     RegistryUpdate::ValidateArtifact
                 }
             }
-            Ok(result) => RegistryUpdate::Present(Box::new(result)),
+            Ok(result) => RegistryUpdate::Present(Box::new(result), picker),
             Err(error) => RegistryUpdate::Error(error.to_string()),
         })
     }
@@ -725,6 +727,34 @@ mod tests {
     }
 
     #[test]
+    fn registry_presentations_keep_the_requesting_picker_epoch() {
+        use crate::editor::session::{search::{SearchSession, PickerContent, PickerOrigin}, workspace::WorkspaceSession};
+        let root = tempfile::tempdir().unwrap();
+        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let workspace = WorkspaceSession::new(
+            crate::workspace::WorkspaceState::new(crate::workspace::WorkspaceId(1), [("root".into(), identity)]).unwrap(),
+            root.path().join("trust"), 1, false, false, 1,
+        );
+        let mut search = SearchSession::default();
+        let content = |title: &str| PickerContent {
+            surface: crate::ui::PickerSurfaceKind::Generic, origin: PickerOrigin::General,
+            title: title.into(), items: Vec::new(), query: String::new(), complete: true,
+        };
+        let epoch = search.install_picker(content("registry"), 100, workspace.version(), 1).unwrap();
+        owner.registry_intents.insert(1, (false, Some(epoch)));
+        let Some(RegistryUpdate::Present(_, Some(epoch))) = owner.accept_registry(RegistryEvent {
+            id: 1, result: Ok(RegistryResult::Search(crate::tools::RegistrySearchResponse { schema: 1, packages: Vec::new() })),
+        }) else { panic!("search must preserve its picker owner") };
+        assert!(search.owns_picker_epoch(&epoch));
+        search.install_picker(content("files"), 100, workspace.version(), 1).unwrap();
+        search.picker_insert("my query");
+        assert!(!search.owns_picker_epoch(&epoch), "a late registry result cannot replace the file picker");
+        assert_eq!(search.picker().unwrap().query(), "my query");
+    }
+
+    #[test]
     fn retired_registry_and_replacement_package_obligations_are_not_adopted() {
         let root = tempfile::tempdir().unwrap();
         let registry =
@@ -770,25 +800,25 @@ mod tests {
         };
         // Synthetic registry responses; no network or installation is performed.
         assert!(owner.accept_registry(event(1, vec![1])).is_none());
-        owner.registry_intents.insert(1, false);
+        owner.registry_intents.insert(1, (false, None));
         assert!(matches!(
             owner.accept_registry(event(1, vec![1])),
             Some(RegistryUpdate::Error(_))
         ));
         assert!(owner.pending_registry_artifact.is_none());
-        owner.registry_intents.insert(2, true);
+        owner.registry_intents.insert(2, (true, None));
         assert!(matches!(
             owner.accept_registry(event(2, vec![2])),
             Some(RegistryUpdate::ValidateArtifact)
         ));
         assert!(owner.accept_registry(event(2, vec![3])).is_none());
-        owner.registry_intents.insert(3, true);
+        owner.registry_intents.insert(3, (true, None));
         assert!(matches!(
             owner.accept_registry(event(3, vec![3])),
             Some(RegistryUpdate::Error(_))
         ));
         assert_eq!(owner.pending_registry_artifact.as_ref().unwrap().1, vec![2]);
-        owner.registry_intents.insert(4, true);
+        owner.registry_intents.insert(4, (true, None));
         owner.retire_packages();
         assert!(owner.accept_registry(event(4, vec![4])).is_none());
         assert!(owner.pending_registry_artifact.is_none());

@@ -119,8 +119,20 @@ pub(super) struct Preparation {
     nix: Option<(u64, Pending<PendingNixLspWorkspace>)>,
     worker: NixWorkspaceService,
     preflights: HashMap<PreflightId, Preflight>,
+    missing_roots: Vec<(String, PathBuf, WorkspaceVersion, u64)>,
 }
 impl LspSession {
+    pub(in crate::editor::session) fn project_root_missing(
+        &self,
+        server: &str,
+        path: &std::path::Path,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> bool {
+        self.preparation.missing_roots.iter().any(|(id, document, source, revision)| {
+            id == server && document == path && source == workspace && *revision == configuration
+        })
+    }
     pub(in crate::editor::session) fn stop_document_launches(&mut self, buffer: crate::editor::BufferId) {
         let mut definitions = Vec::new();
         if let Some((_, pending)) = &self.preparation.root
@@ -224,6 +236,7 @@ impl LspSession {
         self.preparation.root = None;
         self.preparation.nix = None;
         self.preparation.preflights.clear();
+        self.preparation.missing_roots.clear();
     }
     pub(in crate::editor::session) fn discover_launch(
         &mut self,
@@ -279,6 +292,21 @@ impl LspSession {
             return Err("language-server root source changed".into());
         }
         let Some(project_root) = resolution.project_root else {
+            // Keep misses only for this document and configuration. The next candidate
+            // can then start instead of repeatedly choosing the server with no root.
+            self.preparation.missing_roots.retain(|(id, path, workspace, configuration)| {
+                id != &pending.definition.id
+                    && path == &pending.document.path
+                    && workspace == &context.workspace
+                    && *configuration == context.configuration
+            });
+            self.preparation.missing_roots.push((
+                pending.definition.id.clone(),
+                pending.document.path.clone(),
+                context.workspace.clone(),
+                context.configuration,
+            ));
+            self.reset_autostart();
             if pending.asked {
                 return Err(format!(
                     "{} starts in a project with {}",

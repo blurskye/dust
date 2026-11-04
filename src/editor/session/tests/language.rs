@@ -47,12 +47,84 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
         app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "automatic-rust").unwrap().definition.clone();
+    app.tooling.fixture_retain(|entry| entry.definition.id != "automatic-rust");
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition: definition.clone(),
+        status: ToolStatus::Installing { phase: "queued".into(), completed: 0, total: None },
+    });
+    app.sync_lsp_document();
+    assert!(!app.language.project_pending(), "a queued runtime change blocks autostart");
+    app.start_lsp(Some("automatic-rust".into()));
+    assert!(!app.language.project_pending(), "explicit startup cannot race runtime removal either");
+    app.tooling.fixture_retain(|entry| entry.definition.id != "automatic-rust");
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition,
+        status: ToolStatus::Installed(crate::tools::discover_executable("false").unwrap()),
+    });
     app.sync_lsp_document();
     assert!(
         app.language.project_pending(),
-        "trusting the workspace starts the server"
+        "trusting the workspace starts the server after its runtime change finishes"
     );
     assert_eq!(app.workspace.trust(), WorkspaceTrust::Trusted);
+}
+
+#[test]
+fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root() {
+    let mut app = app();
+    fs::create_dir(app.state.workspace_root.join(".git")).unwrap();
+    let template = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    app.tooling.fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    let executable = crate::tools::discover_executable("false").unwrap();
+    for (id, languages, marker) in [
+        ("rust", vec!["rust"], "Cargo.toml"),
+        ("typescript", vec!["typescript"], "package.json"),
+        ("tailwind", vec!["typescript", "html"], ".git"),
+    ] {
+        let mut definition = template.clone();
+        definition.id = id.into();
+        definition.languages = languages.into_iter().map(str::to_owned).collect();
+        definition.executable = executable.display().to_string();
+        definition.install = None;
+        definition.project_root_markers = vec![marker.into()];
+        definition.project_root_strategy = crate::files::ProjectRootStrategy::Marker;
+        app.tooling.fixture_insert(crate::tools::ToolEntry {
+            definition, status: ToolStatus::Installed(executable.clone()),
+        });
+    }
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    let path = app.state.workspace_root.join("main.rs");
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path));
+    app.sync_lsp_document();
+    assert!(app.language.launch_pending("rust"));
+    let path = app.state.workspace_root.join("main.ts");
+    app.state.open_text(TextBuffer::from_text("let value = 1;"), Some(path.clone()));
+    app.sync_lsp_document();
+    assert!(!app.language.launch_pending("typescript"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    for expected in ["typescript", "tailwind"] {
+        while app.language.project_pending() {
+            app.process_lsp_project_root();
+            assert!(Instant::now() < deadline, "root discovery timed out");
+            thread::yield_now();
+        }
+        app.sync_lsp_document();
+        assert!(app.language.launch_pending(expected), "next candidate {expected} must be attempted");
+    }
+    while app.language.project_pending() {
+        app.process_lsp_project_root();
+        assert!(Instant::now() < deadline, "Tailwind discovery timed out");
+        thread::yield_now();
+    }
+    assert!(app.language.project_root_missing("typescript", &path, &app.workspace.version(), app.configuration.binding_revision()));
+    assert!(app.language.fixture_preflight_projects().any(|(key, _)| key.contains("tailwind")));
 }
 
 #[test]
@@ -196,6 +268,10 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
             .documents
             .contains_key(&app.state.active_buffer_id().unwrap())
     );
+    app.show_lsp_sessions();
+    let item = app.search.picker().unwrap().selected_item().unwrap();
+    assert!(item.detail.starts_with("nested ·"));
+    assert_eq!(item.source, nested.display().to_string());
     assert!(app.language.capabilities().is_none()); // `false` is not an initialized language server.
     // Synthetic Running publication over the actual admitted transport: idle
     // document sync must not start a fresh completion request every frame.
@@ -823,6 +899,42 @@ fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
     assert!(InteractiveApplication::rust_analyzer_is_rustup_proxy(
         &hardlink
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn background_tool_install_updates_preserve_the_selected_row() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut app = app();
+    let directory = tempdir().unwrap();
+    let rustup = directory.path().join("rustup");
+    fs::write(&rustup, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    app.rebuild_tool_menu("lsp", None);
+    let menu = app.ui.tool_menu.as_mut().unwrap();
+    menu.selected = menu.rows.iter().position(|row| row.id != "rust-analyzer").unwrap();
+    let selected = menu.rows[menu.selected].id.clone();
+    app.tooling.install(crate::editor::session::tooling::ToolInstall::Rustup {
+        definition, rustup, proxy, cwd: directory.path().into(),
+    }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        app.process_tool_progress();
+        let menu = app.ui.tool_menu.as_ref().unwrap();
+        assert_eq!(menu.rows[menu.selected].id, selected, "progress must preserve selection");
+        app.process_tool_results();
+        let menu = app.ui.tool_menu.as_ref().unwrap();
+        assert_eq!(menu.rows[menu.selected].id, selected, "completion must preserve selection");
+        if !app.tooling.entries().iter().any(|entry| entry.definition.id == "rust-analyzer" && matches!(entry.status, ToolStatus::Installing { .. })) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "installation timed out");
+        thread::yield_now();
+    }
 }
 
 #[cfg(unix)]
@@ -1764,6 +1876,32 @@ fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
     app.request_lsp(crate::language::lsp::LspFeature::Completion);
     assert_eq!(app.language.completion_start(), Some(ByteOffset(7)));
     assert!(app.ui.lsp_loading.is_some());
+}
+
+#[test]
+fn completion_anchor_measures_wide_identifiers_in_terminal_cells() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("wide.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("obj.变量"), Some(path));
+    app.state.views[view].cursor = ByteOffset("obj.变量".len());
+    let owner = super::LspProjectionOwner {
+        server: "server".into(), buffer, view,
+        revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
+        uri: crate::language::lsp::file_uri(app.state.buffers[buffer].path.as_ref().unwrap()),
+        language: "rust".into(),
+    };
+    app.language.fixture_projection(Some(owner.clone()));
+    app.language.fixture_completion_source(Some((7, owner)));
+    app.mark_lsp_completion_start(false);
+    app.language.install_completions("server", vec![crate::language::lsp::LspCompletionItem {
+        label: "变量名称".into(), insert_text: "变量名称".into(),
+        filter_text: None, sort_text: None, detail: String::new(),
+        text_edit: None, additional_edits: Vec::new(), kind: None,
+        snippet: false, documentation: None, resolve_item: None, resolved: true,
+    }], false, 7);
+    app.narrow_lsp_completion();
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().typed, 4);
 }
 
 #[test]

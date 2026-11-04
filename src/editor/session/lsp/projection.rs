@@ -144,7 +144,13 @@ impl LspSession {
                 *owner = current.clone();
             }
         } else {
+            let start = self.projection.completion_start;
+            let automatic = self.projection.completion_automatic;
             self.clear_completion();
+            if typing {
+                self.projection.completion_start = start;
+                self.projection.completion_automatic = automatic;
+            }
             if !typing {
                 self.projection.breadcrumbs_asked = None;
                 self.projection.breadcrumbs_seen = None;
@@ -1603,6 +1609,27 @@ mod tests {
         assert!(endpoint.take_synced_source().is_none());
     }
     #[test]
+    fn document_replay_synchronizes_edited_inactive_buffers() {
+        let (mut editor, buffer, document, mut owner) = fixture();
+        let endpoint = owner.service.replace_edit_source_fixture(
+            document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16,
+        );
+        let session = owner.sessions.remove("owned").unwrap();
+        owner.sessions.insert("owned-edit-fixture".into(), session);
+        editor.open_text(TextBuffer::from_text("other"), Some("/fixture/other.rs".into()));
+        owner.retry_documents(&editor);
+        assert!(endpoint.take_synced_source().is_some());
+        editor.buffers[buffer].text.restore_text("edited inactive text").unwrap();
+        owner.retry_documents(&editor);
+        assert_eq!(endpoint.take_synced_source(), Some(buffer));
+        assert!(owner.synced("owned-edit-fixture", buffer, &editor.buffers[buffer].text.source_version()));
+        assert_eq!(owner.sessions["owned-edit-fixture"].documents[&buffer].text, "edited inactive text");
+        owner.retry_documents(&editor);
+        assert!(endpoint.take_synced_source().is_none());
+    }
+    #[test]
     fn code_action_ranges_are_encoded_for_each_receiving_server() {
         let (_, buffer, mut document, mut owner) = fixture();
         document.text = "😀x".into();
@@ -1661,6 +1688,7 @@ mod tests {
             new_text: "foooX".into(),
         });
         owner.install_completions("owned", vec![completion], false, 0);
+        owner.begin_completion(Some(ByteOffset(1)), true);
         editor.buffers[buffer]
             .text
             .restore_text("foo tail")
@@ -1676,6 +1704,8 @@ mod tests {
             owner.completion_incomplete(),
             "edited ranges require a fresh request"
         );
+        assert_eq!(owner.completion_start(), Some(ByteOffset(1)));
+        assert!(owner.completion_automatic());
     }
     #[test]
     fn reloaded_text_retires_projection_even_at_the_same_revision() {

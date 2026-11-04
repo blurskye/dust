@@ -5961,6 +5961,14 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
     assert!(app.configuration.settings().editor.git_signs.enabled);
 
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+    let zoomed_tab = app.state.active_tab;
+    app.process_effect(AppEffect::Zen);
+    app.process_effect(AppEffect::Zen);
+    assert!(app.state.is_zoomed(), "zen must preserve a pre-existing zoom");
+    assert_eq!(app.state.active_tab, zoomed_tab);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+
     let wrap = app.configuration.settings().editor.wrap;
     app.process_effect(AppEffect::ViewToggle(
         crate::editor::session::ViewToggle::Wrap,
