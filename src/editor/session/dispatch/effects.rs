@@ -2107,7 +2107,12 @@ impl InteractiveApplication {
                 match adapter {
                     Some(AdapterContext::Test { matcher }) => self.run_trusted(TrustedAction::RunTest { name, matcher }),
                     Some(AdapterContext::Linter { matcher, lint: true }) => self.run_trusted(TrustedAction::RunLinter { name, matcher }),
-                    Some(AdapterContext::Formatter { .. }) => self.process_effect(AppEffect::FormatRun(name)),
+                    Some(AdapterContext::Formatter { source }) => {
+                        match crate::editor::session::tasks::FormatterSource::capture(&self.state, source.buffer()) {
+                            Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
+                            Err(error) => self.show_error(error),
+                        }
+                    }
                     _ => self.run_trusted(TrustedAction::RunTask(name)),
                 }
             }
@@ -2947,7 +2952,7 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::LspSelectionExpand => {
-                if self.active_lsp_document().is_some() {
+                if self.active_lsp_document_without_text().is_some() {
                     self.refresh_lsp_projection_owner();
                 }
                 if let Some(view) = self.state.active_view {

@@ -2209,6 +2209,24 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
         fs::read_to_string(root.path().join("dependency-runs")).unwrap(),
         "okok"
     );
+
+    // Restart formats the original document's current text, not the newly focused buffer.
+    app.state.buffers[buffer].text.restore_text("again").unwrap();
+    let (other, view) = app.state.open_text(TextBuffer::from_text("leave alone"), None);
+    app.reconcile_editor_windows();
+    fs::write(root.path().join("go"), "").unwrap();
+    app.process_effect(AppEffect::TaskRestart("owned-format".into()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.tasks.is_running("owned-format") && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!app.tasks.is_running("owned-format"));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "XYZ");
+    assert_eq!(app.state.buffers[other].text.to_string(), "leave alone");
+    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(fs::read_to_string(root.path().join("dependency-runs")).unwrap(), "okokok");
 }
 
 #[cfg(unix)]
