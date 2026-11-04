@@ -277,7 +277,6 @@ impl DocumentSession {
         } else {
             request.base.join(path)
         };
-        let target = target.canonicalize().unwrap_or(target);
         request.other_open_paths.extend(self.pending_files.values().filter_map(|intent| {
             match &intent.operation {
                 Operation::Open { requested, .. } => Some(requested.clone()),
@@ -293,15 +292,15 @@ impl DocumentSession {
         let bytes = configured_file_bytes(view.text, request.policy);
         let expectation = if request.force {
             WriteExpectation::Any
-        } else if view.path == Some(target.as_path()) {
-            WriteExpectation::Exact(view.persisted.to_vec())
         } else {
-            WriteExpectation::Missing
+            // The worker resolves aliases before deciding whether this is a save-as.
+            WriteExpectation::Exact(view.persisted.to_vec())
         };
         let id = self.vfs.write_document(
             target.clone(),
             bytes.clone(),
             expectation,
+            view.path.map(Path::to_path_buf),
             request.other_open_paths,
         )?;
         self.pending_files.insert(

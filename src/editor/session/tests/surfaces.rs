@@ -1243,6 +1243,31 @@ fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
     assert_eq!(fs::read(&path).unwrap(), b"external");
 }
 
+#[cfg(unix)]
+#[test]
+fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let original = root.join("original.txt");
+    let other = root.join("other.txt");
+    let alias = root.join("alias.txt");
+    fs::write(&original, "old").unwrap();
+    fs::write(&other, "unrelated").unwrap();
+    std::os::unix::fs::symlink(&original, &alias).unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(original.clone()));
+    app.invoke_insert_text("new ".into());
+    let gate = gate_document_worker(&mut app);
+    app.start_save(false, Some(alias.clone()), false);
+    fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(&other, &alias).unwrap();
+    gate.send(()).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(fs::read(&original).unwrap(), b"old");
+    assert_eq!(fs::read(&other).unwrap(), b"unrelated");
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
+}
+
 #[test]
 fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
     for edit_during_save in [false, true] {

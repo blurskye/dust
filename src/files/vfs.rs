@@ -235,7 +235,7 @@ pub(crate) enum VfsReply {
 struct QueuedRequest {
     read_roots: Option<Vec<crate::workspace::RootIdentity>>,
     explorer: Option<ExplorerIo>,
-    document_paths: Option<Vec<PathBuf>>,
+    document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
     request: VfsRequest,
     state: Arc<std::sync::atomic::AtomicU8>,
 }
@@ -587,19 +587,28 @@ impl VfsWorker {
                                     expectation,
                                 } => {
                                     let document = queued.document_paths.is_some();
+                                    let mut path = path;
                                     let result = (|| {
-                                        if let Some(paths) = queued.document_paths {
-                                            let canonical = fs::canonicalize(&path).ok();
+                                        let mut expectation = expectation;
+                                        if let Some((source, paths)) = queued.document_paths {
+                                            let requested = path.clone();
+                                            path = fs::canonicalize(&path).unwrap_or(path.clone());
                                             if paths.iter().any(|other| {
-                                                other == &path
-                                                    || canonical.as_ref().is_some_and(|target| {
-                                                        fs::canonicalize(other).ok().as_ref()
-                                                            == Some(target)
-                                                    })
+                                                other == &requested || other == &path
+                                                    || fs::canonicalize(other).ok().as_ref()
+                                                        == Some(&path)
                                             }) {
                                                 return Err(VfsError::DestinationExists(
                                                     path.clone(),
                                                 ));
+                                            }
+                                            let current_file = source.as_ref().is_some_and(|source| {
+                                                source == &requested || source == &path
+                                                    || fs::canonicalize(source).ok().as_ref()
+                                                        == Some(&path)
+                                            });
+                                            if !current_file && matches!(expectation, WriteExpectation::Exact(_)) {
+                                                expectation = WriteExpectation::Missing;
                                             }
                                         }
                                         checked_atomic_write(&path, &bytes, &expectation)
@@ -912,6 +921,7 @@ impl VfsWorker {
         path: PathBuf,
         bytes: Vec<u8>,
         expectation: WriteExpectation,
+        source_path: Option<PathBuf>,
         other_paths: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
@@ -922,7 +932,7 @@ impl VfsWorker {
                 bytes,
                 expectation,
             },
-            Some(other_paths),
+            Some((source_path, other_paths)),
         )?;
         Ok(id)
     }
@@ -1026,14 +1036,14 @@ impl VfsWorker {
     fn submit_document(
         &mut self,
         request: VfsRequest,
-        document_paths: Option<Vec<PathBuf>>,
+        document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
     ) -> Result<(), VfsError> {
         self.submit_io(request, document_paths, None)
     }
     fn submit_io(
         &mut self,
         request: VfsRequest,
-        document_paths: Option<Vec<PathBuf>>,
+        document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
         explorer: Option<ExplorerIo>,
     ) -> Result<(), VfsError> {
         self.submit_packet(request, document_paths, explorer, None)
@@ -1060,7 +1070,7 @@ impl VfsWorker {
     fn submit_packet(
         &mut self,
         request: VfsRequest,
-        document_paths: Option<Vec<PathBuf>>,
+        document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
         explorer: Option<ExplorerIo>,
         read_roots: Option<Vec<crate::workspace::RootIdentity>>,
     ) -> Result<(), VfsError> {
