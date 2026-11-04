@@ -581,6 +581,46 @@ fn loading_a_session_refuses_to_replace_unsaved_work() {
 }
 
 #[test]
+fn managed_formatter_keeps_cursor_and_selection_on_code_after_inserted_punctuation() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo()\nbar()\n"), None);
+    app.state.views[view].cursor = ByteOffset(6);
+    app.state.views[view].selection = Some(crate::editor::Selection {
+        anchor: ByteOffset(0), head: ByteOffset(6),
+        kind: crate::editor::SelectionKind::Character,
+    });
+    app.state.views[view].mode = crate::editor::EditorMode::VisualChar;
+    app.tasks.fixture_formatter_result(
+        "punctuation", buffer, b"foo();\nbar()\n", &app.state, &app.workspace,
+        app.configuration.binding_revision(),
+    );
+    app.process_job_events();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo();\nbar()\n");
+    assert_eq!(app.state.views[view].cursor, ByteOffset(7));
+    assert_eq!(app.state.views[view].selection.unwrap().head, ByteOffset(7));
+}
+
+#[test]
+fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("unicode.rs");
+        fs::write(&path, "é😀x\n").unwrap();
+        if open {
+            app.state.open_text(TextBuffer::from_text("é😀x\n"), Some(path.clone()));
+        }
+        app.set_dashboard_visibility(false);
+        app.navigate_debug_location(crate::editor::session::debugger::DebugLocation {
+            path: path.clone(), line: 1, column: 4,
+        });
+        wait_vfs(&mut app);
+        let view = &app.state.views[app.state.active_view.unwrap()];
+        assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
+        assert_eq!(view.cursor, ByteOffset(6));
+    }
+}
+
+#[test]
 fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None);
@@ -766,7 +806,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
 }
 
 #[test]
-fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
+fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insertion() {
     use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
     let mut app = app();
     let path = app.state.workspace_root.join("snippet.rs");
@@ -806,7 +846,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
                         character: 3,
                     },
                 },
-                new_text: "foo(${1:arg})$0".into(),
+                new_text: "foo(\r\n${1:arg})$0".into(),
             }),
             additional_edits: vec![LspTextEdit {
                 range: LspRange {
@@ -840,7 +880,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     });
     app.accept_lsp_completion();
     let text = app.state.buffers[buffer].text.to_string();
-    assert_eq!(text, "use thing;\n\nfoo(arg)");
+    assert_eq!(text, "use thing;\n\nfoo(\narg)");
     assert_eq!(app.input.snippet_buffer(), Some(buffer));
     assert_eq!(
         app.state.views[view].selection.unwrap().anchor.get(),

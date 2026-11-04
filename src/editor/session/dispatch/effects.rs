@@ -5711,15 +5711,20 @@ impl InteractiveApplication {
         else {
             return false;
         };
-        let head = crate::editor::text::previous_grapheme_boundary(text, ByteOffset(end));
+        let empty = start == end;
+        let head = if empty {
+            ByteOffset(start)
+        } else {
+            crate::editor::text::previous_grapheme_boundary(text, ByteOffset(end))
+        };
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetMode {
                 view: view_id,
-                mode: EditorMode::VisualChar,
+                mode: if empty { EditorMode::Normal } else { EditorMode::VisualChar },
             })
             .with_operation(EditorOperation::SetSelection {
                 view: view_id,
-                selection: Some(crate::editor::Selection {
+                selection: (!empty).then_some(crate::editor::Selection {
                     anchor: ByteOffset(start),
                     head,
                     kind: crate::editor::SelectionKind::Character,
@@ -5740,6 +5745,26 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
+    pub(super) fn navigate_debug_location(
+        &mut self,
+        location: crate::editor::session::debugger::DebugLocation,
+    ) {
+        let position = crate::language::lsp::LspPosition {
+            line: location.line.saturating_sub(1) as usize,
+            character: location.column.saturating_sub(1) as usize,
+        };
+        self.navigate_lsp_location_encoded(
+            &crate::language::lsp::LspLocation {
+                uri: crate::language::lsp::file_uri(&location.path),
+                range: crate::language::lsp::LspRange {
+                    start: position.clone(),
+                    end: position,
+                },
+            },
+            PositionEncoding::Utf16,
+        );
+    }
+
     pub(super) fn start_dap_configuration(&mut self, name: &str) {
         match self.debugger_session.request_debug(
             (Some(name), None),
@@ -5888,11 +5913,7 @@ impl InteractiveApplication {
                             .iter()
                             .any(|root| location.path.starts_with(&root.identity.canonical_path))
                         {
-                            self.navigate_matcher_source(MatcherSource {
-                                path: location.path,
-                                line: location.line.saturating_sub(1) as usize,
-                                column: location.column.saturating_sub(1) as usize,
-                            });
+                            self.navigate_debug_location(location);
                         }
                     }
                     crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
@@ -5957,16 +5978,17 @@ impl InteractiveApplication {
                                     let text = &self.state.buffers[buffer].text;
                                     let line = target.line.saturating_sub(1) as usize;
                                     let line = line.min(text.len_lines().saturating_sub(1));
-                                    let start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
-                                    let column = target.column.saturating_sub(1) as usize;
-                                    let row = text.line(line).unwrap_or_default();
-                                    let column = row
-                                        .trim_end_matches(['\r', '\n'])
-                                        .grapheme_indices(true)
-                                        .take_while(|(offset, _)| *offset <= column)
-                                        .last()
-                                        .map_or(0, |(offset, _)| offset);
-                                    let position = ByteOffset(start.get() + column);
+                                    let position = match PositionCodec::new(text).lsp_to_byte(
+                                        line,
+                                        target.column.saturating_sub(1) as usize,
+                                        PositionEncoding::Utf16,
+                                    ) {
+                                        Ok(position) => position,
+                                        Err(error) => {
+                                            self.show_error(error);
+                                            continue;
+                                        }
+                                    };
                                     self.state.views[view].cursor = position;
                                     self.state.mark_editor_changed();
                                     self.ensure_cursor_visible();
@@ -6133,7 +6155,6 @@ impl InteractiveApplication {
 
     pub(super) fn apply_formatter_result(&mut self, task: &RunningTask) {
         let transaction = self.transaction_id();
-        let positions = self.view_positions(|_| true);
         match self.tasks.formatter_transaction(
             task,
             &self.state,
@@ -6148,7 +6169,6 @@ impl InteractiveApplication {
                 .and_then(|draft| self.commit_editor_draft(draft, None, false))
             {
                 Ok(()) => {
-                    self.restore_view_positions(positions);
                     self.notify_message(self.message("formatter_applied", &[]), false);
                 }
                 Err(error) => self.show_error(error),
@@ -6314,10 +6334,7 @@ impl InteractiveApplication {
                         }
                         // Linters exit 1 when they have findings; that is not a failure. Other
                         // tasks with a matcher publish what they matched however they exit.
-                        let (matched, lint) = match task.adapter() {
-                            AdapterContext::Linter { lint, .. } => (true, *lint),
-                            _ => (false, false),
-                        };
+                        let lint = matches!(task.adapter(), AdapterContext::Linter { lint: true, .. });
                         let linter_ran = lint && matches!(code, Some(0 | 1));
                         if !linter_ran
                             && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
@@ -6337,12 +6354,12 @@ impl InteractiveApplication {
                                 code != Some(0),
                             );
                         }
-                        if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
+                    }
+                    if let AdapterContext::Linter { lint, .. } = task.adapter() {
+                        let linter_ran = *lint && matches!(code, Some(0 | 1));
+                        if truncated {
                             self.show_error("linter output truncated; diagnostics not published");
-                        }
-                        if matched
-                            && (linter_ran || !lint)
-                            && !truncated
+                        } else if (linter_ran || !lint)
                             && let Err(error) = self.tasks.begin_linter(
                                 *task,
                                 &self.state,
@@ -6399,11 +6416,7 @@ impl InteractiveApplication {
 
     /// A terminal running an agent profile's own program, for `agents.connection = "terminal"`.
     pub(super) fn agent_terminal(&self, id: PtyId) -> bool {
-        let agents = &self.configuration.settings().agents.profiles;
-        self.terminal_session
-            .descriptions()
-            .into_iter()
-            .any(|(terminal, profile, _)| terminal == id.0 && agents.contains_key(&profile))
+        self.terminal_session.is_agent(id)
     }
 
     /// An agent's terminal opens on the right at the agent panel's width, where the ACP panel goes.
@@ -6623,6 +6636,7 @@ impl InteractiveApplication {
             self.window_session
                 .navigation_stamp(self.state.window_version(), self.state.active_view),
             self.input.capture_epoch(),
+            false,
         ) {
             Ok(intent) => self.run_trusted(TrustedAction::OpenDapTerminal { intent, reply }),
             Err(error) => {
@@ -6671,6 +6685,7 @@ impl InteractiveApplication {
                             && self.ui.settings.is_none()
                         {
                             self.terminal_session.select(id);
+                            self.terminal_session.display(id);
                             if open.float {
                                 self.float_terminal(id);
                             } else if self.agent_terminal(id) {
@@ -6880,7 +6895,8 @@ impl InteractiveApplication {
                     }
                 }
                 // Nothing is left to type to; keys go back to the source.
-                TerminalUpdate::Exited(id, _) if self.debug_terminal == Some(id) => {
+                TerminalUpdate::Exited(id, _) if self.debug_terminal == Some(id)
+                    && self.window_session.focused_terminal() == Some(id.0) => {
                     self.set_terminal_focus(false);
                 }
                 TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}
@@ -7264,18 +7280,22 @@ impl InteractiveApplication {
             }
             return;
         };
-        if let Err(error) = self.git.start_branches(&status.repository) {
+        if let Err(error) = self.git.start_branches(&status.repository, self.workspace.root_revision()) {
             self.show_error(error);
         }
     }
     /// Remove the selected worktree and its directory. This never deletes a branch.
     pub(in crate::editor::session) fn request_git_worktree_remove(&mut self) {
-        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, .. }) =
+        let Some(crate::editor::session::search::PickerPayload::GitWorktree { name, main, .. }) =
             self.search.selected_picker_payload().cloned()
         else {
             self.show_error("select a worktree first");
             return;
         };
+        if main {
+            self.show_error("the main checkout cannot be removed");
+            return;
+        }
         self.git.set_pending_destructive(
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name.clone()),
         );
@@ -7340,7 +7360,7 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn process_git_branch_events(&mut self) {
         // One poll per handler call: the service is one shot.
-        let outcome = match self.git.poll_branch_outcome() {
+        let outcome = match self.git.poll_branch_outcome(self.workspace.root_revision()) {
             Ok(Some(outcome)) => Some(outcome),
             Ok(None) => None,
             Err(error) => {
@@ -7403,13 +7423,14 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("git-worktree:{}", worktree.name)),
+                        id: PickerItemId(format!("git-worktree:{}:{}", worktree.main, worktree.name)),
                         label: worktree.name.clone(),
                         detail,
                         source: "worktrees".into(),
                         action: PickerAction::None,
                     },
                     crate::editor::session::search::PickerPayload::GitWorktree {
+                        main: worktree.main,
                         name: worktree.name.clone(),
                         path: worktree.path.clone(),
                     },
@@ -9740,11 +9761,7 @@ impl InteractiveApplication {
                 match debug_selection
                     .and_then(|selection| self.debugger_session.activate(selection, target))
                 {
-                    Ok(Some(location)) => self.navigate_matcher_source(MatcherSource {
-                        path: location.path,
-                        line: location.line.saturating_sub(1) as usize,
-                        column: location.column.saturating_sub(1) as usize,
-                    }),
+                    Ok(Some(location)) => self.navigate_debug_location(location),
                     Ok(None) => {}
                     Err(error) => self.show_error(error),
                 }

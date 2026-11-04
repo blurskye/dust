@@ -1661,7 +1661,9 @@ impl DebugSession {
             .is_none_or(DapTerminalReply::current)
     }
     pub(in crate::editor::session) fn reject_terminals(&mut self, reason: &str) {
-        for (_, reply) in self.terminal_replies.drain() {
+        // Keep the association until terminal cleanup or preflight completion consumes it.
+        // Otherwise an absent reply would make a retired debugger's launch look ordinary.
+        for reply in self.terminal_replies.values() {
             let _ = reply.respond(false, Some(reason.into()));
         }
     }

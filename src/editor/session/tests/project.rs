@@ -2150,6 +2150,57 @@ fn search_moves_forward_wraps_and_repeats() {
 
 #[cfg(unix)]
 #[test]
+fn successful_task_dependencies_publish_their_matched_diagnostics() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "source\n").unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    let dependency = crate::config::TaskConfig {
+        kind: crate::config::TaskKind::Task,
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), "printf 'a.txt:1:warning:dependency warning\\n'".into()],
+        cwd: None, environment: BTreeMap::new(), dependencies: vec![],
+        timeout_ms: Some(2000), stdin: false,
+        matcher: Some(crate::config::ProblemMatcherConfig {
+            pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<severity>[^:]+):(?P<message>[^\n]+)$".into(),
+            path_group: "path".into(), line_group: "line".into(), column_group: None,
+            column_encoding: None, severity_group: Some("severity".into()),
+            message_group: "message".into(), name_group: None, status_group: None,
+            duration_group: None,
+        }),
+    };
+    let mut parent = dependency.clone();
+    parent.arguments = vec!["-c".into(), "printf done > parent-finished".into()];
+    parent.dependencies = vec!["dependency".into()];
+    parent.matcher = None;
+    loaded.config.tasks.insert("dependency".into(), dependency);
+    loaded.config.tasks.insert("parent".into(), parent);
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard { root: root.path().into() }, loaded, false,
+        state_dir.path().into(), false, false, std::sync::Arc::new(crate::clock::SystemClock),
+    ).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity);
+    }
+    app.reconcile_workspace_trust();
+    app.process_effect(AppEffect::TaskRun("parent".into()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !root.path().join("parent-finished").exists() || app.diagnostics.choices().count() == 0 {
+        app.process_execution_preflight();
+        app.process_job_events();
+        app.process_vfs_results();
+        assert!(Instant::now() < deadline, "{:?}", app.ui.notification);
+        thread::sleep(Duration::from_millis(2));
+    }
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].label.contains("dependency warning"), "{rows:?}");
+}
+
+#[cfg(unix)]
+#[test]
 fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
@@ -3689,6 +3740,44 @@ fn switching_to_a_worktree_moves_the_editor_there() {
 }
 
 #[test]
+fn removing_the_main_checkout_cannot_remove_a_linked_worktree_named_main() {
+    let mut app = app();
+    let repo = history_fixture(&app.state.workspace_root, &["base"]);
+    let outside = tempdir().unwrap();
+    let linked = outside.path().join("linked");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let branch = repo.branch("linked-main", &head, false).unwrap().into_reference();
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&branch));
+    repo.worktree("main", &linked, Some(&options)).unwrap();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.start_git_worktrees();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let rows = app.search.picker_projection().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == "main").count(), 2);
+    let index = rows.iter().position(|row| row.detail.contains(" · main")).unwrap();
+    for _ in 0..index {
+        app.invoke(crate::editor::CommandInvocation::new("picker.next", InvocationSource::Test).unwrap());
+    }
+    app.request_git_worktree_remove();
+    assert!(app.input.prompt().is_none());
+    assert!(app.git.take_pending_destructive().is_none());
+    assert!(app.ui.notification.as_ref().unwrap().contains("main checkout"));
+    assert!(linked.is_dir());
+    assert!(repo.find_worktree("main").is_ok());
+}
+
+#[test]
 fn a_locked_worktree_refuses_removal() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
@@ -4614,6 +4703,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
             action: crate::workspace::PickerAction::None,
         },
         crate::editor::session::search::PickerPayload::GitWorktree {
+            main: false,
             name: "missing-worktree".into(), path: root.join("missing-worktree"),
         },
     )]);

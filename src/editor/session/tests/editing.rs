@@ -1532,6 +1532,18 @@ fn star_and_hash_repeat_only_whole_identifiers() {
 }
 
 #[test]
+fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.set_dashboard_visibility(false);
+    assert!(app.select_text(view, 0, 2));
+    assert!(app.select_text(view, 3, 3));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert!(app.state.views[view].selection.is_none());
+}
+
+#[test]
 fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
     let mut app = app();
     let (_, view) = app.state.open_text(TextBuffer::from_text("e\u{301} e e\u{301}"), None);

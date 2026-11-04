@@ -492,8 +492,9 @@ impl InteractiveApplication {
             .terminal_session
             .descriptions()
             .into_iter()
-            .find(|(_, profile, lifecycle)| {
-                *profile == name
+            .find(|(id, profile, lifecycle)| {
+                self.terminal_session.is_agent(super::PtyId(*id))
+                    && *profile == name
                     && matches!(
                         lifecycle,
                         ContentLifecycle::Preflight
@@ -548,6 +549,7 @@ impl InteractiveApplication {
             self.window_session
                 .navigation_stamp(self.state.window_version(), self.state.active_view),
             self.input.capture_epoch(),
+            true,
         ) {
             Ok(intent) => {
                 self.run_trusted(super::TrustedAction::OpenTerminal(intent));

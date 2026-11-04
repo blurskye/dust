@@ -42,6 +42,7 @@ pub(in crate::editor::session) enum PickerPayload {
         local: Option<PathBuf>,
     },
     GitWorktree {
+        main: bool,
         #[allow(dead_code)]
         name: String,
         /// Carried so the open and close commands act on the row's own worktree instead of

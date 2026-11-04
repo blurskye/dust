@@ -3966,6 +3966,39 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
+fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
+    let name = loaded.config.agents.default.clone();
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["cat".into()];
+    let mut shell = loaded.config.terminals.profiles["shell"].clone();
+    shell.program = "/bin/cat".into();
+    shell.arguments.clear();
+    shell.float = false;
+    loaded.config.terminals.profiles.insert(name.clone(), shell);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open(&name);
+    let app = driver.application_mut();
+    let shell = app.terminal_session.selected().unwrap();
+    assert!(!app.agent_terminal(shell));
+    assert!(!app.terminal_session.side(shell));
+    app.process_effect(AppEffect::TerminalUnfocus);
+    app.process_effect(AppEffect::AgentAsk);
+    let agent = app.terminal_session.selected().unwrap();
+    assert_ne!(shell, agent, "an ordinary shell is not reused as an agent");
+    assert!(app.agent_terminal(agent));
+    assert!(app.terminal_session.side(agent));
+    app.process_effect(AppEffect::TerminalUnfocus);
+    app.process_effect(AppEffect::AgentAsk);
+    assert_eq!(app.terminal_session.selected(), Some(agent));
+    assert_eq!(app.terminal_session.descriptions().len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
@@ -4771,6 +4804,82 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let mut program = loaded.config.terminals.profiles["shell"].clone();
+    program.program = "/bin/sh".into();
+    program.arguments = vec!["-c".into(), "printf ready > debug-ready; while [ ! -f debug-exit ]; do sleep .01; done".into()];
+    program.float = false;
+    loaded.config.terminals.profiles.insert("debug-output".into(), program);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("shell");
+    let app = driver.application_mut();
+    let shell = app.terminal_session.selected().unwrap();
+    app.process_effect(AppEffect::TerminalUnfocus);
+    let (_service, adapter) = crate::debugger::test_session();
+    let (_request, reply) = adapter.terminal_reply();
+    app.request_terminal_open("debug-output", Some(reply));
+    let debug = app.terminal_session.selected().unwrap();
+    assert_ne!(debug, shell);
+    assert_eq!(app.terminal_session.displayed(), Some(debug));
+    assert!(!app.window_session.terminal_focused());
+    let root = app.state.workspace_root.clone();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !root.join("debug-ready").exists() {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    driver.application_mut().reveal_terminal(shell);
+    std::fs::write(root.join("debug-exit"), "exit").unwrap();
+    loop {
+        driver.pump_terminal();
+        let app = driver.application_mut();
+        if app.terminal_session.descriptions().iter().any(|(id, _, state)| {
+            *id == debug.0 && *state == crate::ui::window::ContentLifecycle::Exited
+        }) { break; }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.application_mut().window_session.focused_terminal(), Some(shell.0));
+}
+
+#[cfg(unix)]
+#[test]
+fn retired_debugger_terminal_preflight_never_launches_the_program() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let mut program = loaded.config.terminals.profiles["shell"].clone();
+    program.program = "/bin/sh".into();
+    program.arguments = vec!["-c".into(), "printf started > retired-debug-started".into()];
+    loaded.config.terminals.profiles.insert("retired-debug".into(), program);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    let (_service, adapter) = crate::debugger::test_session();
+    let (_request, reply) = adapter.terminal_reply();
+    let app = driver.application_mut();
+    app.request_terminal_open("retired-debug", Some(reply));
+    let debug = app.terminal_session.selected().unwrap();
+    assert_eq!(app.terminal_session.preflight_count(), 1);
+    let root = app.state.workspace_root.clone();
+    let _ = app.debugger_session.stop();
+    assert!(!app.debugger_session.terminal_current(&debug));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while driver.application_mut().terminal_session.preflight_count() != 0 {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!driver.application_mut().terminal_session.contains(debug));
+    assert!(!root.join("retired-debug-started").exists());
 }
 
 #[cfg(unix)]

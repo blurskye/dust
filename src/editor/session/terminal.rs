@@ -40,6 +40,7 @@ impl Eq for TerminalKey {}
 pub(in crate::editor::session) struct TerminalIntent {
     key: TerminalKey,
     profile: String,
+    agent: bool,
 }
 struct TerminalCloseSource {
     key: TerminalKey,
@@ -147,6 +148,9 @@ impl TerminalSession {
         if self.displayed == Some(id) {
             self.displayed = self.panel_fallback();
         }
+    }
+    pub(in crate::editor::session) fn is_agent(&self, id: PtyId) -> bool {
+        self.tabs.get(&id).is_some_and(|tab| tab.agent)
     }
     pub(in crate::editor::session) fn side(&self, id: PtyId) -> bool {
         self.tabs.get(&id).is_some_and(|tab| tab.side)
@@ -334,7 +338,7 @@ impl TerminalSession {
             .find(|r| Some(r.id) == workspace.active_root())
             .ok_or("terminal has no active workspace root")?;
         let config = expand_placeholders(config, &root.identity.canonical_path, file)?;
-        self.open_program(name, config, workspace, navigation, capture)
+        self.open_program(name, config, workspace, navigation, capture, false)
     }
     /// Opens `config` as it stands, for a program with no profile of its own.
     pub(in crate::editor::session) fn open_program(
@@ -344,6 +348,7 @@ impl TerminalSession {
         workspace: &WorkspaceSession,
         navigation: super::windows::NavigationStamp,
         capture: Arc<()>,
+        agent: bool,
     ) -> Result<TerminalIntent, String> {
         if self.closed
             || self.next.is_none()
@@ -401,6 +406,7 @@ impl TerminalSession {
                 id,
             },
             profile: name.into(),
+            agent,
         };
         self.intent = Some(Intent {
             token: token.clone(),
@@ -446,6 +452,7 @@ impl TerminalSession {
             key.id,
             TerminalRuntime {
                 profile: source.token.profile,
+                agent: source.token.agent,
                 cwd: request.cwd.clone(),
                 close_on_exit: config.close_on_exit,
                 side: false,
@@ -998,6 +1005,7 @@ fn acknowledge_resize(
 
 struct TerminalRuntime {
     profile: String,
+    agent: bool,
     cwd: std::path::PathBuf,
     close_on_exit: bool,
     side: bool,
@@ -1059,6 +1067,7 @@ impl TerminalSession {
             id,
             TerminalRuntime {
                 profile: fixture.profile,
+                agent: false,
                 cwd: std::path::PathBuf::new(),
                 close_on_exit: false,
                 side: false,
