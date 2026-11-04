@@ -1,4 +1,4 @@
-use super::{PickerAction, PickerItem};
+use super::{PickerAction, PickerItem, fuzzy_score};
 
 pub const MAX_QUERY_BYTES: usize = 4096;
 pub const MAX_ITEM_FIELD_BYTES: usize = 16 * 1024;
@@ -259,19 +259,25 @@ impl SearchWorkflowBroker {
             .order
             .iter()
             .filter_map(|key| active.items.get(key))
-            .filter(|i| q.is_empty() || i.search_text.to_lowercase().contains(&q))
+            .filter_map(|item| {
+                let score = match self.spec.matcher {
+                    SearchMatcherKind::Fuzzy => fuzzy_score(&q, &item.search_text, "")?,
+                    SearchMatcherKind::Literal => {
+                        -i64::try_from(item.search_text.to_lowercase().find(&q)?).ok()?
+                    }
+                };
+                Some((item, score))
+            })
             .collect::<Vec<_>>();
         if q.is_empty() {
-            return Some(items);
+            return Some(items.into_iter().map(|(item, _)| item).collect());
         }
-        items.sort_by(|a, b| {
-            let ar = a.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
-            let br = b.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
-            ar.cmp(&br)
+        items.sort_by(|(a, a_score), (b, b_score)| {
+            b_score.cmp(a_score)
                 .then_with(|| a.title.cmp(&b.title))
                 .then_with(|| a.stable_key.cmp(&b.stable_key))
         });
-        Some(items)
+        Some(items.into_iter().map(|(item, _)| item).collect())
     }
     pub fn snapshot_if_changed(&self, last: u64) -> Option<SearchWorkflowSnapshot> {
         if last == self.revision {
@@ -366,6 +372,57 @@ mod tests {
                 .collect::<Vec<_>>(),
             ordered
         );
+    }
+
+    #[test]
+    fn workflow_matchers_filter_and_rank_search_text() {
+        for (matcher, expected) in [
+            (SearchMatcherKind::Fuzzy, vec!["literal", "subsequence"]),
+            (SearchMatcherKind::Literal, vec!["literal"]),
+        ] {
+            let mut broker = broker();
+            broker.spec.matcher = matcher;
+            broker
+                .begin(SearchRequestId(1), SearchStreamGeneration(1), "AC")
+                .unwrap();
+            let mut subsequence = item("subsequence", "A");
+            subsequence.search_text = "abc".into();
+            let mut literal = item("literal", "Z");
+            literal.search_text = "ac".into();
+            broker
+                .accept(SearchWorkflowChunk {
+                    request: SearchRequestId(1),
+                    generation: SearchStreamGeneration(1),
+                    sequence: 0,
+                    items: vec![subsequence, literal],
+                    complete: true,
+                })
+                .unwrap();
+            let snapshot = broker.snapshot_if_changed(0).unwrap();
+            assert_eq!(
+                snapshot.items.iter().map(|item| item.stable_key.as_str()).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn literal_workflow_ranks_by_substring_position() {
+        let mut broker = broker();
+        broker.spec.matcher = SearchMatcherKind::Literal;
+        broker
+            .begin(SearchRequestId(1), SearchStreamGeneration(1), "ac")
+            .unwrap();
+        broker
+            .accept(SearchWorkflowChunk {
+                request: SearchRequestId(1),
+                generation: SearchStreamGeneration(1),
+                sequence: 0,
+                items: vec![item("late", "A ac"), item("early", "ac Z")],
+                complete: true,
+            })
+            .unwrap();
+        assert_eq!(broker.ordered_items().unwrap()[0].stable_key, "early");
     }
 
     #[test]

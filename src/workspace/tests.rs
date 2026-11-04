@@ -565,6 +565,58 @@ fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
 }
 
 #[test]
+fn picker_filtering_keeps_matching_entries_under_their_sections() {
+    let mut picker = PickerState::new(4, "Changes".into(), 20);
+    let item = |id: &str, label: &str, kind| PickerItem {
+        badge: String::new(),
+        kind,
+        id: PickerItemId(id.into()),
+        label: label.into(),
+        detail: String::new(),
+        source: String::new(),
+        action: PickerAction::None,
+    };
+    use PickerItemKind::{Entry, Section};
+    assert!(picker.append(
+        4,
+        [
+            item("draft", "Commit draft", Entry),
+            item("conflicts", "Conflicts", Section),
+            item("conflict", "other.rs", Entry),
+            item("unstaged", "Unstaged", Section),
+            item("unstaged-scattered", "a_b.rs", Entry),
+            item("unstaged-exact", "ab.rs", Entry),
+            item("staged", "Staged", Section),
+            item("staged-exact", "ab.rs", Entry),
+        ],
+        true
+    ));
+    picker.insert_query("ab");
+    let presentation = picker.presentation();
+    assert_eq!(
+        presentation.rows.iter().map(|row| row.id.0.as_str()).collect::<Vec<_>>(),
+        vec!["unstaged", "unstaged-exact", "unstaged-scattered", "staged", "staged-exact"]
+    );
+    assert_eq!(picker.selected_item().unwrap().id.0, "unstaged-exact");
+    picker.move_selection(1, false);
+    picker.move_selection(1, false);
+    assert_eq!(picker.selected_item().unwrap().id.0, "staged-exact");
+    picker.set_query("staged".into());
+    assert!(picker.presentation().rows.is_empty(), "headers alone are not matches");
+    picker.set_query(String::new());
+    assert_eq!(picker.presentation().rows.len(), 8);
+    assert_eq!(picker.selected_item().unwrap().id.0, "draft");
+}
+
+#[test]
+fn picker_fuzzy_adjacency_uses_the_previous_unicode_character_end() {
+    let adjacent = fuzzy_score("xéa", "xé za", "").unwrap();
+    let scattered = fuzzy_score("xéa", "x éza", "").unwrap();
+    assert!(adjacent > scattered);
+    assert_eq!(fuzzy_score("xéa", "xéa z", ""), Some(1346));
+}
+
+#[test]
 fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
     let directory = tempdir().expect("tempdir");
     let workspace = workspace(directory.path());
