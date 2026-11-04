@@ -220,7 +220,7 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
     })
 }
 
-fn executable_file(path: &Path) -> bool {
+pub(crate) fn executable_file(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };

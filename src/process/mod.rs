@@ -152,6 +152,29 @@ mod tests {
         assert_eq!(result.root_revision, 7);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn preflight_checks_effective_execution_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("tool");
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        for mode in [0o641, 0o600, 0o700] {
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(mode)).unwrap();
+            let can_execute = std::process::Command::new(&executable).status().is_ok();
+            let result = super::preflight(
+                super::PreflightId(1),
+                super::ExecutionPreflightRequest {
+                    executable: executable.clone(),
+                    cwd: root.path().into(),
+                    roots: vec![root.path().into()],
+                    root_revision: 1,
+                },
+            );
+            assert_eq!(result.is_ok(), can_execute, "mode {mode:o}: {result:?}");
+        }
+    }
+
     #[test]
     fn framing_handles_fragment_equivalent_and_coalesced_messages() {
         let mut bytes = Vec::new();
@@ -412,12 +435,8 @@ fn preflight(
     if !executable_metadata.file_type().is_file() || !cwd_metadata.file_type().is_dir() {
         return Err("resolved execution target must be a regular executable and resolved cwd must be a real directory".into());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if executable_metadata.permissions().mode() & 0o111 == 0 {
-            return Err("execution target is not executable".into());
-        }
+    if !crate::tools::executable_file(&executable) {
+        return Err("execution target is not executable".into());
     }
     let mut roots = request
         .roots

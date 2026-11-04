@@ -27,7 +27,7 @@ pub use package_lock::{
 mod mason_catalog;
 pub use mason_catalog::mason_filetype_for_path;
 mod catalog;
-pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
+pub(crate) use catalog::{executable_file, nix_lsp_launch_environment_for_workspace_at};
 pub use catalog::{
     DebugProgramPolicy, ManagedFormatter, ToolArchiveFormat, ToolDefinition, ToolEntry, ToolInstall, ToolKind,
     ToolStatus, ToolVersionPin, bundled_tool_catalog, discover_executable, inspect_tools,
