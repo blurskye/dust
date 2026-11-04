@@ -1269,13 +1269,20 @@ fn rejection_detail(response: &Value) -> String {
             let variables = response
                 .pointer("/body/error/variables")
                 .and_then(Value::as_object);
-            let filled =
-                variables
-                    .into_iter()
-                    .flatten()
-                    .fold(format.to_owned(), |text, (name, value)| {
-                        text.replace(&format!("{{{name}}}"), value.as_str().unwrap_or_default())
-                    });
+            // Interpret only the original template, never placeholders in variable values.
+            let filled: String = format.split_inclusive('}')
+                .flat_map(|part| {
+                    let replacement = part.strip_suffix('}')
+                        .and_then(|part| part.rsplit_once('{'))
+                        .and_then(|(prefix, name)| variables?.get(name).map(|value| {
+                            (prefix, value.as_str().unwrap_or_default())
+                        }));
+                    let (prefix, value) = replacement.unwrap_or(("", part));
+                    prefix.chars().chain(value.chars())
+                })
+                .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+                .take(4097)
+                .collect();
             sanitize_output(&filled)
         }
         None => bounded(response.get("message")),

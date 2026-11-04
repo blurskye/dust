@@ -278,6 +278,19 @@ fn a_rejection_says_why_rather_than_only_that_it_failed() {
     );
 }
 #[test]
+fn rejection_variables_are_not_templates_and_output_is_bounded() {
+    let response = json!({"body":{"error":{
+        "format":"{a} {b} {missing}",
+        "variables":{"a":"{b}{b}", "b":"literal"}
+    }}});
+    assert_eq!(rejection_detail(&response), "{b}{b} literal {missing}");
+    let response = json!({"body":{"error":{
+        "format":"{a}{a}", "variables":{"a":"é".repeat(5000)}
+    }}});
+    assert_eq!(rejection_detail(&response), format!("{}\n[output truncated]\n", "é".repeat(4096)));
+}
+
+#[test]
 fn stopping_lets_the_adapter_end_its_program_and_clean_up() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     let body = r#"

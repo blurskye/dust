@@ -519,6 +519,30 @@ fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
 }
 
 #[test]
+fn plugin_manifest_reads_require_regular_bounded_files() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = std::path::Path::new("manifest.toml");
+    let path = root.path().join(relative);
+    let limits = PluginLimits::default();
+    let check = || {
+        assert!(super::index::load_manifest_component(
+            root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
+        ).is_err());
+        assert!(super::index::index_manifest_from_store(
+            root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
+        ).is_err());
+    };
+    nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    check();
+    fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
+    check();
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, vec![b' '; 1024 * 1024 + 1]).unwrap();
+    check();
+}
+
+#[test]
 fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
     let root = tempfile::tempdir().expect("store");
     let manifest_source = toml::to_string(&manifest()).expect("serialize manifest");
@@ -1187,6 +1211,13 @@ fn retained_runtime(
     limits: &PluginLimits,
     looping_activation: bool,
 ) -> Result<super::execution::LoadOutcome, PluginError> {
+    retained_runtime_with_activation(limits, looping_activation.then_some(&[0, 3, 64, 12, 0, 11, 0, 11]))
+}
+
+fn retained_runtime_with_activation(
+    limits: &PluginLimits,
+    activation_body: Option<&[u8]>,
+) -> Result<super::execution::LoadOutcome, PluginError> {
     fn number(bytes: &[u8], at: &mut usize) -> usize {
         let (mut value, mut shift) = (0, 0);
         loop {
@@ -1211,7 +1242,7 @@ fn retained_runtime(
     }
     let original = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
     let mut core = original.to_vec();
-    if looping_activation {
+    if let Some(activation_body) = activation_body {
         let mut at = 8;
         while at < original.len() {
             let section = original[at];
@@ -1226,7 +1257,7 @@ fn retained_runtime(
                     let length = number(original, &mut at);
                     // The fixed guest exports activate as function 70, after 15 imports.
                     let body: &[u8] = if function == 55 {
-                        &[0, 3, 64, 12, 0, 11, 0, 11]
+                        activation_body
                     } else {
                         &original[at..at + length]
                     };
@@ -1290,13 +1321,42 @@ fn retained_runtime(
         maximum_total_bytes: 4 * 1024 * 1024,
     });
     let mut activation_limits = limits.clone();
-    if !looping_activation {
+    if activation_body.is_none() {
         activation_limits.epoch_deadline_ticks = 1000;
     }
     let mut outcome =
         super::index::load_component(root.path(), &path, manifest, &activation_limits)?;
     outcome.runtime.limits = limits.clone();
     Ok(outcome)
+}
+
+#[test]
+fn component_activation_checks_counts_and_strings_before_copying() {
+    fn constant(mut value: i32, body: &mut Vec<u8>) {
+        body.push(0x41); // i32.const
+        loop {
+            let byte = (value & 127) as u8;
+            value >>= 7;
+            let done = (value == 0 && byte & 64 == 0) || (value == -1 && byte & 64 != 0);
+            body.push(byte | if done { 0 } else { 128 });
+            if done { break; }
+        }
+    }
+    for (count, length, expected) in [(4096, i32::MAX, "count ceiling"), (2, 257, "byte ceiling")] {
+        // Replace activate with a result whose list entries alias one guest string.
+        let mut body = vec![0]; // no locals
+        for (address, value) in [(0, 0), (4, 32), (8, count), (32, 4096), (36, length), (40, 4096), (44, length)] {
+            constant(address, &mut body);
+            constant(value, &mut body);
+            body.extend_from_slice(&[0x36, 2, 0]); // i32.store
+        }
+        constant(0, &mut body); // result pointer
+        body.push(0x0b);
+        let error = retained_runtime_with_activation(&PluginLimits::default(), Some(&body))
+            .err().expect("oversized activation must fail");
+        assert!(matches!(error, PluginError::Activation(_)), "{error}");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
 }
 
 #[test]

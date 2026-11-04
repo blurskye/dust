@@ -335,7 +335,7 @@ pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
 
     let read = |path: &Path| -> Option<Vec<u8>> {
         let mut bytes = Vec::new();
-        fs::File::open(path)
+        crate::files::open_regular_file(path)
             .ok()?
             .take(1024 * 1024 + 1)
             .read_to_end(&mut bytes)
@@ -425,7 +425,7 @@ pub(super) fn capture_source(path: PathBuf) -> CapturedSource {
     };
     let modified = metadata.modified().ok();
     let length = metadata.len();
-    let bytes = fs::File::open(&path).and_then(|file| {
+    let bytes = crate::files::open_regular_file(&path).and_then(|file| {
         let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING.saturating_add(1));
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
@@ -1170,7 +1170,7 @@ pub(super) const WATCH_FINGERPRINT_BYTE_CEILING: u64 = 4 * 1024 * 1024;
 
 pub(super) fn source_fingerprint(path: PathBuf) -> SourceFingerprint {
     let metadata = fs::metadata(&path).ok();
-    let content_hash = fs::File::open(&path).ok().and_then(|file| {
+    let content_hash = crate::files::open_regular_file(&path).ok().and_then(|file| {
         let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).ok()?;

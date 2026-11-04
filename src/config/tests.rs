@@ -716,6 +716,27 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
 }
 
 #[test]
+fn configuration_reads_reject_fifos_and_devices_without_blocking() {
+    let root = tempdir().unwrap();
+    for name in ["config.toml", "keymaps.toml", "dashboard.toml", "theme.toml", "dust-packages.lock.json"] {
+        let path = root.path().join(name);
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        assert!(source_fingerprint(path.clone()).content_hash.is_none());
+        assert!(matches!(super::load::capture_source(path).text, CapturedText::Error(_)));
+    }
+    assert!(super::load::installed_plugins(root.path()).is_empty());
+    let device = PathBuf::from("/dev/zero");
+    assert!(source_fingerprint(device.clone()).content_hash.is_none());
+    assert!(matches!(super::load::capture_source(device).text, CapturedText::Error(_)));
+
+    let path = root.path().join("regular.toml");
+    fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
+    let link = root.path().join("linked.toml");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert_eq!(load_config(&link).config.editor.tab_width, 3);
+}
+
+#[test]
 fn watcher_fingerprint_detects_same_length_content_and_sources_are_size_bounded() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");

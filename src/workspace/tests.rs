@@ -420,6 +420,32 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
 }
 
 #[test]
+fn explorer_rejects_children_from_a_replaced_directory() {
+    let root = tempdir().unwrap();
+    let workspace = workspace(root.path());
+    let mut explorer = ExplorerState::default();
+    explorer.reset_roots(workspace.roots(), 1);
+    let root_id = explorer.selected_id().unwrap();
+    let child_path = root.path().join("child");
+    assert!(explorer.begin_load(root_id, 1));
+    assert!(explorer.apply_load(root_id, 1, 1, vec![ExplorerChild {
+        path: child_path.clone(), name: "child".into(), kind: ExplorerKind::Directory,
+    }]));
+    let child_id = explorer.visible_ids()[1];
+    assert!(explorer.begin_load(child_id, 2));
+    assert!(explorer.apply_load(child_id, 2, 1, vec![
+        ExplorerChild { path: child_path.clone(), name: "child".into(), kind: ExplorerKind::Directory },
+        ExplorerChild { path: root.path().join("sibling"), name: "sibling".into(), kind: ExplorerKind::Directory },
+        ExplorerChild { path: child_path.join("valid"), name: "valid".into(), kind: ExplorerKind::File },
+    ]));
+    assert_eq!(explorer.visible_ids().len(), 3);
+    assert_eq!(explorer.visible_ids()[..2], [root_id, child_id]);
+    explorer.select(child_id);
+    assert_eq!(explorer.selected_node().unwrap().path, child_path);
+    assert_eq!(explorer.selected_node().unwrap().children.len(), 1);
+}
+
+#[test]
 fn explorer_replaces_large_listings_and_prunes_removed_expansions() {
     let root = tempdir().unwrap();
     let workspace = workspace(root.path());

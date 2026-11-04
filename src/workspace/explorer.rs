@@ -185,6 +185,7 @@ impl ExplorerState {
         }
         let data = Arc::make_mut(&mut self.data);
         let root = data.nodes[&node].root;
+        let parent_path = data.nodes[&node].path.clone();
         let old_children = data.nodes[&node].children.clone();
         let old_ids_by_path = old_children
             .iter()
@@ -192,7 +193,7 @@ impl ExplorerState {
             .collect::<HashMap<_, _>>();
         let mut ids = Vec::new();
         for child in children {
-            if data
+            if child.path.parent() != Some(parent_path.as_path()) || data
                 .by_path
                 .get(&child.path)
                 .is_some_and(|id| data.roots.contains(id))
@@ -215,11 +216,7 @@ impl ExplorerState {
                 if let Some(stale) = old_ids_by_path.get(&child.path).copied() {
                     remove_subtree(data, stale);
                 }
-                let id = data
-                    .by_path
-                    .get(&child.path)
-                    .copied()
-                    .unwrap_or_else(|| allocate(data));
+                let id = allocate(data);
                 data.by_path.insert(child.path.clone(), id);
                 data.nodes.insert(
                     id,

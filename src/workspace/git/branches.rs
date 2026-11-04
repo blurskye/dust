@@ -482,12 +482,15 @@ fn exclude_from_status(
         std::fs::create_dir_all(parent).map_err(backend)?;
     }
     check_request(cancel, expires)?;
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .read(true)
         .append(true)
         .create(true)
         .open(&exclude)
         .map_err(backend)?;
+    let mut file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+        .map_err(|(_, error)| backend(error))?;
+    check_request(cancel, expires)?;
     let mut current = Vec::new();
     file.read_to_end(&mut current).map_err(backend)?;
     if current.split(|byte| *byte == b'\n').any(|existing| existing == line.as_bytes()) {
@@ -746,6 +749,41 @@ fn run(
             worktree.prune(Some(&mut options)).map_err(backend)?;
             check_request(cancel, expires)?;
             Ok(GitBranchResult::Changed)
+        }
+    }
+}
+
+#[cfg(test)]
+mod exclude_tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_exclude_updates_preserve_patterns_without_duplicates() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = git2::Repository::init(root.path()).unwrap();
+        let exclude = repository.commondir().join("info/exclude");
+        std::fs::write(&exclude, b"/retained-\xff").unwrap();
+        let barrier = std::sync::Barrier::new(16);
+        std::thread::scope(|scope| {
+            for index in 0..16 {
+                let root = root.path();
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let repository = git2::Repository::open(root).unwrap();
+                    let cancel = AtomicBool::new(false);
+                    let expires = Instant::now() + Duration::from_secs(10);
+                    barrier.wait();
+                    for name in [format!("child-{index}"), "shared".into()] {
+                        exclude_from_status(&repository, &root.join(name), &cancel, expires).unwrap();
+                    }
+                });
+            }
+        });
+        let bytes = std::fs::read(exclude).unwrap();
+        assert!(bytes.starts_with(b"/retained-\xff\n"));
+        let lines = bytes.split(|byte| *byte == b'\n').collect::<Vec<_>>();
+        for name in (0..16).map(|index| format!("/child-{index}/")).chain(["/shared/".into()]) {
+            assert_eq!(lines.iter().filter(|line| **line == name.as_bytes()).count(), 1, "{name}");
         }
     }
 }
