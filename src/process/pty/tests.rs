@@ -35,6 +35,54 @@ fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
         thread::sleep(Duration::from_millis(1));
     }
 }
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
+    use std::os::fd::AsRawFd;
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("original");
+    let other = root.path().join("other");
+    let alias = root.path().join("alias");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::os::unix::fs::symlink(&original, &alias).unwrap();
+    let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+    let cwd = open_working_directory(&alias, Some(&identity)).unwrap();
+    let pinned = format!("/proc/self/fd/{}", cwd.as_raw_fd());
+    std::fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(&other, &alias).unwrap();
+    for removed in [false, true] {
+        if removed {
+            std::fs::remove_dir(&original).unwrap();
+        }
+        // Spawn through portable-pty itself, including its cwd fallback check.
+        let pair = native_pty_system().openpty(PtySize {
+            rows: 8, cols: 80, pixel_width: 0, pixel_height: 0,
+        }).unwrap();
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "test . -ef \"$1\"", "sh"]);
+        command.arg(format!("/proc/{}/fd/{}", std::process::id(), cwd.as_raw_fd()));
+        command.cwd(&pinned);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("cwd probe timed out");
+            }
+            thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(status.exit_code(), 0, "spawn left the pinned cwd (removed: {removed})");
+        assert!(std::fs::metadata(&pinned).unwrap().is_dir());
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
@@ -240,6 +288,7 @@ fn reaped_pty_child_is_never_signalled_again() {
             Ok(portable_pty::ExitStatus::with_exit_code(0))
         }
         fn process_id(&self) -> Option<u32> {
+            self.0.fetch_add(1, Ordering::Relaxed);
             None
         }
         #[cfg(windows)]
@@ -254,6 +303,10 @@ fn reaped_pty_child_is_never_signalled_again() {
     };
     assert!(child.try_wait().unwrap().is_some());
     child.kill();
+    let pair = portable_pty::native_pty_system()
+        .openpty(portable_pty::PtySize { rows: 8, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .unwrap();
+    child.terminate(pair.master.as_ref());
     drop(child);
     assert_eq!(signals.load(Ordering::Relaxed), 0);
 }
@@ -284,6 +337,58 @@ fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
         );
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
+    use std::os::unix::process::CommandExt;
+    struct Holder(std::process::Child);
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut service = PtyService::start(1);
+    let id = service.open(request(root.path(), "tty > slave; read value")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let slave = loop {
+        service.poll().unwrap();
+        if let Ok(path) = std::fs::read_to_string(root.path().join("slave"))
+            && !path.trim().is_empty()
+        {
+            break std::fs::File::open(path.trim()).unwrap();
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    };
+    let mut holder = Holder(std::process::Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .stdin(slave)
+        .spawn().unwrap());
+    service.input(id, b"done\n".to_vec(), 64).unwrap();
+    loop {
+        if service.poll().unwrap().iter().any(|event| matches!(event, PtyEvent::Exited { id: source, code: Some(0) } if *source == id)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "original PTY child did not exit");
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(holder.0.try_wait().unwrap().is_none());
+    service.close(id).unwrap();
+    let events = drain(&mut service, id);
+    assert!(events.iter().any(|event| matches!(event, PtyEvent::IoComplete { result: Ok(()), .. })));
+    assert!(holder.0.try_wait().unwrap().is_none(), "closing a reaped PTY must not signal its old process group");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while service.residents.load(Ordering::Acquire) != 0 {
+        assert!(Instant::now() < deadline, "cancelled reader retained its slot");
+        thread::sleep(Duration::from_millis(2));
+    }
+    let next = service.open(request(root.path(), "printf next")).unwrap();
+    drain(&mut service, next);
 }
 
 #[cfg(unix)]

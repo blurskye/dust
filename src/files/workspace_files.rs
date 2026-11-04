@@ -5,9 +5,10 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread,
+    time::Duration,
 };
 
 use ignore::WalkBuilder;
@@ -151,10 +152,21 @@ pub(super) fn validate_workspace_file_policy(
 pub(super) fn send_file_event(
     sender: &SyncSender<WorkspaceFileEvent>,
     cancel: &AtomicBool,
-    event: WorkspaceFileEvent,
+    mut event: WorkspaceFileEvent,
 ) -> bool {
-    // Cancelling the service drops its receiver, waking a blocked send.
-    !cancel.load(Ordering::Acquire) && sender.send(event).is_ok()
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return false;
+        }
+        match sender.try_send(event) {
+            Ok(()) => return true,
+            Err(TrySendError::Full(pending)) => {
+                event = pending;
+                thread::sleep(Duration::from_millis(2));
+            }
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    }
 }
 pub(super) fn run_workspace_files(
     generation: u64,
@@ -162,11 +174,27 @@ pub(super) fn run_workspace_files(
     cancel: Arc<AtomicBool>,
     sender: SyncSender<WorkspaceFileEvent>,
 ) {
-    let mut roots = policy
-        .roots
-        .iter()
-        .filter_map(|p| fs::canonicalize(p).ok())
-        .collect::<Vec<_>>();
+    let mut roots = Vec::new();
+    for root in &policy.roots {
+        match fs::canonicalize(root) {
+            Ok(root) => roots.push(root),
+            Err(error) => {
+                let _ = send_file_event(
+                    &sender,
+                    &cancel,
+                    WorkspaceFileEvent::Failed {
+                        generation,
+                        root_revision: policy.root_revision,
+                        error: format!(
+                            "workspace file discovery incomplete: {}: {error}",
+                            root.display()
+                        ),
+                    },
+                );
+                return;
+            }
+        }
+    }
     roots.sort();
     roots.dedup();
     if roots.is_empty() {
@@ -189,7 +217,11 @@ pub(super) fn run_workspace_files(
         .iter()
         .flat_map(|root| super::directory::root_worktrees(root))
     {
-        builder.add(worktree);
+        if let Ok(worktree) = fs::canonicalize(worktree)
+            && owner_root(&worktree, &roots).is_some()
+        {
+            builder.add(worktree);
+        }
     }
     builder
         .follow_links(false)
@@ -215,7 +247,21 @@ pub(super) fn run_workspace_files(
             );
             return;
         }
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                let _ = send_file_event(
+                    &sender,
+                    &cancel,
+                    WorkspaceFileEvent::Failed {
+                        generation,
+                        root_revision: policy.root_revision,
+                        error: format!("workspace file discovery incomplete: {error}"),
+                    },
+                );
+                return;
+            }
+        };
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }

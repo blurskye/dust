@@ -83,7 +83,7 @@ pub(in crate::editor::session) struct TestCaseResult {
     pub(in crate::editor::session) status: String,
     pub(in crate::editor::session) duration: String,
     pub(in crate::editor::session) message: String,
-    pub(in crate::editor::session) source: Option<(PathBuf, usize, usize)>,
+    pub(in crate::editor::session) source: Option<super::search::MatcherSource>,
 }
 
 pub(in crate::editor::session) fn task_plan(
@@ -870,13 +870,13 @@ impl TaskSession {
             };
             for (index, case) in self.tests[name].iter().enumerate() {
                 let status = case.status.to_lowercase();
-                let Some((path, line, _)) = &case.source else {
+                let Some(source) = &case.source else {
                     continue;
                 };
                 if status.contains("fail") || status.contains("error") {
                     failed.push((
-                        path.clone(),
-                        *line,
+                        source.path.clone(),
+                        source.line,
                         format!("{}: {}", case.name, case.message),
                         TestKey {
                             name: name.clone(),
@@ -889,7 +889,7 @@ impl TaskSession {
         }
         failed
     }
-    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<(PathBuf, usize, usize)> {
+    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<super::search::MatcherSource> {
         let current = self.keys.get(&key.name)?;
         if !Arc::ptr_eq(&current.epoch, &key.run) {
             return None;
@@ -1061,13 +1061,19 @@ mod tests {
         assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
         tasks.tests.insert("task".into(), vec![TestCaseResult {
             name: "test".into(), status: "failed".into(), duration: String::new(),
-            message: "failure".into(), source: Some((root.path().join("source"), 0, 0)),
+            message: "failure".into(), source: Some(crate::editor::session::search::MatcherSource {
+                path: root.path().join("source"), line: 0, column: 0,
+                encoding: crate::editor::text::PositionEncoding::Utf8,
+            }),
         }]);
         let key = tasks.test_items("task")[0].1.clone();
         assert!(tasks.stop("task").is_err());
         assert_eq!(tasks.test_items("task").len(), 1);
         assert_eq!(tasks.failed_tests().len(), 1);
-        assert_eq!(tasks.resolve_test(&key), Some((root.path().join("source"), 0, 0)));
+        let source = tasks.resolve_test(&key).expect("finished test source");
+        assert_eq!(source.path, root.path().join("source"));
+        assert_eq!((source.line, source.column), (0, 0));
+        assert_eq!(source.encoding, crate::editor::text::PositionEncoding::Utf8);
     }
     #[test]
     fn restarted_task_suppresses_the_cancelled_runs_launch_failure() {
@@ -1235,7 +1241,10 @@ mod tests {
                 status: "ok".into(),
                 duration: String::new(),
                 message: String::new(),
-                source: Some((root.path().join("source"), 0, 0)),
+                source: Some(super::super::search::MatcherSource {
+                    path: root.path().join("source"), line: 0, column: 0,
+                    encoding: crate::editor::text::PositionEncoding::Utf8,
+                }),
             }],
         );
         assert!(owner.resolve_test(&key).is_some());

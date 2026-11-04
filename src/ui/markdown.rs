@@ -197,7 +197,15 @@ fn heading(line: &str) -> Option<&str> {
     let level = line.len() - line.trim_start_matches('#').len();
     let rest = &line[level..];
     ((1..=6).contains(&level) && (rest.is_empty() || rest.starts_with(' ')))
-        .then(|| rest.trim().trim_end_matches('#').trim_end())
+        .then(|| {
+            let title = rest.trim_end();
+            let without_hashes = title.trim_end_matches('#');
+            if without_hashes.ends_with([' ', '\t']) {
+                without_hashes.trim()
+            } else {
+                title.trim_start()
+            }
+        })
 }
 
 /// The `===` or `---` line under a heading written the other way.
@@ -323,15 +331,35 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed:
     }
 }
 
+fn table_cells(row: &str) -> Vec<&str> {
+    let row = row.trim();
+    let row = row.strip_prefix('|').unwrap_or(row);
+    let mut cells = Vec::new();
+    let mut start = 0;
+    let mut escaped = false;
+    for (index, character) in row.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '|' {
+            cells.push(&row[start..index]);
+            start = index + 1;
+        }
+    }
+    if start < row.len() || cells.is_empty() {
+        cells.push(&row[start..]);
+    }
+    cells
+}
+
 fn table(out: &mut Styled, rows: &[&str], width: usize) {
     let cells = rows
         .iter()
         .enumerate()
         .map(|(index, row)| {
-            let row = row.trim().trim_start_matches('|');
-            let row = row.strip_suffix('|').unwrap_or(row);
             let role = (index == 0).then_some(Highlight::STRONG);
-            row.split('|')
+            table_cells(row).into_iter()
                 .map(|cell| inline(cell.trim(), role))
                 .collect::<Vec<_>>()
         })
@@ -375,9 +403,12 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         if index == 0 {
             let line = widths
                 .iter()
-                .map(|width| "─".repeat(*width / out.width("─")))
+                .map(|width| {
+                    let rule_width = out.width("─");
+                    format!("{}{}", "─".repeat(*width / rule_width), " ".repeat(*width % rule_width))
+                })
                 .collect::<Vec<_>>()
-                .join("─┼─");
+                .join(if out.width("─") == 1 { "─┼─" } else { " ┼ " });
             out.push(&line, Some(Highlight::COMMENT));
             out.push("\n", None);
         }
@@ -408,6 +439,26 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             segments.push((std::mem::take(plain), base));
         }
     };
+    // Match labels once: retrying a scan at every unmatched `[` is quadratic.
+    let mut brackets = Vec::new();
+    let mut label_ends = std::collections::HashMap::new();
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+        } else {
+            match character {
+                '\\' => escaped = true,
+                '[' => brackets.push(index),
+                ']' => {
+                    if let Some(start) = brackets.pop() {
+                        label_ends.insert(start, index);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     let mut at = 0;
     while let Some(character) = text[at..].chars().next() {
         let rest = &text[at..];
@@ -422,16 +473,27 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             }
             '`' => {
                 let ticks = rest.len() - rest.trim_start_matches('`').len();
-                if let Some(end) = rest[ticks..].find(&rest[..ticks]) {
+                let mut search = ticks;
+                let mut close = None;
+                while let Some(found) = rest[search..].find('`') {
+                    let start = search + found;
+                    let run = rest[start..].len() - rest[start..].trim_start_matches('`').len();
+                    if run == ticks {
+                        close = Some(start);
+                        break;
+                    }
+                    search = start + run;
+                }
+                if let Some(end) = close {
                     flush(&mut segments, &mut plain);
-                    let code = &rest[ticks..ticks + end];
+                    let code = &rest[ticks..end];
                     let code = code
                         .strip_prefix(' ')
                         .and_then(|code| code.strip_suffix(' '))
                         .filter(|inner| !inner.trim().is_empty())
                         .unwrap_or(code);
                     segments.push((code.to_owned(), Some(Highlight::RAW)));
-                    at += ticks + end + ticks;
+                    at += end + ticks;
                 } else {
                     plain.push_str(&rest[..ticks]);
                     at += ticks;
@@ -440,7 +502,7 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             }
             '*' | '_' | '~' => {
                 let run = rest.len() - rest.trim_start_matches(character).len();
-                let length = if character == '~' { 2 } else { run.min(2) };
+                let length = if character == '~' { 2 } else { run.min(3) };
                 let marker = &rest[..length.min(run)];
                 let opens = run >= length
                     && rest[length..]
@@ -452,7 +514,7 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
                     flush(&mut segments, &mut plain);
                     let role = match (character, length) {
                         ('~', _) => Some(Highlight::STRIKETHROUGH),
-                        (_, 2) => Some(Highlight::STRONG),
+                        (_, 2 | 3) => Some(Highlight::STRONG),
                         _ => Some(Highlight::ITALIC),
                     };
                     segments.extend(inline_at_depth(&text[at + length..close], role, depth + 1));
@@ -466,7 +528,8 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
             '[' | '!' => {
                 let label_start = usize::from(character == '!') + 1;
                 if (character == '[' || rest.starts_with("!["))
-                    && let Some((label, length)) = link(&rest[label_start - 1..])
+                    && let Some(end) = label_ends.get(&(at + label_start - 1))
+                    && let Some((label, length)) = link(&rest[label_start - 1..], end - at - label_start + 1)
                 {
                     flush(&mut segments, &mut plain);
                     segments.extend(inline_at_depth(label, Some(Highlight::LINK), depth + 1));
@@ -533,7 +596,9 @@ fn closing(text: &str, from: usize, marker: &str) -> Option<usize> {
         let inside_word = marker.starts_with('_') && after.is_some_and(char::is_alphanumeric);
         // `**` must not be read as two single `*`.
         let doubled = marker.len() == 1 && after == marker.chars().next();
+        let escaped = text[..close].bytes().rev().take_while(|byte| *byte == b'\\').count() % 2 == 1;
         if close > from
+            && !escaped
             && before.is_some_and(|before| !before.is_whitespace())
             && !inside_word
             && !doubled
@@ -549,25 +614,36 @@ fn closing(text: &str, from: usize, marker: &str) -> Option<usize> {
 }
 
 /// The label of a `[label](target)` link at the start of `text`, and the link's length.
-fn link(text: &str) -> Option<(&str, usize)> {
-    let mut depth = 0;
-    let mut label_end = None;
-    for (index, character) in text.char_indices() {
-        match character {
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    label_end = Some(index);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let label_end = label_end?;
+fn link(text: &str, label_end: usize) -> Option<(&str, usize)> {
     let target = text[label_end + 1..].strip_prefix('(')?;
-    let target_end = target.find(')')?;
+    let mut depth = 0usize;
+    let mut escaped = false;
+    let mut angle = target.trim_start().starts_with('<');
+    let mut quote = None;
+    let mut after_space = false;
+    let target_end = target.char_indices().find_map(|(index, character)| {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if angle {
+            angle = character != '>';
+        } else if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            }
+        } else {
+            match character {
+                '\'' | '"' if depth == 0 && after_space => quote = Some(character),
+                '(' => depth += 1,
+                ')' if depth == 0 => return Some(index),
+                ')' => depth -= 1,
+                _ => {}
+            }
+        }
+        after_space = character.is_whitespace();
+        None
+    })?;
     let label = &text[1..label_end];
     let label = if label.is_empty() {
         &target[..target_end]
@@ -594,11 +670,21 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
             }
         }
     }
+    let width = width.max(1);
     let start_line = |out: &mut Styled, prefix: Prefix| {
-        out.push(prefix.0, prefix.1);
-        out.width(prefix.0)
+        let mut cells = 0;
+        for grapheme in prefix.0.graphemes(true) {
+            let next = out.width(grapheme);
+            if cells + next >= width {
+                break;
+            }
+            out.push(grapheme, prefix.1);
+            cells += next;
+        }
+        cells
     };
     let mut column = start_line(out, first);
+    let mut prefix_width = column;
     let mut line_start = true;
     let mut broken = false;
     let mut previous_role = None;
@@ -611,6 +697,7 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
         if !line_start && column + 1 + word_width > width {
             out.push("\n", None);
             column = start_line(out, rest);
+            prefix_width = column;
             line_start = true;
             broken = true;
         }
@@ -619,21 +706,27 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
             out.push(" ", previous_role.filter(|role| Some(*role) == next_role));
             column += 1;
         }
-        let line_width = width.saturating_sub(out.width(rest.0)).max(1);
+        let fits = word_width <= width.saturating_sub(column);
         for (text, role) in word {
-            if word_width <= line_width {
+            if fits {
                 out.push(text, *role);
                 column += out.width(text);
                 continue;
             }
             for grapheme in text.graphemes(true) {
                 let cells = out.width(grapheme);
-                if column + cells > width && column > out.width(rest.0) {
+                if column + cells > width && column > prefix_width {
                     out.push("\n", None);
                     column = start_line(out, rest);
+                    prefix_width = column;
                 }
-                out.push(grapheme, *role);
-                column += cells;
+                if column + cells > width {
+                    out.push("?", *role);
+                    column += 1;
+                } else {
+                    out.push(grapheme, *role);
+                    column += cells;
+                }
             }
         }
         previous_role = word.last().and_then(|(_, role)| *role);
@@ -685,6 +778,39 @@ mod tests {
     }
 
     #[test]
+    fn wrapping_measures_each_prefix_and_bounds_exhausted_lines() {
+        let mut out = Styled {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..Default::default()
+        };
+        out.wrapped("abcdefgh", None, ("● ", None), ("  ", None), 10);
+        assert_eq!(out.text, "● abcdefg\n  h\n");
+        assert!(out.text.lines().all(|line| out.width(line) <= 10));
+        for width in 1..=4 {
+            let mut out = Styled::default();
+            out.wrapped("界界 abc", None, ("prefix ", None), ("  ", None), width);
+            assert!(out.text.lines().all(|line| out.width(line) <= width), "{width}: {:?}", out.text);
+            assert!(out.text.ends_with("c\n"));
+        }
+        let mut out = Styled::default();
+        out.wrapped("abcdef", None, ("", None), ("long prefix", None), 3);
+        assert!(out.text.lines().all(|line| out.width(line) <= 3));
+        assert!(out.text.ends_with("f\n"));
+    }
+
+    #[test]
+    fn unmatched_link_openers_are_literal_and_do_not_rescan_the_suffix() {
+        for source in ["[".repeat(50_000), format!("{}]", "[".repeat(50_000))] {
+            let runs = inline(&source, None);
+            assert_eq!(runs, vec![(source, None)]);
+        }
+        assert_eq!(inline("[unclosed [ok](url)", None), vec![
+            ("[unclosed ".into(), None),
+            ("ok".into(), Some(Highlight::LINK)),
+        ]);
+    }
+
+    #[test]
     fn deeply_nested_links_are_bounded() {
         let source = format!("{}x{}", "[".repeat(50_000), "](x)".repeat(50_000));
         let runs = inline(&source, None);
@@ -710,6 +836,53 @@ mod tests {
     }
 
     #[test]
+    fn headings_keep_literal_hashes_and_only_remove_closing_markers() {
+        let out = rendered("# C#\n## F##\n# Title ###\n# Title \\###\n# ###", 40);
+        assert_eq!(out.text, "C#\nF##\nTitle\nTitle ###\n\n");
+        assert!(styled(&out, Highlight::HEADING).contains(&"C#"));
+    }
+
+    #[test]
+    fn inline_code_requires_a_matching_backtick_run() {
+        let out = rendered("`a``b` and ``a`b`` and `unclosed``", 80);
+        assert_eq!(out.text, "a``b and a`b and `unclosed``\n");
+        assert_eq!(styled(&out, Highlight::RAW), ["a``b", "a`b"]);
+    }
+
+    #[test]
+    fn triple_emphasis_consumes_both_complete_markers() {
+        let out = rendered("***bold*** and ___strong___", 80);
+        assert_eq!(out.text, "bold and strong\n");
+        assert_eq!(styled(&out, Highlight::STRONG), ["bold", "strong"]);
+    }
+
+    #[test]
+    fn escaped_emphasis_markers_remain_inside_the_styled_text() {
+        let out = rendered(r"*a\*b* and **c\**d** and _e\_f_", 80);
+        assert_eq!(out.text, "a*b and c**d and e_f\n");
+        assert_eq!(styled(&out, Highlight::ITALIC), ["a*b", "e_f"]);
+        assert_eq!(styled(&out, Highlight::STRONG), ["c**d"]);
+        assert_eq!(rendered(r"*a\\*", 80).text, "a\\\n");
+    }
+
+    #[test]
+    fn link_targets_balance_parentheses_and_skip_escaped_delimiters() {
+        let out = rendered(r"[doc](https://example.test/a_(b)) [next](a\)b) [last](a\(b)", 100);
+        assert_eq!(out.text, "doc next last\n");
+        assert_eq!(styled(&out, Highlight::LINK), ["doc next last"]);
+    }
+
+    #[test]
+    fn link_parentheses_inside_angle_destinations_and_titles_are_literal() {
+        let out = rendered(
+            r#"[angle](<https://example.test/a_(b>) [double](url "a(b") [single](url 'a)b') [apostrophe](https://example.test/it's_(ok))"#,
+            100,
+        );
+        assert_eq!(out.text, "angle double single apostrophe\n");
+        assert_eq!(styled(&out, Highlight::LINK), ["angle double single apostrophe"]);
+    }
+
+    #[test]
     fn words_inside_identifiers_and_lone_stars_stay_as_written() {
         let out = rendered("snake_case_name and 2 * 3 * 4", 80);
         assert_eq!(out.text, "snake_case_name and 2 * 3 * 4\n");
@@ -724,6 +897,40 @@ mod tests {
             "── rust ────────────\nfn main() {}\n────────────────────\nafter\n"
         );
         assert!(styled(&out, Highlight::KEYWORD).contains(&"fn"));
+    }
+
+    #[test]
+    fn table_cells_preserve_empty_columns_and_escaped_pipes() {
+        assert_eq!(table_cells("||Name|"), ["", "Name"]);
+        assert_eq!(table_cells(r"|a\|b|c|"), [r"a\|b", "c"]);
+        assert_eq!(table_cells(r"|a\\|b|"), [r"a\\", "b"]);
+        assert_eq!(table_cells(r"|a\|"), [r"a\|"]);
+        let out = rendered("||Name|\n|---|---|\n|1|Alice|", 40);
+        assert_eq!(out.text, "  │ Name\n──┼──────\n1 │ Alice\n");
+        let out = rendered(r"|a\|b|c|
+|---|---|
+|d|e|", 40);
+        assert_eq!(out.text, "a|b │ c\n────┼──\nd   │ e\n");
+    }
+
+    #[test]
+    fn table_rules_align_with_wide_ambiguous_separators() {
+        let mut out = Styled {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..Default::default()
+        };
+        render(&mut out, "| aa | bb |\n|---|---|\n| cc | dd |", 8);
+        assert_eq!(out.text, "aa │ bb\n─ ┼ ─\ncc │ dd\n");
+        assert!(out.text.lines().all(|line| out.width(line) == 8));
+        let mut out = Styled {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..Default::default()
+        };
+        render(&mut out, "| aaa | bbb |\n|---|---|\n| ccc | ddd |", 10);
+        assert!(out.text.lines().all(|line| out.width(line) == 10));
+        let header = out.text.lines().next().unwrap();
+        let rule = out.text.lines().nth(1).unwrap();
+        assert_eq!(out.width(header.split('│').next().unwrap()), out.width(rule.split('┼').next().unwrap()));
     }
 
     #[test]

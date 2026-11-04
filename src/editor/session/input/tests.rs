@@ -102,6 +102,8 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
             registry.specs().map(|spec| spec.id.as_str()),
         )
         .unwrap();
+    assert_eq!(current.directory, root);
+    assert_eq!(current.prefix, "foo");
     assert!(!input.accept_prompt_paths(&old.key, vec![root.join("foo-old.rs")], root, &policy));
     assert!(input.accept_prompt_paths(
         &current.key,
@@ -151,7 +153,8 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     let popup = input.documentation().unwrap();
     assert_eq!(popup.provider.len(), 256);
     assert_eq!(popup.sections[0].lines, ["éé", "line"]);
-    let long = format!("{}\n", "é".repeat(4000)).repeat(40);
+    // Three-byte characters straddle the 65,536-byte ceiling.
+    let long = format!("{}\n", "界".repeat(4000)).repeat(40);
     input.present_documentation(
         DocumentationPopupKind::Git,
         "Diff".into(),
@@ -163,8 +166,8 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     );
     let lines = &input.documentation().unwrap().sections[0].lines;
     let bytes = lines.iter().map(String::len).sum::<usize>();
-    assert!(bytes <= super::documentation::DOCUMENTATION_MAXIMUM_BYTES && bytes > 60_000);
-    assert!(lines.iter().all(|line| line.chars().all(|c| c == 'é')));
+    assert_eq!(bytes, super::documentation::DOCUMENTATION_MAXIMUM_BYTES - 1);
+    assert_eq!(lines.concat(), "界".repeat(super::documentation::DOCUMENTATION_MAXIMUM_BYTES / 3));
     let total = input.documentation().unwrap().line_count();
     input.scroll_documentation(
         1,

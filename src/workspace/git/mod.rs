@@ -5,7 +5,7 @@ mod conflict;
 pub use conflict::{
     GitConflictChoice, GitConflictEntry, GitConflictError, GitConflictResolveError,
     GitConflictSide, GitConflictState, GitOperationAction, GitOperationBar, GitRecoveryOutcome,
-    GitRecoveryRefusal, GitReplacementPlan, abort_operation, apply_replacement, continue_operation,
+    GitRecoveryRefusal, GitReplacementError, GitReplacementPlan, abort_operation, apply_replacement, continue_operation,
     plan_replacement, read_conflict_state, read_side_content,
 };
 mod status;

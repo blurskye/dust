@@ -229,7 +229,15 @@ pub(in crate::editor::session) fn validate_private_snapshot(
     private: &PluginPrivateState,
     snapshot: &PluginPrivateSnapshot,
     previous_revision: Option<u64>,
+    ambiguous_wide: bool,
 ) -> Result<(), PluginUiError> {
+    let cell_width = |text: &str| {
+        if ambiguous_wide {
+            UnicodeWidthStr::width_cjk(text)
+        } else {
+            UnicodeWidthStr::width(text)
+        }
+    };
     let policy = declaration.private_cells.as_ref().ok_or_else(|| {
         ui_error(
             PluginUiErrorCode::WrongPresenter,
@@ -322,7 +330,7 @@ pub(in crate::editor::session) fn validate_private_snapshot(
                     "private lead cell is empty",
                 ));
             };
-            let width = UnicodeWidthStr::width(grapheme);
+            let width = cell_width(grapheme);
             if graphemes.next().is_some()
                 || grapheme.chars().any(char::is_control)
                 || !(1..=2).contains(&width)
@@ -340,7 +348,7 @@ pub(in crate::editor::session) fn validate_private_snapshot(
                 .checked_sub(1)
                 .and_then(|x| cells.get(&(x, *y)))
                 .filter(|lead| {
-                    !lead.continuation && UnicodeWidthStr::width(lead.grapheme.as_str()) == 2
+                    !lead.continuation && cell_width(lead.grapheme.as_str()) == 2
                 });
             if lead.is_none() {
                 return Err(ui_error(
@@ -348,7 +356,7 @@ pub(in crate::editor::session) fn validate_private_snapshot(
                     "private continuation has no width-two lead",
                 ));
             }
-        } else if UnicodeWidthStr::width(cell.grapheme.as_str()) == 2
+        } else if cell_width(cell.grapheme.as_str()) == 2
             && !cells
                 .get(&(x.saturating_add(1), *y))
                 .is_some_and(|continuation| continuation.continuation)
@@ -407,6 +415,7 @@ pub(in crate::editor::session) fn apply_private_patch(
     declaration: &crate::extensions::PluginContentTypeContribution,
     private: &PluginPrivateState,
     patch: &PluginPrivatePatch,
+    ambiguous_wide: bool,
 ) -> Result<PluginPrivateSnapshot, PluginUiError> {
     let policy = declaration.private_cells.as_ref().ok_or_else(|| {
         ui_error(
@@ -492,7 +501,7 @@ pub(in crate::editor::session) fn apply_private_patch(
     if patch.replace_hit_regions {
         candidate.hit_regions = patch.hit_regions.clone();
     }
-    validate_private_snapshot(declaration, private, &candidate, Some(current.revision))?;
+    validate_private_snapshot(declaration, private, &candidate, Some(current.revision), ambiguous_wide)?;
     Ok(candidate)
 }
 

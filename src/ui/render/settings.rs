@@ -6,7 +6,7 @@ use crate::language::syntax::Highlight;
 use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::{Style, geometry::text_width};
 
-use super::{Frame, editor::cursor_style, surfaces::ellipsized};
+use super::{Frame, editor::cursor_style, surfaces::{ellipsized, prompt_viewport}};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SettingsPageState {
@@ -80,6 +80,13 @@ impl SettingsPageState {
             SettingsLine::Setting(row) => self.rows.get(*row),
             SettingsLine::Heading(_) => None,
         }
+    }
+
+    fn section_scroll(&self, layout: SettingsLayout) -> usize {
+        self.selected_row()
+            .map_or(0, |row| row.section.saturating_add(1))
+            .saturating_sub(usize::from(layout.list_height))
+            .min(self.sections.len().saturating_sub(usize::from(layout.list_height)))
     }
 }
 
@@ -281,7 +288,8 @@ pub fn settings_hit(
         && column > layout.left
         && column <= layout.left + sections
     {
-        return (offset < page.sections.len()).then_some(SettingsHit::Section(offset));
+        let section = page.section_scroll(layout) + offset;
+        return (section < page.sections.len()).then_some(SettingsHit::Section(section));
     }
     if column < layout.list_x || column >= layout.list_x + layout.list_width {
         return None;
@@ -353,11 +361,19 @@ pub(super) fn render_settings(
     width: u16,
     height: u16,
 ) {
-    let Some(layout) = settings_layout(width, height) else {
-        return;
-    };
     // The page covers the editor, so its cursor would show through; search and text fields set their own.
     frame.cursor = None;
+    let Some(layout) = settings_layout(width, height) else {
+        for y in 0..height {
+            fill(frame, 0, y, width, Style::Default);
+        }
+        let y = (height / 2).saturating_sub(1);
+        if height > 1 {
+            frame.grid.put_text_clipped(0, y, "Settings: resize to edit", Style::Accent, width);
+        }
+        frame.grid.put_text_clipped(0, (y + 1).min(height.saturating_sub(1)), "Esc/q close", Style::Muted, width);
+        return;
+    };
     let ambiguous = config.editor.ambiguous_width;
     let right = layout.left + layout.width;
     draw_box(frame, layout.left, layout.top, layout.width, layout.height);
@@ -409,15 +425,21 @@ pub(super) fn render_settings(
             count_x,
         );
     } else {
-        let end = frame.grid.put_text_clipped(
+        let (shown, caret) = prompt_viewport(
+            &page.query,
+            page.query.len(),
+            usize::from(count_x.saturating_sub(search_x + 1)),
+            &frame.grid,
+        );
+        frame.grid.put_text_clipped(
             search_x + 1,
             search_y,
-            &page.query,
+            shown,
             Style::Status,
             count_x,
         );
         if page.searching {
-            frame.cursor = Some((end.min(count_x), search_y, cursor_style(PROMPT_CURSOR)));
+            frame.cursor = Some((search_x + 1 + u16::try_from(caret).unwrap_or(0), search_y, cursor_style(PROMPT_CURSOR)));
         }
     }
 
@@ -428,14 +450,12 @@ pub(super) fn render_settings(
         for y in layout.list_top..layout.list_top + layout.list_height {
             frame.grid.set_cell(divider, y, "│", Style::Border);
         }
-        for (index, title) in page.sections.iter().enumerate() {
-            let Some(y) = u16::try_from(index)
-                .ok()
-                .map(|index| layout.list_top + index)
-                .filter(|y| *y < layout.list_top + layout.list_height)
-            else {
-                break;
-            };
+        for (offset, (index, title)) in page.sections.iter().enumerate()
+            .skip(page.section_scroll(layout))
+            .take(usize::from(layout.list_height))
+            .enumerate()
+        {
+            let y = layout.list_top + u16::try_from(offset).unwrap_or(0);
             let present = page.lines.contains(&SettingsLine::Heading(index));
             let style = if current_section == Some(index) {
                 fill(frame, layout.left + 1, y, sections, Style::Selection);
@@ -526,20 +546,15 @@ pub(super) fn render_settings(
                             let x = list_right.saturating_sub(field + 1);
                             fill(frame, x, y, field, Style::Status);
                             let inner = usize::from(field.saturating_sub(2));
-                            let before = &text[..(*cursor).min(text.len())];
-                            // Keep the cursor in the field by dropping text from the left.
-                            let mut skip = 0;
-                            while text_width(&before[skip..], ambiguous) > inner {
-                                skip += before[skip..].chars().next().map_or(1, char::len_utf8);
-                            }
+                            let (shown, caret) = prompt_viewport(text, *cursor, inner, &frame.grid);
                             frame.grid.put_text_clipped(
                                 x + 1,
                                 y,
-                                &text[skip..],
+                                shown,
                                 Style::Status,
                                 x + field - 1,
                             );
-                            let cursor_x = x + 1 + width_of(&before[skip..], ambiguous);
+                            let cursor_x = x + 1 + u16::try_from(caret).unwrap_or(0);
                             frame.cursor = Some((cursor_x, y, cursor_style(PROMPT_CURSOR)));
                             x
                         }
@@ -705,6 +720,117 @@ pub(super) fn render_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_settings_surfaces_show_how_to_close_and_hide_the_editor_cursor() {
+        let config = crate::config::load_bundled_config().config;
+        for (width, height) in [(40, 8), (20, 15), (20, 1), (0, 0)] {
+            let mut frame = Frame {
+                grid: crate::ui::CellGrid::new(width, height),
+                cursor: Some((0, 0, cursor_style(PROMPT_CURSOR))),
+            };
+            render_settings(&mut frame, &SettingsPageState::default(), &config, width, height);
+            assert!(frame.cursor.is_none());
+            if width > 0 && height > 0 {
+                let screen = (0..height).map(|y| frame.grid.row_text(y)).collect::<String>();
+                assert!(screen.contains("Esc/q close"), "{screen}");
+                if height > 1 {
+                    assert!(screen.contains("Settings: resize"), "{screen}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn settings_search_scrolls_to_the_end_without_covering_the_count() {
+        let config = crate::config::load_bundled_config().config;
+        let page = SettingsPageState {
+            query: "workspace.search.exclude_globs".into(),
+            searching: true,
+            ..Default::default()
+        };
+        let mut frame = Frame {
+            grid: crate::ui::CellGrid::new(40, 15),
+            cursor: None,
+        };
+        render_settings(&mut frame, &page, &config, 40, 15);
+        let (x, y, _) = frame.cursor.unwrap();
+        let row = frame.grid.row_text(y);
+        assert!(row.contains("exclude_globs"), "{row}");
+        assert!(!row.contains("workspace"), "{row}");
+        assert!(row.contains("0 settings"), "{row}");
+        assert_eq!(frame.grid.get(x, y).unwrap().symbol, " ");
+        assert!(x < row.find("0 settings").unwrap() as u16);
+    }
+
+    #[test]
+    fn settings_value_viewport_handles_long_text_and_whole_graphemes() {
+        let mut config = crate::config::load_bundled_config().config;
+        let layout = settings_layout(60, 30).unwrap();
+        let field = (layout.list_width / 2).clamp(8, 44)
+            .max(16).min(layout.list_width.saturating_sub(4));
+        let inner = usize::from(field - 2);
+        for wide in [false, true] {
+            config.editor.ambiguous_width = if wide { AmbiguousWidth::Wide } else { AmbiguousWidth::Narrow };
+            for text in ["x".repeat(100_000), format!("e\u{301}{}", "x".repeat(inner))] {
+                let page = SettingsPageState {
+                    rows: vec![SettingsRow {
+                        key: "test.value".into(),
+                        section: 0,
+                        title: "Value".into(),
+                        about: String::new(),
+                        value: SettingsValue::Text(String::new()),
+                        modified: false,
+                        restart: false,
+                    }],
+                    lines: vec![SettingsLine::Setting(0)],
+                    edit: Some(SettingsEdit::Text { cursor: text.len(), text, error: None }),
+                    ..Default::default()
+                };
+                let mut frame = Frame {
+                    grid: crate::ui::CellGrid::new_with_policy(60, 30, "�", "◌", wide),
+                    cursor: None,
+                };
+                render_settings(&mut frame, &page, &config, 60, 30);
+                let (x, y, _) = frame.cursor.unwrap();
+                let row = frame.grid.row_text(y);
+                assert!(row.contains(&"x".repeat(inner - 1)), "{row}");
+                assert!(!row.contains(['�', '◌', '\u{301}']), "{row}");
+                assert_eq!(frame.grid.get(x, y).unwrap().symbol, " ");
+                assert!(x < layout.list_x + layout.list_width - 2);
+            }
+        }
+    }
+
+    #[test]
+    fn sections_scroll_with_selection_and_hit_the_displayed_section() {
+        let config = crate::config::load_bundled_config().config;
+        let mut page = SettingsPageState {
+            sections: (0..11).map(|index| format!("Section {index}")).collect(),
+            rows: (0..11).map(|section| SettingsRow {
+                key: format!("test.{section}"),
+                section,
+                title: "Value".into(),
+                about: String::new(),
+                value: SettingsValue::Bool(false),
+                modified: false,
+                restart: false,
+            }).collect(),
+            lines: (0..11).flat_map(|section| [SettingsLine::Heading(section), SettingsLine::Setting(section)]).collect(),
+            ..Default::default()
+        };
+        let layout = settings_layout(100, 15).unwrap();
+        for section in [0, 8, 10, 0] {
+            page.selected = section * 2 + 1;
+            let mut frame = Frame { grid: crate::ui::CellGrid::new(100, 15), cursor: None };
+            render_settings(&mut frame, &page, &config, 100, 15);
+            let y = (layout.list_top..layout.list_top + layout.list_height)
+                .find(|&y| frame.grid.row_text(y).contains(&format!("Section {section}")))
+                .expect("the selected section is visible");
+            assert_eq!(settings_hit(&page, (100, 15), config.editor.ambiguous_width, layout.left + 3, y), Some(SettingsHit::Section(section)));
+            assert_eq!(frame.grid.get(layout.left + 3, y).unwrap().style, Style::Selection);
+        }
+    }
 
     #[test]
     fn dropdown_hits_precede_the_settings_underneath() {

@@ -106,13 +106,17 @@ impl PtyAdmission<'_> {
         thread::Builder::new()
             .name(format!("dust-pty-{}", id.0))
             .spawn(move || {
-                struct Finished(Arc<AtomicBool>);
+                struct Finished {
+                    finished: Arc<AtomicBool>,
+                    cancel: Arc<AtomicBool>,
+                }
                 impl Drop for Finished {
                     fn drop(&mut self) {
-                        self.0.store(true, Ordering::Release);
+                        self.cancel.store(true, Ordering::Release);
+                        self.finished.store(true, Ordering::Release);
                     }
                 }
-                let _finished = Finished(finished);
+                let _finished = Finished { finished, cancel: cancel.clone() };
                 if let Err(error) = run(
                     id,
                     request,
@@ -339,6 +343,9 @@ impl Child {
         }
     }
     fn terminate(&mut self, master: &dyn portable_pty::MasterPty) {
+        if self.reaped {
+            return;
+        }
         #[cfg(unix)]
         {
             if let Some(group) = master.process_group_leader().filter(|group| *group > 0) {
@@ -377,6 +384,27 @@ fn deliver(
         thread::sleep(Duration::from_millis(2));
     }
 }
+fn open_working_directory(
+    path: &std::path::Path,
+    root: Option<&crate::workspace::RootIdentity>,
+) -> Result<std::fs::File, PtyError> {
+    use rustix::fs::OFlags;
+    let fail = |error: String| PtyError::Spawn(error);
+    let canonical = path.canonicalize()
+        .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))?;
+    if let Some(root) = root {
+        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+            .map_err(|e| fail(e.to_string()))?;
+        if root != &current || !path.starts_with(&root.canonical_path)
+            || !canonical.starts_with(&root.canonical_path)
+        {
+            return Err(fail("PTY execution root filesystem identity changed".into()));
+        }
+    }
+    crate::files::open_no_symlinks(&canonical, OFlags::PATH | OFlags::DIRECTORY)
+        .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
+}
+
 fn run(
     id: PtyId,
     request: PtyRequest,
@@ -392,25 +420,7 @@ fn run(
     if cancel.load(Ordering::Acquire) {
         return Err(fail("PTY cancelled before spawn".into()));
     }
-    if !request.cwd.is_dir() {
-        return Err(fail("PTY working directory is unavailable".into()));
-    }
-    if let Some(root) = root {
-        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
-            .map_err(|e| fail(e.to_string()))?;
-        let cwd = request
-            .cwd
-            .canonicalize()
-            .map_err(|e| fail(e.to_string()))?;
-        if root != current
-            || !request.cwd.starts_with(&root.canonical_path)
-            || !cwd.starts_with(&root.canonical_path)
-        {
-            return Err(fail(
-                "PTY execution root filesystem identity changed".into(),
-            ));
-        }
-    }
+    let cwd = open_working_directory(&request.cwd, root.as_ref())?;
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: request.rows,
@@ -439,7 +449,10 @@ fn run(
     }
     let mut command = CommandBuilder::new(program);
     command.args(&request.arguments);
-    command.cwd(&request.cwd);
+    // portable-pty substitutes HOME for a missing cwd. This descriptor-backed
+    // path stays valid through spawn, even if the original name is removed.
+    use std::os::fd::AsRawFd;
+    command.cwd(format!("/proc/self/fd/{}", cwd.as_raw_fd()));
     for (key, value) in &request.environment {
         command.env(key, value);
     }
@@ -453,11 +466,30 @@ fn run(
             .map_err(|e| fail(e.to_string()))?,
         reaped: false,
     };
+    drop(cwd);
     drop(pair.slave);
     let mut reader = pair
         .master
         .try_clone_reader()
         .map_err(|e| fail(e.to_string()))?;
+    #[cfg(target_os = "linux")]
+    let readiness = {
+        use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollOp};
+        use std::os::fd::AsRawFd;
+        let readiness = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)
+            .map_err(|e| fail(e.to_string()))?;
+        let fd = pair.master.as_raw_fd().ok_or_else(|| fail("PTY master descriptor unavailable".into()))?;
+        // portable-pty exposes a raw descriptor, not an AsFd implementation.
+        // The master and its cloned reader outlive this registration.
+        #[expect(deprecated)]
+        nix::sys::epoll::epoll_ctl(
+            readiness.0.as_raw_fd(),
+            EpollOp::EpollCtlAdd,
+            fd,
+            &mut EpollEvent::new(EpollFlags::EPOLLIN, 0),
+        ).map_err(|e| fail(e.to_string()))?;
+        readiness
+    };
     let mut writer = pair.master.take_writer().map_err(|e| fail(e.to_string()))?;
     if !deliver(
         PtyEvent::Started {
@@ -475,6 +507,7 @@ fn run(
     let output_order = Arc::new(Mutex::new(()));
     let read_order = output_order.clone();
     let read_resident = resident.clone();
+    let read_cancel = cancel.clone();
     let maximum = request.policy.maximum_output_bytes;
     thread::Builder::new()
         .name(format!("dust-pty-read-{}", id.0))
@@ -484,6 +517,15 @@ fn run(
                 let mut total = 0usize;
                 let mut bytes = [0u8; 8192];
                 loop {
+                    if read_cancel.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    #[cfg(target_os = "linux")]
+                    match readiness.wait(&mut [nix::sys::epoll::EpollEvent::empty()], 10u16) {
+                        Ok(0) | Err(nix::errno::Errno::EINTR) => continue,
+                        Ok(_) => {}
+                        Err(error) => return Err(error.to_string()),
+                    }
                     let read = match reader.read(&mut bytes) {
                         Ok(0) => return Ok(()),
                         Ok(n) => n,
@@ -499,13 +541,24 @@ fn run(
                     let _order = read_order
                         .lock()
                         .map_err(|_| "PTY output ordering failed")?;
-                    output
-                        .send(PtyEvent::Output {
-                            id,
-                            bytes: bytes[..read].to_vec(),
-                            truncated: false,
-                        })
-                        .map_err(|_| "PTY output receiver stopped".to_owned())?;
+                    let mut event = PtyEvent::Output {
+                        id,
+                        bytes: bytes[..read].to_vec(),
+                        truncated: false,
+                    };
+                    loop {
+                        match output.try_send(event) {
+                            Ok(()) => break,
+                            Err(mpsc::TrySendError::Disconnected(_)) => {
+                                return Err("PTY output receiver stopped".into());
+                            }
+                            Err(mpsc::TrySendError::Full(returned)) => event = returned,
+                        }
+                        if read_cancel.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
+                        thread::sleep(Duration::from_millis(2));
+                    }
                 }
             })();
             let _ = read_tx.send(result);
@@ -552,6 +605,7 @@ fn run(
     let mut terminated = false;
     loop {
         if cancel.load(Ordering::Acquire) || failure.is_some() {
+            cancel.store(true, Ordering::Release);
             if !terminated {
                 child.terminate(pair.master.as_ref());
                 terminated = true;

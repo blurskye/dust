@@ -194,8 +194,24 @@ impl SearchSession {
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> Result<PickerEpoch, &'static str> {
+        let generation = self
+            .picker
+            .generation
+            .checked_add(1)
+            .ok_or("picker generation exhausted")?;
         let help_install = self.picker.take_help_install();
-        if !help_install && self.picker.help_open {
+        let same_interaction = |picker: &PickerInteraction| {
+            let same_origin = match (picker.origin, content.origin) {
+                (PickerOrigin::Files, PickerOrigin::Files)
+                | (PickerOrigin::Grep, PickerOrigin::Grep) => true,
+                (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
+                _ => false,
+            };
+            picker.source == (scope.clone(), configuration) && same_origin
+        };
+        let refresh_suspended = !help_install && self.picker.help_open
+            && self.picker.suspended.as_ref().is_some_and(same_interaction);
+        if !help_install && self.picker.help_open && !refresh_suspended {
             // A genuinely new surface supersedes both the help page and what it was showing, so
             // the stale snapshot is dropped rather than restored later.
             self.picker.help_open = false;
@@ -203,31 +219,16 @@ impl SearchSession {
         }
         // Stream refreshes replace rows, not the user's interaction. A new search
         // invocation closes the old picker before admitting its producer.
-        let previous = self
-            .picker
-            .interaction
-            .as_ref()
-            .filter(|picker| {
-                let same_origin = match (picker.origin, content.origin) {
-                    (PickerOrigin::Files, PickerOrigin::Files)
-                    | (PickerOrigin::Grep, PickerOrigin::Grep) => true,
-                    (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
-                    _ => false,
-                };
-                picker.source == (scope.clone(), configuration) && same_origin
-            })
-            .map(|picker| {
-                (
-                    picker.epoch.clone(),
-                    picker.state.query().to_owned(),
-                    picker.state.selected_item().map(|item| item.id.clone()),
-                )
-            });
-        let generation = self
-            .picker
-            .generation
-            .checked_add(1)
-            .ok_or("picker generation exhausted")?;
+        let slot = if refresh_suspended {
+            &mut self.picker.suspended
+        } else {
+            &mut self.picker.interaction
+        };
+        let previous = if slot.as_ref().is_some_and(same_interaction) {
+            slot.take()
+        } else {
+            None
+        };
         let mut state = PickerState::new(generation, content.title, maximum);
         let mut payloads = HashMap::new();
         state.append(
@@ -246,16 +247,17 @@ impl SearchSession {
         let mut epoch = PickerEpoch(Arc::new(()));
         let mut query = content.query;
         let mut selected = None;
-        if let Some((original, previous_query, previous_selection)) = previous {
-            epoch = original;
+        if let Some(previous) = &previous {
+            let previous_query = previous.state.query();
+            epoch = previous.epoch.clone();
             if matches!(
                 content.origin,
                 PickerOrigin::Files | PickerOrigin::PluginProvider(_)
             ) {
-                query = previous_query.clone();
+                query = previous_query.to_owned();
             }
             if query == previous_query {
-                selected = previous_selection;
+                selected = previous.state.selected_item().map(|item| item.id.clone());
             }
         }
         if matches!(
@@ -277,7 +279,12 @@ impl SearchSession {
             self.live = false;
             self.query.clear();
         }
-        self.picker.interaction = Some(PickerInteraction {
+        let interaction = if let Some(mut previous) = previous {
+            previous.state = state;
+            previous.payloads = payloads;
+            previous
+        } else {
+            PickerInteraction {
             state,
             payloads,
             surface: content.surface,
@@ -288,7 +295,13 @@ impl SearchSession {
             origin: content.origin,
             source: (scope, configuration),
             epoch: epoch.clone(),
-        });
+            }
+        };
+        if refresh_suspended {
+            self.picker.suspended = Some(interaction);
+        } else {
+            self.picker.interaction = Some(interaction);
+        }
         self.picker.generation = generation;
         Ok(epoch)
     }
@@ -585,6 +598,7 @@ pub(in crate::editor::session) struct MatcherSource {
     pub(in crate::editor::session) path: PathBuf,
     pub(in crate::editor::session) line: usize,
     pub(in crate::editor::session) column: usize,
+    pub(in crate::editor::session) encoding: crate::editor::text::PositionEncoding,
 }
 
 /// A surface's own footer legend: what its keys do on that surface, rather than the widget's

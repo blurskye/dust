@@ -104,7 +104,9 @@ impl ExtensionSession {
         request: PluginUiRequest,
         editor: &EditorState,
         windows: &WindowSession,
+        ambiguous_wide: bool,
     ) -> WindowUpdate<'_> {
+        self.windows.set_ambiguous_width(ambiguous_wide);
         let rejected = |code, detail| {
             WindowUpdate::Ready(PluginWindowHost::rejected(
                 request.token,
@@ -204,7 +206,9 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn synchronize_windows(
         &mut self,
         projection: Option<&CompositorProjection>,
+        ambiguous_wide: bool,
     ) {
+        self.windows.set_ambiguous_width(ambiguous_wide);
         for (plugin, load, event) in self.windows.synchronize_private_geometry(projection) {
             self.queue_ui(plugin, PluginLoadId(load), [event]);
         }

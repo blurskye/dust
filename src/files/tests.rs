@@ -323,6 +323,49 @@ fn atomic_write_replaces_and_preserves_text_format_bytes() {
 }
 
 #[test]
+fn atomic_write_preserves_destination_ownership_and_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, chown};
+    let root = tempdir().unwrap();
+    let path = root.path().join("shared.txt");
+    fs::write(&path, b"before").unwrap();
+    let metadata = fs::metadata(&path).unwrap();
+    let group = if metadata.uid() == 0 {
+        metadata.gid().saturating_add(1)
+    } else {
+        let groups = std::process::Command::new("id").arg("-G").output().unwrap();
+        assert!(groups.status.success());
+        String::from_utf8(groups.stdout).unwrap().split_whitespace()
+            .filter_map(|group| group.parse::<u32>().ok())
+            .find(|group| *group != metadata.gid()).unwrap_or(metadata.gid())
+    };
+    let owner = if metadata.uid() == 0 { 1 } else { metadata.uid() };
+    chown(&path, Some(owner), Some(group)).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o660)).unwrap();
+    atomic_write(&path, b"after").unwrap();
+    let saved = fs::metadata(&path).unwrap();
+    assert_eq!(saved.uid(), owner);
+    assert_eq!(saved.gid(), group);
+    assert_eq!(saved.mode() & 0o7777, 0o660);
+    assert_eq!(fs::read(&path).unwrap(), b"after");
+}
+
+#[test]
+fn exact_empty_write_rejects_external_deletion_but_missing_write_creates() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("empty.txt");
+    fs::write(&path, b"").unwrap();
+    let saved = fs::read(&path).unwrap();
+    fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        checked_atomic_write(&path, b"edited", &WriteExpectation::Exact(saved)),
+        Err(VfsError::ExternalModification(_))
+    ));
+    assert!(!path.exists());
+    checked_atomic_write(&path, b"new", &WriteExpectation::Missing).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"new");
+}
+
+#[test]
 fn checked_write_detects_external_change_and_save_as_collision() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("checked.txt");
@@ -1287,7 +1330,7 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
     fs::write(root.path().join("c.txt"), b"").expect("c");
     let mut worker = VfsWorker::start(2);
     let id = worker
-        .list_directory(root.path().to_path_buf(), 2)
+        .list_directory(root.path().to_path_buf(), 2, String::new())
         .expect("queue list");
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -1306,6 +1349,46 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
         }
         assert!(Instant::now() < deadline, "worker timed out");
         std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn directory_completion_filters_before_limiting_entries() {
+    let root = tempdir().unwrap();
+    for index in 0..1100 {
+        fs::write(root.path().join(format!("entry-{index:04}.txt")), b"").unwrap();
+    }
+    let target = fs::read_dir(root.path()).unwrap().nth(1050).unwrap().unwrap().path();
+    let prefix = target.file_name().unwrap().to_string_lossy().to_lowercase();
+    let mut worker = VfsWorker::start(2);
+    let id = worker.list_directory(root.path().to_path_buf(), 1000, prefix).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(VfsResult::Directory { id: actual, result, .. }) = worker.try_result().unwrap() {
+            assert_eq!(id, actual);
+            assert_eq!(result.unwrap(), vec![target]);
+            break;
+        }
+        assert!(Instant::now() < deadline, "directory completion timed out");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn explorer_copies_preserve_private_and_executable_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let root = tempdir().unwrap();
+    let roots = vec![fs::canonicalize(root.path()).unwrap()];
+    for mode in [0o600, 0o751] {
+        let source = root.path().join(format!("source-{mode:o}"));
+        let target = root.path().join(format!("target-{mode:o}"));
+        fs::write(&source, b"private content").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(mode)).unwrap();
+        super::vfs::apply_explorer_mutation(
+            &ExplorerMutation::Copy { source, target: target.clone() }, &roots, 1024,
+        ).unwrap();
+        assert_eq!(fs::metadata(&target).unwrap().mode() & 0o7777, mode);
+        assert_eq!(fs::read(&target).unwrap(), b"private content");
     }
 }
 
@@ -1418,6 +1501,96 @@ fn worker_reports_write_completion() {
     }
     assert_eq!(fs::read(path).expect("read"), b"saved");
 }
+#[test]
+fn workspace_file_delivery_waits_for_capacity_and_can_be_cancelled() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc};
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let event = super::WorkspaceFileEvent::Cancelled { generation: 1, root_revision: 2 };
+    sender.send(event.clone()).unwrap();
+    let worker_cancel = Arc::clone(&cancel);
+    let (done, completed) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        done.send(super::workspace_files::send_file_event(&sender, &worker_cancel, event)).unwrap();
+    });
+    assert!(matches!(completed.recv_timeout(Duration::from_millis(20)), Err(mpsc::RecvTimeoutError::Timeout)));
+    cancel.store(true, Ordering::Release);
+    assert!(!completed.recv_timeout(Duration::from_secs(2)).unwrap());
+    worker.join().unwrap();
+    assert!(receiver.try_recv().is_ok());
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
+    let root = repository_with_worktree();
+    let outside = repository_with_worktree();
+    fs::remove_dir_all(root.path().join(".worktree")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join(".worktree"), root.path().join(".worktree")).unwrap();
+    let mut service = super::WorkspaceFileService::default();
+    service.start(super::WorkspaceFilePolicy {
+        roots: vec![root.path().to_path_buf()],
+        root_revision: 1,
+        include_hidden: false,
+        include_ignored: false,
+        maximum_files: 100,
+        maximum_path_bytes: 4096,
+        batch_size: 10,
+        event_queue_capacity: 8,
+    }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut paths = Vec::new();
+    loop {
+        match service.try_event() {
+            Some(super::WorkspaceFileEvent::Batch { entries, .. }) => {
+                paths.extend(entries.into_iter().map(|entry| entry.relative_path));
+            }
+            Some(super::WorkspaceFileEvent::Complete { summary, .. }) => {
+                assert_eq!(summary.files, 1);
+                break;
+            }
+            Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(paths, vec![std::path::PathBuf::from("main.txt")]);
+}
+
+#[test]
+fn workspace_files_report_a_missing_root_instead_of_partial_success() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("present.txt"), b"present").unwrap();
+    let missing = root.path().join("missing-root");
+    let mut service = super::WorkspaceFileService::default();
+    service.start(super::WorkspaceFilePolicy {
+        roots: vec![root.path().to_path_buf(), missing.clone()],
+        root_revision: 7,
+        include_hidden: false,
+        include_ignored: false,
+        maximum_files: 100,
+        maximum_path_bytes: 4096,
+        batch_size: 10,
+        event_queue_capacity: 8,
+    }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match service.try_event() {
+            Some(super::WorkspaceFileEvent::Failed { root_revision, error, .. }) => {
+                assert_eq!(root_revision, 7);
+                assert!(error.contains("incomplete"), "{error}");
+                assert!(error.contains(&missing.display().to_string()), "{error}");
+                break;
+            }
+            Some(event) => panic!("unexpected successful discovery event: {event:?}"),
+            None => {}
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
 #[test]
 fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
     let root = tempdir().unwrap();

@@ -658,7 +658,7 @@ impl PluginManager {
         self.statuses.insert(plugin, PluginStatus::Loading);
         Ok(load)
     }
-    fn validate_invocation(invocation: &PluginExecutionRequest) -> Result<(), PluginError> {
+    pub(crate) fn validate_invocation(invocation: &PluginExecutionRequest) -> Result<(), PluginError> {
         if invocation.arguments.len() > 256
             || invocation
                 .arguments

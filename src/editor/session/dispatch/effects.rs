@@ -897,7 +897,8 @@ impl InteractiveApplication {
     ) -> crate::extensions::PluginUiEvent {
         match self
             .extension
-            .prepare_window(index, request, &self.state, &self.window_session)
+            .prepare_window(index, request, &self.state, &self.window_session,
+                self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide)
         {
             WindowUpdate::Ready(event) => event,
             WindowUpdate::Publish(source, transition) => {
@@ -3386,6 +3387,7 @@ impl InteractiveApplication {
                         path: entry.canonical_path,
                         line: 0,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     }),
                 )
             })
@@ -5278,7 +5280,7 @@ impl InteractiveApplication {
         ) && !self.input.completion_read_pending()
             && let Ok(id) = self
                 .documents
-                .list_directory(request.directory, request.limit)
+                .list_directory(request.directory, request.limit, request.prefix)
         {
             self.input.register_completion_read(id, request.key);
         }
@@ -5830,6 +5832,7 @@ impl InteractiveApplication {
                                 path: location.path,
                                 line: location.line.saturating_sub(1) as usize,
                                 column: location.column.saturating_sub(1) as usize,
+                                encoding: PositionEncoding::Utf8,
                             });
                         }
                     }
@@ -7549,6 +7552,7 @@ impl InteractiveApplication {
                 path,
                 line: *line,
                 column: 0,
+                encoding: PositionEncoding::Utf8,
             }),
             _ => self.notify_message(self.message("conflict_none", &[]), false),
         }
@@ -7573,6 +7577,7 @@ impl InteractiveApplication {
                 path,
                 line,
                 column: 0,
+                encoding: PositionEncoding::Utf8,
             }),
             Err(error) => self.show_error(error),
         }
@@ -8031,6 +8036,7 @@ impl InteractiveApplication {
                         path: snapshot.scope_root.join(&entry.relative_path),
                         line: 0,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     }),
                 ));
             }
@@ -8119,23 +8125,7 @@ impl InteractiveApplication {
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
     /// their own codes; everything else names which side differs.
     fn change_code(entry: &crate::workspace::git::GitStatusEntry) -> String {
-        use crate::workspace::git::GitFileStatus;
-        if entry.status == crate::workspace::git::GitFileStatus::Conflicted {
-            return "UU".to_owned();
-        }
-        if entry.status == GitFileStatus::Untracked {
-            return "??".to_owned();
-        }
-        let letter = match entry.status {
-            GitFileStatus::Added => 'A',
-            GitFileStatus::Modified => 'M',
-            GitFileStatus::Deleted => 'D',
-            GitFileStatus::Renamed => 'R',
-            GitFileStatus::Conflicted | GitFileStatus::Untracked => unreachable!(),
-        };
-        let index = if entry.sources.staged { letter } else { ' ' };
-        let worktree = if entry.sources.unstaged { letter } else { ' ' };
-        format!("{index}{worktree}")
+        entry.change_code()
     }
 }
 
@@ -8542,6 +8532,10 @@ impl InteractiveApplication {
                 return;
             }
         };
+        // A stream may have refreshed the picker underneath help, not the visible page.
+        if self.search.help_is_open() {
+            return;
+        }
         if self.search.theme_picker_key().is_none() {
             self.configuration.cancel_theme_picker();
         }
@@ -9294,11 +9288,11 @@ impl InteractiveApplication {
             return;
         };
         let payload = if let PickerPayload::TaskTest(key) = payload {
-            let Some((path, line, column)) = self.tasks.resolve_test(&key) else {
+            let Some(source) = self.tasks.resolve_test(&key) else {
                 self.clear_picker_preview();
                 return;
             };
-            PickerPayload::MatcherSource(MatcherSource { path, line, column })
+            PickerPayload::MatcherSource(source)
         } else {
             payload
         };
@@ -9699,6 +9693,7 @@ impl InteractiveApplication {
                         path: location.path,
                         line: location.line.saturating_sub(1) as usize,
                         column: location.column.saturating_sub(1) as usize,
+                        encoding: PositionEncoding::Utf8,
                     }),
                     Ok(None) => {}
                     Err(error) => self.show_error(error),
@@ -9722,14 +9717,15 @@ impl InteractiveApplication {
                         path,
                         line: new_line,
                         column: 0,
+                        encoding: PositionEncoding::Utf8,
                     })
                 } else {
                     self.show_error("Git hunk is stale")
                 }
             }
             Some(PickerPayload::TaskTest(key)) => {
-                if let Some((path, line, column)) = self.tasks.resolve_test(&key) {
-                    self.navigate_matcher_source(MatcherSource { path, line, column });
+                if let Some(source) = self.tasks.resolve_test(&key) {
+                    self.navigate_matcher_source(source);
                 } else {
                     self.show_error("test result source retired");
                 }
@@ -9934,7 +9930,7 @@ impl InteractiveApplication {
         let paths = previewed
             .files
             .iter()
-            .map(|(path, _)| path.clone())
+            .map(|(path, _, _)| path.clone())
             .collect::<Vec<_>>();
         let plan =
             match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice) {
@@ -10108,6 +10104,9 @@ impl InteractiveApplication {
                     ),
                     false,
                 );
+                if let Some(warning) = outcome.cleanup_warning {
+                    self.show_error(warning);
+                }
                 self.after_conflict_recovery();
             }
             Err(refusal) => self.show_error(refusal.to_string()),
@@ -10192,6 +10191,7 @@ impl InteractiveApplication {
                     line: first_conflict_line(&repository.join(&conflict.path)),
                     path: repository.join(&conflict.path),
                     column: 0,
+                    encoding: PositionEncoding::Utf8,
                 }),
             ));
         }
@@ -14119,6 +14119,7 @@ impl InteractiveApplication {
             path: buffer.path.as_deref(),
             text: &buffer.text,
             persisted: buffer.persisted_bytes(),
+            new_file: buffer.new_file,
             dirty: buffer.dirty,
             virtual_read_only: buffer.is_virtual_read_only(),
             read_only: buffer.read_only,
@@ -14150,7 +14151,7 @@ impl InteractiveApplication {
         let path = crate::editor::new_file_path(&absolute);
         self.record_jump();
         let mut candidate = self.state.draft();
-        if let Err(error) = candidate.open_document(TextBuffer::from_text(""), path.clone()) {
+        if let Err(error) = candidate.open_new_document(path.clone()) {
             self.show_error(error);
             return;
         }

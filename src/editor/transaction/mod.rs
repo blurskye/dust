@@ -784,6 +784,14 @@ impl EditorDraft {
     ) -> Result<(BufferId, ViewId), &'static str> {
         self.state.open_text(text, Some(path))
     }
+    pub(crate) fn open_new_document(&mut self, path: std::path::PathBuf) -> Result<(BufferId, ViewId), &'static str> {
+        let existing = self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&path));
+        let (buffer, view) = self.state.open_text(TextBuffer::from_text(""), Some(path))?;
+        if !existing {
+            self.state.buffers[buffer].new_file = true;
+        }
+        Ok((buffer, view))
+    }
     pub(crate) fn split_document(&mut self, ratio: u16) -> Result<(), &'static str> {
         self.state
             .split_active(crate::editor::Axis::Vertical, ratio)

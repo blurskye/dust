@@ -571,6 +571,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub dashboard_visible: bool,
     pub picker_rect: Option<crate::ui::window::WindowRect>,
     pub picker_surface: Option<PickerSurfaceKind>,
+    pub picker_title: String,
     pub protected_prompt_height: u16,
     pub configuration_generation: u64,
     pub screen_bottom: u16,
@@ -710,6 +711,22 @@ impl NativeSurfaceBridge {
             tab
         };
         self.workspace_tab = Some(tab);
+        // Release outgoing fullscreen terminals before placing the explorer.
+        for (id, ids) in &self.terminals {
+            let remains_fullscreen = (signature.active_terminal == Some(*id)
+                || signature.shown_terminals.contains(id))
+                && terminals.iter().any(|(live, ..)| live == id)
+                && self.terminal_placement(*id)
+                    .or_else(|| self.configured_placements.get("builtin.terminal").copied())
+                    == Some(WindowPlacement::Fullscreen);
+            if !remains_fullscreen
+                && graph.window(ids.window).is_some_and(|window| {
+                    window.placement == WindowPlacement::Fullscreen
+                })
+            {
+                graph.place(ids.window, WindowPlacement::Hidden)?;
+            }
+        }
         let default_explorer_placement = WindowPlacement::Docked {
             edge: crate::ui::window::DockEdge::Left,
             size: signature.explorer_size.max(1),
@@ -991,6 +1008,7 @@ impl NativeSurfaceBridge {
             && let Some(ids) = signature
                 .active_terminal
                 .and_then(|id| self.terminals.get(&id))
+            && graph.can_focus(ids.window)
         {
             graph.focus(ids.window)?;
             focused = true;
@@ -1259,7 +1277,8 @@ impl NativeSurfaceBridge {
                 .terminal_restore_placements
                 .get(&id)
                 .copied()
-                .or(self.terminal_default_placement)
+                .filter(|placement| *placement != WindowPlacement::Hidden)
+                .or(self.terminal_default_placement.filter(|placement| *placement != WindowPlacement::Hidden))
                 .unwrap_or(terminal_fallback),
             NativeSurfaceTarget::Dashboard => self
                 .dashboard_restore_placement

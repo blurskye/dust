@@ -392,7 +392,10 @@ impl InteractiveApplication {
 impl InteractiveApplication {
     pub(super) fn sync_plugin_window_ui(&mut self) {
         let projection = self.compositor_projection().cloned();
-        self.extension.synchronize_windows(projection.as_ref());
+        self.extension.synchronize_windows(
+            projection.as_ref(),
+            self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide,
+        );
         self.ui.plugin_surfaces = self.extension.window_snapshots();
         self.ui.private_surfaces = self
             .extension
@@ -1511,6 +1514,7 @@ impl InteractiveApplication {
             dashboard_visible: self.window_session.dashboard_visible()
                 || self.state.active_view.is_none(),
             picker_rect,
+            picker_title: self.ui.picker.as_ref().map_or_else(String::new, |picker| picker.title.clone()),
             picker_surface: self
                 .ui
                 .picker

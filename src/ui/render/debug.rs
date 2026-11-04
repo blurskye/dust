@@ -166,7 +166,8 @@ pub(super) fn wrap_rows(body: &[String], width: u16, grid: &super::CellGrid) -> 
             let cut = space.unwrap_or(end);
             wrapped.push(format!("{indent}{}", rest[..cut].trim_end()));
             rest = &rest[cut..];
-            indent = "  ";
+            // Leave room for a two-cell grapheme so every row consumes input.
+            indent = &"  "[..width.saturating_sub(2).min(2)];
         }
         wrapped.push(format!("{indent}{rest}"));
     }
@@ -202,7 +203,20 @@ pub(crate) fn debug_layout(width: u16, height: u16) -> Option<DebugLayout> {
     if !wide {
         // NARROW: the source keeps its width, and the inspectors are replaced by ONE selectable
         // inspector in a strip below it rather than squeezing the source into four columns.
-        let strip = DEBUG_CONSOLE_HEIGHT.min(height / 3);
+        // Tabs can wrap, but the heading and at least one value must still fit below them.
+        let tab_rows = DebugPane::ALL
+            .into_iter()
+            .filter_map(|selected| {
+                pane_tabs(WindowRect { x: 0, y: 0, width, height }, selected)
+                    .last()
+                    .map(|(_, _, _, y)| y + 1)
+            })
+            .max()
+            .unwrap_or(0);
+        let strip = DEBUG_CONSOLE_HEIGHT.min(height / 3).max(tab_rows + 2);
+        if height - strip < DEBUG_SOURCE_MIN_HEIGHT {
+            return None;
+        }
         return Some(DebugLayout {
             mode: DebugLayoutMode::Narrow,
             source: WindowRect {
@@ -484,6 +498,36 @@ mod tests {
         let wrapped = wrap_rows(&["·".repeat(20)], 10, &grid);
         assert!(wrapped.len() > 1);
         assert!(wrapped.iter().all(|row| grid.display_width(row) <= 10));
+    }
+
+    #[test]
+    fn narrow_wrapping_leaves_room_for_wide_graphemes() {
+        for wide in [false, true] {
+            let grid = super::super::CellGrid::new_with_policy(3, 10, "�", "◌", wide);
+            let rows = wrap_rows(&["1. 界界".into()], 3, &grid);
+            assert_eq!(rows, ["1.", " 界", " 界"]);
+            assert!(rows.iter().all(|row| grid.display_width(row) <= 3));
+        }
+    }
+
+    #[test]
+    fn narrow_layout_keeps_a_value_row_below_tabs_and_heading() {
+        assert!(debug_layout(80, 8).is_none());
+        for width in [42, 60, 80] {
+            for height in 8..24 {
+                let Some(layout) = debug_layout(width, height) else {
+                    continue;
+                };
+                assert!(layout.source.height >= DEBUG_SOURCE_MIN_HEIGHT);
+                let strip = layout.console.unwrap();
+                for selected in DebugPane::ALL {
+                    let tabs = pane_tabs(strip, selected);
+                    assert_eq!(tabs.len(), DebugPane::ALL.len());
+                    let last_tab_y = tabs.last().unwrap().3;
+                    assert!(last_tab_y + 2 < strip.y + strip.height);
+                }
+            }
+        }
     }
 
     #[test]

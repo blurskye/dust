@@ -422,12 +422,14 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
         query: query.into(),
         complete: false,
     };
-    for origin in [PickerOrigin::Files, PickerOrigin::Grep] {
+    for origin in [PickerOrigin::Files, PickerOrigin::Grep, PickerOrigin::PluginProvider(1)] {
         owner.close_picker();
         let epoch = owner
             .install_picker(content(origin, &[], ""), 3, source.clone(), 1)
             .unwrap();
         owner.picker_insert("jack");
+        owner.set_picker_surface(PickerSurfaceKind::Problems);
+        owner.set_picker_footer("Retained footer".into());
         owner
             .install_picker(
                 content(origin, &["jack-a", "jack-b", "other"], "jack"),
@@ -456,6 +458,8 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
             .unwrap();
         assert!(owner.owns_picker_epoch(&epoch));
         assert_eq!(owner.picker().unwrap().query(), "jack");
+        assert_eq!(owner.picker_surface(), PickerSurfaceKind::Problems);
+        assert_eq!(owner.picker_projection().unwrap().footer.as_deref(), Some("Retained footer"));
         assert_eq!(
             owner.picker().unwrap().selected_item().unwrap().id.0,
             "jack-b"
@@ -468,6 +472,7 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
             .unwrap();
         assert!(!owner.owns_picker_epoch(&epoch));
         assert_eq!(owner.picker().unwrap().query(), "");
+        assert_eq!(owner.picker_surface(), PickerSurfaceKind::Generic);
         assert!(
             matches!(owner.selected_picker_payload(), Some(PickerPayload::Command(id)) if id == "fresh")
         );

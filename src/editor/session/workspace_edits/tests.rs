@@ -773,6 +773,8 @@ fn combined_text_and_rename_is_rejected_before_publication() {
             source_device: 1,
             source_inode: 1,
             source_bytes: b"old".to_vec(),
+            canonical_roots: vec![root.path().into()],
+            maximum_bytes: 1024,
             kind: ResourceIntentKind::Rename {
                 target: root.path().join("new"),
                 parent_device: 1,

@@ -480,6 +480,40 @@ fn nested_projection_tiny_fallback_resize_and_swap_preserve_window_ids() {
 }
 
 #[test]
+fn spatial_navigation_prefers_the_topmost_equal_candidate() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let tiled = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let dock_view = graph.create_view(content, "builtin", 1).unwrap();
+    let dock = graph.open_window(tab, dock_view, WindowPlacement::Docked { edge: DockEdge::Left, size: 20 }, true, "builtin", 1).unwrap();
+    let float_view = graph.create_view(content, "builtin", 1).unwrap();
+    let float = graph.open_window(tab, float_view, WindowPlacement::Floating(WindowRect { x: 0, y: 0, width: 20, height: 30 }), true, "builtin", 1).unwrap();
+    let projection = graph.compositor_snapshot(tab).unwrap().project(WindowRect { x: 0, y: 0, width: 100, height: 30 }, 5, 2);
+    assert_eq!(projection.window(dock).unwrap().rect, projection.window(float).unwrap().rect);
+    assert_eq!(projection.hit_test(1, 1), Some(float));
+    assert_eq!(projection.spatial_neighbor(tiled, SpatialDirection::Left), Some(float));
+}
+
+#[test]
+fn docks_reserve_tiled_minimum_and_chrome_on_both_axes() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let tiled = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    for edge in [DockEdge::Bottom, DockEdge::Right] {
+        let view = graph.create_view(content, "builtin", 1).unwrap();
+        graph.open_window(tab, view, WindowPlacement::Docked { edge, size: 100 }, true, "builtin", 1).unwrap();
+    }
+    let snapshot = graph.compositor_snapshot(tab).unwrap();
+    let insets = super::TiledInsets { screen_bottom: 1, top: 1, bottom: 2, left: 2, right: 1 };
+    let projection = snapshot.project_with_tiled_insets(WindowRect { x: 0, y: 0, width: 80, height: 24 }, 5, 2, insets);
+    assert_eq!(projection.workspace_bounds.width, 8);
+    assert_eq!(projection.workspace_bounds.height, 5);
+    assert_eq!(projection.window(tiled).unwrap().rect.width, 5);
+    assert_eq!(projection.window(tiled).unwrap().rect.height, 2);
+    let tiny = snapshot.project_with_tiled_insets(WindowRect { x: 0, y: 0, width: 2, height: 2 }, 5, 2, insets);
+    assert_eq!(tiny.workspace_bounds.width, 2);
+    assert_eq!(tiny.workspace_bounds.height, 1);
+}
+
+#[test]
 fn compositor_projects_docks_tiles_floats_fullscreen_and_overlays_deterministically() {
     let (mut graph, content, tiled_view, tab) = graph_with_content();
     let open = |graph: &mut WindowGraph, placement| {
@@ -578,8 +612,8 @@ fn compositor_projects_docks_tiles_floats_fullscreen_and_overlays_deterministica
         5,
         2,
     );
-    assert_eq!(tiny.workspace_bounds.width, 1);
-    assert_eq!(tiny.workspace_bounds.height, 1);
+    assert_eq!(tiny.workspace_bounds.width, 4);
+    assert_eq!(tiny.workspace_bounds.height, 2);
     assert_eq!(
         tiny.window(tiled).expect("tiny tile").rect,
         tiny.tiled_bounds

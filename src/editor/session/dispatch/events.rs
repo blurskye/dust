@@ -1862,13 +1862,18 @@ impl InteractiveApplication {
                     if let Some(NavigationRead::Recovered(journal, content)) = &pending
                         && result.is_err()
                     {
-                        let (buffer, _) = match self.state.open_text(TextBuffer::from_text(""), Some(path)) {
+                        let mut candidate = self.state.draft();
+                        let (buffer, _) = match candidate.open_new_document(path) {
                             Ok(opened) => opened,
                             Err(error) => {
                                 self.show_error(error);
                                 continue;
                             }
                         };
+                        if let Err(error) = self.commit_editor_draft(candidate, None, true) {
+                            self.show_error(error);
+                            continue;
+                        }
                         if let Err(error) = self.replace_with_recovered(buffer, content.clone()) {
                             self.show_error(error);
                             continue;
@@ -1890,22 +1895,8 @@ impl InteractiveApplication {
                                 };
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
-                                let start = self.state.buffers[buffer]
-                                    .text
-                                    .line_to_byte(source.line)
-                                    .ok()
-                                    .map(|offset| {
-                                        ByteOffset(
-                                            (offset.get() + source.column)
-                                                .min(self.state.buffers[buffer].text.len_bytes()),
-                                        )
-                                    })
-                                    .filter(|offset| {
-                                        self.state.buffers[buffer]
-                                            .text
-                                            .validate_offset(*offset)
-                                            .is_ok()
-                                    })
+                                let start = PositionCodec::new(&self.state.buffers[buffer].text)
+                                    .lsp_to_byte(source.line, source.column, source.encoding)
                                     .unwrap_or(ByteOffset(0));
                                 self.state.views[view].cursor = start;
                                 self.state.mark_editor_changed();

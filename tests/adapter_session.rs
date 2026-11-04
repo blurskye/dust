@@ -1,6 +1,38 @@
 #![cfg(unix)]
 
-use std::process::Command;
+use std::{
+    process::{Child, Command},
+    thread,
+    time::{Duration, Instant},
+};
+
+struct AdapterChild(Child);
+
+impl Drop for AdapterChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn an_adapter_child_is_killed_and_reaped_on_assertion_failure() {
+    let child = Command::new("python3")
+        .args(["-c", "import time; time.sleep(60)"])
+        .spawn()
+        .expect("start adapter fixture");
+    let pid = nix::unistd::Pid::from_raw(child.id().try_into().unwrap());
+    let result = std::panic::catch_unwind(move || {
+        let _child = AdapterChild(child);
+        panic!("simulated assertion failure");
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)),
+        Err(nix::errno::Errno::ECHILD),
+        "the guard must kill and reap the child before returning"
+    );
+}
 
 #[test]
 fn an_adapter_started_through_dust_leads_its_own_session() {
@@ -33,9 +65,21 @@ fn a_missing_adapter_is_a_failure_rather_than_the_editor_starting() {
 #[test]
 fn an_adapter_that_only_speaks_over_a_socket_is_carried_over_stdio() {
     use std::io::{Read, Write};
-    let script = "import socket, sys; host, port = sys.argv[1].rsplit(':', 1); \
-        s = socket.create_connection((host, int(port))); s.sendall(s.recv(64).upper()); s.close()";
-    let mut bridge = Command::new(env!("CARGO_BIN_EXE_dust"))
+    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+
+    let script = r#"
+import socket, sys
+host, port = sys.argv[1].rsplit(':', 1)
+with socket.create_connection((host, int(port)), timeout=5) as s:
+    request = bytearray()
+    while len(request) < len(b'no newline'):
+        chunk = s.recv(min(2, len(b'no newline') - len(request)))
+        if not chunk:
+            raise RuntimeError('request ended early')
+        request.extend(chunk)
+    s.sendall(request.upper())
+"#;
+    let mut bridge = AdapterChild(Command::new(env!("CARGO_BIN_EXE_dust"))
         .args([
             dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
             "python3",
@@ -46,16 +90,35 @@ fn an_adapter_that_only_speaks_over_a_socket_is_carried_over_stdio() {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("run dust");
-    let mut stdin = bridge.stdin.take().expect("stdin");
+        .expect("run dust"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut stdin = bridge.0.stdin.take().expect("stdin");
     stdin.write_all(b"no newline").expect("write");
-    let mut answer = String::new();
-    bridge
-        .stdout
-        .take()
-        .expect("stdout")
-        .read_to_string(&mut answer)
-        .expect("read");
-    assert_eq!(answer, "NO NEWLINE");
-    assert!(bridge.wait().expect("wait").success());
+    let mut stdout = bridge.0.stdout.take().expect("stdout");
+    let flags = OFlag::from_bits_truncate(fcntl(&stdout, FcntlArg::F_GETFL).unwrap());
+    fcntl(&stdout, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK)).unwrap();
+    let mut answer = Vec::new();
+    let mut buffer = [0; 64];
+    loop {
+        assert!(Instant::now() < deadline, "adapter response timed out: {answer:?}");
+        match stdout.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => answer.extend_from_slice(&buffer[..n]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => panic!("read: {error}"),
+        }
+    }
+    assert_eq!(answer, b"NO NEWLINE");
+    drop(stdin);
+    loop {
+        if let Some(status) = bridge.0.try_wait().expect("wait") {
+            assert!(status.success(), "{status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "adapter exit timed out");
+        thread::sleep(Duration::from_millis(5));
+    }
 }

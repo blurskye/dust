@@ -12,6 +12,7 @@ pub(in crate::editor::session) struct DocumentView<'a> {
     pub path: Option<&'a Path>,
     pub text: &'a TextBuffer,
     pub persisted: &'a [u8],
+    pub new_file: bool,
     pub dirty: bool,
     pub virtual_read_only: bool,
     pub read_only: bool,
@@ -282,7 +283,7 @@ impl DocumentSession {
         let bytes = configured_file_bytes(view.text, request.policy);
         let expectation = if request.force {
             WriteExpectation::Any
-        } else if view.path == Some(target.as_path()) {
+        } else if view.path == Some(target.as_path()) && !view.new_file {
             WriteExpectation::Exact(view.persisted.to_vec())
         } else {
             WriteExpectation::Missing
@@ -550,6 +551,7 @@ mod tests {
             path: b.path.as_deref(),
             text: &b.text,
             persisted: b.persisted_bytes(),
+            new_file: b.new_file,
             dirty: b.dirty,
             virtual_read_only: b.is_virtual_read_only(),
             read_only: b.read_only,

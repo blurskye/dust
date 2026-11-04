@@ -413,6 +413,18 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
             id: "user.test.hidden-pass-through".into(),
             context: Some("editor".into()),
             mode: "normal".into(),
+            keys: Some("<leader> f z".into()),
+            command: None,
+            arguments: BTreeMap::new(),
+            unmap: false,
+            disable: false,
+            pass_through: true,
+            desc: None,
+        },
+        crate::config::KeymapEntry {
+            id: "user.test.lower-command-pass-through".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
             keys: Some("<leader> f p".into()),
             command: None,
             arguments: BTreeMap::new(),
@@ -437,7 +449,15 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
                 "space f",
                 &app.configuration.settings().command_labels,
             )
-            .is_some_and(|projection| { !projection.rows.iter().any(|row| row.next_key == "p") })
+            .is_some_and(|projection| {
+                !projection.rows.iter().any(|row| row.next_key == "z")
+                    && projection.rows.iter().any(|row| {
+                        row.next_key == "p"
+                            && row.mappings.iter().any(|mapping| {
+                                mapping.command.as_deref() == Some("workspace.root.list")
+                            })
+                    })
+            })
     );
 
     {
