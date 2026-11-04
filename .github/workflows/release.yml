@@ -45,7 +45,7 @@ jobs:
       - name: Check it runs and links nothing
         run: |
           binary=target/x86_64-unknown-linux-musl/release/dust
-          ! ldd "$binary" 2>/dev/null | grep -q '=>'
+          if ldd "$binary" 2>/dev/null | grep -q '=>'; then ldd "$binary"; exit 1; fi
           "$binary" --version
       - run: packaging/build-packages.sh ${{ steps.version.outputs.version }} target/x86_64-unknown-linux-musl/release/dust
       - uses: actions/upload-artifact@v4
@@ -85,7 +85,7 @@ jobs:
         with: { pattern: dist-*, merge-multiple: true, path: dist }
       - name: Checksums
         working-directory: dist
-        run: sha256sum * > SHA256SUMS
+        run: sha256sum -- * > SHA256SUMS
       - uses: sigstore/cosign-installer@v3
       - name: Keyless signature of the checksums
         run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
