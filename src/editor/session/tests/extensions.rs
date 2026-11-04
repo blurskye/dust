@@ -1457,6 +1457,17 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
         .expect("coalesced buffer event");
     assert_eq!(event.coalesced, 1);
     assert!(event.payload.contains("cursor=1"));
+    app.extension.acknowledge("demo", PluginLoadId(77), &[event.id]);
+    app.state.active_view = None;
+    app.refresh_plugin_host_events();
+    assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
+    // The earlier delivery is rate-limited, but the disappearance is queued now.
+    thread::sleep(Duration::from_millis(10));
+    let empty = app.extension.deliver("demo", PluginLoadId(77)).pop().expect("empty buffer event");
+    assert_eq!(empty.kind, crate::extensions::PluginSubscriptionKind::BufferSummaryChanged);
+    assert_eq!(empty.payload, "buffer=none");
+    app.refresh_plugin_host_events();
+    assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 0);
 }
@@ -1839,6 +1850,78 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
         Some(3),
         "scroll-adjusted mouse row selects the visible button"
     );
+}
+
+#[test]
+fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let key = ("demo".to_owned(), PluginLoadId(1));
+    app.extension.queue_ui(key.0.clone(), key.1, [crate::extensions::PluginUiEvent {
+        token: 7,
+        handle: None,
+        graph_revision: None,
+        tree_revision: None,
+        surface_revision: None,
+        geometry: None,
+        action: None,
+        error: None,
+    }]);
+    app.extension.queue_storage(crate::extensions::PluginStorageResult {
+        plugin: key.0.clone(),
+        load: key.1,
+        token: 8,
+        value: None,
+        revision: None,
+        entries: Vec::new(),
+        truncated: false,
+        error: None,
+    });
+    for arguments in [vec!["x".repeat(65_537)], vec![String::new(); 257]] {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(), command: "run".into(), arguments,
+        });
+        assert_eq!(app.extension.ui_events().get(&key).and_then(|events| events.first()).map(|event| event.token), Some(7));
+        assert_eq!(app.extension.storage_results().get(&key).and_then(|results| results.first()).map(|result| result.token), Some(8));
+        assert_eq!(app.extension.confirmation_count(), 0);
+    }
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+    });
+    assert!(fixture.take().arguments().is_empty());
+    assert!(!app.extension.ui_events().contains_key(&key));
+    assert!(!app.extension.storage_results().contains_key(&key));
+}
+
+#[test]
+fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let invoke = |app: &mut InteractiveApplication| {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+        });
+    };
+    invoke(&mut app);
+    let old = fixture.take();
+    app.extension.reset_runtime();
+    fixture.reply(&old, Vec::new());
+    let crate::extensions::OwnedPluginEvent::Executed(reply) = app.extension.poll_owned().unwrap().pop().unwrap() else {
+        panic!("execution reply");
+    };
+    let error = app.extension.receive(reply, &app.workspace.version(), app.configuration.binding_revision())
+        .err().expect("pre-reset invocation must be retired");
+    assert!(error.contains("retired"), "{error}");
+    assert_eq!(app.extension.confirmation_count(), 0);
+    invoke(&mut app);
+    let current = fixture.take();
+    fixture.reply(&current, Vec::new());
+    let crate::extensions::OwnedPluginEvent::Executed(reply) = app.extension.poll_owned().unwrap().pop().unwrap() else {
+        panic!("execution reply");
+    };
+    assert!(app.extension.receive(reply, &app.workspace.version(), app.configuration.binding_revision()).is_ok());
 }
 
 #[test]

@@ -1,7 +1,8 @@
 use super::{
     AppEffect, BTreeMap, CommandInvocation, CommandRegistry, CommandValue, FromStr, HashMap,
     InputContextLayer, InputContextRegistry, InvocationSource, KeyEvent, KeymapInspection,
-    KeymapLayer, KeymapOperation, ResolvedKeyGroup, ResolvedKeymaps, ReverseBinding,
+    KeymapLayer, KeymapOperation, KeymapSequence, MappingResolution, ResolvedKeyGroup,
+    ResolvedKeymaps, ReverseBinding,
     configured_context, invocation_fingerprint, keymap_entries,
 };
 
@@ -380,6 +381,7 @@ pub(in crate::editor::session) fn resolve_keymap_identities(
         }
     }
     if diagnostics.is_empty() {
+        slots.sort_by_key(|entry| entry.origin.layer);
         Ok(slots)
     } else {
         Err(diagnostics)
@@ -953,10 +955,9 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             }
             continue;
         }
-        if contribution_layer != InputContextLayer::Bundled {
-            result.reverse.retain(|(mapped_context, _), binding| {
-                mapped_context != &context || binding.keys != effective_keys
-            });
+        if contribution_layer != InputContextLayer::Bundled
+            && entry.operation != KeymapOperation::PassThrough
+        {
             result.inspections.retain(|inspection| {
                 inspection.context != context || inspection.keys != effective_keys
             });
@@ -977,9 +978,6 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             KeymapOperation::Unmap | KeymapOperation::Disable
         ) {
             keymap.insert_disabled(&sequence);
-            result.reverse.retain(|(mapped_context, _), binding| {
-                mapped_context != &context || binding.keys != effective_keys
-            });
             result.inspections.retain(|inspection| {
                 inspection.context != context || inspection.keys != effective_keys
             });
@@ -1052,7 +1050,6 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             diagnostics.push(format!("keymap id `{}`: {error}", entry.id));
             continue;
         }
-        let fingerprint = invocation_fingerprint(&invocation);
         result.inspections.push(KeymapInspection {
             id: entry.id.clone(),
             context: context.clone(),
@@ -1068,31 +1065,6 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
             source,
         });
         keymap.insert(&sequence, invocation);
-        // The key shown for a command (dashboard, footers, palette) is the user's own
-        // binding first, then the shortest one, so a surface's `q` beats `space q q`.
-        let replaces = |existing: &ReverseBinding| {
-            entry.origin.layer > existing.layer
-                || (entry.origin.layer == existing.layer
-                    && sequence.len() < existing.keys.split_whitespace().count())
-        };
-        match result.reverse.entry((context, fingerprint)) {
-            std::collections::hash_map::Entry::Occupied(mut slot) => {
-                if replaces(slot.get()) {
-                    slot.insert(ReverseBinding {
-                        id: entry.id.clone(),
-                        keys: effective_keys,
-                        layer: entry.origin.layer,
-                    });
-                }
-            }
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(ReverseBinding {
-                    id: entry.id.clone(),
-                    keys: effective_keys,
-                    layer: entry.origin.layer,
-                });
-            }
-        }
     }
 
     if let Ok(effective_groups) = resolve_key_group_identities(groups, group_origins)
@@ -1132,11 +1104,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 continue;
             }
             let reachable = result.inspections.iter().any(|inspection| {
-                if inspection.context != context
-                    || matches!(
-                        inspection.operation,
-                        KeymapOperation::Disable | KeymapOperation::Unmap
-                    )
+                if inspection.context != context || inspection.command.is_none()
                 {
                     return false;
                 }
@@ -1179,6 +1147,72 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 .then_with(|| left.prefix.cmp(&right.prefix))
                 .then_with(|| left.id.cmp(&right.id))
         });
+    }
+    // Replay the actual layered resolver: an exact command or disabled ancestor can
+    // make a declaration unreachable even when its own sequence was not overridden.
+    result.inspections.retain(|inspection| {
+        let sequence = inspection
+            .keys
+            .split_whitespace()
+            .map(|key| KeyEvent::from_str(key).expect("compiled key sequence"))
+            .collect::<Vec<_>>();
+        let bindings = &result.bindings[&inspection.context];
+        let mut cursor = KeymapSequence::default();
+        for (index, key) in sequence.iter().enumerate() {
+            let mut resolution = cursor.feed(bindings, key.clone());
+            if index + 1 < sequence.len() {
+                if !matches!(resolution, MappingResolution::Pending | MappingResolution::Ambiguous) {
+                    return false;
+                }
+                continue;
+            }
+            let Some(command) = &inspection.command else {
+                return true;
+            };
+            if resolution == MappingResolution::Ambiguous {
+                resolution = cursor.flush_timeout();
+            }
+            return matches!(resolution, MappingResolution::Ready(invocation)
+                if invocation.id.as_str() == command && invocation.arguments == inspection.arguments);
+        }
+        false
+    });
+    result.groups.retain(|group| {
+        result.inspections.iter().any(|inspection| {
+            inspection.context == group.context
+                && inspection.command.is_some()
+                && inspection
+                    .keys
+                    .strip_prefix(&group.prefix)
+                    .is_some_and(|suffix| suffix.starts_with(' '))
+        })
+    });
+    // Choose presentation bindings only after all overrides and reachability checks,
+    // so overriding the preferred shortcut can fall back to another working one.
+    for inspection in &result.inspections {
+        let Some(command) = &inspection.command else {
+            continue;
+        };
+        let mut invocation = CommandInvocation::new(command, InvocationSource::Keymap)
+            .expect("validated command");
+        invocation.arguments = inspection.arguments.clone();
+        let key = (inspection.context.clone(), invocation_fingerprint(&invocation));
+        let replaces = result.reverse.get(&key).is_none_or(|existing| {
+            inspection.contribution_layer > existing.layer
+                || (inspection.contribution_layer == existing.layer
+                    && inspection.keys.split_whitespace().count()
+                        < existing.keys.split_whitespace().count())
+        });
+        if replaces {
+            result.reverse.insert(
+                key,
+                ReverseBinding {
+                    id: inspection.id.clone(),
+                    keys: inspection.keys.clone(),
+                    layer: inspection.contribution_layer,
+                },
+            );
+        }
     }
     diagnostics.extend(key_conflicts.into_iter().map(|(conflict, contexts)| {
         match contexts.as_slice() {

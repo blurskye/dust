@@ -194,39 +194,37 @@ impl ExtensionSession {
         let origin = loan.origin().clone();
         let reservation = self.confirmations.reserve(&origin);
         let confirmation_available = reservation.available();
+        let mut request = PluginExecutionRequest {
+            runtime_epoch: self.runtime_epoch,
+            plugin: plugin.into(),
+            command: command.into(),
+            arguments: context.arguments,
+            snapshot: None,
+            config: BTreeMap::new(),
+            ui_revision: context.ui_revision,
+            confirmation_available,
+            ui_events: Vec::new(),
+            confirmation_results: Vec::new(),
+            host_events: Vec::new(),
+            storage_results: Vec::new(),
+            provider_requests: Vec::new(),
+            virtual_document_requests: Vec::new(),
+            generation: context.generation,
+        };
+        PluginManager::validate_invocation(&request).map_err(|error| error.to_string())?;
         let mut virtual_requests: crate::extensions::PluginVirtualRequestLane<'_> =
             self.virtual_documents.request_lane();
-        // Real manager/source admission stays borrowed while delivery and snapshot
-        // payloads are built and queued. Full/retired refusal leaves queues intact.
+        // Validate before consuming deliveries; real queue admission stays reserved
+        // while the remaining payloads are built and queued.
         reservation.enqueue(|| {
-            loan.submit(PluginExecutionRequest {
-                runtime_epoch: self.runtime_epoch,
-                plugin: plugin.into(),
-                command: command.into(),
-                arguments: context.arguments,
-                snapshot: None,
-                config: BTreeMap::new(),
-                ui_revision: context.ui_revision,
-                confirmation_available,
-                ui_events: self.ui.remove(&(plugin.into(), load)).unwrap_or_default(),
-                confirmation_results: Vec::new(),
-                host_events: self.events.deliver(plugin, load),
-                storage_results: self
-                    .results
-                    .remove(&(plugin.into(), load))
-                    .unwrap_or_default(),
-                provider_requests: self.providers.requests(
-                    plugin,
-                    load,
-                    &format!("plugin.{plugin}.{command}"),
-                ),
-                virtual_document_requests: virtual_requests.deliver(
-                    plugin,
-                    load,
-                    &format!("plugin.{plugin}.{command}"),
-                ),
-                generation: context.generation,
-            })
+            request.ui_events = self.ui.remove(&(plugin.into(), load)).unwrap_or_default();
+            request.host_events = self.events.deliver(plugin, load);
+            request.storage_results = self.results.remove(&(plugin.into(), load)).unwrap_or_default();
+            request.provider_requests =
+                self.providers.requests(plugin, load, &format!("plugin.{plugin}.{command}"));
+            request.virtual_document_requests =
+                virtual_requests.deliver(plugin, load, &format!("plugin.{plugin}.{command}"));
+            loan.submit(request)
         })
     }
     pub(super) fn receive(
@@ -438,6 +436,7 @@ impl ExtensionSession {
     pub(super) fn reset_runtime(&mut self) -> bool {
         self.runtime_epoch = self.runtime_epoch.saturating_add(1);
         let active_confirmation = self.confirmations.reset();
+        self.edits = PluginEditSources::default();
         self.windows.clear_runtime();
         self.providers.reset_runtime();
         self.virtual_documents.reset_runtime();
@@ -528,6 +527,14 @@ impl ExtensionSession {
             );
             if let Some((id, revision, cursor, anchor, head, kind)) = observation.2 {
                 let _ = self.events.observe(plugin, load, PluginSubscriptionKind::BufferSummaryChanged, revision, format!("buffer={id};revision={revision};cursor={cursor};selection={anchor}:{head}:{kind}"));
+            } else {
+                let _ = self.events.observe(
+                    plugin,
+                    load,
+                    PluginSubscriptionKind::BufferSummaryChanged,
+                    0,
+                    "buffer=none",
+                );
             }
             let _ = self.events.observe(
                 plugin,
