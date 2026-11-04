@@ -47,12 +47,12 @@ impl NoticeSession {
         if self
             .current
             .as_ref()
-            .is_none_or(|(_, previous)| previous != &message)
+            .is_none_or(|(previous_error, previous)| *previous_error != error || previous != &message)
         {
             if self
                 .history
                 .back()
-                .is_none_or(|(_, previous)| previous != &message)
+                .is_none_or(|(previous_error, previous)| *previous_error != error || previous != &message)
             {
                 self.history.push_back((error, message.clone()));
                 if self.history.len() > 200 {
@@ -149,13 +149,15 @@ impl NoticeSession {
         if self.written_crash_snapshot.as_ref() == Some(&snapshot) {
             return;
         }
-        self.written_crash_snapshot = Some(snapshot.clone());
+        let unchanged = snapshot.clone();
         snapshot.timestamp_ms = wall_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis()
             .min(u128::from(u64::MAX)) as u64;
-        let _ = self.crash_snapshot.submit(snapshot);
+        if self.crash_snapshot.submit(snapshot).is_ok() {
+            self.written_crash_snapshot = Some(unchanged);
+        }
     }
 }
 
@@ -214,6 +216,26 @@ mod tests {
         assert!(notices.is_warning());
         notices.notify("back".into(), false, now, Duration::ZERO);
         assert!(!notices.is_warning());
+    }
+
+    #[test]
+    fn changed_severity_records_a_new_notice_and_restarts_expiry() {
+        let root = tempfile::tempdir().unwrap();
+        let now = Instant::now();
+        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
+        notices.notify("offline".into(), false, now, Duration::from_secs(1));
+        notices.notify(
+            "offline".into(),
+            true,
+            now + Duration::from_millis(900),
+            Duration::from_secs(1),
+        );
+        assert_eq!(notices.current(), Some((true, "offline")));
+        assert_eq!(notices.history().cloned().collect::<Vec<_>>(), vec![
+            (false, "offline".into()), (true, "offline".into()),
+        ]);
+        assert!(!notices.tick(now + Duration::from_secs(1)));
+        assert!(notices.tick(now + Duration::from_millis(1900)));
     }
 
     #[test]

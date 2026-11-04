@@ -1642,6 +1642,51 @@ mod tests {
         assert!(endpoint.take_synced_source().is_none());
     }
     #[test]
+    fn document_replay_retires_missing_and_renamed_buffers_even_when_stopped() {
+        let (mut editor, buffer, document, mut owner) = fixture();
+        let (renamed, _) = editor.open_text(TextBuffer::from_text("renamed"), Some("/fixture/old.rs".into()));
+        let (kept, _) = editor.open_text(TextBuffer::from_text("kept"), Some("/fixture/kept.rs".into()));
+        for id in [buffer, renamed, kept] {
+            let mut registered = document.clone();
+            registered.path = editor.buffers[id].path.clone().unwrap();
+            owner.sessions.get_mut("owned").unwrap().documents.insert(id, registered);
+            owner.synced.insert(("owned".into(), id), editor.buffers[id].text.source_version());
+        }
+        editor.buffers.remove(buffer);
+        editor.buffers[renamed].path = Some("/fixture/new.rs".into());
+        owner.sessions.get_mut("owned").unwrap().capabilities = None;
+        owner.retry_documents(&editor);
+        assert_eq!(owner.sessions["owned"].documents.keys().copied().collect::<Vec<_>>(), vec![kept]);
+        assert_eq!(owner.synced.len(), 1);
+        assert!(owner.synced.contains_key(&("owned".into(), kept)));
+    }
+
+    #[test]
+    fn document_replay_synchronizes_changed_inactive_buffers() {
+        let (mut editor, buffer, document, mut owner) = fixture();
+        let endpoint = owner.service.replace_edit_source_fixture_for("owned", document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16, 1);
+        owner.retry_documents(&editor);
+        assert_eq!(endpoint.take_synced_source(), Some(buffer));
+        let old_version = editor.buffers[buffer].text.source_version();
+        editor.open_text(TextBuffer::from_text("active"), Some("/fixture/active.rs".into()));
+        editor.buffers[buffer].text.restore_text("new contents").unwrap();
+        let new_version = editor.buffers[buffer].text.source_version();
+        assert_ne!(old_version, new_version);
+        endpoint.block_responses();
+        owner.retry_documents(&editor);
+        assert!(owner.synced("owned", buffer, &old_version));
+        endpoint.unblock_responses();
+        owner.retry_documents(&editor);
+        assert_eq!(endpoint.take_synced_source(), Some(buffer));
+        assert!(owner.synced("owned", buffer, &new_version));
+        assert_eq!(owner.sessions["owned"].documents[&buffer].text, "new contents");
+        owner.retry_documents(&editor);
+        assert!(endpoint.take_synced_source().is_none());
+    }
+
+    #[test]
     fn code_action_ranges_are_encoded_for_each_receiving_server() {
         let (_, buffer, mut document, mut owner) = fixture();
         document.text = "😀x".into();

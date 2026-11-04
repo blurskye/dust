@@ -573,7 +573,21 @@ impl LspSession {
         }
         Ok(())
     }
+    pub(super) fn retire_documents(&mut self, editor: &EditorState) {
+        for (key, session) in &mut self.sessions {
+            session.documents.retain(|id, document| {
+                let current = editor.buffers.get(*id)
+                    .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path));
+                if !current {
+                    let _ = self.service.close(key, document.uri());
+                    self.synced.remove(&(key.clone(), *id));
+                }
+                current
+            });
+        }
+    }
     pub(super) fn retry_documents(&mut self, editor: &EditorState) {
+        self.retire_documents(editor);
         for (key, session) in &mut self.sessions {
             if !session.desired_running || session.capabilities.is_none() {
                 continue;
@@ -587,7 +601,7 @@ impl LspSession {
                     continue;
                 };
                 let version = buffer.text.source_version();
-                if self.synced.contains_key(&(key.clone(), *id)) {
+                if self.synced.get(&(key.clone(), *id)) == Some(&version) {
                     continue;
                 }
                 document.text = buffer.text.to_string();

@@ -22,8 +22,6 @@ impl TerminalSession {
         {
             return Ok(false);
         }
-        let pty = tab.pty.ok_or("terminal has not started")?;
-        let admission = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
         let ceiling = super::TERMINAL_MAXIMUM_INPUT_BYTES;
         let bytes = match input {
             TerminalInput::Text(text) => {
@@ -59,6 +57,8 @@ impl TerminalSession {
         let Some(bytes) = bytes else {
             return Ok(false);
         };
+        let pty = tab.pty.ok_or("terminal has not started")?;
+        let admission = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
         admission.submit(bytes).map_err(|e| e.to_string())?;
         Ok(true)
     }
@@ -338,35 +338,15 @@ fn terminal_yank_text(
     } else {
         (second, first)
     };
-    let mut output = String::new();
-    for row_index in start.0..=end.0.min(screen.history_len().saturating_sub(1)) {
-        let Some(row) = screen.history_row(row_index) else {
-            continue;
-        };
-        let first_column = if linewise || row_index > start.0 {
-            0
-        } else {
-            start.1
-        };
-        let last_column = if linewise || row_index < end.0 {
-            terminal_row_end(&row)
-        } else {
-            end.1.min(row.len().saturating_sub(1))
-        };
-        if first_column <= last_column {
-            for cell in row
-                .iter()
-                .take(last_column.saturating_add(1))
-                .skip(first_column)
-            {
-                if !cell.continuation {
-                    output.push_str(&cell.text);
-                }
-            }
-        }
-        if row_index < end.0 || linewise {
-            output.push('\n');
-        }
+    let start = if linewise { (start.0, 0) } else { start };
+    let end = if linewise {
+        (end.0, screen.dimensions().0.saturating_sub(1))
+    } else {
+        end
+    };
+    let mut output = screen.selection_text(start, end);
+    if linewise {
+        output.push('\n');
     }
     output
 }
@@ -384,4 +364,29 @@ pub(super) fn keep_terminal_cursor_visible(terminal: &mut TerminalRuntime) {
         terminal.scroll_offset = row.saturating_add(1).saturating_sub(visible);
     }
     terminal.scroll_offset = terminal.scroll_offset.min(total.saturating_sub(visible));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_yanks_preserve_empty_rows_without_adding_spaces() {
+        let mut screen = PtyScreen::new(10, 3, 4);
+        screen.feed_bytes(b"\r\nx\r\n");
+        assert_eq!(terminal_yank_text(&screen, (0, 0), (0, 0), true), "\n");
+        assert_eq!(terminal_yank_text(&screen, (1, 0), (1, 0), true), "x\n");
+        assert_eq!(terminal_yank_text(&screen, (0, 0), (2, 0), true), "\nx\n\n");
+    }
+
+    #[test]
+    fn terminal_yanks_join_soft_wraps_but_keep_hard_newlines() {
+        let mut screen = PtyScreen::new(4, 2, 8);
+        screen.feed_bytes(b"abcdefgh\r\nijkl\r\nmn");
+        assert!(screen.scrollback_len() > 0);
+        assert_eq!(terminal_yank_text(&screen, (0, 0), (1, 3), false), "abcdefgh");
+        assert_eq!(terminal_yank_text(&screen, (0, 1), (2, 1), false), "bcdefgh\nij");
+        assert_eq!(terminal_yank_text(&screen, (2, 1), (0, 1), false), "bcdefgh\nij");
+        assert_eq!(terminal_yank_text(&screen, (0, 0), (1, 3), true), "abcdefgh\n");
+    }
 }

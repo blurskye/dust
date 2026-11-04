@@ -287,6 +287,17 @@ impl PtyScreen {
                 .collect(),
         )
     }
+    /// Copy inclusive history coordinates using the terminal's wrap and wide-cell handling.
+    #[must_use]
+    pub fn selection_text(&self, start: (usize, usize), end: (usize, usize)) -> String {
+        let point = |(row, column): (usize, usize)| {
+            Point::new(
+                Line(row as i32 - self.scrollback_len() as i32),
+                Column(column),
+            )
+        };
+        self.term.bounds_to_string(point(start), point(end))
+    }
     #[must_use]
     pub fn history_window(&self, start: usize, maximum_rows: usize) -> Vec<Vec<PtyCell>> {
         (start..self.history_len().min(start.saturating_add(maximum_rows)))

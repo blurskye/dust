@@ -1224,6 +1224,32 @@ mod tests {
     }
 
     #[test]
+    fn disabled_focus_reports_do_not_require_a_live_terminal() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("test".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())],
+        ).unwrap();
+        let workspace = WorkspaceSession::new(state, root.path().join("state"), 1, false, false, 1);
+        let mut session = TerminalSession::new(&TerminalsConfig::default());
+        let id = PtyId(1);
+        session.fixture(id, TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(10, 2, 4),
+            running: false,
+            exit_code: Some(0),
+            truncated: false,
+        }, workspace.version());
+        for focused in [true, false] {
+            assert!(!session.send(id, TerminalInput::Focus(focused), &workspace).unwrap());
+        }
+        session.tabs.get_mut(&id).unwrap().screen.feed_bytes(b"\x1b[?1004h");
+        assert_eq!(session.send(id, TerminalInput::Focus(true), &workspace),
+            Err("terminal has not started".into()));
+        assert!(session.send(id, TerminalInput::Text("x"), &workspace).is_err());
+    }
+
+    #[test]
     fn workspace_changes_keep_running_terminals_and_retire_unlaunched_tabs() {
         let root = tempfile::tempdir().unwrap();
         let state = crate::workspace::WorkspaceState::new(

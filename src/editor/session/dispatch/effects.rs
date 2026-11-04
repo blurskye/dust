@@ -13427,6 +13427,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn restart_lsp_session(&mut self, key: String) {
+        self.language.retire_documents(&self.state);
         let Some(state) = self.language.sessions().get(&key) else {
             return;
         };
