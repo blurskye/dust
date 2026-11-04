@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
@@ -112,16 +113,16 @@ impl GitUnsavedDocument {
     }
 }
 /// Resolve the unsaved revision for one workspace-relative path. The list is expected to be
-/// sorted and duplicate-free by the validator; a linear scan keeps the reader allocation-free.
+/// sorted and duplicate-free by the validator; binary search keeps lookup logarithmic.
 #[must_use]
 pub fn unsaved_document_revision(
     documents: &[GitUnsavedDocument],
     relative_path: &Path,
 ) -> Option<u64> {
     documents
-        .iter()
-        .find(|document| document.relative_path == relative_path)
-        .map(|document| document.document_revision)
+        .binary_search_by(|document| document.relative_path.as_path().cmp(relative_path))
+        .ok()
+        .map(|index| documents[index].document_revision)
 }
 /// Reject an unsaved list that is unsorted, duplicated, revision-zero, or beyond the
 /// already-bounded status policy. No new ceiling is introduced: the list is bounded by the
@@ -163,7 +164,30 @@ pub struct GitStatusEntry {
     /// Repository-relative source of a rename, including sources outside a nested scope.
     pub original_path: Option<PathBuf>,
     pub status: GitFileStatus,
+    pub staged_status: Option<GitFileStatus>,
+    pub unstaged_status: Option<GitFileStatus>,
     pub sources: GitChangeSources,
+}
+impl GitStatusEntry {
+    #[must_use]
+    pub fn change_code(&self) -> String {
+        if self.status == GitFileStatus::Conflicted {
+            return "UU".into();
+        }
+        if self.status == GitFileStatus::Untracked {
+            return "??".into();
+        }
+        let letter = |status: &Option<GitFileStatus>| match status {
+            Some(GitFileStatus::Added) => 'A',
+            Some(GitFileStatus::Modified) => 'M',
+            Some(GitFileStatus::Deleted) => 'D',
+            Some(GitFileStatus::Renamed) => 'R',
+            Some(GitFileStatus::Conflicted) => 'U',
+            Some(GitFileStatus::Untracked) => '?',
+            None => ' ',
+        };
+        format!("{}{}", letter(&self.staged_status), letter(&self.unstaged_status))
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitStatusSnapshot {
@@ -217,6 +241,8 @@ pub struct GitStatusService {
     accepted: Option<GitStatusSnapshot>,
     active_generation: Option<GitStatusGeneration>,
     revision: u64,
+    worker: Option<thread::JoinHandle<()>>,
+    pending: Option<(GitStatusGeneration, GitStatusPolicy, Vec<GitUnsavedDocument>)>,
 }
 impl GitStatusService {
     pub fn start(
@@ -246,29 +272,46 @@ impl GitStatusService {
         self.cancel();
         self.next = self.next.saturating_add(1);
         let generation = GitStatusGeneration(self.next);
+        self.active_generation = Some(generation);
+        self.pending = Some((generation, policy, unsaved));
+        self.launch_pending()?;
+        Ok(generation)
+    }
+    fn launch_pending(&mut self) -> Result<(), GitStatusError> {
+        // Wait off the UI thread for cancellation to finish before launching another scan.
+        if self.worker.as_ref().is_some_and(|worker| !worker.is_finished()) {
+            return Ok(());
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        let Some((generation, policy, unsaved)) = self.pending.take() else {
+            return Ok(());
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancel);
         let (tx, rx) = mpsc::sync_channel(1);
-        thread::Builder::new()
+        self.worker = Some(thread::Builder::new()
             .name(format!("dust-git-status-{}", generation.0))
             .spawn(move || {
                 let result = read_status(generation, &policy, &unsaved, &worker);
                 let _ = tx.send(Event::Complete(result));
             })
-            .map_err(|_| GitStatusError::Stopped)?;
+            .map_err(|_| GitStatusError::Stopped)?);
         self.cancel = Some(cancel);
         self.receiver = Some(rx);
-        self.active_generation = Some(generation);
-        Ok(generation)
+        Ok(())
     }
     pub fn cancel(&mut self) {
         if let Some(c) = self.cancel.take() {
             c.store(true, Ordering::Release)
         }
         self.receiver = None;
+        self.pending = None;
         self.active_generation = None
     }
     pub fn poll(&mut self) -> Result<Option<&GitStatusSnapshot>, GitStatusError> {
+        self.launch_pending()?;
         let Some(rx) = &self.receiver else {
             return Ok(None);
         };
@@ -365,6 +408,94 @@ pub fn aggregate_git_status(
     result
 }
 
+fn check_status_deadline(
+    policy: &GitStatusPolicy,
+    started: Instant,
+    cancel: &AtomicBool,
+) -> Result<(), GitStatusError> {
+    if cancel.load(Ordering::Acquire) {
+        Err(GitStatusError::Cancelled)
+    } else if started.elapsed() >= policy.deadline {
+        Err(GitStatusError::Deadline)
+    } else {
+        Ok(())
+    }
+}
+
+/// Run Git under the existing job supervisor so a stalled scan can be killed and reaped.
+fn status_command(
+    workdir: &Path,
+    arguments: &[&str],
+    policy: &GitStatusPolicy,
+    started: Instant,
+    cancel: &AtomicBool,
+) -> Result<(Vec<u8>, bool), GitStatusError> {
+    use crate::process::{JobEvent, JobPolicy, JobRequest, JobStream, JobSupervisor};
+    check_status_deadline(policy, started, cancel)?;
+    let program = crate::tools::discover_executable("git")
+        .ok_or_else(|| backend("git executable not found"))?;
+    let maximum_output_bytes = policy.maximum_path_bytes.saturating_mul(2)
+        .saturating_add(policy.maximum_files.saturating_mul(128)).clamp(1024, 64 * 1024 * 1024);
+    let mut environment = std::env::vars().collect::<BTreeMap<_, _>>();
+    // Do not let inherited Git directory overrides retarget this repository.
+    for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] {
+        environment.remove(key);
+    }
+    environment.insert("GIT_OPTIONAL_LOCKS".into(), "0".into());
+    let mut jobs = JobSupervisor::new(16);
+    let job = jobs.start(JobRequest {
+        program,
+        argv0: None,
+        arguments: ["-c", "core.fsmonitor=false", "-c", "color.ui=false"].into_iter()
+            .chain(arguments.iter().copied()).map(str::to_owned).collect(),
+        cwd: workdir.to_path_buf(),
+        environment,
+        root_revision: policy.root_revision,
+        stdin: None,
+        policy: JobPolicy {
+            maximum_output_bytes,
+            maximum_line_bytes: maximum_output_bytes.min(16 * 1024 * 1024),
+            timeout: policy.deadline.saturating_sub(started.elapsed()).max(Duration::from_nanos(1)),
+            ..JobPolicy::default()
+        },
+    }).map_err(|error| backend(&error.to_string()))?;
+    let mut output = Vec::new();
+    let mut stderr = Vec::new();
+    let mut truncated = false;
+    let mut failure = None;
+    loop {
+        if failure.is_none() {
+            failure = check_status_deadline(policy, started, cancel).err();
+            if failure.is_some() { let _ = jobs.cancel(job); }
+        }
+        for event in jobs.poll() {
+            match event {
+                JobEvent::Output { stream: JobStream::Stdout, bytes, truncated: clipped, .. } => {
+                    if !truncated { output.extend(bytes); }
+                    if clipped && !truncated {
+                        truncated = true;
+                        let _ = jobs.cancel(job);
+                    }
+                }
+                JobEvent::Output { stream: JobStream::Stderr, bytes, .. } => {
+                    stderr.extend(bytes.into_iter().take(1024usize.saturating_sub(stderr.len())));
+                }
+                JobEvent::Exited { code, timed_out, .. } => {
+                    if let Some(error) = failure { return Err(error); }
+                    if timed_out { return Err(GitStatusError::Deadline); }
+                    if code != Some(0) && !truncated {
+                        return Err(backend(&String::from_utf8_lossy(&stderr)));
+                    }
+                    return Ok((output, truncated));
+                }
+                JobEvent::Failed { message, .. } => return Err(failure.unwrap_or_else(|| backend(&message))),
+                JobEvent::Started { .. } => {}
+            }
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
 pub(super) fn read_status(
     generation: GitStatusGeneration,
     p: &GitStatusPolicy,
@@ -378,134 +509,139 @@ pub(super) fn read_status(
     if !root.starts_with(&workdir) && !workdir.starts_with(&root) {
         return Err(GitStatusError::OutsideScope);
     }
-    let prefix = root.strip_prefix(&workdir).unwrap_or(Path::new(""));
+    let started = Instant::now();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     workdir.hash(&mut hasher);
     let repository_id = GitRepositoryId(hasher.finish());
-    let started = Instant::now();
-    let statuses = repo
-        .statuses(Some(
-            git2::StatusOptions::new()
-                .include_untracked(true)
-                .recurse_untracked_dirs(true)
-                .renames_head_to_index(true)
-                .renames_index_to_workdir(true),
-        ))
-        .map_err(|e| backend(e.message()))?;
-    let mut entries = Vec::new();
+    let mut entries = BTreeMap::<PathBuf, GitStatusEntry>::new();
     let mut bytes = 0usize;
     let mut truncated = false;
-    for item in statuses.iter() {
-        if cancel.load(Ordering::Acquire) {
-            return Err(GitStatusError::Cancelled);
-        }
-        if started.elapsed() > p.deadline {
-            return Err(GitStatusError::Deadline);
-        }
-        let Some(repo_path) = item
-            .index_to_workdir()
-            .and_then(|delta| delta.new_file().path().map(Path::to_path_buf))
-            .or_else(|| {
-                item.head_to_index()
-                    .and_then(|delta| delta.new_file().path().map(Path::to_path_buf))
-            })
-            .or_else(|| item.path().map(PathBuf::from))
-        else {
-            continue;
+    let mut add = |repo_path: PathBuf, original_path: Option<PathBuf>, mut status: GitFileStatus, source: GitChangeSource| {
+        let absolute = workdir.join(&repo_path);
+        let path = match absolute.strip_prefix(&root) {
+            Ok(path) => path.to_path_buf(),
+            Err(_) => {
+                // A rename out of a nested workspace is still a removal inside it.
+                let Some(path) = original_path.as_ref()
+                    .and_then(|old| workdir.join(old).strip_prefix(&root).ok().map(Path::to_path_buf)) else {
+                    return true;
+                };
+                status = GitFileStatus::Deleted;
+                path
+            }
         };
-        if !repo_path.starts_with(prefix) {
-            continue;
-        }
-        let path = repo_path
-            .strip_prefix(prefix)
-            .unwrap_or(&repo_path)
-            .to_path_buf();
-        let cost = path.as_os_str().len();
-        if entries.len() >= p.maximum_files || bytes.saturating_add(cost) > p.maximum_path_bytes {
+        let existing = entries.get(&path);
+        let original_cost = original_path.as_ref().map_or(0, |path| path.as_os_str().len());
+        let old_original_cost = existing.and_then(|entry| entry.original_path.as_ref())
+            .map_or(0, |path| path.as_os_str().len());
+        let cost = if existing.is_none() { path.as_os_str().len() } else { 0 }
+            + original_cost.saturating_sub(old_original_cost);
+        if (existing.is_none() && entries.len() >= p.maximum_files)
+            || bytes.saturating_add(cost) > p.maximum_path_bytes {
             truncated = true;
-            break;
+            return false;
         }
         bytes += cost;
-        let s = item.status();
-        let conflicted = s.is_conflicted();
-        let staged = conflicted
-            || s.is_index_new()
-            || s.is_index_modified()
-            || s.is_index_deleted()
-            || s.is_index_renamed()
-            || s.is_index_typechange();
-        let unstaged = conflicted
-            || s.is_wt_new()
-            || s.is_wt_modified()
-            || s.is_wt_deleted()
-            || s.is_wt_renamed()
-            || s.is_wt_typechange();
-        let status = if conflicted {
-            GitFileStatus::Conflicted
-        } else if s.is_wt_new() {
-            GitFileStatus::Untracked
-        } else if s.is_index_new() {
-            GitFileStatus::Added
-        } else if s.is_wt_deleted() || s.is_index_deleted() {
-            GitFileStatus::Deleted
-        } else if s.is_wt_renamed() || s.is_index_renamed() {
-            GitFileStatus::Renamed
-        } else {
-            GitFileStatus::Modified
-        };
-        let unsaved_document_revision = unsaved_document_revision(unsaved, &path);
-        let original_path = if s.is_wt_renamed() {
-            item.index_to_workdir()
-                .and_then(|delta| delta.old_file().path().map(Path::to_path_buf))
-        } else if s.is_index_renamed() {
-            item.head_to_index()
-                .and_then(|delta| delta.old_file().path().map(Path::to_path_buf))
-        } else {
-            None
-        };
-        entries.push(GitStatusEntry {
-            relative_path: path,
-            original_path,
-            status,
+        let entry = entries.entry(path.clone()).or_insert_with(|| GitStatusEntry {
+            relative_path: path.clone(),
+            original_path: None,
+            status: status.clone(),
+            staged_status: None,
+            unstaged_status: None,
             sources: GitChangeSources {
-                staged,
-                unstaged,
-                unsaved_document_revision,
+                unsaved_document_revision: unsaved_document_revision(unsaved, &path),
+                ..GitChangeSources::default()
             },
         });
+        if original_path.is_some() {
+            entry.original_path = original_path;
+        }
+        if git_status_precedence(&status) > git_status_precedence(&entry.status) {
+            entry.status = status.clone();
+        }
+        match source {
+            GitChangeSource::Staged => {
+                entry.sources.staged = true;
+                if entry.staged_status != Some(GitFileStatus::Conflicted) {
+                    entry.staged_status = Some(status);
+                }
+            }
+            GitChangeSource::Unstaged => {
+                entry.sources.unstaged = true;
+                if entry.unstaged_status != Some(GitFileStatus::Conflicted) {
+                    entry.unstaged_status = Some(status);
+                }
+            }
+            GitChangeSource::Unsaved { .. } => {}
+        }
+        if entry.status == GitFileStatus::Conflicted {
+            entry.sources.staged = true;
+            entry.sources.unstaged = true;
+        }
+        true
+    };
+    // Read the two comparisons independently: a staged rename's destination is not
+    // necessarily the destination of a later worktree rename.
+    let commands = [
+        (vec!["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-textconv", "--find-renames", "--"], GitChangeSource::Staged),
+        (vec!["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-textconv", "--find-renames", "--"], GitChangeSource::Unstaged),
+        (vec!["ls-files", "--others", "--exclude-standard", "-z", "--"], GitChangeSource::Unstaged),
+    ];
+    let mut output_truncated = false;
+    for (arguments, source) in commands {
+        let (output, clipped) = status_command(&workdir, &arguments, p, started, cancel)?;
+        output_truncated |= clipped;
+        // The final split item is incomplete when output was bounded; never use it as a path.
+        let mut fields = output.split_inclusive(|byte| *byte == 0)
+            .filter_map(|field| field.strip_suffix(&[0]));
+        while let Some(field) = fields.next() {
+            check_status_deadline(p, started, cancel)?;
+            let (path, original, status) = if arguments[0] == "ls-files" {
+                (field, None, GitFileStatus::Untracked)
+            } else {
+                let kind = field.rsplit(|byte| *byte == b' ').next().and_then(|kind| kind.first()).copied();
+                let Some(first) = fields.next() else { break; };
+                let (path, original) = if matches!(kind, Some(b'R' | b'C')) {
+                    let Some(destination) = fields.next() else { break; };
+                    (destination, super::conflict::git_path(first))
+                } else { (first, None) };
+                let status = match kind {
+                    Some(b'A') => GitFileStatus::Added,
+                    Some(b'D') => GitFileStatus::Deleted,
+                    Some(b'R' | b'C') => GitFileStatus::Renamed,
+                    Some(b'U') => GitFileStatus::Conflicted,
+                    _ => GitFileStatus::Modified,
+                };
+                (path, original, status)
+            };
+            let path = super::conflict::git_path(path).ok_or_else(|| backend("unsupported Git path encoding"))?;
+            if !add(path, original, status, source) { break; }
+        }
     }
-    entries.sort();
-    // Unsaved editor content is a third source. A path whose only change is in an unsaved
-    // buffer produces no repository status, so it is merged in here rather than being
-    // presented as either staged or unstaged.
+    truncated |= output_truncated;
+    // Merge unsaved-only paths without repeatedly inserting into a sorted vector.
     for document in unsaved {
-        let position = match entries
-            .binary_search_by(|entry| entry.relative_path.as_path().cmp(&document.relative_path))
-        {
-            Ok(_) => continue,
-            Err(position) => position,
-        };
+        check_status_deadline(p, started, cancel)?;
+        if entries.contains_key(&document.relative_path) { continue; }
         let cost = document.relative_path.as_os_str().len();
         if entries.len() >= p.maximum_files || bytes.saturating_add(cost) > p.maximum_path_bytes {
             truncated = true;
             break;
         }
         bytes += cost;
-        entries.insert(
-            position,
-            GitStatusEntry {
-                relative_path: document.relative_path.clone(),
-                original_path: None,
-                status: GitFileStatus::Modified,
-                sources: GitChangeSources {
-                    staged: false,
-                    unstaged: false,
-                    unsaved_document_revision: Some(document.document_revision),
-                },
+        entries.insert(document.relative_path.clone(), GitStatusEntry {
+            relative_path: document.relative_path.clone(),
+            original_path: None,
+            status: GitFileStatus::Modified,
+            staged_status: None,
+            unstaged_status: None,
+            sources: GitChangeSources {
+                unsaved_document_revision: Some(document.document_revision),
+                ..GitChangeSources::default()
             },
-        );
+        });
     }
-    entries.sort();
+    let entries = entries.into_values().collect();
     Ok(GitStatusSnapshot {
         generation,
         root_revision: p.root_revision,
@@ -517,4 +653,69 @@ pub(super) fn read_status(
         truncated,
         revision: 0,
     })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn policy(root: &Path) -> GitStatusPolicy {
+        GitStatusPolicy {
+            root: root.into(),
+            root_revision: 1,
+            maximum_files: 100,
+            maximum_path_bytes: 4096,
+            deadline: Duration::from_secs(2),
+        }
+    }
+
+    #[test]
+    fn status_commands_enforce_deadlines_and_drain_cancelled_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let arguments = ["-c", "alias.dust-stall=!sleep 30", "dust-stall"];
+        let mut policy = policy(dir.path());
+        policy.deadline = Duration::from_millis(100);
+        let started = Instant::now();
+        assert!(matches!(status_command(dir.path(), &arguments, &policy, started, &AtomicBool::new(false)), Err(GitStatusError::Deadline)));
+        assert!(started.elapsed() < Duration::from_secs(3));
+
+        policy.deadline = Duration::from_secs(10);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            worker_cancel.store(true, Ordering::Release);
+        });
+        let started = Instant::now();
+        assert!(matches!(status_command(dir.path(), &arguments, &policy, started, &cancel), Err(GitStatusError::Cancelled)));
+        worker.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn status_refresh_waits_for_previous_worker_and_keeps_only_latest_request() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("new"), "content").unwrap();
+        let (release, wait) = mpsc::channel();
+        let mut service = GitStatusService::default();
+        service.worker = Some(thread::spawn(move || { let _ = wait.recv(); }));
+        let mut latest = GitStatusGeneration(0);
+        for _ in 0..10 {
+            latest = service.start(policy(dir.path())).unwrap();
+            assert!(service.receiver.is_none(), "a second scan must not start while the old worker is alive");
+        }
+        assert_eq!(service.pending.as_ref().unwrap().0, latest);
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(snapshot) = service.poll().unwrap() {
+                assert_eq!(snapshot.generation, latest);
+                assert_eq!(snapshot.entries.len(), 1);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
 }

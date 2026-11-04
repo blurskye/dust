@@ -8088,23 +8088,7 @@ impl InteractiveApplication {
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
     /// their own codes; everything else names which side differs.
     fn change_code(entry: &crate::workspace::git::GitStatusEntry) -> String {
-        use crate::workspace::git::GitFileStatus;
-        if entry.status == crate::workspace::git::GitFileStatus::Conflicted {
-            return "UU".to_owned();
-        }
-        if entry.status == GitFileStatus::Untracked {
-            return "??".to_owned();
-        }
-        let letter = match entry.status {
-            GitFileStatus::Added => 'A',
-            GitFileStatus::Modified => 'M',
-            GitFileStatus::Deleted => 'D',
-            GitFileStatus::Renamed => 'R',
-            GitFileStatus::Conflicted | GitFileStatus::Untracked => unreachable!(),
-        };
-        let index = if entry.sources.staged { letter } else { ' ' };
-        let worktree = if entry.sources.unstaged { letter } else { ' ' };
-        format!("{index}{worktree}")
+        entry.change_code()
     }
 }
 
@@ -9914,7 +9898,7 @@ impl InteractiveApplication {
         let paths = previewed
             .files
             .iter()
-            .map(|(path, _)| path.clone())
+            .map(|(path, _, _)| path.clone())
             .collect::<Vec<_>>();
         let plan =
             match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice) {

@@ -1719,6 +1719,29 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
     checked_atomic_write(path, bytes, &WriteExpectation::Any)
 }
 
+/// Apply Git's executable flag before publishing the replacement, retaining access permissions.
+pub(crate) fn atomic_write_with_executable(
+    path: &Path,
+    bytes: &[u8],
+    executable: bool,
+) -> Result<(), VfsError> {
+    use std::os::unix::fs::PermissionsExt;
+    let temporary = stage_atomic_write(path, bytes)?;
+    let set_mode = || -> io::Result<()> {
+        let mut permissions = temporary.as_file().metadata()?.permissions();
+        let mode = permissions.mode() & !0o111;
+        permissions.set_mode(if executable { mode | ((mode & 0o444) >> 2) } else { mode });
+        temporary.as_file().set_permissions(permissions)?;
+        temporary.as_file().sync_all()
+    };
+    set_mode().map_err(|source| VfsError::Io {
+        operation: "set replacement executable flag",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    commit_atomic_write(path, temporary, &WriteExpectation::Any)
+}
+
 fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsError> {
     let parent = path
         .parent()

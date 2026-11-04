@@ -53,6 +53,8 @@ fn status_is_bounded_sorted_and_idle() {
                 original_path: None,
                 relative_path: "new.txt".into(),
                 status: GitFileStatus::Untracked,
+                staged_status: None,
+                unstaged_status: Some(GitFileStatus::Untracked),
                 sources: GitChangeSources {
                     staged: false,
                     unstaged: true,
@@ -63,6 +65,8 @@ fn status_is_bounded_sorted_and_idle() {
                 original_path: None,
                 relative_path: "tracked.txt".into(),
                 status: GitFileStatus::Modified,
+                staged_status: None,
+                unstaged_status: Some(GitFileStatus::Modified),
                 sources: GitChangeSources {
                     staged: false,
                     unstaged: true,
@@ -75,6 +79,127 @@ fn status_is_bounded_sorted_and_idle() {
         assert!(service.snapshot_if_changed(snapshot.revision).is_none())
     }
 }
+fn status_policy(root: &Path) -> GitStatusPolicy {
+    GitStatusPolicy {
+        root: root.into(),
+        root_revision: 1,
+        maximum_files: 100,
+        maximum_path_bytes: 4096,
+        deadline: Duration::from_secs(2),
+    }
+}
+
+fn read_status(root: &Path) -> GitStatusSnapshot {
+    super::status::read_status(GitStatusGeneration(1), &status_policy(root), &[], &AtomicBool::new(false)).unwrap()
+}
+
+#[test]
+fn status_paths_include_configured_worktree_below_workspace() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "file.txt", "one\n");
+    let checkout = dir.path().join("checkout");
+    std::fs::create_dir(&checkout).unwrap();
+    std::fs::rename(dir.path().join("file.txt"), checkout.join("file.txt")).unwrap();
+    repo.set_workdir(&checkout, true).unwrap();
+    std::fs::write(checkout.join("file.txt"), "two\n").unwrap();
+    let snapshot = read_status(dir.path());
+    assert_eq!(snapshot.entries.len(), 1);
+    assert_eq!(snapshot.entries[0].relative_path, Path::new("checkout/file.txt"));
+    let decorations = aggregate_git_status(&snapshot.scope_root, &snapshot.entries);
+    assert_eq!(decorations[&checkout.join("file.txt")], GitFileStatus::Modified);
+}
+
+#[test]
+fn status_keeps_staged_rename_destination_after_worktree_moves_again() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "a", "same content\n");
+    std::fs::rename(dir.path().join("a"), dir.path().join("b")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("a")).unwrap();
+    index.add_path(Path::new("b")).unwrap();
+    index.write().unwrap();
+    std::fs::rename(dir.path().join("b"), dir.path().join("c")).unwrap();
+    let snapshot = read_status(dir.path());
+    let staged = snapshot.entries.iter().find(|entry| entry.sources.staged).unwrap();
+    assert_eq!(staged.relative_path, Path::new("b"));
+    assert_eq!(staged.original_path.as_deref(), Some(Path::new("a")));
+    assert_eq!(staged.staged_status, Some(GitFileStatus::Renamed));
+    let preview = read_hunks(&plan_policy(dir.path(), "b", GitDiffLayer::Staged)).unwrap();
+    assert!(!preview.hunks.is_empty());
+    let later = snapshot.entries.iter().find(|entry| entry.relative_path == Path::new("c")).unwrap();
+    assert!(!later.sources.staged);
+}
+
+#[test]
+fn status_nested_scope_retains_removal_for_outgoing_rename() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    commit(&repo, "sub/a", "same content\n");
+    std::fs::rename(dir.path().join("sub/a"), dir.path().join("outside")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("sub/a")).unwrap();
+    index.add_path(Path::new("outside")).unwrap();
+    index.write().unwrap();
+    let snapshot = read_status(&dir.path().join("sub"));
+    assert_eq!(snapshot.entries.len(), 1);
+    let entry = &snapshot.entries[0];
+    assert_eq!(entry.relative_path, Path::new("a"));
+    assert_eq!(entry.staged_status, Some(GitFileStatus::Deleted));
+    assert_eq!(entry.status, GitFileStatus::Deleted);
+    assert!(entry.sources.staged);
+}
+
+#[test]
+fn status_path_budget_includes_rename_source() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "longname", "same\n");
+    std::fs::rename(dir.path().join("longname"), dir.path().join("b")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("longname")).unwrap();
+    index.add_path(Path::new("b")).unwrap();
+    index.write().unwrap();
+    let mut policy = status_policy(dir.path());
+    policy.maximum_path_bytes = 1;
+    let snapshot = super::status::read_status(GitStatusGeneration(1), &policy, &[], &AtomicBool::new(false)).unwrap();
+    assert!(snapshot.truncated);
+    assert!(snapshot.entries.is_empty());
+}
+
+#[test]
+fn status_change_codes_keep_index_and_worktree_kinds() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "base", "base\n");
+    std::fs::write(dir.path().join("new"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("new")).unwrap();
+    index.write().unwrap();
+    std::fs::write(dir.path().join("new"), "unstaged\n").unwrap();
+    let snapshot = read_status(dir.path());
+    let entry = snapshot.entries.iter().find(|entry| entry.relative_path == Path::new("new")).unwrap();
+    assert_eq!(entry.staged_status, Some(GitFileStatus::Added));
+    assert_eq!(entry.unstaged_status, Some(GitFileStatus::Modified));
+    assert_eq!(entry.change_code(), "AM");
+}
+
+#[test]
+fn unsaved_revision_lookup_handles_large_sorted_lists_and_misses() {
+    let documents = (0..50_000).map(|index| GitUnsavedDocument::new(
+        PathBuf::from(format!("file-{index:05}")), index + 1,
+    )).collect::<Vec<_>>();
+    validate_unsaved_documents(&documents, 100_000, 16 * 1024 * 1024).unwrap();
+    for index in [0, 1, 25_000, 49_999] {
+        assert_eq!(unsaved_document_revision(&documents, Path::new(&format!("file-{index:05}"))), Some(index + 1));
+    }
+    for index in 0..50_000 {
+        assert_eq!(unsaved_document_revision(&documents, Path::new(&format!("missing-{index:05}"))), None);
+    }
+}
+
 #[test]
 fn nested_root_is_scoped_and_ceilings_truncate() {
     let dir = tempdir().unwrap();
@@ -646,6 +771,8 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "src/a.rs".into(),
             status: GitFileStatus::Modified,
+            staged_status: None,
+            unstaged_status: Some(GitFileStatus::Modified),
             sources: GitChangeSources {
                 staged: false,
                 unstaged: true,
@@ -656,6 +783,8 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "src/nested/b.rs".into(),
             status: GitFileStatus::Conflicted,
+            staged_status: Some(GitFileStatus::Conflicted),
+            unstaged_status: Some(GitFileStatus::Conflicted),
             sources: GitChangeSources {
                 staged: true,
                 unstaged: true,
@@ -666,6 +795,8 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "docs/readme.md".into(),
             status: GitFileStatus::Untracked,
+            staged_status: None,
+            unstaged_status: Some(GitFileStatus::Untracked),
             sources: GitChangeSources {
                 staged: false,
                 unstaged: true,
@@ -676,6 +807,8 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             original_path: None,
             relative_path: "../escape".into(),
             status: GitFileStatus::Conflicted,
+            staged_status: Some(GitFileStatus::Conflicted),
+            unstaged_status: Some(GitFileStatus::Conflicted),
             sources: GitChangeSources {
                 staged: true,
                 unstaged: true,
@@ -2380,6 +2513,58 @@ fn conflict_replacement_rejects_symlink_aliases_and_normalizes_relative_paths() 
     assert_eq!(std::fs::read_to_string(destination).unwrap(), "ours\n");
 }
 
+#[cfg(unix)]
+#[test]
+fn conflict_replacement_preserves_selected_executable_mode_and_refuses_symlink_sides() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let path = dir.path().join("shared.txt");
+    // Modify the real unmerged index entry, as in executable and symlink conflicts.
+    let mut index = repo.index().unwrap();
+    let mut ours = index.get_path(Path::new("shared.txt"), 2).unwrap();
+    ours.mode = 0o100755;
+    index.add(&ours).unwrap();
+    index.write().unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let plan = plan_replacement(dir.path(), std::slice::from_ref(&path), GitConflictChoice::Ours).unwrap();
+    assert_eq!(plan.files[0].2, 0o100755);
+    apply_replacement(&plan).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours\n");
+    assert_ne!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o111, 0);
+    let plan = plan_replacement(dir.path(), std::slice::from_ref(&path), GitConflictChoice::Theirs).unwrap();
+    apply_replacement(&plan).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o111, 0);
+    ours.mode = 0o120000;
+    index.add(&ours).unwrap();
+    index.write().unwrap();
+    let before = std::fs::read(&path).unwrap();
+    assert!(matches!(plan_replacement(dir.path(), std::slice::from_ref(&path), GitConflictChoice::Ours), Err(GitConflictResolveError::NotText(_))));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn conflict_replacement_failure_reports_files_already_written() {
+    let dir = tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("missing/second");
+    std::fs::write(&first, "old\n").unwrap();
+    let plan = GitReplacementPlan {
+        choice: GitConflictChoice::Ours,
+        files: vec![(first.clone(), "new\n".into(), 0o100644), (second.clone(), "second\n".into(), 0o100644)],
+    };
+    let error = apply_replacement(&plan).unwrap_err();
+    assert_eq!(error.written, vec![first.clone()]);
+    assert_eq!(error.path, second);
+    assert_eq!(std::fs::read(&first).unwrap(), b"new\n");
+    assert!(!second.exists());
+    let message = error.to_string();
+    assert!(message.contains(&first.display().to_string()));
+    assert!(message.contains(&second.display().to_string()));
+    assert!(message.contains("already replaced"));
+}
+
 #[test]
 fn whole_file_replacement_previews_cancels_and_applies_exactly_its_file_list() {
     use crate::workspace::git::{
@@ -3068,7 +3253,7 @@ fn conflict_replacement_is_atomic_and_restores_missing_working_copies() {
     let original = std::fs::read(&backup).unwrap();
     apply_replacement(&GitReplacementPlan {
         choice: GitConflictChoice::Ours,
-        files: vec![(path.clone(), "ours\n".into())],
+        files: vec![(path.clone(), "ours\n".into(), 0o100644)],
     })
     .unwrap();
     assert_eq!(std::fs::read(&backup).unwrap(), original);

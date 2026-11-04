@@ -277,6 +277,14 @@ pub fn read_side_content(
     path: &Path,
     choice: GitConflictChoice,
 ) -> Result<String, GitConflictResolveError> {
+    read_side(repository, path, choice).map(|(content, _)| content)
+}
+
+fn read_side(
+    repository: &Path,
+    path: &Path,
+    choice: GitConflictChoice,
+) -> Result<(String, u32), GitConflictResolveError> {
     let repo =
         git2::Repository::open(repository).map_err(|_| GitConflictResolveError::NotRepository)?;
     let wanted = conflict_relative_path(&repo, path)?;
@@ -317,14 +325,18 @@ pub fn read_side_content(
             side: choice.name(),
         });
     };
+    if !matches!(side.mode, 0o100644 | 0o100755) {
+        return Err(GitConflictResolveError::NotText(wanted.display().to_string()));
+    }
     let blob = repo
         .find_blob(side.id)
         .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
     String::from_utf8(blob.content().to_vec())
+        .map(|content| (content, side.mode))
         .map_err(|_| GitConflictResolveError::NotText(wanted.display().to_string()))
 }
 
-fn git_path(bytes: &[u8]) -> Option<PathBuf> {
+pub(super) fn git_path(bytes: &[u8]) -> Option<PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStringExt;
@@ -663,8 +675,8 @@ fn risky_changes(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitReplacementPlan {
     pub choice: GitConflictChoice,
-    /// Every path the replacement would write, with the content it would write.
-    pub files: Vec<(PathBuf, String)>,
+    /// Every path the replacement would write, with its content and Git file mode.
+    pub files: Vec<(PathBuf, String, u32)>,
 }
 
 impl GitReplacementPlan {
@@ -674,7 +686,7 @@ impl GitReplacementPlan {
         let paths = self
             .files
             .iter()
-            .map(|(path, _)| path.display().to_string())
+            .map(|(path, _, _)| path.display().to_string())
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -711,21 +723,35 @@ pub fn plan_replacement(
             }
             parent = parent.parent().ok_or(GitConflictResolveError::NotRepository)?;
         }
-        let content = read_side_content(repository, &destination, choice)?;
-        files.push((destination, content));
+        let (content, mode) = read_side(repository, &destination, choice)?;
+        files.push((destination, content, mode));
     }
     Ok(GitReplacementPlan { choice, files })
 }
 
-/// Apply a plan that was already previewed. Writes EXACTLY the files the plan names — the plan is
-/// the authority, so nothing outside it is touched.
+#[derive(Debug, Error)]
+#[error("replacement failed at `{path}`: {error}; already replaced: {replaced}", path = .path.display(), replaced = .written.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", "))]
+pub struct GitReplacementError {
+    pub path: PathBuf,
+    pub written: Vec<PathBuf>,
+    pub error: GitConflictResolveError,
+}
+
+/// Apply a previewed plan, reporting the paths already written if a later write fails.
 pub fn apply_replacement(
     plan: &GitReplacementPlan,
-) -> Result<Vec<PathBuf>, GitConflictResolveError> {
+) -> Result<Vec<PathBuf>, GitReplacementError> {
     let mut written = Vec::new();
-    for (path, content) in &plan.files {
-        crate::files::atomic_write(path, content.as_bytes())
-            .map_err(|error| GitConflictResolveError::Backend(error.to_string()))?;
+    for (path, content, mode) in &plan.files {
+        let result = if matches!(mode, 0o100644 | 0o100755) {
+            crate::files::atomic_write_with_executable(path, content.as_bytes(), *mode == 0o100755)
+                .map_err(|error| GitConflictResolveError::Backend(error.to_string()))
+        } else {
+            Err(GitConflictResolveError::NotText(path.display().to_string()))
+        };
+        if let Err(error) = result {
+            return Err(GitReplacementError { path: path.clone(), written, error });
+        }
         written.push(path.clone());
     }
     Ok(written)
