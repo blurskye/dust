@@ -192,6 +192,37 @@ fn project_roots_accept_jsonc_configs_and_whitespace_separated_go_directives() {
 }
 
 #[test]
+fn project_roots_accept_bom_prefixed_node_manifests() {
+    let root = tempdir().unwrap();
+    for marker in ["tsconfig.json", "jsconfig.json", "package.json"] {
+        fs::write(root.path().join(marker), "\u{feff}{\"name\":\"demo\"}").unwrap();
+        let resolution = super::project_root::resolve_project_root(
+            1,
+            1,
+            &root.path().join("src/new.ts"),
+            root.path(),
+            &[marker.into()],
+            ProjectRootStrategy::Node,
+        ).unwrap();
+        assert_eq!(resolution.project_root, Some(fs::canonicalize(root.path()).unwrap()));
+        fs::remove_file(root.path().join(marker)).unwrap();
+    }
+}
+
+#[test]
+fn project_roots_accept_jsonc_comments_with_all_line_endings() {
+    use super::project_root::project_root_is_valid;
+    let root = tempdir().unwrap();
+    for marker in ["tsconfig.json", "jsconfig.json"] {
+        for newline in ["\r", "\n", "\r\n"] {
+            let source = format!("{{{newline}// comment{newline}\"compilerOptions\": {{}},{newline}}}");
+            fs::write(root.path().join(marker), source).unwrap();
+            assert!(project_root_is_valid(root.path(), &[marker.into()], ProjectRootStrategy::Node));
+        }
+    }
+}
+
+#[test]
 fn explorer_watch_detects_ignore_rule_edits_in_parent_directories() {
     let root = tempdir().unwrap();
     let child = root.path().join("child");
@@ -209,6 +240,44 @@ fn explorer_watch_detects_ignore_rule_edits_in_parent_directories() {
         after,
         explorer_directory_fingerprint(&child, &roots, 10, 4096).unwrap()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn explorer_watch_reads_symlinked_ignore_files() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let target = outside.path().join("ignore");
+    fs::write(&target, "one.txt\n").unwrap();
+    symlink(&target, root.path().join(".gitignore")).unwrap();
+    let roots = vec![fs::canonicalize(root.path()).unwrap()];
+    let before = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
+    fs::write(&target, "two.txt\n").unwrap();
+    let after = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
+    assert_eq!(before.entries, after.entries);
+    assert_ne!(before.ignore_rules, after.ignore_rules);
+
+    // Initial reconciliation must also succeed, not just individual reads.
+    let mut watch = ExplorerWatchService::start(ExplorerWatchPolicy {
+        poll_interval: Duration::from_millis(10),
+        debounce: Duration::ZERO,
+        ..ExplorerWatchPolicy::default()
+    }).unwrap();
+    watch.reconcile(1, roots.clone(), roots).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut revision = 0;
+    loop {
+        revision += 1;
+        fs::write(&target, format!("{revision}.txt\n")).unwrap();
+        let events = watch.poll();
+        assert!(!events.iter().any(|event| matches!(event, super::ExplorerWatchEvent::Failed { .. })));
+        if events.iter().any(|event| matches!(event, super::ExplorerWatchEvent::Batch(_))) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "watch did not observe symlink target edits");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]

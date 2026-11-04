@@ -767,6 +767,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
+        .mode(0o600)
         .open(&temp)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
     let mut cancelled = false;
@@ -845,6 +846,7 @@ mod tests {
 
     #[test]
     fn storage_is_atomic_revisioned_persistent_and_generation_owned() {
+        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().expect("root");
         let mut service = PluginStorageService::start(root.path().join("data"), 8);
         service.install_generation("demo", PluginLoadId(7));
@@ -866,6 +868,8 @@ mod tests {
         let stored = wait(&mut service);
         assert_eq!(stored.revision, Some(1));
         assert!(stored.error.is_none());
+        let path = root.path().join("data").join(format!("{:x}.json", Sha256::digest(b"demo")));
+        assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
         service
             .request(
                 "demo".into(),
@@ -1136,10 +1140,8 @@ mod tests {
         assert!(!data.exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn failed_atomic_write_preserves_the_previous_file() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("data");
         let mut service = PluginStorageService::start(data.clone(), 4);
@@ -1162,8 +1164,14 @@ mod tests {
         assert_eq!(wait(&mut service).revision, Some(1));
         let path = data.join(format!("{:x}.json", Sha256::digest(b"demo")));
         let previous = fs::read(&path).unwrap();
-        let original = fs::metadata(&data).unwrap().permissions();
-        fs::set_permissions(&data, fs::Permissions::from_mode(0o500)).unwrap();
+        // Occupy the next temporary path so create_new fails even as root.
+        let temporary = data.join(format!(
+            ".storage-{}-{:08x}-{:016x}.tmp",
+            path.file_stem().unwrap().to_string_lossy(),
+            std::process::id(),
+            2_u64,
+        ));
+        fs::write(&temporary, b"occupied").unwrap();
         service
             .request(
                 "demo".into(),
@@ -1180,7 +1188,7 @@ mod tests {
             )
             .unwrap();
         let failed = wait(&mut service);
-        fs::set_permissions(&data, original).unwrap();
+        assert_eq!(fs::read(temporary).unwrap(), b"occupied");
         assert_eq!(
             failed.error.unwrap().code,
             PluginStorageErrorCode::Unavailable
