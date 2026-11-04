@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    ffi::OsString,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc::Receiver,
@@ -117,7 +118,7 @@ pub(super) fn managed_bun_runtime(
                 &bun,
                 &["--version".into()],
                 root,
-                &BTreeMap::from([("HOME".into(), root.display().to_string())]),
+                &BTreeMap::from([("HOME".into(), root.as_os_str().to_owned())]),
                 cancellations,
                 None,
             )
@@ -138,20 +139,20 @@ pub(super) fn run_managed(
     program: &Path,
     arguments: &[String],
     cwd: &Path,
-    environment: &BTreeMap<String, String>,
+    environment: &BTreeMap<String, OsString>,
     cancellations: &Receiver<()>,
     compatibility: Option<&NixCompatibilityRuntime>,
 ) -> Result<(), String> {
     let mut effective_environment = environment.clone();
     if let Some(runtime) = compatibility {
-        effective_environment.extend(runtime.environment());
-        effective_environment.insert("DUST_NIX_LD".into(), runtime.nix_ld.display().to_string());
+        effective_environment.extend(runtime.environment().into_iter().map(|(key, value)| (key, value.into())));
+        effective_environment.insert("DUST_NIX_LD".into(), runtime.nix_ld.as_os_str().to_owned());
         let mut paths = env::split_paths(&runtime.runtime_path).collect::<Vec<_>>();
         if let Some(existing) = effective_environment.get("PATH") {
             paths.extend(env::split_paths(existing));
         }
         let path = env::join_paths(paths).map_err(|_| "Dust Nix compatibility PATH is invalid")?;
-        effective_environment.insert("PATH".into(), path.to_string_lossy().into_owned());
+        effective_environment.insert("PATH".into(), path);
     }
     let mut command = Command::new(program);
     #[cfg(unix)]
@@ -277,11 +278,11 @@ pub(super) fn install_javascript_package(
         .chain(packages.iter().cloned())
         .collect::<Vec<_>>();
     let environment = BTreeMap::from([
-        ("HOME".into(), staging.display().to_string()),
-        ("BUN_INSTALL".into(), staging.display().to_string()),
+        ("HOME".into(), staging.as_os_str().to_owned()),
+        ("BUN_INSTALL".into(), staging.as_os_str().to_owned()),
         (
             "BUN_INSTALL_CACHE_DIR".into(),
-            staging.join("bun-cache").display().to_string(),
+            staging.join("bun-cache").into_os_string(),
         ),
         ("PATH".into(), "/usr/bin:/bin".into()),
     ]);
@@ -339,16 +340,16 @@ pub(super) fn install_uv_tool(
             .chain(packages.iter().cloned())
             .collect::<Vec<_>>();
         let environment = BTreeMap::from([
-            ("HOME".into(), destination.display().to_string()),
-            ("UV_TOOL_DIR".into(), tools.display().to_string()),
-            ("UV_TOOL_BIN_DIR".into(), staged_bin.display().to_string()),
+            ("HOME".into(), destination.as_os_str().to_owned()),
+            ("UV_TOOL_DIR".into(), tools.into_os_string()),
+            ("UV_TOOL_BIN_DIR".into(), staged_bin.as_os_str().to_owned()),
             (
                 "UV_CACHE_DIR".into(),
-                destination.join("uv-cache").display().to_string(),
+                destination.join("uv-cache").into_os_string(),
             ),
             (
                 "UV_PYTHON_INSTALL_DIR".into(),
-                destination.join("python").display().to_string(),
+                destination.join("python").into_os_string(),
             ),
             ("UV_NO_PROGRESS".into(), "1".into()),
         ]);
@@ -496,9 +497,9 @@ pub(super) fn install_rustup_component(
     let rustup_home = runtime.join("rustup-home");
     let cargo_home = runtime.join("cargo-home");
     let environment = BTreeMap::from([
-        ("HOME".into(), runtime.display().to_string()),
-        ("RUSTUP_HOME".into(), rustup_home.display().to_string()),
-        ("CARGO_HOME".into(), cargo_home.display().to_string()),
+        ("HOME".into(), runtime.as_os_str().to_owned()),
+        ("RUSTUP_HOME".into(), rustup_home.as_os_str().to_owned()),
+        ("CARGO_HOME".into(), cargo_home.as_os_str().to_owned()),
         ("RUSTUP_INIT_SKIP_PATH_CHECK".into(), "yes".into()),
     ]);
     let rustup = cargo_home.join("bin/rustup");
@@ -586,7 +587,7 @@ pub(super) fn probe_downloaded_tool(
         executable,
         arguments,
         workspace,
-        &BTreeMap::from([("HOME".into(), workspace.display().to_string())]),
+        &BTreeMap::from([("HOME".into(), workspace.as_os_str().to_owned())]),
         cancellations,
         compatibility,
     )
@@ -614,7 +615,7 @@ pub(super) fn uninstall_managed_tool(
     Ok(())
 }
 
-pub(super) fn nix_installer_environment() -> BTreeMap<String, String> {
+pub(super) fn nix_installer_environment() -> BTreeMap<String, OsString> {
     [
         "HOME",
         "PATH",
@@ -625,7 +626,7 @@ pub(super) fn nix_installer_environment() -> BTreeMap<String, String> {
         "NIX_SSL_CERT_FILE",
     ]
     .into_iter()
-    .filter_map(|key| env::var(key).ok().map(|value| (key.into(), value)))
+    .filter_map(|key| env::var_os(key).map(|value| (key.into(), value)))
     .collect()
 }
 

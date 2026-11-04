@@ -413,6 +413,9 @@ impl ExtensionSession {
         for event in self.packages.poll().unwrap_or_default() {
             match event {
                 PackageServiceEvent::Completed(mut result) => {
+                    if let Some(error) = result.cleanup_error.take() {
+                        updates.push(ExtensionUpdate::Error(format!("package cleanup failed: {error}")));
+                    }
                     let prepared_operation = result.prepared.is_some();
                     let activation_operation = result.operation == "activations";
                     if let Some(prepared) = result.prepared.take() {

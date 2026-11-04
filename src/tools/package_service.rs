@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -89,24 +88,37 @@ impl PackageManager {
         }
         Ok(lock)
     }
-    fn backup(&self) -> Result<(), PackageError> {
-        let lock = self.lock_path();
-        if lock.exists() {
-            let bytes = fs::read(lock).map_err(PackageError::Io)?;
-            let backup = self.backup_path();
-            let _ = fs::remove_file(&backup);
-            let mut options = fs::OpenOptions::new();
-            options.create_new(true).write(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(backup).map_err(PackageError::Io)?;
-            file.write_all(&bytes).map_err(PackageError::Io)?;
-            file.sync_all().map_err(PackageError::Io)?;
+    fn replace_lock(&self, lock: &PackageLock) -> Result<(), PackageError> {
+        // Finish serialization and staging before changing rollback history.
+        let staged = tempfile::NamedTempFile::new_in(&self.root).map_err(PackageError::Io)?;
+        write_lock_atomic(staged.path(), lock, self.maximum_lock_bytes)?;
+        let backup = self.backup_path();
+        let previous = if backup.exists() {
+            Some(read_bounded_regular(&backup, self.maximum_lock_bytes as u64)?)
+        } else {
+            None
+        };
+        let current = if self.lock_path().exists() {
+            Some(read_bounded_regular(&self.lock_path(), self.maximum_lock_bytes as u64)?)
+        } else {
+            None
+        };
+        if let Some(bytes) = &current {
+            write_protected_atomic(&backup, bytes, self.maximum_lock_bytes)?;
         }
-        Ok(())
+        if let Err(error) = staged.persist(self.lock_path()) {
+            if current.is_some() {
+                if let Some(bytes) = previous {
+                    write_protected_atomic(&backup, &bytes, self.maximum_lock_bytes)?;
+                } else {
+                    fs::remove_file(&backup).map_err(PackageError::Io)?;
+                }
+            }
+            return Err(PackageError::Io(error.error));
+        }
+        fs::File::open(&self.root)
+            .and_then(|file| file.sync_all())
+            .map_err(PackageError::Io)
     }
     pub fn stage_verified_object(
         &self,
@@ -167,7 +179,7 @@ impl PackageManager {
             .join(format!("{activation_sha256}.toml"));
         write_protected_atomic(&activation, activation_bytes.as_bytes(), 1024 * 1024)?;
         let mut lock = self.read_lock()?;
-        self.backup()?;
+        self.validate_plugin_identity(&lock, manifest, plugin)?;
         lock.packages
             .retain(|package| package.name != manifest.name);
         let mut source = manifest.source.clone();
@@ -190,8 +202,54 @@ impl PackageManager {
         });
         lock.packages.sort_by(|a, b| a.name.cmp(&b.name));
         lock.reproducible = true;
-        write_lock_atomic(&self.lock_path(), &lock, self.maximum_lock_bytes)?;
+        self.replace_lock(&lock)?;
         Ok(lock)
+    }
+    fn plugin_manifest(&self, package: &LockedPackage) -> Result<PluginManifest, PackageError> {
+        if !valid_digest(&package.content_sha256)
+            || package.activation_sha256.as_ref().is_some_and(|digest| !valid_digest(digest))
+        {
+            return Err(PackageError::InvalidManifest);
+        }
+        let manifest_path = self.root.join("activations").join(format!(
+            "{}.toml",
+            package.activation_sha256.as_ref().unwrap_or(&package.content_sha256)
+        ));
+        let bytes = read_bounded_regular(&manifest_path, 1024 * 1024)?;
+        if let Some(expected) = &package.activation_sha256
+            && format!("{:x}", Sha256::digest(&bytes)) != *expected
+        {
+            return Err(PackageError::ChecksumMismatch);
+        }
+        let plugin: PluginManifest = toml::from_str(
+            std::str::from_utf8(&bytes).map_err(|_| PackageError::InvalidManifest)?,
+        ).map_err(|_| PackageError::InvalidManifest)?;
+        if !plugin.component_sha256.eq_ignore_ascii_case(&package.content_sha256) {
+            return Err(PackageError::ChecksumMismatch);
+        }
+        Ok(plugin)
+    }
+    fn validate_plugin_identity(
+        &self,
+        lock: &PackageLock,
+        manifest: &PackageManifest,
+        plugin: &PluginManifest,
+    ) -> Result<(), PackageError> {
+        for package in &lock.packages {
+            let installed = self.plugin_manifest(package)?;
+            if package.name == manifest.name && installed.id != plugin.id {
+                return Err(PackageError::Activation(format!(
+                    "package {} cannot change plugin ID from {} to {}",
+                    manifest.name, installed.id, plugin.id
+                )));
+            }
+            if package.name != manifest.name && installed.id == plugin.id {
+                return Err(PackageError::Activation(format!(
+                    "plugin {} is already owned by package {}", plugin.id, package.name
+                )));
+            }
+        }
+        Ok(())
     }
     fn activations_for_lock(
         &self,
@@ -202,38 +260,8 @@ impl PackageManager {
         config.wasm_component_model(true);
         let engine = wasmtime::Engine::new(&config).map_err(|_| PackageError::InvalidManifest)?;
         for package in &lock.packages {
-            if !valid_digest(&package.content_sha256)
-                || package
-                    .activation_sha256
-                    .as_ref()
-                    .is_some_and(|digest| !valid_digest(digest))
-            {
-                return Err(PackageError::InvalidManifest);
-            }
+            let plugin = self.plugin_manifest(package)?;
             let object = self.root.join("store").join(&package.content_sha256);
-            let manifest_path = self.root.join("activations").join(format!(
-                "{}.toml",
-                package
-                    .activation_sha256
-                    .as_ref()
-                    .unwrap_or(&package.content_sha256)
-            ));
-            let bytes = read_bounded_regular(&manifest_path, 1024 * 1024)?;
-            if let Some(expected) = &package.activation_sha256
-                && format!("{:x}", Sha256::digest(&bytes)) != *expected
-            {
-                return Err(PackageError::ChecksumMismatch);
-            }
-            let plugin: PluginManifest = toml::from_str(
-                std::str::from_utf8(&bytes).map_err(|_| PackageError::InvalidManifest)?,
-            )
-            .map_err(|_| PackageError::InvalidManifest)?;
-            if !plugin
-                .component_sha256
-                .eq_ignore_ascii_case(&package.content_sha256)
-            {
-                return Err(PackageError::ChecksumMismatch);
-            }
             let component = read_bounded_regular(&object, self.maximum_object_bytes as u64)?;
             let actual = format!("{:x}", Sha256::digest(&component));
             if !actual.eq_ignore_ascii_case(&package.content_sha256) {
@@ -253,17 +281,16 @@ impl PackageManager {
     pub fn remove(&self, name: &str) -> Result<PackageLock, PackageError> {
         let _transaction = self.transaction()?;
         let mut lock = self.read_lock()?;
+        if !lock.packages.iter().any(|package| package.name == name) {
+            return Err(PackageError::PackageNotFound(name.into()));
+        }
         if lock.packages.iter().any(|package| {
-            package
-                .dependencies
-                .iter()
-                .any(|dependency| dependency == name)
+            package.name != name && package.dependencies.iter().any(|dependency| dependency == name)
         }) {
             return Err(PackageError::PackageRequired(name.into()));
         }
-        self.backup()?;
         lock.packages.retain(|package| package.name != name);
-        write_lock_atomic(&self.lock_path(), &lock, self.maximum_lock_bytes)?;
+        self.replace_lock(&lock)?;
         Ok(lock)
     }
     pub fn rollback(&self) -> Result<PackageLock, PackageError> {
@@ -278,9 +305,7 @@ impl PackageManager {
             return Err(PackageError::InvalidManifest);
         }
         self.activations_for_lock(&lock)?;
-        let current = self.read_lock()?;
-        write_lock_atomic(&self.backup_path(), &current, self.maximum_lock_bytes)?;
-        write_lock_atomic(&self.lock_path(), &lock, self.maximum_lock_bytes)?;
+        self.replace_lock(&lock)?;
         Ok(lock)
     }
     pub fn gc(&self, maximum_removals: usize) -> Result<usize, PackageError> {
@@ -303,7 +328,6 @@ impl PackageManager {
         let mut removed = 0;
         for entry in fs::read_dir(self.root.join("store"))
             .map_err(PackageError::Io)?
-            .take(maximum_removals.saturating_mul(4).max(1))
         {
             let entry = entry.map_err(PackageError::Io)?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -330,7 +354,6 @@ impl PackageManager {
         if removed < maximum_removals {
             for entry in fs::read_dir(self.root.join("activations"))
                 .map_err(PackageError::Io)?
-                .take(maximum_removals.saturating_mul(4).max(1))
             {
                 let entry = entry.map_err(PackageError::Io)?;
                 let path = entry.path();
@@ -425,6 +448,15 @@ pub struct PackageOperationResult {
     pub removed: Option<usize>,
     pub prepared: Option<PreparedPackage>,
     pub activations: Vec<(PluginManifest, PathBuf)>,
+    pub cleanup_error: Option<String>,
+}
+impl PackageOperationResult {
+    fn collect_garbage(&mut self, manager: &PackageManager) {
+        match manager.gc(256) {
+            Ok(removed) => self.removed = Some(removed),
+            Err(error) => self.cleanup_error = Some(error.to_string()),
+        }
+    }
 }
 #[derive(Debug)]
 pub enum PackageServiceEvent {
@@ -503,6 +535,7 @@ impl PackageService {
                             removed: None,
                             prepared: None,
                             activations: Vec::new(),
+                            cleanup_error: None,
                         };
                         match operation {
                             PackageOperation::Install {
@@ -540,6 +573,7 @@ impl PackageService {
                                         .map_err(|_| PackageError::InvalidManifest)?,
                                 )
                                 .map_err(|_| PackageError::InvalidManifest)?;
+                                manager.validate_plugin_identity(&manager.read_lock()?, &package, &plugin)?;
                                 let object =
                                     manager.stage_verified_object(&package, &component_bytes)?;
                                 if !plugin
@@ -590,6 +624,7 @@ impl PackageService {
                                 {
                                     return Err(PackageError::InvalidManifest);
                                 }
+                                manager.validate_plugin_identity(&manager.read_lock()?, &metadata.package, &metadata.plugin)?;
                                 let object =
                                     manager.stage_verified_object(&metadata.package, &component)?;
                                 activate_candidate(
@@ -625,7 +660,7 @@ impl PackageService {
                                     &candidate.plugin,
                                     &candidate.object,
                                 )?);
-                                output.removed = Some(manager.gc(256)?);
+                                output.collect_garbage(&manager);
                             }
                             PackageOperation::Abort { token } => {
                                 prepared
@@ -641,7 +676,7 @@ impl PackageService {
                             PackageOperation::Rollback => output.lock = Some(manager.rollback()?),
                             PackageOperation::Remove(package) => {
                                 output.lock = Some(manager.remove(&package)?);
-                                output.removed = Some(manager.gc(256)?);
+                                output.collect_garbage(&manager);
                             }
                             PackageOperation::GarbageCollect { maximum } => {
                                 output.removed = Some(manager.gc(maximum.min(4096))?)
@@ -707,6 +742,113 @@ impl PackageService {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gc_reaches_garbage_after_a_retained_directory_prefix() {
+        for directory in ["store", "activations"] {
+            let root = tempfile::tempdir().unwrap();
+            let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+            for index in 0..12 {
+                let name = format!("{index:064x}");
+                let name = if directory == "activations" { format!("{name}.toml") } else { name };
+                fs::write(root.path().join(directory).join(name), "unused").unwrap();
+            }
+            let entries = fs::read_dir(root.path().join(directory)).unwrap()
+                .map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+            let mut lock = manager.read_lock().unwrap();
+            for path in &entries[..entries.len() - 1] {
+                let digest = path.file_stem().unwrap().to_str().unwrap().to_owned();
+                lock.packages.push(LockedPackage {
+                    name: digest.clone(), version: "1".into(),
+                    source: super::super::tests::package_fixture("unused").0.source,
+                    content_sha256: digest.clone(), activation_sha256: Some(digest),
+                    dependencies: Vec::new(),
+                });
+            }
+            write_lock_atomic(&manager.lock_path(), &lock, 1024 * 1024).unwrap();
+            assert_eq!(manager.gc(1).unwrap(), 1, "{directory}");
+            assert!(!entries.last().unwrap().exists(), "{directory}");
+            assert!(entries[..entries.len() - 1].iter().all(|path| path.exists()));
+        }
+    }
+
+    #[test]
+    fn package_cleanup_failure_preserves_the_committed_result() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        let lock = manager.remove("demo").unwrap();
+        // An unrelated cleanup failure must not undo or hide the removal.
+        fs::remove_dir_all(manager.store_root()).unwrap();
+        fs::write(manager.store_root(), "not a directory").unwrap();
+        let mut result = PackageOperationResult {
+            id: 1, operation: "remove".into(), lock: Some(lock), verified: None,
+            removed: None, prepared: None, activations: Vec::new(), cleanup_error: None,
+        };
+        result.collect_garbage(&manager);
+        assert!(result.cleanup_error.is_some());
+        assert!(result.lock.unwrap().packages.is_empty());
+        assert!(manager.read_lock().unwrap().packages.is_empty());
+    }
+
+    #[test]
+    fn preparation_rejects_plugin_id_conflicts_before_loading() {
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let (installed, plugin, bytes) = super::super::tests::package_fixture("publisher/alpha");
+        let object = manager.stage_verified_object(&installed, &bytes).unwrap();
+        manager.commit_prepared(&installed, &plugin, &object).unwrap();
+        let mut service = PackageService::start(root.path().into(), 1, 1024 * 1024, 1024);
+        for registry in [false, true] {
+            for (name, plugin_id, message) in [
+                ("alpha", "renamed", "cannot change plugin ID"),
+                ("beta", "publisher/alpha", "already owned"),
+            ] {
+                let (package, mut plugin, component) = super::super::tests::package_fixture(&format!("publisher/{name}"));
+                plugin.id = plugin_id.into();
+                let operation = if registry {
+                    PackageOperation::PrepareRegistry {
+                        metadata: Box::new(RegistryPackageMetadata {
+                            schema: 1, publisher: "publisher".into(), name: name.into(),
+                            version: "1.0.0".into(), yanked: false, artifact_path: "plugin.wasm".into(),
+                            artifact_sha256: plugin.component_sha256.clone(), package, plugin,
+                        }),
+                        component, limits: PluginLimits::default(),
+                    }
+                } else {
+                    let package_manifest = root.path().join("package.json");
+                    let plugin_manifest = root.path().join("plugin.toml");
+                    let component_path = root.path().join("plugin.wasm");
+                    fs::write(&package_manifest, serde_json::to_vec(&package).unwrap()).unwrap();
+                    fs::write(&plugin_manifest, toml::to_string(&plugin).unwrap()).unwrap();
+                    fs::write(&component_path, component).unwrap();
+                    PackageOperation::Install {
+                        package_manifest, plugin_manifest, component: component_path,
+                        roots: vec![root.path().canonicalize().unwrap()],
+                        limits: PluginLimits::default(), update: true,
+                    }
+                };
+                let request = service.request(operation).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let event = loop {
+                    if let Some(event) = service.poll().unwrap().into_iter().next() { break event; }
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(2));
+                };
+                match event {
+                    PackageServiceEvent::Failed { id, error: PackageError::Activation(error), .. } => {
+                        assert_eq!(id, request);
+                        assert!(error.contains(message), "{error}");
+                    }
+                    event => panic!("conflicting plugin was prepared: {event:?}"),
+                }
+            }
+        }
+        assert_eq!(manager.activations().unwrap()[0].0.id, "publisher/alpha");
+    }
 
     #[test]
     fn gc_preserves_outstanding_prepared_objects_across_managers() {

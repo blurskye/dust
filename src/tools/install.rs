@@ -95,15 +95,15 @@ pub(super) fn install_tool(
                 let go = managed_runtime(root, "go", cancellations, report, compatibility)?;
                 let arguments = vec!["install".into(), package.clone()];
                 let environment = BTreeMap::from([
-                    ("HOME".into(), staging.display().to_string()),
-                    ("GOBIN".into(), bin.display().to_string()),
+                    ("HOME".into(), staging.as_os_str().to_owned()),
+                    ("GOBIN".into(), bin.into_os_string()),
                     (
                         "GOPATH".into(),
-                        staging.join("gopath").display().to_string(),
+                        staging.join("gopath").into_os_string(),
                     ),
                     (
                         "GOCACHE".into(),
-                        staging.join("gocache").display().to_string(),
+                        staging.join("gocache").into_os_string(),
                     ),
                     ("GOPROXY".into(), "https://proxy.golang.org,direct".into()),
                     ("GOSUMDB".into(), "sum.golang.org".into()),
@@ -123,9 +123,7 @@ pub(super) fn install_tool(
                 unreachable!("handled before staging")
             }
         }
-        if let Some(compatibility) = compatibility
-            && !matches!(install, ToolInstall::NpmPackage { .. })
-        {
+        if let Some(compatibility) = compatibility {
             report("applying Nix compatibility", 0, None);
             patch_nix_compatibility_tree(&staging, compatibility, cancellations)?;
         }

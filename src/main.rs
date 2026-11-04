@@ -7,7 +7,7 @@ use crossterm::{
 };
 use std::{
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -98,31 +98,6 @@ struct Cli {
     agent_tools: Option<Option<u64>>,
 }
 
-fn external_tui_fixture() -> ExitCode {
-    if crossterm::terminal::enable_raw_mode().is_err() {
-        return ExitCode::from(2);
-    }
-    let mut out = std::io::stdout();
-    if out.write_all(b"PRIMARY_START\r\n\x1b[?1049hALT_READY\r\n\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[38;5;255;48;2;1;2;3;1;4mX\x1b[0m").and_then(|_|out.flush()).is_err(){return ExitCode::from(2)}
-    let mut input = [0u8; 4096];
-    let mut used = 0;
-    while used < input.len() {
-        match std::io::stdin().read(&mut input[used..]) {
-            Ok(0) | Err(_) => return ExitCode::from(2),
-            Ok(n) => {
-                used += n;
-                let bytes = &input[..used];
-                if bytes.windows(3).any(|w| w == b"\x1bOA")
-                    && bytes.windows(19).any(|w| w == b"\x1b[200~fixture\x1b[201~")
-                {
-                    break;
-                }
-            }
-        }
-    }
-    if out.write_all(b"INPUT_OK\r\n\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b[?1049lPRIMARY_OK\r\n").and_then(|_|out.flush()).is_err(){ExitCode::from(2)}else{ExitCode::SUCCESS}
-}
-
 fn main() -> ExitCode {
     #[cfg(unix)]
     {
@@ -140,7 +115,7 @@ fn main() -> ExitCode {
             return match dust::debugger::bridge_adapter_socket(&program, &rest) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    eprintln!("dust: {error}");
+                    eprintln!("dust: {}", error.to_string().escape_debug());
                     ExitCode::FAILURE
                 }
             };
@@ -155,21 +130,18 @@ fn main() -> ExitCode {
             };
             let rest: Vec<_> = arguments.collect();
             let error = dust::debugger::exec_in_own_session(&program, &rest);
-            eprintln!("dust: {error}");
+            eprintln!("dust: {}", error.to_string().escape_debug());
             return ExitCode::FAILURE;
         }
         if let Ok(binary) = std::env::current_exe() {
             dust::debugger::use_adapter_session_launcher(binary);
         }
     }
-    if std::env::var("DUST_TEST_EXTERNAL_TUI_FIXTURE").as_deref() == Ok("1") {
-        return external_tui_fixture();
-    }
     install_crash_hook();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("dust: {error}");
+            eprintln!("dust: {}", error.to_string().escape_debug());
             ExitCode::FAILURE
         }
     }

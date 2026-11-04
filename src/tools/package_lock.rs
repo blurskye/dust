@@ -353,6 +353,8 @@ pub enum PackageError {
     NonReproducibleSource,
     #[error("package {0} is required by another package")]
     PackageRequired(String),
+    #[error("package {0} is not installed")]
+    PackageNotFound(String),
     #[error("no package lock rollback is available")]
     NoRollback,
     #[error("prepared package token is missing or expired")]
