@@ -398,18 +398,7 @@ pub fn run_interactive(
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
         application.refresh_plugin_host_events();
-        let before_paste = application.state.window_version();
-        let registers_enabled = application.state.policy.registers_enabled;
-        if let Some(invocation) = application.clipboard.finish_pull(
-            &mut application.state.registers,
-            registers_enabled,
-            &before_paste,
-        ) {
-            application.invoke(invocation);
-            application
-                .clipboard
-                .continue_pastes(&before_paste, &application.state.window_version());
-        }
+        application.process_clipboard_paste();
         if application.clipboard_shared()
             && let Some(text) = application.clipboard.push(&mut application.state.registers)
         {

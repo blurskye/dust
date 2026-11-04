@@ -1,4 +1,5 @@
 use crate::editor::session::documents::configured_file_bytes;
+mod clipboard;
 mod configuration;
 mod contributions;
 mod driver;

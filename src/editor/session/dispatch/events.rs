@@ -540,6 +540,10 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_event(&mut self, event: UiEvent) {
+        if self.clipboard.waiting() && !matches!(event, UiEvent::Resize(_, _)) {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Event(event));
+            return;
+        }
         if matches!(event, UiEvent::Key { .. }) {
             self.last_key_at = Some(Instant::now());
         }
@@ -1117,6 +1121,9 @@ impl InteractiveApplication {
         self.project_input_hints();
     }
     pub(super) fn flush_keymap_timeout(&mut self) {
+        if self.clipboard.waiting() {
+            return;
+        }
         let context = self.active_input_context();
         let resolution = self.input.flush_timeout(
             &context,
@@ -1246,10 +1253,34 @@ impl InteractiveApplication {
             == crate::config::ClipboardSync::Unnamedplus
     }
 
+    pub(super) fn process_clipboard_paste(&mut self) {
+        let source = self.state.window_version();
+        let enabled = self.state.policy.registers_enabled;
+        match self.clipboard.finish_pull(
+            &mut self.state.registers,
+            enabled,
+            &source,
+        ) {
+            Ok(Some(invocation)) => self.invoke(invocation),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+        while let Some(input) = self.clipboard.next_input() {
+            match input {
+                super::super::clipboard::DeferredInput::Event(event) => self.handle_event(event),
+                super::super::clipboard::DeferredInput::Invocation(invocation) => self.invoke(invocation),
+            }
+        }
+    }
+
     pub(super) fn invoke(&mut self, invocation: CommandInvocation) {
         self.invoke_checked(invocation);
     }
     pub(super) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Invocation(invocation));
+            return true;
+        }
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
         }
@@ -1261,10 +1292,16 @@ impl InteractiveApplication {
         }
         if invocation.id.as_str() == "edit.put"
             && matches!(invocation.register, None | Some('"' | '+' | '*'))
-            && self.clipboard_shared()
-            && self
-                .clipboard
-                .pull(&invocation, self.state.window_version())
+            && (self.clipboard_shared() || matches!(invocation.register, Some('+' | '*')))
+            && {
+                let shared = self.clipboard_shared();
+                self.clipboard.pull(
+                    &invocation,
+                    self.state.window_version(),
+                    &mut self.state.registers,
+                    shared,
+                )
+            }
         {
             return true;
         }

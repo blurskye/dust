@@ -48,27 +48,35 @@ impl Tool {
         }
     }
 
-    fn paste_command(self) -> (&'static str, &'static [&'static str]) {
-        match self {
-            Self::Wayland => ("wl-paste", &["--no-newline"]),
-            Self::Xclip => ("xclip", &["-o", "-selection", "clipboard"]),
-            Self::Xsel => ("xsel", &["-o", "-b"]),
+    fn paste_command(self, primary: bool) -> (&'static str, &'static [&'static str]) {
+        match (self, primary) {
+            (Self::Wayland, false) => ("wl-paste", &["--no-newline"]),
+            (Self::Wayland, true) => ("wl-paste", &["--no-newline", "--primary"]),
+            (Self::Xclip, false) => ("xclip", &["-o", "-selection", "clipboard"]),
+            (Self::Xclip, true) => ("xclip", &["-o", "-selection", "primary"]),
+            (Self::Xsel, false) => ("xsel", &["-o", "-b"]),
+            (Self::Xsel, true) => ("xsel", &["-o", "-p"]),
         }
     }
+}
+
+#[derive(Debug)]
+pub(super) enum DeferredInput {
+    Event(crate::ui::UiEvent),
+    Invocation(CommandInvocation),
 }
 
 #[derive(Debug, Default)]
 pub(super) struct ClipboardSession {
     enabled: bool,
     tool: Option<Tool>,
-    /// Register generation last sent to or read from the system clipboard.
+    /// Register generation last queued for copying or imported from a read.
     synced_generation: u64,
-    /// Text last sent to or read from the system clipboard.
-    synced_text: Option<String>,
     copying: Option<(mpsc::Receiver<bool>, String)>,
     queued: Option<String>,
     reading: Option<mpsc::Receiver<Option<String>>>,
-    pastes: VecDeque<(CommandInvocation, EditorWindowVersion)>,
+    paste: Option<(CommandInvocation, EditorWindowVersion, u64)>,
+    deferred: VecDeque<DeferredInput>,
     paste_ready: bool,
 }
 
@@ -87,29 +95,13 @@ impl ClipboardSession {
         if !self.enabled {
             return None;
         }
-        if registers.generation() != self.synced_generation {
-            if let Some(value) = registers.get('"').cloned() {
-                registers.set('+', value.clone(), true, false);
-                let pending = self.copying.as_ref().map(|(_, text)| text.as_str());
-                self.queued = if pending == Some(value.text.as_str())
-                    || (pending.is_none()
-                        && self.synced_text.as_deref() == Some(value.text.as_str()))
-                {
-                    None
-                } else {
-                    Some(value.text)
-                };
-            }
-            self.synced_generation = registers.generation();
-        }
+        self.queue_copy(registers);
         let mut fallback = None;
         if let Some((receiver, _)) = &self.copying
             && let Ok(success) = receiver.try_recv()
         {
             let (_, text) = self.copying.take().expect("completed copy");
-            if success {
-                self.synced_text = Some(text);
-            } else if self.queued.is_none() {
+            if !success && self.queued.is_none() {
                 fallback = Some(text);
             }
         }
@@ -124,17 +116,46 @@ impl ClipboardSession {
                 });
                 self.copying = Some((receiver, text));
             } else {
-                self.synced_text = Some(text.clone());
                 fallback = Some(text);
             }
         }
         fallback
     }
 
+    fn queue_copy(&mut self, registers: &mut RegisterStore) {
+        if registers.generation() != self.synced_generation {
+            if let Some(value) = registers.get('"').cloned() {
+                registers.set('+', value.clone(), true, false);
+                // A new yank must replace any clipboard changes made by other applications,
+                // even when its text matches our last copy.
+                self.queued = Some(value.text);
+            }
+            self.synced_generation = registers.generation();
+        }
+    }
+
+    pub(super) fn waiting(&self) -> bool {
+        self.paste.is_some()
+    }
+
+    pub(super) fn defer(&mut self, input: DeferredInput) {
+        self.deferred.push_back(input);
+    }
+
+    pub(super) fn next_input(&mut self) -> Option<DeferredInput> {
+        if self.waiting() {
+            None
+        } else {
+            self.deferred.pop_front()
+        }
+    }
+
     pub(super) fn pull(
         &mut self,
         invocation: &CommandInvocation,
         source: EditorWindowVersion,
+        registers: &mut RegisterStore,
+        shared: bool,
     ) -> bool {
         if std::mem::take(&mut self.paste_ready) {
             return false;
@@ -142,14 +163,27 @@ impl ClipboardSession {
         let Some(tool) = self.tool.filter(|_| self.enabled) else {
             return false;
         };
-        self.pastes.push_back((invocation.clone(), source));
-        if self.reading.is_none() {
-            let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || {
-                let _ = sender.send(read(tool));
-            });
-            self.reading = Some(receiver);
+        if shared {
+            self.queue_copy(registers);
         }
+        let primary = invocation.register == Some('*');
+        let pending_copy = (!primary)
+            .then(|| {
+                self.queued.as_ref().or_else(|| self.copying.as_ref().map(|(_, text)| text))
+                    .cloned()
+            })
+            .flatten();
+        let (sender, receiver) = mpsc::channel();
+        if let Some(text) = pending_copy {
+            // A paste immediately after a yank must not race the clipboard writer.
+            let _ = sender.send(Some(text));
+        } else {
+            thread::spawn(move || {
+                let _ = sender.send(read(tool, primary));
+            });
+        }
+        self.reading = Some(receiver);
+        self.paste = Some((invocation.clone(), source, registers.generation()));
         true
     }
 
@@ -158,40 +192,30 @@ impl ClipboardSession {
         registers: &mut RegisterStore,
         enabled: bool,
         current: &EditorWindowVersion,
-    ) -> Option<CommandInvocation> {
-        let text = self.reading.as_ref()?.try_recv().ok()?;
+    ) -> Result<Option<CommandInvocation>, &'static str> {
+        let Some(receiver) = &self.reading else {
+            return Ok(None);
+        };
+        let text = match receiver.try_recv() {
+            Ok(text) => text,
+            Err(mpsc::TryRecvError::Empty) => return Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => None,
+        };
         self.reading = None;
-        if let Some(text) = text {
-            self.import(registers, enabled, text);
+        let (invocation, source, generation) = self.paste.take().expect("pending clipboard paste");
+        if &source != current || generation != registers.generation() {
+            return Ok(None);
         }
-        while let Some((invocation, source)) = self.pastes.pop_front() {
-            if &source == current {
-                self.paste_ready = true;
-                return Some(invocation);
-            }
-        }
-        None
+        let text = text.ok_or("Could not read the system clipboard; paste cancelled")?;
+        let register = if invocation.register == Some('*') { '*' } else { '+' };
+        self.import(registers, enabled, register, text);
+        self.paste_ready = true;
+        Ok(Some(invocation))
     }
 
-    pub(super) fn continue_pastes(
-        &mut self,
-        before: &EditorWindowVersion,
-        after: &EditorWindowVersion,
-    ) {
-        for (_, source) in &mut self.pastes {
-            if source == before {
-                *source = after.clone();
-            }
-        }
-        if !self.pastes.is_empty() {
-            let (sender, receiver) = mpsc::channel();
-            let _ = sender.send(None);
-            self.reading = Some(receiver);
-        }
-    }
-
-    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, text: String) {
-        let cached = registers.get('"').filter(|value| value.text == text);
+    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, register: char, text: String) {
+        let cached = registers.get(register).or_else(|| registers.get('"'))
+            .filter(|value| value.text == text);
         let shape = cached.map_or_else(
             || {
                 if text.ends_with('\n') {
@@ -202,13 +226,9 @@ impl ClipboardSession {
             },
             |value| value.shape,
         );
-        let value = RegisterValue {
-            text: text.clone(),
-            shape,
-        };
-        registers.set('+', value.clone(), enabled, false);
+        let value = RegisterValue { text, shape };
+        registers.set(register, value.clone(), enabled, false);
         registers.set('"', value, enabled, false);
-        self.synced_text = Some(text);
         self.synced_generation = registers.generation();
     }
 }
@@ -249,8 +269,8 @@ fn wait_child(child: &mut std::process::Child, deadline: Instant) -> bool {
     }
 }
 
-fn read(tool: Tool) -> Option<String> {
-    let (program, arguments) = tool.paste_command();
+fn read(tool: Tool, primary: bool) -> Option<String> {
+    let (program, arguments) = tool.paste_command(primary);
     read_command(program, arguments)
 }
 
@@ -292,6 +312,24 @@ fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    impl ClipboardSession {
+        pub(in crate::editor::session) fn pending_read_fixture(
+            invocation: CommandInvocation,
+            source: EditorWindowVersion,
+            generation: u64,
+        ) -> (Self, mpsc::Sender<Option<String>>) {
+            let (sender, receiver) = mpsc::channel();
+            (Self {
+                enabled: true,
+                tool: Some(Tool::Xclip),
+                synced_generation: generation,
+                reading: Some(receiver),
+                paste: Some((invocation, source, generation)),
+                ..Default::default()
+            }, sender)
+        }
+    }
+
     #[test]
     fn paste_reads_yield_until_the_worker_replies() {
         let state = crate::editor::EditorState::new("/workspace".into());
@@ -301,21 +339,130 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         let mut session = ClipboardSession {
             reading: Some(receiver),
-            pastes: VecDeque::from([(invocation.clone(), version.clone())]),
+            paste: Some((invocation.clone(), version.clone(), 0)),
             ..Default::default()
         };
         let mut registers = RegisterStore::default();
         assert!(
             session
                 .finish_pull(&mut registers, true, &version)
+                .unwrap()
                 .is_none()
         );
         sender.send(Some("text".into())).unwrap();
         assert_eq!(
-            session.finish_pull(&mut registers, true, &version).unwrap(),
+            session.finish_pull(&mut registers, true, &version).unwrap().unwrap(),
             invocation
         );
         assert_eq!(registers.get('+').unwrap().text, "text");
+    }
+
+    #[test]
+    fn clipboard_read_failures_do_not_paste_stale_registers() {
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let version = state.window_version();
+        let mut registers = RegisterStore::default();
+        registers.set('"', value("old"), true, false);
+        let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+            invocation, version.clone(), registers.generation(),
+        );
+        sender.send(None).unwrap();
+        assert!(session.finish_pull(&mut registers, true, &version).is_err());
+        assert_eq!(registers.get('"').unwrap().text, "old");
+        assert!(!session.waiting());
+        assert!(!session.paste_ready);
+    }
+
+    #[test]
+    fn clipboard_read_worker_disconnect_is_a_failure() {
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let version = state.window_version();
+        let mut registers = RegisterStore::default();
+        let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+            invocation, version.clone(), registers.generation(),
+        );
+        drop(sender);
+        assert!(session.finish_pull(&mut registers, true, &version).is_err());
+        assert!(!session.waiting());
+    }
+
+    #[test]
+    fn clipboard_reads_do_not_overwrite_new_yanks_or_import_from_stale_sources() {
+        for changed_register in [false, true] {
+            let state = crate::editor::EditorState::new("/workspace".into());
+            let version = state.window_version();
+            let mut registers = RegisterStore::default();
+            registers.set('"', value("before"), true, false);
+            let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+            let (mut session, sender) = ClipboardSession::pending_read_fixture(
+                invocation, version.clone(), registers.generation(),
+            );
+            let current = if changed_register {
+                registers.set('"', value("new yank"), true, false);
+                version
+            } else {
+                crate::editor::EditorState::new("/workspace".into()).window_version()
+            };
+            let expected = registers.get('"').cloned();
+            sender.send(Some("stale read".into())).unwrap();
+            assert!(session.finish_pull(&mut registers, true, &current).unwrap().is_none());
+            assert_eq!(registers.get('"'), expected.as_ref());
+            assert!(registers.get('+').is_none());
+            assert!(!session.paste_ready);
+        }
+    }
+
+    fn value(text: &str) -> RegisterValue {
+        RegisterValue { text: text.into(), shape: RegisterShape::Character }
+    }
+
+    #[test]
+    fn clipboard_pastes_use_the_latest_pending_copy_without_reading_the_provider() {
+        for queued in [false, true] {
+            let state = crate::editor::EditorState::new("/workspace".into());
+            let version = state.window_version();
+            let mut registers = RegisterStore::default();
+            let (_sender, receiver) = mpsc::channel();
+            let mut session = ClipboardSession {
+                enabled: true,
+                tool: Some(Tool::Xclip),
+                copying: Some((receiver, "in flight".into())),
+                ..Default::default()
+            };
+            if queued {
+                registers.set('"', value("latest yank"), true, false);
+            }
+            let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+            assert!(session.pull(&invocation, version.clone(), &mut registers, true));
+            assert_eq!(session.finish_pull(&mut registers, true, &version).unwrap(), Some(invocation));
+            assert_eq!(registers.get('"').unwrap().text, if queued { "latest yank" } else { "in flight" });
+            assert_eq!(session.queued.as_deref(), queued.then_some("latest yank"));
+            assert!(session.copying.is_some(), "the paste must not discard the pending write");
+        }
+    }
+
+    #[test]
+    fn primary_selection_reads_populate_star_without_replacing_plus() {
+        for tool in [Tool::Wayland, Tool::Xclip, Tool::Xsel] {
+            assert_ne!(tool.paste_command(true), tool.paste_command(false));
+            assert!(tool.paste_command(true).1.contains(&if tool == Tool::Xsel { "-p" } else if tool == Tool::Xclip { "primary" } else { "--primary" }));
+        }
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let version = state.window_version();
+        let mut registers = RegisterStore::default();
+        registers.set('+', value("clipboard"), true, false);
+        let mut invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        invocation.register = Some('*');
+        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+            invocation.clone(), version.clone(), registers.generation(),
+        );
+        sender.send(Some("primary".into())).unwrap();
+        assert_eq!(session.finish_pull(&mut registers, true, &version).unwrap(), Some(invocation));
+        assert_eq!(registers.get('*').unwrap().text, "primary");
+        assert_eq!(registers.get('"').unwrap().text, "primary");
+        assert_eq!(registers.get('+').unwrap().text, "clipboard");
     }
 
     #[test]
@@ -331,10 +478,10 @@ mod tests {
             true,
             false,
         );
-        session.import(&mut registers, true, "line\n".into());
+        session.import(&mut registers, true, '+', "line\n".into());
         assert_eq!(registers.get('+'), registers.get('"'));
         assert_eq!(registers.get('+').unwrap().shape, RegisterShape::Line);
-        session.import(&mut registers, true, String::new());
+        session.import(&mut registers, true, '+', String::new());
         assert_eq!(registers.get('+').unwrap().text, "");
         assert_eq!(registers.get('"').unwrap().text, "");
     }
@@ -344,6 +491,24 @@ mod tests {
         let start = Instant::now();
         assert!(read_command("sh", &["-c", "exec 1>&-; sleep 5"]).is_none());
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn identical_yanks_each_replace_the_external_clipboard() {
+        let mut session = ClipboardSession { enabled: true, ..Default::default() };
+        let mut registers = RegisterStore::default();
+        for _ in 0..2 {
+            registers.set('"', value("A"), true, false);
+            assert_eq!(session.push(&mut registers).as_deref(), Some("A"));
+            assert_eq!(session.push(&mut registers), None, "polling alone must not recopy");
+        }
+        let (sender, receiver) = mpsc::channel();
+        session.copying = Some((receiver, "A".into()));
+        registers.set('"', value("A"), true, false);
+        assert_eq!(session.push(&mut registers), None);
+        assert_eq!(session.queued.as_deref(), Some("A"));
+        sender.send(true).unwrap();
+        assert_eq!(session.push(&mut registers).as_deref(), Some("A"));
     }
 
     #[test]
@@ -370,7 +535,7 @@ mod tests {
         assert_eq!(session.queued.as_deref(), Some("C"));
         sender.send(false).unwrap();
         assert_eq!(session.push(&mut registers).as_deref(), Some("C"));
-        assert_eq!(session.synced_text.as_deref(), Some("C"));
+        assert!(session.queued.is_none());
 
         let (sender, receiver) = mpsc::channel();
         session.copying = Some((receiver, "D".into()));
