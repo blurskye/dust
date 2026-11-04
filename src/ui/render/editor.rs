@@ -375,15 +375,6 @@ pub(super) fn render_editor_view(
         .filter(|span| span.buffer == view.buffer && span.revision == buffer.text.revision())
         .collect::<Vec<_>>();
     let mut color_cursor = 0usize;
-    let mut markdown = super::markdown::MarkdownMarks::new(
-        ui,
-        view.buffer,
-        &buffer.text,
-        view.mode,
-        current_line,
-        &config.editor.markdown,
-        config.editor.ambiguous_width,
-    );
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
     // The empty line after a final newline is drawn only while the cursor is on it.
@@ -522,12 +513,29 @@ pub(super) fn render_editor_view(
             .unwrap_or(ByteOffset(0));
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
-        let markdown_line = markdown
-            .as_mut()
-            .and_then(|marks| marks.line(line_index, line_start, full_content.len()));
+        let markdown_line = visual_rows.markdown_line(line_index);
+        let table = markdown_line
+            .as_ref()
+            .and_then(|markdown| markdown.table.as_ref());
         let leading_indentation = leading_indentation_width(full_content, config.editor.tab_width);
         let can_wrap = wrap_enabled;
-        let skipped_bytes = if can_wrap {
+        // A table row is placed whole: each grapheme goes where its cell wraps it.
+        let table_row = screen_row;
+        let table_scroll = if can_wrap { 0 } else { view.scroll_column };
+        if let Some(table) = table {
+            for row in first_line_row..table.rows {
+                let y = table_row
+                    .saturating_add(u16::try_from(row - first_line_row).unwrap_or(u16::MAX));
+                if y >= body_height {
+                    break;
+                }
+                let frame = table.frame.chars().skip(table_scroll).collect::<String>();
+                grid.put_text_clipped(gutter_width, y, &frame, table.style, width);
+            }
+        }
+        let skipped_bytes = if table.is_some() {
+            0
+        } else if can_wrap {
             line_rows[first_line_row].byte_start
         } else {
             byte_offset_at_display_column(
@@ -537,7 +545,9 @@ pub(super) fn render_editor_view(
                 config.editor.ambiguous_width,
             )
         };
-        let skipped_column = if can_wrap {
+        let skipped_column = if table.is_some() {
+            0
+        } else if can_wrap {
             line_rows[first_line_row].source_column_start
         } else {
             display_column(
@@ -569,7 +579,26 @@ pub(super) fn render_editor_view(
         let mut visual_row_index = first_line_row;
         for (relative, grapheme) in visible_content.grapheme_indices(true) {
             let source_relative = skipped_bytes.saturating_add(relative);
-            if can_wrap
+            if let Some(table) = table {
+                let at = ByteOffset(line_start.get() + relative);
+                let Some((row, column)) = table.place(at) else {
+                    continue;
+                };
+                let Some(column) = column.checked_sub(table_scroll) else {
+                    continue;
+                };
+                let Some(row) = row.checked_sub(first_line_row) else {
+                    continue;
+                };
+                screen_row = table_row.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+                if screen_row >= body_height {
+                    continue;
+                }
+                x = gutter_width.saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
+                if x >= width {
+                    continue;
+                }
+            } else if can_wrap
                 && line_rows
                     .get(visual_row_index.saturating_add(1))
                     .is_some_and(|row| source_relative >= row.byte_start)
@@ -800,6 +829,18 @@ pub(super) fn render_editor_view(
                 }
                 x = x.saturating_add(advance);
             }
+        }
+        if let Some(table) = table {
+            let last = table.rows.saturating_sub(1).saturating_sub(first_line_row);
+            screen_row = table_row
+                .saturating_add(u16::try_from(last).unwrap_or(u16::MAX))
+                .min(body_height);
+            x = gutter_width
+                .saturating_add(
+                    u16::try_from(text_width(&table.frame, config.editor.ambiguous_width))
+                        .unwrap_or(u16::MAX),
+                )
+                .min(width);
         }
         if let Some(markdown) = &markdown_line {
             if let Some((text, style)) = &markdown.after {

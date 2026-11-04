@@ -3,10 +3,12 @@
 //! its source.
 use std::borrow::Cow;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::{
-    config::{AmbiguousWidth, MarkdownConfig, MarkdownGlyphs},
+    config::{AmbiguousWidth, EditorConfig, MarkdownGlyphs},
     editor::{
-        BufferId, EditorMode,
+        EditorMode, View,
         text::{ByteOffset, ByteRange, TextBuffer},
     },
     files::ExplorerIconColor,
@@ -22,8 +24,8 @@ const TABLE: [&str; 11] = ["┌", "┬", "┐", "├", "┼", "┤", "└", "┴
 pub(super) struct MarkdownMarks<'a> {
     glyphs: &'a MarkdownGlyphs,
     text: &'a TextBuffer,
+    ambiguous: AmbiguousWidth,
     marks: Vec<&'a UiMarkdownMark>,
-    next: usize,
     /// Code blocks span lines, so they are looked up apart from the marks within a line.
     blocks: Vec<ByteRange>,
     tables: Vec<Table>,
@@ -44,8 +46,7 @@ struct Table {
     /// Each line's cells, without the spaces around them; the second line is the row under the
     /// header.
     rows: Vec<Vec<ByteRange>>,
-    /// The drawn width of each cell, as `rows`.
-    cell_widths: Vec<Vec<usize>>,
+    /// Each column's width, narrower than its widest cell when the table is narrowed to fit.
     widths: Vec<usize>,
     alignments: Vec<Alignment>,
 }
@@ -72,6 +73,20 @@ pub(super) struct MarkdownLine<'a> {
     pub(super) fill: Option<Style>,
     /// Repeated across the row in place of a `---` break.
     pub(super) rule: Option<&'a str>,
+    /// A table row, drawn over as many rows as its tallest cell wraps to.
+    pub(super) table: Option<TableRow>,
+}
+
+/// A table row laid out as a block: the same borders on each of its rows, with every cell's
+/// text wrapped inside its column.
+pub(super) struct TableRow {
+    /// The borders and padding, drawn on each row before the text.
+    pub(super) frame: String,
+    pub(super) style: Style,
+    pub(super) rows: usize,
+    /// Where each drawn grapheme of the cells goes: its row, and its column from the frame's
+    /// start. Sorted by offset; the rest of the line is not drawn.
+    places: Vec<(ByteOffset, usize, usize)>,
 }
 
 enum Shown<'a> {
@@ -86,19 +101,20 @@ pub(super) enum Drawn<'a> {
 }
 
 impl<'a> MarkdownMarks<'a> {
-    /// `None` when the buffer has no marks or rendering is off.
+    /// `None` when the buffer has no marks or rendering is off. Tables are narrowed to fit
+    /// `width` when it is given, as it is when lines wrap.
     pub(super) fn new(
         ui: &'a UiState,
-        buffer: BufferId,
+        view: &View,
         text: &'a TextBuffer,
-        mode: EditorMode,
-        cursor_line: usize,
-        config: &'a MarkdownConfig,
-        ambiguous: AmbiguousWidth,
+        editor: &'a EditorConfig,
+        width: Option<usize>,
     ) -> Option<Self> {
+        let config = &editor.markdown;
+        let ambiguous = editor.ambiguous_width;
         let shown = config.render
             && matches!(
-                mode,
+                view.mode,
                 EditorMode::Normal
                     | EditorMode::OperatorPending
                     | EditorMode::CommandLine
@@ -111,7 +127,7 @@ impl<'a> MarkdownMarks<'a> {
         let (blocks, marks): (Vec<_>, Vec<_>) = ui
             .markdown_marks
             .iter()
-            .filter(|mark| mark.buffer == buffer && mark.revision == revision)
+            .filter(|mark| mark.buffer == view.buffer && mark.revision == revision)
             .partition(|mark| matches!(mark.mark, MarkdownMark::Code | MarkdownMark::Table));
         if blocks.is_empty() && marks.is_empty() {
             return None;
@@ -121,18 +137,20 @@ impl<'a> MarkdownMarks<'a> {
             .partition(|mark| mark.mark == MarkdownMark::Table);
         let tables = tables
             .iter()
-            .filter_map(|table| Table::new(text, &marks, table.range, &config.glyphs, ambiguous))
+            .filter_map(|table| {
+                Table::new(text, &marks, table.range, &config.glyphs, ambiguous, width)
+            })
             .collect();
         let group = |name: &str, fallback| Highlight::named(name).unwrap_or(fallback);
         let list = group("@markup.list", Highlight::KEYWORD);
         Some(Self {
             glyphs: &config.glyphs,
             text,
+            ambiguous,
             marks,
-            next: 0,
             blocks: blocks.into_iter().map(|mark| mark.range).collect(),
             tables,
-            cursor_line,
+            cursor_line: text.byte_to_line(view.cursor).unwrap_or(0),
             headings: [1, 2, 3, 4, 5, 6].map(|level| {
                 group(
                     &format!("@markup.heading.{level}.markdown"),
@@ -147,33 +165,16 @@ impl<'a> MarkdownMarks<'a> {
         })
     }
 
-    /// What the line from `start`, `length` bytes long without its newline, draws. Lines are
-    /// asked for in order.
-    pub(super) fn line(
-        &mut self,
-        line: usize,
-        start: ByteOffset,
-        length: usize,
-    ) -> Option<MarkdownLine<'a>> {
-        let end = ByteOffset(start.get().saturating_add(length));
-        while self
-            .marks
-            .get(self.next)
-            .is_some_and(|mark| mark.range.start < start)
-        {
-            self.next = self.next.saturating_add(1);
-        }
-        let first = self.next;
-        while self
-            .marks
-            .get(self.next)
-            .is_some_and(|mark| mark.range.start < end)
-        {
-            self.next = self.next.saturating_add(1);
-        }
+    /// What `line` draws, or `None` when it shows its source.
+    pub(super) fn line(&self, line: usize) -> Option<MarkdownLine<'a>> {
         if line == self.cursor_line {
             return None;
         }
+        let start = self.text.line_to_byte(line).ok()?;
+        let source = self.text.line(line).ok()?;
+        let end = ByteOffset(start.get() + source.strip_suffix('\n').unwrap_or(&source).len());
+        let first = self.marks.partition_point(|mark| mark.range.start < start);
+        let last = self.marks.partition_point(|mark| mark.range.start < end);
         let glyphs = self.glyphs;
         let code = self
             .blocks
@@ -186,10 +187,11 @@ impl<'a> MarkdownMarks<'a> {
             shaded: Vec::new(),
             fill: code.then_some(Style::MarkdownCode(None)),
             rule: None,
+            table: None,
         };
         self.table_line(line, start, end, &mut drawn);
         let glyph = |text: &'a str, style| Shown::Glyph(Cow::Borrowed(text), style);
-        for mark in &self.marks[first..self.next] {
+        for mark in &self.marks[first..last] {
             let shown = match mark.mark {
                 MarkdownMark::Hide | MarkdownMark::Code | MarkdownMark::Table => Shown::Hidden,
                 MarkdownMark::Heading(level) => {
@@ -290,45 +292,42 @@ impl<'a> MarkdownMarks<'a> {
                 return;
             }
             let pipe = self.part(9);
-            let mut gap_start = start;
-            let mut trailing = 0;
-            for (column, cell) in cells.iter().enumerate() {
-                let spare = table.widths[column].saturating_sub(table.cell_widths[row][column]);
-                let leading = match table.alignments[column] {
-                    Alignment::Default | Alignment::Left => 0,
-                    Alignment::Center => spare / 2,
-                    Alignment::Right => spare,
-                };
-                let border = if column == 0 {
-                    format!("{pipe} {}", " ".repeat(leading))
-                } else {
-                    format!("{} {pipe} {}", " ".repeat(trailing), " ".repeat(leading))
-                };
-                if gap_start < cell.start {
-                    let gap = ByteRange {
-                        start: gap_start,
-                        end: cell.start,
-                    };
-                    drawn.marks.push((gap, Shown::Hidden));
+            let mut frame = format!("{pipe} ");
+            let mut places = Vec::new();
+            let mut rows = 1;
+            for (column, width) in table.widths.iter().enumerate() {
+                let origin = frame.chars().count();
+                frame.push_str(&" ".repeat(*width));
+                frame.push(' ');
+                frame.push_str(pipe);
+                if column + 1 < table.widths.len() {
+                    frame.push(' ');
                 }
-                drawn.inserts.push((cell.start, Cow::Owned(border), style));
-                trailing = spare - leading;
-                gap_start = cell.end;
-            }
-            if gap_start < end {
-                let gap = ByteRange {
-                    start: gap_start,
-                    end,
+                // A row with fewer cells than its header is drawn with empty ones.
+                let Some(cell) = cells.get(column) else {
+                    continue;
                 };
-                drawn.marks.push((gap, Shown::Hidden));
+                let graphemes =
+                    cell_graphemes(self.text, &self.marks, *cell, self.glyphs, self.ambiguous);
+                let (cell_places, widths) = wrap_cell(&graphemes, *width);
+                rows = rows.max(widths.len());
+                places.extend(cell_places.into_iter().map(|(at, row, offset)| {
+                    let spare = width.saturating_sub(widths[row]);
+                    let leading = match table.alignments[column] {
+                        Alignment::Default | Alignment::Left => 0,
+                        Alignment::Center => spare / 2,
+                        Alignment::Right => spare,
+                    };
+                    (at, row, origin + leading + offset)
+                }));
             }
-            // A row with fewer cells than its header is drawn with empty ones.
-            let mut after = format!("{} {pipe}", " ".repeat(trailing));
-            for width in &table.widths[cells.len()..] {
-                after.push_str(&" ".repeat(width + 2));
-                after.push_str(pipe);
-            }
-            drawn.after = Some((after, style));
+            places.sort_by_key(|(at, _, _)| *at);
+            drawn.table = Some(TableRow {
+                frame,
+                style,
+                rows,
+                places,
+            });
             return;
         }
         let blank = self
@@ -468,6 +467,18 @@ fn icon_group(color: ExplorerIconColor) -> Highlight {
     }
 }
 
+impl TableRow {
+    /// The row and column the grapheme at `at` is drawn at, `None` when it is not drawn.
+    pub(super) fn place(&self, at: ByteOffset) -> Option<(usize, usize)> {
+        let index = self
+            .places
+            .binary_search_by_key(&at, |(offset, _, _)| *offset)
+            .ok()?;
+        let (_, row, column) = self.places[index];
+        Some((row, column))
+    }
+}
+
 impl MarkdownLine<'_> {
     /// What the grapheme at `at` draws: nothing, a mark's glyph where the mark starts, or a
     /// glyph before itself.
@@ -477,6 +488,26 @@ impl MarkdownLine<'_> {
             Shown::Glyph(glyph, style) if range.start == at => Some(Drawn::Glyph(glyph, *style)),
             Shown::Hidden | Shown::Glyph(..) => Some(Drawn::Hidden),
         }
+    }
+
+    /// The cells drawn for the grapheme at `at`, which is `source` cells wide in the text,
+    /// with what is drawn before it.
+    pub(super) fn drawn_width(
+        &self,
+        at: ByteOffset,
+        source: usize,
+        ambiguous: AmbiguousWidth,
+    ) -> usize {
+        let before = self
+            .before(at)
+            .map(|(text, _)| text_width(text, ambiguous))
+            .sum::<usize>();
+        before
+            + match self.at(at) {
+                Some(Drawn::Hidden) => 0,
+                Some(Drawn::Glyph(glyph, _)) => text_width(glyph, ambiguous),
+                None => source,
+            }
     }
 
     /// What is drawn before the grapheme at `at`, whether or not the grapheme itself is.
@@ -514,6 +545,7 @@ impl Table {
         range: ByteRange,
         glyphs: &MarkdownGlyphs,
         ambiguous: AmbiguousWidth,
+        fit: Option<usize>,
     ) -> Option<Self> {
         let first_line = text.byte_to_line(range.start).ok()?;
         let last_line = text
@@ -571,7 +603,7 @@ impl Table {
             cell_widths.push(
                 cells
                     .iter()
-                    .map(|cell| drawn_width(text, marks, *cell, glyphs, ambiguous))
+                    .map(|cell| cell_width(text, marks, *cell, glyphs, ambiguous))
                     .collect(),
             );
             rows.push(cells);
@@ -600,47 +632,138 @@ impl Table {
                 widths[column] = widths[column].max(*width);
             }
         }
+        if let Some(width) = fit {
+            // Each column draws its text between a border and a space on either side.
+            narrow(&mut widths, width.saturating_sub(columns * 3 + 1));
+        }
         let mut alignments = alignments;
         alignments.resize(columns, Alignment::Default);
         Some(Self {
             first_line,
             last_line,
             rows,
-            cell_widths,
             widths,
             alignments,
         })
     }
 }
 
-/// The width a cell's text is drawn at, without the markup it hides and with the icons drawn
-/// in place of its links.
-fn drawn_width(
+/// Narrows columns to fit `room` cells together, the widest first, so narrow columns keep
+/// their text on one row.
+fn narrow(widths: &mut [usize], room: usize) {
+    let capped = |cap: usize, widths: &[usize]| widths.iter().map(|width| (*width).min(cap)).sum();
+    let mut cap = widths.iter().copied().max().unwrap_or(1);
+    while cap > 1 && capped(cap, widths) > room {
+        cap -= 1;
+    }
+    let mut spare = room.saturating_sub(capped(cap, widths));
+    for width in widths {
+        let whole = *width;
+        *width = whole.min(cap);
+        if whole > cap && spare > 0 {
+            *width += 1;
+            spare -= 1;
+        }
+    }
+}
+
+/// A cell's graphemes with the width each is drawn at: none for the markup it hides, and a
+/// link's icon in place of its `[`. Whether each is a space, where its text may wrap.
+fn cell_graphemes(
+    text: &TextBuffer,
+    marks: &[&UiMarkdownMark],
+    cell: ByteRange,
+    glyphs: &MarkdownGlyphs,
+    ambiguous: AmbiguousWidth,
+) -> Vec<(ByteOffset, usize, bool)> {
+    let source = text.slice(cell).unwrap_or_default();
+    let marks = &marks[marks.partition_point(|mark| mark.range.start < cell.start)..];
+    source
+        .grapheme_indices(true)
+        .map(|(offset, grapheme)| {
+            let at = ByteOffset(cell.start.get() + offset);
+            let mark = marks
+                .iter()
+                .take_while(|mark| mark.range.start <= at)
+                .find(|mark| {
+                    mark.range.contains(at)
+                        && matches!(
+                            mark.mark,
+                            MarkdownMark::Hide | MarkdownMark::Link { .. } | MarkdownMark::Image
+                        )
+                });
+            let width = match mark {
+                None => text_width(grapheme, ambiguous),
+                Some(mark) if mark.range.start != at => 0,
+                Some(mark) => match mark.mark {
+                    MarkdownMark::Link { url } => text_width(
+                        url.and_then(|url| link_icon(text, glyphs, url))
+                            .unwrap_or(&glyphs.link),
+                        ambiguous,
+                    ),
+                    MarkdownMark::Image => text_width(&glyphs.image, ambiguous),
+                    _ => 0,
+                },
+            };
+            (at, width, mark.is_none() && grapheme.trim().is_empty())
+        })
+        .collect()
+}
+
+/// The width a cell's text is drawn at.
+fn cell_width(
     text: &TextBuffer,
     marks: &[&UiMarkdownMark],
     cell: ByteRange,
     glyphs: &MarkdownGlyphs,
     ambiguous: AmbiguousWidth,
 ) -> usize {
-    let width = |range| {
-        text.slice(range)
-            .map_or(0, |source| text_width(&source, ambiguous))
-    };
-    let mut drawn = width(cell);
-    for mark in marks[marks.partition_point(|mark| mark.range.start < cell.start)..]
+    cell_graphemes(text, marks, cell, glyphs, ambiguous)
         .iter()
-        .take_while(|mark| mark.range.start < cell.end)
-        .filter(|mark| mark.range.end <= cell.end)
-    {
-        let glyph = match mark.mark {
-            MarkdownMark::Hide => "",
-            MarkdownMark::Link { url } => url
-                .and_then(|url| link_icon(text, glyphs, url))
-                .unwrap_or(&glyphs.link),
-            MarkdownMark::Image => &glyphs.image,
-            _ => continue,
-        };
-        drawn = drawn.saturating_sub(width(mark.range)) + text_width(glyph, ambiguous);
+        .map(|(_, width, _)| width)
+        .sum()
+}
+
+/// A cell's text wrapped to `width`, at the last space that fits or, in a word longer than
+/// the column, where it reaches the edge: each drawn grapheme's row and column, and each row's
+/// width. The space a row breaks at is not drawn.
+fn wrap_cell(
+    graphemes: &[(ByteOffset, usize, bool)],
+    width: usize,
+) -> (Vec<(ByteOffset, usize, usize)>, Vec<usize>) {
+    let mut placed: Vec<Option<(usize, usize)>> = vec![None; graphemes.len()];
+    let (mut row, mut column, mut row_start, mut index) = (0, 0, 0, 0);
+    while let Some(&(_, cells, space)) = graphemes.get(index) {
+        if space && column == 0 && row > 0 {
+            index += 1;
+            row_start = index;
+            continue;
+        }
+        if column + cells <= width || column == 0 {
+            placed[index] = Some((row, column));
+            column += cells;
+            index += 1;
+            continue;
+        }
+        if let Some(space) = (row_start + 1..index).rev().find(|&at| graphemes[at].2) {
+            for place in &mut placed[space..index] {
+                *place = None;
+            }
+            index = space + 1;
+        }
+        row += 1;
+        column = 0;
+        row_start = index;
     }
-    drawn
+    let mut widths = vec![0; row + 1];
+    let places = graphemes
+        .iter()
+        .zip(placed)
+        .filter_map(|(&(at, cells, _), place)| {
+            let (row, column) = place?;
+            widths[row] = widths[row].max(column + cells);
+            Some((at, row, column))
+        })
+        .collect();
+    (places, widths)
 }

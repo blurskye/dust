@@ -33,6 +33,8 @@ pub struct VisualRowModel<'a> {
     inlay_widths: BTreeMap<ByteOffset, usize>,
     rows: RefCell<BTreeMap<usize, Vec<VisualRowSlice>>>,
     diagnostic_rows: Option<(usize, Vec<(String, crate::ui::Style)>)>,
+    /// Rendered markdown, so rows break and cells are counted where it is drawn.
+    markdown: Option<super::markdown::MarkdownMarks<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -81,8 +83,8 @@ impl<'a> VisualRowModel<'a> {
         state: &EditorState,
         text: &'a crate::editor::text::TextBuffer,
         view: crate::editor::ViewId,
-        ui: &UiState,
-        config: &Config,
+        ui: &'a UiState,
+        config: &'a Config,
         pane_width: u16,
         wrap: bool,
     ) -> Self {
@@ -165,6 +167,15 @@ impl<'a> VisualRowModel<'a> {
             minimum_digits: editor_line_number_digits(state),
             inlay_widths,
         });
+        model.markdown = state.views.get(view).and_then(|view| {
+            super::markdown::MarkdownMarks::new(
+                ui,
+                view,
+                text,
+                &config.editor,
+                wrap.then_some(model.content_width),
+            )
+        });
         if let Some(buffer) = state
             .views
             .get(view)
@@ -232,7 +243,27 @@ impl<'a> VisualRowModel<'a> {
             inlay_widths,
             rows: RefCell::default(),
             diagnostic_rows: None,
+            markdown: None,
         }
+    }
+
+    /// What a markdown line draws in place of its source, `None` when it shows its source.
+    pub(super) fn markdown_line(&self, line: usize) -> Option<super::markdown::MarkdownLine<'a>> {
+        self.markdown.as_ref()?.line(line)
+    }
+
+    /// The cells a grapheme takes as drawn, with what markdown draws before it.
+    fn drawn_width(
+        &self,
+        markdown: Option<&super::markdown::MarkdownLine>,
+        at: ByteOffset,
+        grapheme: &str,
+        source_column: usize,
+    ) -> usize {
+        let source = self.grapheme_width(grapheme, source_column);
+        markdown.map_or(source, |markdown| {
+            markdown.drawn_width(at, source, self.ambiguous_width)
+        })
     }
 
     pub(super) fn diagnostic_rows(&self, line: usize) -> &[(String, crate::ui::Style)] {
@@ -309,6 +340,20 @@ impl<'a> VisualRowModel<'a> {
             }];
         }
         let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+        let markdown = self.markdown_line(line);
+        // A table row is drawn as a block, each of its rows showing part of every cell.
+        if let Some(table) = markdown
+            .as_ref()
+            .and_then(|markdown| markdown.table.as_ref())
+        {
+            let row = VisualRowSlice {
+                byte_start: 0,
+                byte_end: content.len(),
+                source_column_start: 0,
+                used_cells: text_width(&table.frame, self.ambiguous_width).min(self.content_width),
+            };
+            return vec![row; table.rows];
+        }
         if content.is_empty() {
             return vec![VisualRowSlice {
                 byte_start: 0,
@@ -335,7 +380,14 @@ impl<'a> VisualRowModel<'a> {
                 .unwrap_or(0)
                 .min(self.content_width);
             let source_width = self.grapheme_width(grapheme, source_column);
-            let visible_width = source_width.min(self.content_width);
+            let visible_width = self
+                .drawn_width(
+                    markdown.as_ref(),
+                    ByteOffset(line_start.get().saturating_add(relative)),
+                    grapheme,
+                    source_column,
+                )
+                .min(self.content_width);
             if row_used > 0
                 && row_used
                     .saturating_add(virtual_width)
@@ -364,6 +416,12 @@ impl<'a> VisualRowModel<'a> {
                     .get(&ByteOffset(line_start.get().saturating_add(content.len())))
                     .copied()
                     .unwrap_or(0),
+            )
+            .saturating_add(
+                markdown
+                    .as_ref()
+                    .and_then(|markdown| markdown.after.as_ref())
+                    .map_or(0, |(after, _)| text_width(after, self.ambiguous_width)),
             )
             .min(self.content_width);
         rows.push(VisualRowSlice {
@@ -399,6 +457,7 @@ impl<'a> VisualRowModel<'a> {
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let end = row.byte_end.min(content.len());
         let line_start = self.text.line_to_byte(line).unwrap_or(ByteOffset(0));
+        let markdown = self.markdown_line(line);
         let mut source_column = row.source_column_start;
         let mut cell = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
@@ -417,7 +476,14 @@ impl<'a> VisualRowModel<'a> {
                 return cell.min(self.content_width.saturating_sub(1));
             }
             let source_width = self.grapheme_width(grapheme, source_column);
-            let visible_width = source_width.min(self.content_width);
+            let visible_width = self
+                .drawn_width(
+                    markdown.as_ref(),
+                    ByteOffset(line_start.get().saturating_add(relative)),
+                    grapheme,
+                    source_column,
+                )
+                .min(self.content_width);
             if byte < relative.saturating_add(grapheme.len()) {
                 return cell.min(self.content_width.saturating_sub(1));
             }
@@ -452,6 +518,7 @@ impl<'a> VisualRowModel<'a> {
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let end = row.byte_end.min(content.len());
         let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
+        let markdown = self.markdown_line(anchor.line);
         let mut source_column = row.source_column_start;
         let mut used = 0usize;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
@@ -467,7 +534,14 @@ impl<'a> VisualRowModel<'a> {
             }
             used = used.saturating_add(virtual_width);
             let source_width = self.grapheme_width(grapheme, source_column);
-            let visible_width = source_width.min(self.content_width);
+            let visible_width = self
+                .drawn_width(
+                    markdown.as_ref(),
+                    ByteOffset(line_start.get().saturating_add(relative)),
+                    grapheme,
+                    source_column,
+                )
+                .min(self.content_width);
             if cell < used.saturating_add(visible_width) {
                 return relative;
             }

@@ -5013,6 +5013,55 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
 }
 
 #[test]
+fn a_wrapped_table_too_wide_for_its_window_wraps_each_cell_inside_its_column() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::MarkdownMark;
+    let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.editor.wrap = true;
+    config.ui.status_line.enabled = false;
+    state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = text
+        .match_indices('|')
+        .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+        .collect();
+    let table_end = text.find("\n\nlast").expect("table end") + 1;
+    ui.markdown_marks
+        .push(mark(1, table_end, MarkdownMark::Table));
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
+    let rows = (0..8)
+        .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            "┌───┬──────────────┐",
+            "│ a │ long text    │",
+            "│   │ here and     │",
+            "│   │ more         │",
+            "├───┼──────────────┤",
+            "│ b │ c            │",
+            "└───┴──────────────┘",
+            "last",
+        ]
+    );
+}
+
+#[test]
 fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
     use crate::editor::text::{ByteOffset, ByteRange};
     use crate::language::syntax::MarkdownMark;
