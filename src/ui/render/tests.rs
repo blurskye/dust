@@ -885,6 +885,119 @@ fn split_tree_and_tab_line_render_real_independent_views() {
 }
 
 #[test]
+fn workspace_tab_line_keeps_the_active_label_visible() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("first"),
+        Some(PathBuf::from("/workspace/an-earlier-long-filename.rs")),
+    );
+    let first = state.active_tab.unwrap();
+    let second = state.new_tab().unwrap();
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("second"),
+        Some(PathBuf::from("/workspace/界界.rs")),
+    );
+    let third = state.new_tab().unwrap();
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("third"),
+        Some(PathBuf::from("/workspace/last.rs")),
+    );
+    let loaded = crate::config::load_bundled_config();
+    for (tab, label) in [(first, "an-earlier"), (second, "界界.rs"), (third, "last.rs")] {
+        state.activate_tab(tab).unwrap();
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 16, 6);
+        let line = frame.grid.row_text(0);
+        assert!(line.starts_with('['), "{line:?}");
+        assert!(line.contains(label), "{line:?}");
+        assert_eq!(frame.grid.get(0, 0).unwrap().style, crate::ui::Style::StatusAccent);
+    }
+}
+
+#[test]
+fn workspace_editor_cursor_follows_compositor_focus() {
+    use crate::ui::window::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
+
+    let loaded = crate::config::load_bundled_config();
+    for split in [false, true] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(crate::editor::text::TextBuffer::from_text("editor"), None);
+        if split {
+            state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+        }
+        let mut ui = ui_with_editor_layout(&state);
+        attach_test_compositor(&state, &mut ui, &loaded.config, 60, 8);
+        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        assert!(frame.cursor.is_some());
+
+        let windows = &mut ui.compositor_layout.as_mut().unwrap().projection.windows;
+        for window in windows.iter_mut() {
+            window.focused = false;
+        }
+        windows.push(ProjectedCompositorWindow {
+            window: WindowId(99),
+            rect: WindowRect { x: 50, y: 0, width: 10, height: 3 },
+            layer: CompositorLayer::Overlay,
+            z_index: 1,
+            focused: true,
+            focusable: true,
+        });
+        ui.plugin_surfaces.push(super::PluginSurfaceUiState {
+            handle: 9,
+            window: WindowId(99),
+            tree_revision: 1,
+            scroll: 0,
+            rows: vec![super::PluginSurfaceRow {
+                node: 1,
+                depth: 0,
+                text: "plugin".into(),
+                style: crate::ui::Style::Accent,
+                actionable: true,
+                focused: true,
+            }],
+        });
+        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        assert!(frame.grid.row_text(0).contains("plugin"));
+        assert!(frame.cursor.is_none());
+    }
+}
+
+#[test]
+fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
+    use crate::ui::window::TileAxis;
+
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    for axis in [crate::editor::Axis::Horizontal, crate::editor::Axis::Vertical] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(crate::editor::text::TextBuffer::from_text("pane"), None);
+        state.split_active(axis, 500).unwrap();
+        let mut ui = ui_with_editor_layout(&state);
+        attach_test_compositor(&state, &mut ui, &config, 60, 10);
+        let frame = super::render(&state, &ui, &config, &loaded.dashboard, 60, 10);
+        let projection = &ui.compositor_layout.as_ref().unwrap().projection;
+        assert!(!projection.borders.is_empty());
+        for border in &projection.borders {
+            for offset in 0..border.length {
+                let (x, y, expected) = match border.axis {
+                    TileAxis::Horizontal => (border.x, border.y + offset, "|"),
+                    TileAxis::Vertical => (border.x + offset, border.y, "-"),
+                };
+                let cell = frame.grid.get(x, y).unwrap();
+                assert_eq!(cell.symbol, expected);
+                assert!(!cell.continuation);
+            }
+        }
+        for pane in super::pane_viewports(&state, &ui, &config, 60, 9) {
+            assert_eq!(frame.grid.get(pane.x, pane.y).unwrap().symbol, "p");
+            assert!(!frame.grid.get(pane.x, pane.y).unwrap().continuation);
+        }
+    }
+}
+
+#[test]
 fn buffer_line_follows_active_overflow() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (first, _) = state.open_text(

@@ -3,10 +3,13 @@ use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH
 use crate::{
     config::{AmbiguousWidth, Config},
     editor::EditorState,
-    ui::{CellGrid, Style, window::TileAxis},
+    ui::{CellGrid, Style, geometry::text_width, window::TileAxis},
 };
 
-use super::{Frame, UiState, editor::render_editor_view, overlays::render_content_tab_line};
+use super::{
+    Frame, UiState, editor::render_editor_view, overlays::render_content_tab_line,
+    visual_rows::one_cell_symbol,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {
@@ -22,6 +25,7 @@ pub struct PaneViewport {
 pub(super) struct PaneRect {
     pane: crate::editor::PaneId,
     view: crate::editor::ViewId,
+    focused: bool,
     x: u16,
     y: u16,
     width: u16,
@@ -163,6 +167,7 @@ pub(super) fn workspace_projection(
             Some(PaneRect {
                 pane: binding.pane,
                 view: binding.view,
+                focused: projected.focused,
                 x: projected.rect.x.saturating_sub(origin.x),
                 y: projected.rect.y.saturating_sub(origin.y),
                 width: projected.rect.width,
@@ -354,13 +359,17 @@ pub(super) fn render_workspace(
         && !projection.buffer_line_visible
         && ui.debug_panes.is_none()
     {
-        let Some(view) = projection.panes.first().map(|pane| pane.view) else {
+        let Some(pane) = projection.panes.first() else {
             return Frame {
                 grid: CellGrid::new(width, height),
                 cursor: None,
             };
         };
-        return render_editor_view(state, view, ui, &pane_config, width, height);
+        let mut frame = render_editor_view(state, pane.view, ui, &pane_config, width, height);
+        if !pane.focused {
+            frame.cursor = None;
+        }
+        return frame;
     }
     let mut grid = CellGrid::new_with_policy(
         width,
@@ -371,7 +380,8 @@ pub(super) fn render_workspace(
     );
     if projection.tab_line_visible {
         grid.fill_row(0, Style::Status);
-        let mut x = 0;
+        let mut labels = Vec::new();
+        let mut active = 0;
         for (candidate, candidate_tab) in &state.tabs {
             let title = state
                 .panes
@@ -389,17 +399,30 @@ pub(super) fn render_workspace(
             } else {
                 format!(" {title} ")
             };
-            x = grid.put_text(
-                x,
-                0,
-                &label,
-                if candidate == tab_id {
-                    Style::StatusAccent
-                } else {
-                    Style::Status
-                },
-            );
-            x = grid.put_text(x, 0, "│", Style::Status);
+            let style = if candidate == tab_id {
+                active = labels.len();
+                Style::StatusAccent
+            } else {
+                Style::Status
+            };
+            labels.push((label, style));
+        }
+        // Keep the active label in view, dropping earlier tabs when they do not fit.
+        let mut start = active;
+        let mut used = text_width(&labels[active].0, config.editor.ambiguous_width);
+        while start > 0 {
+            let preceding = text_width(&labels[start - 1].0, config.editor.ambiguous_width) + 1;
+            if used.saturating_add(preceding) > usize::from(width) {
+                break;
+            }
+            used += preceding;
+            start -= 1;
+        }
+        let separator = one_cell_symbol("│", "|", config.editor.ambiguous_width);
+        let mut x = 0;
+        for (label, style) in &labels[start..] {
+            x = grid.put_text(x, 0, label, *style);
+            x = grid.put_text(x, 0, separator, Style::Status);
         }
     }
     if projection.buffer_line_visible {
@@ -429,19 +452,21 @@ pub(super) fn render_workspace(
             }
         }
         if rect.pane == tab.focused
+            && rect.focused
             && let Some((x, y, shape)) = frame.cursor
         {
             cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
         }
     }
-    let (horizontal, vertical) = ('─', '│');
+    let horizontal = one_cell_symbol("─", "-", config.editor.ambiguous_width);
+    let vertical = one_cell_symbol("│", "|", config.editor.ambiguous_width);
     for border in projection.borders {
         for offset in 0..border.length {
             let (cell_x, cell_y, symbol) = match border.axis {
                 TileAxis::Horizontal => (border.x, border.y.saturating_add(offset), vertical),
                 TileAxis::Vertical => (border.x.saturating_add(offset), border.y, horizontal),
             };
-            grid.set_cell(cell_x, cell_y, &symbol.to_string(), Style::Border);
+            grid.set_cell(cell_x, cell_y, symbol, Style::Border);
         }
     }
     Frame { grid, cursor }
