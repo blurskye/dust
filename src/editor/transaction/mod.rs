@@ -896,6 +896,12 @@ impl EditorDraft {
         self.state
             .open_virtual_read_only(text, owner, generation, document, revision)
     }
+    pub(crate) fn set_virtual_metadata(&mut self, buffer: BufferId, title: String, language: String) {
+        let target = &mut self.state.buffers[buffer];
+        target.virtual_title = Some(title);
+        target.virtual_language = Some(language);
+        self.state.mark_window_changed();
+    }
     pub(crate) fn replace_virtual_read_only(
         &mut self,
         buffer: BufferId,

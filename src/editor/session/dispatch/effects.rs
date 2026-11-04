@@ -926,6 +926,7 @@ impl InteractiveApplication {
             }
         };
         let confirmation_source = source.confirmation_source.clone();
+        let navigation_current = confirmation_source.navigation_current(&self.state, &self.window_session);
         let confirmation_result = source.confirmation_result;
         let source_actions_admitted = source.source_actions_admitted;
         let mut execution = source.execution;
@@ -1000,6 +1001,7 @@ impl InteractiveApplication {
                         &plugin,
                         load,
                         proposal,
+                        navigation_current,
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,

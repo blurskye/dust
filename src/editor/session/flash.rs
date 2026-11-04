@@ -26,16 +26,16 @@ pub(super) struct FlashTarget {
     pub(super) label: Option<char>,
 }
 
-/// Every match of `query` in lines `first..=last`, labelled nearest to the cursor first.
+/// Every visible match of `query` in `lines`, labelled nearest to the cursor first.
 ///
 /// Matching ignores case unless the query has a capital letter. A label is never a character
 /// that continues some match, so typing more of the query is never read as a label.
 pub(super) fn flash_targets(
     text: &TextBuffer,
-    first: usize,
-    last: usize,
+    lines: impl IntoIterator<Item = usize>,
     cursor: ByteOffset,
     query: &str,
+    visible: impl Fn(ByteOffset) -> bool,
 ) -> Vec<FlashTarget> {
     if query.is_empty() {
         return Vec::new();
@@ -50,8 +50,7 @@ pub(super) fn flash_targets(
     };
     let mut targets = Vec::new();
     let mut continuations = Vec::new();
-    let last = last.min(text.len_lines().saturating_sub(1));
-    for line in first..=last {
+    for line in lines {
         let (Ok(start), Ok(content)) = (text.line_to_byte(line), text.line(line)) else {
             continue;
         };
@@ -66,7 +65,7 @@ pub(super) fn flash_targets(
             }
             let begin = ByteOffset(start.get() + index);
             let end = ByteOffset(begin.get() + content[index..].len() - rest.as_str().len());
-            if begin == cursor {
+            if begin == cursor || !visible(begin) {
                 continue;
             }
             if let Some(next) = rest.next() {
@@ -97,10 +96,20 @@ mod tests {
 
     fn labels(text: &str, cursor: usize, query: &str) -> Vec<(usize, Option<char>)> {
         let text = TextBuffer::from_bytes(text.as_bytes()).unwrap();
-        flash_targets(&text, 0, 100, ByteOffset(cursor), query)
+        flash_targets(&text, 0..=100, ByteOffset(cursor), query, |_| true)
             .into_iter()
             .map(|target| (target.range.start.get(), target.label))
             .collect()
+    }
+
+    #[test]
+    fn hidden_matches_do_not_consume_labels_or_exclude_continuations() {
+        let text = TextBuffer::from_text("xa xs xa");
+        let targets = flash_targets(&text, [0], ByteOffset(99), "x", |at| at == ByteOffset(3));
+        assert_eq!(targets, vec![FlashTarget {
+            range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
+            label: Some('a'),
+        }]);
     }
 
     #[test]

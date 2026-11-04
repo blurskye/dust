@@ -510,6 +510,15 @@ impl<'a> VisualRowModel<'a> {
 
     #[must_use]
     pub fn byte_at_cell(&self, anchor: VisualRowAnchor, cell: usize) -> usize {
+        self.bytes_at_cells(anchor, cell, cell)
+            .first()
+            .copied()
+            .unwrap_or_else(|| self.row_slice(self.normalize(anchor)).byte_end)
+    }
+
+    /// Source graphemes occupying the inclusive cell range, without rescanning the row per cell.
+    #[must_use]
+    pub fn bytes_at_cells(&self, anchor: VisualRowAnchor, first: usize, last: usize) -> Vec<usize> {
         let anchor = self.normalize(anchor);
         let row = self.row_slice(anchor);
         let text = self.text.line(anchor.line).unwrap_or_default();
@@ -519,7 +528,9 @@ impl<'a> VisualRowModel<'a> {
         let markdown = self.markdown_line(anchor.line);
         let mut source_column = row.source_column_start;
         let mut used = 0usize;
+        let mut bytes = Vec::new();
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
+            if used > last { break; }
             let relative = row.byte_start.saturating_add(relative);
             let virtual_width = self
                 .inlay_widths
@@ -527,10 +538,6 @@ impl<'a> VisualRowModel<'a> {
                 .copied()
                 .unwrap_or(0)
                 .min(self.content_width);
-            if cell < used.saturating_add(virtual_width) {
-                return relative;
-            }
-            used = used.saturating_add(virtual_width);
             let source_width = self.grapheme_width(grapheme, source_column);
             let visible_width = self
                 .drawn_width(
@@ -540,13 +547,14 @@ impl<'a> VisualRowModel<'a> {
                     source_column,
                 )
                 .min(self.content_width);
-            if cell < used.saturating_add(visible_width) {
-                return relative;
+            let next = used.saturating_add(virtual_width).saturating_add(visible_width);
+            if used < next && first <= last && first < next && used <= last {
+                bytes.push(relative);
             }
-            used = used.saturating_add(visible_width);
+            used = next;
             source_column = source_column.saturating_add(source_width);
         }
-        row.byte_end
+        bytes
     }
 
     #[must_use]
@@ -992,6 +1000,24 @@ pub fn editor_state_content_width(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_cells_return_whole_graphemes_across_tabs_and_wrapped_rows() {
+        let text = crate::editor::text::TextBuffer::from_text("a\t界e\u{301}👩‍💻z");
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        config.editor.tab_width = 4;
+        let ui = UiState::default();
+        let model = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, false);
+        let start = VisualRowAnchor::default();
+        assert_eq!(model.bytes_at_cells(start, 2, 5), vec![1, 2]);
+        assert_eq!(model.bytes_at_cells(start, 6, 9), vec![5, 8, 19]);
+        assert!(model.bytes_at_cells(start, 20, 30).is_empty());
+        assert_eq!(model.byte_at_cell(start, 20), text.len_bytes());
+        let wrapped = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, true);
+        assert_eq!(wrapped.bytes_at_cells(start, 0, 5), vec![0, 1, 2]);
+        assert_eq!(wrapped.bytes_at_cells(VisualRowAnchor { line: 0, wrap_row: 1 }, 0, 5), vec![5, 8, 19]);
+    }
 
     #[test]
     fn paging_reuses_cached_line_slices() {

@@ -359,6 +359,8 @@ impl EditorState {
         }
         let mut replacement = Buffer::new(text, None);
         replacement.read_only = true;
+        replacement.virtual_title = target.virtual_title.clone();
+        replacement.virtual_language = target.virtual_language.clone();
         replacement.origin = BufferOrigin::VirtualReadOnly {
             owner,
             generation,

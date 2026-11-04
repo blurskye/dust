@@ -1711,7 +1711,7 @@ fn editor_buffer_titles(
     for (_, buffer) in state.buffers() {
         let base = editor_buffer_base(
             buffer.path.as_deref(),
-            buffer.virtual_owner().unwrap_or(scratch_label),
+            buffer.virtual_title().unwrap_or(scratch_label),
         );
         *bases.entry(base).or_default() += 1;
     }
@@ -1722,7 +1722,7 @@ fn editor_buffer_titles(
         .map(|(id, buffer)| {
             let base = editor_buffer_base(
                 buffer.path.as_deref(),
-                buffer.virtual_owner().unwrap_or(scratch_label),
+                buffer.virtual_title().unwrap_or(scratch_label),
             );
             let duplicate = bases.get(&base).copied().unwrap_or(0) > 1;
             let occurrence = occurrences.entry(base.clone()).or_default();

@@ -2357,6 +2357,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
                 "other",
                 PluginLoadId(7),
                 proposal.clone(),
+                true,
                 VirtualContext {
                     editor: &app.state,
                     windows: &app.window_session,
@@ -2371,6 +2372,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
             "demo",
             PluginLoadId(7),
             proposal.clone(),
+            true,
             VirtualContext {
                 editor: &app.state,
                 windows: &app.window_session,
@@ -2393,6 +2395,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
             "demo",
             PluginLoadId(7),
             proposal.clone(),
+            true,
             VirtualContext {
                 editor: &app.state,
                 windows: &app.window_session,
@@ -2416,6 +2419,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
                 "demo",
                 PluginLoadId(7),
                 proposal,
+                true,
                 VirtualContext {
                     editor: &app.state,
                     windows: &app.window_session,
@@ -2434,6 +2438,50 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
     assert_eq!(app.state.active_view, Some(view));
     assert_eq!(app.window_session.graph().focused(), focus);
     assert_eq!(app.state.buffers[ordinary].text.to_string(), "ordinary");
+}
+
+#[test]
+fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
+    let mut app = app();
+    let before = app.state.version();
+    let mut draft = app.state.draft();
+    let mut snapshot = crate::extensions::PluginVirtualDocumentSnapshot {
+        plugin: "demo".into(), load: PluginLoadId(7), document: 3,
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        title: "Help".into(), language: "rust".into(),
+        text: "fn help() {}\n".into(), revision: 1, closed: false,
+    };
+    let buffer = app.extension.fixture_virtual_publish(&mut draft, &snapshot).unwrap();
+    *app.state = draft.accept(&before).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    assert!(app.ui.content_tabs.iter().any(|tab| tab.title == "Help"));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.syntax.result(buffer).is_none() {
+        app.process_syntax();
+        assert!(Instant::now() < deadline, "declared Rust language was not parsed");
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.syntax.result(buffer).unwrap().language, crate::language::syntax::SyntaxLanguage::Rust);
+    snapshot.revision = 2;
+    snapshot.title = "Updated help".into();
+    snapshot.language = "python".into();
+    snapshot.text = "def help(): pass\n".into();
+    let before = app.state.version();
+    let mut draft = app.state.draft();
+    assert_eq!(app.extension.fixture_virtual_publish(&mut draft, &snapshot).unwrap(), buffer);
+    *app.state = draft.accept(&before).unwrap();
+    app.reconcile_editor_windows();
+    assert!(app.ui.content_tabs.iter().any(|tab| tab.title == "Updated help"));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        app.process_syntax();
+        if app.syntax.result(buffer).is_some_and(|result| result.language == crate::language::syntax::SyntaxLanguage::Python) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "updated language was not parsed");
+        thread::sleep(Duration::from_millis(2));
+    }
 }
 
 #[test]
@@ -2607,7 +2655,7 @@ fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
 }
 
 #[test]
-fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
+fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     let mut app = app();
     let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2635,13 +2683,40 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
         crate::extensions::index_manifest_contributions(&manifest, 1, "virtual fixture".into())
             .unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
-    app.extension.fixture_virtual_request(&index);
+    let request = app.extension.fixture_virtual_request(&index);
+    app.state.open_text(TextBuffer::from_text("original"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let navigation = app.window_session.navigation_stamp(app.state.window_version(), app.state.active_view);
     for _ in 0..2 {
         assert!(matches!(
             app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
             Err(error) if error == "virtual document is already opening"
         ));
     }
+    app.state.new_tab().unwrap();
+    app.reconcile_editor_windows();
+    let before = app.state.version();
+    let active = app.state.active_tab;
+    let navigation_current = app.window_session.navigation_current(&navigation, &app.state.window_version(), app.state.active_view);
+    assert!(!navigation_current);
+    let proposal = crate::extensions::PluginVirtualDocumentProposal {
+        request: request.request, document: request.document,
+        cancellation_generation: request.cancellation_generation,
+        kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(crate::extensions::PluginVirtualDocumentFull {
+            expected_revision: None, revision: 1, title: "Help".into(),
+            language: "rust".into(), text: "fn help() {}".into(),
+        }),
+    };
+    assert!(app.extension.prepare_virtual("demo", PluginLoadId(1), proposal, navigation_current,
+        crate::editor::session::extensions::VirtualContext {
+            editor: &app.state, windows: &app.window_session, scratch: "scratch",
+        }).is_err());
+    assert_eq!(app.state.version(), before);
+    assert_eq!(app.state.active_tab, active);
+    assert!(app.state.buffers.values().all(|buffer| !buffer.is_virtual_read_only()));
+    assert!(matches!(app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
+        Ok(crate::editor::session::extensions::VirtualOpen::Execute { .. })));
 }
 
 #[test]

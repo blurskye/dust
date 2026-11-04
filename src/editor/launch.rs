@@ -129,7 +129,7 @@ fn canonical_or_new(path: &Path, current_directory: &Path) -> Result<PathBuf, St
     if !absolute.exists() && absolute.parent().is_some_and(Path::is_dir) {
         return Ok(new_file_path(&absolute));
     }
-    canonical_existing(path)
+    canonical_existing(&absolute)
 }
 
 fn canonical_existing(path: &Path) -> Result<PathBuf, StartupError> {
@@ -189,6 +189,28 @@ mod tests {
             StartupTarget::Dashboard {
                 root: root.path().canonicalize().expect("canonical")
             }
+        );
+    }
+
+    #[test]
+    fn relative_existing_paths_use_the_supplied_directory() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(root.path().join("other.rs"), "// other\n").unwrap();
+        let target = resolve_startup(
+            &["main.rs".into(), "other.rs".into()],
+            root.path(),
+        ).unwrap();
+        let canonical = root.path().canonicalize().unwrap();
+        assert_eq!(target, StartupTarget::File {
+            workspace_root: root.path().to_path_buf(),
+            path: canonical.join("main.rs"),
+            additional_files: vec![canonical.join("other.rs")],
+        });
+        fs::create_dir(root.path().join("nested")).unwrap();
+        assert_eq!(
+            resolve_startup(&["nested".into()], root.path()).unwrap(),
+            StartupTarget::Dashboard { root: canonical.join("nested") },
         );
     }
 
