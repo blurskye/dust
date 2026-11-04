@@ -32,10 +32,11 @@ impl InputSession {
     ) {
         if let Some(popup) = &mut self.documentation {
             let maximum = total_rows.saturating_sub(visible_rows.max(1));
+            let scroll = popup.scroll.min(maximum);
             popup.scroll = if direction < 0 {
-                popup.scroll.saturating_sub(step)
+                scroll.saturating_sub(step)
             } else {
-                popup.scroll.saturating_add(step).min(maximum)
+                scroll.saturating_add(step).min(maximum)
             };
         }
     }

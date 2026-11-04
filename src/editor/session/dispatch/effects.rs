@@ -2875,18 +2875,23 @@ impl InteractiveApplication {
             }
             AppEffect::LspDocumentationScroll(direction) => {
                 self.reconcile_editor_windows();
-                self.input.scroll_documentation(
-                    direction,
-                    crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
-                    self.window_session.content().documentation_rows.max(1),
-                    self.input.documentation().map_or(0, |popup| {
-                        crate::ui::render::overlays::documentation_display_rows(
-                            popup,
-                            self.configuration.settings(),
-                            self.window_session.width(),
-                        )
-                    }),
+                // Use the same final layout as painting, including a narrowed completion box.
+                let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                    &self.state,
+                    &self.ui,
+                    self.configuration.settings(),
+                    self.configuration.dashboard(),
+                    self.window_session.width(),
+                    self.window_session.height(),
                 );
+                if let Some((visible, total)) = geometry {
+                    self.input.scroll_documentation(
+                        direction,
+                        crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
+                        visible,
+                        total,
+                    );
+                }
                 self.project_input_documentation();
             }
             AppEffect::LspDocumentationClose => self.close_documentation(),

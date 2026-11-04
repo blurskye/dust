@@ -155,6 +155,8 @@ impl InteractiveApplication {
 
     pub(super) fn project_configuration(&mut self) {
         self.ui.dashboard_actions = self.configuration.dashboard_actions();
+        self.ui.dashboard_selected = self.ui.dashboard_selected
+            .min(self.ui.dashboard_actions.len().saturating_sub(1));
     }
     pub(super) fn project_input_hints(&mut self) {
         let hints = self.input.hints().cloned();

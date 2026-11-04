@@ -2,6 +2,7 @@ use crate::ui::render::{
     COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS, CONTROL_CHARACTER_REPLACEMENT,
     ZERO_WIDTH_REPLACEMENT,
 };
+use crate::ui::geometry::cell_text_width;
 use std::path::Path;
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -53,21 +54,21 @@ pub(super) fn render_documentation_popup(
     editor_width: u16,
     height: u16,
     completion_menu: Option<WindowRect>,
-) {
+) -> Option<(usize, usize)> {
     let enabled = config.ui.documentation_popup.enabled;
     let editor_right = editor_left.saturating_add(editor_width);
     let available_height = height;
     let line_count = popup.line_count();
     if !enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
-        return;
+        return None;
     }
     let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
     let display_count = documentation_display_rows(popup, config, editor_width);
-    let mut scrollable = display_count > page_rows;
+    let scrollable = display_count > page_rows;
     let widest = (0..line_count)
         .filter_map(|index| popup.line_at(index))
-        .map(|line| text_width(line, config.editor.ambiguous_width))
-        .chain(std::iter::once(text_width(
+        .map(|line| cell_text_width(line, config.editor.ambiguous_width))
+        .chain(std::iter::once(cell_text_width(
             &popup.title,
             config.editor.ambiguous_width,
         )))
@@ -88,13 +89,14 @@ pub(super) fn render_documentation_popup(
         .unwrap_or(DOCUMENTATION_MAX_WIDTH)
         .min(DOCUMENTATION_MAX_WIDTH)
         .min(width_limit);
-    let mut visible_rows = display_count.saturating_sub(popup.scroll).min(page_rows);
+    let scroll = popup.scroll.min(display_count.saturating_sub(page_rows));
+    let visible_rows = display_count.saturating_sub(scroll).min(page_rows);
     let mut box_height = u16::try_from(visible_rows.saturating_add(2))
         .unwrap_or(DOCUMENTATION_MAX_HEIGHT)
         .min(DOCUMENTATION_MAX_HEIGHT)
         .min(available_height);
     if box_width < 4 || box_height < 3 {
-        return;
+        return None;
     }
     // The dashboard has no cursor to sit beside, so the box goes mid-screen there.
     let (cursor_x, cursor_y) = frame.cursor.map_or(
@@ -158,7 +160,7 @@ pub(super) fn render_documentation_popup(
                         let right_room = editor_right.saturating_sub(beside_right);
                         let left_room = menu.x.saturating_sub(editor_left);
                         if right_room.max(left_room) < 20 {
-                            return;
+                            return None;
                         }
                         box_width = box_width.min(right_room.max(left_room));
                         let room = if menu.y > cursor_y {
@@ -166,9 +168,10 @@ pub(super) fn render_documentation_popup(
                         } else {
                             cursor_y.saturating_sub(menu.y)
                         };
-                        box_height = box_height.min(room.max(menu.height).max(3));
-                        visible_rows = visible_rows.min(usize::from(box_height - 2));
-                        scrollable = line_count > visible_rows;
+                        if room < 3 {
+                            return None;
+                        }
+                        box_height = box_height.min(room);
                         if right_room >= left_room {
                             (beside_right, menu.y)
                         } else {
@@ -193,9 +196,10 @@ pub(super) fn render_documentation_popup(
                 .into_iter()
                 .map(move |range| (index, line, spans, range))
         })
-        .skip(popup.scroll)
         .collect::<Vec<_>>();
-    let wanted = u16::try_from(rows.len().min(page_rows).saturating_add(2))
+    let display_count = rows.len();
+    let scroll = popup.scroll.min(display_count.saturating_sub(page_rows));
+    let wanted = u16::try_from(display_count.saturating_sub(scroll).min(page_rows).saturating_add(2))
         .unwrap_or(u16::MAX)
         .min(DOCUMENTATION_MAX_HEIGHT)
         .min(available_height.saturating_sub(top));
@@ -207,8 +211,9 @@ pub(super) fn render_documentation_popup(
     {
         box_height = wanted;
     }
-    visible_rows = usize::from(box_height.saturating_sub(2)).min(rows.len());
-    scrollable = scrollable || rows.len() > visible_rows;
+    let visible_rows = usize::from(box_height.saturating_sub(2)).min(display_count);
+    let scroll = popup.scroll.min(display_count.saturating_sub(visible_rows));
+    let scrollable = display_count > visible_rows;
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {
@@ -219,7 +224,11 @@ pub(super) fn render_documentation_popup(
         }
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        BorderStyle::Rounded.glyphs();
+        if config.editor.ambiguous_width == AmbiguousWidth::Wide {
+            ('-', '|', '+', '+', '+', '+')
+        } else {
+            BorderStyle::Rounded.glyphs()
+        };
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid
@@ -260,7 +269,7 @@ pub(super) fn render_documentation_popup(
         right.saturating_sub(1),
     );
     let text_left = left.saturating_add(1).saturating_add(DOCUMENTATION_PADDING);
-    for (row, (index, line, spans, wrapped)) in rows.iter().take(visible_rows).enumerate() {
+    for (row, (index, line, spans, wrapped)) in rows.iter().skip(scroll).take(visible_rows).enumerate() {
         let index = *index;
         // A hunk preview reads as a diff.
         let style = match line.chars().next() {
@@ -299,8 +308,8 @@ pub(super) fn render_documentation_popup(
     if scrollable {
         let footer = format!(
             " j/k or wheel · {}-{}/{} ",
-            popup.scroll.saturating_add(1),
-            popup.scroll.saturating_add(visible_rows).min(display_count),
+            scroll.saturating_add(1),
+            scroll.saturating_add(visible_rows).min(display_count),
             display_count
         );
         frame.grid.put_text_clipped(
@@ -311,6 +320,7 @@ pub(super) fn render_documentation_popup(
             right.saturating_sub(1),
         );
     }
+    Some((visible_rows, display_count))
 }
 
 pub(crate) fn documentation_display_rows(
@@ -326,7 +336,7 @@ pub(crate) fn documentation_display_rows(
     let widest = (0..popup.line_count())
         .filter_map(|i| popup.line_at(i))
         .chain(std::iter::once(popup.title.as_str()))
-        .map(|line| text_width(line, config.editor.ambiguous_width))
+        .map(|line| cell_text_width(line, config.editor.ambiguous_width))
         .max()
         .unwrap_or(1);
     let inner = widest
@@ -367,10 +377,10 @@ pub(crate) fn wrap_ranges(
 ) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
-    while text_width(&line[start..], ambiguous) > width.max(1) {
+    while cell_text_width(&line[start..], ambiguous) > width.max(1) {
         let (mut used, mut end, mut space) = (0, start, None);
         for (offset, grapheme) in line[start..].grapheme_indices(true) {
-            let cells = text_width(grapheme, ambiguous).clamp(1, 2);
+            let cells = cell_text_width(grapheme, ambiguous);
             if used + cells > width && end > start {
                 break;
             }
@@ -673,13 +683,14 @@ pub(super) fn render_dashboard(
         } else {
             left.saturating_add(3)
         };
-        grid.put_text_clipped(label_x, y, &action.label, Style::Default, right);
+        let key_x = action.key.as_ref().map(|key| right.saturating_sub(measure(key)));
+        let label_right = key_x.map_or(right, |x| x.saturating_sub(1));
+        grid.put_text_clipped(label_x, y, &action.label, Style::Default, label_right);
         // Like LazyVim, the cursor rests on the label of the item Enter runs.
         if index == selected && label_x < right && y < height {
             cursor = Some((label_x, y, cursor_style(editor_config.ui.cursor.normal)));
         }
-        if let Some(key) = &action.key {
-            let key_x = right.saturating_sub(measure(key));
+        if let (Some(key), Some(key_x)) = (&action.key, key_x) {
             grid.put_text_clipped(key_x, y, key, Style::Accent, right);
         }
         y = y.saturating_add(row_step);
@@ -720,7 +731,7 @@ pub(super) fn truncate_content_title(
     if maximum_width == 0 {
         return String::new();
     }
-    if text_width(title, ambiguous_width) <= maximum_width {
+    if cell_text_width(title, ambiguous_width) <= maximum_width {
         return title.to_owned();
     }
     let ellipsis = "…";
@@ -728,7 +739,7 @@ pub(super) fn truncate_content_title(
     let mut suffix = Vec::new();
     let mut width = 0usize;
     for grapheme in title.graphemes(true).rev() {
-        let grapheme_width = text_width(grapheme, ambiguous_width).max(1);
+        let grapheme_width = cell_text_width(grapheme, ambiguous_width);
         if width.saturating_add(grapheme_width) > available {
             break;
         }
@@ -826,7 +837,7 @@ pub(super) fn render_lsp_progress(
             y,
             &server,
             Style::Accent,
-            right.saturating_sub(server_x),
+            right,
         );
     }
 }
@@ -840,18 +851,17 @@ pub(super) fn formatted_content_tab(
         usize::from(BUFFER_NAME_MAX_WIDTH),
         config.editor.ambiguous_width,
     );
-    let format = BUFFER_TAB_FORMAT.replace("{title}", &title);
-    let (before, after) = format
+    let (before, after) = BUFFER_TAB_FORMAT
         .split_once("{dirty}")
         .expect("buffer tab format has {dirty}");
     (
-        before.to_owned(),
+        before.replace("{title}", &title),
         if entry.dirty {
             BUFFER_DIRTY_MARKER.to_owned()
         } else {
             String::new()
         },
-        after.to_owned(),
+        after.replace("{title}", &title),
         if entry.active {
             Style::BufferLineActive
         } else {
@@ -899,7 +909,7 @@ pub(super) fn content_tab_segments(
 pub(super) fn content_tab_width(entry: &ContentTabEntry, config: &Config) -> usize {
     content_tab_segments(entry, config)
         .iter()
-        .map(|(text, _)| text_width(text, config.editor.ambiguous_width))
+        .map(|(text, _)| cell_text_width(text, config.editor.ambiguous_width))
         .sum()
 }
 
@@ -917,31 +927,20 @@ pub fn content_tab_at_column(
     let left = text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
     let right = text_width(BUFFER_OVERFLOW_RIGHT, config.editor.ambiguous_width);
     let available = usize::from(width);
-    let mut start = 0;
-    while start < active {
-        let required = entries[start..=active]
-            .iter()
-            .map(|e| content_tab_width(e, config))
-            .sum::<usize>()
-            .saturating_add(if start > 0 { left } else { 0 })
-            .saturating_add(if active + 1 < entries.len() { right } else { 0 });
-        if required <= available {
-            break;
-        }
-        start += 1
+    let widths = entries.iter().map(|entry| content_tab_width(entry, config)).collect::<Vec<_>>();
+    let range = visible_content_tabs(&widths, active, available, left, right);
+    if range.end < entries.len() && right <= available
+        && usize::from(column) >= available - right {
+        return None;
     }
-    let mut x = if start > 0 {
+    let mut x = if range.start > 0 {
         u16::try_from(left).unwrap_or(width)
     } else {
         0
     };
-    for (index, entry) in entries.iter().enumerate().skip(start) {
-        let item = content_tab_width(entry, config);
-        let remaining = usize::from(width.saturating_sub(x));
-        let reserve = if index + 1 < entries.len() { right } else { 0 };
-        if item.saturating_add(reserve) > remaining && index > active {
-            break;
-        }
+    for index in range {
+        let entry = &entries[index];
+        let item = widths[index];
         let end = x
             .saturating_add(u16::try_from(item).unwrap_or(u16::MAX))
             .min(width);
@@ -954,6 +953,36 @@ pub fn content_tab_at_column(
         }
     }
     None
+}
+
+fn visible_content_tabs(
+    widths: &[usize], active: usize, available: usize, left: usize, right: usize,
+) -> std::ops::Range<usize> {
+    let mut start = 0;
+    let mut required = widths[..=active].iter().sum::<usize>();
+    while start < active {
+        let markers = if start > 0 { left } else { 0 }
+            + if active + 1 < widths.len() { right } else { 0 };
+        if required.saturating_add(markers) <= available {
+            break;
+        }
+        required = required.saturating_sub(widths[start]);
+        start += 1;
+    }
+    let mut used = if start > 0 { left } else { 0 };
+    let mut end = start;
+    for (index, width) in widths.iter().enumerate().skip(start) {
+        let reserve = if index + 1 < widths.len() { right } else { 0 };
+        if width.saturating_add(reserve) > available.saturating_sub(used) && index > active {
+            break;
+        }
+        used = used.saturating_add(*width);
+        end = index + 1;
+        if used >= available {
+            break;
+        }
+    }
+    start..end
 }
 
 pub(super) fn render_content_tab_line(
@@ -974,26 +1003,14 @@ pub(super) fn render_content_tab_line(
     let left_width = text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
     let right_width = text_width(BUFFER_OVERFLOW_RIGHT, config.editor.ambiguous_width);
     let available = usize::from(width);
-    let mut start = 0usize;
-    while start < active {
-        let required = entries[start..=active]
-            .iter()
-            .map(|entry| content_tab_width(entry, config))
-            .sum::<usize>()
-            .saturating_add(if start > 0 { left_width } else { 0 })
-            .saturating_add(if active + 1 < entries.len() {
-                right_width
-            } else {
-                0
-            });
-        if required <= available {
-            break;
-        }
-        start += 1;
-    }
+    let segments = entries.iter().map(|entry| content_tab_segments(entry, config)).collect::<Vec<_>>();
+    let widths = segments.iter().map(|segments| {
+        segments.iter().map(|(text, _)| cell_text_width(text, config.editor.ambiguous_width)).sum()
+    }).collect::<Vec<usize>>();
+    let range = visible_content_tabs(&widths, active, available, left_width, right_width);
 
     let mut x = 0u16;
-    if start > 0 {
+    if range.start > 0 {
         x = grid.put_text_clipped(
             x,
             row,
@@ -1002,27 +1019,12 @@ pub(super) fn render_content_tab_line(
             width,
         );
     }
-    let mut end = start;
-    for (index, entry) in entries.iter().enumerate().skip(start) {
-        let item_width = content_tab_width(entry, config);
-        let remaining = usize::from(width.saturating_sub(x));
-        let reserve_right = if index + 1 < entries.len() {
-            right_width
-        } else {
-            0
-        };
-        if item_width.saturating_add(reserve_right) > remaining && index > active {
-            break;
-        }
-        for (text, style) in content_tab_segments(entry, config) {
-            x = grid.put_text_clipped(x, row, &text, style, width);
-        }
-        end = index + 1;
-        if x >= width {
-            break;
+    for index in range.clone() {
+        for (text, style) in &segments[index] {
+            x = grid.put_text_clipped(x, row, text, *style, width);
         }
     }
-    if end < entries.len() && right_width <= available {
+    if range.end < entries.len() && right_width <= available {
         let marker_x = width.saturating_sub(u16::try_from(right_width).unwrap_or(width));
         grid.put_text_clipped(
             marker_x,
