@@ -1026,11 +1026,13 @@ impl NativeSurfaceBridge {
                     }
                 } else if signature.dashboard_visible
                     && let Some(dashboard) = dashboard
+                    && graph.can_focus(dashboard.window)
                 {
                     graph.focus(dashboard.window)?;
                 }
             } else if signature.dashboard_visible
                 && let Some(dashboard) = dashboard
+                && graph.can_focus(dashboard.window)
             {
                 graph.focus(dashboard.window)?;
             }

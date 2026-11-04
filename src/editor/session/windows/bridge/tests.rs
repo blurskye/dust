@@ -300,9 +300,14 @@ fn closing_the_final_document_keeps_a_populated_plugin_host() {
 
     let mut native = NativeSurfaceBridge::default();
     let signature = NativeSurfaceSignature { editor_tab: None, dashboard_visible: true, ..native_signature(tab) };
-    native.reconcile(&mut graph, signature, "Explorer", "Dashboard", "Picker", &[]).unwrap();
+    native.reconcile(&mut graph, signature.clone(), "Explorer", "Dashboard", "Picker", &[]).unwrap();
     assert_eq!(native.workspace_tab(), Some(tab));
     assert_eq!(graph.window(panel).unwrap().tab, tab);
+    graph.validate().unwrap();
+
+    graph.place(panel, WindowPlacement::Fullscreen).unwrap();
+    native.reconcile(&mut graph, signature, "Explorer", "Dashboard", "Picker", &[]).unwrap();
+    assert_eq!(graph.focused(), Some(panel));
     graph.validate().unwrap();
 }
 
