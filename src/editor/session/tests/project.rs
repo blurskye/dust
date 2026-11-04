@@ -1165,6 +1165,34 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
 }
 
 #[test]
+fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let git_dir = repo.path().to_path_buf();
+    drop(repo);
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().is_some());
+    assert!(app.ui.operation_bar.is_none());
+    fs::write(git_dir.join("index"), b"invalid index").unwrap();
+    app.project_operation_bar();
+    let bar = app.ui.operation_bar.as_ref().unwrap();
+    assert_eq!(bar.phase, "operation state unavailable");
+    assert!(bar.actions.is_empty());
+    assert!(bar.abort_binding.is_none());
+    assert!(app.ui.notification_error);
+    assert!(app.ui.notification.is_some());
+    fs::remove_file(git_dir.join("index")).unwrap();
+    app.project_operation_bar();
+    assert!(app.ui.operation_bar.is_none());
+}
+
+#[test]
 fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();

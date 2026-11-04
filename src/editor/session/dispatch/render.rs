@@ -321,8 +321,15 @@ impl InteractiveApplication {
         let repository = status.repository.clone();
         let state = match crate::workspace::git::read_conflict_state(&repository) {
             Ok(state) => state,
-            Err(_) => {
-                self.ui.operation_bar = None;
+            Err(error) => {
+                self.ui.operation_bar = Some(crate::ui::OperationBarState {
+                    operation: "Git".into(),
+                    phase: "operation state unavailable".into(),
+                    blockers: Vec::new(),
+                    actions: Vec::new(),
+                    abort_binding: None,
+                });
+                self.show_error(error);
                 return;
             }
         };

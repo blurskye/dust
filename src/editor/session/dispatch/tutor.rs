@@ -752,8 +752,8 @@ impl InteractiveApplication {
         }
     }
 
-    /// Leave the practice project: its edits are saved there, the editor moves back to the
-    /// user's project and `tutor_restore` puts the layout back.
+    /// Leave the practice project: discard disposable edits, move back to the user's project
+    /// and let `tutor_restore` put the layout back.
     fn tutor_leave(&mut self) {
         let Some(practice) = &self.tutor.practice else {
             return;
@@ -778,16 +778,11 @@ impl InteractiveApplication {
             .buffers
             .iter()
             .filter(|(_, buffer)| buffer.dirty)
-            .filter_map(|(id, buffer)| {
-                let path = buffer.path.clone().filter(|path| path.starts_with(&root))?;
-                Some((id, path, buffer.text.revision(), buffer.text.to_bytes()))
-            })
+            .filter(|(_, buffer)| buffer.path.as_ref().is_some_and(|path| path.starts_with(&root)))
+            .map(|(id, _)| id)
             .collect::<Vec<_>>();
-        for (id, path, revision, bytes) in unsaved {
-            if std::fs::write(&path, &bytes).is_ok() {
-                self.state
-                    .mark_buffer_saved_as(id, revision, bytes, Some(path));
-            }
+        for id in unsaved {
+            self.state.set_buffer_dirty(id, false);
         }
         if let Some(practice) = &mut self.tutor.practice {
             practice.stage = Stage::Leaving;
@@ -1111,6 +1106,30 @@ mod tests {
             assert!(app.ui.picker.is_some());
             assert!(app.tutor.practice.is_none());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tutor_exit_discards_practice_edits_without_following_replaced_paths() {
+        let mut app = app();
+        let home = app.state.workspace_root.clone();
+        let original = home.join("original.txt");
+        std::fs::write(&original, "keep this").unwrap();
+        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        enter(&mut app);
+        let root = app.tutor.practice.as_ref().unwrap().root.clone();
+        let path = root.join("replaced.txt");
+        std::os::unix::fs::symlink(&original, &path).unwrap();
+        let (buffer, _) = app.state.open_text(
+            crate::editor::TextBuffer::from_text("practice edits"), Some(path),
+        );
+        app.state.set_buffer_dirty(buffer, true);
+        app.tutor_quit();
+        enter(&mut app);
+        assert_eq!(std::fs::read_to_string(original).unwrap(), "keep this");
+        assert_eq!(app.state.workspace_root, home);
+        assert!(app.tutor.practice.is_none());
+        assert!(!root.exists());
     }
 
     #[test]

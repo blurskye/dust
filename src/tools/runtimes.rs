@@ -182,53 +182,42 @@ pub(super) fn run_managed(
         .map_err(|error| format!("failed to launch managed {}: {error}", program.display()))?;
     let installer_output = child.stderr.take().map(read_installer_output);
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
-    loop {
+    let result = loop {
         if cancellations.try_recv().is_ok() {
-            #[cfg(unix)]
-            crate::process::terminate_process_group(child.id());
-            let _ = child.kill();
-            let _ = child.wait();
-            if let Some(output) = installer_output.as_ref() {
-                let _ = output.recv_timeout(Duration::from_secs(1));
-            }
-            return Err("tool installation cancelled".into());
+            break Err("tool installation cancelled".to_owned());
         }
         if Instant::now() >= deadline {
-            #[cfg(unix)]
-            crate::process::terminate_process_group(child.id());
-            let _ = child.kill();
-            let _ = child.wait();
-            if let Some(output) = installer_output.as_ref() {
-                let _ = output.recv_timeout(Duration::from_secs(1));
-            }
-            return Err("tool installation exceeded the 15-minute ceiling".into());
+            break Err("tool installation exceeded the 15-minute ceiling".to_owned());
         }
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => {
-                let output = installer_output
-                    .and_then(|output| output.recv_timeout(Duration::from_secs(1)).ok())
-                    .unwrap_or_default();
-                return Err(format!(
-                    "managed installer `{}` exited with {}{}",
-                    program.file_name().unwrap_or_default().to_string_lossy(),
-                    status
-                        .code()
-                        .map_or_else(|| "signal".into(), |code| code.to_string()),
-                    output
-                ));
-            }
+            Ok(Some(status)) => break Ok(status),
             Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(error) => return Err(format!("failed to wait for managed installer: {error}")),
+            Err(error) => break Err(format!("failed to wait for managed installer: {error}")),
         }
+    };
+    // Even a successful installer may leave helpers holding its output pipe open.
+    #[cfg(unix)]
+    crate::process::terminate_process_group(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    let output = installer_output.and_then(|output| output.join().ok()).unwrap_or_default();
+    let status = result?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "managed installer `{}` exited with {}{}",
+            program.file_name().unwrap_or_default().to_string_lossy(),
+            status.code().map_or_else(|| "signal".into(), |code| code.to_string()),
+            output
+        ))
     }
 }
 
 /// Read what an installer prints on its own thread, so a full pipe cannot stall it, and hand
 /// back the end of it: that is where installers say what went wrong.
-fn read_installer_output(mut stream: impl std::io::Read + Send + 'static) -> Receiver<String> {
+fn read_installer_output(mut stream: impl std::io::Read + Send + 'static) -> thread::JoinHandle<String> {
     const KEPT_BYTES: usize = 4096;
-    let (sender, receiver) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let mut kept = Vec::new();
         let mut chunk = [0; 4096];
@@ -239,9 +228,8 @@ fn read_installer_output(mut stream: impl std::io::Read + Send + 'static) -> Rec
             kept.extend_from_slice(&chunk[..read]);
             kept.drain(..kept.len().saturating_sub(KEPT_BYTES));
         }
-        let _ = sender.send(installer_failure_detail(&String::from_utf8_lossy(&kept)));
-    });
-    receiver
+        installer_failure_detail(&String::from_utf8_lossy(&kept))
+    })
 }
 
 fn installer_failure_detail(output: &str) -> String {
@@ -319,6 +307,7 @@ pub(super) fn install_uv_tool(
     report: &mut ToolProgressReporter,
     compatibility: Option<&NixCompatibilityRuntime>,
 ) -> Result<Option<PathBuf>, String> {
+    let _lock = lock_managed_tool(root, &definition.id)?;
     let uv = managed_runtime(root, "uv", cancellations, report, compatibility)?;
     let destination = root.join(&definition.id);
     let backup = root.join(format!(
@@ -443,7 +432,13 @@ pub(super) fn install_path_rustup_component(
         return Err("the selected rustup executable does not own the PATH proxy".into());
     }
     report("installing rustup component", 0, None);
-    let mut child = Command::new(&rustup)
+    let mut command = Command::new(&rustup);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
         .args(["component", "add", component])
         .current_dir(&cwd)
         .stdin(Stdio::null())
@@ -453,37 +448,31 @@ pub(super) fn install_path_rustup_component(
         .map_err(|error| format!("failed to launch rustup: {error}"))?;
     let installer_output = child.stderr.take().map(read_installer_output);
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
-    loop {
+    let result = loop {
         if cancellations.try_recv().is_ok() {
-            #[cfg(unix)]
-            crate::process::terminate_process_group(child.id());
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("rustup component installation cancelled".into());
+            break Err("rustup component installation cancelled".to_owned());
         }
         if Instant::now() >= deadline {
-            #[cfg(unix)]
-            crate::process::terminate_process_group(child.id());
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("rustup component installation exceeded the 15-minute ceiling".into());
+            break Err("rustup component installation exceeded the 15-minute ceiling".to_owned());
         }
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(status)) => {
-                return Err(format!(
-                    "rustup component installation exited with {}{}",
-                    status
-                        .code()
-                        .map_or_else(|| "signal".into(), |code| code.to_string()),
-                    installer_output
-                        .and_then(|output| output.recv_timeout(Duration::from_secs(1)).ok())
-                        .unwrap_or_default()
-                ));
-            }
+            Ok(Some(status)) => break Ok(status),
             Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(error) => return Err(format!("failed to wait for rustup: {error}")),
+            Err(error) => break Err(format!("failed to wait for rustup: {error}")),
         }
+    };
+    #[cfg(unix)]
+    crate::process::terminate_process_group(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    let output = installer_output.and_then(|output| output.join().ok()).unwrap_or_default();
+    let status = result?;
+    if !status.success() {
+        return Err(format!(
+            "rustup component installation exited with {}{}",
+            status.code().map_or_else(|| "signal".into(), |code| code.to_string()),
+            output
+        ));
     }
     report("verifying rustup component", 0, None);
     if !proxy.is_file() {
@@ -608,12 +597,24 @@ pub(super) fn probe_downloaded_tool(
     .map_err(|error| format!("downloaded artifact is not runnable on this Linux host: {error}"))
 }
 
+fn lock_managed_tool(root: &Path, id: &str) -> Result<nix::fcntl::Flock<fs::File>, String> {
+    validate_tool_id(id)?;
+    ensure_private_directory(root)?;
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(format!(".install-{id}.lock")))
+        .map_err(|error| format!("cannot open tool installation lock: {error}"))?;
+    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+        .map_err(|(_, error)| format!("cannot lock tool {id} (another installation may be running): {error}"))
+}
+
 pub(super) fn uninstall_managed_tool(
     definition: &ToolDefinition,
     root: &Path,
 ) -> Result<(), String> {
-    validate_tool_id(&definition.id)?;
-    ensure_private_directory(root)?;
+    let _lock = lock_managed_tool(root, &definition.id)?;
     let destination = root.join(&definition.id);
     let Ok(metadata) = fs::symlink_metadata(&destination) else {
         return Ok(());
@@ -719,7 +720,6 @@ pub(super) fn uninstall_nix_lsp_profile(
     let mut removed = 0usize;
     for entry in fs::read_dir(&profiles)
         .map_err(|error| format!("cannot read Dust Nix environments: {error}"))?
-        .take(1024)
     {
         let entry =
             entry.map_err(|error| format!("cannot inspect Dust Nix environment: {error}"))?;
@@ -769,7 +769,7 @@ mod installer_output_tests {
         std::io::Write::write_all(&mut writer, b"exit 1\n").expect("write");
         drop(writer);
         assert_eq!(
-            output.recv_timeout(Duration::from_secs(5)).expect("output"),
+            output.join().expect("output"),
             ": building error: no such attribute exit 1"
         );
     }

@@ -1182,6 +1182,22 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
 }
 
 #[test]
+fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let mut source = "[editor]\ntab_width = 2\n#".to_owned();
+    source.extend(std::iter::repeat_n(' ',
+        super::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1));
+    source.push('\n');
+    fs::write(&path, &source).unwrap();
+    let error = super::write_user_setting(
+        &path, "editor.tab_width", Some(toml::Value::Integer(32)),
+    ).unwrap_err();
+    assert!(error.contains("byte ceiling"), "{error}");
+    assert_eq!(fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
 fn deep_task_dependencies_are_validated_without_recursion() {
     let task: super::settings::TaskConfig = toml::from_str("executable = '/bin/true'").unwrap();
     let mut config = load_bundled_config().config;

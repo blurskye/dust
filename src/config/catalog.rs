@@ -122,12 +122,20 @@ pub fn write_user_setting(
         Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
     };
     let path = resolved.as_deref().unwrap_or(path);
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+    let (source, expectation) = match std::fs::read_to_string(path) {
+        Ok(source) => {
+            let expectation = crate::files::WriteExpectation::Exact(source.as_bytes().to_vec());
+            (source, expectation)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (String::new(), crate::files::WriteExpectation::Missing)
+        },
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     let edited = edited_source(&source, key, value)?;
+    if edited.len() as u64 > super::load::WATCH_FINGERPRINT_BYTE_CEILING {
+        return Err("config.toml exceeds the configuration byte ceiling".into());
+    }
     // A value of the wrong type fails in the deserializer, whose message names Rust types.
     super::load::settings_from_source(&edited).map_err(|error| {
         if error
@@ -144,7 +152,7 @@ pub fn write_user_setting(
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    crate::files::atomic_write(path, edited.as_bytes())
+    crate::files::checked_atomic_write(path, edited.as_bytes(), &expectation)
         .map_err(|error| format!("cannot save {}: {error}", path.display()))
 }
 
