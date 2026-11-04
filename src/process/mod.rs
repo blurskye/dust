@@ -531,10 +531,9 @@ impl<T> CancellablePipe<T> {
     }
     fn retry<R>(
         &mut self,
-        timeout: Option<std::time::Duration>,
+        deadline: Option<std::time::Instant>,
         mut operation: impl FnMut(&mut T) -> io::Result<R>,
     ) -> io::Result<R> {
-        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
         loop {
             if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
                 return Err(io::ErrorKind::TimedOut.into());
@@ -558,16 +557,52 @@ impl<T: io::Read> io::Read for CancellablePipe<T> {
 }
 impl<T: Write> Write for CancellablePipe<T> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.retry(self.write_timeout, |pipe| pipe.write(bytes))
+        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        self.retry(deadline, |pipe| pipe.write(bytes))
+    }
+    fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        while !bytes.is_empty() {
+            match self.retry(deadline, |pipe| pipe.write(bytes)) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => bytes = &bytes[count..],
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.retry(self.write_timeout, Write::flush)
+        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        self.retry(deadline, Write::flush)
     }
 }
 
 #[cfg(all(test, unix))]
 mod cancellable_pipe_tests {
     use super::*;
+
+    #[test]
+    fn partial_writes_share_one_deadline() {
+        struct SlowWriter;
+        impl Write for SlowWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                thread::sleep(std::time::Duration::from_millis(2));
+                Ok(bytes.len().min(1))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut input = CancellablePipe {
+            pipe: SlowWriter,
+            cancelled: Default::default(),
+            write_timeout: Some(std::time::Duration::from_millis(20)),
+        };
+        let error = input.write_all(&[0; 100]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
     #[test]
     fn blocked_child_writes_time_out_without_cancellation() {
         let mut child = std::process::Command::new("sleep")

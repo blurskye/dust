@@ -961,7 +961,23 @@ pub(super) fn handle_command(
             offset,
             generation,
         } => {
-            if documents
+            // Workspace requests use a document only for routing; their caller may
+            // hold an older snapshot, which must not roll back server text.
+            let needs_document = !matches!(feature,
+                LspFeature::ExecuteCommand(_) | LspFeature::WorkspaceSymbols { .. });
+            if needs_document && documents.get(&document.uri()).is_some_and(|old| {
+                old.version > document.version
+                    || old.version == document.version && old.text != document.text
+            }) {
+                send_event(events, LspEvent::RequestFailed {
+                    server: server.into(),
+                    generation,
+                    method: feature.method().into(),
+                    message: "request document is older than or conflicts with the synchronized document".into(),
+                });
+                return Ok(());
+            }
+            if needs_document && documents
                 .get(&document.uri())
                 .is_none_or(|old| old.version != document.version || old.text != document.text)
             {
@@ -1030,7 +1046,7 @@ pub(super) fn handle_command(
                 );
                 return Ok(());
             };
-            if let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
+            if needs_document && let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
                 send_event(events, LspEvent::RequestFailed {
                     server: server.into(),
                     generation,
@@ -1410,6 +1426,44 @@ while True:
         assert_eq!(change["params"]["textDocument"]["version"], 1);
         assert_eq!(change["params"]["contentChanges"][0]["text"], "new");
         assert_eq!(request["method"], "textDocument/hover");
+
+        // Cached document snapshots must neither rewind text nor prevent
+        // documentless code-action commands from running.
+        sources.insert(document.uri(), (buffer, text.source_version()));
+        let stale = LspDocument { version: 0, text: "old".into(), ..document.clone() };
+        for (feature, method) in [
+            (LspFeature::Hover, "textDocument/hover"),
+            (LspFeature::WorkspaceSymbols { query: "name".into() }, "workspace/symbol"),
+            (LspFeature::ExecuteCommand(super::super::LspCommand {
+                command: "fix".into(), arguments: Vec::new(),
+            }), "workspace/executeCommand"),
+        ] {
+            let rejected = matches!(feature, LspFeature::Hover);
+            if !rejected { pending.clear(); }
+            let mut wire = Vec::new();
+            handle_command(SessionCommand::Request {
+                feature, document: stale.clone(), offset: ByteOffset(0), generation: 1000,
+            }, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"), &mut wire,
+            true, &LspCapabilities { hover: true, workspace_symbols: true, execute_command: true, ..Default::default() },
+            &mut documents, &mut sources, &mut lineage, &mut apply, &mut opened, &mut pending,
+            &mut next, Duration::from_secs(1), 0, &endpoint.events, &mut stopping,
+            &mut LspServerConfiguration::standard()).unwrap();
+            assert_eq!(documents[&document.uri()].version, 1);
+            assert_eq!(documents[&document.uri()].text, "new");
+            assert!(sources.contains_key(&document.uri()));
+            if rejected {
+                assert!(wire.is_empty());
+                assert_eq!(pending.len(), MAX_PENDING_REQUESTS);
+                assert!(pending.contains_key(&(MAX_PENDING_REQUESTS as i64)));
+                assert!(matches!(service.try_event(), Some(LspEvent::RequestFailed { generation: 1000, .. })));
+            } else {
+                let mut wire = std::io::Cursor::new(wire);
+                let request = read_content_length_message(&mut wire).unwrap().unwrap();
+                assert_eq!(request["method"], method);
+                assert!(read_content_length_message(&mut wire).unwrap().is_none());
+                assert!(service.try_event().is_none());
+            }
+        }
     }
 
     #[test]

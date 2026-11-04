@@ -764,7 +764,7 @@ while True:
         .request(
             "fake",
             LspFeature::Definition,
-            document.clone(),
+            LspDocument { version: 2, text: "a😀z".into(), ..document.clone() },
             crate::editor::text::ByteOffset(5),
             13,
         )
