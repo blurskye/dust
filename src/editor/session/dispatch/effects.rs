@@ -7252,7 +7252,9 @@ impl InteractiveApplication {
         let result = self
             .git
             .start_worktree_create(&repository, &name, &path, &branch);
-        self.git.show_worktrees_after_change();
+        if result.is_ok() {
+            self.git.show_worktrees_after_change();
+        }
         self.report_branch_request(result);
     }
     fn confirm_git_destructive(
@@ -7268,17 +7270,17 @@ impl InteractiveApplication {
         };
         let result = match action {
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
-                self.git.show_worktrees_after_change();
                 self.git.start_worktree_remove(&self.state, &status.repository, &name)
             }
         };
-        if let Err(error) = result {
-            self.show_error(error);
+        match result {
+            Ok(()) => self.git.show_worktrees_after_change(),
+            Err(error) => self.show_error(error),
         }
     }
     pub(in crate::editor::session) fn process_git_branch_events(&mut self) {
         // One poll per handler call: the service is one shot.
-        let outcome = match self.git.poll_branch_outcome() {
+        let outcome = match self.git.poll_branch_outcome(self.workspace.root_revision(), &self.state.workspace_root) {
             Ok(Some(outcome)) => Some(outcome),
             Ok(None) => None,
             Err(error) => {

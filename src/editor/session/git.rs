@@ -59,6 +59,7 @@ pub(super) struct GitSession {
     mutation_generation: Option<GitMutationGeneration>,
     branches: GitBranchService,
     branch_generation: Option<GitBranchGeneration>,
+    branch_root: Option<(u64, PathBuf)>,
     show_worktrees: bool,
     /// The previewed whole-file replacement waiting for its confirmation. The plan is rebuilt
     /// when the answer arrives, so a plan previewed against one repository state is never applied
@@ -973,7 +974,9 @@ impl GitSession {
             repository: repository.to_path_buf(),
             deadline: Duration::from_secs(10),
         });
+        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
     pub(super) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
@@ -1006,7 +1009,9 @@ impl GitSession {
             name: name.to_owned(),
             deadline: Duration::from_secs(10),
         };
+        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
     /// Create a worktree for a branch. The destination and occupancy checks are the model's.
@@ -1034,12 +1039,21 @@ impl GitSession {
             reference: reference.to_owned(),
             deadline: Duration::from_secs(10),
         };
+        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
     /// One poll reporting whichever branch outcome arrived.
-    pub(super) fn poll_branch_outcome(&mut self) -> Result<Option<GitBranchOutcome>, String> {
+    pub(super) fn poll_branch_outcome(&mut self, root_revision: u64, root: &Path) -> Result<Option<GitBranchOutcome>, String> {
         if self.branch_generation.is_none() {
+            return Ok(None);
+        }
+        if !self.branch_root.as_ref().is_some_and(|(revision, path)| *revision == root_revision && path == root) {
+            self.branches.cancel();
+            self.branch_generation = None;
+            self.branch_root = None;
+            self.show_worktrees = false;
             return Ok(None);
         }
         match self.branches.poll() {
@@ -1057,6 +1071,7 @@ impl GitSession {
             Ok(None) => Ok(None),
             Err(error) => {
                 self.branch_generation = None;
+                self.show_worktrees = false;
                 Err(error.to_string())
             }
         }
@@ -1232,35 +1247,41 @@ pub(in crate::editor::session) fn text_diff_preview(
     provenance: &str,
 ) -> crate::ui::DiffPreview {
     use crate::ui::{DiffHunk, DiffLine, DiffLineKind};
-    let mut hunks = Vec::new();
-    if let Ok(patch) = git2::Patch::from_buffers(old, None, new, None, None) {
+    let mut preview = crate::ui::DiffPreview {
+        hunks: Vec::new(),
+        provenance: provenance.to_owned(),
+        truncated: false,
+        total_lines: 0,
+        layout: crate::ui::DiffLayout::Unified,
+    };
+    let mut options = git2::DiffOptions::new();
+    options.force_text(true);
+    let result = (|| -> Result<(), git2::Error> {
+        let patch = git2::Patch::from_buffers(old, None, new, None, Some(&mut options))?;
         let mut previous_end = 1;
         for index in 0..patch.num_hunks() {
-            let Ok((hunk, count)) = patch.hunk(index) else {
-                continue;
-            };
-            let mut lines = (0..count)
-                .filter_map(|line| patch.line_in_hunk(index, line).ok())
-                .filter_map(|line| {
-                    let kind = match line.origin() {
-                        '+' => DiffLineKind::Added,
-                        '-' => DiffLineKind::Removed,
-                        ' ' => DiffLineKind::Context,
-                        _ => return None,
-                    };
-                    Some(DiffLine {
-                        kind,
-                        old_number: line.old_lineno(),
-                        new_number: line.new_lineno(),
-                        text: String::from_utf8_lossy(line.content())
-                            .trim_end()
-                            .to_owned(),
-                        spans: Vec::new(),
-                    })
-                })
-                .collect::<Vec<_>>();
+            let (hunk, count) = patch.hunk(index)?;
+            let mut lines = Vec::with_capacity(count);
+            for index_in_hunk in 0..count {
+                let line = patch.line_in_hunk(index, index_in_hunk)?;
+                let kind = match line.origin() {
+                    '+' => DiffLineKind::Added,
+                    '-' => DiffLineKind::Removed,
+                    ' ' => DiffLineKind::Context,
+                    _ => continue,
+                };
+                let text = String::from_utf8_lossy(line.content());
+                let text = text.strip_suffix("\r\n").or_else(|| text.strip_suffix('\n')).unwrap_or(&text);
+                lines.push(DiffLine {
+                    kind,
+                    old_number: line.old_lineno(),
+                    new_number: line.new_lineno(),
+                    text: text.to_owned(),
+                    spans: Vec::new(),
+                });
+            }
             crate::ui::emphasise_changed_spans(&mut lines);
-            hunks.push(DiffHunk {
+            preview.hunks.push(DiffHunk {
                 header: String::from_utf8_lossy(hunk.header()).trim_end().to_owned(),
                 lines,
                 collapsed_before: usize::try_from(hunk.old_start().saturating_sub(previous_end))
@@ -1268,14 +1289,13 @@ pub(in crate::editor::session) fn text_diff_preview(
             });
             previous_end = hunk.old_start().saturating_add(hunk.old_lines());
         }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        preview.hunks.clear();
+        preview.provenance = format!("{provenance}: diff unavailable: {error}");
     }
-    crate::ui::DiffPreview {
-        hunks,
-        provenance: provenance.to_owned(),
-        truncated: false,
-        total_lines: 0,
-        layout: crate::ui::DiffLayout::Unified,
-    }
+    preview
 }
 
 pub(in crate::editor::session) fn diff_preview_from_hunks(
@@ -1337,6 +1357,26 @@ mod regression_tests {
     use super::*;
     use crate::editor::text::TextBuffer;
     use std::{thread, time::Instant};
+
+    #[test]
+    fn proposal_diff_previews_include_text_containing_nul() {
+        let preview = text_diff_preview(b"a\0b\n", b"a\0c\n", "proposal");
+        assert_eq!(preview.provenance, "proposal");
+        let lines = &preview.hunks[0].lines;
+        assert!(lines.iter().any(|line| line.kind == crate::ui::DiffLineKind::Removed && line.text == "a\0b"));
+        assert!(lines.iter().any(|line| line.kind == crate::ui::DiffLineKind::Added && line.text == "a\0c"));
+    }
+
+    #[test]
+    fn proposal_diff_previews_preserve_trailing_whitespace() {
+        let preview = text_diff_preview(b"text  \r\n", b"text\r\n", "proposal");
+        let lines = &preview.hunks[0].lines;
+        let removed = lines.iter().find(|line| line.kind == crate::ui::DiffLineKind::Removed).unwrap();
+        let added = lines.iter().find(|line| line.kind == crate::ui::DiffLineKind::Added).unwrap();
+        assert_eq!(removed.text, "text  ");
+        assert_eq!(added.text, "text");
+        assert!(!removed.spans.is_empty());
+    }
 
     fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, GitSession) {
         let dir = tempfile::tempdir().unwrap();
@@ -1580,6 +1620,39 @@ mod regression_tests {
     }
 
     #[test]
+    fn worktree_results_are_retired_after_a_root_change() {
+        let (dir, _, _, mut session) = fixture();
+        let other = tempfile::tempdir().unwrap();
+        session.start_branches(dir.path()).unwrap();
+        session.show_worktrees_after_change();
+        session.clear();
+        // Activating another root does not increment the workspace's root revision.
+        assert!(session.poll_branch_outcome(1, other.path()).unwrap().is_none());
+        assert!(!session.branch_pending());
+        assert!(!session.take_show_worktrees());
+        assert!(session.poll_branch_outcome(1, other.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn failed_worktree_changes_do_not_reopen_the_picker() {
+        let (dir, repo, _, mut session) = fixture();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+        session.start_worktree_create(dir.path(), "review", &dir.path().join("review"), &branch).unwrap();
+        session.show_worktrees_after_change();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Err(error) = session.poll_branch_outcome(1, dir.path()) {
+                assert!(error.contains("checked out"), "{error}");
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(!session.branch_pending());
+        assert!(!session.take_show_worktrees());
+    }
+
+    #[test]
     fn worktree_removal_refuses_unsaved_buffers_including_new_files() {
         let (dir, _, mut editor, mut session) = fixture();
         let path = dir.path().join("review");
@@ -1588,7 +1661,7 @@ mod regression_tests {
         session.start_worktree_create(dir.path(), "review", &alias.join("review"), "review").unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.branch_pending() {
-            session.poll_branch_outcome().unwrap();
+            session.poll_branch_outcome(1, dir.path()).unwrap();
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
@@ -1601,7 +1674,7 @@ mod regression_tests {
         session.start_worktree_remove(&editor, dir.path(), "review").unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.branch_pending() {
-            session.poll_branch_outcome().unwrap();
+            session.poll_branch_outcome(1, dir.path()).unwrap();
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
@@ -1690,7 +1763,7 @@ mod regression_tests {
         assert!(session.branch_pending());
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            if let Some(outcome) = session.poll_branch_outcome().unwrap() {
+            if let Some(outcome) = session.poll_branch_outcome(1, dir.path()).unwrap() {
                 assert!(matches!(outcome, GitBranchOutcome::Changed));
                 break;
             }
