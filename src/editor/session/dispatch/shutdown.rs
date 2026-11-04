@@ -144,16 +144,13 @@ impl InteractiveApplication {
                 ),
             }));
         }
-        if !self.finish_agent_history(deadline) {
-            return Err(InteractiveError::Vfs(VfsError::Io {
+        self.finish_agent_history(deadline).map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
                 operation: "finish agent history shutdown",
                 path: self.state.workspace_root.clone(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "agent history writes did not finish",
-                ),
-            }));
-        }
+                source: std::io::Error::other(message),
+            })
+        })?;
         self.persistence.undo_shutdown_result().map_err(|message| {
             InteractiveError::Vfs(VfsError::Io {
                 operation: "finish undo history shutdown",

@@ -318,7 +318,8 @@ pub fn rejoin_params(session: &str, cwd: &Path, tools: &Value, meta: Option<&Val
 }
 
 /// One piece of a prompt: text, or a file the agent should look at.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PromptPart {
     Text(String),
     /// A file and, optionally, the exact text of a selection in it.

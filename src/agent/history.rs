@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fs,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-/// Larger files are not read back.
+/// Saved transcripts must also fit the reader's byte limit.
 const FILE_BYTE_CEILING: u64 = 32 * 1024 * 1024;
 const HEADER_BYTE_CEILING: u64 = 64 * 1024;
 
@@ -28,6 +28,8 @@ pub enum Entry {
     User {
         text: String,
         context: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<super::PromptPart>,
     },
     Agent(String),
     Thought(String),
@@ -66,7 +68,43 @@ fn file(directory: &Path, id: &str) -> PathBuf {
 #[derive(Default)]
 struct Saves {
     pending: BTreeMap<PathBuf, (Conversation, Vec<Entry>)>,
+    order: VecDeque<PathBuf>,
     writing: bool,
+    failures: BTreeMap<PathBuf, String>,
+    notices: Vec<String>,
+}
+
+impl Saves {
+    fn enqueue(&mut self, target: PathBuf, conversation: Conversation, entries: Vec<Entry>) {
+        if !self.pending.contains_key(&target) {
+            self.order.push_back(target.clone());
+        }
+        self.pending.insert(target, (conversation, entries));
+    }
+
+    fn pop_front(&mut self) -> (PathBuf, (Conversation, Vec<Entry>)) {
+        let target = self.order.pop_front().unwrap();
+        let snapshot = self.pending.remove(&target).unwrap();
+        (target, snapshot)
+    }
+}
+
+fn write_history(target: &Path, conversation: &Conversation, entries: &[Entry]) -> Result<(), String> {
+    let write = || -> Result<(), String> {
+        let head = serde_json::to_string(conversation).map_err(|error| error.to_string())?;
+        let body = serde_json::to_string(entries).map_err(|error| error.to_string())?;
+        if head.len() as u64 + 1 > HEADER_BYTE_CEILING {
+            return Err("conversation header exceeds its size limit".into());
+        }
+        if head.len() as u64 + body.len() as u64 + 2 > FILE_BYTE_CEILING {
+            return Err("conversation exceeds its size limit".into());
+        }
+        let parent = target.parent().ok_or("history path has no parent")?;
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        crate::files::atomic_write(target, format!("{head}\n{body}\n").as_bytes())
+            .map_err(|error| error.to_string())
+    };
+    write().map_err(|error| format!("could not save agent history {}: {error}", target.display()))
 }
 
 struct Writer(Arc<(Mutex<Saves>, Condvar)>);
@@ -84,18 +122,22 @@ impl Writer {
                         saves = ready.wait(saves).unwrap();
                     }
                     saves.writing = true;
-                    saves.pending.pop_first().unwrap()
+                    saves.pop_front()
                 };
-                if let (Ok(head), Ok(body)) = (
-                    serde_json::to_string(&conversation),
-                    serde_json::to_string(&entries),
-                ) && let Some(parent) = target.parent()
-                    && fs::create_dir_all(parent).is_ok()
-                {
-                    let _ =
-                        crate::files::atomic_write(&target, format!("{head}\n{body}\n").as_bytes());
+                let result = write_history(&target, &conversation, &entries);
+                let mut saves = lock.lock().unwrap();
+                match result {
+                    Ok(()) => {
+                        saves.failures.remove(&target);
+                    }
+                    Err(error) => {
+                        if saves.failures.get(&target) != Some(&error) {
+                            saves.notices.push(error.clone());
+                        }
+                        saves.failures.insert(target, error);
+                    }
                 }
-                lock.lock().unwrap().writing = false;
+                saves.writing = false;
                 ready.notify_all();
             }
         });
@@ -106,21 +148,28 @@ impl Writer {
         let (lock, ready) = &*self.0;
         lock.lock()
             .unwrap()
-            .pending
-            .insert(file(&directory, &conversation.id), (conversation, entries));
+            .enqueue(file(&directory, &conversation.id), conversation, entries);
         ready.notify_all();
     }
 
-    fn flush(&self, deadline: Instant) -> bool {
+    fn take_errors(&self) -> Vec<String> {
+        let (lock, _) = &*self.0;
+        std::mem::take(&mut lock.lock().unwrap().notices)
+    }
+
+    fn flush(&self, deadline: Instant) -> Result<(), String> {
         let (lock, ready) = &*self.0;
         let mut saves = lock.lock().unwrap();
         while saves.writing || !saves.pending.is_empty() {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-                return false;
+                return Err("agent history writes did not finish before the exit deadline".into());
             };
             saves = ready.wait_timeout(saves, remaining).unwrap().0;
         }
-        true
+        match saves.failures.values().next() {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 }
 
@@ -134,8 +183,14 @@ pub fn save(directory: PathBuf, conversation: Conversation, entries: Vec<Entry>)
 }
 
 /// Finish pending history writes within the editor's shared shutdown budget.
-pub fn flush(deadline: Instant) -> bool {
-    WRITER.get().is_none_or(|writer| writer.flush(deadline))
+pub fn flush(deadline: Instant) -> Result<(), String> {
+    WRITER.get().map_or(Ok(()), |writer| writer.flush(deadline))
+}
+
+/// New write failures for the session's notifications; failed saves still fail `flush`.
+#[must_use]
+pub fn take_errors() -> Vec<String> {
+    WRITER.get().map_or_else(Vec::new, Writer::take_errors)
 }
 
 fn open_history(path: &Path) -> Option<fs::File> {
@@ -206,7 +261,27 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
     let mut text = String::new();
     for entry in entries {
         match entry {
-            Entry::User { text: question, .. } => text.push_str(&format!("\n\nUser: {question}")),
+            Entry::User { text: question, context, attachments } => {
+                text.push_str(&format!("\n\nUser: {question}"));
+                for label in context {
+                    text.push_str(&format!("\n[context: {label}]"));
+                }
+                for part in attachments {
+                    match part {
+                        super::PromptPart::Text(content) => {
+                            text.push('\n');
+                            text.push_str(content);
+                        }
+                        super::PromptPart::File { path, text: content } => {
+                            text.push_str(&format!("\n[file: {}]", path.display()));
+                            if let Some(content) = content {
+                                text.push('\n');
+                                text.push_str(content);
+                            }
+                        }
+                    }
+                }
+            }
             Entry::Agent(answer) => text.push_str(&format!("\n\nAssistant: {answer}")),
             Entry::Tool { title, .. } => text.push_str(&format!("\n[tool: {title}]")),
             _ => {}
@@ -227,6 +302,92 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_history_saves_are_fair_and_coalesce_in_place() {
+        let conversation = Conversation {
+            id: "a".into(),
+            agent: "fixture".into(),
+            root: "/work".into(),
+            session: None,
+            title: "question".into(),
+            updated: 1,
+        };
+        let mut saves = Saves::default();
+        saves.enqueue("b".into(), conversation.clone(), Vec::new());
+        saves.enqueue("a".into(), conversation.clone(), Vec::new());
+        let latest = vec![Entry::Agent("latest".into())];
+        saves.enqueue("b".into(), conversation.clone(), latest.clone());
+        assert_eq!(saves.pending.len(), 2);
+        let (target, (_, entries)) = saves.pop_front();
+        assert_eq!(target, Path::new("b"));
+        assert_eq!(entries, latest);
+        // Repeated updates to a just-written conversation go behind existing work.
+        saves.enqueue("b".into(), conversation, Vec::new());
+        assert_eq!(saves.pop_front().0, Path::new("a"));
+        assert_eq!(saves.pop_front().0, Path::new("b"));
+        assert!(saves.pending.is_empty());
+        assert!(saves.order.is_empty());
+    }
+
+    #[test]
+    fn failed_history_saves_are_reported_until_a_successful_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("blocked");
+        fs::write(&blocked, "not a directory").unwrap();
+        let conversation = Conversation {
+            id: "failed".into(),
+            agent: "fixture".into(),
+            root: directory.path().into(),
+            session: None,
+            title: "question".into(),
+            updated: 1,
+        };
+        let entries = vec![Entry::Agent("answer".into())];
+        let writer = Writer::new();
+        writer.save(blocked.clone(), conversation.clone(), entries.clone());
+        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap_err();
+        assert!(error.contains("could not save agent history"));
+        assert!(error.contains("blocked"));
+        assert_eq!(writer.take_errors().as_slice(), std::slice::from_ref(&error));
+        assert!(writer.take_errors().is_empty());
+        assert_eq!(writer.flush(Instant::now()), Err(error));
+        fs::remove_file(&blocked).unwrap();
+        writer.save(blocked.clone(), conversation.clone(), entries.clone());
+        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        assert_eq!(load(&blocked, "failed"), Some((conversation, entries)));
+    }
+
+    #[test]
+    fn oversized_history_saves_preserve_the_previous_readable_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let conversation = Conversation {
+            id: "large".into(),
+            agent: "fixture".into(),
+            root: directory.path().into(),
+            session: None,
+            title: "question".into(),
+            updated: 1,
+        };
+        let writer = Writer::new();
+        let entries = vec![Entry::Agent("saved answer".into())];
+        writer.save(directory.path().into(), conversation.clone(), entries.clone());
+        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        writer.save(
+            directory.path().into(),
+            conversation.clone(),
+            vec![Entry::Agent("x".repeat(FILE_BYTE_CEILING as usize))],
+        );
+        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(10)).unwrap_err();
+        assert!(error.contains("conversation exceeds its size limit"));
+        assert_eq!(load(directory.path(), "large"), Some((conversation.clone(), entries.clone())));
+        let mut oversized_header = conversation.clone();
+        oversized_header.title = "x".repeat(HEADER_BYTE_CEILING as usize);
+        writer.save(directory.path().into(), oversized_header, entries.clone());
+        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap_err();
+        assert!(error.contains("header exceeds its size limit"));
+        assert_eq!(load(directory.path(), "large"), Some((conversation, entries)));
+    }
 
     #[test]
     fn queued_history_saves_keep_the_newest_snapshot() {
@@ -254,6 +415,7 @@ mod tests {
             Entry::User {
                 text: "question".into(),
                 context: Vec::new(),
+                attachments: Vec::new(),
             },
             Entry::Agent("still streaming".into()),
         ];
@@ -262,7 +424,7 @@ mod tests {
             conversation.clone(),
             entries.clone(),
         );
-        assert!(writer.flush(Instant::now() + std::time::Duration::from_secs(5)));
+        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
         assert_eq!(
             load(directory.path(), "ordered"),
             Some((conversation, entries))
@@ -304,6 +466,41 @@ mod tests {
     }
 
     #[test]
+    fn history_round_trips_attachments_and_recaps_legacy_context() {
+        use super::super::PromptPart;
+        let directory = tempfile::tempdir().unwrap();
+        let conversation = Conversation {
+            id: "attached".into(),
+            agent: "fixture".into(),
+            root: directory.path().into(),
+            session: None,
+            title: "explain".into(),
+            updated: 1,
+        };
+        let entries = vec![Entry::User {
+            text: "explain".into(),
+            context: vec!["main.rs (1 lines selected)".into()],
+            attachments: vec![
+                PromptPart::File { path: "/work/main.rs".into(), text: Some("unsaved fragment".into()) },
+                PromptPart::Text("Diagnostics:\nunsaved error".into()),
+                PromptPart::File { path: "/work/other.rs".into(), text: None },
+            ],
+        }];
+        write_history(&file(directory.path(), "attached"), &conversation, &entries).unwrap();
+        let (_, loaded) = load(directory.path(), "attached").unwrap();
+        assert_eq!(loaded, entries);
+        let summary = recap(&loaded, 1000);
+        for expected in ["User: explain", "main.rs (1 lines selected)", "/work/main.rs", "unsaved fragment", "Diagnostics:\nunsaved error", "/work/other.rs"] {
+            assert!(summary.contains(expected), "missing {expected}: {summary}");
+        }
+        let legacy: Vec<Entry> = serde_json::from_str(
+            r#"[{"user":{"text":"old question","context":["old context"]}}]"#,
+        ).unwrap();
+        assert!(recap(&legacy, 1000).contains("[context: old context]"));
+        assert!(matches!(&legacy[0], Entry::User { attachments, .. } if attachments.is_empty()));
+    }
+
+    #[test]
     fn a_saved_conversation_lists_and_loads_back() {
         let directory = tempfile::tempdir().unwrap();
         let conversation = Conversation {
@@ -318,6 +515,7 @@ mod tests {
             Entry::User {
                 text: "why".into(),
                 context: Vec::new(),
+                attachments: Vec::new(),
             },
             Entry::Agent("because".into()),
         ];
