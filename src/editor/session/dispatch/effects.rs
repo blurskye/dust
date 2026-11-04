@@ -9305,6 +9305,7 @@ impl InteractiveApplication {
             PickerPayload::MatcherSource(source) => {
                 let (retired, ticket) = self.search.prepare_preview(
                     source.path.clone(),
+                    source.line,
                     label,
                     "loading…".into(),
                     self.workspace.version(),
@@ -9332,7 +9333,7 @@ impl InteractiveApplication {
                             self.documents.cancel_request(id);
                         }
                     }
-                    Err(error) => self.search.preview_failed(ticket, error.to_string()),
+                    Err(error) => self.search.preview_failed(ticket, error),
                 }
             }
             _ => self.clear_picker_preview(),
