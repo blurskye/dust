@@ -2739,6 +2739,12 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("stage command"),
     );
+    // A second request must not erase the first request's save-and-stage intent.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.file.unstage", InvocationSource::Test)
+            .expect("unstage command"),
+    );
+    assert_eq!(app.ui.notification.as_deref(), Some("a Git mutation is already running"));
     wait_for_choice(&mut app);
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);

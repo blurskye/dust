@@ -13512,6 +13512,17 @@ impl InteractiveApplication {
         &mut self,
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
+        // Refuse before replacing the save-and-stage intent owned by the running mutation.
+        if self.git.mutation_pending()
+            && matches!(effect,
+                AppEffect::GitFileStage | AppEffect::GitFileUnstage
+                    | AppEffect::GitHunkStage | AppEffect::GitHunkUnstage
+                    | AppEffect::GitLinesStage { .. } | AppEffect::GitConflictStage
+                    | AppEffect::GitHunkReset)
+        {
+            self.show_error("a Git mutation is already running");
+            return Ok(());
+        }
         match effect {
             AppEffect::Quit { force } => {
                 if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {

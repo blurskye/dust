@@ -517,7 +517,9 @@ impl GitSession {
         layer: GitDiffLayer,
     ) -> Result<(), String> {
         let selection_line = self.selected.as_ref()
-            .filter(|(_, _, selected)| Some(selected.as_path()) == path)
+            .filter(|(snapshot, _, selected)| {
+                Some(selected.as_path()) == path && snapshot.layer == layer
+            })
             .and_then(|_| self.selected_line());
         self.clear_hunks();
         let status = self
@@ -993,9 +995,9 @@ impl GitSession {
         }
         let repo = git2::Repository::open(repository).map_err(|e| e.to_string())?;
         let worktree = repo.find_worktree(name).map_err(|e| e.to_string())?;
-        let path = worktree.path();
+        let path = worktree.path().canonicalize().map_err(|e| e.to_string())?;
         if editor.buffers.values().any(|buffer| {
-            buffer.dirty && buffer.path.as_ref().is_some_and(|file| file.starts_with(path))
+            buffer.dirty && buffer.path.as_ref().is_some_and(|file| file.starts_with(&path))
         }) {
             return Err("worktree has unsaved editor changes".into());
         }
@@ -1190,6 +1192,9 @@ impl GitSession {
     pub(super) fn status_pending(&self) -> bool {
         self.status_generation.is_some()
     }
+    pub(super) fn mutation_pending(&self) -> bool {
+        self.mutation_generation.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -1202,9 +1207,6 @@ impl GitSession {
     }
     pub(super) fn branch_pending(&self) -> bool {
         self.branch_generation.is_some()
-    }
-    pub(super) fn mutation_pending(&self) -> bool {
-        self.mutation_generation.is_some()
     }
     pub(super) fn silent(&self) -> bool {
         self.silent
@@ -1477,6 +1479,25 @@ mod regression_tests {
     }
 
     #[test]
+    fn hunk_refresh_does_not_reuse_selection_from_another_layer() {
+        let (dir, repo, editor, mut session) = fixture();
+        let path = dir.path().join("a.txt");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        session.start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Staged).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while session.hunks_pending() {
+            session.poll_hunks(&editor).unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        session.select_at(20);
+        assert!(!session.has_selection(), "an unstaged selection cannot select a staged hunk");
+
+    }
+
+    #[test]
     fn navigating_hunks_replaces_the_selected_change_indices() {
         let (_, _, _, mut session) = fixture();
         let snapshot = session.hunk_snapshot.as_mut().unwrap();
@@ -1562,7 +1583,9 @@ mod regression_tests {
     fn worktree_removal_refuses_unsaved_buffers_including_new_files() {
         let (dir, _, mut editor, mut session) = fixture();
         let path = dir.path().join("review");
-        session.start_worktree_create(dir.path(), "review", &path, "review").unwrap();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+        session.start_worktree_create(dir.path(), "review", &alias.join("review"), "review").unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.branch_pending() {
             session.poll_branch_outcome().unwrap();
