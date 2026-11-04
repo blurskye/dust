@@ -918,7 +918,7 @@ pub(super) fn handle_command(
                 );
                 return;
             }
-            if !feature.capability(capabilities) {
+            if !feature.capability_for_document(capabilities, &document) {
                 send_event(
                     events,
                     LspEvent::Unsupported {

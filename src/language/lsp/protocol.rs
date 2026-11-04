@@ -141,6 +141,8 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
             .filter_map(Value::as_str)
             .map(|value| value.chars().take(128).collect())
             .collect(),
+        document_selectors: Default::default(),
+        sync_registrations: Vec::new(),
     })
 }
 
@@ -168,10 +170,11 @@ pub(super) fn send_change(
     document: &LspDocument,
     capabilities: &LspCapabilities,
 ) {
-    if capabilities.sync_kind == SyncKind::None {
+    let sync_kind = capabilities.sync_kind_for_document(document);
+    if sync_kind == SyncKind::None {
         return;
     }
-    let content_changes = if capabilities.sync_kind == SyncKind::Incremental {
+    let content_changes = if sync_kind == SyncKind::Incremental {
         previous
             .and_then(|old| incremental_change(old, document, capabilities.position_encoding))
             .map_or_else(|| json!([{"text":document.text}]), |change| json!([change]))

@@ -285,6 +285,49 @@ pub struct LspCapabilities {
     pub selection_ranges: bool,
     pub document_colors: bool,
     pub semantic_token_types: Vec<String>,
+    /// Selectors for providers enabled only by dynamic registration.
+    pub document_selectors: std::collections::HashMap<String, Vec<Value>>,
+    pub sync_registrations: Vec<Value>,
+}
+
+impl LspCapabilities {
+    pub fn supports_document(&self, method: &str, document: &LspDocument) -> bool {
+        self.document_selectors.get(method).is_none_or(|options| {
+            options.iter().any(|options| registration_matches(options, document))
+        })
+    }
+
+    pub(super) fn sync_kind_for_document(&self, document: &LspDocument) -> SyncKind {
+        let mut kinds = self.sync_registrations.iter()
+            .filter(|options| registration_matches(options, document))
+            .filter_map(|options| options.get("syncKind").and_then(Value::as_u64))
+            .peekable();
+        if kinds.peek().is_none() {
+            return self.sync_kind;
+        }
+        kinds.fold(SyncKind::None, |kind, registered| match registered {
+            1 => SyncKind::Full,
+            2 if kind != SyncKind::Full => SyncKind::Incremental,
+            _ => kind,
+        })
+    }
+}
+
+fn registration_matches(options: &Value, document: &LspDocument) -> bool {
+    let selector = options.get("documentSelector").unwrap_or(&Value::Null);
+    if selector.is_null() {
+        return true;
+    }
+    selector.as_array().is_some_and(|filters| filters.iter().any(|filter| {
+        filter.is_object()
+            && filter.get("language").is_none_or(|language| language.as_str() == Some(&document.language_id))
+            && filter.get("scheme").is_none_or(|scheme| scheme.as_str() == Some("file"))
+            && filter.get("pattern").is_none_or(|pattern| {
+                pattern.as_str().and_then(|pattern| globset::GlobBuilder::new(pattern)
+                    .literal_separator(true).build().ok())
+                    .is_some_and(|glob| glob.compile_matcher().is_match(&document.path))
+            })
+    }))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -631,6 +674,15 @@ impl LspFeature {
             Self::DocumentColors => "textDocument/documentColor",
             Self::SelectionRanges => "textDocument/selectionRange",
         }
+    }
+
+    pub fn capability_for_document(&self, capabilities: &LspCapabilities, document: &LspDocument) -> bool {
+        let method = match self {
+            Self::CompletionResolve { .. } => "textDocument/completion",
+            Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => "textDocument/semanticTokens",
+            _ => self.method(),
+        };
+        self.capability(capabilities) && capabilities.supports_document(method, document)
     }
 
     pub fn capability(&self, capabilities: &LspCapabilities) -> bool {

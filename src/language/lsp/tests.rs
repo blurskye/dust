@@ -165,10 +165,129 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
 fn a_server_can_register_formatting_after_it_starts() {
     let registered = super::server_message::effective_capabilities(
         &super::LspCapabilities::default(),
-        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter(),
+        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter().map(|method| (method, &Value::Null)),
     );
     assert!(registered.formatting && registered.range_formatting);
     assert!(!registered.rename);
+}
+
+fn server_message_reply(
+    message: Value,
+    base: &super::LspCapabilities,
+    capabilities: &mut super::LspCapabilities,
+    registrations: &mut std::collections::HashMap<String, (String, Value)>,
+) -> Value {
+    use std::sync::{Arc, mpsc};
+    let (channel, _events) = mpsc::sync_channel(8);
+    let (commands, _requests) = mpsc::sync_channel(1);
+    let events = super::origins::EventSender {
+        channel,
+        commands,
+        context: super::origins::EditContext {
+            session: Arc::new(()),
+            server: Arc::from("fixture"),
+            encoding: PositionEncoding::Utf16,
+            diagnostic_ambiguous: false,
+            sources: Arc::new(Default::default()),
+            disk: None,
+        },
+        cancelled: Arc::new(false.into()),
+        stop_requested: Arc::new(false.into()),
+    };
+    let mut output = Vec::new();
+    super::server_message::handle_server_message(super::server_message::ServerMessageContext {
+        server: "fixture",
+        root: Path::new("/fixture"),
+        stdin: &mut output,
+        events: &events,
+        logs: &mut Default::default(),
+        base_capabilities: base,
+        capabilities,
+        registrations,
+        configuration: &super::LspServerConfiguration::standard(),
+        sources: &Default::default(),
+        diagnostic_lineage: &Default::default(),
+        documents: &Default::default(),
+        apply_requests: &mut Default::default(),
+    }, &message);
+    crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap()
+}
+
+#[test]
+fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
+    let base = super::LspCapabilities::default();
+    let mut capabilities = base.clone();
+    let mut registrations = std::collections::HashMap::from([
+        ("keep".into(), ("textDocument/hover".into(), Value::Null)),
+    ]);
+    let original = registrations.clone();
+    for (method, key) in [
+        ("client/registerCapability", "registrations"),
+        ("client/unregisterCapability", "unregisterations"),
+        ("client/unregisterCapability", "unregistrations"),
+    ] {
+        let items = (0..257).map(|_| json!({"id":"keep","method":"textDocument/formatting"})).collect::<Vec<_>>();
+        let reply = server_message_reply(json!({"id":1,"method":method,"params":{key:items}}), &base, &mut capabilities, &mut registrations);
+        assert_eq!(reply["error"]["code"], -32602);
+        assert_eq!(registrations, original);
+        assert_eq!(capabilities, base);
+    }
+}
+
+#[test]
+fn configuration_replies_preserve_every_requested_position() {
+    let base = super::LspCapabilities::default();
+    let items = (0..257).map(|_| json!({"section":"missing"})).collect::<Vec<_>>();
+    let reply = server_message_reply(json!({"id":1,"method":"workspace/configuration","params":{"items":items}}), &base, &mut base.clone(), &mut Default::default());
+    let values = reply["result"].as_array().unwrap();
+    assert_eq!(values.len(), 257);
+    assert!(values.iter().all(Value::is_object));
+}
+
+#[test]
+fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
+    let base = super::LspCapabilities::default();
+    let options = json!({"documentSelector":[{"language":"javascript","scheme":"file","pattern":"**/*.js"}]});
+    let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+    let js = LspDocument { path: "/fixture/a.js".into(), language_id: "javascript".into(), version: 0, text: String::new() };
+    assert!(LspFeature::Formatting.capability_for_document(&capabilities, &js));
+    let ts = LspDocument { path: "/fixture/a.ts".into(), language_id: "typescript".into(), ..js.clone() };
+    assert!(!LspFeature::Formatting.capability_for_document(&capabilities, &ts));
+    assert!(!LspFeature::Formatting.capability_for_document(&capabilities, &LspDocument { path: "/fixture/a.jsx".into(), ..js.clone() }));
+    let static_base = super::LspCapabilities { formatting: true, ..base.clone() };
+    let capabilities = super::server_message::effective_capabilities(&static_base, [("textDocument/formatting", &options)].into_iter());
+    assert!(LspFeature::Formatting.capability_for_document(&capabilities, &ts));
+    for selector in [json!([]), json!([{"scheme":"untitled"}])] {
+        let options = json!({"documentSelector":selector});
+        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+        assert!(!LspFeature::Formatting.capability_for_document(&capabilities, &js));
+    }
+}
+
+#[test]
+fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_policy() {
+    let base = super::LspCapabilities { sync_kind: SyncKind::None, ..Default::default() };
+    let mut capabilities = base.clone();
+    let mut registrations = Default::default();
+    let reply = server_message_reply(json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
+        "id":"changes","method":"textDocument/didChange","registerOptions":{"documentSelector":[{"language":"rust"}],"syncKind":2}
+    }]}}), &base, &mut capabilities, &mut registrations);
+    assert!(reply.get("result").is_some());
+    let old = LspDocument { path: "/fixture/main.rs".into(), language_id: "rust".into(), version: 1, text: "abc".into() };
+    let new = LspDocument { version: 2, text: "abcd".into(), ..old.clone() };
+    let mut output = Vec::new();
+    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities);
+    let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap();
+    assert_eq!(change["params"]["contentChanges"][0]["text"], "d");
+    assert!(change["params"]["contentChanges"][0]["range"].is_object());
+    let mut output = Vec::new();
+    super::protocol::send_change(&mut output, None, &LspDocument { language_id: "python".into(), ..new.clone() }, &capabilities);
+    assert!(output.is_empty());
+    let reply = server_message_reply(json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}), &base, &mut capabilities, &mut registrations);
+    assert!(reply.get("result").is_some());
+    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities);
+    assert!(output.is_empty());
+    assert_eq!(capabilities, base);
 }
 
 #[test]
