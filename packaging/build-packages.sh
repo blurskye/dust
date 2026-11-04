@@ -22,7 +22,7 @@ tar --zstd --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
 install -m 0755 "$binary" "$dist/$name"
 
 for packager in deb rpm archlinux; do
-  VERSION=$version STAGE=$stage nfpm package --config packaging/nfpm.yaml \
+  VERSION=$version nfpm package --config packaging/nfpm.yaml \
     --packager "$packager" --target "$dist/"
 done
 

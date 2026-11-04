@@ -16,7 +16,7 @@ license: GPL-3.0-or-later
 recommends:
   - git
 contents:
-  - src: ${STAGE}/dust/dust
+  - src: target/package-stage/dust/dust
     dst: /usr/bin/dust
     file_info: { mode: 0755 }
   - src: packaging/dev.blurskye.Dust.desktop
