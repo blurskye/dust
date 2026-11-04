@@ -1227,7 +1227,7 @@ impl InteractiveApplication {
         crate::editor::ViewId,
         crate::editor::text::BufferRevision,
         usize,
-        String,
+        TextBuffer,
     )> {
         self.state
             .views
@@ -1241,8 +1241,7 @@ impl InteractiveApplication {
                     .slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?)
                     .ok()?;
                 let non_blank = before.chars().filter(|c| !c.is_whitespace()).count();
-                let content = text.to_string().chars().filter(|c| !c.is_whitespace()).collect();
-                Some((id, text.revision(), non_blank, content))
+                Some((id, text.revision(), non_blank, text.clone()))
             })
             .collect()
     }
@@ -1252,7 +1251,7 @@ impl InteractiveApplication {
             crate::editor::ViewId,
             crate::editor::text::BufferRevision,
             usize,
-            String,
+            TextBuffer,
         )>,
     ) {
         for (id, revision, non_blank, content) in positions {
@@ -1266,7 +1265,9 @@ impl InteractiveApplication {
             let text = text.to_string();
             // Punctuation and other code changes invalidate the ordinal. In that case keep
             // the cursor already mapped through the edit by the editor transaction.
-            if !text.chars().filter(|c| !c.is_whitespace()).eq(content.chars()) {
+            if !text.chars().filter(|c| !c.is_whitespace())
+                .eq(content.to_string().chars().filter(|c| !c.is_whitespace()))
+            {
                 continue;
             }
             let transaction = EditorTransaction::new(self.transaction_id())
@@ -2354,6 +2355,9 @@ impl InteractiveApplication {
             return;
         }
 
+        let Some(proposal) = self.workspace_edits.resource_proposal(&reply) else {
+            return;
+        };
         let Some(result) = self.workspace_edits.resource_finished(
             reply,
             &self.workspace.version(),
@@ -2364,7 +2368,7 @@ impl InteractiveApplication {
         let request = match result {
             Ok(request) => request,
             Err(error) => {
-                self.cancel_deferred_workspace_command(&error);
+                self.language.cancel_deferred_edits(Some(proposal));
                 self.show_error(error);
                 return;
             }
@@ -2375,7 +2379,7 @@ impl InteractiveApplication {
                 if let Some(draft) = draft
                     && let Err(error) = self.commit_editor_draft(draft, None, false)
                 {
-                    self.cancel_deferred_workspace_command(&error);
+                    self.language.cancel_deferred_edits(Some(proposal));
                     self.show_error(error);
                     return;
                 }
@@ -2384,13 +2388,13 @@ impl InteractiveApplication {
                 }
             }
             Err(error) => {
-                self.cancel_deferred_workspace_command(&error);
+                self.language.cancel_deferred_edits(Some(proposal));
                 self.show_error(error);
                 return;
             }
         }
-        if !self.workspace_edits.resources_pending()
-            && let Err(error) = self.language.finish_deferred_edit(true, None, &self.state)
+        if !self.workspace_edits.resources_pending(proposal)
+            && let Err(error) = self.language.finish_deferred_edit(proposal, &self.state)
         {
             self.show_error(error);
         }
@@ -2398,13 +2402,8 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
-    pub(super) fn cancel_deferred_workspace_command(&mut self, reason: &str) {
-        if let Err(error) = self.language.finish_deferred_edit(false, Some(reason.into()), &self.state) {
-            self.show_error(error);
-        }
-    }
     pub(in crate::editor::session) fn retire_workspace_resources(&mut self, reason: &str) {
-        self.cancel_deferred_workspace_command(reason);
+        self.language.cancel_deferred_edits(None);
         let (notices, requests) = self.workspace_edits.retire_resources(reason);
         for notice in notices {
             self.show_error(notice);
@@ -2425,7 +2424,7 @@ impl InteractiveApplication {
         &mut self,
         reason: &str,
     ) {
-        self.cancel_deferred_workspace_command(reason);
+        self.language.cancel_deferred_edits(None);
         for notice in self.workspace_edits.finish_resources(reason) {
             self.show_error(notice);
         }
@@ -3795,7 +3794,7 @@ impl InteractiveApplication {
                 | "textDocument/selectionRange",
                 LspFeatureResult::Empty,
             ) => LspFeatureResult::Ranges(Vec::new()),
-            ("textDocument/semanticTokens/full", LspFeatureResult::Empty) => {
+            ("textDocument/semanticTokens/full" | "textDocument/semanticTokens/full/delta", LspFeatureResult::Empty) => {
                 LspFeatureResult::SemanticTokens(crate::language::lsp::LspSemanticTokens {
                     result_id: None,
                     data: Vec::new(),
@@ -4421,9 +4420,6 @@ impl InteractiveApplication {
     ) -> Result<(), String> {
         if self.extension.owns_edit(key) {
             self.extension.finish_edit(key)
-        } else if applied && self.workspace_edits.resources_pending() {
-            self.language.defer_edit(key.clone());
-            Ok(())
         } else {
             self.language.finish_edit(key, applied, reason, &self.state)
         }
@@ -4499,13 +4495,21 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
+        let proposal = self.workspace_edits.proposal().expect("approved preview").id;
         let accepted = self.workspace_edits.accepted(self.state.publication());
         if accepted.is_ok() {
             self.close_picker();
         }
         match accepted {
             Ok(Some(origin)) => {
-                if let Err(error) = self.finish_workspace_edit_origin(&origin, true, None) {
+                let result = if !self.extension.owns_edit(&origin)
+                    && self.workspace_edits.resources_pending(proposal)
+                {
+                    self.language.defer_edit(&origin, proposal)
+                } else {
+                    self.finish_workspace_edit_origin(&origin, true, None)
+                };
+                if let Err(error) = result {
                     self.show_error(error);
                     return;
                 }

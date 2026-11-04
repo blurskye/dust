@@ -94,6 +94,43 @@ fn interactive_lsp_results_follow_the_request_cursor() {
 }
 
 #[test]
+fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("hover.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("symbol"), Some(path));
+    app.set_dashboard_visibility(false);
+    let first = super::language::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = super::language::fixture_owned_lsp(&mut app, "second", buffer);
+    drop(second);
+    app.language.select("first");
+    let document = app.active_lsp_document().unwrap().1;
+    app.request_lsp(LspFeature::Hover);
+    first.publish_result(app.language.generation(), "textDocument/hover", &document,
+        LspFeatureResult::Hover(LspHover {
+            range: None,
+            sections: vec![LspMarkupContent {
+                kind: LspMarkupKind::PlainText, value: "available".into(),
+            }],
+        }));
+    app.process_lsp_events();
+    assert!(app.ui.documentation_popup.is_some());
+    assert!(!app.language.request_pending());
+    assert!(!app.ui.notification_error);
+}
+
+#[test]
+fn capturing_formatter_positions_does_not_copy_unrelated_buffers() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text(&"other\n".repeat(1000)), None);
+    let before = TextBuffer::test_materializations();
+    let positions = app.view_positions(|_| true);
+    assert_eq!(TextBuffer::test_materializations(), before);
+    app.restore_view_positions(positions);
+    assert_eq!(TextBuffer::test_materializations(), before);
+}
+
+#[test]
 fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
     let mut app = app();
     let path = app.state.workspace_root.join("hints.rs");
@@ -662,6 +699,11 @@ fn null_projection_results_clear_previous_ranges_and_commands_succeed_quietly() 
             end: LspPosition { line: 0, character: 6 },
         }]));
     assert_eq!(app.ui.lsp_highlight_spans.len(), 1);
+    for method in ["textDocument/semanticTokens/full", "textDocument/semanticTokens/full/delta"] {
+        app.ui.lsp_semantic_spans = app.ui.lsp_highlight_spans.clone();
+        app.present_lsp_result("server", 2, method, &uri, LspFeatureResult::Empty);
+        assert!(app.ui.lsp_semantic_spans.is_empty(), "{method}");
+    }
     app.present_lsp_result("server", 2, "textDocument/documentHighlight", &uri, LspFeatureResult::Empty);
     assert!(app.ui.lsp_highlight_spans.is_empty());
     app.notify_message("keep this".into(), false);

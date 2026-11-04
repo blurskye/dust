@@ -312,8 +312,10 @@ impl LspSession {
         self.projection.request_servers = vec![server.to_owned()];
         // Like VS Code, every attached server answers, e.g. Tailwind classes beside TypeScript.
         for other in others {
-            if !self.synced(&other, owner.buffer, &owner.text) {
-                self.sync_owned(&other, document.clone(), (owner.buffer, owner.text.clone()))?;
+            if !self.synced(&other, owner.buffer, &owner.text)
+                && self.sync_owned(&other, document.clone(), (owner.buffer, owner.text.clone())).is_err()
+            {
+                continue;
             }
             if self
                 .service

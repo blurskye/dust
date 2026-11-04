@@ -1943,6 +1943,9 @@ fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_fai
         .open_text(TextBuffer::from_text("old"), Some(path.clone()));
     let transport = fixture_owned_lsp(&mut app, "action-server", buffer);
     app.language.select("action-server");
+    let unrelated = app.state.open_text(TextBuffer::from_text("other"),
+        Some(path.with_file_name("unrelated.rs"))).0;
+    drop(fixture_owned_lsp(&mut app, "stopped-server", unrelated));
     let uri = file_uri(&path);
     app.present_lsp_result(
         "action-server",
@@ -2024,6 +2027,18 @@ fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
         assert!(app.ui.picker.is_none());
         assert!(path.exists() && !target.exists());
         assert_eq!(transport.executed_command(), None, "resource is still staged");
+        // Accepting a resource edit must release its source, and must not delay an
+        // independent text-only action behind the explicitly staged rename.
+        app.present_lsp_result("action-server", 2, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: "independent".into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit::default()),
+                command: Some(LspCommand { command: "independent".into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert_eq!(transport.executed_command(), Some("independent".into()));
         if fail { fs::write(&target, "conflict").unwrap(); }
         app.process_effect(AppEffect::WorkspaceResourceApply);
         wait_vfs(&mut app);
@@ -2039,6 +2054,48 @@ fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
             assert_eq!(transport.executed_command(), Some("after-rename".into()));
         }
     }
+}
+
+#[test]
+fn deferred_code_action_commands_belong_to_their_own_resource_proposals() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let mut fixtures = Vec::new();
+    for name in ["first", "second"] {
+        let path = app.state.workspace_root.join(format!("{name}.rs"));
+        let target = path.with_file_name(format!("{name}-renamed.rs"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        let transport = fixture_owned_lsp(&mut app, name, buffer);
+        app.language.select(name);
+        app.present_lsp_result(name, 1, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: name.into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit {
+                    documents: Vec::new(),
+                    resources: vec![LspResourceOperation::Rename {
+                        old_uri: file_uri(&path), new_uri: file_uri(&target),
+                        overwrite: false, ignore_if_exists: false,
+                    }],
+                }),
+                command: Some(LspCommand { command: name.into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        wait_vfs(&mut app);
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert_eq!(transport.executed_command(), None);
+        fixtures.push((transport, path, target));
+    }
+    // The first resource fails; the second command must still run after its rename.
+    fs::write(&fixtures[0].2, "conflict").unwrap();
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    wait_vfs(&mut app);
+    assert_eq!(fixtures[0].0.executed_command(), None);
+    assert!(fixtures[0].1.exists());
+    assert_eq!(fixtures[1].0.executed_command(), Some("second".into()));
+    assert!(!fixtures[1].1.exists());
+    assert!(fixtures[1].2.exists());
 }
 
 #[test]

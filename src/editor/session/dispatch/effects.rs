@@ -3239,6 +3239,7 @@ impl InteractiveApplication {
             AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
             AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
             AppEffect::WorkspaceResourceApply => loop {
+                let proposal = self.workspace_edits.next_resource_proposal();
                 let result = match self.workspace_edits.prepare_resource(
                     &self.workspace,
                     self.configuration.binding_revision_ref(),
@@ -3247,13 +3248,13 @@ impl InteractiveApplication {
                     Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
                     Ok(None) => break,
                     Err(error) => {
-                        self.cancel_deferred_workspace_command(&error);
+                        self.language.cancel_deferred_edits(proposal);
                         self.show_error(error);
                         break;
                     }
                 };
                 if let Err(error) = result {
-                    self.cancel_deferred_workspace_command(&error);
+                    self.language.cancel_deferred_edits(proposal);
                     self.show_error(error);
                     break;
                 }

@@ -30,7 +30,7 @@ use crate::{
         OwnedLspEvent,
     },
     tools::{ToolDefinition, nix_lsp_launch_environment_for_workspace_at, tool_launch_environment},
-    workspace::{RootId, WorkspaceTrust},
+    workspace::{ProposalId, RootId, WorkspaceTrust},
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -136,7 +136,7 @@ pub(super) struct LspSession {
     preparation: launch::Preparation,
     service: LspService,
     edits: LspEditSources,
-    deferred_edit: Option<OriginKey>,
+    deferred_commands: Vec<(ProposalId, String, crate::language::lsp::LspCommand)>,
     sessions: HashMap<String, LspRuntimeState>,
     active: Option<String>,
     synced: HashMap<(String, BufferId), TextVersion>,
@@ -350,65 +350,85 @@ impl LspSession {
         let command = self.edits.take_command(key);
         self.edits.finish(key, applied, reason)?;
         if applied && let Some((server, command)) = command {
+            self.execute_edit_command(&server, command, editor)?;
+        }
+        Ok(())
+    }
+    fn execute_edit_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+        editor: &EditorState,
+    ) -> Result<(), String> {
             let fallback = self
                 .sessions
-                .get(&server)
+                .get(server)
                 .and_then(|session| session.documents.values().next())
                 .cloned()
                 .ok_or("code-action server is no longer attached")?;
-            self.sync_edit_documents(editor)?;
+            self.sync_edit_documents(server, editor)?;
             // executeCommand itself has no document parameter, even when the edit deleted it.
-            let document = self.sessions.get(&server)
+            let document = self.sessions.get(server)
                 .and_then(|session| session.documents.values().next()).cloned().unwrap_or(fallback);
             let generation = self
                 .next_generation()
                 .ok_or("language-server request identity exhausted")?;
             self.service
                 .request(
-                    &server,
+                    server,
                     crate::language::lsp::LspFeature::ExecuteCommand(command),
                     document,
                     crate::editor::text::ByteOffset(0),
                     generation,
                 )
                 .map_err(|error| error.to_string())?;
-        }
         Ok(())
     }
-    fn sync_edit_documents(&mut self, editor: &EditorState) -> Result<(), String> {
-        let documents = self.sessions.iter().flat_map(|(server, session)| {
-            session.documents.iter().map(|(id, document)| (server.clone(), *id, document.clone()))
+    fn sync_edit_documents(&mut self, server: &str, editor: &EditorState) -> Result<(), String> {
+        let documents = self.sessions.get(server).into_iter().flat_map(|session| {
+            session.documents.iter().map(|(id, document)| (*id, document.clone()))
         }).collect::<Vec<_>>();
-        for (server, id, mut document) in documents {
+        for (id, mut document) in documents {
             let current = editor.buffers.get(id).filter(|buffer| buffer.path.is_some());
             let path_changed = current.is_none_or(|buffer| buffer.path.as_ref() != Some(&document.path));
             if path_changed {
-                self.close(&server, document.uri()).map_err(|error| error.to_string())?;
-                self.detach(&server, id);
+                self.close(server, document.uri()).map_err(|error| error.to_string())?;
+                self.detach(server, id);
             }
             let Some(buffer) = current else { continue; };
             let version = buffer.text.source_version();
-            if !path_changed && self.synced(&server, id, &version) { continue; }
+            if !path_changed && self.synced(server, id, &version) { continue; }
             document.path = buffer.path.clone().expect("checked document path");
+            if crate::language::lsp::language_id_for_path(&document.path) != Some(document.language_id.as_str()) {
+                continue;
+            }
             document.version = buffer.text.revision().0;
             document.text = buffer.text.to_string();
-            self.sync_owned(&server, document, (id, version)).map_err(|error| error.to_string())?;
+            self.sync_owned(server, document, (id, version)).map_err(|error| error.to_string())?;
         }
         Ok(())
     }
-    pub(super) fn defer_edit(&mut self, key: OriginKey) {
-        self.deferred_edit = Some(key);
+    pub(super) fn defer_edit(&mut self, key: &OriginKey, proposal: ProposalId) -> Result<(), String> {
+        let command = self.edits.take_command(key);
+        self.edits.finish(key, true, None)?;
+        if let Some((server, command)) = command {
+            self.deferred_commands.push((proposal, server, command));
+        }
+        Ok(())
     }
     pub(super) fn finish_deferred_edit(
         &mut self,
-        applied: bool,
-        reason: Option<String>,
+        proposal: ProposalId,
         editor: &EditorState,
     ) -> Result<(), String> {
-        if let Some(key) = self.deferred_edit.take() {
-            self.finish_edit(&key, applied, reason, editor)?;
+        if let Some(index) = self.deferred_commands.iter().position(|(id, _, _)| *id == proposal) {
+            let (_, server, command) = self.deferred_commands.remove(index);
+            self.execute_edit_command(&server, command, editor)?;
         }
         Ok(())
+    }
+    pub(super) fn cancel_deferred_edits(&mut self, proposal: Option<ProposalId>) {
+        self.deferred_commands.retain(|(id, _, _)| proposal.is_some_and(|proposal| *id != proposal));
     }
     pub(super) fn set_edit_command(
         &mut self,
