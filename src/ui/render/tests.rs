@@ -915,6 +915,31 @@ fn workspace_tab_line_keeps_the_active_label_visible() {
 }
 
 #[test]
+fn workspace_tab_line_measures_sanitized_labels() {
+    let loaded = crate::config::load_bundled_config();
+    for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        let mut config = loaded.config.clone();
+        config.editor.ambiguous_width = ambiguous;
+        for title in ["\n".repeat(20), "\t".repeat(20), "\u{200b}".repeat(20)] {
+            let mut state = EditorState::new(PathBuf::from("/workspace"));
+            state.open_text(
+                crate::editor::text::TextBuffer::from_text("first"),
+                Some(PathBuf::from(format!("/workspace/{title}"))),
+            );
+            state.new_tab().unwrap();
+            state.open_text(
+                crate::editor::text::TextBuffer::from_text("second"),
+                Some(PathBuf::from("/workspace/active.rs")),
+            );
+            let ui = ui_with_editor_layout(&state);
+            let frame = render(&state, &ui, &config, &loaded.dashboard, 16, 6);
+            assert!(frame.grid.row_text(0).starts_with("[active.rs]"));
+            assert_eq!(frame.grid.get(0, 0).unwrap().style, crate::ui::Style::StatusAccent);
+        }
+    }
+}
+
+#[test]
 fn workspace_editor_cursor_follows_compositor_focus() {
     use crate::ui::window::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
 

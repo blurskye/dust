@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::ui::render::editor::END_OF_BUFFER_MARKER;
 use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
 use crate::{
@@ -408,10 +410,26 @@ pub(super) fn render_workspace(
             labels.push((label, style));
         }
         // Keep the active label in view, dropping earlier tabs when they do not fit.
+        // Match CellGrid's replacement and per-grapheme width policy, including
+        // filenames containing controls or standalone zero-width characters.
+        let label_width = |label: &str| {
+            label.graphemes(true).map(|grapheme| {
+                let safe = if grapheme == "\t" {
+                    " "
+                } else if grapheme.chars().any(char::is_control) {
+                    CONTROL_CHARACTER_REPLACEMENT
+                } else if text_width(grapheme, config.editor.ambiguous_width) == 0 {
+                    ZERO_WIDTH_REPLACEMENT
+                } else {
+                    grapheme
+                };
+                text_width(safe, config.editor.ambiguous_width).clamp(1, 2)
+            }).sum::<usize>()
+        };
         let mut start = active;
-        let mut used = text_width(&labels[active].0, config.editor.ambiguous_width);
+        let mut used = label_width(&labels[active].0);
         while start > 0 {
-            let preceding = text_width(&labels[start - 1].0, config.editor.ambiguous_width) + 1;
+            let preceding = label_width(&labels[start - 1].0) + 1;
             if used.saturating_add(preceding) > usize::from(width) {
                 break;
             }
