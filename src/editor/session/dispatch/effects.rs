@@ -12591,6 +12591,13 @@ impl InteractiveApplication {
         if self.workspace.require_path(&document.path).is_err() {
             return;
         }
+        // Wait before recording an observation or copying a launch document: another
+        // language's discovery can still own the shared lane.
+        if !self.workspace.execution_lane(
+            crate::editor::session::workspace::DiscoveryKind::Language,
+        ).discovery_available() {
+            return;
+        }
         // Every matching server attaches, as in VS Code and Neovim: Tailwind runs
         // beside the HTML or TypeScript server. They start one at a time because
         // project-root discovery takes one launch at a time.

@@ -583,6 +583,10 @@ mod tests {
             [("root".into(), identity)],
         ).unwrap();
         let mut workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let identity = workspace.roots()[0].identity.clone();
+        workspace.fixture_identity(crate::workspace::RootId(1), identity.clone()).unwrap();
+        workspace.fixture_trust_identity(identity);
+        workspace.reconcile_trust();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
         let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
@@ -614,6 +618,9 @@ mod tests {
             launchable_server: Some("another-server".into()),
         };
         assert_eq!(owner.observe(observation.clone(), false).as_deref(), Some("another-server"));
+        assert!(workspace.execution_lane(
+            crate::editor::session::workspace::DiscoveryKind::Language,
+        ).current(&context.workspace));
         assert!(owner.discover_launch(value, context, workspace.execution_lane(
             crate::editor::session::workspace::DiscoveryKind::Language,
         )).unwrap_err().contains("busy"));

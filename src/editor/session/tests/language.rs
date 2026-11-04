@@ -53,6 +53,31 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
         "trusting the workspace starts the server"
     );
     assert_eq!(app.workspace.trust(), WorkspaceTrust::Trusted);
+
+    // Switching languages during discovery must neither consume the next
+    // document's observation nor repeatedly report a busy error on each frame.
+    let mut python = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "automatic-rust").unwrap().clone();
+    python.definition.id = "automatic-python".into();
+    python.definition.languages = vec!["python".into()];
+    app.tooling.fixture_insert(python);
+    let path = app.state.workspace_root.join("main.py");
+    app.state.open_text(
+        TextBuffer::from_text("print('hello')"),
+        Some(path),
+    );
+    for _ in 0..3 {
+        app.sync_lsp_document();
+        assert!(!app.ui.notification_error, "busy discovery is not an autostart error");
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.language.project_pending() {
+        app.process_lsp_project_root();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.sync_lsp_document();
+    assert!(app.language.launch_pending("automatic-python"), "the unchanged document retries after discovery finishes");
 }
 
 #[test]
