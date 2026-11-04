@@ -182,7 +182,8 @@ pub fn read_conflict_state(repository: &Path) -> Result<GitConflictState, GitCon
             .as_ref()
             .or(conflict.our.as_ref())
             .or(conflict.their.as_ref())
-            .map(|entry| PathBuf::from(String::from_utf8_lossy(&entry.path).into_owned()));
+            .map(|entry| git_path(&entry.path).ok_or(GitConflictError::Backend))
+            .transpose()?;
         let Some(path) = path else {
             continue;
         };
@@ -278,24 +279,7 @@ pub fn read_side_content(
 ) -> Result<String, GitConflictResolveError> {
     let repo =
         git2::Repository::open(repository).map_err(|_| GitConflictResolveError::NotRepository)?;
-    // Index conflict paths are RELATIVE to the worktree root, while a caller holds an absolute
-    // buffer path, so the caller's path is made relative before comparison.
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        repo.workdir().unwrap_or(repository).join(path)
-    };
-    let canonical = std::fs::canonicalize(&absolute).unwrap_or(absolute);
-    let wanted = match repo.workdir() {
-        Some(workdir) => {
-            let workdir = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-            canonical
-                .strip_prefix(&workdir)
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|_| path.to_path_buf())
-        }
-        None => path.to_path_buf(),
-    };
+    let wanted = conflict_relative_path(&repo, path)?;
     let index = repo
         .index()
         .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
@@ -313,7 +297,7 @@ pub fn read_side_content(
             .or(conflict.their.as_ref());
         if let Some(entry) = entry {
             // Index paths are bytes; compare against the caller's relativized path directly.
-            if Path::new(&String::from_utf8_lossy(&entry.path).into_owned()) == wanted.as_path() {
+            if git_path(&entry.path).as_deref() == Some(wanted.as_path()) {
                 found = Some(conflict);
                 break;
             }
@@ -338,6 +322,42 @@ pub fn read_side_content(
         .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
     String::from_utf8(blob.content().to_vec())
         .map_err(|_| GitConflictResolveError::NotText(wanted.display().to_string()))
+}
+
+fn git_path(bytes: &[u8]) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Some(std::ffi::OsString::from_vec(bytes.to_vec()).into())
+    }
+    #[cfg(not(unix))]
+    {
+        std::str::from_utf8(bytes).ok().map(PathBuf::from)
+    }
+}
+
+// Index names are lexical worktree-relative paths, not the targets of worktree symlinks.
+fn conflict_relative_path(
+    repo: &git2::Repository,
+    path: &Path,
+) -> Result<PathBuf, GitConflictResolveError> {
+    let workdir = repo.workdir().ok_or(GitConflictResolveError::NotRepository)?;
+    let relative = if path.is_absolute() {
+        path.strip_prefix(workdir)
+            .map_err(|_| GitConflictResolveError::NoConflict(path.display().to_string()))?
+    } else {
+        path
+    };
+    let mut normalized = PathBuf::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(name) => normalized.push(name),
+            std::path::Component::CurDir => {},
+            std::path::Component::ParentDir if normalized.pop() => {},
+            _ => return Err(GitConflictResolveError::NoConflict(path.display().to_string())),
+        }
+    }
+    Ok(normalized)
 }
 
 /// Why a recovery action was refused. Every reason is decided BEFORE the first write.
@@ -366,6 +386,7 @@ pub struct GitRecoveryOutcome {
     pub operation: String,
     pub commit: Option<git2::Oid>,
     pub restored_to: Option<git2::Oid>,
+    pub cleanup_warning: Option<String>,
 }
 
 /// Finish a paused operation by writing the merge commit its recorded parents describe.
@@ -401,48 +422,42 @@ pub fn continue_operation(
         .head()
         .and_then(|head| head.peel_to_commit())
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    // A merge records the operation's other head as a second parent; without it the commit would
-    // silently be an ordinary commit and the merge would be lost.
-    let merge_head = repo
-        .find_reference("MERGE_HEAD")
-        .and_then(|reference| {
-            reference
-                .target()
-                .ok_or_else(|| git2::Error::from_str("MERGE_HEAD has no target"))
-        })
-        .and_then(|oid| repo.find_commit(oid))
-        .map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
-    let signature = repo
-        .signature()
-        .or_else(|_| git2::Signature::now("Dust", "dust@example.invalid"))
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let message = if message.trim().is_empty() {
-        format!("Merge {}", &merge_head.id().to_string()[..8])
+    let merge_heads = recorded_merge_heads(&repo)?
+        .into_iter()
+        .map(|oid| repo.find_commit(oid).map_err(|_| GitRecoveryRefusal::NoRecordedStart))
+        .collect::<Result<Vec<_>, _>>()?;
+    // A previous attempt may have committed successfully but failed to remove MERGE_HEAD.
+    // In that case retry only cleanup, never create another merge commit.
+    let already_committed = head.tree_id() == tree_id
+        && head.parent_count() == merge_heads.len() + 1
+        && merge_heads.iter().enumerate().all(|(index, parent)| {
+            head.parent_id(index + 1).ok() == Some(parent.id())
+        });
+    let oid = if already_committed {
+        head.id()
     } else {
-        message.to_owned()
+        let signature = repo.signature().map_err(|error| {
+            GitRecoveryRefusal::Backend(format!(
+                "configure Git user.name and user.email before continuing: {}", error.message()
+            ))
+        })?;
+        let message = if message.trim().is_empty() {
+            format!("Merge {}", merge_heads.iter().map(|head| head.id().to_string()[..8].to_owned()).collect::<Vec<_>>().join(", "))
+        } else {
+            message.to_owned()
+        };
+        let parents = std::iter::once(&head).chain(merge_heads.iter()).collect::<Vec<_>>();
+        repo.commit(Some("HEAD"), &signature, &signature, &message, &tree, &parents)
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?
     };
-    let oid = repo
-        .commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            &message,
-            &tree,
-            &[&head, &merge_head],
-        )
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    drop(tree);
-    drop(head);
-    drop(merge_head);
-    index
-        .clear()
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    repo.cleanup_state()
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let cleanup_warning = repo.cleanup_state().err().map(|error| {
+        format!("commit {oid} was created, but operation cleanup failed: {}; retry continue to clean up", error.message())
+    });
     Ok(GitRecoveryOutcome {
         operation,
         commit: Some(oid),
         restored_to: None,
+        cleanup_warning,
     })
 }
 
@@ -453,20 +468,38 @@ pub fn continue_operation(
 pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
     let operation = operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("abort"))?;
-    let recorded = repo
-        .find_reference("ORIG_HEAD")
-        .and_then(|reference| {
-            reference
-                .target()
-                .ok_or_else(|| git2::Error::from_str("ORIG_HEAD has no target"))
-        })
-        .map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
-    // What the operation itself touched: the conflicted paths and the paths whose content the
-    // merge changed. A change OUTSIDE that set is the user's, and abort must not discard it.
-    let touched = merge_touched_paths(&repo, recorded)?;
+    let mut rebase = if operation == "rebase" {
+        Some(repo.open_rebase(None).map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?)
+    } else {
+        None
+    };
+    let recorded = match operation.as_str() {
+        "merge" => repo.refname_to_id("ORIG_HEAD").ok(),
+        "cherry-pick" | "revert" => {
+            // Single picks/reverts leave HEAD at their starting commit. Sequences record it.
+            if repo.path().join("sequencer").exists() {
+                std::fs::read_to_string(repo.path().join("sequencer/head"))
+                    .ok().and_then(|head| git2::Oid::from_str(head.trim()).ok())
+            } else {
+                repo.head().ok().and_then(|head| head.target())
+            }
+        }
+        "rebase" => rebase.as_ref().and_then(|rebase| rebase.orig_head_id()),
+        _ => return Err(GitRecoveryRefusal::Backend(format!("aborting {operation} is not supported"))),
+    }.ok_or(GitRecoveryRefusal::NoRecordedStart)?;
+    let touched = merge_touched_paths(&repo, recorded, &operation)?;
     let risky = risky_changes(&repo, &touched)?;
     if !risky.is_empty() {
         return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
+    }
+    if let Some(rebase) = &mut rebase {
+        rebase.abort().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        return Ok(GitRecoveryOutcome {
+            operation,
+            commit: None,
+            restored_to: Some(recorded),
+            cleanup_warning: None,
+        });
     }
     let object = repo
         .find_object(recorded, None)
@@ -501,6 +534,7 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
         operation,
         commit: None,
         restored_to: Some(recorded),
+        cleanup_warning: None,
     })
 }
 
@@ -514,11 +548,22 @@ fn conflict_count(repo: &git2::Repository) -> Result<usize, GitRecoveryRefusal> 
     Ok(conflicts.count())
 }
 
-/// The paths the operation itself touched: conflicted paths plus paths that differ between the
-/// recorded starting point and the current index.
+fn recorded_merge_heads(repo: &git2::Repository) -> Result<Vec<git2::Oid>, GitRecoveryRefusal> {
+    let contents = std::fs::read_to_string(repo.path().join("MERGE_HEAD"))
+        .map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
+    let heads = contents.lines().map(|line| git2::Oid::from_str(line.trim())
+        .map_err(|_| GitRecoveryRefusal::NoRecordedStart)).collect::<Result<Vec<_>, _>>()?;
+    if heads.is_empty() {
+        return Err(GitRecoveryRefusal::NoRecordedStart);
+    }
+    Ok(heads)
+}
+
+/// Determine operation paths from its commits, never from arbitrary user-staged changes.
 fn merge_touched_paths(
     repo: &git2::Repository,
     recorded: git2::Oid,
+    operation: &str,
 ) -> Result<std::collections::BTreeSet<PathBuf>, GitRecoveryRefusal> {
     let mut touched = std::collections::BTreeSet::new();
     let index = repo
@@ -536,27 +581,34 @@ fn merge_touched_paths(
             .or(conflict.our.as_ref())
             .or(conflict.their.as_ref())
         {
-            touched.insert(PathBuf::from(
-                String::from_utf8_lossy(&entry.path).into_owned(),
-            ));
+            touched.insert(git_path(&entry.path).ok_or_else(|| GitRecoveryRefusal::Backend("unsupported index path encoding".into()))?);
         }
     }
     drop(conflicts);
-    // Paths whose INDEX content differs from the recorded revision were changed by the
-    // operation, not by the user.
-    let recorded_tree = repo
-        .find_commit(recorded)
-        .and_then(|commit| commit.tree())
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let diff = repo
-        .diff_tree_to_index(Some(&recorded_tree), Some(&index), None)
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    for delta in diff.deltas() {
-        for path in [delta.old_file().path(), delta.new_file().path()]
-            .into_iter()
-            .flatten()
-        {
-            touched.insert(path.to_path_buf());
+    let incoming = match operation {
+        "merge" => recorded_merge_heads(repo)?,
+        "cherry-pick" => vec![repo.refname_to_id("CHERRY_PICK_HEAD").map_err(|_| GitRecoveryRefusal::NoRecordedStart)?],
+        "revert" => vec![repo.refname_to_id("REVERT_HEAD").map_err(|_| GitRecoveryRefusal::NoRecordedStart)?],
+        _ => Vec::new(),
+    };
+    for incoming in incoming {
+        let commit = repo.find_commit(incoming)
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        let base = if operation == "merge" {
+            repo.merge_base(recorded, incoming)
+        } else {
+            commit.parent_id(0)
+        }.map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
+        let base_tree = repo.find_commit(base).and_then(|commit| commit.tree())
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        let incoming_tree = commit.tree()
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&incoming_tree), None)
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        for delta in diff.deltas() {
+            for path in [delta.old_file().path(), delta.new_file().path()].into_iter().flatten() {
+                touched.insert(path.to_path_buf());
+            }
         }
     }
     Ok(touched)
@@ -575,10 +627,7 @@ fn risky_changes(
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     let mut risky = Vec::new();
     for entry in statuses.iter() {
-        let Some(path) = entry.path() else {
-            continue;
-        };
-        let path = PathBuf::from(path);
+        let path = git_path(entry.path_bytes()).ok_or_else(|| GitRecoveryRefusal::Backend("unsupported status path encoding".into()))?;
         let status = entry.status();
         // A conflicted entry belongs to the operation; so does a change the operation made.
         if status.contains(git2::Status::CONFLICTED) || touched.contains(&path) {
@@ -629,9 +678,21 @@ pub fn plan_replacement(
         ));
     }
     let mut files = Vec::new();
+    let repo = git2::Repository::open(repository)
+        .map_err(|_| GitConflictResolveError::NotRepository)?;
+    let workdir = repo.workdir().ok_or(GitConflictResolveError::NotRepository)?;
     for path in paths {
-        let content = read_side_content(repository, path, choice)?;
-        files.push((path.clone(), content));
+        let destination = workdir.join(conflict_relative_path(&repo, path)?);
+        // Replacing a symlink would replace the alias, not the selected repository file.
+        let mut parent = destination.as_path();
+        while parent != workdir {
+            if std::fs::symlink_metadata(parent).is_ok_and(|metadata| metadata.is_symlink()) {
+                return Err(GitConflictResolveError::NoConflict(path.display().to_string()));
+            }
+            parent = parent.parent().ok_or(GitConflictResolveError::NotRepository)?;
+        }
+        let content = read_side_content(repository, &destination, choice)?;
+        files.push((destination, content));
     }
     Ok(GitReplacementPlan { choice, files })
 }

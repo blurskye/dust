@@ -10088,6 +10088,9 @@ impl InteractiveApplication {
                     ),
                     false,
                 );
+                if let Some(warning) = outcome.cleanup_warning {
+                    self.show_error(warning);
+                }
                 self.after_conflict_recovery();
             }
             Err(refusal) => self.show_error(refusal.to_string()),

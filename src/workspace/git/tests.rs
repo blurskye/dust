@@ -1882,12 +1882,23 @@ fn conflict_provenance_reports_the_three_sides_from_the_index_on_demand() {
 
 /// Build a repository paused in a real merge conflict, returning the working directory.
 fn conflicted_fixture(root: &std::path::Path) -> (git2::Oid, git2::Oid) {
+    conflicted_fixture_with_extra(root, None)
+}
+
+fn conflicted_fixture_with_extra(root: &Path, extra: Option<&Path>) -> (git2::Oid, git2::Oid) {
     let repo = git2::Repository::init(root).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.test").unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
     std::fs::write(root.join("shared.txt"), "base\n").unwrap();
     std::fs::write(root.join("untouched.txt"), "original\n").unwrap();
     {
         let mut index = repo.index().unwrap();
+        if let Some(extra) = extra {
+            std::fs::write(root.join(extra), "original\n").unwrap();
+            index.add_path(extra).unwrap();
+        }
         index.add_path(std::path::Path::new("shared.txt")).unwrap();
         index
             .add_path(std::path::Path::new("untouched.txt"))
@@ -1942,6 +1953,108 @@ fn conflicted_fixture(root: &std::path::Path) -> (git2::Oid, git2::Oid) {
     repo.reference("ORIG_HEAD", our_tip, true, "fixture")
         .unwrap();
     (our_tip, their_tip)
+}
+
+#[cfg(unix)]
+#[test]
+fn conflict_paths_preserve_native_bytes_and_do_not_follow_worktree_symlinks() {
+    use std::os::unix::{ffi::OsStrExt, fs::symlink};
+    let dir = tempdir().unwrap();
+    let native = Path::new(std::ffi::OsStr::from_bytes(b"bad\xff.txt"));
+    conflicted_fixture_with_extra(dir.path(), Some(native));
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    // Move the existing conflict to the native name, using Git's byte-preserving index input.
+    let shared = repo.index().unwrap().conflicts().unwrap().next().unwrap().unwrap();
+    let mut child = std::process::Command::new("git").arg("-C").arg(dir.path())
+        .args(["update-index", "-z", "--index-info"]).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().unwrap();
+        write!(stdin, "0 {}\t", git2::Oid::zero()).unwrap();
+        stdin.write_all(native.as_os_str().as_bytes()).unwrap();
+        stdin.write_all(b"\0").unwrap();
+        for (stage, entry) in [(1, shared.ancestor), (2, shared.our), (3, shared.their)] {
+            let entry = entry.unwrap();
+            write!(stdin, "{:o} {} {stage}\t", entry.mode, entry.id).unwrap();
+            stdin.write_all(native.as_os_str().as_bytes()).unwrap();
+            stdin.write_all(b"\0").unwrap();
+        }
+    }
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    let display_alias = dir.path().join(native.to_string_lossy().as_ref());
+    std::fs::write(&display_alias, "unrelated\n").unwrap();
+    let state = read_conflict_state(dir.path()).unwrap();
+    assert!(state.conflicts.iter().any(|entry| entry.path == native));
+    assert_eq!(read_side_content(dir.path(), native, GitConflictChoice::Theirs).unwrap(), "theirs\n");
+    assert!(read_side_content(dir.path(), &display_alias, GitConflictChoice::Theirs).is_err());
+    let shared_path = dir.path().join("shared.txt");
+    std::fs::remove_file(&shared_path).unwrap();
+    symlink(&display_alias, &shared_path).unwrap();
+    assert_eq!(read_side_content(dir.path(), &shared_path, GitConflictChoice::Ours).unwrap(), "ours\n");
+    assert_eq!(std::fs::read_to_string(display_alias).unwrap(), "unrelated\n");
+}
+
+#[test]
+fn continue_requires_identity_and_preserves_every_merge_parent() {
+    let dir = tempdir().unwrap();
+    let (ours, theirs) = conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let head = repo.find_commit(ours).unwrap();
+    let signature = repo.signature().unwrap();
+    let third = repo.commit(None, &signature, &signature, "third", &head.tree().unwrap(), &[&head]).unwrap();
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{theirs}\n{third}\n")).unwrap();
+    std::fs::write(dir.path().join("shared.txt"), "resolved\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("shared.txt")).unwrap();
+    index.write().unwrap();
+    repo.config().unwrap().set_str("user.name", "").unwrap();
+    repo.config().unwrap().set_str("user.email", "").unwrap();
+    let error = continue_operation(dir.path(), "merge").unwrap_err();
+    assert!(error.to_string().contains("configure Git user.name and user.email"));
+    assert_eq!(repo.head().unwrap().target(), Some(ours));
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    repo.config().unwrap().set_str("user.name", "Test User").unwrap();
+    repo.config().unwrap().set_str("user.email", "test@example.test").unwrap();
+    let outcome = continue_operation(dir.path(), "merge").unwrap();
+    let merged = repo.find_commit(outcome.commit.unwrap()).unwrap();
+    assert_eq!(merged.parent_ids().collect::<Vec<_>>(), vec![ours, theirs, third]);
+    assert_eq!(merged.author().name(), Some("Test User"));
+    assert!(outcome.cleanup_warning.is_none());
+    // Recreate failed cleanup's remaining state; retry must not commit a second time.
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{theirs}\n{third}\n")).unwrap();
+    let retried = continue_operation(dir.path(), "merge again").unwrap();
+    assert_eq!(retried.commit, Some(merged.id()));
+    assert_eq!(repo.head().unwrap().target(), Some(merged.id()));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[cfg(unix)]
+#[test]
+fn continue_reports_committed_revision_when_cleanup_fails_and_retry_only_cleans_up() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let (ours, theirs) = conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join("shared.txt"), "resolved\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("shared.txt")).unwrap();
+    index.write().unwrap();
+    let permissions = std::fs::metadata(repo.path()).unwrap().permissions();
+    std::fs::set_permissions(repo.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result = continue_operation(dir.path(), "merge");
+    std::fs::set_permissions(repo.path(), permissions).unwrap();
+    let outcome = result.unwrap();
+    let oid = outcome.commit.unwrap();
+    assert!(outcome.cleanup_warning.unwrap().contains(&oid.to_string()));
+    assert_eq!(repo.head().unwrap().target(), Some(oid));
+    assert_eq!(repo.find_commit(oid).unwrap().parent_ids().collect::<Vec<_>>(), vec![ours, theirs]);
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    let retry = continue_operation(dir.path(), "retry").unwrap();
+    assert_eq!(retry.commit, Some(oid));
+    assert!(retry.cleanup_warning.is_none());
+    assert_eq!(repo.head().unwrap().target(), Some(oid));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
 
 #[test]
@@ -2008,6 +2121,62 @@ fn continue_refuses_while_conflicts_remain_and_then_records_two_parents() {
         "the operation is finished, not left paused"
     );
     assert_eq!(repo.head().unwrap().target(), Some(commit.id()));
+}
+
+#[test]
+fn abort_cherry_picks_and_reverts_ignore_missing_or_stale_orig_head() {
+    for revert in [false, true] {
+        for stale in [false, true] {
+            let dir = tempdir().unwrap();
+            let (ours, theirs) = conflicted_fixture(dir.path());
+            let repo = git2::Repository::open(dir.path()).unwrap();
+            repo.cleanup_state().unwrap();
+            repo.reset(&repo.find_object(ours, None).unwrap(), git2::ResetType::Hard, None).unwrap();
+            let incoming = repo.find_commit(theirs).unwrap();
+            if revert {
+                repo.revert(&incoming, None).unwrap();
+            } else {
+                repo.cherrypick(&incoming, None).unwrap();
+            }
+            assert!(repo.index().unwrap().has_conflicts());
+            if stale {
+                repo.reference("ORIG_HEAD", theirs, true, "stale fixture").unwrap();
+            } else {
+                repo.find_reference("ORIG_HEAD").unwrap().delete().unwrap();
+            }
+            let branch = repo.head().unwrap().name().unwrap().to_owned();
+            let outcome = abort_operation(dir.path()).unwrap();
+            assert_eq!(outcome.restored_to, Some(ours));
+            assert_eq!(repo.head().unwrap().target(), Some(ours));
+            assert_eq!(repo.head().unwrap().name(), Some(branch.as_str()));
+            assert_eq!(repo.state(), git2::RepositoryState::Clean);
+            assert_eq!(std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(), "ours\n");
+        }
+    }
+}
+
+#[test]
+fn abort_rebase_restores_original_branch_attachment_and_tip() {
+    let dir = tempdir().unwrap();
+    let (ours, theirs) = conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    repo.cleanup_state().unwrap();
+    repo.reset(&repo.find_object(ours, None).unwrap(), git2::ResetType::Hard, None).unwrap();
+    let branch = repo.head().unwrap().name().unwrap().to_owned();
+    let upstream = repo.find_annotated_commit(theirs).unwrap();
+    let mut rebase = repo.rebase(None, Some(&upstream), None, None).unwrap();
+    rebase.next().unwrap().unwrap();
+    assert!(repo.head_detached().unwrap());
+    assert!(repo.index().unwrap().has_conflicts());
+    drop(rebase);
+    let outcome = abort_operation(dir.path()).unwrap();
+    assert_eq!(outcome.restored_to, Some(ours));
+    assert_eq!(repo.head().unwrap().name(), Some(branch.as_str()));
+    assert_eq!(repo.head().unwrap().target(), Some(ours));
+    assert_eq!(repo.refname_to_id(&branch).unwrap(), ours);
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(), "ours\n");
 }
 
 #[test]
@@ -2171,6 +2340,27 @@ fn the_operation_bar_lists_only_the_actions_valid_in_the_repositorys_real_state(
         "no operation means no bar at all, never completion"
     );
     let _ = GitConflictChoice::Ours;
+}
+
+#[cfg(unix)]
+#[test]
+fn conflict_replacement_rejects_symlink_aliases_and_normalizes_relative_paths() {
+    use std::os::unix::fs::symlink;
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    conflicted_fixture(&root);
+    let alias = dir.path().join("alias");
+    let destination = root.join("shared.txt");
+    symlink(&destination, &alias).unwrap();
+    let before = std::fs::read(&destination).unwrap();
+    assert!(plan_replacement(&root, std::slice::from_ref(&alias), GitConflictChoice::Ours).is_err());
+    assert!(std::fs::symlink_metadata(&alias).unwrap().is_symlink());
+    assert_eq!(std::fs::read(&destination).unwrap(), before);
+    let plan = plan_replacement(&root, &[PathBuf::from("sub/../shared.txt")], GitConflictChoice::Ours).unwrap();
+    assert_eq!(plan.files[0].0, destination);
+    apply_replacement(&plan).unwrap();
+    assert_eq!(std::fs::read_to_string(destination).unwrap(), "ours\n");
 }
 
 #[test]
@@ -2873,6 +3063,37 @@ fn conflict_replacement_is_atomic_and_restores_missing_working_copies() {
 }
 
 #[test]
+fn abort_refuses_unrelated_staged_edits_without_changing_index_or_worktree() {
+    let dir = tempdir().unwrap();
+    let (ours, _) = conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join("untouched.txt"), "user-staged work\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("untouched.txt")).unwrap();
+    index.write().unwrap();
+    let before = git_index_fingerprint(dir.path()).unwrap();
+    assert!(matches!(abort_operation(dir.path()), Err(GitRecoveryRefusal::WouldDiscard(paths)) if paths.contains("untouched.txt")));
+    assert_eq!(git_index_fingerprint(dir.path()).unwrap(), before);
+    assert_eq!(repo.head().unwrap().target(), Some(ours));
+    assert_eq!(std::fs::read_to_string(dir.path().join("untouched.txt")).unwrap(), "user-staged work\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn abort_protects_non_utf8_tracked_worktree_edits() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempdir().unwrap();
+    let native = Path::new(std::ffi::OsStr::from_bytes(b"mine\xff.txt"));
+    let (ours, _) = conflicted_fixture_with_extra(dir.path(), Some(native));
+    std::fs::write(dir.path().join(native), "saved edits\n").unwrap();
+    let before = git_index_fingerprint(dir.path()).unwrap();
+    assert!(matches!(abort_operation(dir.path()), Err(GitRecoveryRefusal::WouldDiscard(_))));
+    assert_eq!(git_index_fingerprint(dir.path()).unwrap(), before);
+    assert_eq!(git2::Repository::open(dir.path()).unwrap().head().unwrap().target(), Some(ours));
+    assert_eq!(std::fs::read_to_string(dir.path().join(native)).unwrap(), "saved edits\n");
+}
+
+#[test]
 fn abort_preserves_unrelated_tracked_worktree_edits() {
     let dir = tempdir().unwrap();
     conflicted_fixture(dir.path());
@@ -2893,8 +3114,15 @@ fn abort_preserves_unrelated_tracked_worktree_edits() {
 fn abort_restores_clean_merge_deletions() {
     let dir = tempdir().unwrap();
     conflicted_fixture(dir.path());
-    // A clean deletion made by the operation has no surviving index entry.
+    // Record a real incoming deletion, not an arbitrary user-staged index difference.
     let repo = git2::Repository::open(dir.path()).unwrap();
+    let incoming = repo.find_commit(repo.refname_to_id("MERGE_HEAD").unwrap()).unwrap();
+    let mut builder = repo.treebuilder(Some(&incoming.tree().unwrap())).unwrap();
+    builder.remove("untouched.txt").unwrap();
+    let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let deleted = repo.commit(None, &sig, &sig, "incoming deletion", &tree, &[&incoming]).unwrap();
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{deleted}\n")).unwrap();
     let mut index = repo.index().unwrap();
     index.remove_path(Path::new("untouched.txt")).unwrap();
     index.write().unwrap();

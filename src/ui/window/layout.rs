@@ -215,7 +215,7 @@ impl CompositorProjection {
                 spatial_score(source_rect, candidate.rect, direction)
                     .map(|score| (score, candidate.z_index, candidate.window))
             })
-            .min_by_key(|(score, z, id)| (*score, *z, id.0))
+            .min_by_key(|(score, z, id)| (*score, std::cmp::Reverse(*z), id.0))
             .map(|(_, _, window)| window)
     }
 }
@@ -284,9 +284,16 @@ impl CompositorSnapshot {
                     let WindowPlacement::Docked { size, .. } = window.placement else {
                         continue;
                     };
-                    let preserve_tiled = u16::from(self.tiled.is_some());
+                    let (reserve_width, reserve_height) = if self.tiled.is_some() {
+                        (
+                            minimum_tiled_width.max(1).saturating_add(insets.left).saturating_add(insets.right),
+                            minimum_tiled_height.max(1).saturating_add(insets.top).saturating_add(insets.bottom),
+                        )
+                    } else {
+                        (0, 0)
+                    };
                     let (rect, next) =
-                        project_dock(remaining, edge, size, preserve_tiled, preserve_tiled);
+                        project_dock(remaining, edge, size, reserve_width, reserve_height);
                     remaining = next;
                     if rect.width > 0 && rect.height > 0 {
                         push_compositor_window(
