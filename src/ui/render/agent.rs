@@ -131,9 +131,10 @@ pub(super) fn render_agent_panel(
     } else {
         Style::Border
     };
+    let horizontal = if grid.display_width("─") == 1 { "─" } else { "-" };
     for column in 0..width {
-        grid.set_cell(column, top, "─", border);
-        grid.set_cell(column, bottom, "─", border);
+        grid.set_cell(column, top, horizontal, border);
+        grid.set_cell(column, bottom, horizontal, border);
     }
     if !panel.busy.is_empty() {
         let x = grid.put_text(2, top, " ", border);
@@ -141,7 +142,7 @@ pub(super) fn render_agent_panel(
         grid.put_text(x, top, " ", border);
     }
     let list_top = top - list;
-    if panel.menu.is_empty() {
+    if panel.menu.is_empty() && list > 0 {
         // When the family is longer than the room, the last row counts the rest, and the
         // conversation on screen stays listed.
         let room = usize::from(list);
@@ -153,7 +154,9 @@ pub(super) fn render_agent_panel(
         };
         let mut rows = panel.family.iter().take(take).collect::<Vec<_>>();
         if hidden > 0 {
-            if let Some(shown) = panel.family.iter().skip(take).find(|row| row.shown) {
+            if take > 0
+                && let Some(shown) = panel.family.iter().skip(take).find(|row| row.shown)
+            {
                 rows.pop();
                 rows.push(shown);
             }
@@ -258,7 +261,7 @@ pub(super) fn render_agent_panel(
         let y = 1 + u16::try_from(offset).unwrap_or(0);
         draw_line(&mut grid, y, &panel.transcript, &panel.bands, line.clone());
     }
-    if scroll > 0 {
+    if area > 0 && scroll > 0 {
         let more = format!(" ↓ {scroll} more ");
         let more_width =
             u16::try_from(text_width(&more, config.editor.ambiguous_width)).unwrap_or(0);
@@ -291,11 +294,15 @@ fn left_ellipsized(text: &str, room: usize, ambiguous: AmbiguousWidth) -> String
     if text_width(text, ambiguous) <= room {
         return text.to_owned();
     }
+    let ellipsis_width = text_width("…", ambiguous);
+    if room < ellipsis_width {
+        return String::new();
+    }
     let mut tail = String::new();
-    for character in text.chars().rev() {
-        let mut candidate = character.to_string();
+    for grapheme in text.graphemes(true).rev() {
+        let mut candidate = grapheme.to_owned();
         candidate.push_str(&tail);
-        if text_width(&candidate, ambiguous) + 1 > room {
+        if text_width(&candidate, ambiguous) + ellipsis_width > room {
             break;
         }
         tail = candidate;
@@ -307,11 +314,12 @@ fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> St
     if text_width(settings, ambiguous) <= room {
         return settings.to_owned();
     }
+    let separator_width = text_width(" · ", ambiguous);
     match settings.split_once(" · ") {
-        Some((model, rest)) if text_width(rest, ambiguous) + 3 + 6 <= room => {
+        Some((model, rest)) if text_width(rest, ambiguous) + separator_width + 6 <= room => {
             let model = super::surfaces::ellipsized(
                 model,
-                room - text_width(rest, ambiguous) - 3,
+                room - text_width(rest, ambiguous) - separator_width,
                 ambiguous,
             );
             format!("{model} · {rest}")
@@ -362,7 +370,7 @@ fn wrap_input(
     let mut at = None;
     for (index, grapheme) in input.grapheme_indices(true) {
         if grapheme == "\n" {
-            if index == cursor {
+            if (index..index + grapheme.len()).contains(&cursor) {
                 at = Some((rows.len() - 1, column));
             }
             rows.push(String::new());
@@ -379,7 +387,7 @@ fn wrap_input(
             rows.push(String::new());
             column = 0;
         }
-        if index == cursor {
+        if (index..index + grapheme.len()).contains(&cursor) {
             at = Some((rows.len() - 1, column));
         }
         if let Some(row) = rows.last_mut() {
@@ -394,6 +402,49 @@ fn wrap_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn panel() -> AgentPanelUi {
+        AgentPanelUi {
+            view: ViewId::default(),
+            tabs: Vec::new(),
+            transcript: Styled::default(),
+            bands: Vec::new(),
+            scroll: 0,
+            context: Vec::new(),
+            family: Vec::new(),
+            menu: Vec::new(),
+            selected: 0,
+            busy: String::new(),
+            normal: false,
+            input: String::new(),
+            cursor: 0,
+            placeholder: String::new(),
+            status: String::new(),
+            settings: String::new(),
+        }
+    }
+
+    #[test]
+    fn input_borders_remain_one_cell_wide() {
+        let mut config = Config::default();
+        config.editor.ambiguous_width = AmbiguousWidth::Wide;
+        let frame = render_agent_panel(&panel(), true, &config, 20, 12, false);
+        for y in [8, 10] {
+            assert_eq!(frame.grid.row_text(y), "-".repeat(20));
+        }
+    }
+
+    #[test]
+    fn scrolling_without_transcript_rows_preserves_the_tabs() {
+        let mut panel = panel();
+        panel.context.push("file.rs".into());
+        panel.transcript.text = "first\nsecond\nthird".into();
+        let before = render_agent_panel(&panel, true, &Config::default(), 30, 6, false);
+        panel.scroll = 2;
+        let after = render_agent_panel(&panel, true, &Config::default(), 30, 6, false);
+        assert_eq!(before.grid.row_text(0), after.grid.row_text(0));
+        assert!(!after.grid.row_text(0).contains("more"));
+    }
 
     #[test]
     fn input_measurement_matches_grid_substitutions() {
@@ -434,6 +485,14 @@ mod tests {
     }
 
     #[test]
+    fn input_cursor_inside_a_grapheme_uses_its_display_position() {
+        let grid = CellGrid::new(20, 10);
+        assert_eq!(wrap_input("e\u{301}x", 1, 10, &grid).1, (0, 0));
+        assert_eq!(wrap_input("abe\u{301}x", 3, 2, &grid).1, (1, 0));
+        assert_eq!(wrap_input("e\u{301}x", 3, 10, &grid).1, (0, 1));
+    }
+
+    #[test]
     fn a_narrow_footer_shortens_the_model_before_the_mode() {
         let settings = "Claude Opus 5.5 with a long name · Bypass permissions · high";
         let fitted = fitted_settings(settings, 44, AmbiguousWidth::Narrow);
@@ -443,6 +502,22 @@ mod tests {
             fitted_settings(settings, 80, AmbiguousWidth::Narrow),
             settings
         );
+    }
+
+    #[test]
+    fn wide_footer_punctuation_fits_its_budget() {
+        let ambiguous = AmbiguousWidth::Wide;
+        let path = "~/dev/qa/fixtures/agents";
+        let shown = left_ellipsized(path, 10, ambiguous);
+        assert!(shown.ends_with("/agents"), "{shown}");
+        assert_eq!(text_width(&shown, ambiguous), 10);
+        let settings = "Long model name · Mode · high";
+        for room in 0..60 {
+            assert!(text_width(&left_ellipsized(path, room, ambiguous), ambiguous) <= room);
+            let fitted = fitted_settings(settings, room, ambiguous);
+            assert!(text_width(&fitted, ambiguous) <= room, "{room}: {fitted}");
+        }
+        assert!(fitted_settings(settings, 22, ambiguous).ends_with(" · Mode · high"));
     }
 
     #[test]
@@ -464,22 +539,8 @@ mod tests {
             status: "✓".into(),
         };
         let panel = AgentPanelUi {
-            view: ViewId::default(),
-            tabs: Vec::new(),
-            transcript: Styled::default(),
-            bands: Vec::new(),
-            scroll: 0,
-            context: Vec::new(),
             family: (0..12).map(row).collect(),
-            menu: Vec::new(),
-            selected: 0,
-            busy: String::new(),
-            normal: false,
-            input: String::new(),
-            cursor: 0,
-            placeholder: String::new(),
-            status: String::new(),
-            settings: String::new(),
+            ..panel()
         };
         let frame = render_agent_panel(&panel, true, &Config::default(), 60, 40, false);
         let lines = (0..40)
@@ -499,6 +560,33 @@ mod tests {
             lines.iter().any(|line| line.contains("+5 more")),
             "{lines:#?}"
         );
+    }
+
+    #[test]
+    fn a_small_panel_keeps_the_family_within_its_allocated_rows() {
+        let panel = AgentPanelUi {
+            family: (0..12)
+                .map(|index| AgentListRow {
+                    shown: index == 10,
+                    name: "claude".into(),
+                    task: format!("task {index}"),
+                    status: "✓".into(),
+                })
+                .collect(),
+            ..panel()
+        };
+        for height in [8, 9, 10, 11] {
+            let frame = render_agent_panel(&panel, true, &Config::default(), 40, height, false);
+            let top = height - 4;
+            assert_eq!(frame.grid.row_text(top), "─".repeat(40));
+            let lines = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
+            assert!(!lines.iter().any(|line| line.contains("claude")), "{lines:#?}");
+            if height >= 10 {
+                assert!(lines[usize::from(top - 1)].contains("+12 more"), "{lines:#?}");
+            } else {
+                assert!(!lines.iter().any(|line| line.contains("more")), "{lines:#?}");
+            }
+        }
     }
 
     #[test]

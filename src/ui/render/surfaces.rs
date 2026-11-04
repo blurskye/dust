@@ -43,7 +43,10 @@ pub(super) fn ellipsized(
         };
     }
     let mut kept = String::new();
-    let mut width = 1;
+    let mut width = text_width("…", ambiguous);
+    if width > maximum {
+        return kept;
+    }
     for grapheme in text.graphemes(true) {
         width += text_width(grapheme, ambiguous).max(1);
         if width > maximum {
@@ -1481,7 +1484,7 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
     keys
 }
 
-fn prompt_viewport<'a>(
+pub(super) fn prompt_viewport<'a>(
     input: &'a str,
     cursor: usize,
     width: usize,
@@ -1892,6 +1895,16 @@ pub(super) fn render_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ellipsis_width_is_included_in_the_budget() {
+        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+            for maximum in 0..20 {
+                let shown = ellipsized("abcdefghijklmnopqrst", maximum, ambiguous);
+                assert!(text_width(&shown, ambiguous) <= maximum, "{maximum}: {shown}");
+            }
+        }
+    }
 
     #[test]
     fn prompt_viewport_keeps_the_grapheme_caret_visible() {
