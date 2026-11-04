@@ -1554,6 +1554,11 @@ fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
         revision,
         vec![crate::editor::text::TextEdit::new(ByteRange::empty(ByteOffset(0)), "\n")],
     )).unwrap();
+    // A view change rebuilds rows while this buffer still has its older parse.
+    app.process_syntax();
+    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    app.process_syntax();
+    assert!(app.ui.syntax_folds.iter().any(|fold| fold.collapsed && fold.start_line == 2 && fold.end_line == end + 1));
     wait_syntax(&mut app, buffer);
     assert!(app.ui.syntax_folds.iter().any(|fold| fold.collapsed && fold.start_line == 2 && fold.end_line == end + 1));
 }
@@ -1613,6 +1618,19 @@ fn recovery_missing_original_is_bound_only_inside_the_workspace() {
     let recovered = &app.state.buffers[app.state.active_buffer_id().unwrap()];
     assert_eq!(recovered.path.as_ref(), Some(&path));
     assert_eq!(recovered.text.to_string(), "recovered");
+}
+
+#[test]
+fn recovery_missing_parent_does_not_bind_an_unvalidated_destination() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("missing-parent/original.txt");
+    let id = app.documents.read_scoped(path.clone(), vec![app.state.workspace_root.clone()]).unwrap();
+    app.recovery.register_read(id, path.with_extension("journal"), "recovered".into(), app.workspace.version());
+    wait_vfs(&mut app);
+    let recovered = &app.state.buffers[app.state.active_buffer_id().unwrap()];
+    assert_eq!(recovered.text.to_string(), "recovered");
+    assert!(recovered.path.is_none());
+    assert!(recovered.dirty);
 }
 
 #[cfg(unix)]

@@ -1796,6 +1796,34 @@ fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_
 }
 
 #[test]
+fn waiting_lsp_requests_stay_queued_while_their_server_is_starting() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("starting.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path));
+    app.set_dashboard_visibility(false);
+    let endpoint = fixture_owned_lsp(&mut app, "starting", buffer);
+    app.language.select("starting");
+    let capabilities = app.language.sessions()["starting"].capabilities.clone().unwrap();
+    app.language.stopped("starting");
+    app.request_lsp(crate::language::lsp::LspFeature::CodeAction {
+        range: crate::language::lsp::LspRange {
+            start: crate::language::lsp::LspPosition { line: 0, character: 0 },
+            end: crate::language::lsp::LspPosition { line: 0, character: 0 },
+        },
+        diagnostics: Vec::new(),
+    });
+    app.ui.lsp_loading = Some("still starting".into());
+    app.update_lsp_progress_animation();
+    assert_eq!(app.ui.lsp_loading.as_deref(), Some("still starting"));
+    assert!(app.lsp_waiting.is_some());
+    assert!(endpoint.requested_feature().is_none());
+    app.language.running("starting", capabilities);
+    app.update_lsp_progress_animation();
+    assert!(app.lsp_waiting.is_none());
+    assert!(matches!(endpoint.requested_feature(), Some(crate::language::lsp::LspFeature::CodeAction { .. })));
+}
+
+#[test]
 fn save_notifications_reach_every_document_owner_after_buffer_switch() {
     let mut app = app();
     let path = app.state.workspace_root.join("saved.rs");

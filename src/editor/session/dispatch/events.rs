@@ -1918,8 +1918,9 @@ impl InteractiveApplication {
                         // replace that buffer, and never bind a rejected path to recovered text.
                         let already_open = self.state.buffers.values()
                             .any(|buffer| buffer.path.as_ref() == Some(&path));
-                        let missing = matches!(&result, Err(crate::files::VfsError::Io { source, .. })
-                            if source.kind() == std::io::ErrorKind::NotFound);
+                        let missing = matches!(&result, Err(crate::files::VfsError::Io {
+                            operation: "open for reading", source, ..
+                        }) if source.kind() == std::io::ErrorKind::NotFound);
                         let writable = self.workspace.require_path(&path).is_ok();
                         let (text, destination) = match result {
                             Ok(bytes) if !already_open && writable => {
@@ -2537,13 +2538,19 @@ impl InteractiveApplication {
         for (fold, source) in self.ui.syntax_folds.iter_mut()
             .zip(&mut self.syntax_fold_positions)
         {
-            let Some((view, revision, range)) = source else { continue };
-            let Some(buffer) = self.state.views.get(*view)
-                .and_then(|view| self.state.buffers.get(view.buffer)) else { continue };
+            let Some((buffer_id, version, revision, range)) = source else { continue };
+            let Some(buffer) = self.state.buffers.get(*buffer_id).filter(|buffer| {
+                self.state.views.get(fold.view).is_some_and(|view| view.buffer == *buffer_id)
+                    && version.same_incarnation(&buffer.text.source_version())
+            }) else {
+                fold.collapsed = false;
+                continue;
+            };
             if let Some(mapped) = buffer.text.map_range_since(*revision, *range) {
                 fold.start_line = buffer.text.byte_to_line(mapped.start).unwrap_or(fold.start_line);
                 fold.end_line = buffer.text.byte_to_line(mapped.end).unwrap_or(fold.end_line);
                 *range = mapped;
+                *version = buffer.text.source_version();
                 *revision = buffer.text.revision();
             }
         }
@@ -2613,19 +2620,28 @@ impl InteractiveApplication {
         let mut syntax_folds = Vec::new();
         for (view_id, view) in self.state.views.iter() {
             if let Some(result) = self.syntax.result(view.buffer) {
+                let text = &self.state.buffers[view.buffer].text;
+                let Some(parsed) = text.text_at(BufferRevision(result.revision)) else { continue };
                 for fold in &result.folds {
+                    let range = parsed.line_to_byte(fold.start_row).ok().zip(
+                        parsed.line_to_byte(fold.end_row).ok(),
+                    ).and_then(|(start, end)| ByteRange::new(start, end).ok())
+                        .and_then(|range| text.map_range_since(BufferRevision(result.revision), range));
+                    let Some((start_line, end_line)) = range.and_then(|range| {
+                        Some((text.byte_to_line(range.start).ok()?, text.byte_to_line(range.end).ok()?))
+                    }) else { continue };
                     syntax_folds.push(UiFold {
                         view: view_id,
-                        start_line: fold.start_row,
-                        end_line: fold.end_row,
-                        collapsed: collapsed.contains(&(view_id, fold.start_row, fold.end_row)),
+                        start_line,
+                        end_line,
+                        collapsed: collapsed.contains(&(view_id, start_line, end_line)),
                     });
                 }
             }
         }
         self.syntax_fold_positions = syntax_folds.iter().map(|fold| {
             let buffer = self.state.buffers.get(self.state.views.get(fold.view)?.buffer)?;
-            Some((fold.view, buffer.text.revision(), ByteRange::new(
+            Some((self.state.views.get(fold.view)?.buffer, buffer.text.source_version(), buffer.text.revision(), ByteRange::new(
                 buffer.text.line_to_byte(fold.start_line).ok()?,
                 buffer.text.line_to_byte(fold.end_line).ok()?,
             ).ok()?))
@@ -2856,7 +2872,10 @@ impl InteractiveApplication {
             self.ui.lsp_progress = rows.to_vec();
         }
         if self.lsp_waiting_server.as_ref()
-            .is_some_and(|server| !self.language.server_loading(server))
+            .is_some_and(|server| {
+                self.language.sessions().get(server).is_some_and(|session| session.capabilities.is_some())
+                    && !self.language.server_loading(server)
+            })
         {
             self.lsp_waiting_server = None;
             self.lsp_retry_at = None;
@@ -3038,7 +3057,9 @@ impl InteractiveApplication {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
                     }
-                    if self.lsp_waiting_server.as_ref().is_none_or(|waiting| waiting == &server) {
+                    if self.lsp_waiting_server.as_ref().is_none_or(|waiting| waiting == &server)
+                        && !self.language.server_loading(&server)
+                    {
                         self.lsp_waiting_server = None;
                         if let Some(feature) = self.lsp_waiting.take() {
                             self.request_lsp(feature);

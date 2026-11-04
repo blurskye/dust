@@ -241,7 +241,9 @@ struct InteractiveApplication {
         Vec<(crate::editor::BufferId, u64, u64)>,
         Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
     ),
-    syntax_fold_positions: Vec<Option<(crate::editor::ViewId, BufferRevision, ByteRange)>>,
+    syntax_fold_positions: Vec<Option<(
+        crate::editor::BufferId, crate::editor::text::TextVersion, BufferRevision, ByteRange,
+    )>>,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
