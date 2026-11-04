@@ -61,12 +61,23 @@ pub fn search_match(
         return Ok(None);
     }
     let expression = RegexBuilder::new(&regex::escape(query))
-        .case_insensitive(smart_case && query.is_ascii() && !query.chars().any(char::is_uppercase))
+        .case_insensitive(smart_case && !query.chars().any(char::is_uppercase))
         .build()
         .map_err(|error| SearchPatternError::InvalidRegex(error.to_string()))?;
     let word = |character: char| character.is_alphanumeric() || character == '_';
     let matches = || {
-        expression.find_iter(source).filter(|found| {
+        let mut from = 0;
+        let expression = &expression;
+        std::iter::from_fn(move || {
+            let found = expression.find_at(source, from)?;
+            from = found.start()
+                + source[found.start()..]
+                    .chars()
+                    .next()
+                    .expect("literal is nonempty")
+                    .len_utf8();
+            Some(found)
+        }).filter(|found| {
             !whole_word
                 || source[..found.start()]
                     .chars()
@@ -128,6 +139,36 @@ mod tests {
             Some(0..3)
         );
     }
+    #[test]
+    fn navigation_uses_unicode_smart_case() {
+        assert_eq!(
+            super::search_match("É é", "é", true, false, 0, true, false).unwrap(),
+            Some(0..2)
+        );
+        assert_eq!(
+            super::search_match("É é", "é", false, false, 0, true, false).unwrap(),
+            Some(3..5)
+        );
+        assert_eq!(
+            super::search_match("é É", "É", true, false, 0, true, false).unwrap(),
+            Some(3..5)
+        );
+    }
+
+    #[test]
+    fn backward_navigation_keeps_overlapping_literal_starts() {
+        for offset in [5, 0] {
+            assert_eq!(
+                super::search_match("banana", "ana", true, false, offset, false, true).unwrap(),
+                Some(3..6)
+            );
+        }
+        assert_eq!(
+            super::search_match("banana", "ana", true, false, 3, false, false).unwrap(),
+            Some(1..4)
+        );
+    }
+
     #[test]
     fn literal_smart_case_and_regex_are_explicit_policies() {
         assert_eq!(

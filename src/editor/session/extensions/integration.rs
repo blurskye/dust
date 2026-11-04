@@ -534,6 +534,12 @@ impl ExtensionSession {
     ) -> Result<(), crate::extensions::PluginError> {
         self.plugin_contributions.install(index)
     }
+    pub(in crate::editor::session) fn fixture_prepared(&mut self, plugin: &str, load: PluginLoadId, token: u64) {
+        self.package_prepared.insert(plugin.into(), (load, token));
+    }
+    pub(in crate::editor::session) fn fixture_package_reload_pending(&self) -> bool {
+        self.package_startup_request.is_some()
+    }
     pub(in crate::editor::session) fn fixture_pending_index(
         &mut self,
         plugin: String,

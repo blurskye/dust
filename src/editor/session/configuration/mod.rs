@@ -342,7 +342,7 @@ impl ConfigurationSession {
     ) -> Result<ContributionReceipt, String> {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
-        // A theme picked in the theme picker stays while config.toml keeps the same theme.
+        // Keep a different picker selection while config.toml keeps the same theme.
         let keep_theme = candidate.resolved.settings.ui.theme == self.accepted.settings.ui.theme;
         let receipt = ContributionReceipt(candidate.window_contribution().window_source());
         self.accepted = candidate.resolved;
@@ -356,7 +356,7 @@ impl ConfigurationSession {
             editor.indent_guides.enabled = false;
         }
         self.hidden_line_numbers = None;
-        self.themes.reset(keep_theme);
+        self.themes.reset(keep_theme, &self.accepted.theme.name);
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(receipt)

@@ -93,6 +93,55 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
 }
 
 #[test]
+fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
+    use crate::persistence::{PersistedBreakpoint, PersistedState, PersistedWatch, PersistenceService};
+    let mut app = app();
+    let saved = tempdir().unwrap();
+    let path = app.state.workspace_root.join("main.rs");
+    let mut state = PersistedState::default();
+    state.metadata.insert("lsp.runtime.rust-analyzer".into(), "managed".into());
+    state.metadata.insert("lsp.version.rust-analyzer".into(), "0.3.3008".into());
+    state.breakpoints = [1, 2, 3].into_iter().map(|line| PersistedBreakpoint {
+        path: path.clone(), line, column: None, condition: Some("saved".into()),
+        hit_condition: None, log_message: None,
+    }).collect();
+    state.watches = ["saved", "removed", "untouched"].into_iter().map(|expression| PersistedWatch {
+        expression: expression.into(),
+    }).collect();
+    let state_path = saved.path().join("session.json");
+    fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let (worker, release) = PersistenceService::gated_for_test(1);
+    app.persistence = crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
+    let row = |line, condition: &str| crate::debugger::DapSourceBreakpoint {
+        path: path.clone(), line, column: None, condition: Some(condition.into()),
+        hit_condition: None, log_message: None,
+    };
+    app.debugger_session.breakpoint(row(2, "old"), false).unwrap();
+    app.debugger_session.add_watch("removed".into());
+    app.load_persistence();
+    app.tooling.select_runtime("rust-analyzer", LspRuntimeSource::Path, None).unwrap();
+    app.tooling.select_version("rust-analyzer", "0.3.3025".into()).unwrap();
+    app.debugger_session.breakpoint(row(1, "new"), false).unwrap();
+    app.debugger_session.breakpoint(row(2, "old"), true).unwrap();
+    app.debugger_session.add_watch("live".into());
+    app.debugger_session.remove_watch("removed");
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.persistence.pending() {
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!app.tooling.metadata().contains_key("lsp.runtime.rust-analyzer"));
+    assert_eq!(app.tooling.managed_version("rust-analyzer").map(String::as_str), Some("0.3.3025"));
+    let breakpoints = app.debugger_session.persisted_breakpoints();
+    assert_eq!(breakpoints.len(), 2);
+    assert!(breakpoints.iter().any(|row| row.line == 1 && row.condition.as_deref() == Some("new")));
+    assert!(breakpoints.iter().any(|row| row.line == 3 && row.condition.as_deref() == Some("saved")));
+    assert_eq!(app.debugger_session.watches(), ["live", "saved", "untouched"]);
+}
+
+#[test]
 fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();

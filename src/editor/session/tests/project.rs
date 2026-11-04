@@ -1774,6 +1774,40 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
 }
 
 #[test]
+fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
+    let mut app = app();
+    let files = tempfile::tempdir_in(&app.state.workspace_root).unwrap();
+    let mut directory = files.path().to_path_buf();
+    for _ in 0..10 {
+        directory.push("d".repeat(200));
+    }
+    fs::create_dir_all(&directory).unwrap();
+    let count = 3000;
+    for index in 0..count {
+        fs::write(directory.join(format!("file-{index:04}")), "").unwrap();
+    }
+    // Two path copies fit discovery's budget; a third label copy exceeds it.
+    let relative_length = directory.strip_prefix(files.path()).unwrap().as_os_str().len() + 10;
+    let absolute_length = directory.as_os_str().len() + 10;
+    assert!(count * (relative_length + absolute_length) < 16 * 1024 * 1024);
+    assert!(count * (2 * relative_length + absolute_length) > 16 * 1024 * 1024);
+    app.search.start_files(crate::files::WorkspaceFilePolicy {
+        roots: vec![files.path().into()], root_revision: app.workspace.root_revision(),
+        include_hidden: false, include_ignored: false, maximum_files: 100_000,
+        maximum_path_bytes: 16 * 1024 * 1024, batch_size: 128, event_queue_capacity: 8,
+    }, app.workspace.version(), app.configuration.binding_revision()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while app.search.files_pending() {
+        app.process_workspace_file_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let picker = app.search.picker().unwrap().presentation();
+    assert!(!picker.loading);
+    assert_eq!(picker.rows.len(), count);
+}
+
+#[test]
 fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let mut app = app();
     let path = app.state.workspace_root.join("find-me.txt");

@@ -2308,6 +2308,59 @@ fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
 }
 
 #[test]
+fn provider_chunks_use_the_revision_after_virtual_publication() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.test", "x y");
+    manifest.capabilities.extend([
+        crate::extensions::PluginCapability::VirtualDocuments,
+        crate::extensions::PluginCapability::PickerProviders,
+    ]);
+    manifest.contributions.virtual_documents = vec![crate::extensions::PluginVirtualDocumentContribution {
+        id: "plugin.demo.virtual.help".into(), title: "Help".into(), language: "markdown".into(),
+        mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
+        maximum_concurrent_documents: 1, maximum_document_bytes: 4096, maximum_document_lines: 128,
+        maximum_patch_bytes: 256, maximum_patches_per_request: 8, deadline_milliseconds: 30_000,
+        command: "plugin.demo.run".into(), context: "dashboard".into(), provenance: None,
+    }];
+    manifest.contributions.providers = vec![crate::extensions::PluginProviderContribution {
+        id: "plugin.demo.provider.files".into(), kind: crate::extensions::PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(), maximum_concurrent_requests: 1, maximum_items: 16,
+        maximum_bytes: 8192, deadline_milliseconds: 30_000, provenance: None,
+    }];
+    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    app.extension.fixture_provider_install(&index).unwrap();
+    let virtual_request = app.extension.fixture_virtual_request(&index);
+    let request = app.extension.fixture_provider_start(crate::extensions::PluginProviderStart {
+        plugin: "demo".into(), load: PluginLoadId(1), provider: "plugin.demo.provider.files".into(),
+        query: String::new(), context: "dashboard".into(),
+        workspace_revision: Some(app.workspace.root_revision()), buffer_revision: None,
+    }).unwrap();
+    app.process_effect(AppEffect::PluginExecute { plugin: "demo".into(), command: "run".into(), arguments: Vec::new() });
+    fixture.reply_with(&fixture.take(), |execution| {
+        execution.virtual_document_proposals.push(crate::extensions::PluginVirtualDocumentProposal {
+            request: virtual_request.request, document: virtual_request.document,
+            cancellation_generation: virtual_request.cancellation_generation,
+            kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(crate::extensions::PluginVirtualDocumentFull {
+                expected_revision: None, revision: 1, title: "Help".into(), language: "markdown".into(), text: "new virtual text".into(),
+            }),
+        });
+        execution.provider_chunks.push(crate::extensions::PluginPickerChunk {
+            request, sequence: 1,
+            items: vec![crate::extensions::PluginPickerItem { id: "old".into(), primary: "Stale row".into(), secondary: None, action_data: Vec::new() }],
+            terminal: crate::extensions::PluginProviderTerminal::Complete,
+        });
+    });
+    app.process_plugin_events();
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "new virtual text");
+    assert!(app.extension.provider_projection(request).is_none_or(|projection| projection.items.is_empty()));
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn virtual_publication_keeps_original_request_until_checked_window_acceptance() {
     use crate::editor::session::extensions::VirtualContext;
     let mut app = app();
@@ -2645,6 +2698,57 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
 }
 
 #[test]
+fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
+    let mut app = app();
+    let (mut manager, fixture) = crate::extensions::ExecutionFixture::new(1);
+    manager.execute(crate::extensions::empty_execution_request()).unwrap();
+    app.extension.fixture_manager(manager);
+    let mut config = app.configuration.fixture_snapshot();
+    config.deferred_plugin_keymaps = true;
+    config.expected_plugin_indexes = ["demo".into(), "zeta".into()].into_iter().collect();
+    app.configuration.install_fixture(config);
+    let sibling = crate::extensions::index_manifest_contributions(
+        &plugin_manifest("zeta", "plugin.zeta.test", "z z"), 2, "sibling".into(),
+    ).unwrap();
+    app.register_indexed_plugin_commands(&sibling).unwrap();
+    app.extension.fixture_contribution(sibling).unwrap();
+    app.extension.fixture_pending_index("zeta".into(), (PluginLoadId(2), "0".repeat(64)));
+    fixture.indexed(crate::extensions::index_manifest_contributions(
+        &plugin_manifest("demo", "plugin.demo.test", "x y"), 1, "test".into(),
+    ).unwrap());
+    app.process_plugin_events();
+    assert!(app.extension.pending_indexes().is_empty());
+    assert!(app.extension.contributions().get("zeta").is_none());
+    assert!(app.extension.rejected_indexes().contains(&("zeta".into(), PluginLoadId(2))));
+    assert!(app.ui.notification.as_deref().unwrap().contains("queue is full"), "{:?}", app.ui.notification);
+}
+
+#[test]
+fn rejected_package_commands_schedule_the_installed_version_for_reload() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let manifest = plugin_manifest("demo", "plugin.demo.test", "x y");
+    app.extension.fixture_contribution(crate::extensions::index_manifest_contributions(
+        &manifest, 1, "test".into(),
+    ).unwrap()).unwrap();
+    app.extension.fixture_prepared("demo", PluginLoadId(1), 41);
+    fixture.loaded(PluginLoadId(1), crate::extensions::LoadedComponent {
+        canonical_path: "replacement.wasm".into(),
+        bytes: Vec::new(),
+        manifest,
+        instantiated: true,
+        unavailable_host: None,
+        activated_commands: Vec::new(),
+    });
+    app.process_plugin_events();
+    assert!(app.extension.fixture_package_reload_pending());
+    assert!(app.extension.take_prepared("demo", PluginLoadId(1)).is_none());
+    assert!(!app.extension.is_active_generation("demo", PluginLoadId(1)));
+    assert!(app.extension.contributions().get("demo").is_none());
+}
+
+#[test]
 fn active_plugin_failure_does_not_abort_a_siblings_index() {
     let mut app = app();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
@@ -2664,6 +2768,8 @@ fn active_plugin_failure_does_not_abort_a_siblings_index() {
     fixture.fail(&fixture.take());
     app.process_plugin_events();
     assert!(app.extension.pending_indexes().contains_key("sibling"));
+    assert_eq!(app.ui.notification.as_deref(), Some("Plugin demo: plugin is not active"));
+    assert!(app.ui.notification_error);
 }
 
 #[test]

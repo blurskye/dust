@@ -21,6 +21,8 @@ pub(super) struct ToolingSession {
     nix_preferred: BTreeSet<String>,
     managed_preferred: BTreeSet<String>,
     managed_versions: BTreeMap<String, String>,
+    /// Runtime choices made while the saved settings are being read.
+    changed_runtimes: Option<BTreeSet<String>>,
     installer: ToolInstaller,
     version_service: ToolVersionService,
     probe_directory: RefCell<Option<PathBuf>>,
@@ -139,6 +141,7 @@ impl ToolingSession {
             nix_preferred: BTreeSet::new(),
             managed_preferred: BTreeSet::new(),
             managed_versions: BTreeMap::new(),
+            changed_runtimes: None,
             installer: ToolInstaller::start(),
             version_service: ToolVersionService::start(),
             probe_directory: RefCell::new(None),
@@ -223,6 +226,9 @@ impl ToolingSession {
         }) {
             return Err("this managed runtime has no installable version".into());
         }
+        if let Some(changed) = &mut self.changed_runtimes {
+            changed.insert(id.into());
+        }
         self.managed_versions.insert(id.into(), version);
         Ok(())
     }
@@ -247,6 +253,9 @@ impl ToolingSession {
                 id,
                 version.ok_or("this managed runtime has no installable version")?,
             )?;
+        }
+        if let Some(changed) = &mut self.changed_runtimes {
+            changed.insert(id.into());
         }
         self.nix_preferred.remove(id);
         self.managed_preferred.remove(id);
@@ -277,13 +286,20 @@ impl ToolingSession {
             )
             .collect()
     }
+    pub(super) fn begin_restore(&mut self) {
+        self.changed_runtimes = Some(BTreeSet::new());
+    }
+    pub(super) fn finish_restore(&mut self) {
+        self.changed_runtimes = None;
+    }
     pub(super) fn restore(&mut self, metadata: &BTreeMap<String, String>) {
-        self.nix_preferred.clear();
-        self.managed_preferred.clear();
-        self.managed_versions.clear();
+        let changed = self.changed_runtimes.take().unwrap_or_default();
+        self.nix_preferred.retain(|id| changed.contains(id));
+        self.managed_preferred.retain(|id| changed.contains(id));
+        self.managed_versions.retain(|id, _| changed.contains(id));
         for entry in &self.entries {
             let definition = &entry.definition;
-            if definition.kind != ToolKind::Lsp {
+            if definition.kind != ToolKind::Lsp || changed.contains(&definition.id) {
                 continue;
             }
             match metadata

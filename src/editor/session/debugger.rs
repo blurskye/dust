@@ -125,6 +125,9 @@ pub(super) struct DebugSession {
     launch: Option<launch::Launch>,
     console: VecDeque<crate::debugger::DapConsoleEntry>,
     breakpoints: BTreeMap<PathBuf, Vec<DapSourceBreakpoint>>,
+    /// Settings changed while persistence is loading must win over the saved values.
+    changed_breakpoints: Option<std::collections::BTreeSet<(PathBuf, u64)>>,
+    changed_watches: Option<std::collections::BTreeSet<String>>,
     /// What is TRUE about each requested breakpoint, keyed by path and line. A request the
     /// adapter has not answered stays unverified; only a real acknowledgement verifies one.
     breakpoint_states: BTreeMap<(PathBuf, u64), crate::debugger::DapBreakpointState>,
@@ -203,6 +206,8 @@ impl DebugSession {
             launch: None,
             console: VecDeque::new(),
             breakpoints: BTreeMap::new(),
+            changed_breakpoints: Default::default(),
+            changed_watches: Default::default(),
             breakpoint_states: BTreeMap::new(),
             end_state: None,
             stop_epoch: 0,
@@ -781,6 +786,9 @@ impl DebugSession {
             && self.watches.len() < MAXIMUM_WATCHES
             && !self.watches.contains(&expression)
         {
+            if let Some(changed) = &mut self.changed_watches {
+                changed.insert(expression.clone());
+            }
             self.watches.push(expression.clone());
             // Paused, the value can be shown now rather than at the next stop.
             if self.execution.is_some() {
@@ -794,6 +802,9 @@ impl DebugSession {
         }
     }
     pub(in crate::editor::session) fn remove_watch(&mut self, expression: &str) {
+        if let Some(changed) = &mut self.changed_watches {
+            changed.insert(expression.into());
+        }
         self.watches.retain(|watch| watch != expression);
     }
     pub(in crate::editor::session) fn breakpoint(
@@ -821,6 +832,9 @@ impl DebugSession {
             .and_then(|rows| rows.iter().position(|old| old.line == row.line));
         if existing.is_none() && count >= MAXIMUM_BREAKPOINTS {
             return Err("debugger breakpoint limit reached".into());
+        }
+        if let Some(changed) = &mut self.changed_breakpoints {
+            changed.insert((row.path.clone(), row.line));
         }
         let rows = self.breakpoints.entry(row.path.clone()).or_default();
         let removed = toggle && existing.is_some();
@@ -916,6 +930,9 @@ impl DebugSession {
         disabled: bool,
     ) {
         let key = (path.to_path_buf(), line);
+        if let Some(changed) = &mut self.changed_breakpoints {
+            changed.insert(key.clone());
+        }
         if disabled {
             self.disabled_breakpoints.insert(key.clone());
             self.breakpoint_states
@@ -1073,15 +1090,30 @@ impl DebugSession {
             })
             .collect()
     }
+    pub(in crate::editor::session) fn begin_restore(&mut self) {
+        self.changed_breakpoints = Some(Default::default());
+        self.changed_watches = Some(Default::default());
+    }
+    pub(in crate::editor::session) fn finish_restore(&mut self) {
+        self.changed_breakpoints = None;
+        self.changed_watches = None;
+    }
     pub(in crate::editor::session) fn restore(
         &mut self,
         rows: Vec<PersistedBreakpoint>,
         watches: Vec<PersistedWatch>,
         workspace: &WorkspaceSession,
     ) {
-        self.breakpoints.clear();
+        let changed_breakpoints = self.changed_breakpoints.take().unwrap_or_default();
+        let changed_watches = self.changed_watches.take().unwrap_or_default();
+        self.breakpoints.retain(|path, rows| {
+            rows.retain(|r| changed_breakpoints.contains(&(path.clone(), r.line)));
+            !rows.is_empty()
+        });
         for r in rows.into_iter().take(MAXIMUM_BREAKPOINTS) {
-            if workspace.require_path(&r.path).is_err() {
+            if changed_breakpoints.contains(&(r.path.clone(), r.line))
+                || workspace.require_path(&r.path).is_err()
+            {
                 continue;
             }
             let _ = self.breakpoint(
@@ -1096,9 +1128,11 @@ impl DebugSession {
                 false,
             );
         }
-        self.watches.clear();
+        self.watches.retain(|watch| changed_watches.contains(watch));
         for watch in watches.into_iter().take(MAXIMUM_WATCHES) {
-            self.add_watch(watch.expression);
+            if !changed_watches.contains(&watch.expression) {
+                self.add_watch(watch.expression);
+            }
         }
     }
     fn install(&mut self, values: Vec<(String, String, Choice)>) -> Vec<DebugRow> {

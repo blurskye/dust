@@ -61,45 +61,6 @@ use crate::workspace::search_workflow::{
 use slotmap::Key;
 use unicode_segmentation::UnicodeSegmentation;
 
-fn compose_workspace_file_items(
-    items: Vec<(PickerItem, PickerPayload)>,
-) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
-    let mut broker = SearchWorkflowBroker::try_new(SearchWorkflowSpec {
-        id: SearchWorkflowId(1),
-        source: SearchSourceKind::Files,
-        matcher: SearchMatcherKind::Fuzzy,
-        presenter: SearchPresenterKind::Picker,
-        maximum_items: items.len().max(1),
-        maximum_bytes: ABS_MAX_BYTES,
-    })?;
-    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
-    broker.accept(SearchWorkflowChunk {
-        request: SearchRequestId(1),
-        generation: SearchStreamGeneration(1),
-        sequence: 0,
-        items: items
-            .iter()
-            .map(|(item, _)| picker_item_adapter(item))
-            .collect(),
-        complete: true,
-    })?;
-    let order = broker
-        .snapshot_if_changed(0)
-        .ok_or(SearchWorkflowError::Stale)?
-        .items
-        .into_iter()
-        .map(|item| item.stable_key)
-        .collect::<Vec<_>>();
-    let mut map = items
-        .into_iter()
-        .map(|pair| (pair.0.id.0.clone(), pair))
-        .collect::<BTreeMap<_, _>>();
-    Ok(order
-        .into_iter()
-        .filter_map(|key| map.remove(&key))
-        .collect())
-}
-
 fn compose_plugin_picker_items(
     projection: &crate::extensions::PluginPickerProjection,
 ) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
@@ -677,6 +638,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
+        if self.persistence.restoring() {
+            return;
+        }
         if self.extension.retire_stale_confirmations(
             &self.state,
             &self.workspace.version(),
@@ -705,6 +669,7 @@ impl InteractiveApplication {
                 return;
             }
         };
+        let mut failure_diagnostic = None;
         for event in events {
             let event = match event {
                 crate::extensions::OwnedPluginEvent::Executed(reply) => {
@@ -761,7 +726,7 @@ impl InteractiveApplication {
                             .extension
                             .disable_generation(&failed_plugin, failed_load);
                         self.extension.abort_prepared(&failed_plugin, failed_load);
-                        self.show_error(error);
+                        self.abort_pending_index_batch(error);
                         continue;
                     }
                     self.configuration.complete_plugin_indexes();
@@ -782,7 +747,6 @@ impl InteractiveApplication {
                         let _ = self.extension.disable_generation(&plugin, load);
                         continue;
                     }
-                    let prepared = self.extension.take_prepared(&plugin, load);
                     if let Some(index) = self
                         .extension
                         .contributions()
@@ -796,17 +760,15 @@ impl InteractiveApplication {
                             .cloned()
                             .collect::<BTreeSet<_>>();
                         if declared != activated {
-                            if let Some(token) = prepared {
-                                let _ = self
-                                    .extension
-                                    .request_package(PackageOperation::Abort { token });
-                            }
+                            let updates = self.extension.failed_package_load(&plugin, load);
+                            self.apply_extension_updates(updates);
                             self.remove_plugin_contribution_generation(&plugin, load);
                             let _ = self.extension.disable_generation(&plugin, load);
                             self.show_error(crate::extensions::PluginError::UndeclaredCommand);
                             continue;
                         }
                     }
+                    let prepared = self.extension.take_prepared(&plugin, load);
                     let declarations = component
                         .manifest
                         .commands
@@ -866,6 +828,7 @@ impl InteractiveApplication {
                     self.apply_extension_updates(updates);
                     self.remove_plugin_contribution_generation(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
+                    failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
                     self.notices.record(
                         LogLevel::Error,
                         "plugins",
@@ -885,6 +848,9 @@ impl InteractiveApplication {
             self.configuration.binding_revision(),
         );
         self.present_next_plugin_confirmation();
+        if let Some(diagnostic) = failure_diagnostic {
+            self.show_error(diagnostic);
+        }
     }
 }
 
@@ -988,11 +954,6 @@ impl InteractiveApplication {
                 );
             }
             let workspace_revision = Some(self.workspace.root_revision());
-            let buffer_revision = self
-                .state
-                .active_buffer_id()
-                .and_then(|buffer| self.state.buffers.get(buffer))
-                .map(|buffer| buffer.text.revision().0);
             for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
                 let result = self
                     .extension
@@ -1018,6 +979,11 @@ impl InteractiveApplication {
                     Err(error) => self.show_error(error),
                 }
             }
+            let buffer_revision = self
+                .state
+                .active_buffer_id()
+                .and_then(|buffer| self.state.buffers.get(buffer))
+                .map(|buffer| buffer.text.revision().0);
             for chunk in std::mem::take(&mut execution.provider_chunks) {
                 match self.extension.provider_chunk(
                     &plugin,
@@ -1270,6 +1236,8 @@ impl InteractiveApplication {
         match result {
             Ok(()) => {
                 self.session_load_requested = true;
+                self.tooling.begin_restore();
+                self.debugger_session.begin_restore();
                 self.configuration.begin_theme_restore();
             }
             Err(error) => self.show_error(error),
@@ -1294,6 +1262,8 @@ impl InteractiveApplication {
         ) {
             self.ui.config_diagnostic = Some(error);
         } else {
+            self.tooling.begin_restore();
+            self.debugger_session.begin_restore();
             self.configuration.begin_theme_restore();
         }
     }
@@ -1436,6 +1406,10 @@ impl InteractiveApplication {
 
     pub(super) fn process_persistence_events(&mut self) {
         self.read_persistence_events();
+        if !self.persistence.pending() {
+            self.tooling.finish_restore();
+            self.debugger_session.finish_restore();
+        }
         // A project with no saved session file finishes loading without any event.
         if self.session_load_requested && !self.persistence.pending() {
             self.session_load_requested = false;
@@ -3372,17 +3346,14 @@ impl InteractiveApplication {
                 )
             })
             .collect();
-        match compose_workspace_file_items(items) {
-            Ok(items) => self.install_surface_picker_state(
-                PickerSurfaceKind::Generic,
-                "Files".into(),
-                items,
-                String::new(),
-                !self.search.files_pending(),
-                PickerOrigin::Files,
-            ),
-            Err(error) => self.show_error(error.to_string()),
-        }
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            "Files".into(),
+            items,
+            String::new(),
+            !self.search.files_pending(),
+            PickerOrigin::Files,
+        );
     }
     /// `<leader>st`: every TODO-style comment keyword in the workspace, as todo-comments.nvim.
     fn start_todo_search(&mut self) {

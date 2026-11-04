@@ -5201,6 +5201,60 @@ fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
 }
 
 #[test]
+fn startup_plugin_publication_waits_for_session_restoration() {
+    use crate::persistence::{PersistedLayout, PersistedPane, PersistedSession, PersistedState, PersistedTab, PersistenceService};
+    let mut app = app();
+    let path = app.state.workspace_root.join("restored.txt");
+    fs::write(&path, "restored text\n").unwrap();
+    let session = PersistedSession {
+        roots: vec![app.state.workspace_root.clone()],
+        tabs: vec![PersistedTab {
+            layout: PersistedLayout::Pane { pane: PersistedPane {
+                path: path.clone(), cursor: 3, anchor: 3, scroll_line: 0, scroll_column: 0,
+            } },
+            focused_path: Some(path.clone()),
+        }],
+        active_tab: 0, window_rules: Vec::new(), content_descriptors: Vec::new(), pinned: Vec::new(),
+    };
+    let saved = tempdir().unwrap();
+    let state_path = saved.path().join("session.json");
+    fs::write(&state_path, serde_json::to_vec(&PersistedState {
+        session: Some(session), ..Default::default()
+    }).unwrap()).unwrap();
+    let (worker, release) = PersistenceService::gated_for_test(1);
+    app.persistence = crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.load_persistence();
+    fixture.indexed(crate::extensions::index_manifest_contributions(
+        &plugin_manifest("demo", "plugin.demo.test", "x y"), 1, "startup".into(),
+    ).unwrap());
+    let revision = app.configuration.binding_revision();
+    app.process_plugin_events();
+    assert!(app.extension.contributions().get("demo").is_none());
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.persistence.pending() {
+        app.process_plugin_events();
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(app.persistence.restoring());
+    app.process_plugin_events();
+    assert_eq!(app.configuration.binding_revision(), revision);
+    wait_vfs(&mut app);
+    assert!(!app.persistence.restoring());
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "restored text\n");
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(3));
+    app.process_plugin_events();
+    assert!(app.extension.contributions().get("demo").is_some());
+    assert!(app.configuration.binding_revision() > revision);
+}
+
+#[test]
 fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::{
         editor::session::persistence::RestoreContext,
