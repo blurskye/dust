@@ -405,15 +405,54 @@ fn validate_metadata(
         "packages/{}/{}/{}/artifacts/",
         value.publisher, value.name, value.version
     );
-    if !value
-        .artifact_path
-        .trim_start_matches('/')
-        .starts_with(&prefix)
+    let artifact_path = value.artifact_path.trim_start_matches('/');
+    let artifact_url = Url::parse(&format!("{OFFICIAL_REGISTRY}/{artifact_path}"))
+        .map_err(|_| RegistryError::Origin)?;
+    // URL parsing removes encoded parent segments too; validate the final scope.
+    if !artifact_path.starts_with(&prefix)
+        || !artifact_url
+            .as_str()
+            .starts_with(&format!("{OFFICIAL_REGISTRY}/{prefix}"))
     {
         return Err(RegistryError::Origin);
     }
     Ok(())
 }
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+
+    #[test]
+    fn artifact_scope_is_checked_after_url_normalization() {
+        let (mut package, plugin, _) = crate::tools::tests::package_fixture("publisher/demo");
+        if let PackageSource::Registry { registry, .. } = &mut package.source {
+            *registry = OFFICIAL_REGISTRY.into();
+        }
+        let mut metadata = RegistryPackageMetadata {
+            schema: 1,
+            publisher: "publisher".into(),
+            name: "demo".into(),
+            version: "1.0.0".into(),
+            yanked: false,
+            artifact_path: "packages/publisher/demo/1.0.0/artifacts/x.wasm".into(),
+            artifact_sha256: plugin.component_sha256.clone(),
+            package,
+            plugin,
+        };
+        assert!(validate_metadata(&metadata, Some(("publisher", "demo", "1.0.0"))).is_ok());
+        for traversal in ["%2e%2e/%2e%2e", ".%2e/%2e.", "../.."] {
+            metadata.artifact_path = format!(
+                "packages/publisher/demo/1.0.0/artifacts/{traversal}/2.0.0/artifacts/x.wasm"
+            );
+            assert!(matches!(validate_metadata(&metadata, None), Err(RegistryError::Origin)));
+            assert!(matches!(
+                validate_metadata(&metadata, Some(("publisher", "demo", "1.0.0"))),
+                Err(RegistryError::Origin)
+            ));
+        }
+    }
+}
+
 fn read_response(
     mut response: Response,
     accept: &str,
