@@ -3078,12 +3078,14 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         scroll_offset: 0,
         requested_height: 6,
     };
+    let tab_geometry = super::terminal_panel_geometry(19, 6).unwrap();
+    let tab_geometry = super::TerminalPanelGeometry { width: 80, ..tab_geometry };
     assert_eq!(
-        super::terminal_tab_at_column(&terminal, &config, 80, 2),
+        super::terminal_tab_at_column(&terminal, &config, tab_geometry, 2),
         Some(7)
     );
     assert_eq!(
-        super::terminal_tab_at_column(&terminal, &config, 80, 13),
+        super::terminal_tab_at_column(&terminal, &config, tab_geometry, 13),
         Some(8)
     );
     let mut ui = ui_with_editor_layout(&state);
@@ -3181,6 +3183,77 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
 }
 
 #[test]
+fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(crate::editor::text::TextBuffer::from_text("editor"), None).unwrap();
+    let mut screen = crate::ui::PtyScreen::new(40, 2, 10);
+    screen.feed_bytes("·x界y".as_bytes());
+    let mut terminal = super::TerminalPanelState {
+        id: 1,
+        profile: "shell".into(),
+        tabs: (1..=6).map(|id| super::TerminalTabState {
+            id,
+            profile: "shell".into(),
+            phase: super::TerminalPhase::Running,
+            running: true,
+            exit_code: None,
+        }).collect(),
+        mode: super::TerminalPanelMode::Input,
+        running: true,
+        exit_code: None,
+        truncated: false,
+        focused: true,
+        columns: 40,
+        rows: 2,
+        cells: screen.history_window(0, 2),
+        cells_start: 0,
+        cursor: None,
+        selection: None,
+        scrollback_lines: 0,
+        scroll_offset: 0,
+        requested_height: 3,
+    };
+    let mut config = crate::config::load_bundled_config().config;
+    for policy in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        config.editor.ambiguous_width = policy;
+        for layer in [crate::ui::window::CompositorLayer::Docked, crate::ui::window::CompositorLayer::Floating] {
+            let geometry = super::terminal_window_geometry(crate::ui::window::ProjectedCompositorWindow {
+                window: crate::ui::window::WindowId(1),
+                rect: crate::ui::window::WindowRect { x: 10, y: 1, width: 40, height: 3 },
+                layer,
+                z_index: 0,
+                focused: true,
+                focusable: true,
+            }).unwrap();
+            for active in [1, 6, 3] {
+                terminal.id = active;
+                let frame = super::terminal::dock_terminal_panel(
+                    super::Frame { grid: crate::ui::CellGrid::new(80, 8), cursor: None },
+                    &terminal, geometry, &config, 80, 8,
+                );
+                let title = super::terminal::terminal_tab_label(&terminal.tabs, &terminal.tabs[(active - 1) as usize]);
+                assert!(frame.grid.row_text(geometry.top).contains(&title));
+                let mut title_cells = 0;
+                for x in geometry.x..geometry.x + geometry.width {
+                    let cell = frame.grid.get(x, geometry.top).unwrap();
+                    if cell.style == crate::ui::Style::TerminalTitle {
+                        title_cells += 1;
+                        assert_eq!(super::terminal_tab_at_column(&terminal, &config, geometry, x), Some(active));
+                    }
+                }
+                assert_eq!(title_cells, title.len());
+                assert_eq!(super::terminal_tab_at_column(&terminal, &config, geometry, geometry.x), None);
+                for (offset, symbol, continuation) in [(0, "·", false), (1, "x", false), (2, "界", false), (3, " ", true), (4, "y", false)] {
+                    let cell = frame.grid.get(geometry.x + offset, geometry.body_top).unwrap();
+                    assert_eq!(cell.symbol, symbol);
+                    assert_eq!(cell.continuation, continuation);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn key_hints_anchor_clip_and_preserve_protected_rows() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let loaded = crate::config::load_bundled_config();
@@ -3229,6 +3302,59 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
 
     let tiny = render(&state, &ui, &config, &loaded.dashboard, 10, 3);
     assert!(!(0..3).any(|row| tiny.grid.row_text(row).contains("space f")));
+}
+
+#[test]
+fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
+    let hints = super::KeyHintUiState {
+        prefix: "space".into(),
+        rows: (0..8).map(|index| super::KeyHintUiRow {
+            next_key: index.to_string(),
+            label: format!("Action {index}"),
+            icon: None,
+            group: false,
+        }).collect(),
+    };
+    let mut frame = super::Frame { grid: crate::ui::CellGrid::new(80, 40), cursor: None };
+    for y in 0..40 {
+        frame.grid.fill_row(y, crate::ui::Style::TerminalBackground);
+    }
+    super::terminal::render_key_hints(&mut frame, &hints, 0, 80, 30, 8, crate::config::AmbiguousWidth::Narrow);
+    for index in 0..8 {
+        assert!((30..37).any(|y| frame.grid.row_text(y).contains(&format!("Action {index}"))));
+    }
+    for y in (0..30).chain(37..40) {
+        assert!((0..80).all(|x| frame.grid.get(x, y).unwrap().style == crate::ui::Style::TerminalBackground));
+    }
+}
+
+#[test]
+fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
+    let hints = super::KeyHintUiState {
+        prefix: "space".into(),
+        rows: vec![super::KeyHintUiRow {
+            next_key: "a".into(), label: "·".repeat(20), icon: None, group: false,
+        }],
+    };
+    for (width, clipped) in [(60, false), (24, true)] {
+        let mut frame = super::Frame {
+            grid: crate::ui::CellGrid::new_with_policy(width, 10, "?", "?", true), cursor: None,
+        };
+        super::terminal::render_key_hints(&mut frame, &hints, 0, width, 0, 10, crate::config::AmbiguousWidth::Wide);
+        let body = (0..10).find(|y| frame.grid.row_text(*y).contains("[a]")).unwrap();
+        let text = frame.grid.row_text(body);
+        assert_eq!(text.contains('…'), clipped);
+        if !clipped { assert!(text.contains(&"·".repeat(20))); }
+        for y in 0..10 {
+            for x in 0..width {
+                let cell = frame.grid.get(x, y).unwrap();
+                if cell.style == crate::ui::Style::KeyHintBorder {
+                    assert!(!cell.continuation);
+                    assert!(matches!(cell.symbol.as_str(), "+" | "-" | "|"));
+                }
+            }
+        }
+    }
 }
 
 #[test]

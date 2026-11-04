@@ -1,5 +1,4 @@
 use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
     config::{AmbiguousWidth, Config},
@@ -91,15 +90,36 @@ pub(super) fn terminal_tab_label(tabs: &[TerminalTabState], tab: &TerminalTabSta
     title
 }
 
+// Drop leading tabs until the active title fits, keeping earlier tabs when there is room.
+fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16) -> usize {
+    let Some(active) = terminal.tabs.iter().position(|tab| tab.id == terminal.id) else {
+        return 0;
+    };
+    let separator = text_width(TERMINAL_TAB_SEPARATOR, config.editor.ambiguous_width);
+    let widths: Vec<_> = terminal.tabs[..=active]
+        .iter()
+        .map(|tab| text_width(&terminal_tab_label(&terminal.tabs, tab), config.editor.ambiguous_width))
+        .collect();
+    let mut used = widths.iter().sum::<usize>() + separator * active;
+    let mut first = 0;
+    while first < active && used > usize::from(width.saturating_sub(1)) {
+        used = used.saturating_sub(widths[first] + separator);
+        first += 1;
+    }
+    first
+}
+
 #[must_use]
 pub fn terminal_tab_at_column(
     terminal: &TerminalPanelState,
     config: &Config,
-    width: u16,
+    geometry: TerminalPanelGeometry,
     column: u16,
 ) -> Option<u64> {
-    let mut x = 1_u16;
-    for (index, tab) in terminal.tabs.iter().enumerate() {
+    let right = geometry.x.saturating_add(geometry.width);
+    let mut x = geometry.x.saturating_add(1);
+    let first = terminal_tab_start(terminal, config, geometry.width);
+    for (index, tab) in terminal.tabs.iter().skip(first).enumerate() {
         if index > 0 {
             x = x.saturating_add(
                 u16::try_from(text_width(
@@ -115,12 +135,12 @@ pub fn terminal_tab_at_column(
                 u16::try_from(text_width(&label, config.editor.ambiguous_width))
                     .unwrap_or(u16::MAX),
             )
-            .min(width);
+            .min(right);
         if column >= x && column < end {
             return Some(tab.id);
         }
         x = end;
-        if x >= width {
+        if x >= right {
             break;
         }
     }
@@ -177,7 +197,8 @@ pub(super) fn dock_terminal_panel(
         }
     }
     let mut title_x = geometry.x.saturating_add(1);
-    for (index, tab) in terminal.tabs.iter().enumerate() {
+    let first = terminal_tab_start(terminal, config, geometry.width);
+    for (index, tab) in terminal.tabs.iter().skip(first).enumerate() {
         if index > 0 {
             title_x = grid.put_text_clipped(
                 title_x,
@@ -236,6 +257,11 @@ pub(super) fn dock_terminal_panel(
             if cell.continuation {
                 continue;
             }
+            let cell_width = if row.get(column + 1).is_some_and(|next| next.continuation) { 2 } else { 1 };
+            let x = geometry.x.saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
+            if x.saturating_add(cell_width as u16) > right {
+                break;
+            }
             let selected = terminal.selection.is_some_and(|(first, second, linewise)| {
                 let (start, end) = if first <= second {
                     (first, second)
@@ -248,10 +274,8 @@ pub(super) fn dock_terminal_panel(
                     (source_row, column) >= start && (source_row, column) <= end
                 }
             });
-            grid.put_text_clipped(
-                geometry
-                    .x
-                    .saturating_add(u16::try_from(column).unwrap_or(u16::MAX)),
+            grid.set_cell_with_width(
+                x,
                 y,
                 &cell.text,
                 if selected {
@@ -259,7 +283,7 @@ pub(super) fn dock_terminal_panel(
                 } else {
                     Style::Terminal(cell.style)
                 },
-                geometry.x.saturating_add(geometry.width),
+                cell_width,
             );
         }
     }
@@ -287,22 +311,23 @@ pub(super) fn render_key_hints(
     hints: &KeyHintUiState,
     editor_left: u16,
     editor_width: u16,
-    terminal_height: u16,
+    editor_top: u16,
+    editor_height: u16,
+    ambiguous: AmbiguousWidth,
 ) {
-    let available_height = terminal_height.saturating_sub(1);
+    let available_height = editor_height.saturating_sub(1);
     if editor_width < 12 || available_height < 4 || hints.rows.is_empty() {
         return;
     }
+    let maximum_rows = usize::from(KEY_HINT_MAX_ROWS.min(available_height.saturating_sub(3)));
     let row_count = hints
         .rows
         .len()
-        .min(usize::from(KEY_HINT_MAX_ROWS).saturating_mul(usize::from(KEY_HINT_MAX_COLUMNS)));
+        .min(maximum_rows.saturating_mul(usize::from(KEY_HINT_MAX_COLUMNS)));
     let columns = usize::from(KEY_HINT_MAX_COLUMNS)
-        .min(row_count.div_ceil(usize::from(KEY_HINT_MAX_ROWS)))
+        .min(row_count.div_ceil(maximum_rows))
         .max(1);
-    let rows_per_column = row_count
-        .div_ceil(columns)
-        .min(usize::from(KEY_HINT_MAX_ROWS));
+    let rows_per_column = row_count.div_ceil(columns);
     let desired_height = 3usize.saturating_add(rows_per_column);
     let box_height = u16::try_from(desired_height)
         .unwrap_or(available_height)
@@ -315,12 +340,12 @@ pub(super) fn render_key_hints(
         .iter()
         .take(row_count)
         .map(|row| {
-            UnicodeWidthStr::width(row.next_key.as_str())
-                + UnicodeWidthStr::width(row.label.as_str())
+            frame.grid.display_width(&row.next_key)
+                + frame.grid.display_width(&row.label)
                 + row
                     .icon
                     .as_deref()
-                    .map_or(0, |icon| UnicodeWidthStr::width(icon) + 1)
+                    .map_or(0, |icon| frame.grid.display_width(icon) + 1)
                 + 3
         })
         .max()
@@ -338,7 +363,7 @@ pub(super) fn render_key_hints(
         return;
     }
     let left = editor_left.saturating_add(editor_width.saturating_sub(box_width));
-    let top = available_height.saturating_sub(box_height);
+    let top = editor_top.saturating_add(available_height.saturating_sub(box_height));
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {
@@ -439,7 +464,7 @@ pub(super) fn render_key_hints(
         // A label too long for its column ends in an ellipsis instead of stopping mid-word.
         let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
         let label =
-            super::surfaces::ellipsized(&row.label, room, crate::config::AmbiguousWidth::Narrow);
+            super::surfaces::ellipsized(&row.label, room, ambiguous);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,

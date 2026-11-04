@@ -2521,7 +2521,9 @@ pub fn render(
             key_hints,
             workspace.map_or(0, |bounds| bounds.x),
             content_width,
+            workspace.map_or(0, |bounds| bounds.y),
             workspace_height,
+            config.editor.ambiguous_width,
         );
     }
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();

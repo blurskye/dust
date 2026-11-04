@@ -699,14 +699,17 @@ impl InteractiveApplication {
                 if over_terminal
                     && key.terminal_mouse()
                         == Some(crate::editor::input::TerminalMouseInput::LeftDown)
-                    && let Some(rect) = self.terminal_window_rect()
-                    && row == rect.y
+                    && let Some(layout) = self.window_session.layout()
+                    && let Some((_, window)) = layout.surfaces.terminal
+                    && let Some(window) = self.compositor_projection().and_then(|projection| projection.window(window))
+                    && let Some(geometry) = crate::ui::terminal_window_geometry(window)
+                    && row == geometry.top
                     && let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
                         terminal_tab_at_column(
                             terminal,
                             self.configuration.settings(),
-                            rect.width,
-                            column.saturating_sub(rect.x),
+                            geometry,
+                            column,
                         )
                     })
                 {
