@@ -196,11 +196,14 @@ def assert_resize_with_pending_input(binary: pathlib.Path) -> None:
         target = pathlib.Path(directory) / "resize-race.txt"
         target.write_text("X" * 210 + "\n", encoding="utf-8")
         widths = [180, 100] * 12
-        stages: list[Stage] = [(0.7, b"", None)]
+        stages: list[Stage] = [(5.0, b"", None)]
         stages.extend((0.5, b"\x1b[O", (30, width)) for width in widths)
         stages.extend([(0.5, b"", None), (0.1, b":q\r", None)])
         code, output, snapshots = run(
-            binary, directory, [str(target)], stages, coalesce_resize_input=True
+            binary, directory, [str(target)], stages, coalesce_resize_input=True,
+            stage_expectations={
+                0: lambda screen: "X" * 80 in screen and "opening file" not in screen,
+            },
         )
         assert code == 0
         for index, width in enumerate(widths):
@@ -465,42 +468,50 @@ def main() -> None:
             directory,
             ["main.rs"],
             [
-                (0.7, b":lsp\r", None),
-                (0.5, b"p", None),
-                (0.3, b"", None),
+                (5.0, b":lsp\r", None),
+                (5.0, b"p", None),
+                (5.0, b"", None),
                 (0.1, b"\x1b", None),
                 (0.1, b"\x1b", None),
                 (0.1, b":q\r", None),
             ],
+            stage_expectations={
+                0: lambda screen: "fn main() {}" in screen and "main.rs" in screen,
+                1: lambda screen: " Tools " in screen and "rust-analyzer" in screen,
+                2: lambda screen: "Tools · rust-analyzer · choose build" in screen,
+            },
         )
         assert code == 0
         tool_screen = terminal_screen(snapshots[1])
-        assert "Dust tool manager" in tool_screen
+        assert " Tools " in tool_screen, repr(tool_screen)
         assert "rust-analyzer" in tool_screen
-        assert all(column in tool_screen for column in ("SERVER", "VERSION", "RUNTIME", "STATE"))
+        assert all(column in tool_screen for column in ("NAME", "VERSION", "SOURCE", "STATE"))
         runtime_screen = terminal_screen(snapshots[2])
-        assert "rust-analyzer · choose build" in runtime_screen
-        assert "this host's Dust fallback; only ACTIVE is used" in runtime_screen
-        assert "BUILD / RELEASE" in runtime_screen
+        assert "Tools · rust-analyzer · choose build" in runtime_screen
+        assert "Enter use this build" in runtime_screen
+        assert all(
+            column in runtime_screen
+            for column in ("VERSION", "RELEASE", "SOURCE", "STATE", "IN USE")
+        )
         assert "PATH" in runtime_screen
         if rust_analyzer_is_rustup_proxy():
             assert "rustup bundled" in runtime_screen
             assert "Rust 1." not in runtime_screen
         if is_nixos_host():
-            assert "Dust via Nix" in runtime_screen
-            assert "Dust download" not in runtime_screen
+            assert "Dust (Nix)" in runtime_screen
+            assert not re.search(r"\bDust\s+not installed", runtime_screen)
             assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
             assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
             assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
             assert "0.3.2660" not in runtime_screen
         else:
-            assert "Dust download" in runtime_screen
-            assert "Dust via Nix" not in runtime_screen
+            assert re.search(r"\bDust\s+not installed", runtime_screen)
+            assert "Dust (Nix)" not in runtime_screen
             assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
             assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
             assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
             assert "0.3.2660" not in runtime_screen
-        assert "i install" in runtime_screen and "u remove Dust copy" in runtime_screen
+        assert "i install" in runtime_screen and "u uninstall" in runtime_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -595,7 +606,7 @@ def main() -> None:
                 (0.5, b":q\r", None),
             ],
         )
-        assert code == 0
+        assert code == 0, (code, output[-4000:])
         assert "untrusted" in terminal_screen(snapshots[1])
         trust_prompt = terminal_screen(snapshots[2])
         assert "Do you want to trust this workspace?" in trust_prompt
@@ -668,7 +679,10 @@ def main() -> None:
         )
         assert code == 0
         inline = terminal_screen(snapshots[3])
-        assert "●● first error [check]" in inline and "E2 W0" in inline
+        assert "●● first error [check]" in inline, inline
+        status = inline.splitlines()[29]
+        assert "\uf057 2" in status, status
+        assert "\uf071" not in status, status  # zero warnings stay hidden
         expanded = terminal_screen(snapshots[5])
         assert "Diagnostics:" in expanded
         assert "1. first error [check]" in expanded
@@ -821,7 +835,7 @@ while True:
         )
         assert code == 0
         assert "added workspace root" in terminal_screen(snapshots[1])
-        assert "Workspace roots" in terminal_screen(snapshots[2])
+        assert "Projects" in terminal_screen(snapshots[2])
         assert "root-b" in terminal_screen(snapshots[3])
         assert "active root" in terminal_screen(snapshots[5])
         opened = terminal_screen(snapshots[6])
@@ -845,7 +859,7 @@ while True:
         assert pathlib.Path(directory).name in opened_with_dock
         assert "inside.txt" in opened_with_dock
         assert "explorer pty content" in opened_with_dock
-        assert opened_with_dock.splitlines()[0][40] == "⎸"
+        assert opened_with_dock.splitlines()[0][40] == "│"
         assert_restored(output)
 
         code, output, snapshots = run(
@@ -856,7 +870,7 @@ while True:
         split_screen = terminal_screen(snapshots[4])
         assert pathlib.Path(directory).name in split_screen and "inside.txt" in split_screen
         assert "explorer pty content" in split_screen
-        assert split_screen.splitlines()[0][40] == "⎸"
+        assert split_screen.splitlines()[0][40] == "│"
         assert_restored(output)
 
     # Directional focus crosses the persistent explorer/editor boundary using
@@ -880,12 +894,14 @@ while True:
             ],
         )
         assert code == 0
-        focused_explorer = terminal_screen(snapshots[1]).splitlines()[1]
-        focused_editor = terminal_screen(snapshots[3]).splitlines()[1]
-        refocused_explorer = terminal_screen(snapshots[5]).splitlines()[1]
-        assert focused_explorer.lstrip().startswith(">")
-        assert not focused_editor.lstrip().startswith(">")
-        assert refocused_explorer.lstrip().startswith(">")
+        # The search box keeps its prompt when unfocused; the real terminal
+        # cursor moves from the explorer's left margin into the editor.
+        focused_explorer = terminal_cursor(snapshots[1])
+        focused_editor = terminal_cursor(snapshots[3])
+        refocused_explorer = terminal_cursor(snapshots[5])
+        assert focused_explorer[0] == 0, focused_explorer
+        assert 41 <= focused_editor[0] < 100, focused_editor
+        assert refocused_explorer == focused_explorer, refocused_explorer
         assert_restored(output)
 
     # Screen-painting movements must never be exposed as visible cursor
@@ -925,21 +941,26 @@ while True:
             directory,
             [str(target)],
             [
-                (0.5, b"", (30, 180)),
+                (5.0, b"", (30, 180)),
                 (0.7, b"", (18, 60)),
                 (0.7, b"", (30, 180)),
                 (0.7, b"", None),
                 (0.1, b":q\r", None),
             ],
+            # The opening notice floats over the first line; let it fade before
+            # checking how much file content each resized viewport exposes.
+            stage_expectations={
+                0: lambda screen: "X" * 80 in screen and "opening file" not in screen,
+            },
         )
         assert code == 0
         for snapshot in (snapshots[1], snapshots[3]):
             grown = terminal_screen(snapshot, 180, 30)
-            assert "X" * 120 in grown
-            assert "NORMAL" in grown.splitlines()[29]
+            assert "X" * 120 in grown, repr(grown)
+            assert "NORMAL" in grown.splitlines()[29], repr(grown)
         shrunk = terminal_screen(snapshots[2], 60, 18)
-        assert "X" * 40 in shrunk
-        assert "NORMAL" in shrunk.splitlines()[17]
+        assert "X" * 40 in shrunk, repr(shrunk)
+        assert "NORMAL" in shrunk.splitlines()[17], repr(shrunk)
         assert_restored(output)
 
     assert_resize_with_pending_input(binary)
@@ -1004,7 +1025,10 @@ while True:
             stage_expectations={
                 1: lambda screen: "BETA-CONTENT" in screen,
                 2: lambda screen: "GAMMA-CONTENT" in screen,
-                3: lambda screen: pathlib.Path(directory).name in screen.splitlines()[0][:41]
+                3: lambda screen: "Explorer" in screen.splitlines()[0][:41]
+                and pathlib.Path(directory).name in "\n".join(
+                    row[:40] for row in screen.splitlines()
+                )
                 and all(
                     name in screen.splitlines()[0][41:]
                     for name in ("alpha.rs", "beta.rs", "gamma.rs")
@@ -1014,7 +1038,10 @@ while True:
         assert code == 0
         opened = terminal_screen(snapshots[3])
         top = opened.splitlines()[0]
-        assert pathlib.Path(directory).name in top[:41]
+        assert "Explorer" in top[:41], top
+        assert pathlib.Path(directory).name in "\n".join(
+            row[:40] for row in opened.splitlines()
+        ), opened
         assert all(name in top[41:] for name in ("alpha.rs", "beta.rs", "gamma.rs")), top
         assert "BETA-CONTENT" in terminal_screen(snapshots[5])
         assert "GAMMA-CONTENT" in terminal_screen(snapshots[6])
@@ -1064,13 +1091,15 @@ while True:
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
         assert pathlib.Path(directory).name in focused and "EDITOR-TOP" in focused
-        assert "shell" in focused_rows[20]
-        assert any("DOCKED-TERMINAL" in row for row in focused_rows[21:29])
+        # The ten-row dock ends above the screen's persistent status line.
+        assert "shell" in focused_rows[19]
+        assert any("DOCKED-TERMINAL" in row for row in focused_rows[20:29])
         assert "[?2004h" not in focused and "[1;32m" not in focused
         assert "]0;title" not in focused
-        assert "TERMINAL" not in focused
+        assert "TERMINAL" in focused_rows[29]
+        assert "TERMINAL" not in focused_rows[19]
         assert "unsupported" not in focused_rows[29]
-        assert focused_rows[21][40] != "⎸"  # terminal spans beneath explorer
+        assert focused_rows[20][40] != "│"  # terminal spans beneath explorer
 
         hidden = terminal_screen(snapshots[8], 100, 30)
         assert "shell" not in hidden
@@ -1083,7 +1112,7 @@ while True:
         assert "EDITOR-TOP" in resized
         refocused = terminal_screen(snapshots[10], 60, 20)
         assert "shell" in refocused
-        assert terminal_cursor(snapshots[10], 60, 20)[1] >= 11
+        assert 10 <= terminal_cursor(snapshots[10], 60, 20)[1] < 19
         exited = terminal_screen(snapshots[11], 60, 20)
         assert "shell" not in exited
         assert "EXIT 0" not in exited
@@ -1145,9 +1174,9 @@ exit 1
         assert code == 0
         manager = terminal_screen(snapshots[3])
         assert "unavailable" in manager
-        assert "STARTING" not in manager
+        assert "starting" not in manager
         installed = terminal_screen(snapshots[4])
-        assert "rust-analyzer" in installed and "PATH" in installed and "stopped" in installed
+        assert re.search(r"rust-analyzer[^\n]*PATH\s+installed", installed), installed
         assert "installed rust-analyzer in the active rustup toolchain" in installed
         assert (root / ".component-installed").is_file()
         assert_restored(output)
@@ -1252,7 +1281,7 @@ exit 1
         config_home = pathlib.Path(directory) / "config"
         config_home.mkdir()
         (config_home / "config.toml").write_text(
-            "[ui]\nalternate_screen=false\nmouse=false\nfocus_events=false\n",
+            "[ui]\nmouse=false\n",
             encoding="utf-8",
         )
         code, output, _ = run(
@@ -1264,9 +1293,11 @@ exit 1
             config_home=config_home,
         )
         assert code == 0
-        assert b"\x1b[?1049h" not in output
+        # Alternate screen, bracketed paste and focus events are always enabled;
+        # mouse capture remains configurable.
+        assert_restored(output)
         assert b"\x1b[?1000h" not in output
-        assert b"\x1b[?2004h" in output and b"\x1b[?2004l" in output
+        assert b"\x1b[?1004h" in output and b"\x1b[?1004l" in output
 
     with tempfile.TemporaryDirectory() as directory:
         path = pathlib.Path(directory) / "focus.txt"
@@ -1328,12 +1359,15 @@ exit 1
             [],
             [
                 (0.4, b":recovery\r", None),
-                (0.2, b":recover\r", None),
-                (0.2, b":q\r", None),
+                (0.2, b"\r", None),
+                (0.2, b":q!\r", None),
             ],
         )
         assert code == 0
-        assert "1 recovery journal" in terminal_screen(snapshots[1])
+        recovery_picker = terminal_screen(snapshots[1])
+        assert "Recover Unsaved Work" in recovery_picker, recovery_picker
+        assert "1/1" in recovery_picker and "recover-me.txt" in recovery_picker
+        assert "unsaved-base" in recovery_picker
         assert "unsaved-base" in terminal_screen(snapshots[2])
         assert_restored(output)
 
@@ -1407,7 +1441,8 @@ arguments = { force = false }
         assert code == 0
         remapped = terminal_screen(snapshots[1])
         assert pathlib.Path(directory).as_posix() in remapped
-        assert "[z]" in remapped and "[q]" not in remapped
+        assert re.search(r"\bQuit +z *$", remapped, re.M), remapped
+        assert not re.search(r"\bQuit +q *$", remapped, re.M)
         assert_restored(output)
 
         code, output, snapshots = run(
@@ -1420,7 +1455,8 @@ arguments = { force = false }
         )
         assert code == 0
         clean_screen = terminal_screen(snapshots[0])
-        assert "[q]" in clean_screen and "[z]" not in clean_screen
+        assert re.search(r"\bQuit +q *$", clean_screen, re.M), clean_screen
+        assert not re.search(r"\bQuit +z *$", clean_screen, re.M)
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1429,7 +1465,6 @@ arguments = { force = false }
         (config_home / "config.toml").write_text(
             """
 [input.keymaps]
-load_bundled_defaults = false
 leader = ","
 local_leader = ";"
 """.strip(),
@@ -1437,6 +1472,10 @@ local_leader = ";"
         )
         (config_home / "keymaps.toml").write_text(
             """
+[[keymap]]
+id = "builtin.dashboard.surface.editor-quit.q"
+disable = true
+
 [[keymap]]
 id = "user.dashboard.symbolic-quit"
 context = "dashboard"
@@ -1456,7 +1495,8 @@ arguments = { force = false }
         )
         assert code == 0
         leader_screen = terminal_screen(snapshots[0])
-        assert "[, q]" in leader_screen and "[q]" not in leader_screen
+        assert re.search(r"\bQuit +, q *$", leader_screen, re.M), leader_screen
+        assert not re.search(r"\bQuit +q *$", leader_screen, re.M)
         assert pathlib.Path(directory).as_posix() in terminal_screen(snapshots[1])
         assert_restored(output)
 
@@ -1470,7 +1510,8 @@ arguments = { force = false }
         )
         assert code == 0
         clean_leader_screen = terminal_screen(snapshots[0])
-        assert "[q]" in clean_leader_screen and "[, q]" not in clean_leader_screen
+        assert re.search(r"\bQuit +q *$", clean_leader_screen, re.M), clean_leader_screen
+        assert not re.search(r"\bQuit +, q *$", clean_leader_screen, re.M)
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1591,9 +1632,6 @@ command_marker = "> "
 [ui.status_line.mode_labels]
 normal = "NORMX"
 
-[input]
-disabled_command_aliases = ["q"]
-
 [input.command_aliases]
 bye = "editor.quit"
 """.strip(),
@@ -1666,20 +1704,26 @@ arguments = { force = false }
                 (0.3, b"p", None),
                 (0.2, b"\x1b", None),
                 (0.1, b":config reload\r", None),
-                (0.5, b":config reload\r", None),
-                (1.0, b"p", None),
+                (5.0, b":config reload\r", None),
+                (5.0, b"p", None),
                 (0.2, b"\x1b", None),
                 (0.2, b":bye\r", None),
             ],
             clean=False,
             config_home=config_home,
             stage_actions={3: lambda: config_path.write_text("[ui\n", encoding="utf-8")},
+            stage_expectations={
+                3: lambda screen: "configuration reloaded" in screen,
+                4: lambda screen: "reload rejected" in screen,
+            },
         )
         assert code == 0
         assert "CUSTOM DASH" in terminal_screen(snapshots[0])
         assert "OPS CONSOLE" in terminal_screen(snapshots[1])
-        assert "configuration reloaded" in terminal_screen(snapshots[3])
-        assert "reload rejected" in terminal_screen(snapshots[4])
+        reloaded = terminal_screen(snapshots[3])
+        rejected = terminal_screen(snapshots[4])
+        assert "configuration reloaded" in reloaded, repr(reloaded)
+        assert "reload rejected" in rejected, repr(rejected)
         assert "OPS CONSOLE" in terminal_screen(snapshots[5])
         assert b"38;5;201" in output
         assert_restored(output)
@@ -1726,10 +1770,6 @@ arguments = { force = false }
 
         def watched_config(label: str, theme: str = "watched") -> str:
             return (
-                "[config_watch]\n"
-                "enabled=true\n"
-                "poll_interval_ms=25\n"
-                "debounce_ms=25\n"
                 "[ui]\n"
                 f"theme='{theme}'\n"
                 "[ui.status_line.mode_labels]\n"
@@ -1741,6 +1781,10 @@ arguments = { force = false }
         watched_dashboard = (
             repository / "assets/defaults/dashboard.toml"
         ).read_text(encoding="utf-8").replace("D U S T", "WATCHED DASHBOARD")
+        # Keep the watched identity visible instead of the bundled large logo.
+        watched_dashboard = re.sub(
+            r'logo = """.*?"""', 'logo = ""', watched_dashboard, count=1, flags=re.S
+        )
 
         def update_watched_sources() -> None:
             config_path.write_text(watched_config("WATCH-NEW"), encoding="utf-8")
@@ -1781,10 +1825,10 @@ arguments = { force = false }
             [str(path)],
             [
                 (0.8, b"", None),
-                (0.4, b"", None),
-                (0.4, b"", None),
+                (5.0, b"", None),
+                (5.0, b"", None),
                 (4.0, b"", None),
-                (0.8, b":bd\r", None),
+                (5.0, b":bd\r", None),
                 (0.2, b"y", None),
             ],
             clean=False,
@@ -1794,6 +1838,12 @@ arguments = { force = false }
                 1: switch_watched_theme_source,
                 2: update_selected_theme_content,
                 3: lambda: config_path.write_text("[ui\n", encoding="utf-8"),
+            },
+            stage_expectations={
+                1: lambda screen: "WATCH-NEW" in screen,
+                2: lambda screen: "WATCH-THEME2" in screen,
+                4: lambda screen: "WATCH-THEME2" in screen
+                and "automatic configuration reload rejected" in screen,
             },
         )
         assert code == 0

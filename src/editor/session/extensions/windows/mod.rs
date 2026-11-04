@@ -56,6 +56,7 @@ struct PluginWindowInstance {
     private: Option<PluginPrivateState>,
     focused_node: Option<u64>,
     scroll: usize,
+    visible_rows: usize,
 }
 
 #[cfg_attr(not(test), derive(Clone))]

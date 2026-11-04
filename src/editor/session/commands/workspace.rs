@@ -154,11 +154,7 @@ pub(super) fn register_commands(
             "Open command picker",
             PickerKind::Commands,
         ),
-        (
-            "workspace.root.list",
-            "List projects",
-            PickerKind::Roots,
-        ),
+        ("workspace.root.list", "List projects", PickerKind::Roots),
         (
             "navigation.recents",
             "Open recent files",

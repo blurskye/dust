@@ -81,7 +81,14 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
     assert_eq!(app.configuration.theme(), &saved);
     assert_eq!(
         app.configuration.theme_state().unwrap().as_deref(),
-        Some(snapshot.as_str())
+        Some(
+            crate::config::theme_snapshot(&crate::config::ThemeChoice {
+                theme: saved.clone(),
+                path: "<editor-state:theme:remembered>".into(),
+            })
+            .unwrap()
+            .as_str()
+        )
     );
 }
 
@@ -233,8 +240,13 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let saved_state: crate::persistence::PersistedState =
         serde_json::from_slice(&fs::read(saved.path().join("session.json")).unwrap()).unwrap();
     let snapshot = saved_state.metadata.get("ui.theme.snapshot").unwrap();
+    let mut snapshot: serde_json::Value = serde_json::from_str(snapshot).unwrap();
     assert_eq!(
-        serde_json::from_str::<crate::config::ThemeConfig>(snapshot).unwrap(),
+        snapshot.as_object_mut().unwrap().remove("bundled"),
+        Some(serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        serde_json::from_value::<crate::config::ThemeConfig>(snapshot).unwrap(),
         amber
     );
     let mut restarted = InteractiveApplication::new(
@@ -695,7 +707,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
     });
     for leader in [",", ";"] {
         let policy = crate::config::KeymapPolicyConfig {
-                leader: leader.into(),
+            leader: leader.into(),
             local_leader: "\\".into(),
         };
         let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &policy);
@@ -717,11 +729,11 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
                 "editor.normal",
                 KeyEvent::character(leader.chars().next().expect("leader"))
             ),
-            MappingResolution::Pending
+            MappingResolution::Ambiguous
         );
         assert_eq!(
             keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('f')),
-            MappingResolution::Pending
+            MappingResolution::Ambiguous
         );
         assert_eq!(
             keymaps.resolve(&mut dispatch, "editor.normal", KeyEvent::character('e')),
@@ -865,7 +877,11 @@ fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
         key: None,
         command: None,
     });
-    let message = app.ui.notification.clone().expect("inspection notification");
+    let message = app
+        .ui
+        .notification
+        .clone()
+        .expect("inspection notification");
     assert!(message.contains(id));
     assert!(message.contains("<leader> f e => space f e"));
     assert!(message.contains("[command] explorer.panel.toggle"));
@@ -1066,7 +1082,10 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
             .contains("ctrl-c")
     );
     app.handle_configured_key("ctrl-c".parse().unwrap());
-    assert!(app.input.prompt().is_none(), "the remapped cancel key closes it");
+    assert!(
+        app.input.prompt().is_none(),
+        "the remapped cancel key closes it"
+    );
     app.open_confirmation(
         crate::ui::PromptKind::PluginConfirmation,
         "Delete?".into(),
@@ -1074,7 +1093,10 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
         crate::ui::ConfirmationChoice::No,
     );
     app.handle_configured_key(KeyEvent::character('z'));
-    assert!(app.input.prompt().is_none(), "the remapped yes key answers at once");
+    assert!(
+        app.input.prompt().is_none(),
+        "the remapped yes key answers at once"
+    );
 }
 
 /// Compile the bundled keymaps exactly as application construction does.
@@ -1118,7 +1140,6 @@ fn documented_key_reaches(
     None
 }
 
-
 #[test]
 fn the_agent_keys_each_reach_their_command() {
     let app = app();
@@ -1136,7 +1157,11 @@ fn the_agent_keys_each_reach_their_command() {
         ("<leader> a r", "agent.thinking"),
         ("<leader> a o", "agent.options"),
     ] {
-        assert_eq!(documented_key_reaches(&keymaps, keys).as_deref(), Some(command), "{keys}");
+        assert_eq!(
+            documented_key_reaches(&keymaps, keys).as_deref(),
+            Some(command),
+            "{keys}"
+        );
     }
 }
 
@@ -1244,8 +1269,14 @@ fn the_pi_profile_says_how_to_give_pi_subagents() {
     let app = app();
     let agents = &app.configuration.settings().agents;
     let note = agents.profiles["pi"].note.as_deref().unwrap_or_default();
-    assert!(note.contains("pi mcp add dust --exposure direct -- dust --agent-tools"), "{note}");
-    assert_eq!(agents.profiles["claude"].note, None, "Dust gives other agents the tool itself");
+    assert!(
+        note.contains("pi mcp add dust --exposure direct -- dust --agent-tools"),
+        "{note}"
+    );
+    assert_eq!(
+        agents.profiles["claude"].note, None,
+        "Dust gives other agents the tool itself"
+    );
 }
 
 #[test]
@@ -1253,9 +1284,17 @@ fn agents_own_subagents_are_off_over_acp_only() {
     let app = app();
     let profiles = &app.configuration.settings().agents.profiles;
     assert_eq!(profiles["codex"].cli, ["codex"]);
-    assert!(profiles["codex"].acp_environment.contains_key("CODEX_CONFIG"));
+    assert!(
+        profiles["codex"]
+            .acp_environment
+            .contains_key("CODEX_CONFIG")
+    );
     assert_eq!(profiles["opencode"].cli, ["opencode"]);
-    assert!(profiles["opencode"].acp_environment.contains_key("OPENCODE_CONFIG_CONTENT"));
+    assert!(
+        profiles["opencode"]
+            .acp_environment
+            .contains_key("OPENCODE_CONFIG_CONTENT")
+    );
     for profile in profiles.values() {
         assert!(!profile.environment.contains_key("CODEX_CONFIG"));
         assert!(!profile.environment.contains_key("OPENCODE_CONFIG_CONTENT"));
@@ -1301,13 +1340,32 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Enter));
     // The panel says so for good, not just in the notice, and keeps the question.
     let panel = app.ui.agent_panel.as_ref().expect("the panel is drawn");
-    assert!(panel.transcript.text.contains("dust-test-missing-adapter is not installed"));
+    assert!(
+        panel
+            .transcript
+            .text
+            .contains("dust-test-missing-adapter is not installed")
+    );
     assert_eq!(
-        (panel.input.as_str(), app.ui.notification.as_deref(), app.ui.notification_error),
-        ("hi", Some("dust-test-missing-adapter is not installed"), true)
+        (
+            panel.input.as_str(),
+            app.ui.notification.as_deref(),
+            app.ui.notification_error
+        ),
+        (
+            "hi",
+            Some("dust-test-missing-adapter is not installed"),
+            true
+        )
     );
     app.handle_configured_key(KeyEvent::character('!'));
-    assert_eq!(app.ui.agent_panel.as_ref().map(|panel| panel.input.as_str()), Some("hi!"));
+    assert_eq!(
+        app.ui
+            .agent_panel
+            .as_ref()
+            .map(|panel| panel.input.as_str()),
+        Some("hi!")
+    );
 }
 
 #[test]
@@ -1343,10 +1401,15 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
 
     app.process_effect(AppEffect::Settings(SettingsAction::Search));
     assert_eq!(app.active_input_context(), "settings_search");
-    app.process_effect(AppEffect::Settings(SettingsAction::Insert("tab width".into())));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert(
+        "tab width".into(),
+    )));
     let page = app.ui.settings.as_ref().unwrap();
     assert_eq!(page.selected_row().unwrap().key, "editor.tab_width");
-    assert_eq!(page.selected_row().unwrap().value, SettingsValue::Number("4".into()));
+    assert_eq!(
+        page.selected_row().unwrap().value,
+        SettingsValue::Number("4".into())
+    );
 
     // Enter leaves the search box; Enter again edits the number.
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
@@ -1375,4 +1438,100 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
         app.process_effect(AppEffect::Settings(SettingsAction::Cancel));
     }
     assert!(app.ui.settings.is_none());
+}
+
+#[test]
+fn undo_persistence_policy_changes_with_configuration() {
+    let mut app = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.persistence.enabled = true;
+    loaded.config.persistence.undo_history = true;
+    app.apply_configuration_candidate(loaded.clone(), false)
+        .unwrap();
+    assert!(app.state.undo_directory.as_ref().unwrap().ends_with("undo"));
+    loaded.config.persistence.undo_history = false;
+    app.apply_configuration_candidate(loaded.clone(), false)
+        .unwrap();
+    assert!(app.state.undo_directory.is_none());
+    loaded.config.persistence.undo_history = true;
+    app.apply_configuration_candidate(loaded, false).unwrap();
+    assert!(app.state.undo_directory.is_some());
+}
+
+#[test]
+fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
+    let mut app = app();
+    app.open_settings();
+    let page = app.ui.settings.as_mut().unwrap();
+    page.query = "@modified".into();
+    page.edit = Some(crate::ui::SettingsEdit::Text {
+        text: "8".into(),
+        cursor: 1,
+        error: None,
+    });
+    app.refresh_settings();
+    assert!(app.ui.settings.as_ref().unwrap().edit.is_none());
+}
+
+#[test]
+fn reload_preserves_zen_exit_and_plugin_command_titles() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("a"), None);
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    app.process_effect(AppEffect::Zen);
+    assert!(app.ui.explorer.is_none());
+    let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
+    spec.source = crate::editor::CommandSource::Plugin("demo".into());
+    app.commands
+        .register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty()))
+        .unwrap();
+    app.apply_configuration_candidate(crate::config::load_bundled_config(), false)
+        .unwrap();
+    app.process_effect(AppEffect::Zen);
+    assert!(app.ui.explorer.is_some());
+}
+
+#[test]
+fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
+    let app = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.installed_plugins.insert("demo".into());
+    loaded.keymaps.entries.push(crate::config::KeymapEntry {
+        id: "user.demo".into(),
+        context: Some("dashboard".into()),
+        mode: String::new(),
+        keys: Some("z".into()),
+        command: Some("plugin.demo.run".into()),
+        arguments: BTreeMap::new(),
+        unmap: false,
+        disable: false,
+        pass_through: false,
+        desc: None,
+    });
+    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded, true).unwrap();
+    assert!(diagnostic.is_none());
+    assert!(resolved.deferred_plugin_keymaps);
+    assert!(resolved.expected_plugin_indexes.contains("demo"));
+}
+
+#[test]
+fn reload_preserves_plugin_window_rules() {
+    let mut app = app();
+    let manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+    app.extension.fixture_contribution(index).unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.installed_plugins.insert("demo".into());
+    loaded.config.windows.rules = vec![crate::config::WindowRuleConfig {
+        content_type: "plugin.demo.panel".into(),
+        placement: crate::config::WindowPlacementConfig::Docked {
+            edge: "right".into(),
+            size: 20,
+        },
+    }];
+    app.apply_configuration_candidate(loaded.clone(), false)
+        .unwrap();
+    assert_eq!(app.configuration.settings().windows, loaded.config.windows);
 }

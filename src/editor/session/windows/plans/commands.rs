@@ -71,12 +71,14 @@ impl WindowSession {
         };
         let mut ids: Vec<u64> = self.native_ids().terminal_ids().collect();
         ids.sort_unstable();
-        ids.into_iter().map(NativeSurfaceTarget::Terminal).find(|target| {
-            matches!(
-                self.native_placement(*target),
-                Ok(WindowPlacement::Docked { edge, .. }) if edge == wanted
-            )
-        })
+        ids.into_iter()
+            .map(NativeSurfaceTarget::Terminal)
+            .find(|target| {
+                matches!(
+                    self.native_placement(*target),
+                    Ok(WindowPlacement::Docked { edge, .. }) if edge == wanted
+                )
+            })
     }
 
     pub(in crate::editor::session) fn plan_window_command(
@@ -175,6 +177,11 @@ impl WindowSession {
                     plan.native = Some(NativeAction::Place(native, placement));
                 } else {
                     let target_pane = pane(window)?;
+                    if placement == WindowPlacement::Fullscreen {
+                        plan.operations
+                            .push(EditorOperation::FocusPaneId { pane: target_pane });
+                        plan.focus_editor = true;
+                    }
                     if placement == WindowPlacement::Hidden
                         && self.core.graph.focused() == Some(window)
                     {
@@ -344,7 +351,10 @@ impl WindowSession {
                             .ok_or(TargetError::MissingTerminal)?,
                     ))
                 } else if self.explorer_focused() {
-                    Some(NativeSurfaceTarget::Explorer)
+                    Some(match self.focused_explorer() {
+                        Some(1) | None => NativeSurfaceTarget::Explorer,
+                        Some(view) => NativeSurfaceTarget::ExplorerView(view),
+                    })
                 } else {
                     None
                 };
@@ -551,10 +561,26 @@ impl WindowSession {
                                         "cannot swap tiled and non-tiled editor windows".into(),
                                     ));
                                 }
-                                _ => Some(NativeAction::SwapEditors(
-                                    (first_pane, first),
-                                    (second_pane, second),
-                                )),
+                                _ => {
+                                    let focused = self.core.graph.focused();
+                                    if focused == Some(first)
+                                        && second_placement == WindowPlacement::Hidden
+                                    {
+                                        plan.operations.push(EditorOperation::FocusPaneId {
+                                            pane: second_pane,
+                                        });
+                                    } else if focused == Some(second)
+                                        && first_placement == WindowPlacement::Hidden
+                                    {
+                                        plan.operations.push(EditorOperation::FocusPaneId {
+                                            pane: first_pane,
+                                        });
+                                    }
+                                    Some(NativeAction::SwapEditors(
+                                        (first_pane, first),
+                                        (second_pane, second),
+                                    ))
+                                }
                             }
                         }
                         _ => {

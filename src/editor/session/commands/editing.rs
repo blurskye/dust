@@ -259,15 +259,31 @@ pub(super) fn register_commands(
     }
     for (id, title, toggle) in [
         ("view.wrap.toggle", "Toggle line wrap", ViewToggle::Wrap),
-        ("view.line_numbers.toggle", "Toggle line numbers", ViewToggle::LineNumbers),
+        (
+            "view.line_numbers.toggle",
+            "Toggle line numbers",
+            ViewToggle::LineNumbers,
+        ),
         (
             "view.relative_numbers.toggle",
             "Toggle relative line numbers",
             ViewToggle::RelativeNumbers,
         ),
-        ("view.indent_guides.toggle", "Toggle indent guides", ViewToggle::IndentGuides),
-        ("view.git_signs.toggle", "Toggle git signs", ViewToggle::GitSigns),
-        ("view.format_on_save.toggle", "Toggle format on save", ViewToggle::FormatOnSave),
+        (
+            "view.indent_guides.toggle",
+            "Toggle indent guides",
+            ViewToggle::IndentGuides,
+        ),
+        (
+            "view.git_signs.toggle",
+            "Toggle git signs",
+            ViewToggle::GitSigns,
+        ),
+        (
+            "view.format_on_save.toggle",
+            "Toggle format on save",
+            ViewToggle::FormatOnSave,
+        ),
     ] {
         register(
             registry,

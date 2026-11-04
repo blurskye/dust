@@ -59,7 +59,9 @@ pub enum AppEffect {
     OpenWorkspaceFilePicker,
     GitStatusRefresh,
     GitStatusOpen,
-    GitBrowse { copy: bool },
+    GitBrowse {
+        copy: bool,
+    },
     FlashBegin,
     TodoSearch,
     AgentAsk,
@@ -273,6 +275,7 @@ pub enum AppEffect {
     PluginExecute {
         plugin: String,
         command: String,
+        arguments: Vec<String>,
     },
     PluginPickerOpen {
         provider: String,
@@ -368,7 +371,9 @@ pub enum AppEffect {
     ExplorerSearch,
     ExplorerSearchInsert(String),
     ExplorerSearchDelete,
-    ExplorerSearchStop { keep: bool },
+    ExplorerSearchStop {
+        keep: bool,
+    },
     ExplorerFileOpen {
         split: bool,
     },
@@ -414,7 +419,9 @@ pub enum AppEffect {
     ToolSearch,
     ToolSearchInsert(String),
     ToolSearchDelete,
-    ToolSearchStop { keep: bool },
+    ToolSearchStop {
+        keep: bool,
+    },
     CycleToolCategory(i8),
     RefreshTools,
     ActivateTool,

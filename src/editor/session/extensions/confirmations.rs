@@ -73,15 +73,15 @@ impl ConfirmationReservationLoan<'_> {
 }
 impl Drop for ConfirmationReservationLoan<'_> {
     fn drop(&mut self) {
-        if self.reserved && !self.committed {
-            if let Some(index) = self
+        if self.reserved
+            && !self.committed
+            && let Some(index) = self
                 .owner
                 .reservations
                 .iter()
                 .position(|reservation| reservation.same(&self.origin))
-            {
-                self.owner.reservations.remove(index);
-            }
+        {
+            self.owner.reservations.remove(index);
         }
     }
 }
@@ -254,6 +254,7 @@ impl PluginConfirmations {
         workspace: &WorkspaceVersion,
         configuration: u64,
         ui: &mut BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
+        runtime_epoch: u64,
     ) -> Result<bool, String> {
         let Some(answered) = self.answered.front_mut() else {
             return Ok(false);
@@ -284,6 +285,7 @@ impl PluginConfirmations {
             .remove(&(answered.pending.plugin.clone(), answered.pending.load))
             .unwrap_or_default();
         let request = PluginExecutionRequest {
+            runtime_epoch,
             plugin: answered.pending.plugin.clone(),
             command: answered.pending.command.clone(),
             arguments: Vec::new(),

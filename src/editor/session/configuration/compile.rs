@@ -11,8 +11,7 @@ pub fn reload_keymaps(
     candidate: &crate::config::LoadedKeymaps,
     policy: &crate::config::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
-    let (entries, bundled_count, groups, bundled_group_count) =
-        keymap_entries(candidate);
+    let (entries, bundled_count, groups, bundled_group_count) = keymap_entries(candidate);
     match compile_keymap_entries(
         commands,
         KeymapCompilation {
@@ -43,8 +42,7 @@ pub fn compile_keymaps(
     loaded: &crate::config::LoadedKeymaps,
     policy: &crate::config::KeymapPolicyConfig,
 ) -> (ResolvedKeymaps, Option<String>) {
-    let (entries, bundled_count, groups, bundled_group_count) =
-        keymap_entries(loaded);
+    let (entries, bundled_count, groups, bundled_group_count) = keymap_entries(loaded);
     match compile_keymap_entries(
         commands,
         KeymapCompilation {
@@ -246,9 +244,7 @@ pub(in crate::editor::session) fn regular_keymap_declaration(
         .filter(|keys| !keys.is_empty())
         .ok_or_else(|| "command/unmap/pass_through declaration requires `keys`".to_owned())?;
     if entry.desc.as_ref().is_some_and(|desc| {
-        desc.is_empty()
-            || desc.chars().count() > 64
-            || desc.chars().any(char::is_control)
+        desc.is_empty() || desc.chars().count() > 64 || desc.chars().any(char::is_control)
     }) {
         return Err("desc must contain 1..=64 non-control characters".into());
     }
@@ -926,17 +922,15 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
         let contribution_layer = entry.origin.layer;
         if let Some(previous) =
             effective_declarations.insert((context.clone(), sequence.clone()), index)
+            && effective_entries[previous].origin.layer != contribution_layer
         {
-            if effective_entries[previous].origin.layer != contribution_layer {
-                let declared = display_key_declaration(&entry.keys, &effective_keys);
-                let previous_entry = &effective_entries[previous];
-                let previous_declared =
-                    display_key_declaration(&previous_entry.keys, &effective_keys);
-                result.conflicts.push(format!(
-                    "keymap id `{}` {declared} shadows id `{}` {previous_declared} in `{context}`",
-                    entry.id, previous_entry.id
-                ));
-            }
+            let declared = display_key_declaration(&entry.keys, &effective_keys);
+            let previous_entry = &effective_entries[previous];
+            let previous_declared = display_key_declaration(&previous_entry.keys, &effective_keys);
+            result.conflicts.push(format!(
+                "keymap id `{}` {declared} shadows id `{}` {previous_declared} in `{context}`",
+                entry.id, previous_entry.id
+            ));
         }
         if let Some(previous) = sequence_declarations.insert(
             (context.clone(), sequence.clone(), contribution_layer),

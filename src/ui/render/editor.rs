@@ -80,6 +80,51 @@ fn diagnostic_label(diagnostic: &UiDiagnostic) -> String {
     tag.map_or(message.clone(), |tag| format!("{message} [{tag}]"))
 }
 
+pub(super) fn expanded_diagnostic_rows(
+    text: &crate::editor::text::TextBuffer,
+    path: Option<&std::path::Path>,
+    ui: &UiState,
+    config: &Config,
+    content_width: u16,
+) -> Option<(usize, Vec<(String, Style)>)> {
+    let expanded = ui.expanded_diagnostic.as_ref()?;
+    if path != Some(expanded.path.as_path()) {
+        return None;
+    }
+    let mut diagnostics = ui
+        .diagnostics
+        .iter()
+        .filter(|d| path == Some(d.path.as_path()))
+        .take(2_000)
+        .filter(|d| {
+            text.byte_to_line(d.range.start).ok() == Some(expanded.line)
+                && expanded.severities.contains(&d.severity)
+        })
+        .collect::<Vec<_>>();
+    diagnostics.sort_unstable_by_key(|d| (d.severity, d.range.start, &d.message));
+    if diagnostics.is_empty() {
+        return None;
+    }
+    let grid = CellGrid::new_with_policy(
+        0,
+        0,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
+        config.editor.ambiguous_width == AmbiguousWidth::Wide,
+    );
+    let mut rows = vec![("Diagnostics:".into(), Style::Muted)];
+    for (index, diagnostic) in diagnostics.into_iter().enumerate() {
+        let text = format!("{}. {}", index + 1, diagnostic_label(diagnostic));
+        let lines = text.lines().map(str::to_owned).collect::<Vec<_>>();
+        rows.extend(
+            super::debug::wrap_rows(&lines, content_width, &grid)
+                .into_iter()
+                .map(|row| (row, diagnostic_style(diagnostic.severity))),
+        );
+    }
+    Some((expanded.line, rows))
+}
+
 pub(super) fn render_editor_view(
     state: &EditorState,
     view_id: crate::editor::ViewId,
@@ -88,21 +133,34 @@ pub(super) fn render_editor_view(
     width: u16,
     height: u16,
 ) -> Frame {
-    if let Some(panel) = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id) {
+    if let Some(panel) = ui
+        .agent_panel
+        .as_ref()
+        .filter(|panel| panel.view == view_id)
+    {
         let focused = state.active_view == Some(view_id) && !ui.explorer_focused;
         // Alone on screen the panel keeps the status line under it, like any editor view.
         let status = config.ui.status_line.enabled && height > 1;
-        let mut frame = super::agent::render_agent_panel(panel, focused, config, width, height, status);
+        let mut frame =
+            super::agent::render_agent_panel(panel, focused, config, width, height, status);
         if status {
-            render_status_line(&mut frame.grid, state, view_id, ui, config, width, height - 1);
+            render_status_line(
+                &mut frame.grid,
+                state,
+                view_id,
+                ui,
+                config,
+                width,
+                height - 1,
+            );
         }
         return frame;
     }
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let Some(view) = state.views.get(view_id) else {
@@ -118,13 +176,8 @@ pub(super) fn render_editor_view(
     let digits = editor_line_number_digits(state);
     let gutter_width = editor_state_gutter_width(state, &buffer.text, &config.editor, width);
     let content_width = editor_state_content_width(state, &buffer.text, &config.editor, width);
-    let neutral_git_sign = (config.editor.git_signs.enabled && gutter_width > 0).then(|| {
-        one_cell_symbol(
-            &GIT_SIGN_UNCHANGED,
-            "|",
-            config.editor.ambiguous_width,
-        )
-    });
+    let neutral_git_sign = (config.editor.git_signs.enabled && gutter_width > 0)
+        .then(|| one_cell_symbol(GIT_SIGN_UNCHANGED, "|", config.editor.ambiguous_width));
     if let (Some(symbol), Some(column)) = (
         neutral_git_sign,
         git_sign_column(gutter_width, &config.editor),
@@ -133,9 +186,11 @@ pub(super) fn render_editor_view(
             grid.set_cell(column, row, symbol, Style::Muted);
         }
     }
-    let indent_guide_symbol = config.editor.indent_guides.enabled.then(|| {
-        one_cell_symbol(INDENT_GUIDE, "|", config.editor.ambiguous_width)
-    });
+    let indent_guide_symbol = config
+        .editor
+        .indent_guides
+        .enabled
+        .then(|| one_cell_symbol(INDENT_GUIDE, "|", config.editor.ambiguous_width));
     let active_indent_scope = indent_guide_symbol.and_then(|_| {
         active_indent_guide(
             &buffer.text,
@@ -149,10 +204,7 @@ pub(super) fn render_editor_view(
     let end_of_buffer_label = if config.editor.line_numbers == LineNumbers::Off {
         END_OF_BUFFER_MARKER.to_owned()
     } else {
-        let marker_width = text_width(
-            &END_OF_BUFFER_MARKER,
-            config.editor.ambiguous_width,
-        );
+        let marker_width = text_width(END_OF_BUFFER_MARKER, config.editor.ambiguous_width);
         format!(
             "{}{}{}",
             " ".repeat(digits.saturating_sub(marker_width)),
@@ -161,9 +213,7 @@ pub(super) fn render_editor_view(
         )
     };
     let large_file = ui.large_file_buffers.contains(&view.buffer);
-    let wrap_enabled = content_width > 0
-        && config.editor.wrap
-        && !large_file;
+    let wrap_enabled = content_width > 0 && config.editor.wrap && !large_file;
     let visual_rows = VisualRowModel::new_for_state(
         state,
         &buffer.text,
@@ -207,7 +257,10 @@ pub(super) fn render_editor_view(
         {
             Some(prompt.input.as_str())
         }
-        _ => typed_substitute.as_deref().or(ui.search_query.as_deref()),
+        _ => typed_substitute
+            .as_deref()
+            .filter(|pattern| !pattern.is_empty())
+            .or(ui.search_query.as_deref()),
     };
     let search_ranges = if config.search.highlight && !large_file {
         highlighted
@@ -252,27 +305,25 @@ pub(super) fn render_editor_view(
         Vec::new()
     };
     let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
-    if !large_file {
-        if let Some(path) = &buffer.path {
-            for diagnostic in ui
-                .diagnostics
-                .iter()
-                .filter(|diagnostic| &diagnostic.path == path)
-                .take(2_000)
-            {
-                if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
-                    diagnostic_lines.entry(line).or_default().push(diagnostic);
-                }
+    if !large_file && let Some(path) = &buffer.path {
+        for diagnostic in ui
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| &diagnostic.path == path)
+            .take(2_000)
+        {
+            if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
+                diagnostic_lines.entry(line).or_default().push(diagnostic);
             }
-            for diagnostics in diagnostic_lines.values_mut() {
-                diagnostics.sort_unstable_by_key(|diagnostic| {
-                    (
-                        diagnostic.severity,
-                        diagnostic.range.start,
-                        &diagnostic.message,
-                    )
-                });
-            }
+        }
+        for diagnostics in diagnostic_lines.values_mut() {
+            diagnostics.sort_unstable_by_key(|diagnostic| {
+                (
+                    diagnostic.severity,
+                    diagnostic.range.start,
+                    &diagnostic.message,
+                )
+            });
         }
     }
 
@@ -314,6 +365,7 @@ pub(super) fn render_editor_view(
         .iter()
         .chain(&ui.substitute_preview)
         .filter(|hint| hint.buffer == view.buffer && hint.revision == buffer.text.revision())
+        .take(10_000)
         .collect::<Vec<_>>();
     inlay_hints.sort_unstable_by_key(|hint| hint.position);
     let mut inlay_cursor = 0usize;
@@ -388,25 +440,32 @@ pub(super) fn render_editor_view(
             );
             // Beside the number, where it takes no room and hides no sign.
             let separator = u16::try_from(digits).unwrap_or(u16::MAX);
-            if let Some(worst) = diagnostic_lines.get(&line_index).and_then(|found| found.first())
+            if let Some(worst) = diagnostic_lines
+                .get(&line_index)
+                .and_then(|found| found.first())
                 && !LINE_NUMBER_SEPARATOR.is_empty()
-                && git_sign_column(gutter_width, &config.editor).is_none_or(|column| separator < column)
+                && git_sign_column(gutter_width, &config.editor)
+                    .is_none_or(|column| separator < column)
                 && separator < gutter_width
             {
                 grid.set_cell(separator, screen_row, "●", diagnostic_style(worst.severity));
             }
         }
-        if let Some(git_sign_column) =
-            git_sign_column(gutter_width, &config.editor).filter(|_| first_line_row == 0)
+        if let Some(git_sign_column) = git_sign_column(gutter_width, &config.editor)
+            .or_else(|| {
+                (gutter_width > 0
+                    && ui
+                        .debug_signs
+                        .iter()
+                        .any(|sign| buffer.path.as_deref() == Some(sign.path.as_path())))
+                .then(|| gutter_width - 1)
+            })
+            .filter(|_| first_line_row == 0)
         {
             grid.set_cell(
                 git_sign_column,
                 screen_row,
-                one_cell_symbol(
-                    &GIT_SIGN_UNCHANGED,
-                    "|",
-                    config.editor.ambiguous_width,
-                ),
+                one_cell_symbol(GIT_SIGN_UNCHANGED, "|", config.editor.ambiguous_width),
                 Style::Muted,
             );
             let debug_sign = ui.debug_signs.iter().find(|sign| {
@@ -425,20 +484,15 @@ pub(super) fn render_editor_view(
                     style,
                 );
             } else if let Some(sign) = ui.git_signs.iter().find(|sign| {
-                sign.buffer == view.buffer
+                config.editor.git_signs.enabled
+                    && sign.buffer == view.buffer
                     && sign.buffer_revision == buffer.text.revision().0
                     && sign.line == line_index
             }) {
                 let (symbol, fallback, style) = match sign.kind {
-                    UiGitSignKind::Added => {
-                        (&GIT_SIGN_ADDED, "|", Style::GitSignAdded)
-                    }
-                    UiGitSignKind::Changed => {
-                        (&GIT_SIGN_CHANGED, "|", Style::GitSignChanged)
-                    }
-                    UiGitSignKind::Deleted => {
-                        (&GIT_SIGN_DELETED, "_", Style::GitSignDeleted)
-                    }
+                    UiGitSignKind::Added => (&GIT_SIGN_ADDED, "|", Style::GitSignAdded),
+                    UiGitSignKind::Changed => (&GIT_SIGN_CHANGED, "|", Style::GitSignChanged),
+                    UiGitSignKind::Deleted => (&GIT_SIGN_DELETED, "_", Style::GitSignDeleted),
                 };
                 let symbol = if sign.staged {
                     &GIT_SIGN_STAGED
@@ -488,13 +542,16 @@ pub(super) fn render_editor_view(
                 .saturating_add(skipped_bytes)
                 .saturating_add(visible_content.len()),
         );
+        let mut rendered_inlays = 0usize;
         while inlay_hints
             .get(inlay_cursor)
             .is_some_and(|hint| hint.position < visible_start)
         {
+            if inlay_hints[inlay_cursor].position >= line_start {
+                rendered_inlays += 1;
+            }
             inlay_cursor = inlay_cursor.saturating_add(1);
         }
-        let mut rendered_inlays = 0usize;
         let mut x = gutter_width;
         let mut source_column = skipped_column;
         let mut visual_row_index = first_line_row;
@@ -513,12 +570,21 @@ pub(super) fn render_editor_view(
                 x = gutter_width;
             }
             let global = ByteOffset(line_start.get() + skipped_bytes + relative);
+            let inlay_right = x
+                .saturating_add(u16::try_from(visual_rows.inlay_width(global)).unwrap_or(u16::MAX))
+                .min(width);
             while let Some(hint) = inlay_hints
                 .get(inlay_cursor)
                 .filter(|hint| hint.position == global)
             {
                 if rendered_inlays < 32 {
-                    x = grid.put_text_clipped(x, screen_row, &hint.label, Style::Muted, width);
+                    x = grid.put_text_clipped(
+                        x,
+                        screen_row,
+                        &hint.label,
+                        Style::Muted,
+                        inlay_right,
+                    );
                     rendered_inlays = rendered_inlays.saturating_add(1);
                 }
                 inlay_cursor = inlay_cursor.saturating_add(1);
@@ -531,13 +597,16 @@ pub(super) fn render_editor_view(
                     tab_width: config.editor.tab_width,
                     ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
                 },
-            ) || view.multi_marks.iter().any(|mark| {
-                mark.contains(global) || (mark.is_empty() && mark.start == global)
-            }) || view.block_insert.contains(&global)
+            ) || view
+                .multi_marks
+                .iter()
+                .any(|mark| mark.contains(global) || (mark.is_empty() && mark.start == global))
+                || view.block_insert.contains(&global)
             {
                 Style::Selection
             } else if search_ranges.iter().any(|range| range.contains(global))
-                || flash.is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
+                || flash
+                    .is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
                 || tutor_target.is_some_and(|target| target.range.contains(global))
             {
                 Style::Search
@@ -663,17 +732,21 @@ pub(super) fn render_editor_view(
                         .map(|(_, label)| *label)
                 }) {
                     let mut bytes = [0; 4];
-                    grid.set_cell(x, screen_row, label.encode_utf8(&mut bytes), Style::StatusAccent);
+                    grid.set_cell(
+                        x,
+                        screen_row,
+                        label.encode_utf8(&mut bytes),
+                        Style::StatusAccent,
+                    );
                 } else if can_wrap && cells > content_width {
-                    let replacement = if text_width(
-                        &CONTROL_CHARACTER_REPLACEMENT,
-                        config.editor.ambiguous_width,
-                    ) == 1
-                    {
-                        CONTROL_CHARACTER_REPLACEMENT
-                    } else {
-                        "?"
-                    };
+                    let replacement =
+                        if text_width(CONTROL_CHARACTER_REPLACEMENT, config.editor.ambiguous_width)
+                            == 1
+                        {
+                            CONTROL_CHARACTER_REPLACEMENT
+                        } else {
+                            "?"
+                        };
                     grid.set_cell(x, screen_row, replacement, style);
                 } else if grapheme == " " {
                     if let Some(guide) = indent_guide_symbol.filter(|_| {
@@ -700,11 +773,20 @@ pub(super) fn render_editor_view(
                 x = x.saturating_add(advance);
             }
         }
-        if let Some(fold) = ui.lsp_folds.iter().chain(ui.syntax_folds.iter()).find(|fold| {
-            fold.view == view_id && fold.collapsed && fold.start_line == line_index
-        }) {
+        if let Some(fold) = ui
+            .lsp_folds
+            .iter()
+            .chain(ui.syntax_folds.iter())
+            .find(|fold| fold.view == view_id && fold.collapsed && fold.start_line == line_index)
+        {
             let hidden = fold.end_line.saturating_sub(fold.start_line);
-            x = grid.put_text_clipped(x, screen_row, &format!(" ⋯ {hidden} lines"), Style::Muted, width);
+            x = grid.put_text_clipped(
+                x,
+                screen_row,
+                &format!(" ⋯ {hidden} lines"),
+                Style::Muted,
+                width,
+            );
         }
         while let Some(hint) = inlay_hints
             .get(inlay_cursor)
@@ -716,72 +798,25 @@ pub(super) fn render_editor_view(
             }
             inlay_cursor = inlay_cursor.saturating_add(1);
         }
-        if let Some(diagnostics) = diagnostic_lines.get(&line_index) {
-            if let Some(diagnostic) = diagnostics.first() {
-                let text = format!("  ●● {}", diagnostic_label(diagnostic));
-                grid.put_text_clipped(
-                    x,
-                    screen_row,
-                    &text,
-                    diagnostic_style(diagnostic.severity),
-                    width,
-                );
-            }
+        if let Some(diagnostics) = diagnostic_lines.get(&line_index)
+            && let Some(diagnostic) = diagnostics.first()
+        {
+            let text = format!("  ●● {}", diagnostic_label(diagnostic));
+            grid.put_text_clipped(
+                x,
+                screen_row,
+                &text,
+                diagnostic_style(diagnostic.severity),
+                width,
+            );
         }
         screen_row = screen_row.saturating_add(1);
-        if ui.expanded_diagnostic.as_ref().is_some_and(|expanded| {
-            expanded.line == line_index
-                && buffer.path.as_ref() == Some(&expanded.path)
-                && diagnostic_lines
-                    .get(&line_index)
-                    .is_some_and(|diagnostics| {
-                        diagnostics
-                            .iter()
-                            .any(|diagnostic| expanded.severities.contains(&diagnostic.severity))
-                    })
-        }) {
-            if let Some(diagnostics) = diagnostic_lines.get(&line_index) {
-                if screen_row < body_height {
-                    grid.put_text_clipped(
-                        gutter_width,
-                        screen_row,
-                        "Diagnostics:",
-                        Style::Muted,
-                        width,
-                    );
-                    screen_row = screen_row.saturating_add(1);
-                }
-                let severities = &ui
-                    .expanded_diagnostic
-                    .as_ref()
-                    .expect("checked expanded diagnostic")
-                    .severities;
-                for (index, diagnostic) in diagnostics
-                    .iter()
-                    .filter(|diagnostic| severities.contains(&diagnostic.severity))
-                    .enumerate()
-                {
-                    let text = format!(
-                        "{}. {}",
-                        index.saturating_add(1),
-                        diagnostic_label(diagnostic)
-                    );
-                    let lines: Vec<String> = text.lines().map(str::to_owned).collect();
-                    for row in super::debug::wrap_rows(&lines, width.saturating_sub(gutter_width)) {
-                        if screen_row >= body_height {
-                            break;
-                        }
-                        grid.put_text_clipped(
-                            gutter_width,
-                            screen_row,
-                            &row,
-                            diagnostic_style(diagnostic.severity),
-                            width,
-                        );
-                        screen_row = screen_row.saturating_add(1);
-                    }
-                }
+        for (row, style) in visual_rows.diagnostic_rows(line_index) {
+            if screen_row >= body_height {
+                break;
             }
+            grid.put_text_clipped(gutter_width, screen_row, row, *style, width);
+            screen_row = screen_row.saturating_add(1);
         }
         line_index = line_index.saturating_add(1);
     }
@@ -812,7 +847,8 @@ pub(super) fn render_editor_view(
 
     // The operation bar sits directly above the status line so a paused operation is visible
     // without displacing the editor, and it is drawn ONLY when an operation is genuinely paused.
-    let bar_rows = u16::from(config.ui.status_line.enabled && ui.operation_bar.is_some() && height > 1);
+    let bar_rows =
+        u16::from(config.ui.status_line.enabled && ui.operation_bar.is_some() && height > 1);
     if bar_rows == 1 {
         render_operation_bar(&mut grid, ui, width, height - 2);
     }
@@ -836,7 +872,9 @@ pub(super) fn render_editor_view(
         let configured = match view.mode {
             EditorMode::Insert => config.ui.cursor.insert,
             EditorMode::Replace => REPLACE_CURSOR,
-            EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+            EditorMode::VisualChar
+            | EditorMode::VisualLine
+            | EditorMode::VisualBlock
             | EditorMode::Multi => VISUAL_CURSOR,
             EditorMode::OperatorPending => OPERATOR_PENDING_CURSOR,
             EditorMode::CommandLine => COMMAND_CURSOR,
@@ -881,10 +919,16 @@ pub(super) fn render_status_line(
     let status = &config.ui.status_line;
     let shown = |component: &str| status.components.iter().any(|item| item == component);
     // The agent panel's input has its own Insert and Normal modes.
-    let panel = ui.agent_panel.as_ref().filter(|panel| panel.view == view_id);
+    let panel = ui
+        .agent_panel
+        .as_ref()
+        .filter(|panel| panel.view == view_id);
     let agent = panel.is_some();
     // So does a focused terminal, whose typing mode is its own.
-    let terminal = ui.terminal_panel.as_ref().filter(|terminal| terminal.focused);
+    let terminal = ui
+        .terminal_panel
+        .as_ref()
+        .filter(|terminal| terminal.focused);
     let mode_key = match (terminal, panel) {
         (Some(terminal), _) => match terminal.mode {
             TerminalPanelMode::Input => "terminal",
@@ -902,7 +946,13 @@ pub(super) fn render_status_line(
     let (mode_style, mode_edge) = status_mode_styles(mode_key);
     let icons = config.ui.explorer.icon_mode == ExplorerIconMode::NerdFont;
     let (end_edge, start_edge, branch_icon, error_icon, warning_icon) = if icons {
-        ("\u{e0b0}", "\u{e0b2}", "\u{e0a0} ", "\u{f057} ", "\u{f071} ")
+        (
+            "\u{e0b0}",
+            "\u{e0b2}",
+            "\u{e0a0} ",
+            "\u{f057} ",
+            "\u{f071} ",
+        )
     } else {
         (" ", " ", "", "E", "W")
     };
@@ -916,12 +966,7 @@ pub(super) fn render_status_line(
         .as_ref()
         .and_then(|path| path.file_name())
         .map_or_else(
-            || {
-                buffer
-                    .virtual_owner()
-                    .unwrap_or(SCRATCH_LABEL)
-                    .to_owned()
-            },
+            || buffer.virtual_owner().unwrap_or(SCRATCH_LABEL).to_owned(),
             |name| name.to_string_lossy().into_owned(),
         );
     let file = if shown("file") {
@@ -973,7 +1018,10 @@ pub(super) fn render_status_line(
                     .collect::<Vec<_>>();
                 if !trail.is_empty() {
                     let deepest = &trail[trail.len().saturating_sub(3)..];
-                    left_fields.push((format!("\u{203a} {}", deepest.join(" \u{203a} ")), Style::Status));
+                    left_fields.push((
+                        format!("\u{203a} {}", deepest.join(" \u{203a} ")),
+                        Style::Status,
+                    ));
                 }
             }
             "diagnostics" => {
@@ -984,14 +1032,12 @@ pub(super) fn render_status_line(
                     left_fields.push((format!("{warning_icon}{warnings}"), Style::StatusWarning));
                 }
             }
-            "tasks" if ui.running_tasks > 0 => left_fields.push((
-                format!("Tasks {}", ui.running_tasks),
-                Style::Status,
-            )),
-            "large_file" if ui.large_file_buffers.contains(&view.buffer) => left_fields.push((
-                LARGE_FILE_LABEL.to_owned(),
-                Style::StatusWarning,
-            )),
+            "tasks" if ui.running_tasks > 0 => {
+                left_fields.push((format!("Tasks {}", ui.running_tasks), Style::Status))
+            }
+            "large_file" if ui.large_file_buffers.contains(&view.buffer) => {
+                left_fields.push((LARGE_FILE_LABEL.to_owned(), Style::StatusWarning))
+            }
             _ => {}
         }
     }
@@ -1036,13 +1082,13 @@ pub(super) fn render_status_line(
             .saturating_add(right_cells)
             <= width
     });
-    let left_needed = left_fixed.saturating_add(
-        branch
-            .as_deref()
-            .map_or(0, |text| text_cells(text, config)),
-    );
+    let left_needed =
+        left_fixed.saturating_add(branch.as_deref().map_or(0, |text| text_cells(text, config)));
     let mut fits = |cells: u16| {
-        let fits = left_needed.saturating_add(right_cells).saturating_add(cells) < width;
+        let fits = left_needed
+            .saturating_add(right_cells)
+            .saturating_add(cells)
+            < width;
         if fits {
             right_cells = right_cells.saturating_add(cells);
         }
@@ -1055,7 +1101,12 @@ pub(super) fn render_status_line(
         .then(|| STATUS_ROOT_FORMAT.replace("{root}", &workspace_title(state)))
         .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
     let progress = (!agent && shown("progress"))
-        .then(|| format!(" {} ", status_progress(cursor_line, buffer.text.visible_lines())))
+        .then(|| {
+            format!(
+                " {} ",
+                status_progress(cursor_line, buffer.text.visible_lines())
+            )
+        })
         .filter(|text| fits(text_cells(text, config).saturating_add(1)));
     let lsp = ui
         .lsp_server

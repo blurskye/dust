@@ -8,10 +8,13 @@ This guide covers everyday editing.
 dust                 # open the current directory
 dust path/to/file    # open a file
 dust --clean         # ignore user configuration
-dust --safe-mode     # disable plugins, project execution, and session restore
+dust --safe-mode     # disable plugins, LSP/tasks/debuggers, and session restore
 ```
 
-A workspace Dust has not seen before asks whether to trust it after the first frame. Press Enter to trust it (LSP servers, tasks and debuggers may then run project code), or Escape to keep editing without execution. Dust remembers that it asked. Use `:trust` later to approve the workspace and `:untrust` to revoke it.
+A workspace Dust has not seen before asks whether to trust it after the first frame. Press Enter to trust it (LSP servers, tasks and debuggers may then run project code), or Escape to keep editing without those execution paths. Dust remembers that it asked. Use `:trust` later to approve the workspace and `:untrust` to revoke it.
+
+ACP agents currently remain executable in safe mode and untrusted workspaces;
+they run as ordinary child processes with access to the workspace.
 
 Press `:` from the dashboard, editor, or explorer to open the command menu. Start typing to filter commands; Enter accepts and Escape closes it.
 
@@ -38,7 +41,7 @@ Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
 | Change inside quotes, brackets, a word | `ci"`, `ci(`, `ciw` (also `a…` for around, `ip`/`ap` paragraph) |
 | Toggle comment | `gcc` line, `gc` + motion, `gc` in Visual |
 | Add / delete / replace surrounding pair | `gsa` + motion + char, `gsd` + char, `gsr` + old + new |
-| Command palette | `Space f c` |
+| Command palette | `F1` or `Space :` |
 | File picker | `Space Space` |
 | Workspace grep | `Space /` or `Space s g` |
 
@@ -50,7 +53,7 @@ Yank and paste share the system clipboard, as in LazyVim (`clipboard = "unnamedp
 
 ## Explorer
 
-Open the explorer with `f` on the dashboard, `Space f e` in Normal mode, or `:explore`.
+Open the explorer with `e` on the dashboard, `Space e` in Normal mode, or `:explore`.
 
 | Action | Key |
 |---|---|
@@ -80,10 +83,10 @@ Explorer mutations are asynchronous, confined to canonical workspace roots, reje
 Dust exposes the daily Telescope/Snacks-style workflows through its bounded picker. `Space /` and `Space s g` open the Grep panel directly—there is no intermediate command prompt—and typing restarts the cancellable live search. File and grep results use a compact result list, live result count, and adaptive file preview: readable panes sit side by side when their measured content fits, otherwise Dust stacks the preview below the results. Grep previews keep the selected match line on-screen and highlight it even when the stacked preview has fewer rows than the captured context. File previews read up to 256 KiB by default through scoped asynchronous VFS reads (`[ui.picker].maximum_preview_bytes`), so files larger than 120 KiB are not rejected:
 
 - `Space Space` or `Space f f`: files in the active workspace roots;
-- `Space /`, `Space s g`, or `Space f g`: workspace text search;
+- `Space /` or `Space s g`: workspace text search;
 - `Space f b`: open buffers;
-- `Space f c`: commands;
-- `Space s r`: recent files;
+- `F1` or `Space :`: commands;
+- `Space f r`: recent files;
 - `Space s d`: diagnostics;
 - `Space s s` / `Space s S`: document/workspace symbols;
 - `Space s j` / `Space s m`: jumps/marks.
@@ -92,7 +95,7 @@ Pickers open in **Insert** mode: every letter (including `j` and `k`) types into
 
 Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. The existing `j`/`k` mapping IDs now belong to `picker_normal`; the existing Insert-context Escape mapping invokes `picker.mode.normal`. `picker.cancel` remains the direct-close command. Workspace-edit review is deliberately separate: its existing toggle/apply/reject controls are not query editing.
 
-`Space f r` opens checked workspace replacement. The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
+`Space s r` opens checked workspace replacement. The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
 
 ## Diagnostics and LSP
 
@@ -179,7 +182,7 @@ There is no generated configuration reference or JSON schema in this checkout; t
 
 ### Select a theme
 
-Use `:theme.select` (or `Space u t` from editor Normal mode). Type to filter, then use Up/Down to preview the selected theme on the actual screen. **Enter applies and remembers it in editor state. Escape or Ctrl-C cancels immediately**, restoring the previously chosen theme without saving the preview. This selection dialog uses the configurable `theme_picker` context, rather than the two-Escape result-picker grammar. A newer accepted configuration reload wins over an older preview or pending discovery.
+Use `:theme.select` (or `Space u C` from editor Normal mode). Type to filter, then use Up/Down to preview the selected theme on the actual screen. **Enter applies and remembers it in editor state. Escape or Ctrl-C cancels immediately**, restoring the previously chosen theme without saving the preview. This selection dialog uses the configurable `theme_picker` context, rather than the two-Escape result-picker grammar. A newer accepted configuration reload wins over an older preview or pending discovery.
 
 The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dust** (the unchanged original theme), **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
 

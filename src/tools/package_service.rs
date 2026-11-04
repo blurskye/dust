@@ -45,6 +45,24 @@ impl PackageManager {
             maximum_object_bytes,
         })
     }
+    fn transaction(&self) -> Result<impl Drop, PackageError> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.root.join("dust-packages.lock"))
+            .map_err(PackageError::Io)?;
+        #[cfg(unix)]
+        {
+            nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+                .map_err(|(_, error)| PackageError::Io(error.into()))
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(file)
+        }
+    }
     fn lock_path(&self) -> PathBuf {
         self.root.join("dust-packages.lock.json")
     }
@@ -126,39 +144,44 @@ impl PackageManager {
         plugin: &PluginManifest,
         object: &Path,
     ) -> Result<PackageLock, PackageError> {
-        let expected = manifest.source_digest();
-        if !valid_digest(expected)
-            || object.file_name().and_then(|value| value.to_str()) != Some(expected)
+        let _transaction = self.transaction()?;
+        let expected = manifest.source_digest().to_ascii_lowercase();
+        if !valid_digest(&expected)
+            || object.file_name().and_then(|value| value.to_str()) != Some(expected.as_str())
         {
             return Err(PackageError::ChecksumMismatch);
         }
         let bytes = read_bounded_regular(object, self.maximum_object_bytes as u64)?;
         let actual = format!("{:x}", Sha256::digest(&bytes));
-        if !actual.eq_ignore_ascii_case(expected)
-            || !plugin.component_sha256.eq_ignore_ascii_case(expected)
+        if !actual.eq_ignore_ascii_case(&expected)
+            || !plugin.component_sha256.eq_ignore_ascii_case(&expected)
         {
             return Err(PackageError::ChecksumMismatch);
         }
+        let activation_bytes =
+            toml::to_string(plugin).map_err(|_| PackageError::InvalidManifest)?;
+        let activation_sha256 = format!("{:x}", Sha256::digest(activation_bytes.as_bytes()));
         let activation = self
             .root
             .join("activations")
-            .join(format!("{expected}.toml"));
-        write_protected_atomic(
-            &activation,
-            toml::to_string(plugin)
-                .map_err(|_| PackageError::InvalidManifest)?
-                .as_bytes(),
-            1024 * 1024,
-        )?;
+            .join(format!("{activation_sha256}.toml"));
+        write_protected_atomic(&activation, activation_bytes.as_bytes(), 1024 * 1024)?;
         let mut lock = self.read_lock()?;
         self.backup()?;
         lock.packages
             .retain(|package| package.name != manifest.name);
+        let mut source = manifest.source.clone();
+        match &mut source {
+            PackageSource::Registry { archive_sha256, .. } => *archive_sha256 = expected.clone(),
+            PackageSource::Git { tree_sha256, .. } => *tree_sha256 = expected.clone(),
+            PackageSource::Path { .. } => {}
+        }
         lock.packages.push(LockedPackage {
             name: manifest.name.clone(),
             version: manifest.version.clone(),
-            source: manifest.source.clone(),
-            content_sha256: expected.into(),
+            source,
+            content_sha256: expected,
+            activation_sha256: Some(activation_sha256),
             dependencies: manifest
                 .dependencies
                 .iter()
@@ -179,12 +202,28 @@ impl PackageManager {
         config.wasm_component_model(true);
         let engine = wasmtime::Engine::new(&config).map_err(|_| PackageError::InvalidManifest)?;
         for package in &lock.packages {
+            if !valid_digest(&package.content_sha256)
+                || package
+                    .activation_sha256
+                    .as_ref()
+                    .is_some_and(|digest| !valid_digest(digest))
+            {
+                return Err(PackageError::InvalidManifest);
+            }
             let object = self.root.join("store").join(&package.content_sha256);
-            let manifest_path = self
-                .root
-                .join("activations")
-                .join(format!("{}.toml", package.content_sha256));
+            let manifest_path = self.root.join("activations").join(format!(
+                "{}.toml",
+                package
+                    .activation_sha256
+                    .as_ref()
+                    .unwrap_or(&package.content_sha256)
+            ));
             let bytes = read_bounded_regular(&manifest_path, 1024 * 1024)?;
+            if let Some(expected) = &package.activation_sha256
+                && format!("{:x}", Sha256::digest(&bytes)) != *expected
+            {
+                return Err(PackageError::ChecksumMismatch);
+            }
             let plugin: PluginManifest = toml::from_str(
                 std::str::from_utf8(&bytes).map_err(|_| PackageError::InvalidManifest)?,
             )
@@ -207,10 +246,12 @@ impl PackageManager {
         Ok(output)
     }
     pub fn activations(&self) -> Result<Vec<(PluginManifest, PathBuf)>, PackageError> {
+        let _transaction = self.transaction()?;
         let lock = self.read_lock()?;
         self.activations_for_lock(&lock)
     }
     pub fn remove(&self, name: &str) -> Result<PackageLock, PackageError> {
+        let _transaction = self.transaction()?;
         let mut lock = self.read_lock()?;
         if lock.packages.iter().any(|package| {
             package
@@ -226,6 +267,7 @@ impl PackageManager {
         Ok(lock)
     }
     pub fn rollback(&self) -> Result<PackageLock, PackageError> {
+        let _transaction = self.transaction()?;
         let backup = self.backup_path();
         if !backup.exists() {
             return Err(PackageError::NoRollback);
@@ -242,12 +284,22 @@ impl PackageManager {
         Ok(lock)
     }
     pub fn gc(&self, maximum_removals: usize) -> Result<usize, PackageError> {
-        let lock = self.read_lock()?;
-        let retained = lock
-            .packages
-            .into_iter()
-            .map(|package| package.content_sha256)
-            .collect::<BTreeSet<_>>();
+        let _transaction = self.transaction()?;
+        let mut locks = vec![self.read_lock()?];
+        if self.backup_path().exists() {
+            let bytes = read_bounded_regular(&self.backup_path(), self.maximum_lock_bytes as u64)?;
+            locks.push(serde_json::from_slice::<PackageLock>(&bytes).map_err(PackageError::Json)?);
+        }
+        let mut retained = BTreeSet::new();
+        let mut retained_activations = BTreeSet::new();
+        for package in locks.into_iter().flat_map(|lock| lock.packages) {
+            retained_activations.insert(
+                package
+                    .activation_sha256
+                    .unwrap_or_else(|| package.content_sha256.clone()),
+            );
+            retained.insert(package.content_sha256);
+        }
         let mut removed = 0;
         for entry in fs::read_dir(self.root.join("store"))
             .map_err(PackageError::Io)?
@@ -261,6 +313,16 @@ impl PackageManager {
                 && !retained.contains(&name)
                 && removed < maximum_removals
             {
+                #[cfg(unix)]
+                let _object_lock = {
+                    let file = fs::File::open(entry.path()).map_err(PackageError::Io)?;
+                    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+                    {
+                        Ok(lock) => lock,
+                        Err((_, nix::errno::Errno::EAGAIN)) => continue,
+                        Err((_, error)) => return Err(PackageError::Io(error.into())),
+                    }
+                };
                 fs::remove_file(entry.path()).map_err(PackageError::Io)?;
                 removed += 1
             }
@@ -279,7 +341,7 @@ impl PackageManager {
                 let metadata = entry.metadata().map_err(PackageError::Io)?;
                 if metadata.is_file()
                     && valid_digest(stem)
-                    && !retained.contains(stem)
+                    && !retained_activations.contains(stem)
                     && removed < maximum_removals
                 {
                     fs::remove_file(path).map_err(PackageError::Io)?;
@@ -339,11 +401,20 @@ pub struct PreparedPackage {
     pub plugin: PluginManifest,
     pub object: PathBuf,
 }
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct PreparedInstall {
     manifest: PackageManifest,
     plugin: PluginManifest,
     object: PathBuf,
+    #[cfg(unix)]
+    _object_lock: nix::fcntl::Flock<fs::File>,
+}
+
+#[cfg(unix)]
+fn protect_object(object: &Path) -> Result<nix::fcntl::Flock<fs::File>, PackageError> {
+    let file = fs::File::open(object).map_err(PackageError::Io)?;
+    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockShared)
+        .map_err(|(_, error)| PackageError::Io(error.into()))
 }
 #[derive(Clone, Debug)]
 pub struct PackageOperationResult {
@@ -442,6 +513,7 @@ impl PackageService {
                                 limits,
                                 ..
                             } => {
+                                let _transaction = manager.transaction()?;
                                 let package_manifest =
                                     fs::canonicalize(package_manifest).map_err(PackageError::Io)?;
                                 let plugin_manifest =
@@ -489,6 +561,8 @@ impl PackageService {
                                         manifest: package.clone(),
                                         plugin: plugin.clone(),
                                         object: object.clone(),
+                                        #[cfg(unix)]
+                                        _object_lock: protect_object(&object)?,
                                     },
                                 );
                                 output.prepared = Some(PreparedPackage {
@@ -503,6 +577,7 @@ impl PackageService {
                                 component,
                                 limits,
                             } => {
+                                let _transaction = manager.transaction()?;
                                 if metadata.package.name
                                     != format!("{}/{}", metadata.publisher, metadata.name)
                                     || !metadata
@@ -530,6 +605,8 @@ impl PackageService {
                                         manifest: metadata.package.clone(),
                                         plugin: metadata.plugin.clone(),
                                         object: object.clone(),
+                                        #[cfg(unix)]
+                                        _object_lock: protect_object(&object)?,
                                     },
                                 );
                                 output.prepared = Some(PreparedPackage {
@@ -580,7 +657,9 @@ impl PackageService {
                         },
                         |result| PackageServiceEvent::Completed(Box::new(result)),
                     );
-                    let _ = etx.try_send(event);
+                    if etx.send(event).is_err() {
+                        break;
+                    }
                 }
             })
             .expect("package service");
@@ -622,5 +701,28 @@ impl PackageService {
                 Err(TryRecvError::Disconnected) => return Err(PackageError::ServiceStopped),
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_preserves_outstanding_prepared_objects_across_managers() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let (manifest, plugin, bytes) = super::super::tests::package_fixture("prepared");
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        let protected = protect_object(&object).unwrap();
+        let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        assert_eq!(other.gc(256).unwrap(), 0);
+        assert!(object.exists());
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
+        drop(protected);
+        assert_eq!(other.gc(256).unwrap(), 0);
+        assert!(object.exists());
     }
 }

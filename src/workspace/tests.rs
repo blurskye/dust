@@ -505,14 +505,30 @@ fn typing_selects_the_best_match_instead_of_keeping_the_old_row() {
     };
     assert!(picker.append(
         4,
-        [item("new", "New worktree", "check out a branch in its own directory"), item("o", "other", "")],
+        [
+            item(
+                "new",
+                "New worktree",
+                "check out a branch in its own directory"
+            ),
+            item("o", "other", "")
+        ],
         true
     ));
-    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("new"));
+    assert_eq!(
+        picker.selected_item().map(|item| item.id.0.as_str()),
+        Some("new")
+    );
     picker.insert_query("other");
-    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("o"));
+    assert_eq!(
+        picker.selected_item().map(|item| item.id.0.as_str()),
+        Some("o")
+    );
     picker.backspace_query();
-    assert_eq!(picker.selected_item().map(|item| item.id.0.as_str()), Some("o"));
+    assert_eq!(
+        picker.selected_item().map(|item| item.id.0.as_str()),
+        Some("o")
+    );
 }
 
 #[test]
@@ -520,8 +536,8 @@ fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
     let mut picker = PickerState::new(4, "References".into(), 3);
     assert!(!picker.append(3, Vec::new(), true));
     let item = |id: &str, label: &str| PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+        badge: String::new(),
+        kind: crate::workspace::PickerItemKind::Entry,
         id: PickerItemId(id.into()),
         label: label.into(),
         detail: String::new(),
@@ -618,4 +634,65 @@ fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn nested_explorer_roots_keep_their_identity_and_children() {
+    let dir = tempdir().unwrap();
+    let nested = dir.path().join("sub");
+    fs::create_dir(&nested).unwrap();
+    let workspace = WorkspaceState::new(
+        WorkspaceId(1),
+        [
+            ("outer".into(), RootIdentity::capture(dir.path()).unwrap()),
+            ("inner".into(), RootIdentity::capture(&nested).unwrap()),
+        ],
+    )
+    .unwrap();
+    let revision = workspace.root_revision();
+    let mut explorer = ExplorerState::default();
+    explorer.reset_roots(workspace.roots(), revision);
+    let outer = explorer.id_for_path(dir.path()).unwrap();
+    let inner = explorer.id_for_path(&nested).unwrap();
+    explorer.begin_load(inner, 1);
+    explorer.apply_load(
+        inner,
+        1,
+        revision,
+        vec![ExplorerChild {
+            path: nested.join("file"),
+            name: "file".into(),
+            kind: ExplorerKind::File,
+        }],
+    );
+    let before = explorer.node(inner).unwrap().clone();
+    explorer.begin_load(outer, 2);
+    explorer.apply_load(
+        outer,
+        2,
+        revision,
+        vec![ExplorerChild {
+            path: nested,
+            name: "sub".into(),
+            kind: ExplorerKind::Directory,
+        }],
+    );
+    assert_eq!(explorer.node(inner), Some(&before));
+    assert!(explorer.node(outer).unwrap().children.is_empty());
+}
+
+#[test]
+fn explorer_refresh_preserves_a_later_collapse() {
+    let dir = tempdir().unwrap();
+    let workspace = workspace(dir.path());
+    let mut explorer = ExplorerState::default();
+    explorer.reset_roots(workspace.roots(), 1);
+    let root = explorer.selected_id().unwrap();
+    explorer.begin_load(root, 1);
+    explorer.apply_load(root, 1, 1, vec![]);
+    explorer.begin_load(root, 2);
+    explorer.toggle_loaded(root);
+    assert!(!explorer.is_expanded(root));
+    explorer.apply_load(root, 2, 1, vec![]);
+    assert!(!explorer.is_expanded(root));
 }

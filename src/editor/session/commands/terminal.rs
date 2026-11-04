@@ -1,6 +1,7 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    integer_arg, optional_bool_arg, optional_integer_arg, optional_string_arg, register, string_arg,
+    integer_arg, optional_bool_arg, optional_integer_arg, optional_string_arg, register,
+    string_arg,
 };
 
 pub(super) fn register_commands(
@@ -98,7 +99,9 @@ pub(super) fn register_commands(
                     )
                 })?;
             Ok(AppEffect::TerminalDock {
-                edge: optional_string_arg(invocation, "edge").unwrap_or("bottom").to_owned(),
+                edge: optional_string_arg(invocation, "edge")
+                    .unwrap_or("bottom")
+                    .to_owned(),
                 size,
             })
         },
@@ -114,7 +117,10 @@ pub(super) fn register_commands(
             .field("width", ArgumentType::Integer, false)
             .field("height", ArgumentType::Integer, false),
         |invocation| {
-            if optional_integer_arg(invocation, "width").is_none() {
+            if ["x", "y", "width", "height"]
+                .iter()
+                .all(|name| optional_integer_arg(invocation, name).is_none())
+            {
                 return Ok(AppEffect::TerminalFloat(None));
             }
             let bounded = |name| {
@@ -124,12 +130,14 @@ pub(super) fn register_commands(
                     ))
                 })
             };
-            Ok(AppEffect::TerminalFloat(Some(crate::ui::window::WindowRect {
-                x: bounded("x")?,
-                y: bounded("y")?,
-                width: bounded("width")?,
-                height: bounded("height")?,
-            })))
+            Ok(AppEffect::TerminalFloat(Some(
+                crate::ui::window::WindowRect {
+                    x: bounded("x")?,
+                    y: bounded("y")?,
+                    width: bounded("width")?,
+                    height: bounded("height")?,
+                },
+            )))
         },
     )?;
     register(
@@ -237,4 +245,23 @@ pub(super) fn register_commands(
         |_| AppEffect::TerminalQuit,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_float_rectangles_are_rejected() {
+        let mut registry = CommandRegistry::default();
+        register_commands(&mut registry).unwrap();
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let invocation = crate::editor::CommandInvocation::new(
+            "terminal.float",
+            crate::editor::InvocationSource::Test,
+        )
+        .unwrap()
+        .with_argument("height", crate::editor::CommandValue::Integer(10));
+        assert!(registry.execute(&state, &invocation).is_err());
+    }
 }

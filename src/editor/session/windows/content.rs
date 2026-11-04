@@ -1,5 +1,5 @@
-use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, TERMINAL_ICON, VIRTUAL_ICON};
 use super::{EditorTopology, WindowSession};
+use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, TERMINAL_ICON, VIRTUAL_ICON};
 use crate::{
     config::Config,
     editor::BufferId,
@@ -167,10 +167,10 @@ impl WindowSession {
             line.order.retain(|buffer| represented.contains(buffer));
             line.pins.retain(|buffer| represented.contains(buffer));
             for content in &snapshots {
-                if let Some(buffer) = bridge.buffer_for_content(content.id) {
-                    if !line.order.contains(&buffer) {
-                        line.order.push(buffer)
-                    }
+                if let Some(buffer) = bridge.buffer_for_content(content.id)
+                    && !line.order.contains(&buffer)
+                {
+                    line.order.push(buffer)
                 }
             }
             if before_order != line.order || before_pins != line.pins {

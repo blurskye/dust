@@ -187,6 +187,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
         buffer,
         view,
         revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
         uri: "file:///inlay-failure.rs".into(),
         language: "rust".into(),
     };
@@ -238,6 +239,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
         buffer,
         view,
         revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
         uri: "file:///completion.rs".into(),
         language: "rust".into(),
     };
@@ -338,7 +340,14 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert!(app.ui.notification_error);
 }
 
-fn app_waiting_to_save_formatted(name: &str) -> (InteractiveApplication, crate::editor::BufferId, std::path::PathBuf, String) {
+fn app_waiting_to_save_formatted(
+    name: &str,
+) -> (
+    InteractiveApplication,
+    crate::editor::BufferId,
+    std::path::PathBuf,
+    String,
+) {
     let mut app = app();
     let path = app.state.workspace_root.join(name);
     std::fs::write(&path, "a  b\n").unwrap();
@@ -350,7 +359,11 @@ fn app_waiting_to_save_formatted(name: &str) -> (InteractiveApplication, crate::
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
     app.format_on_save = Some(super::super::FormatOnSave {
+        request: Some(("formatter".into(), 1)),
         buffer,
+        source: app.state.buffers[buffer].text.source_version(),
+        path: app.state.buffers[buffer].path.clone(),
+        formatter: None,
         quit_after: false,
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
     });
@@ -404,9 +417,20 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
         "4/330".into(),
         Some(1),
     );
-    app.present_lsp_result("server", 1, "textDocument/hover", &uri, LspFeatureResult::Empty);
+    app.present_lsp_result(
+        "server",
+        1,
+        "textDocument/hover",
+        &uri,
+        LspFeatureResult::Empty,
+    );
     assert!(!app.ui.notification_error);
-    assert!(app.ui.lsp_loading.as_deref().is_some_and(|text| text.contains("Loading")));
+    assert!(
+        app.ui
+            .lsp_loading
+            .as_deref()
+            .is_some_and(|text| text.contains("Loading"))
+    );
     assert!(app.lsp_waiting.is_none(), "nothing was asked for");
     app.update_lsp_progress(
         "server".into(),
@@ -417,7 +441,13 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
         None,
     );
 
-    app.present_lsp_result("other", 1, "textDocument/hover", &uri, LspFeatureResult::Empty);
+    app.present_lsp_result(
+        "other",
+        1,
+        "textDocument/hover",
+        &uri,
+        LspFeatureResult::Empty,
+    );
     assert!(app.ui.notification_error);
 }
 
@@ -430,10 +460,14 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
         title: title.into(),
         kind: Some("quickfix".into()),
         preferred: false,
-        edit: Some(LspWorkspaceEdit { resources: Vec::new(), documents: Vec::new() }),
+        edit: Some(LspWorkspaceEdit {
+            resources: Vec::new(),
+            documents: Vec::new(),
+        }),
         command: None,
     };
-    app.language.offer_actions("types", vec![action("from types")], None);
+    app.language
+        .offer_actions("types", vec![action("from types")], None);
     app.present_lsp_result(
         "linter",
         1,
@@ -482,8 +516,14 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
                 version: None,
                 edits: vec![LspTextEdit {
                     range: LspRange {
-                        start: LspPosition { line: 0, character: 0 },
-                        end: LspPosition { line: 3, character: 0 },
+                        start: LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: 3,
+                            character: 0,
+                        },
                     },
                     new_text: "x = 1\ny = 2\nz = 3\n".into(),
                 }],
@@ -538,4 +578,254 @@ fn loading_a_session_refuses_to_replace_unsaved_work() {
     assert!(!app.session_load_requested);
     assert!(app.state.buffers.contains_key(buffer));
     assert!(app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("a   bé\n"), None);
+    app.state.views[view].cursor = ByteOffset(4);
+    app.state.views[view].selection = Some(crate::editor::Selection {
+        anchor: ByteOffset(0),
+        head: ByteOffset(4),
+        kind: crate::editor::SelectionKind::Character,
+    });
+    app.state.views[view].mode = crate::editor::EditorMode::VisualChar;
+    let positions = app.view_positions(|_| true);
+    app.state.buffers[buffer]
+        .text
+        .restore_text("a bé\n")
+        .unwrap();
+    app.state.views[view].cursor = ByteOffset(6);
+    app.state.views[view].selection.as_mut().unwrap().head = ByteOffset(6);
+    app.restore_view_positions(positions);
+    assert_eq!(app.state.views[view].cursor.get(), 2);
+    assert_eq!(
+        app.state.views[view].selection.unwrap().head,
+        app.state.views[view].cursor
+    );
+}
+
+#[test]
+fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
+    let (mut app, buffer, ..) = app_waiting_to_save_formatted("newer-save.txt");
+    app.format_on_save.as_mut().unwrap().request = Some(("formatter".into(), 2));
+    app.handle_lsp_request_failure(
+        "formatter".into(),
+        1,
+        "textDocument/formatting".into(),
+        "old failure".into(),
+    );
+    assert!(app.format_on_save.is_some());
+    assert!(app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
+    let (mut app, buffer, path, ..) = app_waiting_to_save_formatted("save-in-background.txt");
+    app.state.open_text(TextBuffer::from_text("other"), None);
+    let other = app.state.active_buffer_id();
+    app.finish_format_on_save();
+    super::wait_vfs(&mut app);
+    assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(fs::read_to_string(path).unwrap(), "a  b\n");
+    assert_eq!(app.state.active_buffer_id(), other);
+}
+
+#[test]
+fn delayed_lsp_navigation_loads_without_stealing_focus() {
+    use crate::language::lsp::{LspLocation, LspPosition, LspRange, file_uri};
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("first"), None);
+    let path = app.state.workspace_root.join("definition.txt");
+    fs::write(&path, "definition").unwrap();
+    app.navigate_lsp_location_encoded(
+        &LspLocation {
+            uri: file_uri(&path),
+            range: LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+            },
+        },
+        crate::editor::text::PositionEncoding::Utf16,
+    );
+    let (_, view) = app.state.open_text(TextBuffer::from_text("second"), None);
+    super::wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(view));
+    assert!(
+        app.state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_ref() == Some(&path))
+    );
+}
+
+#[test]
+fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), None);
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(5);
+    app.language.install_selection_ranges(vec![
+        ByteRange::new(ByteOffset(4), ByteOffset(7)).unwrap(),
+        ByteRange::new(ByteOffset(0), ByteOffset(7)).unwrap(),
+    ]);
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert_eq!(app.state.views[view].selection.unwrap().head, ByteOffset(6));
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert_eq!(
+        app.state.views[view].selection.unwrap().anchor,
+        ByteOffset(0)
+    );
+    app.handle_configured_key(KeyEvent::character('d'));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), ";");
+}
+
+#[test]
+fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("encoded.rs");
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("é def"), Some(path.clone()));
+    app.set_dashboard_visibility(false);
+    app.open_lsp_locations_picker(
+        vec![crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&path),
+            range: crate::language::lsp::LspRange {
+                start: crate::language::lsp::LspPosition {
+                    line: 0,
+                    character: 3,
+                },
+                end: crate::language::lsp::LspPosition {
+                    line: 0,
+                    character: 6,
+                },
+            },
+        }],
+        crate::editor::text::PositionEncoding::Utf8,
+    );
+    app.accept_picker();
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+}
+
+#[test]
+fn an_unrelated_formatter_cannot_release_a_pending_save() {
+    let (mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
+    app.format_on_save.as_mut().unwrap().formatter = Some("wanted".into());
+    let (other, _) = app.state.open_text(TextBuffer::from_text("other"), None);
+    app.tasks.fixture_formatter_result(
+        "unrelated",
+        other,
+        b"other formatted",
+        &app.state,
+        &app.workspace,
+        app.configuration.binding_revision(),
+    );
+    app.process_job_events();
+    assert!(app.format_on_save.is_some());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "a  b\n");
+    app.tasks.fixture_formatter_result(
+        "wanted",
+        pending_buffer,
+        b"a b\n",
+        &app.state,
+        &app.workspace,
+        app.configuration.binding_revision(),
+    );
+    app.process_job_events();
+    wait_vfs(&mut app);
+    assert!(app.format_on_save.is_none());
+    assert_eq!(fs::read_to_string(path).unwrap(), "a b\n");
+}
+
+#[test]
+fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
+    use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
+    let mut app = app();
+    let path = app.state.workspace_root.join("snippet.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("\nfoo"), Some(path));
+    app.state.views[view].cursor = ByteOffset(4);
+    app.set_dashboard_visibility(false);
+    let document = app.active_lsp_document().unwrap().1;
+    app.language.fixture_completion_source(Some((
+        1,
+        super::LspProjectionOwner {
+            server: "fixture".into(),
+            buffer,
+            view,
+            revision: app.state.buffers[buffer].text.revision(),
+            text: app.state.buffers[buffer].text.source_version(),
+            uri: document.uri(),
+            language: document.language_id,
+        },
+    )));
+    app.language
+        .fixture_completion_items(vec![LspCompletionItem {
+            label: "foo".into(),
+            filter_text: None,
+            sort_text: None,
+            detail: String::new(),
+            insert_text: String::new(),
+            text_edit: Some(LspTextEdit {
+                range: LspRange {
+                    start: LspPosition {
+                        line: 1,
+                        character: 0,
+                    },
+                    end: LspPosition {
+                        line: 1,
+                        character: 3,
+                    },
+                },
+                new_text: "foo(${1:arg})$0".into(),
+            }),
+            additional_edits: vec![LspTextEdit {
+                range: LspRange {
+                    start: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                },
+                new_text: "use thing;\n".into(),
+            }],
+            kind: None,
+            snippet: true,
+            documentation: None,
+            resolve_item: None,
+            resolved: true,
+        }]);
+    app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+        typed: 0,
+        items: vec![crate::ui::CompletionItem {
+            icon: None,
+            color: None,
+            label: "foo".into(),
+            detail: String::new(),
+        }],
+        selected: 0,
+        scroll: 0,
+    });
+    app.accept_lsp_completion();
+    let text = app.state.buffers[buffer].text.to_string();
+    assert_eq!(text, "use thing;\n\nfoo(arg)");
+    assert_eq!(app.input.snippet_buffer(), Some(buffer));
+    assert_eq!(
+        app.state.views[view].selection.unwrap().anchor.get(),
+        text.find("arg").unwrap()
+    );
+    app.navigate_snippet(1);
+    assert!(app.state.views[view].selection.is_none());
 }

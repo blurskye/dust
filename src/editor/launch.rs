@@ -197,7 +197,10 @@ mod tests {
         let root = tempdir().expect("tempdir");
         let target =
             resolve_startup(&[std::path::PathBuf::from("new.txt")], root.path()).expect("startup");
-        assert_eq!(target.new_files(), vec![root.path().canonicalize().unwrap().join("new.txt")]);
+        assert_eq!(
+            target.new_files(),
+            vec![root.path().canonicalize().unwrap().join("new.txt")]
+        );
         assert!(
             resolve_startup(&[std::path::PathBuf::from("missing/new.txt")], root.path()).is_err(),
             "a folder that does not exist is still an error"

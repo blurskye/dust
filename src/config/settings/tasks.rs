@@ -18,6 +18,8 @@ pub struct ProblemMatcherConfig {
     pub path_group: String,
     pub line_group: String,
     pub column_group: Option<String>,
+    #[serde(default)]
+    pub column_encoding: Option<crate::editor::text::PositionEncoding>,
     pub severity_group: Option<String>,
     pub message_group: String,
     #[serde(default)]
@@ -45,4 +47,3 @@ pub struct TaskConfig {
     pub stdin: bool,
     pub matcher: Option<ProblemMatcherConfig>,
 }
-

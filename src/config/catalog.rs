@@ -71,7 +71,9 @@ fn humanized(name: &str) -> String {
             "utf8" => words.push("UTF-8".into()),
             _ => {
                 let mut characters = word.chars();
-                let first = characters.next().map(|c| c.to_uppercase().collect::<String>());
+                let first = characters
+                    .next()
+                    .map(|c| c.to_uppercase().collect::<String>());
                 words.push(first.unwrap_or_default() + characters.as_str());
             }
         }
@@ -105,7 +107,21 @@ pub fn default_setting(key: &str) -> Option<toml::Value> {
 /// Set one setting in the user's config.toml, or remove it with `None` so the default applies,
 /// leaving the rest of the file and its comments as they were. The new file is checked like a
 /// reload would check it before it is written, so a bad value never reaches the disk.
-pub fn write_user_setting(path: &Path, key: &str, value: Option<toml::Value>) -> Result<(), String> {
+pub fn write_user_setting(
+    path: &Path,
+    key: &str,
+    value: Option<toml::Value>,
+) -> Result<(), String> {
+    let resolved = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Some(
+            std::fs::canonicalize(path)
+                .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?,
+        ),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
+    };
+    let path = resolved.as_deref().unwrap_or(path);
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -114,7 +130,11 @@ pub fn write_user_setting(path: &Path, key: &str, value: Option<toml::Value>) ->
     let edited = edited_source(&source, key, value)?;
     // A value of the wrong type fails in the deserializer, whose message names Rust types.
     super::load::settings_from_source(&edited).map_err(|error| {
-        if error.lines().next().is_some_and(|line| line.contains("expected")) {
+        if error
+            .lines()
+            .next()
+            .is_some_and(|line| line.contains("expected"))
+        {
             format!("{key} can't be set to that value")
         } else {
             error
@@ -190,7 +210,10 @@ fn remove_setting(table: &mut dyn toml_edit::TableLike, segments: &[String]) -> 
         let comments = comments?;
         return match next.as_deref().and_then(|next| table.key_mut(next)) {
             Some(mut key) => {
-                let prefix = key.leaf_decor().prefix().and_then(toml_edit::RawString::as_str);
+                let prefix = key
+                    .leaf_decor()
+                    .prefix()
+                    .and_then(toml_edit::RawString::as_str);
                 let prefix = format!("{comments}{}", prefix.unwrap_or(""));
                 key.leaf_decor_mut().set_prefix(prefix);
                 None
@@ -201,7 +224,10 @@ fn remove_setting(table: &mut dyn toml_edit::TableLike, segments: &[String]) -> 
     let (empty, orphan) = match table.get_mut(first) {
         Some(toml_edit::Item::Table(inner)) if !inner.is_implicit() && !inner.is_dotted() => {
             if let Some(comments) = remove_setting(inner, rest) {
-                let suffix = inner.decor().suffix().and_then(toml_edit::RawString::as_str);
+                let suffix = inner
+                    .decor()
+                    .suffix()
+                    .and_then(toml_edit::RawString::as_str);
                 let suffix = format!("{}\n{}", suffix.unwrap_or(""), comments.trim_end());
                 inner.decor_mut().set_suffix(suffix);
             }

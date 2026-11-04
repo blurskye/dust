@@ -87,7 +87,9 @@ impl NoticeSession {
     /// Takes down the passing notice once it has passed, unless another has replaced it.
     pub(super) fn clear_passing(&mut self) {
         if self.passing.take().is_some_and(|passing| {
-            self.current.as_ref().is_some_and(|(_, current)| *current == passing)
+            self.current
+                .as_ref()
+                .is_some_and(|(_, current)| *current == passing)
         }) {
             self.clear();
         }
@@ -165,9 +167,16 @@ fn make_logs(persist: bool) -> StructuredLogs {
             maximum_field_bytes: 4096,
             maximum_file_bytes: 8 * 1024 * 1024,
             rotations: 3,
-            sensitive_keys: ["token", "password", "secret", "authorization", "source", "text"]
-                .map(String::from)
-                .to_vec(),
+            sensitive_keys: [
+                "token",
+                "password",
+                "secret",
+                "authorization",
+                "source",
+                "text",
+            ]
+            .map(String::from)
+            .to_vec(),
         },
         persist.then(|| crate::config::user_state_directory().join("dust.jsonl")),
         256,
@@ -183,11 +192,7 @@ mod tests {
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {
         let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
-        let mut notices = NoticeSession::new(
-            false,
-            root.path().join("health.json"),
-            now,
-        );
+        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
         notices.notify("first".into(), false, now, Duration::from_secs(1));
         notices.notify(
             "first".into(),
@@ -215,11 +220,7 @@ mod tests {
     fn history_retains_only_the_latest_two_hundred_notices() {
         let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
-        let mut notices = NoticeSession::new(
-            false,
-            root.path().join("health.json"),
-            now,
-        );
+        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
         for index in 0..205 {
             notices.notify(index.to_string(), false, now, Duration::ZERO);
         }

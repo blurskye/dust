@@ -159,6 +159,9 @@ impl WindowSession {
     }
     /// On a short screen a debug session takes the terminal's room for its inspector. The
     /// height the user chose comes back when the session ends.
+    pub(in crate::editor::session) fn terminal_shrunk(&self) -> bool {
+        self.terminal_shrunk
+    }
     pub(in crate::editor::session) fn set_debugging(&mut self, debugging: bool) {
         self.terminal_shrunk = debugging && self.height() < SHORT_SCREEN_HEIGHT;
     }
@@ -168,20 +171,30 @@ impl WindowSession {
         rows: i16,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
-        let height = self.resized_terminal_height(
-            rows,
-            crate::ui::render::TERMINAL_PANEL_RESIZE_STEP,
-            crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT,
-            crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT,
-        );
         let target = NativeSurfaceTarget::Terminal(id);
+        let current = match self.native_placement(target)? {
+            crate::ui::window::WindowPlacement::Docked { size, .. } => size,
+            crate::ui::window::WindowPlacement::Floating(rect) => rect.height,
+            _ => self.terminal_height(),
+        };
+        let height = u16::try_from(
+            (i32::from(current)
+                + i32::from(rows) * i32::from(crate::ui::render::TERMINAL_PANEL_RESIZE_STEP))
+            .clamp(
+                i32::from(crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT),
+                i32::from(crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT),
+            ),
+        )
+        .unwrap_or(current);
         let placement = match self.native_placement(target)? {
             // A terminal on the left or right, such as an agent, grows in columns.
             crate::ui::window::WindowPlacement::Docked {
-                edge: edge @ (crate::ui::window::DockEdge::Left | crate::ui::window::DockEdge::Right),
+                edge:
+                    edge @ (crate::ui::window::DockEdge::Left | crate::ui::window::DockEdge::Right),
                 size,
             } => {
-                let step = i32::from(rows) * i32::from(crate::ui::render::TERMINAL_PANEL_RESIZE_STEP);
+                let step =
+                    i32::from(rows) * i32::from(crate::ui::render::TERMINAL_PANEL_RESIZE_STEP);
                 let widest = i32::from(self.width().saturating_sub(PANE_MINIMUM_WIDTH)).max(20);
                 let size = (i32::from(size) + step).clamp(20, widest);
                 let placement = crate::ui::window::WindowPlacement::Docked {
@@ -213,19 +226,5 @@ impl WindowSession {
         maximum: u16,
     ) {
         self.terminal_height = self.terminal_height.clamp(minimum, maximum);
-    }
-    pub(in crate::editor::session) fn resized_terminal_height(
-        &self,
-        rows: i16,
-        step: u16,
-        minimum: u16,
-        maximum: u16,
-    ) -> u16 {
-        u16::try_from(
-            i32::from(self.terminal_height())
-                .saturating_add(i32::from(rows).saturating_mul(i32::from(step)))
-                .clamp(i32::from(minimum), i32::from(maximum)),
-        )
-        .expect("u16-clamped height")
     }
 }

@@ -22,20 +22,76 @@ pub(super) fn register_commands(
     )?;
     for (id, title, action) in [
         ("settings.open", "Open Settings", SettingsAction::Open),
-        ("settings.page.close", "Close Settings", SettingsAction::Close),
-        ("settings.page.activate", "Change the selected setting", SettingsAction::Activate),
-        ("settings.page.toggle", "Toggle the selected setting", SettingsAction::Toggle),
-        ("settings.page.reset", "Reset the selected setting to its default", SettingsAction::Reset),
-        ("settings.page.search", "Search settings", SettingsAction::Search),
-        ("settings.page.modified", "Show only modified settings", SettingsAction::Modified),
-        ("settings.page.open_file", "Open config.toml", SettingsAction::OpenFile),
-        ("settings.page.cancel", "Cancel or close", SettingsAction::Cancel),
-        ("settings.page.backspace", "Delete a character", SettingsAction::Backspace),
-        ("settings.page.clear", "Clear the text", SettingsAction::Clear),
-        ("settings.page.left", "Cursor left", SettingsAction::Cursor(PromptMove::Left)),
-        ("settings.page.right", "Cursor right", SettingsAction::Cursor(PromptMove::Right)),
-        ("settings.page.home", "Cursor to start", SettingsAction::Cursor(PromptMove::Home)),
-        ("settings.page.end", "Cursor to end", SettingsAction::Cursor(PromptMove::End)),
+        (
+            "settings.page.close",
+            "Close Settings",
+            SettingsAction::Close,
+        ),
+        (
+            "settings.page.activate",
+            "Change the selected setting",
+            SettingsAction::Activate,
+        ),
+        (
+            "settings.page.toggle",
+            "Toggle the selected setting",
+            SettingsAction::Toggle,
+        ),
+        (
+            "settings.page.reset",
+            "Reset the selected setting to its default",
+            SettingsAction::Reset,
+        ),
+        (
+            "settings.page.search",
+            "Search settings",
+            SettingsAction::Search,
+        ),
+        (
+            "settings.page.modified",
+            "Show only modified settings",
+            SettingsAction::Modified,
+        ),
+        (
+            "settings.page.open_file",
+            "Open config.toml",
+            SettingsAction::OpenFile,
+        ),
+        (
+            "settings.page.cancel",
+            "Cancel or close",
+            SettingsAction::Cancel,
+        ),
+        (
+            "settings.page.backspace",
+            "Delete a character",
+            SettingsAction::Backspace,
+        ),
+        (
+            "settings.page.clear",
+            "Clear the text",
+            SettingsAction::Clear,
+        ),
+        (
+            "settings.page.left",
+            "Cursor left",
+            SettingsAction::Cursor(PromptMove::Left),
+        ),
+        (
+            "settings.page.right",
+            "Cursor right",
+            SettingsAction::Cursor(PromptMove::Right),
+        ),
+        (
+            "settings.page.home",
+            "Cursor to start",
+            SettingsAction::Cursor(PromptMove::Home),
+        ),
+        (
+            "settings.page.end",
+            "Cursor to end",
+            SettingsAction::Cursor(PromptMove::End),
+        ),
     ] {
         register(
             registry,
@@ -52,7 +108,11 @@ pub(super) fn register_commands(
         "Move through settings",
         ContextRequirement::Application,
         ArgumentSchema::default().field("by", ArgumentType::Integer, true),
-        |invocation| Ok(AppEffect::Settings(SettingsAction::Move(integer_arg(invocation, "by")?))),
+        |invocation| {
+            Ok(AppEffect::Settings(SettingsAction::Move(integer_arg(
+                invocation, "by",
+            )?)))
+        },
     )?;
     register(
         registry,
@@ -61,7 +121,9 @@ pub(super) fn register_commands(
         ContextRequirement::Application,
         ArgumentSchema::default().field("by", ArgumentType::Integer, true),
         |invocation| {
-            Ok(AppEffect::Settings(SettingsAction::Section(integer_arg(invocation, "by")?)))
+            Ok(AppEffect::Settings(SettingsAction::Section(integer_arg(
+                invocation, "by",
+            )?)))
         },
     )?;
     register(
@@ -71,7 +133,9 @@ pub(super) fn register_commands(
         ContextRequirement::Application,
         ArgumentSchema::default().field("text", ArgumentType::String, true),
         |invocation| {
-            Ok(AppEffect::Settings(SettingsAction::Insert(string_arg(invocation, "text")?.into())))
+            Ok(AppEffect::Settings(SettingsAction::Insert(
+                string_arg(invocation, "text")?.into(),
+            )))
         },
     )?;
     register(
@@ -382,11 +446,31 @@ pub(super) fn register_commands(
         |_invocation| Ok(AppEffect::Tutor),
     )?;
     for (id, description, effect) in [
-        ("session.tutor.next", "Skip to the next tutor step", AppEffect::TutorNext),
-        ("session.tutor.back", "Go back to the previous tutor step", AppEffect::TutorBack),
-        ("session.tutor.quit", "Stop the tutor; :Tutor picks up where it stopped", AppEffect::TutorQuit),
-        ("navigation.jump.back", "Jump back to where the cursor was", AppEffect::WalkJumps(true)),
-        ("navigation.jump.forward", "Jump forward again", AppEffect::WalkJumps(false)),
+        (
+            "session.tutor.next",
+            "Skip to the next tutor step",
+            AppEffect::TutorNext,
+        ),
+        (
+            "session.tutor.back",
+            "Go back to the previous tutor step",
+            AppEffect::TutorBack,
+        ),
+        (
+            "session.tutor.quit",
+            "Stop the tutor; :Tutor picks up where it stopped",
+            AppEffect::TutorQuit,
+        ),
+        (
+            "navigation.jump.back",
+            "Jump back to where the cursor was",
+            AppEffect::WalkJumps(true),
+        ),
+        (
+            "navigation.jump.forward",
+            "Jump forward again",
+            AppEffect::WalkJumps(false),
+        ),
     ] {
         register(
             registry,

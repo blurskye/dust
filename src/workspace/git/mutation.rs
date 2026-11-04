@@ -280,9 +280,7 @@ impl GitMutationService {
                     GitMutationRequest::ResetUnstagedHunk(request) => {
                         reset_hunk(generation, &request, &worker)
                     }
-                    GitMutationRequest::Plan(plan) => {
-                        apply_change_plan(generation, &plan, &worker)
-                    }
+                    GitMutationRequest::Plan(plan) => apply_change_plan(generation, &plan, &worker),
                 };
                 let _ = tx.send(GitMutationEvent::Complete(result));
             })
@@ -388,6 +386,62 @@ pub(super) fn exact_mutation_repository(
     Ok((root, repository, workdir))
 }
 
+/// Keep Git's index lock from the first read through the final replacement. Libgit2 writes
+/// to a temporary index while the real index stays locked and unchanged.
+struct IndexLock {
+    path: PathBuf,
+}
+impl Drop for IndexLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+struct IndexWrite {
+    _lock: IndexLock,
+    path: PathBuf,
+    temporary: tempfile::NamedTempFile,
+}
+impl IndexWrite {
+    fn start(repo: &git2::Repository) -> Result<Self, GitMutationError> {
+        let path = repo
+            .index()
+            .map_err(|_| GitMutationError::Backend)?
+            .path()
+            .ok_or(GitMutationError::Backend)?
+            .to_path_buf();
+        let lock_path = path.with_extension("lock");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|_| GitMutationError::StaleIndex)?;
+        let lock = IndexLock { path: lock_path };
+        let temporary =
+            tempfile::NamedTempFile::new_in(path.parent().ok_or(GitMutationError::Backend)?)
+                .map_err(|_| GitMutationError::Backend)?;
+        if path.exists() {
+            std::fs::copy(&path, temporary.path()).map_err(|_| GitMutationError::Backend)?;
+        } else {
+            std::fs::remove_file(temporary.path()).map_err(|_| GitMutationError::Backend)?;
+        }
+        let mut index =
+            git2::Index::open(temporary.path()).map_err(|_| GitMutationError::Backend)?;
+        repo.set_index(&mut index)
+            .map_err(|_| GitMutationError::Backend)?;
+        Ok(Self {
+            _lock: lock,
+            path,
+            temporary,
+        })
+    }
+    fn commit(&self) -> Result<(), GitMutationError> {
+        std::fs::File::open(self.temporary.path())
+            .and_then(|file| file.sync_all())
+            .map_err(|_| GitMutationError::Backend)?;
+        std::fs::rename(self.temporary.path(), &self.path).map_err(|_| GitMutationError::Backend)
+    }
+}
+
 pub(super) fn reset_hunk(
     generation: GitMutationGeneration,
     r: &GitResetHunkRequest,
@@ -398,6 +452,8 @@ pub(super) fn reset_hunk(
     }
     let started = Instant::now();
     let (root, repo, repository) = exact_mutation_repository(&r.policy)?;
+    let _index_write = IndexWrite::start(&repo)?;
+    let repo_path = repository_relative_path(&root, &repository, &r.policy.file)?;
     let before = git_index_fingerprint(&repository)?;
     if r.expected_index != Some(before) {
         return Err(GitMutationError::StaleIndex);
@@ -422,17 +478,16 @@ pub(super) fn reset_hunk(
     if current != &r.selected {
         return Err(GitMutationError::WrongHunk);
     }
-    let Some(name) = r.policy.file.to_str().filter(|s| !s.contains(['\n', '\r'])) else {
-        return Err(GitMutationError::Invalid);
-    };
-    let chosen = |index: usize| {
-        r.selected_lines.is_empty() || r.selected_lines.contains(&(index as u32))
-    };
+    let name = checked_name(&repo_path)?;
+    let chosen =
+        |index: usize| r.selected_lines.is_empty() || r.selected_lines.contains(&(index as u32));
     // Going back: added lines come out and deleted ones return. An addition left alone stays as
     // context, and a deletion left alone stays gone.
     let mut body = String::new();
+    let mut emitted = Vec::new();
     let mut kept_lines = 0u32;
-    for (index, line) in current.lines.iter().enumerate() {
+    for index in lines_in_pairs(current) {
+        let line = &current.lines[index];
         let mark = match (line.kind, chosen(index)) {
             (GitDiffLineKind::Context, _) | (GitDiffLineKind::Add, false) => ' ',
             (GitDiffLineKind::Add, true) => '-',
@@ -442,12 +497,14 @@ pub(super) fn reset_hunk(
         if mark != '-' {
             kept_lines += 1;
         }
-        body.push(mark);
-        body.push_str(&line.text);
+        emitted.push((mark, line.text.as_str()));
     }
+    append_patch_lines(&mut body, emitted);
+    let header = patch_header(name, current.new_mode, current.new_mode);
+    let target_start = patch_start(current.new_start, current.new_lines, kept_lines);
     let patch = format!(
-        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n@@ -{1},{2} +{1},{3} @@\n{body}",
-        name, current.new_start, current.new_lines, kept_lines
+        "{header}@@ -{},{} +{},{} @@\n{body}",
+        current.new_start, current.new_lines, target_start, kept_lines
     );
     if patch.len() > r.maximum_patch_bytes {
         return Err(GitMutationError::Invalid);
@@ -498,6 +555,8 @@ pub(super) fn stage_hunk(
     }
     let started = Instant::now();
     let (root, repo, repository) = exact_mutation_repository(&r.policy)?;
+    let index_write = IndexWrite::start(&repo)?;
+    let repo_path = repository_relative_path(&root, &repository, &r.policy.file)?;
     let before = git_index_fingerprint(&repository)?;
     if r.expected_index != Some(before) {
         return Err(GitMutationError::StaleIndex);
@@ -525,19 +584,7 @@ pub(super) fn stage_hunk(
     if started.elapsed() > r.deadline {
         return Err(GitMutationError::Deadline);
     }
-    let mut patch = format!(
-        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n{1}",
-        r.policy.file.to_string_lossy(),
-        current.header
-    );
-    for line in &current.lines {
-        patch.push(match line.kind {
-            GitDiffLineKind::Context => ' ',
-            GitDiffLineKind::Add => '+',
-            GitDiffLineKind::Delete => '-',
-        });
-        patch.push_str(&line.text)
-    }
+    let patch = whole_hunk_patch(checked_name(&repo_path)?, current);
     if patch.len() > r.maximum_patch_bytes {
         return Err(GitMutationError::Invalid);
     }
@@ -553,9 +600,10 @@ pub(super) fn stage_hunk(
     if worktree_hash(&file)?.0 != worktree_hash_before {
         return Err(GitMutationError::StaleWorktree);
     }
-    let diff = git2::Diff::from_buffer(patch.as_bytes()).map_err(|_| GitMutationError::Backend)?;
+    let diff = git2::Diff::from_buffer(&patch).map_err(|_| GitMutationError::Backend)?;
     repo.apply(&diff, git2::ApplyLocation::Index, None)
         .map_err(|_| GitMutationError::Backend)?;
+    index_write.commit()?;
     let after = git_index_fingerprint(&repository)?;
     if before == after || worktree_hash(&file)?.1 != worktree {
         return Err(GitMutationError::Postcondition);
@@ -613,7 +661,8 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
     {
         return Err(GitMutationError::Invalid);
     }
-    let whole_file = plan.hunk_id.is_none() && plan.selected.is_none() && plan.selected_lines.is_empty();
+    let whole_file =
+        plan.hunk_id.is_none() && plan.selected.is_none() && plan.selected_lines.is_empty();
     match plan.kind {
         GitMutationKind::StageFile | GitMutationKind::UnstageFile => {
             if !whole_file {
@@ -702,17 +751,60 @@ fn checked_name(file: &Path) -> Result<&str, GitMutationError> {
         .ok_or(GitMutationError::Invalid)
 }
 
-/// Build the forward patch for one captured hunk. The unstaged diff runs index to disk, so
-/// applying it forward to the index stages and applying it reversed to the index unstages.
+fn append_patch_text(patch: &mut String, text: &str) {
+    patch.push_str(text);
+    if !text.ends_with('\n') {
+        patch.push_str("\n\\ No newline at end of file\n");
+    }
+}
+
+fn patch_header(name: &str, old_mode: u32, new_mode: u32) -> String {
+    let mut header = format!("diff --git a/{name} b/{name}\n");
+    if old_mode == 0 {
+        header.push_str(&format!(
+            "new file mode {new_mode:06o}\n--- /dev/null\n+++ b/{name}\n"
+        ));
+    } else if new_mode == 0 {
+        header.push_str(&format!(
+            "deleted file mode {old_mode:06o}\n--- a/{name}\n+++ /dev/null\n"
+        ));
+    } else {
+        header.push_str(&format!(
+            "index 0000000..0000000 {old_mode:06o}\n--- a/{name}\n+++ b/{name}\n"
+        ));
+    }
+    header
+}
+
+fn patch_start(start: u32, source_lines: u32, target_lines: u32) -> u32 {
+    start
+        .saturating_add(u32::from(source_lines == 0))
+        .saturating_sub(u32::from(target_lines == 0))
+}
+
 fn whole_hunk_patch(name: &str, hunk: &GitHunk) -> Vec<u8> {
-    let mut patch = format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n{}", hunk.header);
+    let new_mode = if hunk.new_mode == 0 {
+        0
+    } else if hunk.old_mode == 0 {
+        hunk.new_mode
+    } else {
+        hunk.old_mode
+    };
+    let mut patch = patch_header(name, hunk.old_mode, new_mode);
+    patch.push_str(&format!(
+        "@@ -{},{} +{},{} @@\n",
+        hunk.old_start,
+        hunk.old_lines,
+        patch_start(hunk.old_start, hunk.old_lines, hunk.new_lines),
+        hunk.new_lines
+    ));
     for line in &hunk.lines {
         patch.push(match line.kind {
             GitDiffLineKind::Context => ' ',
             GitDiffLineKind::Add => '+',
             GitDiffLineKind::Delete => '-',
         });
-        patch.push_str(&line.text);
+        append_patch_text(&mut patch, &line.text);
     }
     patch.into_bytes()
 }
@@ -750,13 +842,13 @@ fn selected_lines_patch(
         match line.kind {
             GitDiffLineKind::Context => {
                 body.push(' ');
-                body.push_str(&line.text);
+                append_patch_text(&mut body, &line.text);
                 old_lines += 1;
                 new_lines += 1;
             }
             GitDiffLineKind::Delete => {
                 body.push(if chosen { '-' } else { ' ' });
-                body.push_str(&line.text);
+                append_patch_text(&mut body, &line.text);
                 old_lines += 1;
                 if chosen {
                     applied += 1;
@@ -767,7 +859,7 @@ fn selected_lines_patch(
             GitDiffLineKind::Add => {
                 if chosen {
                     body.push('+');
-                    body.push_str(&line.text);
+                    append_patch_text(&mut body, &line.text);
                     new_lines += 1;
                     applied += 1;
                 }
@@ -777,9 +869,21 @@ fn selected_lines_patch(
     if applied == 0 {
         return Err(GitMutationError::NothingSelected);
     }
+    let modes = patch_header(
+        name,
+        hunk.old_mode,
+        if new_lines == 0 {
+            0
+        } else if hunk.old_mode == 0 {
+            hunk.new_mode
+        } else {
+            hunk.old_mode
+        },
+    );
     let header = format!(
-        "diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -{},{old_lines} +{},{new_lines} @@\n",
-        hunk.old_start, hunk.old_start
+        "{modes}@@ -{},{old_lines} +{},{new_lines} @@\n",
+        hunk.old_start,
+        patch_start(hunk.old_start, old_lines, new_lines)
     );
     Ok(format!("{header}{body}").into_bytes())
 }
@@ -810,34 +914,69 @@ fn lines_in_pairs(hunk: &GitHunk) -> Vec<usize> {
     order
 }
 
+/// Emit removals before additions between context lines, including their EOF markers.
+fn append_patch_lines(patch: &mut String, mut lines: Vec<(char, &str)>) {
+    let mut start = 0;
+    for end in 0..=lines.len() {
+        if end == lines.len() || lines[end].0 == ' ' {
+            lines[start..end].sort_by_key(|(mark, _)| u8::from(*mark != '-'));
+            start = end + 1;
+        }
+    }
+    for (mark, text) in lines {
+        patch.push(mark);
+        append_patch_text(patch, text);
+    }
+}
+
 /// Build the reverse patch for one captured hunk: the sides swap and the markers invert, so
 /// applying it forward to the index returns that hunk to HEAD.
 fn reverse_hunk_patch(name: &str, hunk: &GitHunk) -> Vec<u8> {
-    let mut patch = format!(
-        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n@@ -{1},{2} +{3},{4} @@\n",
-        name, hunk.new_start, hunk.new_lines, hunk.old_start, hunk.old_lines
-    );
-    for line in &hunk.lines {
-        patch.push(match line.kind {
-            GitDiffLineKind::Context => ' ',
-            GitDiffLineKind::Add => '-',
-            GitDiffLineKind::Delete => '+',
-        });
-        patch.push_str(&line.text);
-    }
+    let mode = if hunk.old_mode == 0 {
+        0
+    } else if hunk.new_mode == 0 {
+        hunk.old_mode
+    } else {
+        hunk.new_mode
+    };
+    let mut patch = patch_header(name, hunk.new_mode, mode);
+    patch.push_str(&format!(
+        "@@ -{},{} +{},{} @@\n",
+        hunk.new_start,
+        hunk.new_lines,
+        patch_start(hunk.new_start, hunk.new_lines, hunk.old_lines),
+        hunk.old_lines
+    ));
+    let lines = hunk
+        .lines
+        .iter()
+        .map(|line| {
+            let mark = match line.kind {
+                GitDiffLineKind::Context => ' ',
+                GitDiffLineKind::Add => '-',
+                GitDiffLineKind::Delete => '+',
+            };
+            (mark, line.text.as_str())
+        })
+        .collect();
+    append_patch_lines(&mut patch, lines);
     patch.into_bytes()
 }
 
 /// Resolve the captured hunk against a fresh read at the plan's layer and produce its patch.
 fn captured_hunk_patch(
     p: &GitChangePlanRequest,
+    repo_path: &Path,
     selection: Option<&[u32]>,
     cancel: &AtomicBool,
 ) -> Result<Vec<u8>, GitMutationError> {
-    let snapshot = read_hunks_owned(GitHunkGeneration(0), &p.policy, cancel)
-        .map_err(mutation_hunk_error)?;
+    let snapshot =
+        read_hunks_owned(GitHunkGeneration(0), &p.policy, cancel).map_err(mutation_hunk_error)?;
     let hunk_id = p.hunk_id.ok_or(GitMutationError::MissingSelection)?;
-    let selected = p.selected.as_ref().ok_or(GitMutationError::MissingSelection)?;
+    let selected = p
+        .selected
+        .as_ref()
+        .ok_or(GitMutationError::MissingSelection)?;
     let current = snapshot
         .hunks
         .iter()
@@ -846,7 +985,7 @@ fn captured_hunk_patch(
     if current != selected {
         return Err(GitMutationError::WrongHunk);
     }
-    let name = checked_name(&p.policy.file)?;
+    let name = checked_name(repo_path)?;
     Ok(match (p.kind, selection) {
         (GitMutationKind::UnstageHunk, _) => reverse_hunk_patch(name, current),
         (_, None) => whole_hunk_patch(name, current),
@@ -871,27 +1010,44 @@ fn stage_whole_file(
     index.write().map_err(|_| GitMutationError::Backend)
 }
 
-fn unstage_whole_file(
-    repo: &git2::Repository,
-    repo_path: &Path,
-) -> Result<(), GitMutationError> {
-    let name = checked_name(repo_path)?;
-    match repo
-        .head()
-        .ok()
-        .and_then(|head| head.peel(git2::ObjectType::Commit).ok())
-    {
-        Some(target) => repo
-            .reset_default(Some(&target), [name])
-            .map_err(|_| GitMutationError::Backend),
-        None => {
-            let mut index = repo.index().map_err(|_| GitMutationError::Backend)?;
-            index
-                .remove_path(repo_path)
-                .map_err(|_| GitMutationError::Backend)?;
-            index.write().map_err(|_| GitMutationError::Backend)
-        }
+fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), GitMutationError> {
+    let mut index = repo.index().map_err(|_| GitMutationError::Backend)?;
+    let tree = match repo.head() {
+        Ok(head) => Some(head.peel_to_tree().map_err(|_| GitMutationError::Backend)?),
+        Err(error) if error.code() == git2::ErrorCode::UnbornBranch => None,
+        Err(_) => return Err(GitMutationError::Backend),
+    };
+    let entry = tree.as_ref().and_then(|tree| tree.get_path(repo_path).ok());
+    if let Some(entry) = entry {
+        let mut restored = index.get_path(repo_path, 0).unwrap_or(git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: entry.id(),
+            flags: 0,
+            flags_extended: 0,
+            path: checked_name(repo_path)?.as_bytes().to_vec(),
+        });
+        restored.id = entry.id();
+        restored.mode = entry.filemode() as u32;
+        // The restored blob no longer describes the cached worktree stat data.
+        restored.ctime = git2::IndexTime::new(0, 0);
+        restored.mtime = git2::IndexTime::new(0, 0);
+        restored.file_size = 0;
+        index
+            .add(&restored)
+            .map_err(|_| GitMutationError::Backend)?;
+    } else {
+        index
+            .remove_path(repo_path)
+            .map_err(|_| GitMutationError::Backend)?;
     }
+    index.write().map_err(|_| GitMutationError::Backend)
 }
 
 /// Apply one captured change plan. Every captured revision is checked before the first write,
@@ -907,6 +1063,7 @@ pub(super) fn apply_change_plan(
     }
     let started = Instant::now();
     let (root, repo, workdir) = exact_mutation_repository(&p.policy)?;
+    let index_write = IndexWrite::start(&repo)?;
     let repo_path = repository_relative_path(&root, &workdir, &p.policy.file)?;
 
     if !p.expected_head.matches(git_head_id(&workdir)?) {
@@ -945,11 +1102,14 @@ pub(super) fn apply_change_plan(
     let patch = match p.kind {
         GitMutationKind::StageFile | GitMutationKind::UnstageFile => None,
         GitMutationKind::StageHunk | GitMutationKind::UnstageHunk => {
-            Some(captured_hunk_patch(p, None, cancel)?)
+            Some(captured_hunk_patch(p, &repo_path, None, cancel)?)
         }
-        GitMutationKind::StageLines => {
-            Some(captured_hunk_patch(p, Some(&p.selected_lines), cancel)?)
-        }
+        GitMutationKind::StageLines => Some(captured_hunk_patch(
+            p,
+            &repo_path,
+            Some(&p.selected_lines),
+            cancel,
+        )?),
         GitMutationKind::ResetUnstagedHunk => return Err(GitMutationError::Invalid),
     };
 
@@ -988,6 +1148,7 @@ pub(super) fn apply_change_plan(
         unstage_whole_file(&repo, &repo_path)?;
     }
 
+    index_write.commit()?;
     let after = git_index_fingerprint(&workdir)?;
     if before == after {
         return Err(GitMutationError::NoChange);
@@ -1009,4 +1170,36 @@ pub(super) fn apply_change_plan(
         after,
         hunk: p.hunk_id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_mutations_hold_git_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("a"), "a\n").unwrap();
+        std::fs::write(dir.path().join("b"), "b\n").unwrap();
+        let transaction = IndexWrite::start(&repo).unwrap();
+        stage_whole_file(
+            &repo,
+            Path::new("a"),
+            &worktree_state(&dir.path().join("a")).unwrap(),
+        )
+        .unwrap();
+        let external = git2::Repository::open(dir.path()).unwrap();
+        let mut other = external.index().unwrap();
+        other.add_path(Path::new("b")).unwrap();
+        assert_eq!(other.write().unwrap_err().code(), git2::ErrorCode::Locked);
+        transaction.commit().unwrap();
+        drop(transaction);
+        other.read(true).unwrap();
+        other.add_path(Path::new("b")).unwrap();
+        other.write().unwrap();
+        let index = git2::Repository::open(dir.path()).unwrap().index().unwrap();
+        assert!(index.get_path(Path::new("a"), 0).is_some());
+        assert!(index.get_path(Path::new("b"), 0).is_some());
+    }
 }

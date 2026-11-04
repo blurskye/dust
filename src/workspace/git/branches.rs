@@ -3,7 +3,7 @@
 //! repository byte-unchanged.
 use std::{
     hash::{Hash, Hasher},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -162,7 +162,10 @@ pub struct GitBranchService {
     accepted: Option<GitBranchResult>,
 }
 impl GitBranchService {
-    pub fn start(&mut self, request: GitBranchRequest) -> Result<GitBranchGeneration, GitBranchError> {
+    pub fn start(
+        &mut self,
+        request: GitBranchRequest,
+    ) -> Result<GitBranchGeneration, GitBranchError> {
         if !valid_request(&request) {
             return Err(GitBranchError::Invalid);
         }
@@ -235,7 +238,8 @@ fn valid_request(request: &GitBranchRequest) -> bool {
             reference,
             deadline,
         } => {
-            if name.trim().is_empty() || path.as_os_str().is_empty() || reference.trim().is_empty() {
+            if name.trim().is_empty() || path.as_os_str().is_empty() || reference.trim().is_empty()
+            {
                 return false;
             }
             (repository, *deadline)
@@ -280,9 +284,7 @@ struct WorktreeRef {
 
 /// The linked worktrees and the branch each has checked out.
 fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, GitBranchError> {
-    let names = repository
-        .worktrees()
-        .map_err(backend)?;
+    let names = repository.worktrees().map_err(backend)?;
     let mut found = Vec::new();
     for index in 0..names.len() {
         let Some(name) = names.get(index) else {
@@ -298,9 +300,9 @@ fn worktree_branches(repository: &git2::Repository) -> Result<Vec<WorktreeRef>, 
                 .ok()
                 .and_then(|head| head.shorthand().map(str::to_owned))
         });
-        let locked = worktree.is_locked().is_ok_and(|status| {
-            !matches!(status, git2::WorktreeLockStatus::Unlocked)
-        });
+        let locked = worktree
+            .is_locked()
+            .is_ok_and(|status| !matches!(status, git2::WorktreeLockStatus::Unlocked));
         found.push(WorktreeRef {
             name: name.to_owned(),
             path,
@@ -322,7 +324,9 @@ fn operation_name(state: git2::RepositoryState) -> Option<String> {
     match state {
         git2::RepositoryState::Clean => None,
         git2::RepositoryState::Merge => Some("merge".into()),
-        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => Some("revert".into()),
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
+            Some("revert".into())
+        }
         git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
             Some("cherry-pick".into())
         }
@@ -351,7 +355,10 @@ fn read_list(
             .parent()
             .and_then(|root| git2::Repository::open(root).ok())
     });
-    let main = linked_from.as_ref().and_then(Option::as_ref).unwrap_or(&repository);
+    let main = linked_from
+        .as_ref()
+        .and_then(Option::as_ref)
+        .unwrap_or(&repository);
     let main_path = main
         .workdir()
         .and_then(|path| std::fs::canonicalize(path).ok());
@@ -426,10 +433,10 @@ fn read_list(
 
 fn has_changes(repository: &git2::Repository) -> Result<bool, GitBranchError> {
     let mut options = git2::StatusOptions::new();
-    options.include_untracked(true).recurse_untracked_dirs(false);
-    let statuses = repository
-        .statuses(Some(&mut options))
-        .map_err(backend)?;
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(false);
+    let statuses = repository.statuses(Some(&mut options)).map_err(backend)?;
     Ok(!statuses.is_empty())
 }
 
@@ -438,11 +445,21 @@ fn exclude_from_status(repository: &git2::Repository, path: &Path) {
     let Some(root) = repository.commondir().parent() else {
         return;
     };
-    let Some(Component::Normal(top)) = path.strip_prefix(root).ok().and_then(|p| p.components().next())
-    else {
+    let Ok(relative) = path.strip_prefix(root) else {
         return;
     };
-    let line = format!("/{}/", top.to_string_lossy());
+    let relative = relative.to_string_lossy();
+    if relative.is_empty() || relative.contains(['\n', '\r']) {
+        return;
+    }
+    let mut line = String::from("/");
+    for ch in relative.chars() {
+        if matches!(ch, '\\' | '*' | '?' | '[' | ']' | ' ' | '#' | '!') {
+            line.push('\\');
+        }
+        line.push(ch);
+    }
+    line.push('/');
     let exclude = repository.commondir().join("info").join("exclude");
     let current = std::fs::read_to_string(&exclude).unwrap_or_default();
     if current.lines().any(|existing| existing == line) {
@@ -451,7 +468,17 @@ fn exclude_from_status(repository: &git2::Repository, path: &Path) {
     if let Some(parent) = exclude.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&exclude, format!("{current}{line}\n"));
+    let _ = std::fs::write(
+        &exclude,
+        format!(
+            "{current}{}{line}\n",
+            if current.is_empty() || current.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            }
+        ),
+    );
 }
 
 fn checked_out_path(
@@ -486,10 +513,7 @@ fn run(
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
-                    || std::fs::read_dir(path)
-                        .map_err(backend)?
-                        .next()
-                        .is_some())
+                    || std::fs::read_dir(path).map_err(backend)?.next().is_some())
             {
                 return Err(GitBranchError::RefusedDestinationNotEmpty(
                     path.display().to_string(),
@@ -518,7 +542,12 @@ fn run(
             // therefore exactly what it was before the review was looked at.
             let temporary_branch = format!("dust-review/{name}");
             let starting = repository
-                .reference(&format!("refs/heads/{temporary_branch}"), oid, true, "review checkout")
+                .reference(
+                    &format!("refs/heads/{temporary_branch}"),
+                    oid,
+                    true,
+                    "review checkout",
+                )
                 .map_err(backend)?;
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&starting));
@@ -527,17 +556,15 @@ fn run(
             created.map_err(backend)?;
             // DETACHED: no branch is created and none is moved by looking at a review.
             let linked = git2::Repository::open(path).map_err(backend)?;
-            linked
-                .set_head_detached(oid)
-                .map_err(backend)?;
+            linked.set_head_detached(oid).map_err(backend)?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
-            linked
-                .checkout_head(Some(&mut checkout))
-                .map_err(backend)?;
+            linked.checkout_head(Some(&mut checkout)).map_err(backend)?;
             // The starting branch has served its purpose: HEAD is detached now, so it can go and
             // no branch is left behind by looking at a review.
-            if let Ok(mut branch) = repository.find_branch(&temporary_branch, git2::BranchType::Local) {
+            if let Ok(mut branch) =
+                repository.find_branch(&temporary_branch, git2::BranchType::Local)
+            {
                 let _ = branch.delete();
             }
             Ok(GitBranchResult::Changed)
@@ -553,15 +580,14 @@ fn run(
             let _ = deadline;
             // A relative path starts at the main checkout, from any worktree.
             let main_root = repository.commondir().parent().map(Path::to_path_buf);
-            let path = main_root.as_deref().map_or(path.clone(), |root| root.join(path));
+            let path = main_root
+                .as_deref()
+                .map_or(path.clone(), |root| root.join(path));
             let path = path.as_path();
             // Validate everything that could refuse before creating anything.
             if let Ok(metadata) = std::fs::symlink_metadata(path)
                 && (!metadata.file_type().is_dir()
-                    || std::fs::read_dir(path)
-                        .map_err(backend)?
-                        .next()
-                        .is_some())
+                    || std::fs::read_dir(path).map_err(backend)?.next().is_some())
             {
                 return Err(GitBranchError::RefusedDestinationNotEmpty(
                     path.display().to_string(),
@@ -633,25 +659,33 @@ fn run(
                 .find_worktree(name)
                 .map_err(|_| GitBranchError::UnknownWorktree(name.clone()))?;
             if !matches!(
-                worktree.is_locked().unwrap_or(git2::WorktreeLockStatus::Unlocked),
+                worktree
+                    .is_locked()
+                    .unwrap_or(git2::WorktreeLockStatus::Unlocked),
                 git2::WorktreeLockStatus::Unlocked
             ) {
                 return Err(GitBranchError::RefusedLockedWorktree(name.clone()));
             }
             let path = worktree.path().to_path_buf();
-            if let Ok(opened) = git2::Repository::open(&path) {
+            if path.try_exists().map_err(backend)? {
+                let opened = git2::Repository::open(&path).map_err(backend)?;
+                let workdir = opened.workdir().and_then(|path| path.canonicalize().ok());
+                if workdir != Some(path.canonicalize().map_err(backend)?) {
+                    return Err(GitBranchError::RefusedDirtyWorktree(name.clone()));
+                }
                 if has_changes(&opened)? {
                     return Err(GitBranchError::RefusedDirtyWorktree(name.clone()));
                 }
                 if let Some(operation) = operation_name(opened.state()) {
-                    return Err(GitBranchError::RefusedActiveOperation(name.clone(), operation));
+                    return Err(GitBranchError::RefusedActiveOperation(
+                        name.clone(),
+                        operation,
+                    ));
                 }
             }
             let mut options = git2::WorktreePruneOptions::new();
             options.valid(true);
-            worktree
-                .prune(Some(&mut options))
-                .map_err(backend)?;
+            worktree.prune(Some(&mut options)).map_err(backend)?;
             // Pruning removes the worktree's administrative data. The directory itself is
             // only removed here, after every dirtiness and operation check above.
             if path.exists() {

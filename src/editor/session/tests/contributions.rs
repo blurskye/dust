@@ -784,8 +784,6 @@ fn question_mark_still_navigates_and_only_the_leader_opens_help() {
     assert_ne!(plain.command, leader.command);
 }
 
-
-
 #[test]
 fn help_is_reachable_from_the_confirmation_and_from_a_form() {
     let app = app();
@@ -865,10 +863,7 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
         mode: "normal".into(),
         keys: Some("ctrl-p".into()),
         command: Some("command_line.open".into()),
-        arguments: BTreeMap::from([(
-            "kind".to_owned(),
-            toml::Value::String("command".into()),
-        )]),
+        arguments: BTreeMap::from([("kind".to_owned(), toml::Value::String("command".into()))]),
         unmap: false,
         disable: false,
         pass_through: false,

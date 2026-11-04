@@ -372,7 +372,8 @@ fn incremental_sync_uses_the_negotiated_unicode_units() {
 
 #[test]
 fn nested_document_symbols_keep_their_positions_and_children() {
-    let range = |line: u64| json!({"start":{"line":line,"character":4},"end":{"line":line,"character":7}});
+    let range =
+        |line: u64| json!({"start":{"line":line,"character":4},"end":{"line":line,"character":7}});
     let found = super::protocol::symbols(&json!([{
         "name":"Person","kind":23,"range":range(1),"selectionRange":range(1),
         "children":[{"name":"Greet","kind":6,"range":range(5),"selectionRange":range(6)}]
@@ -392,8 +393,13 @@ fn completion_and_workspace_edits_are_bounded_typed_data() {
             .expect("completion");
     assert_eq!(items[0].insert_text, "println!");
     // tsserver lists auto-imports after a thousand globals, so a short list would lose them.
-    let many = (0..2_000).map(|index| json!({"label": format!("item{index}")})).collect();
-    assert_eq!(completion_items(&Value::Array(many)).expect("many").len(), 2_000);
+    let many = (0..2_000)
+        .map(|index| json!({"label": format!("item{index}")}))
+        .collect();
+    assert_eq!(
+        completion_items(&Value::Array(many)).expect("many").len(),
+        2_000
+    );
     let edit = workspace_edit(&json!({"changes":{"file:///tmp/a.rs":[{
         "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"newText":"b"
     }]}}))
@@ -528,7 +534,11 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
     thread::sleep(Duration::from_millis(200));
     let started = Instant::now();
     service.stop("daemonizing").expect("stop");
-    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -783,8 +793,15 @@ while True:
     thread::sleep(Duration::from_millis(30));
     service.close("fake", document.uri()).expect("close");
     service.stop("fake").expect("stop");
-    let trace = std::fs::read_to_string(trace_path).expect("trace");
-    assert!(trace.contains("textDocument/didClose"));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let trace = loop {
+        let trace = std::fs::read_to_string(&trace_path).expect("trace");
+        if trace.contains("textDocument/didClose") {
+            break trace;
+        }
+        assert!(Instant::now() < deadline, "close was not delivered");
+        thread::sleep(Duration::from_millis(5));
+    };
     assert!(trace.contains("test rejection"));
     assert!(
         trace
@@ -834,7 +851,8 @@ fn document_colors_and_color_completions_carry_rgb() {
         {"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},
          "color":{"red":"bad","green":0,"blue":0,"alpha":1}}
     ]);
-    let Ok(LspFeatureResult::Colors(colors)) = normalize_result(&LspFeature::DocumentColors, &colors)
+    let Ok(LspFeatureResult::Colors(colors)) =
+        normalize_result(&LspFeature::DocumentColors, &colors)
     else {
         panic!("colours");
     };
@@ -859,6 +877,303 @@ fn document_colors_and_color_completions_carry_rgb() {
     let swatches = items.iter().map(|item| item.color()).collect::<Vec<_>>();
     assert_eq!(
         swatches,
-        [Some((239, 68, 68)), Some((14, 165, 233)), Some((255, 255, 255)), None]
+        [
+            Some((239, 68, 68)),
+            Some((14, 165, 233)),
+            Some((255, 255, 255)),
+            None
+        ]
     );
+}
+
+#[test]
+fn workspace_mutations_reject_oversized_documents_and_edit_lists() {
+    let edit = json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"x"});
+    let mut changes = serde_json::Map::new();
+    for index in 0..257 {
+        changes.insert(format!("file:///{index}.rs"), json!([edit.clone()]));
+    }
+    assert!(workspace_edit(&json!({"changes":changes})).is_err());
+    assert!(
+        workspace_edit(
+            &json!({"documentChanges":vec![json!({"kind":"create","uri":"file:///x"});257]})
+        )
+        .is_err()
+    );
+    assert!(workspace_edit(&json!({"changes":{"file:///x":vec![edit;4097]}})).is_err());
+}
+#[test]
+fn semantic_delta_support_and_response_modes_are_distinct() {
+    use super::protocol::normalize_result;
+    for (full, delta) in [
+        (json!(true), false),
+        (json!({"delta":true}), true),
+        (json!({"delta":false}), false),
+    ] {
+        let caps = initialize_capabilities(Some(
+            &json!({"capabilities":{"semanticTokensProvider":{"full":full}}}),
+        ))
+        .unwrap();
+        assert!(caps.semantic_tokens);
+        assert_eq!(caps.semantic_tokens_delta, delta);
+    }
+    let feature = LspFeature::SemanticTokensDelta {
+        previous_result_id: "old".into(),
+    };
+    assert!(matches!(
+        normalize_result(
+            &feature,
+            &json!({"edits":[{"start":0,"deleteCount":1,"data":[3]}]})
+        )
+        .unwrap(),
+        LspFeatureResult::SemanticTokenDelta(_)
+    ));
+    assert!(matches!(
+        normalize_result(&feature, &json!({"data":[0,0,1,0,0]})).unwrap(),
+        LspFeatureResult::SemanticTokens(_)
+    ));
+}
+#[test]
+fn maximum_hints_preserve_server_formatting_and_validation() {
+    let mut config = super::LspServerConfiguration::for_server(
+        "vscode-json-language-server",
+        std::path::Path::new("/server"),
+    );
+    config.overlay(super::LspServerConfiguration::maximum_inlay_hints(
+        "vscode-json-language-server",
+    ));
+    assert_eq!(
+        config.initialization_options().unwrap()["provideFormatter"],
+        true
+    );
+    assert_eq!(config.settings["json"]["validate"]["enable"], true);
+}
+#[cfg(unix)]
+#[test]
+fn file_uris_preserve_non_utf8_path_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let a = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\xff.rs".to_vec()));
+    let b = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\xfe.rs".to_vec()));
+    assert_ne!(file_uri(&a), file_uri(&b));
+    assert_eq!(path_from_file_uri(&file_uri(&a)), Some(a));
+    assert_eq!(path_from_file_uri(&file_uri(&b)), Some(b));
+}
+
+fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, LspDocument) {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("server.py");
+    std::fs::write(&path, script).unwrap();
+    let mut definition = crate::tools::bundled_tool_catalog()
+        .into_iter()
+        .find(|d| d.id == "rust-analyzer")
+        .unwrap();
+    let python = crate::tools::discover_executable("python3").unwrap();
+    definition.executable = python.display().to_string();
+    let document = LspDocument {
+        path: root.path().join("main.rs"),
+        language_id: "rust".into(),
+        version: 0,
+        text: "fn main() {}".into(),
+    };
+    let mut service = LspService::new();
+    service
+        .start_session_absolute_with_policy(super::LspSessionLaunch {
+            session_key: "boundary",
+            definition: &definition,
+            executable: python,
+            arguments: vec!["-u".into(), path.display().to_string()],
+            root: root.path().into(),
+            document: Some(document.clone()),
+            policy: LspPolicy::default(),
+            configuration: super::LspServerConfiguration::standard(),
+            environment: Default::default(),
+        })
+        .unwrap();
+    (root, service, document)
+}
+const BOUNDARY_SERVER: &str = r#"
+import json,sys,pathlib,time,os
+def read():
+ length=0
+ while True:
+  line=sys.stdin.buffer.readline()
+  if not line: return None
+  if line in (b'\r\n',b'\n'): break
+  if line.lower().startswith(b'content-length:'): length=int(line.split(b':',1)[1])
+ return json.loads(sys.stdin.buffer.read(length))
+def send(value):
+ data=json.dumps(value).encode()
+ sys.stdout.buffer.write(('Content-Length: %d\r\n\r\n'%len(data)).encode()+data);sys.stdout.buffer.flush()
+m=read()
+send({'jsonrpc':'2.0','id':1,'method':'window/showMessageRequest','params':{'type':3,'message':'starting'}})
+reply=read()
+assert reply['id']==1 and 'method' not in reply
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
+while True:
+ m=read()
+ if m is None: break
+ method=m.get('method')
+ if method=='initialized':
+  send({'jsonrpc':'2.0','id':2,'method':'client/registerCapability','params':{'registrations':[{'id':'completion','method':'textDocument/completion','registerOptions':{'resolveProvider':True,'triggerCharacters':['.']}}]}})
+  send({'jsonrpc':'2.0','id':3,'method':'workspace/workspaceFolders','params':{}})
+  for n in range(250): sys.stderr.write('line\n');sys.stderr.flush()
+  time.sleep(.03);sys.stderr.write('still open\n');sys.stderr.flush()
+  pathlib.Path('stderr-ok').write_text('ok')
+  for n in range(600): send({'jsonrpc':'2.0','method':'$/progress','params':{'token':n,'value':{'kind':'begin','title':'progress'}}})
+ if m.get('id')==3 and 'result' in m:
+  pathlib.Path('folders.json').write_text(json.dumps(m['result']))
+  send({'jsonrpc':'2.0','id':4,'method':'client/unregisterCapability','params':{'unregisterations':[{'id':'completion','method':'textDocument/completion'}]}})
+ if method=='textDocument/hover': send({'jsonrpc':'2.0','id':m['id'],'result':{'contents':'alive'}})
+"#;
+#[test]
+fn server_request_ids_dynamic_options_folders_and_saturated_readers_stay_healthy() {
+    let (root, mut service, document) = boundary_service(BOUNDARY_SERVER);
+    thread::sleep(Duration::from_millis(100));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut progress = 0;
+    let mut registered = false;
+    let mut unregistered = false;
+    while progress < 600 || !unregistered {
+        assert!(
+            Instant::now() < deadline,
+            "progress={progress}, registered={registered}, unregistered={unregistered}"
+        );
+        match service.try_event() {
+            Some(LspEvent::Progress { .. }) => progress += 1,
+            Some(LspEvent::CapabilitiesChanged { capabilities, .. }) => {
+                if capabilities.completion {
+                    registered = capabilities.completion_resolve
+                        && capabilities.completion_triggers == ["."];
+                } else {
+                    unregistered = !capabilities.completion_resolve
+                        && capabilities.completion_triggers.is_empty();
+                }
+            }
+            Some(LspEvent::Failed { message, .. }) => panic!("{message}"),
+            Some(LspEvent::Stopped { .. }) => panic!("healthy server stopped"),
+            _ => thread::sleep(Duration::from_millis(1)),
+        }
+    }
+    assert!(registered && root.path().join("stderr-ok").is_file());
+    let folders: Value =
+        serde_json::from_slice(&std::fs::read(root.path().join("folders.json")).unwrap()).unwrap();
+    assert_eq!(folders[0]["uri"], file_uri(root.path()));
+    service
+        .request(
+            "boundary",
+            LspFeature::Hover,
+            document,
+            crate::editor::text::ByteOffset(0),
+            7,
+        )
+        .unwrap();
+    loop {
+        assert!(Instant::now() < deadline);
+        match service.try_event() {
+            Some(LspEvent::Result { generation: 7, .. }) => break,
+            Some(LspEvent::Failed { message, .. } | LspEvent::RequestFailed { message, .. }) => {
+                panic!("{message}")
+            }
+            _ => thread::sleep(Duration::from_millis(1)),
+        }
+    }
+    service.stop("boundary").unwrap();
+}
+#[test]
+fn stop_cancels_a_blocked_write_even_with_a_full_command_queue() {
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
+pathlib.Path('pid').write_text(str(os.getpid()))
+time.sleep(30)
+"#;
+    let (root, mut service, mut document) = boundary_service(&script);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    document.version = 1;
+    document.text = "x".repeat(2 * 1024 * 1024);
+    service.sync("boundary", document.clone()).unwrap();
+    thread::sleep(Duration::from_millis(30));
+    let mut full = false;
+    for _ in 0..100 {
+        if service.sync("boundary", document.clone()).is_err() {
+            full = true;
+            break;
+        }
+    }
+    assert!(full);
+    let started = Instant::now();
+    service.stop("boundary").unwrap();
+    assert!(started.elapsed() < Duration::from_millis(200));
+    #[cfg(target_os = "linux")]
+    {
+        let pid = std::fs::read_to_string(root.path().join("pid")).unwrap();
+        while Path::new(&format!("/proc/{pid}")).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "blocked language server was not reaped"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+#[test]
+fn failed_request_writes_report_the_original_generation() {
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
+while True:
+ m=read()
+ if m.get('method')=='textDocument/didOpen': break
+os.close(0)
+pathlib.Path('closed').write_text('closed')
+time.sleep(30)
+"#;
+    let (root, mut service, document) = boundary_service(&script);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !root.path().join("closed").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    service
+        .request(
+            "boundary",
+            LspFeature::Hover,
+            document,
+            crate::editor::text::ByteOffset(0),
+            91,
+        )
+        .unwrap();
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "failed write never produced a request outcome"
+        );
+        match service.try_event() {
+            Some(LspEvent::RequestFailed {
+                generation: 91,
+                method,
+                ..
+            }) => {
+                assert_eq!(method, "textDocument/hover");
+                break;
+            }
+            _ => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    service.stop("boundary").unwrap();
 }

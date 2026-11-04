@@ -212,3 +212,16 @@ pub fn manifest() -> Result<ApiManifest, String> {
         ]),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn checked_in_release_contract_is_supported() {
+        let compatibility = super::check_compatibility(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("api/compat-v1.json"),
+            1024 * 1024,
+        )
+        .unwrap();
+        assert!(compatibility.compatible, "{:?}", compatibility.reasons);
+    }
+}

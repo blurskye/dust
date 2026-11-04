@@ -315,25 +315,11 @@ impl PluginContributionCatalog {
             return Err(PluginError::AlreadyActive);
         }
         for existing in self.indexes.values() {
-            let mapping_conflict = existing.keymaps.iter().any(|left| {
-                index.keymaps.iter().any(|right| {
-                    left.context == right.context
-                        && left.mode == right.mode
-                        && left.keys == right.keys
-                })
-            });
-            let group_conflict = existing.key_groups.iter().any(|left| {
-                index.key_groups.iter().any(|right| {
-                    left.context == right.context
-                        && left.mode == right.mode
-                        && left.prefix == right.prefix
-                })
-            });
             let content_conflict = existing
                 .content_types
                 .iter()
                 .any(|left| index.content_types.iter().any(|right| left.id == right.id));
-            if mapping_conflict || group_conflict || content_conflict {
+            if content_conflict {
                 return Err(PluginError::ContributionConflict);
             }
         }

@@ -6,8 +6,7 @@ mod restore;
 pub(crate) use restore::build_restored_layout;
 mod workspace;
 pub(crate) use workspace::{
-    EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot,
-    changed_spans,
+    EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot, changed_spans,
 };
 mod undo;
 pub(crate) use paths::BufferPathChange;
@@ -320,10 +319,21 @@ fn apply_operation(
                         start,
                         removed,
                         inserted: edit.replacement().to_owned(),
+                        removed_endings: target.text.line_endings(edit.range()),
+                        inserted_endings: vec![
+                            target.text.format().preferred_line_ending;
+                            edit.replacement()
+                                .bytes()
+                                .filter(|b| *b == b'\n')
+                                .count()
+                        ],
                     });
                 }
             }
             let delta = target.text.apply_edits(edits)?;
+            if let Some(view) = &mut target.saved_view {
+                view.cursor = delta.map_offset(view.cursor, Affinity::After);
+            }
             target.refresh_dirty();
             if undo_policy == UndoPolicy::Ignore {
                 if !edits.edits().is_empty() {
@@ -347,6 +357,8 @@ fn apply_operation(
                 for position in &mut view.block_insert {
                     *position = delta.map_offset(*position, Affinity::After);
                 }
+                view.block_insert.sort();
+                view.block_insert.dedup();
                 for mark in &mut view.multi_marks {
                     mark.start = delta.map_offset(mark.start, Affinity::Before);
                     mark.end = delta.map_offset(mark.end, Affinity::After);
@@ -373,6 +385,12 @@ fn apply_operation(
                 .views
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
+            if target.cursor != *position
+                && target.mode == EditorMode::Replace
+                && matches!(undo_policy, UndoPolicy::Ignore | UndoPolicy::Boundary)
+            {
+                target.replace_history.clear();
+            }
             target.cursor = *position;
             target.preferred_column = None;
             if let Some(selection) = &mut target.selection {
@@ -446,7 +464,10 @@ fn apply_operation(
                         kind: crate::editor::SelectionKind::Block,
                     });
                 }
-                EditorMode::Normal | EditorMode::Insert | EditorMode::Replace | EditorMode::Multi => {
+                EditorMode::Normal
+                | EditorMode::Insert
+                | EditorMode::Replace
+                | EditorMode::Multi => {
                     target.selection = None;
                 }
                 _ => {}
@@ -459,6 +480,9 @@ fn apply_operation(
             }
             if *mode != EditorMode::Multi {
                 target.multi_marks.clear();
+            }
+            if *mode == EditorMode::Normal {
+                target.clear_editing_state();
             }
         }
         EditorOperation::PushReplaceRecord { view, record } => {
@@ -526,25 +550,40 @@ fn apply_operation(
                         "undo history no longer matches the text".into(),
                     ));
                 }
+                let first_line = target.text.byte_to_line(range.start).unwrap_or(0);
                 let delta = target.text.apply_edits(&TextEditSet::new(
                     target.text.revision(),
                     vec![TextEdit::new(range, change.inserted)],
                 ))?;
+                target
+                    .text
+                    .set_line_endings(first_line, &change.inserted_endings);
+                if let Some(view) = &mut target.saved_view {
+                    view.cursor = delta.map_offset(view.cursor, Affinity::Before);
+                }
                 for (_, view) in state
                     .views
                     .iter_mut()
                     .filter(|(_, view)| view.buffer == *buffer)
                 {
                     view.cursor = delta.map_offset(view.cursor, Affinity::Before);
+                    for position in &mut view.block_insert {
+                        *position = delta.map_offset(*position, Affinity::After);
+                    }
+                    for mark in &mut view.multi_marks {
+                        mark.start = delta.map_offset(mark.start, Affinity::Before);
+                        mark.end = delta.map_offset(mark.end, Affinity::After);
+                    }
+                    view.replace_history.clear();
                 }
             }
             target.refresh_dirty();
             clamp_views(state, *buffer);
             // Like Vim, the cursor lands on the earliest changed text.
-            if let (Some(first), Some(view)) = (first, state.active_view) {
-                if let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer) {
-                    view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
-                }
+            if let (Some(first), Some(view)) = (first, state.active_view)
+                && let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer)
+            {
+                view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
             }
         }
         EditorOperation::SplitPane { axis, ratio } => {
@@ -675,11 +714,12 @@ impl EditorDraft {
             self.state.close_view(view).map_err(str::to_owned)?;
         }
         self.state.remove_buffer(buffer);
-        if let Some((tab, pane)) = focus {
-            if self.state.tabs.contains_key(tab) && self.state.panes.contains_key(pane) {
-                self.state.active_tab = Some(tab);
-                self.state.focus_pane_id(pane).map_err(str::to_owned)?;
-            }
+        if let Some((tab, pane)) = focus
+            && self.state.tabs.contains_key(tab)
+            && self.state.panes.contains_key(pane)
+        {
+            self.state.active_tab = Some(tab);
+            self.state.focus_pane_id(pane).map_err(str::to_owned)?;
         }
         Ok(())
     }
@@ -767,6 +807,7 @@ impl EditorDraft {
         revision: BufferRevision,
         bytes: Vec<u8>,
         path: std::path::PathBuf,
+        snapshot: std::sync::Arc<str>,
     ) -> bool {
         let changed = self
             .state
@@ -779,6 +820,7 @@ impl EditorDraft {
         {
             return false;
         }
+        self.state.buffers[buffer].set_saved_text(Some(snapshot));
         if changed {
             self.state.set_buffer_dirty(buffer, true);
         }
@@ -806,7 +848,12 @@ impl EditorDraft {
             .keys()
             .filter(|other| *other != buffer && Some(*other) != self.state.kept_buffer)
             .collect::<Vec<_>>();
-        let position = self.state.buffers.keys().position(|other| other == buffer).unwrap_or(0);
+        let position = self
+            .state
+            .buffers
+            .keys()
+            .position(|other| other == buffer)
+            .unwrap_or(0);
         let replacement = others
             .iter()
             .rev()
@@ -822,10 +869,10 @@ impl EditorDraft {
         if removed {
             self.state.remove_buffer(buffer);
         }
-        if self.state.active_view.is_none() {
-            if let Some(buffer) = self.state.buffers.keys().next() {
-                self.state.show_buffer(buffer)?;
-            }
+        if self.state.active_view.is_none()
+            && let Some(buffer) = self.state.buffers.keys().next()
+        {
+            self.state.show_buffer(buffer)?;
         }
         Ok(removed)
     }
@@ -879,7 +926,15 @@ impl EditorDraft {
                 while !text.is_char_boundary(view.cursor) {
                     view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
                 }
-                view.selection = selection.filter(|s| s.anchor.get() <= len && s.head.get() <= len);
+                view.selection = selection.filter(|s| {
+                    s.anchor.get() <= len
+                        && s.head.get() <= len
+                        && text.is_char_boundary(s.anchor)
+                        && text.is_char_boundary(s.head)
+                });
+                if let Some(selection) = &mut view.selection {
+                    selection.head = view.cursor;
+                }
                 view.scroll_line = line.min(text.len_lines().saturating_sub(1));
                 view.scroll_column = column;
             }
@@ -927,11 +982,18 @@ mod tests {
         EditorOperation, EditorState, EditorTransaction, Precondition, TransactionId,
     };
 
-    fn edit(state: &mut EditorState, buffer: crate::editor::BufferId, edits: &[(usize, usize, &str)]) {
+    fn edit(
+        state: &mut EditorState,
+        buffer: crate::editor::BufferId,
+        edits: &[(usize, usize, &str)],
+    ) {
         let edits = edits
             .iter()
             .map(|&(start, end, text)| {
-                TextEdit::new(ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), text)
+                TextEdit::new(
+                    ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+                    text,
+                )
             })
             .collect();
         let edits = TextEditSet::new(state.buffers[buffer].text.revision(), edits);
@@ -962,7 +1024,8 @@ mod tests {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         state.undo_directory = Some(directory.path().to_path_buf());
         state.undo_maximum_bytes = 1 << 20;
-        let (buffer, _) = state.open_text(TextBuffer::from_text("one two three"), Some(path.clone()));
+        let (buffer, _) =
+            state.open_text(TextBuffer::from_text("one two three"), Some(path.clone()));
         edit(&mut state, buffer, &[(0, 3, "1"), (8, 13, "3!")]);
         edit(&mut state, buffer, &[(2, 6, "")]);
         assert_eq!(state.buffers[buffer].text.to_string(), "1 3!");
@@ -979,9 +1042,15 @@ mod tests {
             1 << 20,
         );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::fs::read_dir(directory.path())
-            .map_or(0, |entries| entries.filter(|entry| entry.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|x| x == "json"))).count())
-            == 0
+        while std::fs::read_dir(directory.path()).map_or(0, |entries| {
+            entries
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "json"))
+                })
+                .count()
+        }) == 0
         {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -994,8 +1063,10 @@ mod tests {
             state
         };
         let mut changed_on_disk = restart();
-        let (changed, _) =
-            changed_on_disk.open_text(TextBuffer::from_text("edited elsewhere"), Some(path.clone()));
+        let (changed, _) = changed_on_disk.open_text(
+            TextBuffer::from_text("edited elsewhere"),
+            Some(path.clone()),
+        );
         assert!(changed_on_disk.buffers[changed].undo.is_empty());
         let mut restarted = restart();
         let (reopened, _) = restarted.open_text(TextBuffer::from_text("1 two 3!"), Some(path));
@@ -1088,6 +1159,54 @@ mod tests {
         assert_eq!(state.views[view].buffer, buffer);
         assert_eq!(state.buffers[buffer].text.to_string(), "héllo refreshed");
         assert!(state.buffers[buffer].is_virtual_read_only());
+    }
+
+    #[test]
+    fn mixed_line_endings_follow_surviving_text_through_undo() {
+        let mut state = EditorState::new("/tmp".into());
+        let original = b"one\r\ntwo\nthree\r";
+        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None);
+        edit(&mut state, buffer, &[(0, 4, "")]);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
+        history(&mut state, buffer, true);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), original);
+        history(&mut state, buffer, false);
+        assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
+    }
+
+    #[test]
+    fn history_maps_multi_cursor_anchors() {
+        let mut state = EditorState::new("/tmp".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text("foo"), None);
+        edit(&mut state, buffer, &[(0, 0, "xx ")]);
+        state.views[view].multi_marks = vec![ByteRange::new(ByteOffset(3), ByteOffset(6)).unwrap()];
+        state.views[view].block_insert = vec![ByteOffset(6)];
+        history(&mut state, buffer, true);
+        assert_eq!(
+            state.views[view].multi_marks[0],
+            ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap()
+        );
+        assert_eq!(state.views[view].block_insert, [ByteOffset(3)]);
+        history(&mut state, buffer, false);
+        assert_eq!(state.views[view].multi_marks[0].end, ByteOffset(6));
+        assert_eq!(state.views[view].block_insert, [ByteOffset(6)]);
+    }
+
+    #[test]
+    fn virtual_refresh_drops_selection_inside_a_character() {
+        let mut state = EditorState::new("/tmp".into());
+        let (buffer, view) =
+            state.open_virtual_read_only(TextBuffer::from_text("ab"), "demo".into(), 1, 1, 1);
+        state.views[view].cursor = ByteOffset(1);
+        state.views[view].selection = Some(crate::editor::Selection {
+            anchor: ByteOffset(0),
+            head: ByteOffset(1),
+            kind: crate::editor::SelectionKind::Character,
+        });
+        let mut draft = state.draft();
+        assert!(draft.replace_virtual_read_only(buffer, 1, 2, TextBuffer::from_text("éx")));
+        assert_eq!(draft.state.views[view].cursor, ByteOffset(0));
+        assert_eq!(draft.state.views[view].selection, None);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Vim text objects (`iw`, `a(`, `i"`, `ip`, …). They are motions whose result is a
 //! range rather than a cursor target, so operators and Visual mode share them.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
 use crate::language::syntax::{SyntaxObject, SyntaxObjectKind};
 
@@ -19,7 +21,7 @@ pub(super) fn text_object(
         Some(("a", kind)) => (true, kind),
         _ => return Ok(None),
     };
-    let range = match kind {
+    let mut range = match kind {
         "word" => word(text, cursor, around, false)?,
         "big_word" => word(text, cursor, around, true)?,
         "paragraph" => paragraph(text, cursor, around)?,
@@ -35,6 +37,30 @@ pub(super) fn text_object(
         "argument" => syntax(objects, SyntaxObjectKind::Argument, cursor, around, count),
         _ => return Ok(None),
     };
+    if matches!(kind, "word" | "big_word" | "paragraph") {
+        for _ in 1..count {
+            let Some(previous) = range else {
+                break;
+            };
+            let source = text.to_string();
+            let next = source[previous.end.get()..]
+                .char_indices()
+                .find(|(_, character)| !character.is_whitespace())
+                .map(|(offset, _)| ByteOffset(previous.end.get() + offset));
+            let Some(next) = next else {
+                break;
+            };
+            let following = if kind == "paragraph" {
+                paragraph(text, next, around)?
+            } else {
+                word(text, next, around, kind == "big_word")?
+            };
+            let Some(following) = following.filter(|following| following.end > previous.end) else {
+                break;
+            };
+            range = Some(ByteRange::new(previous.start, following.end).map_err(failed)?);
+        }
+    }
     range
         .map(Some)
         .ok_or_else(|| CommandError::Unavailable("no matching text object at the cursor".into()))
@@ -86,7 +112,7 @@ pub(super) fn surrounding(
     match pair_for(character) {
         Some((open, close)) if open == close => quote(text, cursor, open, true),
         Some((open, close)) => pair(text, cursor, open, close, true, 1),
-        None => Ok(None),
+        None => quote(text, cursor, character, true),
     }
 }
 
@@ -107,11 +133,12 @@ fn word(
     big: bool,
 ) -> Result<Option<ByteRange>, CommandError> {
     let (start, content) = line_bounds(text, cursor)?;
-    let characters = content.char_indices().collect::<Vec<_>>();
+    let characters = content.grapheme_indices(true).collect::<Vec<_>>();
     if characters.is_empty() {
         return Ok(Some(ByteRange::empty(cursor)));
     }
-    let class = |character: char| {
+    let class = |grapheme: &str| {
+        let character = grapheme.chars().next().unwrap_or(' ');
         if big {
             u8::from(!character.is_whitespace())
         } else {
@@ -276,15 +303,15 @@ fn pair(
     let mut end = closing;
     // A block like `{\n    body\n}` keeps its braces on their own lines.
     if source[start..end].contains('\n') {
-        if let Some(newline) = source[start..end].find('\n') {
-            if source[start..start + newline].trim().is_empty() {
-                start += newline + 1;
-            }
+        if let Some(newline) = source[start..end].find('\n')
+            && source[start..start + newline].trim().is_empty()
+        {
+            start += newline + 1;
         }
-        if let Some(newline) = source[start..end].rfind('\n') {
-            if source[start + newline + 1..end].trim().is_empty() {
-                end = start + newline + 1;
-            }
+        if let Some(newline) = source[start..end].rfind('\n')
+            && source[start + newline + 1..end].trim().is_empty()
+        {
+            end = start + newline + 1;
         }
     }
     ByteRange::new(ByteOffset(start), ByteOffset(end.max(start)))

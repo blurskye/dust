@@ -1,16 +1,17 @@
-use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS};
 use crate::ui::render::editor::PROMPT_CURSOR;
+use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS};
 use crossterm::cursor::SetCursorStyle;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     config::{BorderStyle, Config},
-    ui::{Style, geometry::text_width, window::WindowRect},
+    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
 };
 
 use super::{
-    CellAlign, DiffLayout, DiffPreview, DiffRow, DiffRowKind, DiffSideRow, Frame, PickerPreviewBody,
-    PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState, PromptState,
-    ToolMenuState, editor::cursor_style, overlays::truncate_content_title,
+    CellAlign, DiffLayout, DiffPreview, DiffRow, DiffRowKind, DiffSideRow, Frame,
+    PickerPreviewBody, PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState,
+    PromptState, ToolMenuState, editor::cursor_style, overlays::truncate_content_title,
 };
 
 pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
@@ -24,13 +25,22 @@ pub(crate) const TOOL_MANAGER_TITLE: &str = "Tools";
 pub(crate) const TOOL_MANAGER_HELP: &str =
     "j/k move · / search · Tab category · Enter install or start · r refresh · Esc close";
 pub(crate) const TOOL_LANGUAGE_SEPARATOR: &str = ", ";
-pub(crate) const TOOL_CATEGORY_ORDER: &[&str] = &["all", "lsp", "dap", "linter", "formatter", "agent"];
+pub(crate) const TOOL_CATEGORY_ORDER: &[&str] =
+    &["all", "lsp", "dap", "linter", "formatter", "agent"];
 
 /// What fits of `text`, ending in an ellipsis when some had to go.
-pub(super) fn ellipsized(text: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
+pub(super) fn ellipsized(
+    text: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> String {
     use unicode_segmentation::UnicodeSegmentation;
     if text_width(text, ambiguous) <= maximum || maximum == 0 {
-        return if maximum == 0 { String::new() } else { text.to_owned() };
+        return if maximum == 0 {
+            String::new()
+        } else {
+            text.to_owned()
+        };
     }
     let mut kept = String::new();
     let mut width = 1;
@@ -49,11 +59,7 @@ fn looks_like_path(text: &str) -> bool {
 }
 
 /// A `Label  /some/path` detail row keeps its label and the end of its path.
-fn clip_path_tail(
-    line: &str,
-    maximum: usize,
-    ambiguous: crate::config::AmbiguousWidth,
-) -> String {
+fn clip_path_tail(line: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
     let path = line.rsplit(' ').next().unwrap_or_default();
     let label = &line[..line.len() - path.len()];
     let room = maximum.saturating_sub(text_width(label, ambiguous));
@@ -70,11 +76,16 @@ pub(super) fn fitted_picker_row(
 ) -> (String, String) {
     let label_width = text_width(label, ambiguous);
     let detail_width = text_width(detail, ambiguous);
-    if label_width + 2 + detail_width <= available || detail.is_empty() && label_width <= available {
+    if label_width + 2 + detail_width <= available || detail.is_empty() && label_width <= available
+    {
         return (label.to_owned(), detail.to_owned());
     }
     let label = if looks_like_path(label) {
-        let room = if detail.is_empty() { available } else { available * 2 / 3 };
+        let room = if detail.is_empty() {
+            available
+        } else {
+            available * 2 / 3
+        };
         truncate_content_title(label, room, ambiguous)
     } else {
         label.to_owned()
@@ -138,7 +149,11 @@ fn diff_row_style(kind: DiffRowKind) -> Style {
 ///
 /// A narrow surface drops whole actions rather than clipping one, so a footer can never show
 /// half an action that reads as a different one.
-fn fitted_footer(text: &str, width: usize, ambiguous_width: crate::config::AmbiguousWidth) -> String {
+fn fitted_footer(
+    text: &str,
+    width: usize,
+    ambiguous_width: crate::config::AmbiguousWidth,
+) -> String {
     if text_width(text, ambiguous_width) <= width {
         return text.to_owned();
     }
@@ -157,50 +172,30 @@ fn fitted_footer(text: &str, width: usize, ambiguous_width: crate::config::Ambig
     fitted
 }
 
-fn text_width_u16(text: &str, config: &Config) -> u16 {
-    u16::try_from(text_width(text, config.editor.ambiguous_width)).unwrap_or(u16::MAX)
-}
-
 /// Draw one diff row, emphasising the spans that changed inside it.
 ///
 /// The emphasis uses the theme's search style, which is the existing style for highlighted
 /// text. A dedicated diff-emphasis style would be a theme-schema change and U-16 does not
 /// ask for one.
-fn paint_diff_row(frame: &mut Frame, config: &Config, x: u16, y: u16, right: u16, row: &DiffRow) {
+fn paint_diff_row(frame: &mut Frame, _config: &Config, x: u16, y: u16, right: u16, row: &DiffRow) {
     let style = diff_row_style(row.kind);
     if row.spans.is_empty() {
         frame.grid.put_text_clipped(x, y, &row.text, style, right);
         return;
     }
     let mut cursor_x = x;
-    let mut cursor = 0usize;
-    for span in &row.spans {
-        let start = span.start.min(row.text.len());
-        let end = span.end.min(row.text.len());
-        if end < start
-            || !row.text.is_char_boundary(start)
-            || !row.text.is_char_boundary(end)
-        {
-            continue;
-        }
-        if start > cursor {
-            let piece = &row.text[cursor..start];
-            frame.grid.put_text_clipped(cursor_x, y, piece, style, right);
-            cursor_x = cursor_x.saturating_add(text_width_u16(piece, config));
-        }
-        if end > start {
-            let piece = &row.text[start..end];
-            frame
-                .grid
-                .put_text_clipped(cursor_x, y, piece, Style::Search, right);
-            cursor_x = cursor_x.saturating_add(text_width_u16(piece, config));
-        }
-        cursor = end;
-    }
-    if cursor < row.text.len() {
-        frame
-            .grid
-            .put_text_clipped(cursor_x, y, &row.text[cursor..], style, right);
+    for (at, grapheme) in row.text.grapheme_indices(true) {
+        let changed = row
+            .spans
+            .iter()
+            .any(|span| span.start < at + grapheme.len() && span.end > at);
+        cursor_x = frame.grid.put_text_clipped(
+            cursor_x,
+            y,
+            grapheme,
+            if changed { Style::Search } else { style },
+            right,
+        );
     }
 }
 
@@ -211,6 +206,7 @@ fn render_diff_preview(
     config: &Config,
     rect: WindowRect,
 ) {
+    let number_width = diff.number_width();
     let (left, top) = (rect.x, rect.y);
     let right = rect.x.saturating_add(rect.width);
     let bottom = rect.y.saturating_add(rect.height);
@@ -250,12 +246,15 @@ fn render_diff_preview(
                     frame.grid.put_text_clipped(left, y, text, style, right);
                     continue;
                 }
-                let left_row = left_cells.get(position.saturating_add(left_offset)).copied();
+                let left_row = left_cells
+                    .get(position.saturating_add(left_offset))
+                    .copied();
                 let right_row = rows.get(position.saturating_add(right_offset));
                 {
                     frame.grid.set_cell(divider, y, "│", Style::Border);
                     if let Some(cell) = left_row.and_then(|row| row.old.as_ref()) {
-                        let (text, spans) = diff.side_cell_text(cell);
+                        let (text, spans) =
+                            DiffPreview::side_cell_text_with_width(cell, number_width);
                         paint_diff_row(
                             frame,
                             config,
@@ -270,7 +269,8 @@ fn render_diff_preview(
                         );
                     }
                     if let Some(cell) = right_row.and_then(|row| row.new.as_ref()) {
-                        let (text, spans) = diff.side_cell_text(cell);
+                        let (text, spans) =
+                            DiffPreview::side_cell_text_with_width(cell, number_width);
                         paint_diff_row(
                             frame,
                             config,
@@ -390,11 +390,10 @@ pub fn picker_geometry(bounds: WindowRect) -> Option<WindowRect> {
         .unwrap_or(bounds.width)
         .max(40.min(bounds.width))
         .min(bounds.width);
-    let height =
-        u16::try_from(u32::from(bounds.height) * 82 / 100)
-            .unwrap_or(bounds.height)
-            .max(10.min(bounds.height))
-            .min(bounds.height);
+    let height = u16::try_from(u32::from(bounds.height) * 82 / 100)
+        .unwrap_or(bounds.height)
+        .max(10.min(bounds.height))
+        .min(bounds.height);
     if width < 4 || height < 6 {
         return None;
     }
@@ -513,7 +512,11 @@ pub(super) fn render_picker(
             match picker.footer.as_deref() {
                 Some(footer) => fitted_footer(
                     footer,
-                    usize::from(footer_right.saturating_sub(left.saturating_add(2)).saturating_sub(2)),
+                    usize::from(
+                        footer_right
+                            .saturating_sub(left.saturating_add(2))
+                            .saturating_sub(2)
+                    ),
                     config.editor.ambiguous_width,
                 ),
                 None => picker.input_hint.clone(),
@@ -609,9 +612,14 @@ pub(super) fn render_picker(
             // rows apart; a path too short to say anything is left out.
             let ambiguous = config.editor.ambiguous_width;
             let wanted = text_width(&row.label, ambiguous)
-                + if row.detail.is_empty() { 0 } else { 2 + text_width(&row.detail, ambiguous) }
+                + if row.detail.is_empty() {
+                    0
+                } else {
+                    2 + text_width(&row.detail, ambiguous)
+                }
                 + 3;
-            let left_over = usize::from(source_right.saturating_sub(content_left)).saturating_sub(wanted);
+            let left_over =
+                usize::from(source_right.saturating_sub(content_left)).saturating_sub(wanted);
             source_room = source_room.min(u16::try_from(left_over).unwrap_or(u16::MAX));
             if source_room < 12 {
                 source_room = 0;
@@ -668,7 +676,11 @@ pub(super) fn render_picker(
             // it on the selected row, and only the default style is promoted to the
             // selection style so no lane or status colour is lost under the cursor. Muted
             // text is promoted too, so the selection band runs unbroken under a description.
-            let marker_style = if selected { Style::Selection } else { Style::Default };
+            let marker_style = if selected {
+                Style::Selection
+            } else {
+                Style::Default
+            };
             frame
                 .grid
                 .put_text_clipped(content_left, y, marker, marker_style, list_right);
@@ -683,9 +695,7 @@ pub(super) fn render_picker(
                         .iter()
                         .map(|rest| rest.width)
                         .sum();
-                    list_right
-                        .saturating_sub(cell_x)
-                        .saturating_sub(fixed)
+                    list_right.saturating_sub(cell_x).saturating_sub(fixed)
                 } else {
                     cell.width
                 };
@@ -749,8 +759,7 @@ pub(super) fn render_picker(
         let preview_bottom = top + height - 1;
         match &preview.body {
             PickerPreviewBody::Text(text) => {
-                let available_rows =
-                    usize::from(preview_bottom.saturating_sub(preview_top));
+                let available_rows = usize::from(preview_bottom.saturating_sub(preview_top));
                 let highlighted_offset = text
                     .highlight_line
                     .and_then(|line| line.checked_sub(text.first_line));
@@ -818,7 +827,13 @@ pub(super) fn render_picker(
                                 );
                                 at = range.end;
                             }
-                            frame.grid.put_text_clipped(x, y, &line[at..], Style::Default, preview_right);
+                            frame.grid.put_text_clipped(
+                                x,
+                                y,
+                                &line[at..],
+                                Style::Default,
+                                preview_right,
+                            );
                         }
                         None => {
                             frame.grid.put_text_clipped(
@@ -991,7 +1006,11 @@ pub(super) fn render_tool_menu(
     let ambiguous = config.editor.ambiguous_width;
     let clip = |text: &str| ellipsized(text, usize::from(content_width), ambiguous);
     let clip_indented = |text: &str| {
-        truncate_content_title(text, usize::from(content_width.saturating_sub(2)), ambiguous)
+        truncate_content_title(
+            text,
+            usize::from(content_width.saturating_sub(2)),
+            ambiguous,
+        )
     };
     let mut y = top + 1;
 
@@ -1004,7 +1023,9 @@ pub(super) fn render_tool_menu(
         .iter()
         .enumerate()
         {
-            frame.grid.put_text(content_left, y + row as u16, help, Style::Muted);
+            frame
+                .grid
+                .put_text(content_left, y + row as u16, help, Style::Muted);
         }
         y += 2;
         let picker_version_x = content_left.saturating_add(2);
@@ -1035,12 +1056,22 @@ pub(super) fn render_tool_menu(
             .options
             .iter()
             .enumerate()
-            .skip(picker.scroll)
+            .skip(
+                picker
+                    .scroll
+                    .min(picker.selected)
+                    .max(picker.selected.saturating_add(1).saturating_sub(visible))
+                    .min(picker.options.len().saturating_sub(visible)),
+            )
             .take(visible)
         {
             let focused = index == picker.selected;
             let marker = if focused { ">" } else { " " };
-            let active = if option.selected && option.installed { "●" } else { "" };
+            let active = if option.selected && option.installed {
+                "●"
+            } else {
+                ""
+            };
             let style = if focused {
                 Style::Selection
             } else if option.selected {
@@ -1057,7 +1088,11 @@ pub(super) fn render_tool_menu(
             }
             frame.grid.put_text(content_left, y, marker, style);
             let column = |text: &str, from: u16, to: u16| {
-                ellipsized(text, usize::from(to.saturating_sub(from).saturating_sub(1)), ambiguous)
+                ellipsized(
+                    text,
+                    usize::from(to.saturating_sub(from).saturating_sub(1)),
+                    ambiguous,
+                )
             };
             frame.grid.put_text(
                 picker_version_x,
@@ -1143,7 +1178,9 @@ pub(super) fn render_tool_menu(
         .iter()
         .enumerate()
     {
-        frame.grid.put_text(content_left, y + row as u16, help, Style::Muted);
+        frame
+            .grid
+            .put_text(content_left, y + row as u16, help, Style::Muted);
     }
     y += 2;
     let mut tab_x = content_left;
@@ -1193,7 +1230,8 @@ pub(super) fn render_tool_menu(
         .get(menu.selected)
         .filter(|row| tool_state_glyph(row).1 == Style::Error)
         .map_or(0, |row| {
-            let note = super::wrap_card_text(&row.note, usize::from(content_width), ambiguous).len();
+            let note =
+                super::wrap_card_text(&row.note, usize::from(content_width), ambiguous).len();
             usual_detail_rows - 2 + u16::try_from(note).unwrap_or(u16::MAX)
         })
         .min(remaining.saturating_sub(2));
@@ -1202,14 +1240,10 @@ pub(super) fn render_tool_menu(
         .min(remaining.saturating_sub(1));
     let list_bottom = top + height - 1 - detail_rows;
     let visible_rows = usize::from(list_bottom.saturating_sub(y));
-    let scroll = menu.scroll.max((menu.selected + 1).saturating_sub(visible_rows));
-    for (index, row) in menu
-        .rows
-        .iter()
-        .enumerate()
-        .skip(scroll)
-        .take(visible_rows)
-    {
+    let scroll = menu
+        .scroll
+        .max((menu.selected + 1).saturating_sub(visible_rows));
+    for (index, row) in menu.rows.iter().enumerate().skip(scroll).take(visible_rows) {
         let selected = index == menu.selected;
         let style = if selected {
             Style::Selection
@@ -1233,26 +1267,38 @@ pub(super) fn render_tool_menu(
             .grid
             .put_text(name_x, y, &column(&row.name, name_x, name_right), style);
         let languages_x = name_x
-            .saturating_add(u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0))
+            .saturating_add(
+                u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0),
+            )
             .saturating_add(2);
         if !row.languages.is_empty() && languages_x < name_right {
             frame.grid.put_text_clipped(
                 languages_x,
                 y,
                 &column(&row.languages, languages_x, name_right),
-                if selected { Style::Selection } else { Style::Muted },
+                if selected {
+                    Style::Selection
+                } else {
+                    Style::Muted
+                },
                 name_right,
             );
         }
         if !compact {
             let runtime_right = runtime_x.saturating_sub(1);
-            frame
-                .grid
-                .put_text(version_x, y, &column(&row.version, version_x, runtime_right), style);
+            frame.grid.put_text(
+                version_x,
+                y,
+                &column(&row.version, version_x, runtime_right),
+                style,
+            );
             let state_left = state_x.saturating_sub(1);
-            frame
-                .grid
-                .put_text(runtime_x, y, &column(&row.runtime, runtime_x, state_left), style);
+            frame.grid.put_text(
+                runtime_x,
+                y,
+                &column(&row.runtime, runtime_x, state_left),
+                style,
+            );
         }
         // The list shows the short state; byte counts stay in the detail pane.
         let state = row.lifecycle.split(" (").next().unwrap_or_default();
@@ -1260,7 +1306,11 @@ pub(super) fn render_tool_menu(
             state_x,
             y,
             &column(state, state_x, right),
-            if selected { Style::Selection } else { glyph_style },
+            if selected {
+                Style::Selection
+            } else {
+                glyph_style
+            },
         );
         y += 1;
     }
@@ -1275,20 +1325,29 @@ pub(super) fn render_tool_menu(
         );
         y += 1;
         let (_, state_style) = tool_state_glyph(row);
-        let status_x = right
-            .saturating_sub(u16::try_from(row.lifecycle.chars().count()).unwrap_or(u16::MAX));
+        let status_x =
+            right.saturating_sub(u16::try_from(row.lifecycle.chars().count()).unwrap_or(u16::MAX));
         frame
             .grid
             .put_text_clipped(content_left, y, &row.name, Style::Accent, status_x);
         if !row.languages.is_empty() {
             let x = content_left
-                .saturating_add(u16::try_from(text_width(&row.name, config.editor.ambiguous_width)).unwrap_or(0))
+                .saturating_add(
+                    u16::try_from(text_width(&row.name, config.editor.ambiguous_width))
+                        .unwrap_or(0),
+                )
                 .saturating_add(2);
-            frame
-                .grid
-                .put_text_clipped(x, y, &row.languages, Style::Muted, status_x.saturating_sub(1));
+            frame.grid.put_text_clipped(
+                x,
+                y,
+                &row.languages,
+                Style::Muted,
+                status_x.saturating_sub(1),
+            );
         }
-        frame.grid.put_text(status_x, y, &row.lifecycle, state_style);
+        frame
+            .grid
+            .put_text(status_x, y, &row.lifecycle, state_style);
         y += if short { 1 } else { 2 };
         let mut details = Vec::new();
         if row.installed {
@@ -1341,13 +1400,17 @@ pub(super) fn render_tool_menu(
                     break;
                 }
                 let line: String = line.into_iter().map(|(piece, _)| piece).collect();
-                frame.grid.put_text(content_left, y, &clip(&line), note_style);
+                frame
+                    .grid
+                    .put_text(content_left, y, &clip(&line), note_style);
                 y += 1;
             }
         }
         let keys = tool_row_keys(row).join(" · ");
         if y < bottom && !keys.is_empty() {
-            frame.grid.put_text(content_left, y, &clip(&keys), Style::Accent);
+            frame
+                .grid
+                .put_text(content_left, y, &clip(&keys), Style::Accent);
         }
     }
     frame.cursor = None;
@@ -1357,7 +1420,12 @@ pub(super) fn render_tool_menu(
 fn tool_busy(state: &str) -> bool {
     !matches!(
         state,
-        "installed" | "not installed" | "install failed" | "not working" | "crashed" | "starting"
+        "installed"
+            | "not installed"
+            | "install failed"
+            | "not working"
+            | "crashed"
+            | "starting"
             | "restarting"
     ) && !state.starts_with("running")
 }
@@ -1411,6 +1479,37 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
         keys.push("p versions");
     }
     keys
+}
+
+fn prompt_viewport<'a>(
+    input: &'a str,
+    cursor: usize,
+    width: usize,
+    grid: &CellGrid,
+) -> (&'a str, usize) {
+    let cursor = input
+        .grapheme_indices(true)
+        .map(|(at, _)| at)
+        .chain(std::iter::once(input.len()))
+        .take_while(|at| *at <= cursor)
+        .last()
+        .unwrap_or(0);
+    let before = &input[..cursor];
+    let mut cells = 0;
+    let mut start = cursor;
+    for (at, grapheme) in before.grapheme_indices(true).rev() {
+        let size = if grapheme == "\t" {
+            1
+        } else {
+            grid.display_width(grapheme).clamp(1, 2)
+        };
+        if cells + size >= width {
+            break;
+        }
+        cells += size;
+        start = at;
+    }
+    (&input[start..], cells)
 }
 
 pub(super) fn render_prompt(
@@ -1489,19 +1588,18 @@ pub(super) fn render_prompt(
             Style::Accent,
             right,
         );
-        frame.grid.put_text_clipped(
-            marker_end,
-            geometry.top,
+        let (shown, caret) = prompt_viewport(
             &prompt.input,
-            Style::Default,
-            right,
+            prompt.cursor,
+            usize::from(right.saturating_sub(marker_end)),
+            &frame.grid,
         );
-        let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);
+        frame
+            .grid
+            .put_text_clipped(marker_end, geometry.top, shown, Style::Default, right);
         frame.cursor = Some((
             marker_end
-                .saturating_add(
-                    u16::try_from(text_width(prefix, config.editor.ambiguous_width)).unwrap_or(0),
-                )
+                .saturating_add(u16::try_from(caret).unwrap_or(0))
                 .min(right.saturating_sub(1)),
             geometry.top,
             cursor_style(PROMPT_CURSOR),
@@ -1568,8 +1666,7 @@ pub(super) fn render_prompt(
             Style::Border,
         );
     }
-    if geometry.width > PROMPT_TITLE_MIN_WIDTH
-    {
+    if geometry.width > PROMPT_TITLE_MIN_WIDTH {
         let title = format!(
             " {} ",
             prompt.confirmation.as_ref().map_or_else(
@@ -1661,8 +1758,11 @@ pub(super) fn render_prompt(
             // The legend starts two cells in, stops two short of the right edge and has a space
             // on each side.
             let room = right.saturating_sub(geometry.left).saturating_sub(6);
-            let hint =
-                fitted_footer(&confirmation.hint, usize::from(room), config.editor.ambiguous_width);
+            let hint = fitted_footer(
+                &confirmation.hint,
+                usize::from(room),
+                config.editor.ambiguous_width,
+            );
             if !hint.is_empty() {
                 frame.grid.put_text_clipped(
                     geometry.left.saturating_add(2),
@@ -1676,21 +1776,17 @@ pub(super) fn render_prompt(
         frame.cursor = None;
         return;
     }
-    let input_x = geometry
-        .left
-        .saturating_add(PROMPT_INPUT_PADDING);
+    let input_x = geometry.left.saturating_add(PROMPT_INPUT_PADDING);
     let input_y = geometry.top.saturating_add(if show_help { 2 } else { 1 });
     let content_right = right.saturating_sub(1);
-    if show_help {
-        if let Some(help) = &prompt.help {
-            frame.grid.put_text_clipped(
-                input_x,
-                geometry.top.saturating_add(1),
-                help,
-                Style::Muted,
-                content_right,
-            );
-        }
+    if show_help && let Some(help) = &prompt.help {
+        frame.grid.put_text_clipped(
+            input_x,
+            geometry.top.saturating_add(1),
+            help,
+            Style::Muted,
+            content_right,
+        );
     }
     let marker_end = frame.grid.put_text_clipped(
         input_x,
@@ -1699,20 +1795,22 @@ pub(super) fn render_prompt(
         Style::Accent,
         content_right,
     );
-    frame.grid.put_text_clipped(
-        marker_end,
-        input_y,
+    let (shown, caret) = prompt_viewport(
         &prompt.input,
-        Style::Default,
-        content_right,
+        prompt.cursor,
+        usize::from(content_right.saturating_sub(marker_end)),
+        &frame.grid,
     );
+    frame
+        .grid
+        .put_text_clipped(marker_end, input_y, shown, Style::Default, content_right);
     if let Some(error) = &prompt.error {
-        let error_y = geometry
-            .top
-            .saturating_add(3);
+        let error_y = geometry.top.saturating_add(3);
         // A long error wraps below the box, since its end usually says what to do.
         let padding = PROMPT_INPUT_PADDING;
-        let inner = right.saturating_sub(geometry.left).saturating_sub(padding.saturating_mul(2));
+        let inner = right
+            .saturating_sub(geometry.left)
+            .saturating_sub(padding.saturating_mul(2));
         let ambiguous = config.editor.ambiguous_width;
         let lines = super::wrap_card_text(error, usize::from(inner).max(1), ambiguous);
         for (row, line) in (error_y..height).zip(lines) {
@@ -1729,9 +1827,7 @@ pub(super) fn render_prompt(
             );
         }
     } else if !prompt.completions.is_empty() {
-        let completion_top = geometry
-            .top
-            .saturating_add(3);
+        let completion_top = geometry.top.saturating_add(3);
         let available = height.saturating_sub(completion_top);
         let rows = u16::try_from(prompt.completions.len())
             .unwrap_or(u16::MAX)
@@ -1763,9 +1859,7 @@ pub(super) fn render_prompt(
                 frame.grid.set_cell(x, y, " ", style);
             }
             let item = &prompt.completions[index];
-            let label_x = geometry
-                .left
-                .saturating_add(PROMPT_INPUT_PADDING);
+            let label_x = geometry.left.saturating_add(PROMPT_INPUT_PADDING);
             let detail_x = label_x
                 .saturating_add(
                     u16::try_from(text_width(&item.label, config.editor.ambiguous_width))
@@ -1777,17 +1871,36 @@ pub(super) fn render_prompt(
                 .put_text_clipped(label_x, y, &item.label, style, right);
             let room = usize::from(right.saturating_sub(detail_x));
             let detail = ellipsized(&item.detail, room, config.editor.ambiguous_width);
-            let detail_style = if style == Style::Selection { style } else { Style::Muted };
-            frame.grid.put_text_clipped(detail_x, y, &detail, detail_style, right);
+            let detail_style = if style == Style::Selection {
+                style
+            } else {
+                Style::Muted
+            };
+            frame
+                .grid
+                .put_text_clipped(detail_x, y, &detail, detail_style, right);
         }
     }
-    let prefix = prompt.input.get(..prompt.cursor).unwrap_or(&prompt.input);
-    let cursor_x = marker_end.saturating_add(
-        u16::try_from(text_width(prefix, config.editor.ambiguous_width)).unwrap_or(0),
-    );
+    let cursor_x = marker_end.saturating_add(u16::try_from(caret).unwrap_or(0));
     frame.cursor = Some((
         cursor_x.min(geometry.left + geometry.width.saturating_sub(2)),
         input_y,
         cursor_style(PROMPT_CURSOR),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_viewport_keeps_the_grapheme_caret_visible() {
+        let grid = CellGrid::new(20, 1);
+        let input = format!("{}é👩‍💻z", "a".repeat(80));
+        let (shown, caret) = prompt_viewport(&input, input.len(), 8, &grid);
+        assert!(shown.ends_with("é👩‍💻z"));
+        assert!(caret < 8);
+        assert!(!shown.starts_with('\u{301}'));
+        assert_eq!(prompt_viewport(&input, 0, 8, &grid), (input.as_str(), 0));
+    }
 }

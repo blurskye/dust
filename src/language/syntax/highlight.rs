@@ -121,7 +121,10 @@ fn registry() -> &'static Registry {
             ids: HashMap::new(),
             defaults: BTreeMap::new(),
         };
-        let links = file.defaults.values().filter_map(|definition| definition.link.as_deref());
+        let links = file
+            .defaults
+            .values()
+            .filter_map(|definition| definition.link.as_deref());
         for name in BUILTIN
             .into_iter()
             .chain(file.names.iter().map(String::as_str))
@@ -145,7 +148,10 @@ mod tests {
 
     #[test]
     fn captures_fall_back_to_the_nearest_known_group() {
-        assert_eq!(Highlight::for_capture("comment").map(Highlight::name), Some("@comment"));
+        assert_eq!(
+            Highlight::for_capture("comment").map(Highlight::name),
+            Some("@comment")
+        );
         assert_eq!(
             Highlight::for_capture("function.method.call").map(Highlight::name),
             Some("@function.method.call")

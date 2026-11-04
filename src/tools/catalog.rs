@@ -211,12 +211,28 @@ pub fn bundled_tool_catalog() -> Vec<ToolDefinition> {
 pub fn discover_executable(executable: &str) -> Option<PathBuf> {
     let candidate = Path::new(executable);
     if candidate.components().count() > 1 {
-        return candidate.is_file().then(|| candidate.to_path_buf());
+        return executable_file(candidate).then(|| candidate.to_path_buf());
     }
     env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
         let path = directory.join(executable);
-        path.is_file().then_some(path)
+        executable_file(&path).then_some(path)
     })
+}
+
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    true
 }
 
 /// The executables on `PATH`, read with one listing per directory. Looking up every catalog
@@ -235,7 +251,9 @@ impl PathExecutables {
                 continue;
             };
             for entry in entries.flatten() {
-                found.entry(entry.file_name()).or_insert_with(|| entry.path());
+                found
+                    .entry(entry.file_name())
+                    .or_insert_with(|| entry.path());
             }
         }
         Self(found)
@@ -248,7 +266,7 @@ impl PathExecutables {
         }
         let path = self.0.get(OsStr::new(executable))?;
         // A directory of that name shadows nothing: keep searching like the plain lookup.
-        if path.is_file() {
+        if executable_file(path) {
             Some(path.clone())
         } else {
             discover_executable(executable)
@@ -734,4 +752,27 @@ pub fn inspect_tools_at(root: &Path) -> Vec<ToolEntry> {
 #[must_use]
 pub fn inspect_tools() -> Vec<ToolEntry> {
     inspect_tools_at(&tool_store_root())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn path_lookup_skips_nonexecutable_files() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("clangd");
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(discover_executable(path.to_str().unwrap()).is_none());
+        assert!(
+            PathExecutables(HashMap::from([("clangd".into(), path.clone())]))
+                .find("clangd")
+                .as_ref()
+                != Some(&path)
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(discover_executable(path.to_str().unwrap()), Some(path));
+    }
 }

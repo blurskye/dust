@@ -186,12 +186,17 @@ impl PickerState {
             .selected
             .filter(|selected| entries.contains(selected))
             .map_or_else(
-                || entries.iter().position(|entry| *entry > self.selected.unwrap_or(0)),
+                || {
+                    entries
+                        .iter()
+                        .position(|entry| *entry > self.selected.unwrap_or(0))
+                },
                 |selected| {
                     let at = entries.iter().position(|entry| *entry == selected);
                     at.map(|at| {
                         if direction < 0 {
-                            at.checked_sub(1).unwrap_or(if wrap { entries.len() - 1 } else { at })
+                            at.checked_sub(1)
+                                .unwrap_or(if wrap { entries.len() - 1 } else { at })
                         } else if at + 1 < entries.len() {
                             at + 1
                         } else if wrap {
@@ -225,7 +230,11 @@ impl PickerState {
 
     /// A row that has gone leaves the selection where the list put it, so there is still one.
     pub fn select_id(&mut self, id: &PickerItemId) {
-        if let Some(position) = self.visible.iter().position(|index| &self.items[*index].id == id) {
+        if let Some(position) = self
+            .visible
+            .iter()
+            .position(|index| &self.items[*index].id == id)
+        {
             self.selected = Some(position);
         }
     }
@@ -342,7 +351,11 @@ pub fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
     let query = query.to_lowercase();
     let mut previous = None;
     // The query typed as one piece beats the same letters scattered across the row.
-    let mut score = if haystack.contains(&query) { 1000_i64 } else { 0 };
+    let mut score = if haystack.contains(&query) {
+        1000_i64
+    } else {
+        0
+    };
     let mut search_start = 0;
     for needle in query.chars() {
         let relative = haystack.get(search_start..)?.find(needle)?;

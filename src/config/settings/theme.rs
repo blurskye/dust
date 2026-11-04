@@ -28,6 +28,30 @@ pub enum ThemeColor {
 }
 
 impl ThemeColor {
+    pub(crate) fn rgb(self) -> Option<(u8, u8, u8)> {
+        Some(match self {
+            Self::Reset => return None,
+            Self::Rgb(r, g, b) => (r, g, b),
+            Self::Indexed(index) if index >= 16 => return indexed_rgb(index).rgb(),
+            Self::Indexed(0) | Self::Black => (0, 0, 0),
+            Self::Indexed(1) | Self::DarkRed => (205, 0, 0),
+            Self::Indexed(2) | Self::DarkGreen => (0, 205, 0),
+            Self::Indexed(3) | Self::DarkYellow => (205, 205, 0),
+            Self::Indexed(4) | Self::DarkBlue => (0, 0, 238),
+            Self::Indexed(5) | Self::DarkMagenta => (205, 0, 205),
+            Self::Indexed(6) | Self::DarkCyan => (0, 205, 205),
+            Self::Indexed(7) | Self::Grey => (229, 229, 229),
+            Self::Indexed(8) | Self::DarkGrey => (127, 127, 127),
+            Self::Indexed(9) | Self::Red => (255, 0, 0),
+            Self::Indexed(10) | Self::Green => (0, 255, 0),
+            Self::Indexed(11) | Self::Yellow => (255, 255, 0),
+            Self::Indexed(12) | Self::Blue => (92, 92, 255),
+            Self::Indexed(13) | Self::Magenta => (255, 0, 255),
+            Self::Indexed(14) | Self::Cyan => (0, 255, 255),
+            Self::Indexed(_) | Self::White => (255, 255, 255),
+        })
+    }
+
     fn parse(value: &str) -> Result<Self, String> {
         let named = match value {
             "reset" => Self::Reset,
@@ -255,7 +279,11 @@ impl ThemeConfig {
     pub fn highlight(&self, group: Highlight) -> Option<&ThemeStyle> {
         self.resolved
             .0
-            .get_or_init(|| Highlight::all().map(|group| self.resolve(group.name())).collect())
+            .get_or_init(|| {
+                Highlight::all()
+                    .map(|group| self.resolve(group.name()))
+                    .collect()
+            })
             .get(group.index())?
             .as_ref()
     }
@@ -263,8 +291,14 @@ impl ThemeConfig {
     fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
         // Links can loop in a hand-written theme.
         for _ in 0..32 {
-            match self.highlights.get(name).or_else(|| Highlight::default_definition(name)) {
-                Some(HighlightDefinition { link: Some(link), .. }) => name = link,
+            match self
+                .highlights
+                .get(name)
+                .or_else(|| Highlight::default_definition(name))
+            {
+                Some(HighlightDefinition {
+                    link: Some(link), ..
+                }) => name = link,
                 Some(definition) => return Some(self.highlight_style(definition)),
                 None if name.starts_with('@') => name = name.rsplit_once('.')?.0,
                 None => return None,
@@ -275,14 +309,28 @@ impl ThemeConfig {
 
     fn highlight_style(&self, definition: &HighlightDefinition) -> ThemeStyle {
         let base = &self.styles.default;
-        let channel = |colour: Option<ThemeColor>, cterm: Option<u8>, fallback| match colour {
-            Some(colour) => (
-                colour,
-                cterm.map(ThemeColor::Indexed).or_else(|| nearest_256(colour)),
-                nearest_16(colour),
-            ),
-            None => fallback,
-        };
+        let channel =
+            |colour: Option<ThemeColor>,
+             cterm: Option<u8>,
+             fallback: (ThemeColor, Option<ThemeColor>, Option<ThemeColor>)| {
+                match colour {
+                    Some(colour) => (
+                        colour,
+                        cterm
+                            .map(ThemeColor::Indexed)
+                            .or_else(|| nearest_256(colour)),
+                        nearest_16(colour),
+                    ),
+                    None => match cterm {
+                        Some(index) => (
+                            fallback.0,
+                            Some(ThemeColor::Indexed(index)),
+                            nearest_16(ThemeColor::Indexed(index)),
+                        ),
+                        None => fallback,
+                    },
+                }
+            };
         let foreground = channel(
             definition.fg,
             definition.ctermfg,
@@ -296,7 +344,10 @@ impl ThemeConfig {
         let attributes = [
             (definition.bold, ThemeAttribute::Bold),
             (definition.italic, ThemeAttribute::Italic),
-            (definition.underline || definition.undercurl, ThemeAttribute::Underlined),
+            (
+                definition.underline || definition.undercurl,
+                ThemeAttribute::Underlined,
+            ),
             (definition.strikethrough, ThemeAttribute::Strikethrough),
             (definition.reverse, ThemeAttribute::Reverse),
         ]
@@ -439,7 +490,10 @@ fn nearest_256(colour: ThemeColor) -> Option<ThemeColor> {
     };
     let cube = (0..216u8).map(|index| {
         let level = |step: u8| XTERM_LEVELS[usize::from(step)];
-        (16 + index, (level(index / 36), level(index / 6 % 6), level(index % 6)))
+        (
+            16 + index,
+            (level(index / 36), level(index / 6 % 6), level(index % 6)),
+        )
     });
     let greys = (0..24u8).map(|step| (232 + step, (8 + step * 10, 8 + step * 10, 8 + step * 10)));
     cube.chain(greys)
@@ -451,6 +505,28 @@ fn nearest_256(colour: ThemeColor) -> Option<ThemeColor> {
 fn nearest_16(colour: ThemeColor) -> Option<ThemeColor> {
     let (red, green, blue) = match colour {
         ThemeColor::Rgb(red, green, blue) => (red, green, blue),
+        ThemeColor::Indexed(index @ 0..=15) => {
+            return Some(
+                [
+                    ThemeColor::Black,
+                    ThemeColor::DarkRed,
+                    ThemeColor::DarkGreen,
+                    ThemeColor::DarkYellow,
+                    ThemeColor::DarkBlue,
+                    ThemeColor::DarkMagenta,
+                    ThemeColor::DarkCyan,
+                    ThemeColor::Grey,
+                    ThemeColor::DarkGrey,
+                    ThemeColor::Red,
+                    ThemeColor::Green,
+                    ThemeColor::Yellow,
+                    ThemeColor::Blue,
+                    ThemeColor::Magenta,
+                    ThemeColor::Cyan,
+                    ThemeColor::White,
+                ][usize::from(index)],
+            );
+        }
         ThemeColor::Indexed(index) => return nearest_16(indexed_rgb(index)),
         _ => return None,
     };
@@ -496,4 +572,3 @@ fn distance(left: (u8, u8, u8), right: (u8, u8, u8)) -> u32 {
     let channel = |a: u8, b: u8| u32::from(a.abs_diff(b)).pow(2);
     channel(left.0, right.0) + channel(left.1, right.1) + channel(left.2, right.2)
 }
-

@@ -16,6 +16,7 @@ fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: "run".into(),
+            arguments: Vec::new(),
         });
     };
 
@@ -123,6 +124,7 @@ fn hidden_confirmation_suffix_cannot_be_submitted() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     fixture.reply_confirmation_request(
@@ -155,6 +157,7 @@ fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: "run".into(),
+            arguments: Vec::new(),
         });
         let invocation = fixture.take();
         fixture.reply_confirmation_request(
@@ -221,6 +224,7 @@ fn docked_layout_render_and_protection_share_confirmation_bounds() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     fixture.reply_confirmation_request(
@@ -284,6 +288,7 @@ fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     app.open_prompt(crate::ui::PromptKind::Command, "newer".into());
@@ -323,6 +328,7 @@ fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload(
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     let accepted = app.configuration.fixture_snapshot();
@@ -362,6 +368,7 @@ fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: "run".into(),
+            arguments: Vec::new(),
         });
     }
     let first = fixture.take();
@@ -408,6 +415,7 @@ fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
             app.process_effect(AppEffect::PluginExecute {
                 plugin: "demo".into(),
                 command: "run".into(),
+                arguments: Vec::new(),
             });
         };
         let invocation = if delayed {
@@ -457,6 +465,7 @@ fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
             app.process_effect(AppEffect::PluginExecute {
                 plugin: "demo".into(),
                 command: "run".into(),
+                arguments: Vec::new(),
             });
         };
         let invocation = if delayed {
@@ -510,6 +519,7 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
                 app.process_effect(AppEffect::PluginExecute {
                     plugin: "demo".into(),
                     command: "run".into(),
+                    arguments: Vec::new(),
                 });
             };
             let invocation = if delayed {
@@ -563,7 +573,7 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
 #[test]
 fn background_confirmation_during_documentation_fails_without_overlay() {
     let mut app = app();
-    let policy = app.configuration.settings().ui.documentation_popup.clone();
+    let policy = app.configuration.settings().clone();
     app.input.present_documentation(
         crate::ui::DocumentationPopupKind::Hover,
         "Hover".into(),
@@ -582,6 +592,7 @@ fn background_confirmation_during_documentation_fails_without_overlay() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     fixture.reply_confirmation_request(
@@ -618,6 +629,7 @@ fn background_confirmation_during_picker_fails_without_overlay() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     fixture.reply_confirmation_request(
@@ -657,6 +669,7 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     assert_eq!(invocation.snapshot().unwrap().utf8, "A");
@@ -700,6 +713,7 @@ fn changed_confirmation_document_gets_a_terminal_failure() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = fixture.take();
     fixture.reply_confirmation_request(
@@ -739,6 +753,7 @@ fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: "run".into(),
+            arguments: Vec::new(),
         });
     }
     let first = fixture.take();
@@ -759,6 +774,7 @@ fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let retry = fixture.take();
     assert!(retry.confirmation_available());
@@ -797,6 +813,7 @@ fn confirmation_capacity_is_reserved_before_the_guest_call() {
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: "run".into(),
+            arguments: Vec::new(),
         });
         let invocation = fixture.take();
         assert!(invocation.confirmation_available());
@@ -809,6 +826,7 @@ fn confirmation_capacity_is_reserved_before_the_guest_call() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     let full = fixture.take();
     assert!(!full.confirmation_available());
@@ -821,6 +839,7 @@ fn confirmation_capacity_is_reserved_before_the_guest_call() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "run".into(),
+        arguments: Vec::new(),
     });
     assert!(fixture.take().confirmation_available());
 }
@@ -875,6 +894,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
             app.process_effect(AppEffect::PluginExecute {
                 plugin: "demo".into(),
                 command: "confirmationprobe".into(),
+                arguments: Vec::new(),
             });
             if app.extension.confirmation_count() == expected {
                 break;
@@ -888,11 +908,19 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     }
     assert_eq!(app.extension.confirmation_count(), 64);
 
-    // Polling transfers completed reservations into pending/active confirmations while keeping
-    // the aggregate confirmation lane full, and frees the production execution/event queue.
+    // Transfer reservations to pending confirmations before opening a modal changes capture.
+    // This keeps the ordinary probe separate from SourceRetired result-only callbacks.
     let reply_deadline = Instant::now() + Duration::from_secs(15);
-    while app.input.prompt().is_none() {
-        app.process_plugin_events();
+    while !app
+        .notices
+        .history()
+        .any(|(_, text)| text == "confirmationprobe:64:accepted")
+    {
+        for event in app.extension.poll_owned().unwrap() {
+            if let crate::extensions::OwnedPluginEvent::Executed(reply) = event {
+                app.apply_plugin_execution(reply);
+            }
+        }
         assert!(
             !matches!(
                 app.extension.statuses().get("demo"),
@@ -918,6 +946,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "confirmationprobe".into(),
+        arguments: Vec::new(),
     });
     assert_eq!(
         app.extension.confirmation_count(),
@@ -925,8 +954,16 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
         "the intended 65th ordinary invocation must receive no reservation"
     );
     let full_deadline = Instant::now() + Duration::from_secs(15);
-    while app.ui.notification.as_deref() != Some("confirmationprobe:65:queue-full") {
-        app.process_plugin_events();
+    while !app
+        .notices
+        .history()
+        .any(|(_, text)| text == "confirmationprobe:65:queue-full")
+    {
+        for event in app.extension.poll_owned().unwrap() {
+            if let crate::extensions::OwnedPluginEvent::Executed(reply) = event {
+                app.apply_plugin_execution(reply);
+            }
+        }
         assert!(
             app.extension.confirmation_count() <= 64,
             "aggregate confirmation ownership exceeded its bound"
@@ -938,6 +975,8 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
         );
         thread::yield_now();
     }
+    app.process_plugin_events();
+    assert!(app.input.prompt().is_some());
     // Opening the first prompt changes capture. Pending requests may now finish through bounded
     // SourceRetired result-only callbacks, so ownership can legitimately decline after polling.
     assert!(app.extension.confirmation_count() <= 64);
@@ -989,6 +1028,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         app.process_effect(AppEffect::PluginExecute {
             plugin: "demo".into(),
             command: command.into(),
+            arguments: Vec::new(),
         });
         if private {
             while !app
@@ -1007,6 +1047,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
             app.process_effect(AppEffect::PluginExecute {
                 plugin: "demo".into(),
                 command: command.into(),
+                arguments: Vec::new(),
             });
         }
         while if private {
@@ -1150,6 +1191,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
         command: "confirmation".into(),
+        arguments: Vec::new(),
     });
     while app.ui.plugin_surfaces.iter().all(|surface| {
         surface
@@ -1201,6 +1243,11 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     }
     app.handle_configured_key("left".parse().unwrap());
     app.handle_configured_key("enter".parse().unwrap());
+    assert!(
+        app.input.prompt().is_none(),
+        "confirmation not submitted: {:?}",
+        app.input.prompt()
+    );
     assert_eq!(app.window_session.graph().focused(), focused_before_answer);
     while app
         .ui
@@ -1209,7 +1256,12 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
         .all(|surface| surface.rows.iter().all(|row| row.text != "Confirmed: Yes"))
     {
         app.process_plugin_events();
-        assert!(Instant::now() < deadline, "Yes result timed out");
+        assert!(
+            Instant::now() < deadline,
+            "Yes result timed out: notice={:?}, status={:?}",
+            app.ui.notification,
+            app.extension.statuses()
+        );
         thread::yield_now();
     }
 
@@ -1469,7 +1521,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
                         action_data: vec![2],
                     },
                 ],
-                terminal: crate::extensions::PluginProviderTerminal::Complete,
+                terminal: crate::extensions::PluginProviderTerminal::More,
             },
         )
         .expect("chunk");
@@ -1483,6 +1535,41 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             .map(|item| item.label.as_str()),
         Some("Beta")
     );
+    app.picker_insert("e");
+    app.input.set_picker_normal(true);
+    let selected = app
+        .search
+        .picker()
+        .unwrap()
+        .selected_item()
+        .unwrap()
+        .id
+        .clone();
+    app.extension
+        .provider_chunk(
+            "demo",
+            PluginLoadId(77),
+            (Some(app.workspace.root_revision()), None),
+            crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 2,
+                items: vec![crate::extensions::PluginPickerItem {
+                    id: "better".into(),
+                    primary: "Better".into(),
+                    secondary: None,
+                    action_data: Vec::new(),
+                }],
+                terminal: crate::extensions::PluginProviderTerminal::Complete,
+            },
+        )
+        .unwrap();
+    app.present_plugin_picker(request);
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "e");
+    assert_eq!(
+        app.search.picker().unwrap().selected_item().unwrap().id,
+        selected
+    );
+    assert!(app.input.picker_normal());
     let stable = app.extension.provider_projection(request);
     let stable_ui = app.ui.picker.clone();
     for _ in 0..256 {
@@ -1512,7 +1599,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             )
             .unwrap_err()
             .code,
-        crate::extensions::PluginProviderErrorCode::Cancelled
+        crate::extensions::PluginProviderErrorCode::UnknownRequest
     );
     // Reopening a one-request provider reserves new metadata without destroying
     // the displayed source if subsequent picker admission is refused.
@@ -1832,7 +1919,7 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         .queue_ui("demo".into(), PluginLoadId(78), (10..80).map(event));
     assert_eq!(
         app.extension.ui_events()[&("demo".into(), PluginLoadId(78))].len(),
-        64
+        71
     );
     assert!(
         app.extension
@@ -1840,7 +1927,7 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
             .is_err()
     );
     let delivered = app.extension.take_ui("demo", PluginLoadId(78));
-    assert_eq!(delivered.len(), 64);
+    assert_eq!(delivered.len(), 71);
     assert_eq!(delivered.last().unwrap().token, 79);
     assert!(app.extension.take_ui("demo", PluginLoadId(78)).is_empty());
 }
@@ -2347,4 +2434,298 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
     assert_eq!(app.state.active_view, Some(view));
     assert_eq!(app.window_session.graph().focused(), focus);
     assert_eq!(app.state.buffers[ordinary].text.to_string(), "ordinary");
+}
+
+#[test]
+fn provider_selection_delivers_request_item_and_action_data() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::PickerProviders);
+    manifest.contributions.providers = vec![crate::extensions::PluginProviderContribution {
+        id: "plugin.demo.provider.files".into(),
+        kind: crate::extensions::PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(),
+        maximum_concurrent_requests: 1,
+        maximum_items: 16,
+        maximum_bytes: 8192,
+        deadline_milliseconds: 30_000,
+        provenance: None,
+    }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "picker fixture".into())
+            .unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    app.extension.fixture_provider_install(&index).unwrap();
+    let request = app
+        .extension
+        .fixture_provider_start(crate::extensions::PluginProviderStart {
+            plugin: "demo".into(),
+            load: PluginLoadId(1),
+            provider: "plugin.demo.provider.files".into(),
+            query: String::new(),
+            context: String::new(),
+            workspace_revision: None,
+            buffer_revision: None,
+        })
+        .unwrap();
+    app.extension
+        .provider_chunk(
+            "demo",
+            PluginLoadId(1),
+            (None, None),
+            crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 1,
+                items: vec![crate::extensions::PluginPickerItem {
+                    id: "selected".into(),
+                    primary: "Selected item".into(),
+                    secondary: None,
+                    action_data: vec![0, 255],
+                }],
+                terminal: crate::extensions::PluginProviderTerminal::Complete,
+            },
+        )
+        .unwrap();
+    app.extension.picker_installed(Some(request));
+    app.present_plugin_picker(request);
+    app.accept_picker();
+    assert_eq!(
+        fixture.take().arguments(),
+        &[request.to_string(), "selected".into(), "[0,255]".into()]
+    );
+    assert!(app.extension.provider_projection(request).is_none());
+}
+
+#[test]
+fn plugin_surface_observations_include_counts_and_geometry_preserves_receipts() {
+    let mut app = app();
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::EventSubscriptions);
+    manifest.contributions.subscriptions =
+        vec![crate::extensions::PluginSubscriptionContribution {
+            id: "plugin.demo.subscription.surface".into(),
+            kind: crate::extensions::PluginSubscriptionKind::PluginSurfaceChanged,
+            maximum_queued: 1,
+            maximum_rate_per_second: 30,
+            coalesce: true,
+            provenance: None,
+        }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "surface fixture".into())
+            .unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    app.extension.install_events(&index).unwrap();
+    let observation = (1, "editor".into(), None, 1);
+    app.extension.observe(observation.clone(), 1, 0, 0);
+    app.extension.observe(observation, 1, 0, 1);
+    assert_eq!(
+        app.extension.deliver("demo", PluginLoadId(1))[0].payload,
+        "retained=0;private=1"
+    );
+    let event = |token, width: Option<u16>| crate::extensions::PluginUiEvent {
+        token,
+        handle: Some(5),
+        graph_revision: None,
+        tree_revision: None,
+        surface_revision: None,
+        action: None,
+        error: None,
+        geometry: width.map(|width| crate::extensions::PluginSurfaceGeometry {
+            handle: 5,
+            width,
+            height: 3,
+            dimensions_revision: 1,
+        }),
+    };
+    app.extension.queue_ui(
+        "demo".into(),
+        PluginLoadId(1),
+        (1..=64).map(|token| event(token, None)),
+    );
+    app.extension.queue_ui(
+        "demo".into(),
+        PluginLoadId(1),
+        [event(0, Some(20)), event(0, Some(30))],
+    );
+    let events = app.extension.take_ui("demo", PluginLoadId(1));
+    assert_eq!(events.len(), 65);
+    assert_eq!(events[0].token, 1);
+    assert_eq!(events.last().unwrap().geometry.as_ref().unwrap().width, 30);
+}
+
+#[test]
+fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
+    let mut app = app();
+    let mut catalog = crate::extensions::PluginContributionCatalog::default();
+    for owner in ["demo", "other"] {
+        let mut manifest = plugin_manifest(owner, &format!("plugin.{owner}.keymap.open"), "x y");
+        manifest
+            .contributions
+            .key_groups
+            .push(crate::extensions::PluginKeyGroupContribution {
+                id: format!("plugin.{owner}.group.open"),
+                context: "dashboard".into(),
+                mode: String::new(),
+                prefix: "x".into(),
+                label: owner.into(),
+                icon: None,
+                order: 1,
+            });
+        let index =
+            crate::extensions::index_manifest_contributions(&manifest, 1, "keys fixture".into())
+                .unwrap();
+        app.register_indexed_plugin_commands(&index).unwrap();
+        catalog.install(index).unwrap();
+    }
+    let mut loaded = crate::config::load_bundled_config();
+    let compile = |loaded: &crate::config::LoadedConfig| {
+        crate::editor::session::configuration::compile_keymaps_with_plugin_catalog(
+            &app.commands,
+            &loaded.keymaps,
+            &catalog,
+            &loaded.config.input.keymaps,
+        )
+    };
+    assert!(compile(&loaded).is_err());
+    loaded
+        .keymaps
+        .entries
+        .push(toml::from_str("id='plugin.other.keymap.open'\ncontext='dashboard'\nkeys='z y'\ncommand='plugin.other.run'").unwrap());
+    loaded.keymaps.groups.push(
+        toml::from_str(
+            "id='plugin.other.group.open'\ncontext='dashboard'\nprefix='z'\nlabel='Other'",
+        )
+        .unwrap(),
+    );
+    compile(&loaded).expect("user replacements resolve the default conflicts");
+}
+
+#[test]
+fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
+    let mut app = app();
+    let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::VirtualDocuments);
+    manifest.contributions.virtual_documents =
+        vec![crate::extensions::PluginVirtualDocumentContribution {
+            id: "plugin.demo.virtual.help".into(),
+            title: "Help".into(),
+            language: "markdown".into(),
+            mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
+            maximum_concurrent_documents: 2,
+            maximum_document_bytes: 4096,
+            maximum_document_lines: 128,
+            maximum_patch_bytes: 256,
+            maximum_patches_per_request: 8,
+            deadline_milliseconds: 30_000,
+            command: "plugin.demo.run".into(),
+            context: "dashboard".into(),
+            provenance: None,
+        }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "virtual fixture".into())
+            .unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    app.extension.fixture_virtual_request(&index);
+    for _ in 0..2 {
+        assert!(matches!(
+            app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
+            Err(error) if error == "virtual document is already opening"
+        ));
+    }
+}
+
+#[test]
+fn active_plugin_failure_does_not_abort_a_siblings_index() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut config = app.configuration.fixture_snapshot();
+    config.deferred_plugin_keymaps = true;
+    config.expected_plugin_indexes = ["demo".into(), "sibling".into()].into_iter().collect();
+    app.configuration.install_fixture(config);
+    app.configuration.complete_plugin_indexes();
+    app.extension
+        .fixture_pending_index("sibling".into(), (PluginLoadId(2), "0".repeat(64)));
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
+    });
+    fixture.fail(&fixture.take());
+    app.process_plugin_events();
+    assert!(app.extension.pending_indexes().contains_key("sibling"));
+}
+
+#[test]
+fn synchronous_plugin_load_refusal_retires_the_deferred_batch() {
+    let mut app = app_with_plugin_queue(1);
+    let root = tempfile::tempdir().unwrap();
+    for owner in ["one", "two"] {
+        fs::create_dir(root.path().join(owner)).unwrap();
+        write_plugin_manifest(
+            &root.path().join(owner),
+            &plugin_manifest(owner, &format!("plugin.{owner}.test"), "x y"),
+        );
+    }
+    let mut config = app.configuration.fixture_snapshot();
+    config.deferred_plugin_keymaps = true;
+    config.expected_plugin_indexes = ["one".into(), "two".into()].into_iter().collect();
+    config.settings.plugins.store = root.path().into();
+    for owner in ["one", "two"] {
+        config.settings.plugins.entries.insert(
+            owner.into(),
+            crate::config::PluginEntryConfig {
+                enabled: true,
+                manifest: format!("{owner}/manifest.toml").into(),
+                component: format!("{owner}/missing.wasm").into(),
+            },
+        );
+    }
+    app.configuration.install_fixture(config);
+    app.load_configured_plugins();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.extension.load_id("one").is_some() {
+        app.process_plugin_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.extension.pending_indexes().is_empty());
+    assert!(app.extension.contributions().get("one").is_none());
+}
+
+#[test]
+fn plugin_command_arguments_reach_the_existing_execution_request() {
+    let mut app = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.test", "x y");
+    manifest.commands.get_mut("run").unwrap().arguments.insert(
+        "value".into(),
+        crate::extensions::PluginArgumentDeclaration {
+            kind: crate::extensions::PluginArgumentKind::String,
+            required: true,
+        },
+    );
+    manifest.contributions.keymaps[0]
+        .arguments
+        .insert("value".into(), toml::Value::String("configured".into()));
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
+    app.register_indexed_plugin_commands(&index).unwrap();
+    app.invoke(
+        crate::editor::CommandInvocation::new("plugin.demo.run", InvocationSource::Test)
+            .unwrap()
+            .with_argument("value", CommandValue::String("configured".into())),
+    );
+    assert_eq!(fixture.take().arguments(), ["configured"]);
 }

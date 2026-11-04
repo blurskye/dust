@@ -4,9 +4,9 @@ use tempfile::tempdir;
 
 use super::load::{
     BUNDLED_CONFIG, BUNDLED_THEME, CandidateAttempt, CapturedSource, CapturedText,
-    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
-    capture_configuration_bundle_with, captured_bundle_is_stable, hash_source_bytes,
-    load_consistent_candidate_with, load_theme, setting_keys, setting_spans, source_fingerprint,
+    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING, capture_configuration_bundle_with,
+    captured_bundle_is_stable, hash_source_bytes, load_consistent_candidate_with, load_theme,
+    setting_keys, setting_spans, source_fingerprint,
 };
 use super::{
     AmbiguousWidth, ExplorerIconMode, LineNumbers, load_bundled_config, load_config, load_keymaps,
@@ -179,7 +179,8 @@ fn viewport_horizontal_margin_is_nested_bounded_and_has_no_flat_alias() {
     );
 
     // A removed setting is left out with a warning; the rest of the file still applies.
-    fs::write(&path, "[editor]\nhorizontal_margin = 9\ntab_width = 3\n").expect("write removed flat field");
+    fs::write(&path, "[editor]\nhorizontal_margin = 9\ntab_width = 3\n")
+        .expect("write removed flat field");
     let loaded = load_config(&path);
     assert_eq!(loaded.config.editor.tab_width, 3);
     assert!(
@@ -241,7 +242,9 @@ fn a_bad_task_is_named_with_what_to_fix() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
     fs::write(&path, "[tasks.demo]\nexecutable = \"python3\"\n").expect("write");
-    let diagnostic = load_config(&path).diagnostic.expect("relative executable is refused");
+    let diagnostic = load_config(&path)
+        .diagnostic
+        .expect("relative executable is refused");
     assert!(
         diagnostic.contains("tasks.demo executable must be an absolute path"),
         "{diagnostic}"
@@ -292,15 +295,29 @@ fn malformed_or_invalid_config_is_nonfatal() {
     assert_eq!(loaded.config, load_bundled_config().config);
     assert!(loaded.diagnostic.is_some());
 
-    fs::write(&path, "made_up = 1\n[ui]\nmade_up = true\n[editor.debug_signs]\nexecution = \"x\"\n")
-        .expect("unknown keys");
+    fs::write(
+        &path,
+        "made_up = 1\n[ui]\nmade_up = true\n[editor.debug_signs]\nexecution = \"x\"\n",
+    )
+    .expect("unknown keys");
     let loaded = load_config(&path);
     assert_eq!(loaded.config, load_bundled_config().config);
-    assert_eq!(loaded.path, path, "the file is used, not the bundled defaults");
+    assert_eq!(
+        loaded.path, path,
+        "the file is used, not the bundled defaults"
+    );
     assert_eq!(loaded.diagnostic, None);
     let diagnostic = loaded.warning.unwrap_or_default();
     for key in ["made_up", "ui.made_up", "editor.debug_signs"] {
-        assert!(diagnostic.split(": ").last().unwrap().split(", ").any(|found| found == key), "{diagnostic}");
+        assert!(
+            diagnostic
+                .split(": ")
+                .last()
+                .unwrap()
+                .split(", ")
+                .any(|found| found == key),
+            "{diagnostic}"
+        );
     }
 }
 
@@ -710,7 +727,10 @@ fn buffer_line_policy_is_typed_and_strict() {
         fs::write(&path, format!("[ui.buffer_line]\n{invalid}\n")).expect("invalid buffer line");
         let loaded = load_config(&path);
         assert_eq!(loaded.config, load_bundled_config().config);
-        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
+        assert!(
+            loaded.diagnostic.is_some() || loaded.warning.is_some(),
+            "{invalid}"
+        );
     }
 }
 
@@ -767,7 +787,10 @@ fn terminal_panel_height_is_bounded() {
             .expect("invalid terminal panel");
         let loaded = load_config(&path);
         assert_eq!(loaded.config, load_bundled_config().config, "{invalid}");
-        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
+        assert!(
+            loaded.diagnostic.is_some() || loaded.warning.is_some(),
+            "{invalid}"
+        );
     }
 }
 
@@ -784,7 +807,10 @@ fn key_hint_policy_is_typed_bounded_and_transactional() {
     for invalid in ["delay_ms=60001", "max_rows=4"] {
         fs::write(&path, format!("[ui.key_hints]\n{invalid}\n")).expect("invalid key hints");
         let loaded = load_config(&path);
-        assert!(loaded.diagnostic.is_some() || loaded.warning.is_some(), "{invalid}");
+        assert!(
+            loaded.diagnostic.is_some() || loaded.warning.is_some(),
+            "{invalid}"
+        );
         assert_eq!(
             loaded.config.ui.key_hints,
             load_bundled_config().config.ui.key_hints
@@ -932,7 +958,9 @@ label = "Files"
 fn highlight_groups_resolve_like_neovim() {
     use crate::language::syntax::Highlight;
     let group = |name| Highlight::named(name).expect(name);
-    let colour = |theme: &super::ThemeConfig, name| theme.highlight(group(name)).map(|style| style.foreground);
+    let colour = |theme: &super::ThemeConfig, name| {
+        theme.highlight(group(name)).map(|style| style.foreground)
+    };
 
     // Every bundled link lands on a group with a definition, so ports keep their colours.
     for (name, _) in super::themes::BUNDLED {
@@ -942,7 +970,8 @@ fn highlight_groups_resolve_like_neovim() {
                 assert!(
                     link.starts_with('@')
                         || theme.highlights.contains_key(link)
-                        || Highlight::named(link).is_some_and(|linked| theme.highlight(linked).is_some()),
+                        || Highlight::named(link)
+                            .is_some_and(|linked| theme.highlight(linked).is_some()),
                     "{name}: {group} links to undefined {link}"
                 );
             }
@@ -950,29 +979,53 @@ fn highlight_groups_resolve_like_neovim() {
     }
     let tokyo = super::themes::bundled_named("tokyo-night").unwrap().theme;
     // `@function.method.call` links to `@function.method`, which links to `Function`.
-    assert_eq!(colour(&tokyo, "@function.method.call"), Some(super::ThemeColor::Rgb(0x7a, 0xa2, 0xf7)));
+    assert_eq!(
+        colour(&tokyo, "@function.method.call"),
+        Some(super::ThemeColor::Rgb(0x7a, 0xa2, 0xf7))
+    );
     let keyword = tokyo.highlight(Highlight::KEYWORD).unwrap();
     assert!(keyword.attributes.contains(&super::ThemeAttribute::Italic));
-    assert_eq!(keyword.foreground_256, Some(super::ThemeColor::Indexed(140)));
+    assert_eq!(
+        keyword.foreground_256,
+        Some(super::ThemeColor::Indexed(140))
+    );
 
     let mut dust = super::themes::bundled_named("dust").unwrap().theme;
-    dust.highlights.insert("@function".into(), super::HighlightDefinition { link: Some("@function.method".into()), ..Default::default() });
-    dust.highlights.insert("@function.method".into(), super::HighlightDefinition { link: Some("@function".into()), ..Default::default() });
+    dust.highlights.insert(
+        "@function".into(),
+        super::HighlightDefinition {
+            link: Some("@function.method".into()),
+            ..Default::default()
+        },
+    );
+    dust.highlights.insert(
+        "@function.method".into(),
+        super::HighlightDefinition {
+            link: Some("@function".into()),
+            ..Default::default()
+        },
+    );
     // Nothing defines `@markup.heading.1`, so it takes `@markup.heading`, which Neovim links to `Title`.
-    assert_eq!(colour(&dust, "@markup.heading.1"), Some(super::ThemeColor::Rgb(0x58, 0xa6, 0xff)));
+    assert_eq!(
+        colour(&dust, "@markup.heading.1"),
+        Some(super::ThemeColor::Rgb(0x58, 0xa6, 0xff))
+    );
     // A theme that leaves a token type out keeps tree-sitter's colour.
     assert_eq!(dust.highlight(group("@lsp.type.derive")), None);
     // Links that loop colour nothing.
     assert_eq!(dust.highlight(Highlight::FUNCTION), None);
     // Groups without a background draw on the editor's.
-    assert_eq!(dust.highlight(Highlight::STRING).unwrap().background, dust.styles.default.background);
+    assert_eq!(
+        dust.highlight(Highlight::STRING).unwrap().background,
+        dust.styles.default.background
+    );
 }
 
 #[test]
 fn a_saved_bundled_theme_restores_from_this_build() {
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     // Saved by an older build, with a style field that no longer exists.
-    let saved = r##"{"name":"tokyo-night","styles":{"syntax_comment":{"foreground":"#a9b1d6"}}}"##;
+    let saved = r##"{"bundled":true,"name":"tokyo-night","styles":{"syntax_comment":{"foreground":"#a9b1d6"}}}"##;
     super::themes::discover(super::themes::ThemeRead {
         source: super::themes::ThemeReadSource::Saved(saved.into()),
         cancelled: Default::default(),
@@ -980,7 +1033,10 @@ fn a_saved_bundled_theme_restores_from_this_build() {
     });
     let catalog = receiver.recv().unwrap();
     assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
-    assert_eq!(catalog.choices[0].theme, super::themes::bundled_named("tokyo-night").unwrap().theme);
+    assert_eq!(
+        catalog.choices[0].theme,
+        super::themes::bundled_named("tokyo-night").unwrap().theme
+    );
 }
 
 #[test]
@@ -1003,20 +1059,48 @@ fn settings_catalog_lists_every_bundled_setting_once() {
         .iter()
         .filter(|key| !listed.contains(&key.as_str()) && !in_collection(key))
         .collect();
-    assert!(missing.is_empty(), "settings missing from settings.toml: {missing:?}");
-    let stale: Vec<&&str> = listed.iter().filter(|key| !bundled.contains(**key)).collect();
-    assert!(stale.is_empty(), "settings.toml lists unknown settings: {stale:?}");
+    assert!(
+        missing.is_empty(),
+        "settings missing from settings.toml: {missing:?}"
+    );
+    let stale: Vec<&&str> = listed
+        .iter()
+        .filter(|key| !bundled.contains(**key))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "settings.toml lists unknown settings: {stale:?}"
+    );
     let unique: BTreeSet<&&str> = listed.iter().collect();
-    assert_eq!(unique.len(), listed.len(), "settings.toml lists a setting twice");
+    assert_eq!(
+        unique.len(),
+        listed.len(),
+        "settings.toml lists a setting twice"
+    );
     for section in &catalog.sections {
         for key in &section.common {
-            assert!(catalog.setting(key).is_some(), "{} lists unknown {key}", section.title);
+            assert!(
+                catalog.setting(key).is_some(),
+                "{} lists unknown {key}",
+                section.title
+            );
         }
     }
-    for setting in catalog.sections.iter().flat_map(|section| &section.settings) {
-        assert!(!setting.about.is_empty(), "{} needs a description", setting.key);
+    for setting in catalog
+        .sections
+        .iter()
+        .flat_map(|section| &section.settings)
+    {
+        assert!(
+            !setting.about.is_empty(),
+            "{} needs a description",
+            setting.key
+        );
         if let Some(table) = &setting.choices_from {
-            assert!(super::default_setting(table).is_some_and(|value| value.is_table()), "{table}");
+            assert!(
+                super::default_setting(table).is_some_and(|value| value.is_table()),
+                "{table}"
+            );
         }
         for choice in &setting.choices {
             let source = super::catalog::edited_source(
@@ -1041,8 +1125,15 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     };
     let source = "# my settings\n[editor]\n# wrap long lines\nwrap = false # for now\n";
     let wrapped = edited(source, "editor.wrap", Some(toml::Value::Boolean(true)));
-    assert_eq!(wrapped, "# my settings\n[editor]\n# wrap long lines\nwrap = true # for now\n");
-    let added = edited(&wrapped, "editor.git_signs.enabled", Some(toml::Value::Boolean(false)));
+    assert_eq!(
+        wrapped,
+        "# my settings\n[editor]\n# wrap long lines\nwrap = true # for now\n"
+    );
+    let added = edited(
+        &wrapped,
+        "editor.git_signs.enabled",
+        Some(toml::Value::Boolean(false)),
+    );
     assert!(added.starts_with(&wrapped), "{added}");
     assert!(added.contains("enabled = false"), "{added}");
     let reset = edited(&added, "editor.git_signs.enabled", None);
@@ -1050,17 +1141,243 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     // Reset keeps the setting's comments: under the table header when it was the last key,
     // above the next key otherwise.
     let emptied = edited(&reset, "editor.wrap", None);
-    assert_eq!(emptied, "# my settings\n[editor]\n# wrap long lines\n# for now\n");
-    let next = edited("[editor]\n# width comment\ntab_width = 4\nwrap = true\n", "editor.tab_width", None);
+    assert_eq!(
+        emptied,
+        "# my settings\n[editor]\n# wrap long lines\n# for now\n"
+    );
+    let next = edited(
+        "[editor]\n# width comment\ntab_width = 4\nwrap = true\n",
+        "editor.tab_width",
+        None,
+    );
     assert_eq!(next, "[editor]\n# width comment\nwrap = true\n");
     let plain = edited("[editor]\ntab_width = 4\n", "editor.tab_width", None);
     assert_eq!(plain, "");
     let file = tempdir().unwrap();
     let path = file.path().join("dust").join("config.toml");
     super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
-    assert_eq!(fs::read_to_string(&path).unwrap(), "[editor]\ntab_width = 2\n");
-    let rejected =
-        super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::String("x".into())));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "[editor]\ntab_width = 2\n"
+    );
+    let rejected = super::write_user_setting(
+        &path,
+        "editor.tab_width",
+        Some(toml::Value::String("x".into())),
+    );
     assert!(rejected.is_err());
-    assert_eq!(fs::read_to_string(&path).unwrap(), "[editor]\ntab_width = 2\n");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "[editor]\ntab_width = 2\n"
+    );
+}
+
+#[test]
+fn deep_task_dependencies_are_validated_without_recursion() {
+    let task: super::settings::TaskConfig = toml::from_str("executable = '/bin/true'").unwrap();
+    let mut config = load_bundled_config().config;
+    for index in 0..50_000 {
+        let mut task = task.clone();
+        if index < 49_999 {
+            task.dependencies.push(format!("t{:05}", index + 1));
+        }
+        config.tasks.insert(format!("t{index:05}"), task);
+    }
+    assert!(config.validate().is_ok());
+    config
+        .tasks
+        .get_mut("t49999")
+        .unwrap()
+        .dependencies
+        .push("t00000".into());
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn settings_save_preserves_a_symlink() {
+    let root = tempdir().unwrap();
+    let target = root.path().join("dotfiles.toml");
+    let path = root.path().join("config.toml");
+    fs::write(&target, "# preserved\n[editor]\ntab_width = 4\n").unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(3))).unwrap();
+    assert!(
+        fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        fs::read_to_string(target)
+            .unwrap()
+            .contains("tab_width = 3")
+    );
+}
+
+#[test]
+fn unknown_fields_under_dotted_task_names_preserve_valid_settings() {
+    let (config, _, _, ignored) = super::load::settings_from_source(
+        "[editor]\ntab_width=3\n[tasks.'build.all']\nexecutable='/bin/true'\nunknown=true\n",
+    )
+    .unwrap();
+    assert_eq!(config.editor.tab_width, 3);
+    assert!(config.tasks.contains_key("build.all"));
+    assert_eq!(ignored, vec!["tasks.build.all.unknown"]);
+}
+
+#[test]
+fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
+    let mut installed = load_bundled_config().theme;
+    installed.styles.default.foreground = super::ThemeColor::Red;
+    let theme_source = toml::to_string(&installed).unwrap();
+    let bundle = capture_configuration_bundle_with("dust", |path| {
+        captured(
+            path.clone(),
+            if path.file_name().is_some_and(|name| name == "dust.toml") {
+                CapturedText::Text(theme_source.clone())
+            } else {
+                CapturedText::Missing
+            },
+        )
+    });
+    assert_eq!(bundle.into_loaded().theme, installed);
+    let choice = super::themes::ThemeChoice {
+        theme: installed.clone(),
+        path: "/themes/dust.toml".into(),
+    };
+    let (reply, receiver) = std::sync::mpsc::sync_channel(1);
+    super::themes::discover(super::themes::ThemeRead {
+        source: super::themes::ThemeReadSource::Saved(super::themes::snapshot(&choice).unwrap()),
+        cancelled: Default::default(),
+        reply,
+    });
+    assert_eq!(receiver.recv().unwrap().choices[0].theme, installed);
+}
+
+#[test]
+fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
+    use super::{HighlightDefinition, ThemeColor};
+    use crate::language::syntax::Highlight;
+    for (index, expected) in [
+        ThemeColor::Black,
+        ThemeColor::DarkRed,
+        ThemeColor::DarkGreen,
+        ThemeColor::DarkYellow,
+        ThemeColor::DarkBlue,
+        ThemeColor::DarkMagenta,
+        ThemeColor::DarkCyan,
+        ThemeColor::Grey,
+        ThemeColor::DarkGrey,
+        ThemeColor::Red,
+        ThemeColor::Green,
+        ThemeColor::Yellow,
+        ThemeColor::Blue,
+        ThemeColor::Magenta,
+        ThemeColor::Cyan,
+        ThemeColor::White,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        theme.highlights.insert(
+            "@function".into(),
+            HighlightDefinition {
+                ctermfg: Some(index as u8),
+                ctermbg: Some(index as u8),
+                ..Default::default()
+            },
+        );
+        let style = theme.highlight(Highlight::FUNCTION).unwrap();
+        assert_eq!(style.foreground_256, Some(ThemeColor::Indexed(index as u8)));
+        assert_eq!(style.background_16, Some(expected));
+        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        theme.highlights.insert(
+            "@function".into(),
+            HighlightDefinition {
+                fg: Some(ThemeColor::Indexed(index as u8)),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            theme.highlight(Highlight::FUNCTION).unwrap().foreground_16,
+            Some(expected)
+        );
+    }
+}
+
+#[test]
+fn config_migration_rejects_changes_since_the_source_was_read() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    std::fs::write(&path, "# original\n").unwrap();
+    let source = std::fs::read_to_string(&path).unwrap();
+    let (migrated, _) = super::migrate_config_source(&source).unwrap();
+    std::fs::write(&path, "# edited elsewhere\n").unwrap();
+    assert!(matches!(
+        super::apply_config_migration(&path, &source, &migrated),
+        Err(crate::files::VfsError::ExternalModification(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "# edited elsewhere\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn config_migration_preserves_symlinks_and_updates_their_target() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("dotfiles.toml");
+    let link = directory.path().join("config.toml");
+    std::fs::write(&target, "# original\n").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let source = std::fs::read_to_string(&link).unwrap();
+    let (migrated, _) = super::migrate_config_source(&source).unwrap();
+    super::apply_config_migration(&link, &source, &migrated).unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read_to_string(target).unwrap(), migrated);
+}
+
+#[test]
+fn product_plan_terminal_profile_and_keymap_are_accepted() {
+    let plan = include_str!("../../docs/product-plan.md");
+    let profile = plan
+        .split("Example profile in `config.toml`:")
+        .nth(1)
+        .unwrap()
+        .split("```toml\n")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap();
+    let mapping = plan
+        .split("Mapping in `keymaps.toml`:")
+        .nth(1)
+        .unwrap()
+        .split("```toml\n")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap();
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, profile).unwrap();
+    let loaded = load_config(&path);
+    assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+    let path = directory.path().join("keymaps.toml");
+    fs::write(&path, mapping).unwrap();
+    let mappings = load_keymaps(&path);
+    assert!(mappings.diagnostic.is_none(), "{:?}", mappings.diagnostic);
+    let mut config = load_bundled_config();
+    config.config = loaded.config;
+    config.keymaps = mappings;
+    crate::editor::validate_loaded_configuration(config).unwrap();
 }

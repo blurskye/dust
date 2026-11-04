@@ -138,7 +138,9 @@ impl RegistryService {
                         .as_ref()
                         .map_err(Clone::clone)
                         .and_then(|client| client.execute(request));
-                    let _ = etx.try_send(RegistryEvent { id, result });
+                    if etx.send(RegistryEvent { id, result }).is_err() {
+                        break;
+                    }
                 }
             })
             .map_err(|error| RegistryError::Thread(Arc::new(error)))?;
@@ -374,10 +376,10 @@ fn validate_metadata(
     validate_segment(&value.publisher)?;
     validate_segment(&value.name)?;
     validate_version(&value.version)?;
-    if let Some((publisher, name, version)) = expected {
-        if value.publisher != publisher || value.name != name || value.version != version {
-            return Err(RegistryError::InvalidMetadata);
-        }
+    if let Some((publisher, name, version)) = expected
+        && (value.publisher != publisher || value.name != name || value.version != version)
+    {
+        return Err(RegistryError::InvalidMetadata);
     }
     let identity = format!("{}/{}", value.publisher, value.name);
     match &value.package.source {

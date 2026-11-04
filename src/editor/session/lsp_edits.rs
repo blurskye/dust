@@ -4,8 +4,8 @@ use crate::{
     editor::{
         BufferId, TransactionId,
         text::{
-            BufferRevision, ByteOffset, ByteRange, PositionCodec, PositionEncoding, TextBuffer, TextEdit,
-            TextEditSet,
+            BufferRevision, ByteOffset, ByteRange, PositionCodec, PositionEncoding, TextBuffer,
+            TextEdit, TextEditSet,
         },
         transaction::{EditorOperation, EditorTransaction, Precondition},
     },
@@ -37,6 +37,7 @@ struct Request {
     encoding: PositionEncoding,
     context: Option<EditContext>,
     reply: Option<ApplyEditReply>,
+    command: Option<(String, crate::language::lsp::LspCommand)>,
 }
 #[derive(Clone, Debug)]
 pub(super) struct CodeActionKey {
@@ -74,11 +75,12 @@ impl LspEditSources {
         actions: Vec<crate::language::lsp::LspCodeAction>,
         context: Option<EditContext>,
     ) {
-        self.offered.extend(actions.into_iter().map(|action| OfferedAction {
-            server: server.to_owned(),
-            action,
-            context: context.clone(),
-        }));
+        self.offered
+            .extend(actions.into_iter().map(|action| OfferedAction {
+                server: server.to_owned(),
+                action,
+                context: context.clone(),
+            }));
     }
     pub(super) fn clear_offered_actions(&mut self) {
         self.offered.clear();
@@ -235,13 +237,12 @@ impl LspEditSources {
             for doc in &edit.documents {
                 let path = path_from_file_uri(&doc.uri)
                     .ok_or_else(|| format!("unsupported workspace-edit URI {}", doc.uri))?;
-                if let Some(buffer) = current.iter().find(|buffer| buffer.path == path) {
-                    if doc
+                if let Some(buffer) = current.iter().find(|buffer| buffer.path == path)
+                    && doc
                         .version
                         .is_some_and(|version| version != buffer.text.revision().0)
-                    {
-                        return Err("workspace edit document revision is stale".into());
-                    }
+                {
+                    return Err("workspace edit document revision is stale".into());
                 }
                 if let Some(context) = context.as_ref() {
                     let actual = current
@@ -253,7 +254,10 @@ impl LspEditSources {
                     }
                 }
                 paths.push((doc.uri.clone(), path.clone()));
-                files.push(InputFile::Read(path));
+                if !edit.resources.iter().any(|resource| matches!(resource,
+                    crate::language::lsp::LspResourceOperation::Create { uri, .. } if uri == &doc.uri)) {
+                    files.push(InputFile::Read(path));
+                }
             }
             Self::validate_context(context.as_ref(), &paths, current, service)?;
             for resource in &edit.resources {
@@ -321,6 +325,7 @@ impl LspEditSources {
         let key = OriginKey::new();
         let all_files = reply.is_some();
         self.active = Some(Request {
+            command: None,
             key: key.clone(),
             documents: Some(edit.documents),
             paths,
@@ -409,6 +414,25 @@ impl LspEditSources {
                 })
             })
             .collect()
+    }
+    pub(super) fn set_command(
+        &mut self,
+        server: String,
+        command: crate::language::lsp::LspCommand,
+    ) {
+        if let Some(request) = &mut self.active {
+            request.command = Some((server, command));
+        }
+    }
+    pub(super) fn take_command(
+        &mut self,
+        key: &OriginKey,
+    ) -> Option<(String, crate::language::lsp::LspCommand)> {
+        self.active
+            .as_mut()
+            .filter(|request| request.key.same(key))?
+            .command
+            .take()
     }
     pub(super) fn finish(
         &mut self,
@@ -520,6 +544,48 @@ mod tests {
                 })
             })
             .collect()
+    }
+    #[test]
+    fn create_and_populate_uses_only_the_create_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let uri = crate::language::lsp::file_uri(&root.path().join("new.rs"));
+        let edit = LspWorkspaceEdit {
+            resources: vec![crate::language::lsp::LspResourceOperation::Create {
+                uri: uri.clone(),
+                overwrite: false,
+                ignore_if_exists: false,
+            }],
+            documents: vec![LspDocumentEdit {
+                uri,
+                version: None,
+                edits: vec![LspTextEdit {
+                    range: LspRange {
+                        start: LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                    new_text: "created contents".into(),
+                }],
+            }],
+        };
+        let mut owner = LspEditSources::default();
+        let plan = owner
+            .start(
+                edit,
+                PositionEncoding::Utf16,
+                None,
+                None,
+                &[],
+                &LspService::new(),
+            )
+            .unwrap();
+        assert_eq!(plan.files.len(), 1);
+        assert!(matches!(plan.files[0], InputFile::Create(_)));
     }
     #[test]
     fn requesting_edit_origin_preserves_encoding_incarnation_and_acknowledges_only_its_endpoint() {
@@ -814,23 +880,45 @@ impl LspEditSources {
         {
             return Err("diagnostic session or document lineage is unavailable/ambiguous".into());
         }
-        let (id, text) = context
-            .document_source(uri)
-            .ok_or("diagnostic transport has no document source")?;
-        let buffer = editor
-            .buffers
-            .get(*id)
-            .ok_or("diagnostic document closed")?;
-        let source = buffer.text.source_version();
-        if !(if pull { source == *text } else { source.same_incarnation(text) })
-            || buffer
+        let id;
+        let current_text;
+        if let Some((source_id, text)) = context.document_source(uri) {
+            id = Some(*source_id);
+            let buffer = editor
+                .buffers
+                .get(*source_id)
+                .ok_or("diagnostic document closed")?;
+            let source = buffer.text.source_version();
+            if !(if pull {
+                source == *text
+            } else {
+                source.same_incarnation(text)
+            }) || buffer
                 .path
                 .as_ref()
                 .is_none_or(|path| crate::language::lsp::file_uri(path) != uri)
-        {
-            return Err("diagnostic document changed since its source context".into());
+            {
+                return Err("diagnostic document changed since its source context".into());
+            }
+            current_text = &buffer.text;
+        } else {
+            if pull
+                || editor.buffers.iter().any(|(_, buffer)| {
+                    buffer
+                        .path
+                        .as_ref()
+                        .is_some_and(|p| crate::language::lsp::file_uri(p) == uri)
+                })
+            {
+                return Err("diagnostic transport has no document source".into());
+            }
+            id = None;
+            current_text = context
+                .disk_document(uri)
+                .ok_or("diagnostic transport has no disk snapshot")?;
         }
-        let revision = buffer.text.revision();
+        let revision = current_text.revision();
+        let version = if id.is_none() { None } else { version };
         if version.is_some_and(|v| v > revision.0) {
             return Err("diagnostic reported version was never sent".into());
         }
@@ -844,11 +932,13 @@ impl LspEditSources {
         // A late report is read against the text it was made for, when that is still kept, and
         // then moved over the edits since; otherwise against the current text.
         let reported = behind
-            .then(|| version.and_then(|v| buffer.text.text_at(BufferRevision(v))))
+            .then(|| version.and_then(|v| current_text.text_at(BufferRevision(v))))
             .flatten();
-        let codec = PositionCodec::new(reported.as_ref().unwrap_or(&buffer.text));
+        let codec = PositionCodec::new(reported.as_ref().unwrap_or(current_text));
         let onto_current = |offset: ByteOffset| match &reported {
-            Some(old) => buffer.text.map_offset_since(old.revision(), offset).unwrap_or(offset),
+            Some(old) => current_text
+                .map_offset_since(old.revision(), offset)
+                .unwrap_or(offset),
             None => offset,
         };
         let version = if pull {
@@ -866,7 +956,7 @@ impl LspEditSources {
         let items = diagnostics
             .into_iter()
             .filter(|diagnostic| {
-                !behind || (fits(&diagnostic.range.start) && fits(&diagnostic.range.end))
+                (pull && !behind) || (fits(&diagnostic.range.start) && fits(&diagnostic.range.end))
             })
             .take(maximum)
             .map(|diagnostic| {
@@ -910,8 +1000,10 @@ impl LspEditSources {
         Ok(super::diagnostics::DiagnosticBatch {
             producer,
             uri: uri.into(),
-            document: super::diagnostics::DiagnosticDocument::capture(editor, *id),
-            validity: if pull {
+            document: id.and_then(|id| super::diagnostics::DiagnosticDocument::capture(editor, id)),
+            validity: if id.is_none() {
+                super::diagnostics::DiagnosticValidity::DiskReport
+            } else if pull {
                 super::diagnostics::DiagnosticValidity::RequestedSnapshot
             } else if version.is_some() {
                 super::diagnostics::DiagnosticValidity::ReportedVersion
@@ -931,6 +1023,82 @@ mod diagnostic_tests {
         editor::session::diagnostics::{DiagnosticSession, DiagnosticValidity},
         language::lsp::{DiagnosticLineage, LspDiagnostic, LspEvent, LspPosition, LspRange},
     };
+    #[test]
+    fn unopened_reports_use_disk_snapshots_and_stale_unversioned_ranges_are_filtered() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("open.rs");
+        let uri = crate::language::lsp::file_uri(&path);
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path));
+        let mut service = LspService::new();
+        let endpoint = service.replace_edit_source_fixture(
+            uri.clone(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            PositionEncoding::Utf16,
+        );
+        let raw = |line| crate::language::lsp::LspDiagnostic {
+            range: crate::language::lsp::LspRange {
+                start: crate::language::lsp::LspPosition { line, character: 0 },
+                end: crate::language::lsp::LspPosition { line, character: 1 },
+            },
+            severity: Some(1),
+            source: None,
+            code: None,
+            message: "problem".into(),
+            data: None,
+        };
+        endpoint.publish_diagnostics(&uri, None, vec![raw(0), raw(2)], &Default::default());
+        let event = service.try_owned_event().unwrap();
+        let LspEvent::Diagnostics { diagnostics, .. } = event.event else {
+            panic!()
+        };
+        let batch = LspEditSources::diagnostic_batch(
+            &event.context,
+            &service,
+            &editor,
+            (&uri, None, diagnostics),
+            false,
+            10,
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(batch.items.len(), 1);
+        let disk_uri = crate::language::lsp::file_uri(&root.path().join("unopened.rs"));
+        endpoint.publish_disk_diagnostics(&disk_uri, "abc", vec![raw(0)]);
+        let event = service.try_owned_event().unwrap();
+        let LspEvent::Diagnostics { diagnostics, .. } = event.event else {
+            panic!()
+        };
+        let batch = LspEditSources::diagnostic_batch(
+            &event.context,
+            &service,
+            &editor,
+            (&disk_uri, None, diagnostics),
+            false,
+            10,
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(batch.items.len(), 1);
+        assert_eq!(batch.validity, DiagnosticValidity::DiskReport);
+        assert!(batch.document.is_none());
+        editor.open_text(
+            TextBuffer::from_text("new contents"),
+            Some(root.path().join("unopened.rs")),
+        );
+        assert!(
+            LspEditSources::diagnostic_batch(
+                &event.context,
+                &service,
+                &editor,
+                (&disk_uri, None, Vec::new()),
+                false,
+                10,
+                "fixture"
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn diagnostic_transport_keeps_encoding_and_quarantines_reused_document_lineage() {
         let root = tempfile::tempdir().unwrap();
@@ -1105,7 +1273,10 @@ mod diagnostic_tests {
             "fixture",
         )
         .unwrap();
-        assert_eq!(late.items[0].range, ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap());
+        assert_eq!(
+            late.items[0].range,
+            ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap()
+        );
         editor.buffers[buffer].text = TextBuffer::from_text("éab");
         endpoint.observe_diagnostic_document(
             &uri,

@@ -266,7 +266,11 @@ fn line_diff_spans(before: &str, after: &str) -> Option<Vec<(std::ops::Range<usi
         let added = String::from_utf8(added).ok()?;
         let (start, end) = (line_start(first), line_start(first.saturating_add(removed)));
         let old = before.get(start..end)?;
-        let mut prefix = old.bytes().zip(added.bytes()).take_while(|(a, b)| a == b).count();
+        let mut prefix = old
+            .bytes()
+            .zip(added.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
         while !old.is_char_boundary(prefix) || !added.is_char_boundary(prefix) {
             prefix -= 1;
         }

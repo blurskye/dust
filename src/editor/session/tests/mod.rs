@@ -8,9 +8,9 @@ mod input_workflows;
 mod language;
 mod language_features;
 pub(super) mod project;
-mod window_workflows;
 mod surfaces;
 mod viewport;
+mod window_workflows;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -33,8 +33,8 @@ use crate::ui::{
 use tempfile::tempdir;
 
 use super::{
-    InteractiveApplication, KeymapOperation, LspProjectionOwner,
-    LspRuntimeSource, build_restored_layout, capture_persisted_layout, compile_keymaps,
+    InteractiveApplication, KeymapOperation, LspProjectionOwner, LspRuntimeSource,
+    build_restored_layout, capture_persisted_layout, compile_keymaps,
     compile_keymaps_with_plugin_catalog, configuration_generation_is_newer,
     lsp_runtime_source_allowed_on_host, reload_keymaps, resolve_configuration,
     validate_configured_commands,
@@ -86,7 +86,7 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
     assert!(launch.environment(&definition).is_err());
 }
 
-fn app() -> InteractiveApplication {
+pub(super) fn app() -> InteractiveApplication {
     app_with_optional_plugin_queue(None)
 }
 

@@ -1,8 +1,10 @@
-use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS, CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::{
+    COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS, CONTROL_CHARACTER_REPLACEMENT,
+    ZERO_WIDTH_REPLACEMENT,
+};
 use std::path::Path;
 
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
     config::{AmbiguousWidth, BorderStyle, Config, DashboardConfig},
@@ -60,14 +62,19 @@ pub(super) fn render_documentation_popup(
         return;
     }
     let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
-    let mut scrollable = line_count > page_rows;
+    let display_count = documentation_display_rows(popup, config, editor_width);
+    let mut scrollable = display_count > page_rows;
     let widest = (0..line_count)
         .filter_map(|index| popup.line_at(index))
-        .map(UnicodeWidthStr::width)
-        .chain(std::iter::once(UnicodeWidthStr::width(
-            popup.title.as_str(),
+        .map(|line| text_width(line, config.editor.ambiguous_width))
+        .chain(std::iter::once(text_width(
+            &popup.title,
+            config.editor.ambiguous_width,
         )))
-        .chain(scrollable.then_some(UnicodeWidthStr::width("j/k or wheel · 0000-0000/0000")))
+        .chain(scrollable.then_some(text_width(
+            "j/k or wheel · 0000-0000/0000",
+            config.editor.ambiguous_width,
+        )))
         .max()
         .unwrap_or(1)
         .saturating_add(usize::from(DOCUMENTATION_PADDING).saturating_mul(2))
@@ -81,7 +88,7 @@ pub(super) fn render_documentation_popup(
         .unwrap_or(DOCUMENTATION_MAX_WIDTH)
         .min(DOCUMENTATION_MAX_WIDTH)
         .min(width_limit);
-    let mut visible_rows = line_count.saturating_sub(popup.scroll).min(page_rows);
+    let mut visible_rows = display_count.saturating_sub(popup.scroll).min(page_rows);
     let mut box_height = u16::try_from(visible_rows.saturating_add(2))
         .unwrap_or(DOCUMENTATION_MAX_HEIGHT)
         .min(DOCUMENTATION_MAX_HEIGHT)
@@ -119,59 +126,58 @@ pub(super) fn render_documentation_popup(
             .saturating_sub(box_width)
             .max(editor_left)
     };
-    let (left, top) = match completion_menu
-        .filter(|_| popup.kind == DocumentationPopupKind::Completion)
-    {
-        None => (left, top),
-        Some(menu) => {
-            let beside_right = menu.x.saturating_add(menu.width);
-            let below_menu = menu.y.saturating_add(menu.height);
-            let spot = [
-                (beside_right, menu.y),
-                (menu.x.saturating_sub(box_width), menu.y),
-                (left, top),
-                (beside_right, top),
-                (menu.x.saturating_sub(box_width), top),
-                (left, below_menu.max(cursor_y.saturating_add(1))),
-                (left, menu.y.min(cursor_y).saturating_sub(box_height)),
-            ]
-            .into_iter()
-            .find(|(x, y)| {
-                *x >= editor_left
-                    && x.saturating_add(box_width) <= editor_right
-                    && y.saturating_add(box_height) <= available_height
-                    && !boxes_overlap((*x, *y), (box_width, box_height), menu)
-                    && !(*y <= cursor_y && y.saturating_add(box_height) > cursor_y)
-            });
-            match spot {
-                Some(spot) => spot,
-                None => {
-                    // Too big for anywhere clear of the menu: a narrower box on the wider side,
-                    // as tall as fits from the menu's top without reaching the cursor's line,
-                    // or none at all rather than one over the items.
-                    let right_room = editor_right.saturating_sub(beside_right);
-                    let left_room = menu.x.saturating_sub(editor_left);
-                    if right_room.max(left_room) < 20 {
-                        return;
-                    }
-                    box_width = box_width.min(right_room.max(left_room));
-                    let room = if menu.y > cursor_y {
-                        available_height.saturating_sub(menu.y)
-                    } else {
-                        cursor_y.saturating_sub(menu.y)
-                    };
-                    box_height = box_height.min(room.max(menu.height).max(3));
-                    visible_rows = visible_rows.min(usize::from(box_height - 2));
-                    scrollable = line_count > visible_rows;
-                    if right_room >= left_room {
-                        (beside_right, menu.y)
-                    } else {
-                        (menu.x - box_width, menu.y)
+    let (left, top) =
+        match completion_menu.filter(|_| popup.kind == DocumentationPopupKind::Completion) {
+            None => (left, top),
+            Some(menu) => {
+                let beside_right = menu.x.saturating_add(menu.width);
+                let below_menu = menu.y.saturating_add(menu.height);
+                let spot = [
+                    (beside_right, menu.y),
+                    (menu.x.saturating_sub(box_width), menu.y),
+                    (left, top),
+                    (beside_right, top),
+                    (menu.x.saturating_sub(box_width), top),
+                    (left, below_menu.max(cursor_y.saturating_add(1))),
+                    (left, menu.y.min(cursor_y).saturating_sub(box_height)),
+                ]
+                .into_iter()
+                .find(|(x, y)| {
+                    *x >= editor_left
+                        && x.saturating_add(box_width) <= editor_right
+                        && y.saturating_add(box_height) <= available_height
+                        && !boxes_overlap((*x, *y), (box_width, box_height), menu)
+                        && !(*y <= cursor_y && y.saturating_add(box_height) > cursor_y)
+                });
+                match spot {
+                    Some(spot) => spot,
+                    None => {
+                        // Too big for anywhere clear of the menu: a narrower box on the wider side,
+                        // as tall as fits from the menu's top without reaching the cursor's line,
+                        // or none at all rather than one over the items.
+                        let right_room = editor_right.saturating_sub(beside_right);
+                        let left_room = menu.x.saturating_sub(editor_left);
+                        if right_room.max(left_room) < 20 {
+                            return;
+                        }
+                        box_width = box_width.min(right_room.max(left_room));
+                        let room = if menu.y > cursor_y {
+                            available_height.saturating_sub(menu.y)
+                        } else {
+                            cursor_y.saturating_sub(menu.y)
+                        };
+                        box_height = box_height.min(room.max(menu.height).max(3));
+                        visible_rows = visible_rows.min(usize::from(box_height - 2));
+                        scrollable = line_count > visible_rows;
+                        if right_room >= left_room {
+                            (beside_right, menu.y)
+                        } else {
+                            (menu.x - box_width, menu.y)
+                        }
                     }
                 }
             }
-        }
-    };
+        };
     // Lines wider than the box wrap at spaces instead of losing their ends, and the box grows
     // down for them while that stays clear of the menu and the cursor's line.
     let inner = usize::from(
@@ -180,13 +186,14 @@ pub(super) fn render_documentation_popup(
             .saturating_sub(DOCUMENTATION_PADDING.saturating_mul(2)),
     )
     .max(1);
-    let rows = (popup.scroll..line_count)
+    let rows = (0..line_count)
         .filter_map(|index| popup.at(index).map(|(line, spans)| (index, line, spans)))
         .flat_map(|(index, line, spans)| {
-            wrap_ranges(line, inner)
+            wrap_ranges(line, inner, config.editor.ambiguous_width)
                 .into_iter()
                 .map(move |range| (index, line, spans, range))
         })
+        .skip(popup.scroll)
         .collect::<Vec<_>>();
     let wanted = u16::try_from(rows.len().min(page_rows).saturating_add(2))
         .unwrap_or(u16::MAX)
@@ -252,9 +259,7 @@ pub(super) fn render_documentation_popup(
         Style::DocumentationTitle,
         right.saturating_sub(1),
     );
-    let text_left = left
-        .saturating_add(1)
-        .saturating_add(DOCUMENTATION_PADDING);
+    let text_left = left.saturating_add(1).saturating_add(DOCUMENTATION_PADDING);
     for (row, (index, line, spans, wrapped)) in rows.iter().take(visible_rows).enumerate() {
         let index = *index;
         // A hunk preview reads as a diff.
@@ -267,7 +272,9 @@ pub(super) fn render_documentation_popup(
         let y = top
             .saturating_add(1)
             .saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
-        let limit = right.saturating_sub(1).saturating_sub(DOCUMENTATION_PADDING);
+        let limit = right
+            .saturating_sub(1)
+            .saturating_sub(DOCUMENTATION_PADDING);
         // Rendered Markdown: the runs between styled ones keep the line's style.
         let mut x = text_left;
         let mut at = wrapped.start;
@@ -290,14 +297,11 @@ pub(super) fn render_documentation_popup(
             .put_text_clipped(x, y, line.get(at..wrapped.end).unwrap_or(""), style, limit);
     }
     if scrollable {
-        let last = rows
-            .get(visible_rows.saturating_sub(1))
-            .map_or(popup.scroll, |(index, ..)| *index);
         let footer = format!(
             " j/k or wheel · {}-{}/{} ",
             popup.scroll.saturating_add(1),
-            last.saturating_add(1).min(line_count),
-            line_count
+            popup.scroll.saturating_add(visible_rows).min(display_count),
+            display_count
         );
         frame.grid.put_text_clipped(
             left.saturating_add(1),
@@ -309,13 +313,44 @@ pub(super) fn render_documentation_popup(
     }
 }
 
+pub(crate) fn documentation_display_rows(
+    popup: &DocumentationPopupState,
+    config: &Config,
+    editor_width: u16,
+) -> usize {
+    let limit = if popup.kind == DocumentationPopupKind::Completion {
+        editor_width / 2
+    } else {
+        editor_width
+    };
+    let widest = (0..popup.line_count())
+        .filter_map(|i| popup.line_at(i))
+        .chain(std::iter::once(popup.title.as_str()))
+        .map(|line| text_width(line, config.editor.ambiguous_width))
+        .max()
+        .unwrap_or(1);
+    let inner = widest
+        .saturating_add(4)
+        .min(usize::from(DOCUMENTATION_MAX_WIDTH.min(limit)))
+        .saturating_sub(4)
+        .max(1);
+    (0..popup.line_count())
+        .filter_map(|i| popup.line_at(i))
+        .map(|line| wrap_ranges(line, inner, config.editor.ambiguous_width).len())
+        .sum()
+}
+
 /// Two cells read as a square swatch; the third is the gap before the detail.
 const SWATCH_WIDTH: usize = 3;
 
 /// A cell painted in a colour from a language server, with text that stays readable on it.
 pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
     let luminance = 299 * u32::from(red) + 587 * u32::from(green) + 114 * u32::from(blue);
-    let text = if luminance > 128_000 { (0, 0, 0) } else { (255, 255, 255) };
+    let text = if luminance > 128_000 {
+        (0, 0, 0)
+    } else {
+        (255, 255, 255)
+    };
     Style::Terminal(crate::ui::PtyStyle {
         foreground: Some(crate::ui::PtyColor::Rgb(text.0, text.1, text.2)),
         background: Some(crate::ui::PtyColor::Rgb(red, green, blue)),
@@ -325,13 +360,17 @@ pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
 
 /// The byte ranges of `line` that fit `width` cells each, broken after a space when there is
 /// one, else mid-word.
-fn wrap_ranges(line: &str, width: usize) -> Vec<std::ops::Range<usize>> {
+pub(crate) fn wrap_ranges(
+    line: &str,
+    width: usize,
+    ambiguous: AmbiguousWidth,
+) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
-    while UnicodeWidthStr::width(&line[start..]) > width {
+    while text_width(&line[start..], ambiguous) > width.max(1) {
         let (mut used, mut end, mut space) = (0, start, None);
         for (offset, grapheme) in line[start..].grapheme_indices(true) {
-            let cells = UnicodeWidthStr::width(grapheme);
+            let cells = text_width(grapheme, ambiguous).clamp(1, 2);
             if used + cells > width && end > start {
                 break;
             }
@@ -377,11 +416,14 @@ pub(super) fn render_language_completion(
             .unwrap_or((bounds.x, bounds.y, cursor_style(config.ui.cursor.normal)));
     let right = bounds.x.saturating_add(bounds.width);
     let bottom = bounds.y.saturating_add(bounds.height);
+    let room_below = bottom.saturating_sub(cursor_y.saturating_add(1));
+    let room_above = cursor_y.saturating_sub(bounds.y);
+    let available = room_below.max(room_above);
     let rows = completion
         .items
         .len()
         .min(usize::from(COMPLETION_MAX_ROWS))
-        .min(usize::from(bounds.height.saturating_sub(1)));
+        .min(usize::from(available));
     if rows == 0 {
         return None;
     }
@@ -402,7 +444,11 @@ pub(super) fn render_language_completion(
         0
     };
     let swatch = |item: &crate::ui::CompletionItem| {
-        if item.color.is_some() { SWATCH_WIDTH } else { 0 }
+        if item.color.is_some() {
+            SWATCH_WIDTH
+        } else {
+            0
+        }
     };
     // Measured over every item, so the menu keeps its width while it scrolls.
     let label_width = completion
@@ -425,7 +471,11 @@ pub(super) fn render_language_completion(
     .saturating_sub(2);
     let content_width = usize::from(icon_width)
         .saturating_add(label_width)
-        .saturating_add(if source_width > 0 { gap + source_width } else { 0 })
+        .saturating_add(if source_width > 0 {
+            gap + source_width
+        } else {
+            0
+        })
         .min(usize::from(maximum_content_width));
     let panel_width = u16::try_from(content_width)
         .unwrap_or(bounds.width)
@@ -518,7 +568,9 @@ pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config)
         cursor_y.saturating_sub(1)
     };
     for x in left..left.saturating_add(width) {
-        frame.grid.set_cell(x, y, " ", Style::DocumentationBackground);
+        frame
+            .grid
+            .set_cell(x, y, " ", Style::DocumentationBackground);
     }
     frame
         .grid
@@ -538,8 +590,8 @@ pub(super) fn render_dashboard(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         ambiguous == AmbiguousWidth::Wide,
     );
     let measure = |text: &str| u16::try_from(text_width(text, ambiguous)).unwrap_or(u16::MAX);
@@ -557,17 +609,24 @@ pub(super) fn render_dashboard(
             return None;
         }
         let header = if use_logo {
-            u16::try_from(logo.len()).unwrap_or(u16::MAX).saturating_add(version)
+            u16::try_from(logo.len())
+                .unwrap_or(u16::MAX)
+                .saturating_add(version)
         } else {
             u16::from(configured.show_identity).saturating_add(version)
         };
-        let rows = actions.saturating_mul(row_step).saturating_sub(row_step - 1);
-        let total = header.saturating_add(2).saturating_add(rows).saturating_add(footer);
+        let rows = actions
+            .saturating_mul(row_step)
+            .saturating_sub(row_step - 1);
+        let total = header
+            .saturating_add(2)
+            .saturating_add(rows)
+            .saturating_add(footer);
         (total <= height).then_some((use_logo, row_step, header, total))
     });
-    let Some((use_logo, row_step, header, total)) = fitting.filter(|_| {
-        width >= configured.minimum_width && height >= configured.minimum_height
-    }) else {
+    let Some((use_logo, row_step, header, total)) = fitting
+        .filter(|_| width >= configured.minimum_width && height >= configured.minimum_height)
+    else {
         grid.put_text(
             1.min(width.saturating_sub(1)),
             1.min(height.saturating_sub(1)),
@@ -609,7 +668,11 @@ pub(super) fn render_dashboard(
         if !action.icon.is_empty() {
             grid.put_text_clipped(left, y, &action.icon, Style::Accent, right);
         }
-        let label_x = if action.icon.is_empty() { left } else { left.saturating_add(3) };
+        let label_x = if action.icon.is_empty() {
+            left
+        } else {
+            left.saturating_add(3)
+        };
         grid.put_text_clipped(label_x, y, &action.label, Style::Default, right);
         // Like LazyVim, the cursor rests on the label of the item Enter runs.
         if index == selected && label_x < right && y < height {
@@ -706,7 +769,11 @@ pub(super) fn render_lsp_progress(
     let first = progress.len().saturating_sub(row_count);
 
     for (row, item) in progress[first..].iter().enumerate() {
-        let marker = if item.done { LSP_PROGRESS_DONE } else { spinner };
+        let marker = if item.done {
+            LSP_PROGRESS_DONE
+        } else {
+            spinner
+        };
         let activity = match (item.title.is_empty(), item.message.is_empty()) {
             (false, false) if item.title != item.message => {
                 format!("{}: {}", item.title, item.message)
@@ -774,7 +841,9 @@ pub(super) fn formatted_content_tab(
         config.editor.ambiguous_width,
     );
     let format = BUFFER_TAB_FORMAT.replace("{title}", &title);
-    let (before, after) = format.split_once("{dirty}").expect("buffer tab format has {dirty}");
+    let (before, after) = format
+        .split_once("{dirty}")
+        .expect("buffer tab format has {dirty}");
     (
         before.to_owned(),
         if entry.dirty {
@@ -818,7 +887,10 @@ pub(super) fn content_tab_segments(
         ));
     }
     if entry.closeable {
-        segments.push((format!(" {BUFFER_CLOSE_MARKER}"), accent(Style::BufferLineClose)));
+        segments.push((
+            format!(" {BUFFER_CLOSE_MARKER}"),
+            accent(Style::BufferLineClose),
+        ));
     }
     segments.push((after, style));
     segments.push((BUFFER_SEPARATOR.to_owned(), Style::BufferLineSeparator));
@@ -842,14 +914,8 @@ pub fn content_tab_at_column(
         return None;
     }
     let active = entries.iter().position(|e| e.active).unwrap_or(0);
-    let left = text_width(
-        &BUFFER_OVERFLOW_LEFT,
-        config.editor.ambiguous_width,
-    );
-    let right = text_width(
-        &BUFFER_OVERFLOW_RIGHT,
-        config.editor.ambiguous_width,
-    );
+    let left = text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
+    let right = text_width(BUFFER_OVERFLOW_RIGHT, config.editor.ambiguous_width);
     let available = usize::from(width);
     let mut start = 0;
     while start < active {
@@ -905,14 +971,8 @@ pub(super) fn render_content_tab_line(
         return;
     }
     let active = entries.iter().position(|entry| entry.active).unwrap_or(0);
-    let left_width = text_width(
-        &BUFFER_OVERFLOW_LEFT,
-        config.editor.ambiguous_width,
-    );
-    let right_width = text_width(
-        &BUFFER_OVERFLOW_RIGHT,
-        config.editor.ambiguous_width,
-    );
+    let left_width = text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
+    let right_width = text_width(BUFFER_OVERFLOW_RIGHT, config.editor.ambiguous_width);
     let available = usize::from(width);
     let mut start = 0usize;
     while start < active {
@@ -937,7 +997,7 @@ pub(super) fn render_content_tab_line(
         x = grid.put_text_clipped(
             x,
             row,
-            &BUFFER_OVERFLOW_LEFT,
+            BUFFER_OVERFLOW_LEFT,
             Style::BufferLineSeparator,
             width,
         );
@@ -967,7 +1027,7 @@ pub(super) fn render_content_tab_line(
         grid.put_text_clipped(
             marker_x,
             row,
-            &BUFFER_OVERFLOW_RIGHT,
+            BUFFER_OVERFLOW_RIGHT,
             Style::BufferLineSeparator,
             width,
         );

@@ -74,6 +74,13 @@ impl InputSession {
     }
     pub(in crate::editor::session) fn remember_search(&mut self, forward: bool) {
         self.last_search_forward = forward;
+        self.whole_word_search = false;
+    }
+    pub(in crate::editor::session) fn remember_word_search(&mut self) {
+        self.whole_word_search = true;
+    }
+    pub(in crate::editor::session) fn whole_word_search(&self) -> bool {
+        self.whole_word_search
     }
     pub(in crate::editor::session) fn search_direction(&self, reverse: bool) -> bool {
         self.last_search_forward != reverse
@@ -87,12 +94,11 @@ impl InputSession {
         if self.mouse.generation != Some(plan.generation) {
             return;
         }
-        if let Some(anchor) = plan.anchor {
-            if anchor.editor.same_editor(editor)
-                && current == Some((anchor.view, anchor.buffer, anchor.revision))
-            {
-                self.mouse.anchor = Some(anchor);
-            }
+        if let Some(anchor) = plan.anchor
+            && anchor.editor.same_editor(editor)
+            && current == Some((anchor.view, anchor.buffer, anchor.revision))
+        {
+            self.mouse.anchor = Some(anchor);
         }
     }
     pub(in crate::editor::session) fn mouse_plan(
@@ -130,12 +136,7 @@ impl InputSession {
             line: view.scroll_line,
             wrap_row: view.scroll_wrap_row,
         });
-        let target_anchor = visual_rows.forward(start_anchor, usize::from(row));
-        if visual_rows.screen_row(start_anchor, target_anchor, usize::from(body_height))
-            != Some(usize::from(row))
-        {
-            return None;
-        }
+        let target_anchor = visual_rows.painted_row(start_anchor, usize::from(row))?;
         let line_index = target_anchor.line;
         let line_start = text.line_to_byte(line_index).unwrap_or(ByteOffset(0));
         let byte = if wrap_enabled {
@@ -253,6 +254,15 @@ impl InputSession {
                 view: view_id,
                 selection: None,
             });
+            if matches!(
+                document.view.mode,
+                EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+            ) {
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::Normal,
+                });
+            }
         }
         Some(MousePlan {
             transaction,
@@ -337,5 +347,24 @@ mod tests {
         );
         assert_eq!(input.mouse.anchor.as_ref().unwrap().position, ByteOffset(2));
         assert_eq!(state.views[view].cursor, ByteOffset(2));
+    }
+    #[test]
+    fn plain_click_leaves_visual_mode_with_no_selection() {
+        let mut state = EditorState::new("/workspace".into());
+        let (_, view) = state.open_text(TextBuffer::from_text("abc"), None);
+        state.views[view].mode = EditorMode::VisualChar;
+        state.views[view].selection = Some(crate::editor::Selection {
+            anchor: ByteOffset(0),
+            head: ByteOffset(2),
+            kind: crate::editor::SelectionKind::Character,
+        });
+        let mut input = InputSession::new(100);
+        input.observe_mouse(1, 0);
+        let pending = plan(&input, &state);
+        state
+            .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
+            .unwrap();
+        assert_eq!(state.views[view].mode, EditorMode::Normal);
+        assert!(state.views[view].selection.is_none());
     }
 }

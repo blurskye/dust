@@ -1,6 +1,6 @@
 use super::{
     component::{
-        ComponentHostState, component_api, component_confirmation_result,
+        ComponentHostState, ComponentLimits, component_api, component_confirmation_result,
         component_provider_request, component_storage_result, component_ui_error,
         component_virtual_document_request,
     },
@@ -581,6 +581,41 @@ pub fn activate_candidate(
     Ok(outcome.loaded.activated_commands)
 }
 
+pub(super) struct ComponentDeadline {
+    cancel: std::sync::mpsc::Sender<()>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+impl ComponentDeadline {
+    pub(super) fn arm(engine: &wasmtime::Engine, ticks: u64) -> Result<Self, PluginError> {
+        let engine = engine.clone();
+        let (cancel, receiver) = std::sync::mpsc::channel();
+        let duration = Duration::from_millis(ticks.max(1).saturating_mul(10));
+        let worker = thread::Builder::new()
+            .name("dust-plugin-deadline".into())
+            .spawn(move || {
+                if matches!(
+                    receiver.recv_timeout(duration),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    engine.increment_epoch();
+                }
+            })
+            .map_err(PluginError::Io)?;
+        Ok(Self {
+            cancel,
+            worker: Some(worker),
+        })
+    }
+}
+impl Drop for ComponentDeadline {
+    fn drop(&mut self) {
+        let _ = self.cancel.send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 pub(crate) fn load_component(
     store: &Path,
     path: &Path,
@@ -622,9 +657,12 @@ pub(crate) fn load_component(
         .memory_size(limits.maximum_memory_bytes)
         .table_elements(limits.maximum_table_elements as usize)
         .instances(limits.maximum_instances as usize)
+        .memories(limits.maximum_instances as usize)
+        .tables(limits.maximum_instances as usize)
         .build();
     let host = ComponentHostState {
-        limits: store_limits,
+        runtime_epoch: 0,
+        limits: ComponentLimits::new(store_limits, limits.maximum_memory_bytes),
         capabilities: manifest.capabilities.clone(),
         declared_content_types: manifest
             .contributions
@@ -642,12 +680,15 @@ pub(crate) fn load_component(
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
         confirmation_requests: Vec::new(),
         confirmation_results: Vec::new(),
         next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
+        execution_available: false,
+        pending_storage: BTreeMap::new(),
         storage_policy: manifest.contributions.storage.clone(),
         storage_requests: Vec::new(),
         storage_results: Vec::new(),
@@ -664,18 +705,20 @@ pub(crate) fn load_component(
     store
         .set_fuel(limits.fuel)
         .map_err(|error| PluginError::Validation(error.to_string()))?;
-    store.set_epoch_deadline(limits.epoch_deadline_ticks);
+    store.set_epoch_deadline(1);
     let mut linker = wasmtime::component::Linker::new(&engine);
+    let deadline = ComponentDeadline::arm(&engine, limits.epoch_deadline_ticks)?;
     let activation = (|| {
         component_api::EditorPlugin::add_to_linker(&mut linker, |state| state)
             .map_err(|error| error.to_string())?;
         let bindings = component_api::EditorPlugin::instantiate(&mut store, &component, &linker)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("{error:#}"))?;
         let commands = bindings
             .call_activate(&mut store)
-            .map_err(|error| error.to_string())??;
+            .map_err(|error| format!("{error:#}"))??;
         Ok::<_, String>((bindings, commands))
     })();
+    drop(deadline);
     let (bindings, activated) = activation.map_err(PluginError::Activation)?;
     let activated_commands = activated
         .into_iter()
@@ -712,6 +755,7 @@ pub(crate) fn execute_component(
     runtime: &mut ActiveRuntime,
 ) -> Result<PluginExecution, PluginError> {
     let PluginExecutionRequest {
+        runtime_epoch,
         plugin,
         command,
         arguments,
@@ -735,20 +779,17 @@ pub(crate) fn execute_component(
         .set_fuel(runtime.limits.fuel)
         .map_err(|error| PluginError::Execution(error.to_string()))?;
     runtime.store.set_epoch_deadline(1);
-    let epoch_engine = runtime.store.engine().clone();
-    let deadline = runtime
-        .limits
-        .epoch_deadline_ticks
-        .max(1)
-        .saturating_mul(10);
-    let _ = thread::Builder::new()
-        .name("dust-plugin-deadline".into())
-        .spawn(move || {
-            thread::sleep(Duration::from_millis(deadline));
-            epoch_engine.increment_epoch();
-        });
+    let deadline =
+        ComponentDeadline::arm(runtime.store.engine(), runtime.limits.epoch_deadline_ticks)?;
     {
         let state = runtime.store.data_mut();
+        if state.runtime_epoch != runtime_epoch {
+            state.runtime_epoch = runtime_epoch;
+            state.storage_results.clear();
+            state.pending_storage.clear();
+            state.ui_events.clear();
+            state.pending_ui_tokens.clear();
+        }
         state.snapshot = snapshot.map(|snapshot| component_api::dust::plugin::host::Snapshot {
             buffer: snapshot.buffer,
             revision: snapshot.revision,
@@ -758,32 +799,40 @@ pub(crate) fn execute_component(
         state.ui_revision = ui_revision;
         state.confirmation_available = confirmation_available;
         state.confirmation_result_only = !confirmation_results.is_empty();
-        state
-            .ui_events
-            .extend(ui_events.into_iter().take(64).map(|event| {
-                component_api::dust::plugin::host::UiEvent {
-                    token: event.token,
-                    handle: event.handle,
-                    graph_revision: event.graph_revision,
-                    tree_revision: event.tree_revision,
-                    surface_revision: event.surface_revision,
-                    geometry: event.geometry.map(|geometry| {
-                        component_api::dust::plugin::host::SurfaceGeometry {
-                            handle: geometry.handle,
-                            width: geometry.width,
-                            height: geometry.height,
-                            dimensions_revision: geometry.dimensions_revision,
-                        }
-                    }),
-                    action: event.action,
-                    error: event.error.map(component_ui_error),
-                }
-            }));
-        if state.ui_events.len() > 64 {
-            state
-                .ui_events
-                .drain(..state.ui_events.len().saturating_sub(64));
-        }
+        state.execution_available = true;
+        state.ui_events.extend(ui_events.into_iter().map(|event| {
+            component_api::dust::plugin::host::UiEvent {
+                token: event.token,
+                handle: event.handle,
+                graph_revision: event.graph_revision,
+                tree_revision: event.tree_revision,
+                surface_revision: event.surface_revision,
+                geometry: event.geometry.map(|geometry| {
+                    component_api::dust::plugin::host::SurfaceGeometry {
+                        handle: geometry.handle,
+                        width: geometry.width,
+                        height: geometry.height,
+                        dimensions_revision: geometry.dimensions_revision,
+                    }
+                }),
+                action: event.action,
+                error: event.error.map(component_ui_error),
+            }
+        }));
+        let mut geometry = BTreeSet::new();
+        let mut actions = 0;
+        state.ui_events.reverse();
+        state.ui_events.retain(|event| {
+            if event.token != 0 {
+                true
+            } else if event.action.is_some() {
+                actions += 1;
+                actions <= 64
+            } else {
+                geometry.insert(event.handle)
+            }
+        });
+        state.ui_events.reverse();
         state.confirmation_results = confirmation_results
             .into_iter()
             .take(64)
@@ -818,11 +867,12 @@ pub(crate) fn execute_component(
             .collect();
         state.delivered_host_event_ids = state.host_events.iter().map(|event| event.id).collect();
         state.host_event_acknowledgements.clear();
-        state.storage_results = storage_results
-            .into_iter()
-            .take(STORAGE_REQUEST_CEILING)
-            .map(component_storage_result)
-            .collect();
+        state.storage_results.extend(
+            storage_results
+                .into_iter()
+                .take(STORAGE_REQUEST_CEILING)
+                .map(component_storage_result),
+        );
         state.storage_requests.clear();
         state.provider_requests = provider_requests
             .into_iter()
@@ -852,7 +902,9 @@ pub(crate) fn execute_component(
     }
     let result = runtime
         .bindings
-        .call_execute_command(&mut runtime.store, &command, &arguments)
+        .call_execute_command(&mut runtime.store, &command, &arguments);
+    drop(deadline);
+    let result = result
         .map_err(|error| PluginError::Execution(error.to_string()))?
         .map_err(PluginError::Execution)?;
     if result.len() > 1024 * 1024 {

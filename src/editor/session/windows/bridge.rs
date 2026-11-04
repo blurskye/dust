@@ -37,6 +37,7 @@ pub(in crate::editor::session) struct ActiveEditorWindowLayout {
 /// validation/projection; the maps adapt existing editor identifiers.
 #[derive(Clone, Debug, Default)]
 pub(in crate::editor::session) struct EditorWindowBridge {
+    focused_view: Option<EditorViewId>,
     buffers: HashMap<BufferId, ContentId>,
     views: HashMap<EditorViewId, ViewId>,
     panes: HashMap<PaneId, WindowId>,
@@ -70,6 +71,16 @@ impl EditorWindowBridge {
         scratch_label: &str,
     ) -> Result<(), WindowError> {
         let source = state.version().clone();
+        let focused_view = state
+            .active_tab()
+            .and_then(|tab| state.tabs().get(tab))
+            .and_then(|tab| state.panes().get(tab.focused))
+            .map(|pane| pane.view);
+        let retain_plugin_focus = self.focused_view == focused_view
+            && graph
+                .focused()
+                .and_then(|window| graph.window(window))
+                .is_some_and(|window| window.owner.starts_with("plugin."));
         // Retire absent hosts first so a still-live view may be rehosted by a
         // replacement pane without ever owning two windows.
         let stale_panes = self
@@ -195,6 +206,26 @@ impl EditorWindowBridge {
             })
             .collect::<Vec<_>>();
         for (tab, universal) in stale_tabs {
+            if let Some(target) = state
+                .active_tab()
+                .and_then(|tab| self.tabs.get(&tab))
+                .copied()
+            {
+                let hosted = graph
+                    .windows()
+                    .filter(|window| window.tab == universal)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for window in hosted {
+                    graph.rehost(
+                        window.id,
+                        target,
+                        window.view,
+                        window.placement,
+                        window.focusable,
+                    )?;
+                }
+            }
             graph.remove_workspace_tab(universal)?;
             self.tabs.remove(&tab);
         }
@@ -219,19 +250,23 @@ impl EditorWindowBridge {
                     .ok_or(WindowError::UnknownWorkspaceTab)?,
             )?;
         }
-        if let Some(active_tab) = state.active_tab() {
-            if let Some(tab) = state.tabs().get(active_tab) {
-                if let Some(window) = self.panes.get(&tab.focused).copied() {
-                    if graph
-                        .window(window)
-                        .is_some_and(|descriptor| descriptor.placement != WindowPlacement::Hidden)
-                    {
-                        graph.focus(window)?;
-                    }
-                }
-            }
+        if let Some(active_tab) = state.active_tab()
+            && let Some(tab) = state.tabs().get(active_tab)
+            && let Some(window) = self.panes.get(&tab.focused).copied()
+            && !retain_plugin_focus
+            && graph
+                .window(window)
+                .is_some_and(|descriptor| descriptor.placement != WindowPlacement::Hidden)
+            && !graph.windows().any(|other| {
+                other.tab == self.tabs[&active_tab]
+                    && other.placement == WindowPlacement::Fullscreen
+                    && other.id != window
+            })
+        {
+            graph.focus(window)?;
         }
         graph.validate()?;
+        self.focused_view = focused_view;
         self.source = Some(source);
         self.scratch_label = Some(scratch_label.to_owned());
         #[cfg(test)]
@@ -529,6 +564,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub shown_terminals: Arc<[u64]>,
     pub terminal_focused: bool,
     pub terminal_size: u16,
+    pub terminal_shrunk: bool,
     pub terminal_set_revision: Option<u64>,
     pub terminal_width: u16,
     pub terminal_height: u16,
@@ -537,6 +573,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub picker_surface: Option<PickerSurfaceKind>,
     pub protected_prompt_height: u16,
     pub configuration_generation: u64,
+    pub screen_bottom: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -677,6 +714,26 @@ impl NativeSurfaceBridge {
             edge: crate::ui::window::DockEdge::Left,
             size: signature.explorer_size.max(1),
         };
+        if signature.focused_explorer == Some(1)
+            && self.explorer_placement == Some(WindowPlacement::Hidden)
+        {
+            self.explorer_placement = self
+                .explorer_restore_placement
+                .filter(|p| *p != WindowPlacement::Hidden);
+        }
+        if let Some(view) = signature.focused_explorer.filter(|view| *view > 1)
+            && self.explorer_view_placements.get(&view) == Some(&WindowPlacement::Hidden)
+        {
+            self.explorer_view_placements.remove(&view);
+            if let Some(placement) = self
+                .explorer_view_restore_placements
+                .get(&view)
+                .copied()
+                .filter(|p| *p != WindowPlacement::Hidden)
+            {
+                self.explorer_view_placements.insert(view, placement);
+            }
+        }
         let explorer_placement = if signature.explorer_visible {
             self.explorer_placement
                 .or_else(|| self.configured_placements.get("builtin.explorer").copied())
@@ -729,12 +786,23 @@ impl NativeSurfaceBridge {
                         height: 20,
                     }),
                 );
+                let shown_placement = if signature.explorer_visible {
+                    placement
+                } else {
+                    WindowPlacement::Hidden
+                };
                 if let Some(ids) = self.explorer_views.get(&view).copied() {
-                    graph.rehost(ids.window, tab, ids.view, placement, true)?;
+                    graph.rehost(ids.window, tab, ids.view, shown_placement, true)?;
                 } else {
                     let cloned_view = graph.create_view(explorer.content, owner, generation)?;
-                    let window =
-                        graph.open_window(tab, cloned_view, placement, true, owner, generation)?;
+                    let window = graph.open_window(
+                        tab,
+                        cloned_view,
+                        shown_placement,
+                        true,
+                        owner,
+                        generation,
+                    )?;
                     self.explorer_views.insert(
                         view,
                         NativeSurfaceIds {
@@ -871,6 +939,17 @@ impl NativeSurfaceBridge {
             } else {
                 WindowPlacement::Hidden
             };
+            let placement = match placement {
+                WindowPlacement::Docked {
+                    edge:
+                        edge @ (crate::ui::window::DockEdge::Top | crate::ui::window::DockEdge::Bottom),
+                    size,
+                } if signature.terminal_shrunk => WindowPlacement::Docked {
+                    edge,
+                    size: size.min(signature.terminal_size.max(1)),
+                },
+                placement => placement,
+            };
             if let Some(ids) = self.terminals.get(id).copied() {
                 graph.update_content_lifecycle(ids.content, profile.clone(), false, *lifecycle)?;
                 graph.rehost(ids.window, tab, ids.view, placement, true)?;
@@ -898,25 +977,23 @@ impl NativeSurfaceBridge {
         }
 
         let mut focused = false;
-        if signature.picker_rect.is_some() {
-            if let Some(picker) = picker {
-                if graph
-                    .window(picker.window)
-                    .is_some_and(|window| window.placement != WindowPlacement::Hidden)
-                {
-                    graph.focus(picker.window)?;
-                    focused = true;
-                }
-            }
+        if signature.picker_rect.is_some()
+            && let Some(picker) = picker
+            && graph
+                .window(picker.window)
+                .is_some_and(|window| window.placement != WindowPlacement::Hidden)
+        {
+            graph.focus(picker.window)?;
+            focused = true;
         }
-        if !focused && signature.terminal_focused {
-            if let Some(ids) = signature
+        if !focused
+            && signature.terminal_focused
+            && let Some(ids) = signature
                 .active_terminal
                 .and_then(|id| self.terminals.get(&id))
-            {
-                graph.focus(ids.window)?;
-                focused = true;
-            }
+        {
+            graph.focus(ids.window)?;
+            focused = true;
         }
         if !focused {
             if let Some(view) = signature.focused_explorer {
@@ -925,7 +1002,9 @@ impl NativeSurfaceBridge {
                 } else {
                     self.explorer_views.get(&view).copied()
                 };
-                if let Some(ids) = ids {
+                if let Some(ids) = ids
+                    && graph.can_focus(ids.window)
+                {
                     graph.focus(ids.window)?;
                 }
             } else if let Some(editor) = signature.editor_window {
@@ -933,41 +1012,39 @@ impl NativeSurfaceBridge {
                     .window(editor)
                     .is_some_and(|window| window.placement != WindowPlacement::Hidden)
                 {
-                    graph.focus(editor)?;
-                } else if signature.dashboard_visible {
-                    if let Some(dashboard) = dashboard {
-                        graph.focus(dashboard.window)?;
+                    if graph.can_focus(editor) {
+                        graph.focus(editor)?;
                     }
-                }
-            } else if signature.dashboard_visible {
-                if let Some(dashboard) = dashboard {
+                } else if signature.dashboard_visible
+                    && let Some(dashboard) = dashboard
+                {
                     graph.focus(dashboard.window)?;
                 }
+            } else if signature.dashboard_visible
+                && let Some(dashboard) = dashboard
+            {
+                graph.focus(dashboard.window)?;
             }
         }
         if signature.picker_rect.is_none()
             && !signature.terminal_focused
             && signature.focused_explorer.is_none()
+            && let Some(plugin) = retained_plugin_focus
+            && graph
+                .window(plugin)
+                .is_some_and(|descriptor| descriptor.tab == tab)
         {
-            if let Some(plugin) = retained_plugin_focus {
-                if graph
-                    .window(plugin)
-                    .is_some_and(|descriptor| descriptor.tab == tab)
-                {
-                    graph.focus(plugin)?;
-                }
-            }
+            graph.focus(plugin)?;
         }
         if signature.editor_tab == Some(tab) {
             self.workspace_tab = Some(tab);
         }
-        if let Some(previous) = previous_tab.filter(|previous| *previous != tab) {
-            if graph
+        if let Some(previous) = previous_tab.filter(|previous| *previous != tab)
+            && graph
                 .workspace_tab(previous)
                 .is_some_and(|_| !graph.tab_has_windows(previous))
-            {
-                graph.remove_workspace_tab(previous)?;
-            }
+        {
+            graph.remove_workspace_tab(previous)?;
         }
         graph.validate()?;
         self.signature = Some(signature);
@@ -1105,10 +1182,10 @@ impl NativeSurfaceBridge {
             NativeSurfaceTarget::Explorer => {
                 let ids = self.explorer.ok_or(WindowError::UnknownWindow)?;
                 if placement == WindowPlacement::Hidden {
-                    if let Some(current) = self.explorer_placement {
-                        if current != WindowPlacement::Hidden {
-                            self.explorer_restore_placement = Some(current);
-                        }
+                    if let Some(current) = self.explorer_placement
+                        && current != WindowPlacement::Hidden
+                    {
+                        self.explorer_restore_placement = Some(current);
                     }
                 } else {
                     self.explorer_restore_placement = Some(placement);
@@ -1123,10 +1200,10 @@ impl NativeSurfaceBridge {
                     .copied()
                     .ok_or(WindowError::UnknownWindow)?;
                 if placement == WindowPlacement::Hidden {
-                    if let Some(current) = self.explorer_view_placements.get(&view).copied() {
-                        if current != WindowPlacement::Hidden {
-                            self.explorer_view_restore_placements.insert(view, current);
-                        }
+                    if let Some(current) = self.explorer_view_placements.get(&view).copied()
+                        && current != WindowPlacement::Hidden
+                    {
+                        self.explorer_view_restore_placements.insert(view, current);
                     }
                 } else {
                     self.explorer_view_restore_placements
@@ -1455,10 +1532,10 @@ impl NativeSurfaceBridge {
             .copied()
             .ok_or(WindowError::UnknownWindow)?;
         if placement == WindowPlacement::Hidden {
-            if let Some(current) = self.terminal_placements.get(&id).copied() {
-                if current != WindowPlacement::Hidden {
-                    self.terminal_restore_placements.insert(id, current);
-                }
+            if let Some(current) = self.terminal_placements.get(&id).copied()
+                && current != WindowPlacement::Hidden
+            {
+                self.terminal_restore_placements.insert(id, current);
             }
         } else {
             self.terminal_restore_placements.insert(id, placement);

@@ -22,15 +22,15 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 mod model;
+/// The enum name is needed by tests and by prose; production reaches it through the method it
+/// returns from, so the alias is gated rather than left to warn as an unused import.
+#[cfg(test)]
+pub(in crate::editor::session) use model::EffectiveBinding;
 pub(in crate::editor::session) use model::ReverseBinding;
 pub use model::{
     ConfigurationSources, KeymapInspection, KeymapOperation, ResolvedConfiguration,
     ResolvedKeyGroup, ResolvedKeymaps,
 };
-/// The enum name is needed by tests and by prose; production reaches it through the method it
-/// returns from, so the alias is gated rather than left to warn as an unused import.
-#[cfg(test)]
-pub(in crate::editor::session) use model::EffectiveBinding;
 mod resolve;
 pub use resolve::validate_loaded_configuration;
 pub(in crate::editor::session) use resolve::{
@@ -39,8 +39,7 @@ pub(in crate::editor::session) use resolve::{
 };
 mod validation;
 pub(in crate::editor::session) use validation::{
-    configuration_value, invocation_fingerprint, keymap_entries,
-    validate_configured_commands,
+    configuration_value, invocation_fingerprint, keymap_entries, validate_configured_commands,
 };
 mod compile;
 pub(in crate::editor::session) use compile::{
@@ -140,6 +139,15 @@ impl ContributionCandidate {
     }
 }
 impl ConfigurationCandidate {
+    pub(in crate::editor::session) fn window_contribution(&self) -> ContributionCandidate {
+        ContributionCandidate {
+            stamp: self.stamp.clone(),
+            catalog: self.catalog.clone(),
+            keymaps: None,
+            windows: self.resolved.settings.windows.clone(),
+            deferred: self.resolved.deferred_plugin_keymaps,
+        }
+    }
     pub(in crate::editor::session) fn view(&self) -> &ResolvedConfiguration {
         &self.resolved
     }
@@ -147,10 +155,8 @@ impl ConfigurationCandidate {
 
 impl ConfigurationSession {
     pub(super) fn new(accepted: ResolvedConfiguration, user_configuration: bool) -> Self {
-        let worker = ConfigurationWorker::start(
-            user_configuration,
-            accepted.settings.ui.theme.clone(),
-        );
+        let worker =
+            ConfigurationWorker::start(user_configuration, accepted.settings.ui.theme.clone());
         Self {
             accepted,
             user_configuration,
@@ -170,7 +176,8 @@ impl ConfigurationSession {
     /// The config.toml the Settings page writes, or `None` when Dust runs on the bundled
     /// defaults only.
     pub(super) fn user_settings_path(&self) -> Option<PathBuf> {
-        self.user_configuration.then(crate::config::user_config_path)
+        self.user_configuration
+            .then(crate::config::user_config_path)
     }
     /// Keys the user's config.toml sets.
     pub(super) fn user_setting_keys(&self) -> &BTreeSet<String> {
@@ -206,6 +213,9 @@ impl ConfigurationSession {
     pub(super) fn deferred_plugin_keymaps(&self) -> bool {
         self.accepted.deferred_plugin_keymaps
     }
+    pub(super) fn complete_plugin_indexes(&mut self) {
+        self.accepted.deferred_plugin_keymaps = false;
+    }
     pub(super) fn generation(&self) -> u64 {
         self.generation
     }
@@ -231,7 +241,8 @@ impl ConfigurationSession {
             .iter()
             .filter(|action| action.visible)
             .nth(index)?;
-        let mut invocation = CommandInvocation::new(&action.command, InvocationSource::Keymap).ok()?;
+        let mut invocation =
+            CommandInvocation::new(&action.command, InvocationSource::Keymap).ok()?;
         for (name, value) in &action.arguments {
             invocation
                 .arguments
@@ -278,6 +289,11 @@ impl ConfigurationSession {
                     .into(),
             );
         }
+        resolved.settings.windows = Self::resolve_plugin_window_rules(
+            &resolved.raw_windows,
+            &resolved.expected_plugin_indexes,
+            catalog,
+        )?;
         resolved.keymaps = compile_keymaps_with_plugin_catalog(
             commands,
             &resolved.raw_keymaps,
@@ -323,18 +339,27 @@ impl ConfigurationSession {
         &mut self,
         candidate: ConfigurationCandidate,
         catalog: &PluginContributionCatalog,
-    ) -> Result<(), String> {
+    ) -> Result<ContributionReceipt, String> {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         // A theme picked in the theme picker stays while config.toml keeps the same theme.
         let keep_theme = candidate.resolved.settings.ui.theme == self.accepted.settings.ui.theme;
+        let receipt = ContributionReceipt(candidate.window_contribution().window_source());
         self.accepted = candidate.resolved;
+        if let Some(zen) = &mut self.zen {
+            let editor = &mut self.accepted.settings.editor;
+            zen.line_numbers = editor.line_numbers;
+            zen.git_signs = editor.git_signs.enabled;
+            zen.indent_guides = editor.indent_guides.enabled;
+            editor.line_numbers = LineNumbers::Off;
+            editor.git_signs.enabled = false;
+            editor.indent_guides.enabled = false;
+        }
         self.hidden_line_numbers = None;
-        self.zen = None;
         self.themes.reset(keep_theme);
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
-        Ok(())
+        Ok(receipt)
     }
     #[cfg(test)]
     pub(super) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {

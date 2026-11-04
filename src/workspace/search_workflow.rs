@@ -79,6 +79,7 @@ struct Active {
     next_sequence: u64,
     query: String,
     items: BTreeMap<String, SearchWorkflowItem>,
+    order: Vec<String>,
     bytes: usize,
     complete: bool,
     preview_request: Option<(String, SearchPreviewRevision)>,
@@ -138,6 +139,7 @@ impl SearchWorkflowBroker {
             next_sequence: 0,
             query,
             items: BTreeMap::new(),
+            order: Vec::new(),
             bytes: 0,
             complete: false,
             preview_request: None,
@@ -204,6 +206,7 @@ impl SearchWorkflowBroker {
         }
         let next = self.active.as_mut().expect("validated active stream");
         for item in chunk.items {
+            next.order.push(item.stable_key.clone());
             next.items.insert(item.stable_key.clone(), item);
         }
         next.next_sequence = sequence;
@@ -253,10 +256,14 @@ impl SearchWorkflowBroker {
         let active = self.active.as_ref()?;
         let q = active.query.to_lowercase();
         let mut items = active
-            .items
-            .values()
+            .order
+            .iter()
+            .filter_map(|key| active.items.get(key))
             .filter(|i| q.is_empty() || i.search_text.to_lowercase().contains(&q))
             .collect::<Vec<_>>();
+        if q.is_empty() {
+            return Some(items);
+        }
         items.sort_by(|a, b| {
             let ar = a.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
             let br = b.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
@@ -271,20 +278,7 @@ impl SearchWorkflowBroker {
             return None;
         }
         let active = self.active.as_ref()?;
-        let q = active.query.to_lowercase();
-        let mut items = active
-            .items
-            .values()
-            .filter(|i| q.is_empty() || i.search_text.to_lowercase().contains(&q))
-            .cloned()
-            .collect::<Vec<_>>();
-        items.sort_by(|a, b| {
-            let ar = a.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
-            let br = b.search_text.to_lowercase().find(&q).unwrap_or(usize::MAX);
-            ar.cmp(&br)
-                .then_with(|| a.title.cmp(&b.title))
-                .then_with(|| a.stable_key.cmp(&b.stable_key))
-        });
+        let items = self.ordered_items()?.into_iter().cloned().collect();
         Some(SearchWorkflowSnapshot {
             revision: self.revision,
             request: active.request,
@@ -341,6 +335,39 @@ mod tests {
         })
         .unwrap()
     }
+    #[test]
+    fn empty_query_preserves_producer_order_in_every_projection() {
+        let mut broker = broker();
+        broker
+            .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+            .unwrap();
+        broker
+            .accept(SearchWorkflowChunk {
+                request: SearchRequestId(1),
+                generation: SearchStreamGeneration(1),
+                sequence: 0,
+                items: vec![item("20", "recent"), item("100", "earlier")],
+                complete: true,
+            })
+            .unwrap();
+        let ordered = broker
+            .ordered_items()
+            .unwrap()
+            .iter()
+            .map(|item| item.stable_key.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ordered, vec!["20", "100"]);
+        let snapshot = broker.snapshot_if_changed(0).unwrap();
+        assert_eq!(
+            snapshot
+                .items
+                .iter()
+                .map(|item| item.stable_key.as_str())
+                .collect::<Vec<_>>(),
+            ordered
+        );
+    }
+
     #[test]
     fn bounded_streams_are_exact_and_idle() {
         let mut b = broker();
@@ -463,8 +490,8 @@ mod tests {
         let p = plugin_item_adapter("a", "A", Some("B"));
         assert_eq!(p.action, SearchHostAction::InvokeDeclaredProviderCommand);
         let picker = PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+            badge: String::new(),
+            kind: crate::workspace::PickerItemKind::Entry,
             id: super::super::PickerItemId("c".into()),
             label: "C".into(),
             detail: "D".into(),

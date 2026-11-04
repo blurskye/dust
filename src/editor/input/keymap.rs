@@ -114,37 +114,49 @@ impl KeymapBindings {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct KeymapSequence {
     pending: Vec<KeyEvent>,
-    pending_exact: Option<CommandInvocation>,
+    pending_exact: Option<(CommandInvocation, usize)>,
 }
 
 impl KeymapSequence {
     pub(crate) fn feed(&mut self, bindings: &KeymapBindings, key: KeyEvent) -> MappingResolution {
-        let fallback = self.pending_exact.take();
         self.pending.push(key);
+        let mut prefix = false;
         for (_, keymap) in bindings.layers.iter().rev() {
             match keymap.lookup(&self.pending) {
                 Lookup::Disabled => {
-                    self.pending.clear();
+                    self.cancel();
                     return MappingResolution::Disabled;
                 }
                 Lookup::PassThrough => continue,
-                Lookup::Exact(command) => {
-                    self.pending.clear();
+                Lookup::Exact(command) if !prefix => {
+                    self.cancel();
                     return MappingResolution::Ready(command);
                 }
-                Lookup::Ambiguous(command) => {
-                    self.pending_exact = Some(command);
+                Lookup::Exact(command) => {
+                    self.pending_exact = Some((command, self.pending.len()));
                     return MappingResolution::Ambiguous;
                 }
-                Lookup::Prefix => return MappingResolution::Pending,
+                Lookup::Ambiguous(command) => {
+                    self.pending_exact = Some((command, self.pending.len()));
+                    return MappingResolution::Ambiguous;
+                }
+                Lookup::Prefix => prefix = true,
                 Lookup::Missing => {}
             }
         }
+        if prefix {
+            return if self.pending_exact.is_some() {
+                MappingResolution::Ambiguous
+            } else {
+                MappingResolution::Pending
+            };
+        }
         let mut rejected = std::mem::take(&mut self.pending);
+        if let Some((command, consumed)) = self.pending_exact.take() {
+            return MappingResolution::ReadyAndReplay(command, rejected.split_off(consumed));
+        }
         let last = rejected.pop().into_iter().collect::<Vec<_>>();
-        if let Some(command) = fallback {
-            MappingResolution::ReadyAndReplay(command, last)
-        } else if rejected.is_empty() {
+        if rejected.is_empty() {
             MappingResolution::Missing
         } else {
             MappingResolution::Replay(rejected, last)
@@ -157,9 +169,12 @@ impl KeymapSequence {
     }
 
     pub fn flush_timeout(&mut self) -> MappingResolution {
-        let pending = std::mem::take(&mut self.pending);
+        let mut pending = std::mem::take(&mut self.pending);
         match self.pending_exact.take() {
-            Some(command) => MappingResolution::Ready(command),
+            Some((command, consumed)) if consumed < pending.len() => {
+                MappingResolution::ReadyAndReplay(command, pending.split_off(consumed))
+            }
+            Some((command, _)) => MappingResolution::Ready(command),
             None if pending.is_empty() => MappingResolution::Missing,
             None => MappingResolution::Replay(pending, Vec::new()),
         }
@@ -264,7 +279,10 @@ mod tests {
         );
         assert_eq!(
             prefix.feed(KeyEvent::character('x')),
-            MappingResolution::Replay(vec![KeyEvent::character('g')], vec![KeyEvent::character('x')])
+            MappingResolution::Replay(
+                vec![KeyEvent::character('g')],
+                vec![KeyEvent::character('x')]
+            )
         );
     }
 
@@ -283,5 +301,61 @@ mod tests {
             resolver.feed(KeyEvent::character('x')),
             MappingResolution::Ready(command) if command.id.as_str() == "health.open"
         ));
+    }
+    #[test]
+    fn shorter_mapping_survives_longer_prefixes_and_replays_the_suffix() {
+        for timeout in [false, true] {
+            let mut resolver = KeymapResolver::default();
+            let short = CommandInvocation::new("editor.quit", InvocationSource::Test).unwrap();
+            let long = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
+            resolver
+                .layer_mut(KeymapLayer::Mode)
+                .insert(&[KeyEvent::character('g')], short.clone());
+            resolver.layer_mut(KeymapLayer::Mode).insert(
+                &[
+                    KeyEvent::character('g'),
+                    KeyEvent::character('h'),
+                    KeyEvent::character('i'),
+                ],
+                long,
+            );
+            assert_eq!(
+                resolver.feed(KeyEvent::character('g')),
+                MappingResolution::Ambiguous
+            );
+            assert_eq!(
+                resolver.feed(KeyEvent::character('h')),
+                MappingResolution::Ambiguous
+            );
+            let result = if timeout {
+                resolver.flush_timeout()
+            } else {
+                resolver.feed(KeyEvent::character('x'))
+            };
+            let suffix = if timeout {
+                vec![KeyEvent::character('h')]
+            } else {
+                vec![KeyEvent::character('h'), KeyEvent::character('x')]
+            };
+            assert_eq!(result, MappingResolution::ReadyAndReplay(short, suffix));
+        }
+    }
+
+    #[test]
+    fn higher_layer_prefix_keeps_a_lower_exact_mapping_as_timeout_fallback() {
+        let mut resolver = KeymapResolver::default();
+        let short = CommandInvocation::new("editor.quit", InvocationSource::Test).unwrap();
+        resolver
+            .layer_mut(KeymapLayer::Global)
+            .insert(&[KeyEvent::character('j')], short.clone());
+        resolver.layer_mut(KeymapLayer::Mode).insert(
+            &[KeyEvent::character('j'), KeyEvent::character('k')],
+            short.clone(),
+        );
+        assert_eq!(
+            resolver.feed(KeyEvent::character('j')),
+            MappingResolution::Ambiguous
+        );
+        assert_eq!(resolver.flush_timeout(), MappingResolution::Ready(short));
     }
 }

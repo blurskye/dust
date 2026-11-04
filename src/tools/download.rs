@@ -2,6 +2,12 @@ use std::{
     fs,
     io::{Cursor, Read, Write},
     path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver},
+    },
+    thread,
     time::Duration,
 };
 
@@ -22,8 +28,67 @@ pub(super) type ToolProgressReporter = dyn FnMut(&str, u64, Option<u64>);
 pub(super) fn download_checked(
     url: &str,
     expected_sha256: &str,
+    cancellations: &Receiver<()>,
     report: &mut ToolProgressReporter,
 ) -> Result<Vec<u8>, String> {
+    if cancellations.try_recv().is_ok() {
+        return Err("tool installation cancelled".into());
+    }
+    let url = url.to_owned();
+    let expected = expected_sha256.to_owned();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let (progress, updates) = mpsc::sync_channel(8);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = cancelled.clone();
+    thread::Builder::new()
+        .name("dust-tool-download".into())
+        .spawn(move || {
+            let result = download_artifact(
+                &url,
+                &expected,
+                &worker_cancelled,
+                &mut move |_, completed, total| {
+                    let _ = progress.try_send((completed, total));
+                },
+            );
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("cannot start tool download: {error}"))?;
+    let result = receive_download(&receiver, &updates, cancellations, report);
+    cancelled.store(true, Ordering::Release);
+    result
+}
+
+fn receive_download(
+    receiver: &Receiver<Result<Vec<u8>, String>>,
+    progress: &Receiver<(u64, Option<u64>)>,
+    cancellations: &Receiver<()>,
+    report: &mut ToolProgressReporter,
+) -> Result<Vec<u8>, String> {
+    loop {
+        if cancellations.try_recv().is_ok() {
+            return Err("tool installation cancelled".into());
+        }
+        for (completed, total) in progress.try_iter() {
+            report("downloading", completed, total);
+        }
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err("tool download stopped".into()),
+        }
+    }
+}
+
+fn download_artifact(
+    url: &str,
+    expected_sha256: &str,
+    cancelled: &AtomicBool,
+    report: &mut ToolProgressReporter,
+) -> Result<Vec<u8>, String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("tool installation cancelled".into());
+    }
     if !valid_digest(expected_sha256) {
         return Err("tool catalog has an invalid artifact checksum".into());
     }
@@ -58,6 +123,9 @@ pub(super) fn download_checked(
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            return Err("tool installation cancelled".into());
+        }
         let read = response
             .read(&mut buffer)
             .map_err(|error| format!("cannot read tool artifact: {error}"))?;
@@ -288,10 +356,15 @@ pub(super) fn extract_zip_tree(bytes: &[u8], prefix: &str, output: &Path) -> Res
                 .map_err(|error| format!("cannot create tool directory: {error}"))?;
             continue;
         }
-        if entry.unix_mode().is_some_and(|mode| mode & 0o170_000 == 0o120_000) {
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170_000 == 0o120_000)
+        {
             return Err("tool archive contains a non-regular entry".into());
         }
-        let parent = destination.parent().ok_or("tool archive file has no parent")?;
+        let parent = destination
+            .parent()
+            .ok_or("tool archive file has no parent")?;
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create tool directory: {error}"))?;
         let mut options = fs::OpenOptions::new();
@@ -343,4 +416,25 @@ pub(super) fn replace_managed_directory(staging: &Path, destination: &Path) -> R
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stalled_download_does_not_hold_installer_cancellation() {
+        let (_sender, receiver) = mpsc::sync_channel(1);
+        let (_progress, updates) = mpsc::sync_channel(1);
+        let (cancel, cancellations) = mpsc::channel();
+        let cancellation = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(25));
+            cancel.send(()).unwrap();
+        });
+        let start = std::time::Instant::now();
+        let result = receive_download(&receiver, &updates, &cancellations, &mut |_, _, _| {});
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert!(start.elapsed() < Duration::from_millis(200));
+        cancellation.join().unwrap();
+    }
 }

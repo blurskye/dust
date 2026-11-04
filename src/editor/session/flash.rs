@@ -1,6 +1,8 @@
 //! Flash-style jump (`s`), as flash.nvim in LazyVim: type a few characters, every visible
 //! match gets a one-key label, and typing that label jumps there.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::editor::{
     ViewId,
     text::{ByteOffset, ByteRange, TextBuffer},
@@ -12,6 +14,8 @@ const LABELS: &str = "asdfghjklqwertyuiopzxcvbnm";
 #[derive(Clone, Debug)]
 pub(super) struct FlashState {
     pub(super) view: ViewId,
+    pub(super) buffer: crate::editor::BufferId,
+    pub(super) source: crate::editor::text::TextVersion,
     pub(super) query: String,
     pub(super) targets: Vec<FlashTarget>,
 }
@@ -52,9 +56,12 @@ pub(super) fn flash_targets(
             continue;
         };
         let content = content.trim_end_matches(['\n', '\r']);
-        for (index, _) in content.char_indices() {
+        for (index, _) in content.grapheme_indices(true) {
             let mut rest = content[index..].chars();
-            if !query.chars().all(|wanted| rest.next().is_some_and(|got| same(wanted, got))) {
+            if !query
+                .chars()
+                .all(|wanted| rest.next().is_some_and(|got| same(wanted, got)))
+            {
                 continue;
             }
             let begin = ByteOffset(start.get() + index);
@@ -72,7 +79,9 @@ pub(super) fn flash_targets(
     }
     let mut order = (0..targets.len()).collect::<Vec<_>>();
     order.sort_by_key(|&index| targets[index].range.start.get().abs_diff(cursor.get()));
-    let mut labels = LABELS.chars().filter(|label| !continuations.contains(label));
+    let mut labels = LABELS
+        .chars()
+        .filter(|label| !continuations.contains(label));
     for index in order {
         let Some(label) = labels.next() else {
             break;
@@ -92,6 +101,12 @@ mod tests {
             .into_iter()
             .map(|target| (target.range.start.get(), target.label))
             .collect()
+    }
+
+    #[test]
+    fn matches_never_start_inside_joined_emoji() {
+        assert!(labels("👩‍💻 👨‍💻", 0, "💻").is_empty());
+        assert_eq!(labels("👩‍💻 x", 99, "👩‍💻")[0].0, 0);
     }
 
     #[test]

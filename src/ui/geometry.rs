@@ -141,9 +141,13 @@ pub fn picker_content_geometry(
     });
     let stacked_divider = (preview.is_some() && !side_by_side).then(|| {
         // A short list of changes leaves its spare rows to the diff.
-        let list_rows = (picker.surface == PickerSurfaceKind::Changes)
-            .then(|| u16::try_from(picker.rows.len()).unwrap_or(u16::MAX).saturating_add(3))
-            .unwrap_or(u16::MAX);
+        let list_rows = if picker.surface == PickerSurfaceKind::Changes {
+            u16::try_from(picker.rows.len())
+                .unwrap_or(u16::MAX)
+                .saturating_add(3)
+        } else {
+            u16::MAX
+        };
         let list_share = (height.saturating_mul(2) / 3).min(list_rows);
         top.saturating_add(list_share).clamp(
             top.saturating_add(6),
@@ -182,7 +186,10 @@ const EXPLORER_SEARCH_ROWS: u16 = 3;
 pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
     WindowRect {
         x: rect.x,
-        y: rect.y.saturating_add(EXPLORER_SEARCH_ROWS).min(rect.y.saturating_add(rect.height)),
+        y: rect
+            .y
+            .saturating_add(EXPLORER_SEARCH_ROWS)
+            .min(rect.y.saturating_add(rect.height)),
         width: rect.width.saturating_sub(1),
         height: rect
             .height
@@ -200,13 +207,9 @@ pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usiz
         .min(usize::from(height.saturating_sub(2)))
 }
 
-pub(crate) fn error_notification_geometry(
-    width: u16,
-    height: u16,
-) -> Option<WindowRect> {
+pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
     let margin = 1_u16.min(width / 2);
-    let available = NOTIFICATION_MAX_WIDTH
-        .min(width.saturating_sub(margin.saturating_mul(2)));
+    let available = NOTIFICATION_MAX_WIDTH.min(width.saturating_sub(margin.saturating_mul(2)));
     (available >= 4 && height >= 3).then_some(WindowRect {
         x: width.saturating_sub(margin).saturating_sub(available),
         y: 1.min(height.saturating_sub(3)),

@@ -15,6 +15,76 @@ use std::{
 };
 use thiserror::Error;
 
+// Keep existing UTF-8 JSON paths readable; Unix paths with other bytes use byte arrays.
+mod persisted_path {
+    use super::*;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Encoded {
+        Text(String),
+        Bytes(Vec<u8>),
+    }
+    impl Encoded {
+        fn from_path(path: &Path) -> Self {
+            match path.to_str() {
+                Some(text) => Self::Text(text.to_owned()),
+                None => Self::Bytes(path.as_os_str().as_bytes().to_vec()),
+            }
+        }
+        fn into_path(self) -> PathBuf {
+            match self {
+                Self::Text(text) => PathBuf::from(text),
+                Self::Bytes(bytes) => PathBuf::from(std::ffi::OsString::from_vec(bytes)),
+            }
+        }
+    }
+    pub fn serialize<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+        Encoded::from_path(path).serialize(serializer)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<PathBuf, D::Error> {
+        Encoded::deserialize(deserializer).map(Encoded::into_path)
+    }
+    pub mod optional {
+        use super::*;
+        pub fn serialize<S: serde::Serializer>(
+            path: &Option<PathBuf>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            path.as_deref()
+                .map(Encoded::from_path)
+                .serialize(serializer)
+        }
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<PathBuf>, D::Error> {
+            Option::<Encoded>::deserialize(deserializer).map(|path| path.map(Encoded::into_path))
+        }
+    }
+    pub mod list {
+        use super::*;
+        pub fn serialize<S: serde::Serializer>(
+            paths: &[PathBuf],
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            paths
+                .iter()
+                .map(|path| Encoded::from_path(path))
+                .collect::<Vec<_>>()
+                .serialize(serializer)
+        }
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Vec<PathBuf>, D::Error> {
+            Vec::<Encoded>::deserialize(deserializer)
+                .map(|paths| paths.into_iter().map(Encoded::into_path).collect())
+        }
+    }
+}
+
 pub const STATE_VERSION: u32 = 2;
 const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
 const MAXIMUM_DESCRIPTOR_ID_BYTES: usize = 128;
@@ -34,9 +104,10 @@ impl Default for PersistencePolicy {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedLocation {
+    #[serde(with = "persisted_path")]
     pub path: PathBuf,
     pub byte: usize,
     pub anchor: usize,
@@ -46,6 +117,7 @@ pub struct PersistedLocation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedPane {
+    #[serde(with = "persisted_path")]
     pub path: PathBuf,
     pub cursor: usize,
     pub anchor: usize,
@@ -69,6 +141,7 @@ pub enum PersistedLayout {
 #[serde(deny_unknown_fields)]
 pub struct PersistedTab {
     pub layout: PersistedLayout,
+    #[serde(default, with = "persisted_path::optional")]
     pub focused_path: Option<PathBuf>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,6 +177,7 @@ pub struct PersistedContentDescriptor {
     pub semantic_id: String,
     pub content_type: String,
     pub adapter: String,
+    #[serde(default, with = "persisted_path::optional")]
     pub path: Option<PathBuf>,
     pub provider: Option<String>,
     pub source: Option<String>,
@@ -114,6 +188,7 @@ pub struct PersistedContentDescriptor {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedSession {
+    #[serde(with = "persisted_path::list")]
     pub roots: Vec<PathBuf>,
     pub tabs: Vec<PersistedTab>,
     pub active_tab: usize,
@@ -124,6 +199,7 @@ pub struct PersistedSession {
     pub content_descriptors: Vec<PersistedContentDescriptor>,
     /// Absent from files written before pins were saved.
     #[serde(default)]
+    #[serde(with = "persisted_path::list")]
     pub pinned: Vec<PathBuf>,
 }
 impl PersistedSession {
@@ -143,15 +219,16 @@ impl PersistedSession {
             .collect()
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedMark {
     pub name: String,
     pub location: PersistedLocation,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedBreakpoint {
+    #[serde(with = "persisted_path")]
     pub path: PathBuf,
     pub line: u64,
     pub column: Option<u64>,
@@ -159,14 +236,15 @@ pub struct PersistedBreakpoint {
     pub hit_condition: Option<String>,
     pub log_message: Option<String>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedWatch {
     pub expression: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedLargeFileOverride {
+    #[serde(with = "persisted_path")]
     pub path: PathBuf,
     pub mode: String,
 }
@@ -175,6 +253,7 @@ pub struct PersistedLargeFileOverride {
 pub struct PersistedState {
     pub version: u32,
     pub session: Option<PersistedSession>,
+    #[serde(with = "persisted_path::list")]
     pub recent_files: Vec<PathBuf>,
     pub marks: Vec<PersistedMark>,
     pub jumps: Vec<PersistedLocation>,
@@ -598,6 +677,7 @@ impl PersistenceService {
                 if let Some(gate) = gate {
                     let _ = gate.recv();
                 }
+                let mut previous = BTreeMap::new();
                 while let Ok(request) = rx.recv() {
                     let event = match request {
                         Request::Read {
@@ -605,10 +685,13 @@ impl PersistenceService {
                             path,
                             policy,
                         } => match read_state(&path, &policy) {
-                            Ok(state) => PersistenceEvent::Loaded {
-                                generation,
-                                state: Box::new(state),
-                            },
+                            Ok(state) => {
+                                previous.insert(path, state.clone());
+                                PersistenceEvent::Loaded {
+                                    generation,
+                                    state: Box::new(state),
+                                }
+                            }
                             Err(error) => PersistenceEvent::Failed { generation, error },
                         },
                         Request::Write {
@@ -616,8 +699,11 @@ impl PersistenceService {
                             path,
                             state,
                             policy,
-                        } => match write_state(&path, &state, &policy) {
-                            Ok(()) => PersistenceEvent::Saved { generation },
+                        } => match write_state(&path, &state, previous.get(&path), &policy) {
+                            Ok(()) => {
+                                previous.insert(path, *state);
+                                PersistenceEvent::Saved { generation }
+                            }
                             Err(error) => PersistenceEvent::Failed { generation, error },
                         },
                     };
@@ -714,12 +800,9 @@ fn read_state(path: &Path, policy: &PersistencePolicy) -> Result<PersistedState,
 fn write_state(
     path: &Path,
     state: &PersistedState,
+    previous: Option<&PersistedState>,
     policy: &PersistencePolicy,
 ) -> Result<(), PersistenceError> {
-    let bytes = serde_json::to_vec(state).map_err(PersistenceError::Json)?;
-    if bytes.len() > policy.maximum_file_bytes {
-        return Err(PersistenceError::TooLarge);
-    }
     let parent = path.parent().ok_or(PersistenceError::InvalidPath)?;
     fs::create_dir_all(parent).map_err(PersistenceError::Io)?;
     #[cfg(unix)]
@@ -728,10 +811,23 @@ fn write_state(
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
             .map_err(PersistenceError::Io)?;
     }
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(PersistenceError::InvalidFileType);
-        }
+    let _lock =
+        crate::files::lock_file(&path.with_extension("json.lock")).map_err(PersistenceError::Io)?;
+    let mut merged = state.clone();
+    match read_state(path, policy) {
+        Ok(current) => merge_shared_state(&mut merged, &current, previous, policy.maximum_entries),
+        Err(PersistenceError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    merged.validate(policy)?;
+    let bytes = serde_json::to_vec(&merged).map_err(PersistenceError::Json)?;
+    if bytes.len() > policy.maximum_file_bytes {
+        return Err(PersistenceError::TooLarge);
+    }
+    if let Ok(metadata) = fs::symlink_metadata(path)
+        && (!metadata.file_type().is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(PersistenceError::InvalidFileType);
     }
     let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), sequence));
@@ -750,6 +846,120 @@ fn write_state(
         .and_then(|file| file.sync_all())
         .map_err(PersistenceError::Io)
 }
+fn merge_shared_state(
+    state: &mut PersistedState,
+    current: &PersistedState,
+    previous: Option<&PersistedState>,
+    maximum: usize,
+) {
+    let empty = PersistedState::default();
+    let previous = previous.unwrap_or(&empty);
+    merge_entries(
+        &mut state.recent_files,
+        &current.recent_files,
+        &previous.recent_files,
+        maximum,
+        Clone::clone,
+    );
+    merge_entries(
+        &mut state.marks,
+        &current.marks,
+        &previous.marks,
+        maximum,
+        |mark| mark.name.clone(),
+    );
+    merge_entries(
+        &mut state.jumps,
+        &current.jumps,
+        &previous.jumps,
+        maximum,
+        |location| (location.path.clone(), location.byte),
+    );
+    merge_entries(
+        &mut state.changes,
+        &current.changes,
+        &previous.changes,
+        maximum,
+        |location| (location.path.clone(), location.byte),
+    );
+    merge_entries(
+        &mut state.command_history,
+        &current.command_history,
+        &previous.command_history,
+        maximum,
+        Clone::clone,
+    );
+    merge_entries(
+        &mut state.search_history,
+        &current.search_history,
+        &previous.search_history,
+        maximum,
+        Clone::clone,
+    );
+    merge_entries(
+        &mut state.breakpoints,
+        &current.breakpoints,
+        &previous.breakpoints,
+        maximum,
+        |breakpoint| (breakpoint.path.clone(), breakpoint.line, breakpoint.column),
+    );
+    merge_entries(
+        &mut state.watches,
+        &current.watches,
+        &previous.watches,
+        maximum,
+        |watch| watch.expression.clone(),
+    );
+    merge_entries(
+        &mut state.large_file_overrides,
+        &current.large_file_overrides,
+        &previous.large_file_overrides,
+        maximum,
+        |entry| entry.path.clone(),
+    );
+    for (key, value) in &current.metadata {
+        if state.metadata.get(key) == previous.metadata.get(key) {
+            state.metadata.insert(key.clone(), value.clone());
+        }
+    }
+    for key in previous.metadata.keys() {
+        if !current.metadata.contains_key(key)
+            && state.metadata.get(key) == previous.metadata.get(key)
+        {
+            state.metadata.remove(key);
+        }
+    }
+    // The saving instance owns its layout, pins and active tab; they are not merged.
+}
+
+fn merge_entries<T: Clone + PartialEq, K: Eq>(
+    entries: &mut Vec<T>,
+    current: &[T],
+    previous: &[T],
+    maximum: usize,
+    key: impl Fn(&T) -> K,
+) {
+    *entries = entries
+        .iter()
+        .filter_map(|entry| {
+            let old = previous.iter().find(|old| key(old) == key(entry));
+            if old == Some(entry) {
+                current.iter().find(|item| key(item) == key(entry)).cloned()
+            } else {
+                Some(entry.clone())
+            }
+        })
+        .collect();
+    for entry in current {
+        if !previous.iter().any(|old| key(old) == key(entry))
+            && !entries.iter().any(|item| key(item) == key(entry))
+        {
+            entries.push(entry.clone());
+        }
+    }
+    entries.truncate(maximum);
+}
+
 #[derive(Debug, Error)]
 pub enum PersistenceError {
     #[error("persistence I/O failed: {0}")]
@@ -803,6 +1013,138 @@ mod tests {
         PersistencePolicy, STATE_VERSION, read_state, write_state,
     };
 
+    #[test]
+    fn non_utf8_paths_round_trip_in_every_persisted_location() {
+        use std::os::unix::ffi::OsStringExt;
+        let directory = tempdir().unwrap();
+        let path = directory
+            .path()
+            .join(std::ffi::OsString::from_vec(b"file-\xff".to_vec()));
+        let location = PersistedLocation {
+            path: path.clone(),
+            byte: 1,
+            anchor: 1,
+            scroll_line: 0,
+            scroll_column: 0,
+        };
+        let mut state = state_with_horizontal_offsets();
+        let session = state.session.as_mut().unwrap();
+        session.roots = vec![directory.path().to_path_buf()];
+        session.pinned = vec![path.clone()];
+        session.tabs[0].focused_path = Some(path.clone());
+        let PersistedLayout::Pane { pane } = &mut session.tabs[0].layout else {
+            panic!("pane")
+        };
+        pane.path = path.clone();
+        session.content_descriptors = vec![PersistedContentDescriptor {
+            semantic_id: "text:0:0".into(),
+            content_type: "builtin.text-buffer".into(),
+            adapter: "text-buffer".into(),
+            path: Some(path.clone()),
+            provider: None,
+            source: None,
+            key: None,
+            desired_placement: PersistedWindowPlacement::Tiled,
+        }];
+        state.recent_files = vec![path.clone()];
+        state.marks = vec![super::PersistedMark {
+            name: "A".into(),
+            location: location.clone(),
+        }];
+        state.jumps = vec![location.clone()];
+        state.changes = vec![location];
+        state.breakpoints = vec![super::PersistedBreakpoint {
+            path: path.clone(),
+            line: 1,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }];
+        state.large_file_overrides = vec![super::PersistedLargeFileOverride {
+            path: path.clone(),
+            mode: "on".into(),
+        }];
+        let policy = PersistencePolicy::default();
+        let saved = directory.path().join("state.json");
+        write_state(&saved, &state, None, &policy).unwrap();
+        let loaded = read_state(&saved, &policy).unwrap();
+        assert_eq!(
+            serde_json::to_value(&state).unwrap(),
+            serde_json::to_value(&loaded).unwrap()
+        );
+        assert_eq!(loaded.recent_files[0], path);
+        let session = loaded.session.unwrap();
+        assert_eq!(session.content_descriptors[0].path, Some(path.clone()));
+        assert_eq!(session.tabs[0].focused_path, Some(path));
+    }
+
+    #[test]
+    fn concurrent_saves_merge_histories_marks_and_metadata_without_reviving_deletions() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let policy = PersistencePolicy::default();
+        let mut original = PersistedState::default();
+        original.command_history.push("old".into());
+        original.metadata.insert("old".into(), "old".into());
+        write_state(&path, &original, None, &policy).unwrap();
+        let mut first = original.clone();
+        first.recent_files.push("/first".into());
+        first.command_history.clear();
+        first.command_history.push("first".into());
+        first.metadata.clear();
+        first.metadata.insert("first".into(), "first".into());
+        first.marks.push(super::PersistedMark {
+            name: "A".into(),
+            location: PersistedLocation {
+                path: "/first".into(),
+                byte: 0,
+                anchor: 0,
+                scroll_line: 0,
+                scroll_column: 0,
+            },
+        });
+        let mut second = original.clone();
+        second.recent_files.push("/second".into());
+        second.command_history.push("second".into());
+        second.metadata.insert("second".into(), "second".into());
+        second.marks.push(super::PersistedMark {
+            name: "B".into(),
+            location: PersistedLocation {
+                path: "/second".into(),
+                byte: 0,
+                anchor: 0,
+                scroll_line: 0,
+                scroll_column: 0,
+            },
+        });
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            for state in [&first, &second] {
+                let barrier = &barrier;
+                let path = &path;
+                let original = &original;
+                let policy = &policy;
+                scope.spawn(move || {
+                    barrier.wait();
+                    write_state(path, state, Some(original), policy).unwrap();
+                });
+            }
+        });
+        let saved = read_state(&path, &policy).unwrap();
+        assert!(saved.recent_files.contains(&PathBuf::from("/first")));
+        assert!(saved.recent_files.contains(&PathBuf::from("/second")));
+        assert!(saved.command_history.contains(&"first".into()));
+        assert!(saved.command_history.contains(&"second".into()));
+        assert!(!saved.command_history.contains(&"old".into()));
+        assert_eq!(saved.marks.len(), 2);
+        assert!(saved.metadata.contains_key("first"));
+        assert!(saved.metadata.contains_key("second"));
+        assert!(!saved.metadata.contains_key("old"));
+        write_state(&path, &second, Some(&second), &policy).unwrap();
+        assert_eq!(read_state(&path, &policy).unwrap().marks.len(), 2);
+    }
+
     fn state_with_horizontal_offsets() -> PersistedState {
         PersistedState {
             version: STATE_VERSION,
@@ -848,7 +1190,7 @@ mod tests {
         let root = tempdir().expect("temporary persistence directory");
         let path = root.path().join("state.json");
         let policy = PersistencePolicy::default();
-        write_state(&path, &state_with_horizontal_offsets(), &policy).expect("write state");
+        write_state(&path, &state_with_horizontal_offsets(), None, &policy).expect("write state");
         let restored = read_state(&path, &policy).expect("read state");
         let pane = match &restored.session.as_ref().expect("session").tabs[0].layout {
             PersistedLayout::Pane { pane } => pane,

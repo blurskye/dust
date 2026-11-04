@@ -73,7 +73,7 @@ impl ExtensionSession {
         load: PluginLoadId,
     ) -> Result<(), (String, PluginLoadId, String)> {
         let activations = if deferred {
-            std::mem::take(&mut self.pending_index_activation)
+            self.pending_index_activation.clone()
         } else {
             let Some((candidate, checksum)) = self
                 .pending_index_activation
@@ -83,13 +83,12 @@ impl ExtensionSession {
             else {
                 return Ok(());
             };
-            self.pending_index_activation.remove(plugin);
             BTreeMap::from([(plugin.into(), (candidate, checksum))])
         };
         for (plugin, (load, checksum)) in activations {
-            self.manager
-                .activate_indexed(&plugin, load, checksum)
-                .map_err(|e| (plugin, load, e.to_string()))?;
+            let result = self.manager.activate_indexed(&plugin, load, checksum);
+            self.pending_index_activation.remove(&plugin);
+            result.map_err(|e| (plugin, load, e.to_string()))?;
         }
         Ok(())
     }
@@ -99,14 +98,14 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn reject_expected(
         &mut self,
         expected: impl Iterator<Item = String>,
-        failed: (&str, PluginLoadId),
+        failed: Option<(&str, PluginLoadId)>,
     ) {
         for plugin in expected {
-            if let Some(load) = if plugin == failed.0 {
-                Some(failed.1)
-            } else {
-                self.manager.load_id(&plugin)
-            } {
+            if let Some(load) = failed
+                .filter(|(owner, _)| plugin == *owner)
+                .map(|(_, load)| load)
+                .or_else(|| self.manager.load_id(&plugin))
+            {
                 self.reject_index(plugin.clone(), load);
                 self.pending_index_activation
                     .entry(plugin)
@@ -136,7 +135,15 @@ impl ExtensionSession {
         ) {
             self.package_startup_rollback_attempted = false;
         }
-        self.packages.request(operation)
+        let preparing = matches!(
+            operation,
+            PackageOperation::Install { .. } | PackageOperation::PrepareRegistry { .. }
+        );
+        let id = self.packages.request(operation)?;
+        if preparing {
+            self.package_preparing.insert(id);
+        }
+        Ok(id)
     }
     pub(in crate::editor::session) fn start_packages(&mut self) {
         self.package_startup_request = self.packages.request(PackageOperation::Activations).ok();
@@ -195,7 +202,7 @@ impl ExtensionSession {
         limits: PluginLimits,
     ) -> Result<(), PackageError> {
         if let Some((metadata, component)) = self.pending_registry_artifact.take() {
-            self.packages.request(PackageOperation::PrepareRegistry {
+            self.request_package(PackageOperation::PrepareRegistry {
                 metadata: Box::new(metadata),
                 component,
                 limits,
@@ -228,6 +235,8 @@ impl ExtensionSession {
         {
             self.package_prepared.remove(plugin);
             let _ = self.packages.request(PackageOperation::Abort { token });
+            self.package_startup_request =
+                self.packages.request(PackageOperation::Activations).ok();
         }
     }
     pub(in crate::editor::session) fn commit_package(
@@ -244,6 +253,8 @@ impl ExtensionSession {
             Err(error) => {
                 let _ = self.manager.disable_generation(&plugin, load);
                 let _ = self.packages.request(PackageOperation::Abort { token });
+                self.package_startup_request =
+                    self.packages.request(PackageOperation::Activations).ok();
                 Err(error)
             }
         }
@@ -259,6 +270,8 @@ impl ExtensionSession {
             .is_some_and(|(candidate, _)| *candidate == load)
         {
             self.abort_prepared(plugin, load);
+            self.package_startup_request =
+                self.packages.request(PackageOperation::Activations).ok();
             Vec::new()
         } else if self.package_startup_pending.get(plugin) == Some(&load) {
             self.package_startup_pending.remove(plugin);
@@ -302,6 +315,7 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn retire_packages(&mut self) -> Vec<(String, PluginLoadId)> {
         self.registry_intents.clear();
         self.pending_registry_artifact = None;
+        self.package_preparing.clear();
         let mut removed = Vec::new();
         for (plugin, (load, token)) in self.package_prepared.drain() {
             let _ = self.manager.unload_generation(&plugin, load);
@@ -341,6 +355,56 @@ impl ExtensionSession {
         self.plugin_contributions = PluginContributionCatalog::default();
         self.clear_events();
     }
+    fn load_prepared(
+        &mut self,
+        request: u64,
+        prepared: crate::tools::PreparedPackage,
+        limits: &PluginLimits,
+    ) -> Vec<ExtensionUpdate> {
+        let mut updates = Vec::new();
+        let plugin = prepared.plugin.id.clone();
+        let token = prepared.token;
+        if !self.package_preparing.remove(&request) {
+            let _ = self.packages.request(PackageOperation::Abort { token });
+            return updates;
+        }
+        if let Some(load) = self.manager.load_id(&plugin) {
+            if self.package_managed_plugins.get(&plugin) != Some(&load) {
+                let _ = self.packages.request(PackageOperation::Abort { token });
+                updates.push(ExtensionUpdate::Conflict(plugin));
+                return updates;
+            }
+            // The installed lock retains the previous version until Commit succeeds.
+            if let Err(error) = self.manager.unload_generation(&plugin, load) {
+                let _ = self.packages.request(PackageOperation::Abort { token });
+                updates.push(ExtensionUpdate::Error(error.to_string()));
+                return updates;
+            }
+            self.package_managed_plugins.remove(&plugin);
+            updates.push(ExtensionUpdate::Remove(plugin.clone(), load));
+        }
+        match self.manager.load(
+            self.package_store.clone(),
+            prepared.object,
+            prepared.plugin,
+            limits.clone(),
+        ) {
+            Ok(load) => {
+                self.package_prepared.insert(plugin, (load, token));
+                updates.push(ExtensionUpdate::Message(
+                    "package_prepared",
+                    vec![("package", prepared.manifest.name)],
+                ));
+            }
+            Err(error) => {
+                let _ = self.packages.request(PackageOperation::Abort { token });
+                updates.push(ExtensionUpdate::Error(error.to_string()));
+                self.package_startup_request =
+                    self.packages.request(PackageOperation::Activations).ok();
+            }
+        }
+        updates
+    }
     pub(in crate::editor::session) fn poll_packages(
         &mut self,
         limits: PluginLimits,
@@ -352,35 +416,14 @@ impl ExtensionSession {
                     let prepared_operation = result.prepared.is_some();
                     let activation_operation = result.operation == "activations";
                     if let Some(prepared) = result.prepared.take() {
-                        let plugin = prepared.plugin.id.clone();
-                        let token = prepared.token;
-                        if self.manager.load_id(&plugin).is_some() {
-                            let _ = self.packages.request(PackageOperation::Abort { token });
-                            updates.push(ExtensionUpdate::Conflict(plugin));
-                            continue;
-                        }
-                        match self.manager.load(
-                            self.package_store.clone(),
-                            prepared.object,
-                            prepared.plugin,
-                            limits.clone(),
-                        ) {
-                            Ok(load) => {
-                                self.package_prepared.insert(plugin, (load, token));
-                                updates.push(ExtensionUpdate::Message(
-                                    "package_prepared",
-                                    vec![("package", prepared.manifest.name)],
-                                ));
-                            }
-                            Err(error) => {
-                                let _ = self.packages.request(PackageOperation::Abort { token });
-                                updates.push(ExtensionUpdate::Error(error.to_string()));
-                            }
-                        }
+                        updates.extend(self.load_prepared(result.id, prepared, &limits));
                     }
                     for (manifest, path) in std::mem::take(&mut result.activations) {
                         let plugin = manifest.id.clone();
-                        if self.manager.load_id(&plugin).is_some() {
+                        if let Some(load) = self.manager.load_id(&plugin) {
+                            if self.package_managed_plugins.get(&plugin) == Some(&load) {
+                                continue;
+                            }
                             updates.push(ExtensionUpdate::Conflict(plugin));
                             updates.extend(self.rollback_packages());
                             break;
@@ -456,6 +499,7 @@ impl ExtensionSession {
                     operation,
                     error,
                 } => {
+                    self.package_preparing.remove(&id);
                     if self.package_startup_rollback == Some(id) {
                         self.package_startup_rollback = None;
                     }
@@ -469,6 +513,8 @@ impl ExtensionSession {
                         }
                         let _ = self.manager.disable_generation(&plugin, load);
                         updates.push(ExtensionUpdate::Remove(plugin, load));
+                        self.package_startup_request =
+                            self.packages.request(PackageOperation::Activations).ok();
                     }
                     updates.push(ExtensionUpdate::Failed {
                         operation,
@@ -518,6 +564,136 @@ mod tests {
         tools::{PackageManifest, PackageSource, RegistryPackageMetadata, RegistryService},
     };
     use std::time::{Duration, Instant};
+    #[test]
+    fn package_update_replaces_managed_plugin_and_commits_after_load() {
+        use crate::{
+            extensions::PluginEvent,
+            tools::{PackageManager, PackageOperation},
+        };
+        use sha2::{Digest, Sha256};
+        use std::{fs, thread};
+        let root = tempfile::tempdir().unwrap();
+        let packages = root.path().join("packages");
+        let registry = RegistryService::start(
+            crate::tools::RegistryPolicy {
+                offline: true,
+                ..Default::default()
+            },
+            root.path().join("cache"),
+        )
+        .unwrap();
+        let mut owner =
+            ExtensionSession::new(root.path().join("storage"), 8, packages.clone(), registry);
+        let core =
+            include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+        let bytes = wit_component::ComponentEncoder::default()
+            .module(core)
+            .unwrap()
+            .validate(true)
+            .encode()
+            .unwrap();
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let mut plugin = crate::editor::session::extensions::fixture_manifest(digest.clone());
+        let mut package = PackageManifest {
+            name: "demo".into(),
+            version: "1.0.0".into(),
+            component: "plugin.wasm".into(),
+            source: PackageSource::Registry {
+                registry: "https://example.invalid".into(),
+                version: "1.0.0".into(),
+                archive_sha256: digest,
+            },
+            dependencies: Vec::new(),
+        };
+        fs::write(root.path().join("plugin.wasm"), bytes).unwrap();
+        let mut old_load = None;
+        for update in [false, true] {
+            if update {
+                package.version = "2.0.0".into();
+                plugin.version = "2.0.0".into();
+            }
+            fs::write(
+                root.path().join("package.json"),
+                serde_json::to_vec(&package).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                root.path().join("plugin.toml"),
+                toml::to_string(&plugin).unwrap(),
+            )
+            .unwrap();
+            owner
+                .request_package(PackageOperation::Install {
+                    package_manifest: root.path().join("package.json"),
+                    plugin_manifest: root.path().join("plugin.toml"),
+                    component: root.path().join("plugin.wasm"),
+                    roots: vec![root.path().into()],
+                    limits: PluginLimits::default(),
+                    update,
+                })
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let load = loop {
+                for update in owner.poll_packages(PluginLimits::default()) {
+                    assert!(
+                        !matches!(
+                            update,
+                            ExtensionUpdate::Conflict(_)
+                                | ExtensionUpdate::Error(_)
+                                | ExtensionUpdate::Failed { .. }
+                        ),
+                        "package preparation failed"
+                    );
+                }
+                let mut loaded = None;
+                for event in owner.manager.poll().unwrap() {
+                    match event {
+                        PluginEvent::Indexed {
+                            load, plugin: id, ..
+                        } => {
+                            owner
+                                .manager
+                                .activate_indexed(&id, load, plugin.component_sha256.clone())
+                                .unwrap();
+                        }
+                        PluginEvent::Loaded { load, .. } => loaded = Some(load),
+                        PluginEvent::Failed { error, .. } => panic!("plugin load: {error}"),
+                        _ => {}
+                    }
+                }
+                if let Some(load) = loaded {
+                    break load;
+                }
+                assert!(Instant::now() < deadline, "replacement load timed out");
+                thread::sleep(Duration::from_millis(2));
+            };
+            assert_ne!(Some(load), old_load);
+            let token = owner.take_prepared("demo", load).unwrap();
+            let manager =
+                PackageManager::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
+            assert_eq!(
+                manager
+                    .read_lock()
+                    .unwrap()
+                    .packages
+                    .first()
+                    .map(|package| package.version.as_str()),
+                if update { Some("1.0.0") } else { None }
+            );
+            owner.commit_package("demo".into(), load, token).unwrap();
+            while owner.pending_packages() != 0 {
+                owner.poll_packages(PluginLimits::default());
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(
+                manager.read_lock().unwrap().packages[0].version,
+                package.version
+            );
+            old_load = Some(load);
+        }
+    }
+
     #[test]
     fn retired_registry_and_replacement_package_obligations_are_not_adopted() {
         let root = tempfile::tempdir().unwrap();
@@ -605,5 +781,106 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(owner.package_startup_rollback.is_none());
+    }
+
+    #[test]
+    fn deferred_activation_failure_keeps_unsubmitted_indexes() {
+        let root = tempfile::tempdir().unwrap();
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
+        let (mut manager, _fixture) = crate::extensions::ExecutionFixture::new(1);
+        manager
+            .execute(crate::extensions::empty_execution_request())
+            .unwrap();
+        manager
+            .statuses
+            .insert("demo".into(), crate::extensions::PluginStatus::Indexed);
+        owner.fixture_manager(manager);
+        owner.queue_index("demo".into(), PluginLoadId(1), "a".into());
+        owner.queue_index("zeta".into(), PluginLoadId(2), "b".into());
+        assert!(
+            owner
+                .activate_pending(true, "demo", PluginLoadId(1))
+                .is_err()
+        );
+        assert!(!owner.index_pending("demo"));
+        assert!(owner.index_pending("zeta"));
+    }
+
+    #[test]
+    fn prepared_updates_replace_only_managed_generations_and_ignore_retired_requests() {
+        let root = tempfile::tempdir().unwrap();
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
+        let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
+        owner.fixture_manager(manager);
+        let prepared = crate::tools::PreparedPackage {
+            token: 41,
+            manifest: PackageManifest {
+                name: "demo".into(),
+                version: "2.0.0".into(),
+                component: "demo.wasm".into(),
+                source: PackageSource::Path {
+                    path: root.path().into(),
+                },
+                dependencies: Vec::new(),
+            },
+            plugin: PluginManifest {
+                id: "demo".into(),
+                version: "2.0.0".into(),
+                component_sha256: "0".repeat(64),
+                capabilities: Default::default(),
+                commands: Default::default(),
+                contributions: Default::default(),
+            },
+            object: root.path().join("demo.wasm"),
+        };
+        owner.package_preparing.insert(41);
+        let updates = owner.load_prepared(41, prepared.clone(), &PluginLimits::default());
+        assert!(
+            updates
+                .iter()
+                .any(|update| matches!(update, ExtensionUpdate::Conflict(_)))
+        );
+        assert_eq!(owner.manager.load_id("demo"), Some(PluginLoadId(1)));
+        owner.package_preparing.insert(42);
+        owner.retire_packages();
+        assert!(
+            owner
+                .load_prepared(42, prepared.clone(), &PluginLimits::default())
+                .is_empty()
+        );
+        assert_eq!(owner.manager.load_id("demo"), Some(PluginLoadId(1)));
+        owner
+            .package_managed_plugins
+            .insert("demo".into(), PluginLoadId(1));
+        owner.package_preparing.insert(43);
+        let updates = owner.load_prepared(43, prepared, &PluginLimits::default());
+        assert!(
+            updates
+                .iter()
+                .any(|update| matches!(update, ExtensionUpdate::Remove(_, PluginLoadId(1))))
+        );
+        assert!(
+            !updates
+                .iter()
+                .any(|update| matches!(update, ExtensionUpdate::Conflict(_)))
+        );
+        assert_eq!(
+            owner.package_prepared.get("demo"),
+            Some(&(PluginLoadId(2), 41))
+        );
     }
 }

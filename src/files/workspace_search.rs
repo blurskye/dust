@@ -330,7 +330,10 @@ pub(super) fn run_workspace_search(
     for root in roots.iter().skip(1) {
         builder.add(root);
     }
-    for worktree in roots.iter().flat_map(|root| super::directory::root_worktrees(root)) {
+    for worktree in roots
+        .iter()
+        .flat_map(|root| super::directory::root_worktrees(root))
+    {
         builder.add(worktree);
     }
     builder
@@ -440,7 +443,20 @@ pub(super) fn run_workspace_search(
             continue;
         };
         let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        let mut line_starts = vec![0];
+        for (offset, byte) in source.bytes().enumerate() {
+            if offset % 4096 == 0 && cancellation.load(Ordering::Acquire) {
+                return;
+            }
+            if byte == b'\n' {
+                line_starts.push(offset + 1);
+            }
+        }
+        let path_id = super::workspace_files::file_id(&path);
         for found in pattern.find_iter(&source) {
+            if cancellation.load(Ordering::Acquire) {
+                return;
+            }
             if policy.whole_word && !has_word_boundaries(&source, found.start(), found.end()) {
                 continue;
             }
@@ -448,27 +464,16 @@ pub(super) fn run_workspace_search(
                 summary.truncated = true;
                 break 'files;
             }
-            let line_start = source[..found.start()]
-                .rfind('\n')
-                .map_or(0, |offset| offset.saturating_add(1));
-            let line_end = source[found.end()..]
-                .find('\n')
-                .map_or(source.len(), |offset| found.end().saturating_add(offset));
-            let line = source[..line_start]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count();
-            let column = found.start().saturating_sub(line_start);
-            let end_line_start = source[..found.end()]
-                .rfind('\n')
-                .map_or(0, |offset| offset.saturating_add(1));
-            let end_line = source[..end_line_start]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count();
-            let end_column = found.end().saturating_sub(end_line_start);
+            let line = line_starts.partition_point(|start| *start <= found.start()) - 1;
+            let end_line = line_starts.partition_point(|start| *start <= found.end()) - 1;
+            let line_start = line_starts[line];
+            let line_end = line_starts
+                .get(end_line + 1)
+                .map_or(source.len(), |start| start - 1);
+            let column = found.start() - line_start;
+            let end_column = found.end() - line_starts[end_line];
             matches.push(WorkspaceSearchMatch {
-                id: format!("{}:{}:{}", path.display(), found.start(), found.end()),
+                id: format!("{path_id}:{}:{}", found.start(), found.end()),
                 canonical_path: path.clone(),
                 relative_path: relative.clone(),
                 root: root.clone(),

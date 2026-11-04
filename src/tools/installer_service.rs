@@ -1,4 +1,6 @@
 use std::{
+    cell::RefCell,
+    collections::VecDeque,
     path::PathBuf,
     sync::{
         Arc,
@@ -70,6 +72,7 @@ pub struct ToolInstaller {
     sender: Sender<InstallerRequest>,
     receiver: Receiver<ToolInstallResult>,
     progress_receiver: Receiver<ToolInstallProgress>,
+    progress: RefCell<VecDeque<ToolInstallProgress>>,
     cancel: Sender<()>,
     stopping: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -220,6 +223,7 @@ impl ToolInstaller {
             sender,
             receiver,
             progress_receiver,
+            progress: RefCell::new(VecDeque::new()),
             cancel,
             stopping,
             thread: Some(thread),
@@ -279,6 +283,9 @@ impl ToolInstaller {
     }
 
     pub fn try_progress(&self) -> Result<Option<ToolInstallProgress>, ToolInstallerError> {
+        if let Some(progress) = self.progress.borrow_mut().pop_front() {
+            return Ok(Some(progress));
+        }
         match self.progress_receiver.try_recv() {
             Ok(progress) => Ok(Some(progress)),
             Err(TryRecvError::Empty) => Ok(None),
@@ -288,7 +295,12 @@ impl ToolInstaller {
 
     pub fn try_result(&self) -> Result<Option<ToolInstallResult>, ToolInstallerError> {
         match self.receiver.try_recv() {
-            Ok(result) => Ok(Some(result)),
+            Ok(result) => {
+                let mut progress = self.progress.borrow_mut();
+                progress.extend(self.progress_receiver.try_iter());
+                progress.retain(|update| update.id != result.id);
+                Ok(Some(result))
+            }
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(ToolInstallerError::Stopped),
         }
@@ -303,5 +315,49 @@ impl Drop for ToolInstaller {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_discards_late_progress_for_only_that_tool() {
+        let (sender, _) = mpsc::channel();
+        let (results, receiver) = mpsc::channel();
+        let (progress_sender, progress_receiver) = mpsc::channel();
+        let (cancel, _) = mpsc::channel();
+        let installer = ToolInstaller {
+            sender,
+            receiver,
+            progress_receiver,
+            progress: RefCell::new(VecDeque::new()),
+            cancel,
+            stopping: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        assert!(installer.try_progress().unwrap().is_none());
+        for id in ["one", "two"] {
+            progress_sender
+                .send(ToolInstallProgress {
+                    id: id.into(),
+                    operation: ToolOperation::InstallManaged,
+                    phase: "verifying".into(),
+                    completed: 1,
+                    total: None,
+                })
+                .unwrap();
+        }
+        results
+            .send(ToolInstallResult {
+                id: "one".into(),
+                operation: ToolOperation::InstallManaged,
+                result: Ok(None),
+            })
+            .unwrap();
+        assert_eq!(installer.try_result().unwrap().unwrap().id, "one");
+        assert_eq!(installer.try_progress().unwrap().unwrap().id, "two");
+        assert!(installer.try_progress().unwrap().is_none());
     }
 }

@@ -5,8 +5,8 @@ mod conflict;
 pub use conflict::{
     GitConflictChoice, GitConflictEntry, GitConflictError, GitConflictResolveError,
     GitConflictSide, GitConflictState, GitOperationAction, GitOperationBar, GitRecoveryOutcome,
-    GitReplacementPlan, GitRecoveryRefusal, abort_operation, apply_replacement, plan_replacement,
-    continue_operation, read_conflict_state, read_side_content,
+    GitRecoveryRefusal, GitReplacementPlan, abort_operation, apply_replacement, continue_operation,
+    plan_replacement, read_conflict_state, read_side_content,
 };
 mod status;
 pub use status::{
@@ -16,14 +16,14 @@ pub use status::{
     validate_unsaved_documents,
 };
 mod hunks;
+pub use branches::{
+    GitBranchEntry, GitBranchError, GitBranchGeneration, GitBranchList, GitBranchListRequest,
+    GitBranchRequest, GitBranchResult, GitBranchService, GitWorktreeEntry, WorktreeIdentity,
+};
 pub use hunks::{
     GitDiffLayer, GitDiffLine, GitDiffLineKind, GitHunk, GitHunkBufferInput, GitHunkError,
     GitHunkGeneration, GitHunkId, GitHunkPolicy, GitHunkService, GitHunkSign, GitHunkSignKind,
     GitHunkSnapshot, git_hunk_signs, git_staged_signs, index_line_in_buffer, read_hunks,
-};
-pub use branches::{
-    GitBranchEntry, GitBranchError, GitBranchGeneration, GitBranchList, GitBranchListRequest,
-    GitBranchRequest, GitBranchResult, GitBranchService, GitWorktreeEntry, WorktreeIdentity,
 };
 mod mutation;
 pub use mutation::{

@@ -2,10 +2,10 @@ pub(crate) mod terminal;
 use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
 mod debug;
 pub(crate) mod explorer;
-use debug::{debug_layout_in, render_debug_panes};
 pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets, debug_pane_tab_at};
-use explorer::{place_workspace_frame, render_explorer_window};
+use debug::{debug_layout_in, render_debug_panes};
 pub(crate) use explorer::explorer_segment_style;
+use explorer::{place_workspace_frame, render_explorer_window};
 pub(crate) mod overlays;
 use super::geometry::text_width;
 use overlays::{
@@ -33,23 +33,23 @@ use surfaces::{
 use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
 
 pub use agent::{AgentListRow, AgentPanelUi, transcript_lines};
+pub use editor::{snap_display_column, snap_display_column_forward};
+pub use explorer::explorer_panel_width;
+pub use overlays::content_tab_at_column;
 pub use settings::{
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
     settings_hit, settings_layout, settings_line_height,
 };
-pub use editor::{snap_display_column, snap_display_column_forward};
-pub use explorer::explorer_panel_width;
-pub use overlays::content_tab_at_column;
 pub use surfaces::picker_geometry;
-pub(crate) use terminal::terminal_window_geometry;
 pub use terminal::terminal_tab_at_column;
+pub(crate) use terminal::terminal_window_geometry;
 pub use visual_rows::{
     VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
     editor_state_content_width, editor_state_gutter_width,
 };
 pub use workspace::{
-    PaneViewport, view_pane_viewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
-    pane_viewports,
+    PaneViewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
+    pane_viewports, view_pane_viewport,
 };
 
 use std::time::Instant;
@@ -315,7 +315,6 @@ pub enum DocumentationPopupKind {
     Notice,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationMarkupKind {
     PlainText,
@@ -374,10 +373,14 @@ impl DocumentationPopupState {
     }
 
     /// The line at `index` and its styled runs.
+    #[allow(clippy::type_complexity)]
     fn at(
         &self,
         mut index: usize,
-    ) -> Option<(&str, &[(std::ops::Range<usize>, crate::language::syntax::Highlight)])> {
+    ) -> Option<(
+        &str,
+        &[(std::ops::Range<usize>, crate::language::syntax::Highlight)],
+    )> {
         for section in &self.sections {
             if let Some(heading) = &section.heading {
                 if index == 0 {
@@ -386,7 +389,10 @@ impl DocumentationPopupState {
                 index = index.saturating_sub(1);
             }
             if let Some(line) = section.lines.get(index) {
-                return Some((line, section.spans.get(index).map_or(&[][..], Vec::as_slice)));
+                return Some((
+                    line,
+                    section.spans.get(index).map_or(&[][..], Vec::as_slice),
+                ));
             }
             index = index.saturating_sub(section.lines.len());
         }
@@ -690,13 +696,11 @@ impl DiffPreview {
     /// painter uses rather than from a re-derivation that could drift.
     #[must_use]
     pub fn content_width(&self, ambiguous_width: crate::config::AmbiguousWidth) -> usize {
-        let measure = |text: &str| {
-            crate::ui::geometry::text_width(text, ambiguous_width)
-        };
+        let number_width = self.number_width();
+        let measure = |text: &str| crate::ui::geometry::text_width(text, ambiguous_width);
         match self.layout {
             DiffLayout::Unified => self
-                .rows()
-                .iter()
+                .iter_rows()
                 .take(64)
                 .map(|row| measure(&row.text))
                 .max()
@@ -711,7 +715,9 @@ impl DiffPreview {
                     .max()
                     .unwrap_or(0);
                 let (left, right) = rows.iter().fold((0usize, 0usize), |(left, right), row| {
-                    let half = |cell: &DiffSideCell| measure(&self.side_cell_text(cell).0);
+                    let half = |cell: &DiffSideCell| {
+                        measure(&Self::side_cell_text_with_width(cell, number_width).0)
+                    };
                     (
                         left.max(row.old.as_ref().map_or(0, half)),
                         right.max(row.new.as_ref().map_or(0, half)),
@@ -726,7 +732,10 @@ impl DiffPreview {
     /// The text of one unified diff line, with the changed spans moved into its coordinates.
     #[must_use]
     pub fn line_row(&self, line: &DiffLine) -> (String, Vec<DiffSpan>) {
-        let number_width = self.number_width();
+        Self::line_row_with_width(line, self.number_width())
+    }
+
+    fn line_row_with_width(line: &DiffLine, number_width: usize) -> (String, Vec<DiffSpan>) {
         let old = line.old_number.map_or_else(String::new, |n| n.to_string());
         let new = line.new_number.map_or_else(String::new, |n| n.to_string());
         let glyph = match line.kind {
@@ -751,8 +760,12 @@ impl DiffPreview {
     /// returned text's coordinates.
     #[must_use]
     pub fn side_cell_text(&self, cell: &DiffSideCell) -> (String, Vec<DiffSpan>) {
+        Self::side_cell_text_with_width(cell, self.number_width())
+    }
+
+    fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
         let number = cell.number.map_or_else(String::new, |n| n.to_string());
-        let prefix = format!("{number:>width$} ", width = self.number_width());
+        let prefix = format!("{number:>width$} ", width = width);
         let offset = prefix.len();
         let spans = cell
             .spans
@@ -775,8 +788,14 @@ impl DiffPreview {
     #[must_use]
     pub fn last_scroll(&self, height: usize) -> usize {
         let pinned = self.pinned_rows();
-        self.rows()
-            .len()
+        let total = self
+            .hunks
+            .iter()
+            .map(|hunk| hunk.lines.len() + 1 + usize::from(hunk.collapsed_before > 0))
+            .sum::<usize>()
+            + pinned
+            + usize::from(self.truncated);
+        total
             .saturating_sub(pinned)
             .saturating_sub(height.saturating_sub(pinned))
     }
@@ -787,8 +806,7 @@ impl DiffPreview {
     pub fn opening_scroll(&self, height: usize) -> usize {
         let pinned = self.pinned_rows();
         let first_change = self
-            .rows()
-            .iter()
+            .iter_rows()
             .skip(pinned)
             .position(|row| matches!(row.kind, DiffRowKind::Added | DiffRowKind::Removed))
             .unwrap_or(0);
@@ -806,37 +824,48 @@ impl DiffPreview {
     /// that row's own coordinates so the painter cannot shift them wrongly.
     #[must_use]
     pub fn rows(&self) -> Vec<DiffRow> {
-        let mut rows = Vec::new();
-        let plain = |kind: DiffRowKind, text: String| DiffRow {
+        self.iter_rows().collect()
+    }
+
+    fn iter_rows(&self) -> impl Iterator<Item = DiffRow> + '_ {
+        let number_width = self.number_width();
+        let plain = |kind, text| DiffRow {
             kind,
             text,
             spans: Vec::new(),
         };
-        if !self.provenance.is_empty() {
-            rows.push(plain(DiffRowKind::Provenance, self.provenance.clone()));
-        }
-        for hunk in &self.hunks {
-            if hunk.collapsed_before > 0 {
-                rows.push(plain(
+        let provenance = (!self.provenance.is_empty())
+            .then(|| plain(DiffRowKind::Provenance, self.provenance.clone()));
+        let hunks = self.hunks.iter().flat_map(move |hunk| {
+            let collapsed = (hunk.collapsed_before > 0).then(|| {
+                plain(
                     DiffRowKind::Collapsed,
-                    self.collapsed_text(hunk.collapsed_before),
-                ));
-            }
-            rows.push(plain(DiffRowKind::Header, hunk.header.clone()));
-            for line in &hunk.lines {
-                let kind = match line.kind {
-                    DiffLineKind::Added => DiffRowKind::Added,
-                    DiffLineKind::Removed => DiffRowKind::Removed,
-                    DiffLineKind::Context => DiffRowKind::Context,
-                };
-                let (text, spans) = self.line_row(line);
-                rows.push(DiffRow { kind, text, spans });
-            }
-        }
-        if self.truncated {
-            rows.push(plain(DiffRowKind::Truncated, self.truncated_text()));
-        }
-        rows
+                    format!(
+                        "{:>number_width$}   {} unchanged lines",
+                        "", hunk.collapsed_before
+                    ),
+                )
+            });
+            collapsed
+                .into_iter()
+                .chain(std::iter::once(plain(
+                    DiffRowKind::Header,
+                    hunk.header.clone(),
+                )))
+                .chain(hunk.lines.iter().map(move |line| {
+                    let kind = match line.kind {
+                        DiffLineKind::Added => DiffRowKind::Added,
+                        DiffLineKind::Removed => DiffRowKind::Removed,
+                        DiffLineKind::Context => DiffRowKind::Context,
+                    };
+                    let (text, spans) = Self::line_row_with_width(line, number_width);
+                    DiffRow { kind, text, spans }
+                }))
+        });
+        provenance.into_iter().chain(hunks).chain(
+            self.truncated
+                .then(|| plain(DiffRowKind::Truncated, self.truncated_text())),
+        )
     }
 
     /// Every row a side-by-side diff draws, paired line for line.
@@ -846,6 +875,7 @@ impl DiffPreview {
     /// a different one is drawn.
     #[must_use]
     pub fn side_by_side_rows(&self) -> Vec<DiffSideRow> {
+        let number_width = self.number_width();
         let spanning = |kind: DiffRowKind, text: String| DiffSideRow {
             kind,
             spanning: Some(text),
@@ -865,7 +895,10 @@ impl DiffPreview {
             if hunk.collapsed_before > 0 {
                 rows.push(spanning(
                     DiffRowKind::Collapsed,
-                    self.collapsed_text(hunk.collapsed_before),
+                    format!(
+                        "{:>number_width$}   {} unchanged lines",
+                        "", hunk.collapsed_before
+                    ),
                 ));
             }
             rows.push(spanning(DiffRowKind::Header, hunk.header.clone()));
@@ -1362,9 +1395,7 @@ impl OperationBarState {
                 format!("{brief} {tail}")
             };
         }
-        let budget = width
-            .saturating_sub(tail_width)
-            .saturating_sub(separator);
+        let budget = width.saturating_sub(tail_width).saturating_sub(separator);
         let mut head: String = brief.chars().take(budget).collect();
         while head.ends_with(' ') {
             head.pop();
@@ -1538,8 +1569,8 @@ fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<Confirmat
     let policy = CellGrid::new_with_policy(
         0,
         0,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let mut lines = Vec::new();
@@ -1788,9 +1819,13 @@ fn render_error_notification(
     for (row, line) in (rect.y + 1..).zip(&lines) {
         frame.grid.set_cell(rect.x, row, "│", style);
         frame.grid.set_cell(right, row, "│", style);
-        frame
-            .grid
-            .put_text_clipped(rect.x.saturating_add(2), row, line, style, right.saturating_sub(1));
+        frame.grid.put_text_clipped(
+            rect.x.saturating_add(2),
+            row,
+            line,
+            style,
+            right.saturating_sub(1),
+        );
     }
 }
 
@@ -1812,7 +1847,10 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
                     pieces.push((piece.to_owned(), key));
                 }
             }
-            let word_width: usize = pieces.iter().map(|(piece, _)| text_width(piece, ambiguous)).sum();
+            let word_width: usize = pieces
+                .iter()
+                .map(|(piece, _)| text_width(piece, ambiguous))
+                .sum();
             if used > 0 && used + 1 + word_width > width {
                 lines.push(std::mem::take(&mut line));
                 used = 0;
@@ -1829,7 +1867,9 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
             // A long path breaks where it has to, so its end, the name that matters, still shows.
             for (piece, is_key) in pieces {
                 let mut run = String::new();
-                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(piece.as_str(), true) {
+                for grapheme in
+                    unicode_segmentation::UnicodeSegmentation::graphemes(piece.as_str(), true)
+                {
                     let grapheme_width = text_width(grapheme, ambiguous).max(1);
                     if used > 0 && used + grapheme_width > width {
                         if !run.is_empty() {
@@ -1857,10 +1897,22 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
 /// `place` is whether the key hints are open and where an agent panel starts. The card goes to
 /// the top while the hints are open, and left of the panel, or above its input when there is
 /// no room beside it.
-fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width: u16, bottom: u16, place: (bool, Option<u16>)) {
+fn render_tutor_card(
+    frame: &mut Frame,
+    card: &TutorCard,
+    config: &Config,
+    width: u16,
+    bottom: u16,
+    place: (bool, Option<u16>),
+) {
     let (hints_open, panel) = place;
-    let beside = panel.map(|x| x.saturating_sub(2)).filter(|room| *room >= 30);
-    let card_width = width.saturating_sub(2).min(64).min(beside.unwrap_or(u16::MAX));
+    let beside = panel
+        .map(|x| x.saturating_sub(2))
+        .filter(|room| *room >= 30);
+    let card_width = width
+        .saturating_sub(2)
+        .min(64)
+        .min(beside.unwrap_or(u16::MAX));
     if card_width < 24 || bottom < 8 {
         return;
     }
@@ -1868,15 +1920,34 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     let styled = |text: &str, room: u16, plain: Style, key: Style| -> Vec<Vec<(String, Style)>> {
         wrap_card_text(text, usize::from(room), ambiguous)
             .into_iter()
-            .map(|line| line.into_iter().map(|(piece, is_key)| (piece, if is_key { key } else { plain })).collect())
+            .map(|line| {
+                line.into_iter()
+                    .map(|(piece, is_key)| (piece, if is_key { key } else { plain }))
+                    .collect()
+            })
             .collect()
     };
-    let mut rows = styled(&card.text, card_width - 4, Style::Default, Style::KeyHintKey);
+    let mut rows = styled(
+        &card.text,
+        card_width - 4,
+        Style::Default,
+        Style::KeyHintKey,
+    );
     rows.push(Vec::new());
     if !card.place.is_empty() {
-        let (style, lead) = if card.away { (Style::Warning, "! ") } else { (Style::Accent, "▶ ") };
-        for (index, mut line) in styled(&card.place, card_width - 6, style, Style::KeyHintKey).into_iter().enumerate() {
-            line.insert(0, ((if index == 0 { lead } else { "  " }).to_owned(), style));
+        let (style, lead) = if card.away {
+            (Style::Warning, "! ")
+        } else {
+            (Style::Accent, "▶ ")
+        };
+        for (index, mut line) in styled(&card.place, card_width - 6, style, Style::KeyHintKey)
+            .into_iter()
+            .enumerate()
+        {
+            line.insert(
+                0,
+                ((if index == 0 { lead } else { "  " }).to_owned(), style),
+            );
             rows.push(line);
         }
     }
@@ -1884,19 +1955,51 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     let (lead, plain, key) = if card.praised {
         ("✓   ".to_owned(), Style::GitSignAdded, Style::GitSignAdded)
     } else {
-        (format!("{} ", card.pointer), Style::Accent, Style::KeyHintKey)
+        (
+            format!("{} ", card.pointer),
+            Style::Accent,
+            Style::KeyHintKey,
+        )
     };
-    for (index, mut line) in styled(&card.press, card_width - 8, plain, key).into_iter().enumerate() {
-        let lead = if index == 0 { lead.clone() } else { "    ".to_owned() };
-        line.insert(0, (lead, if card.praised { Style::GitSignAdded } else { Style::Accent }));
+    for (index, mut line) in styled(&card.press, card_width - 8, plain, key)
+        .into_iter()
+        .enumerate()
+    {
+        let lead = if index == 0 {
+            lead.clone()
+        } else {
+            "    ".to_owned()
+        };
+        line.insert(
+            0,
+            (
+                lead,
+                if card.praised {
+                    Style::GitSignAdded
+                } else {
+                    Style::Accent
+                },
+            ),
+        );
         rows.push(line);
     }
     rows.push(Vec::new());
     rows.push(vec![(card.footer.clone(), Style::Muted)]);
     // Long steps lose their last rows rather than cover the whole screen.
-    let card_height = u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(2).min(bottom - 2);
-    let top = if hints_open || panel.is_some() && beside.is_none() { 1 } else { bottom - card_height };
-    let left = if beside.is_some() { 1 } else { width - card_width - 1 };
+    let card_height = u16::try_from(rows.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2)
+        .min(bottom - 2);
+    let top = if hints_open || panel.is_some() && beside.is_none() {
+        1
+    } else {
+        bottom - card_height
+    };
+    let left = if beside.is_some() {
+        1
+    } else {
+        width - card_width - 1
+    };
     let right = left + card_width - 1;
     let last = top + card_height - 1;
     for y in top..=last {
@@ -1914,9 +2017,17 @@ fn render_tutor_card(frame: &mut Frame, card: &TutorCard, config: &Config, width
     frame.grid.set_cell(right, top, "╮", Style::Accent);
     frame.grid.set_cell(left, last, "╰", Style::Accent);
     frame.grid.set_cell(right, last, "╯", Style::Accent);
-    let x = frame.grid.put_text_clipped(left + 2, top, &format!(" {} ", card.title), Style::Accent, right);
+    let x = frame.grid.put_text_clipped(
+        left + 2,
+        top,
+        &format!(" {} ", card.title),
+        Style::Accent,
+        right,
+    );
     if card.praised {
-        frame.grid.put_text_clipped(x, top, " ✓ Nice! ", Style::GitSignAdded, right);
+        frame
+            .grid
+            .put_text_clipped(x, top, " ✓ Nice! ", Style::GitSignAdded, right);
     }
     for (row, y) in rows.iter().zip(top + 1..last) {
         let mut x = left + 2;
@@ -1941,8 +2052,8 @@ pub fn render(
             grid: CellGrid::new_with_policy(
                 width,
                 height,
-                &CONTROL_CHARACTER_REPLACEMENT,
-                &ZERO_WIDTH_REPLACEMENT,
+                CONTROL_CHARACTER_REPLACEMENT,
+                ZERO_WIDTH_REPLACEMENT,
                 config.editor.ambiguous_width == AmbiguousWidth::Wide,
             ),
             cursor: None,
@@ -1989,11 +2100,6 @@ pub fn render(
     // and the workspace is rendered at that size rather than being squeezed into it.
     // The terminal panel is planned WITH the arrangement rather than after it: the panel's top row
     // is what the arrangement has, so the two docks cannot collide.
-    let debug_height = ui
-        .terminal_panel
-        .as_ref()
-        .and(terminal_geometry.as_ref())
-        .map_or(height, |geometry| geometry.top);
     let debug = ui
         .debug_panes
         .as_ref()
@@ -2006,7 +2112,7 @@ pub fn render(
                 height,
             });
             let top = workspace_top_rows(state, ui, config);
-            let end = area.y.saturating_add(area.height).min(debug_height);
+            let end = area.y.saturating_add(area.height);
             debug_layout_in(WindowRect {
                 y: area.y.saturating_add(top),
                 height: end.saturating_sub(area.y).saturating_sub(top),
@@ -2039,7 +2145,9 @@ pub fn render(
                     compositor
                         .projection
                         .window(*window)
-                        .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+                        .filter(|window| {
+                            window.layer != crate::ui::window::CompositorLayer::Floating
+                        })
                         .map(|window| window.rect)
                 })
             }))
@@ -2122,7 +2230,8 @@ pub fn render(
             workspace_frame
         };
     for (window, terminal) in &ui.other_terminals {
-        let Some(projected) = compositor.and_then(|compositor| compositor.projection.window(*window))
+        let Some(projected) =
+            compositor.and_then(|compositor| compositor.projection.window(*window))
         else {
             continue;
         };
@@ -2241,10 +2350,9 @@ pub fn render(
                 .terminal
                 .is_some_and(|(_, window)| window == projected.window)
             {
-                if let (Some(terminal), Some(geometry)) = (
-                    &ui.terminal_panel,
-                    terminal_window_geometry(*projected),
-                ) {
+                if let (Some(terminal), Some(geometry)) =
+                    (&ui.terminal_panel, terminal_window_geometry(*projected))
+                {
                     frame = dock_terminal_panel(frame, terminal, geometry, config, width, height);
                 }
                 continue;
@@ -2282,16 +2390,16 @@ pub fn render(
     if let Some(page) = &ui.settings {
         settings::render_settings(&mut frame, page, config, width, workspace_height);
     }
-    if let Some(picker) = &ui.picker {
-        if let Some(rect) = compositor.and_then(|compositor| {
+    if let Some(picker) = &ui.picker
+        && let Some(rect) = compositor.and_then(|compositor| {
             let window = compositor.surfaces.picker?;
             compositor
                 .projection
                 .window(window)
                 .map(|window| window.rect)
-        }) {
-            render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
-        }
+        })
+    {
+        render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
     }
     let completion_menu = ui.language_completion.as_ref().and_then(|completion| {
         let pane = active_editor_pane_viewport(state, ui)?;
@@ -2385,7 +2493,15 @@ pub fn render(
         } else {
             Style::Accent
         };
-        render_error_notification(&mut frame, message, style, config, width, notice_height, modal_open);
+        render_error_notification(
+            &mut frame,
+            message,
+            style,
+            config,
+            width,
+            notice_height,
+            modal_open,
+        );
     } else if let Some(message) = ui.config_diagnostic.as_ref() {
         render_error_notification(
             &mut frame,
@@ -2408,4 +2524,3 @@ pub fn render(
 
 #[cfg(test)]
 mod tests;
-

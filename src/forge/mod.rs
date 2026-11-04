@@ -43,6 +43,13 @@ pub enum ForgeReply {
     Commented(Result<(), String>),
 }
 
+#[derive(Debug)]
+pub struct ForgeEvent {
+    pub root: PathBuf,
+    pub generation: u64,
+    pub reply: ForgeReply,
+}
+
 /// The CLI that talks to the repository's forge.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Forge {
@@ -51,8 +58,8 @@ enum Forge {
 }
 
 pub struct ForgeJobs {
-    sender: Sender<ForgeReply>,
-    replies: Receiver<ForgeReply>,
+    sender: Sender<ForgeEvent>,
+    replies: Receiver<ForgeEvent>,
 }
 
 impl Default for ForgeJobs {
@@ -63,39 +70,68 @@ impl Default for ForgeJobs {
 }
 
 impl ForgeJobs {
-    pub fn try_reply(&self) -> Option<ForgeReply> {
+    pub fn try_reply(&self) -> Option<ForgeEvent> {
         self.replies.try_recv().ok()
     }
 
-    fn spawn(&self, job: impl FnOnce() -> ForgeReply + Send + 'static) {
+    #[cfg(test)]
+    pub(crate) fn reply_for_test(&self, root: PathBuf, generation: u64, reply: ForgeReply) {
+        self.sender
+            .send(ForgeEvent {
+                root,
+                generation,
+                reply,
+            })
+            .unwrap();
+    }
+
+    fn spawn(
+        &self,
+        root: PathBuf,
+        generation: u64,
+        job: impl FnOnce(&Path) -> ForgeReply + Send + 'static,
+    ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let _ = sender.send(job());
+            let reply = job(&root);
+            let _ = sender.send(ForgeEvent {
+                root,
+                generation,
+                reply,
+            });
         });
     }
 
-    pub fn list(&self, root: PathBuf) {
-        self.spawn(move || match open_pull_requests(&root) {
-            Ok(list) => ForgeReply::List(Ok(list)),
-            Err(error) => ForgeReply::Offline {
-                error,
-                local: local_pull_requests(&root),
-            },
+    pub fn list(&self, root: PathBuf, generation: u64) {
+        self.spawn(root, generation, move |root| {
+            match open_pull_requests(root) {
+                Ok(list) => ForgeReply::List(Ok(list)),
+                Err(error) => ForgeReply::Offline {
+                    error,
+                    local: local_pull_requests(root),
+                },
+            }
         });
     }
 
     /// Check the pull request out into `<parent>/<repo>-pr-<number>` on branch `pr-<number>`,
     /// so the current worktree and its branch are left alone. An existing one is updated.
-    pub fn checkout(&self, root: PathBuf, number: u64) {
-        self.spawn(move || {
+    pub fn checkout(
+        &self,
+        root: PathBuf,
+        generation: u64,
+        number: u64,
+        workspace: crate::workspace::WorkspaceState,
+    ) {
+        self.spawn(root, generation, move |root| {
             ForgeReply::CheckedOut((|| {
-                let target = pr_worktree(&root, number)?;
-                if !target.is_dir() {
-                    let path = target.to_string_lossy().into_owned();
-                    run(&root, "git", &["worktree", "add", "--detach", &path])?;
-                }
+                workspace
+                    .authorize_execution(crate::workspace::ExecutionSource::ProjectLocal)
+                    .map_err(|error| error.to_string())?;
+                let target = pr_worktree(root, number)?;
+                prepare_worktree(root, &target)?;
                 let branch = format!("pr-{number}");
-                with_forge(&root, |forge| match forge {
+                with_forge(root, |forge| match forge {
                     Forge::GitHub => run(
                         &target,
                         "gh",
@@ -103,8 +139,12 @@ impl ForgeJobs {
                     ),
                     // Gitea and Forgejo publish every pull request's head as refs/pull/N/head.
                     Forge::Gitea => {
-                        run(&target, "git", &["fetch", "origin", &format!("refs/pull/{number}/head")])?;
-                        run(&target, "git", &["checkout", "-B", &branch, "FETCH_HEAD"])
+                        run(
+                            &target,
+                            "git",
+                            &["fetch", "origin", &format!("refs/pull/{number}/head")],
+                        )?;
+                        update_pr_branch(&target, &branch)
                     }
                 })?;
                 Ok(target)
@@ -113,13 +153,13 @@ impl ForgeJobs {
     }
 
     /// Review comments of the pull request for the current branch.
-    pub fn comments(&self, root: PathBuf) {
-        self.spawn(move || {
-            ForgeReply::Comments(with_forge(&root, |forge| match forge {
+    pub fn comments(&self, root: PathBuf, generation: u64) {
+        self.spawn(root, generation, move |root| {
+            ForgeReply::Comments(with_forge(root, |forge| match forge {
                 Forge::GitHub => {
-                    let number = current_number(&root, Forge::GitHub)?;
+                    let number = current_number(root, Forge::GitHub)?;
                     let output = run(
-                        &root,
+                        root,
                         "gh",
                         &[
                             "api",
@@ -129,14 +169,17 @@ impl ForgeJobs {
                             ".[]",
                         ],
                     )?;
-                    parse_comments(&output, &root)
+                    parse_comments(&output, root)
                 }
                 Forge::Gitea => {
-                    let number = current_number(&root, Forge::Gitea)?;
+                    let number = current_number(root, Forge::Gitea)?;
                     let reviews = run(
-                        &root,
+                        root,
                         "tea",
-                        &["api", &format!("repos/{{owner}}/{{repo}}/pulls/{number}/reviews")],
+                        &[
+                            "api",
+                            &format!("repos/{{owner}}/{{repo}}/pulls/{number}/reviews"),
+                        ],
                     )?;
                     let reviews: Vec<Value> =
                         serde_json::from_str(&reviews).map_err(|error| error.to_string())?;
@@ -146,14 +189,16 @@ impl ForgeJobs {
                             continue;
                         };
                         let output = run(
-                            &root,
+                            root,
                             "tea",
                             &[
                                 "api",
-                                &format!("repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{id}/comments"),
+                                &format!(
+                                    "repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{id}/comments"
+                                ),
                             ],
                         )?;
-                        comments.extend(parse_gitea_comments(&output, &root)?);
+                        comments.extend(parse_gitea_comments(&output, root)?);
                     }
                     Ok(comments)
                 }
@@ -162,20 +207,34 @@ impl ForgeJobs {
     }
 
     /// Comment on `line` (1-based) of `path` in the pull request for the current branch.
-    pub fn comment(&self, root: PathBuf, path: PathBuf, line: usize, body: String) {
-        self.spawn(move || {
-            ForgeReply::Commented((|| {
-                let relative = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().into_owned();
-                with_forge(&root, |forge| match forge {
+    pub fn comment(
+        &self,
+        root: PathBuf,
+        generation: u64,
+        path: PathBuf,
+        line: usize,
+        body: String,
+        text: String,
+    ) {
+        self.spawn(root, generation, move |root| {
+            ForgeReply::Commented({
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                with_forge(root, |forge| match forge {
                     Forge::GitHub => {
-                        let view = run(&root, "gh", &["pr", "view", "--json", "number,headRefOid"])?;
+                        let view = run(root, "gh", &["pr", "view", "--json", "number,headRefOid"])?;
                         let view: Value =
                             serde_json::from_str(&view).map_err(|error| error.to_string())?;
-                        let number =
-                            view["number"].as_u64().ok_or("no pull request for this branch")?;
+                        let number = view["number"]
+                            .as_u64()
+                            .ok_or("no pull request for this branch")?;
                         let commit = view["headRefOid"].as_str().unwrap_or_default();
+                        check_comment_text(root, commit, &relative, &text)?;
                         run(
-                            &root,
+                            root,
                             "gh",
                             &[
                                 "api",
@@ -197,14 +256,25 @@ impl ForgeJobs {
                         .map(|_| ())
                     }
                     Forge::Gitea => {
-                        let number = current_number(&root, Forge::Gitea)?;
+                        let number = current_number(root, Forge::Gitea)?;
+                        let view = run(
+                            root,
+                            "tea",
+                            &["api", &format!("repos/{{owner}}/{{repo}}/pulls/{number}")],
+                        )?;
+                        let view: Value =
+                            serde_json::from_str(&view).map_err(|error| error.to_string())?;
+                        let commit = view["head"]["sha"]
+                            .as_str()
+                            .ok_or("pull request head is missing")?;
+                        check_comment_text(root, commit, &relative, &text)?;
                         let review = serde_json::json!({
                             "event": "COMMENT",
                             "body": "",
                             "comments": [{ "path": relative, "body": body, "new_position": line }],
                         });
                         run(
-                            &root,
+                            root,
                             "tea",
                             &[
                                 "api",
@@ -218,9 +288,19 @@ impl ForgeJobs {
                         .map(|_| ())
                     }
                 })
-            })())
+            })
         });
     }
+}
+
+fn check_comment_text(root: &Path, commit: &str, path: &str, text: &str) -> Result<(), String> {
+    let head = run(root, "git", &["show", &format!("{commit}:{path}")])?;
+    if head.replace("\r\n", "\n").replace('\r', "\n") != text {
+        return Err(
+            "the buffer differs from the pull request head; comment on an unchanged buffer".into(),
+        );
+    }
+    Ok(())
 }
 
 fn open_pull_requests(root: &Path) -> Result<Vec<PullRequest>, String> {
@@ -302,10 +382,14 @@ fn remote_host(url: &str) -> &str {
 
 fn current_number(root: &Path, forge: Forge) -> Result<u64, String> {
     match forge {
-        Forge::GitHub => run(root, "gh", &["pr", "view", "--json", "number", "--jq", ".number"])?
-            .trim()
-            .parse()
-            .map_err(|_| "no pull request for this branch".to_owned()),
+        Forge::GitHub => run(
+            root,
+            "gh",
+            &["pr", "view", "--json", "number", "--jq", ".number"],
+        )?
+        .trim()
+        .parse()
+        .map_err(|_| "no pull request for this branch".to_owned()),
         Forge::Gitea => {
             let branch = run(root, "git", &["branch", "--show-current"])?;
             let branch = branch.trim();
@@ -332,22 +416,94 @@ fn local_pull_requests(root: &Path) -> Vec<(u64, PathBuf)> {
     for line in output.lines() {
         if let Some(worktree) = line.strip_prefix("worktree ") {
             path = Some(PathBuf::from(worktree));
-        } else if let Some(branch) = line.strip_prefix("branch refs/heads/pr-") {
-            if let (Ok(number), Some(path)) = (branch.parse(), path.take()) {
-                local.push((number, path));
-            }
+        } else if let Some(branch) = line.strip_prefix("branch refs/heads/pr-")
+            && let (Ok(number), Some(path)) = (branch.parse(), path.take())
+        {
+            local.push((number, path));
         }
     }
     local
 }
 
 fn pr_worktree(root: &Path, number: u64) -> Result<PathBuf, String> {
+    if let Some((_, path)) = local_pull_requests(root)
+        .into_iter()
+        .find(|(pr, _)| *pr == number)
+    {
+        return Ok(path);
+    }
+    let repository = git2::Repository::discover(root).map_err(|error| error.to_string())?;
+    let common =
+        git2::Repository::open(repository.commondir()).map_err(|error| error.to_string())?;
+    let root = common
+        .workdir()
+        .ok_or("the repository has no main worktree")?;
     let name = root
         .file_name()
         .ok_or("the workspace has no directory name")?
         .to_string_lossy();
-    let parent = root.parent().ok_or("the workspace has no parent directory")?;
+    let parent = root
+        .parent()
+        .ok_or("the workspace has no parent directory")?;
     Ok(parent.join(format!("{name}-pr-{number}")))
+}
+
+fn prepare_worktree(root: &Path, target: &Path) -> Result<(), String> {
+    if !target.try_exists().map_err(|error| error.to_string())? {
+        let path = target.to_str().ok_or("worktree path is not UTF-8")?;
+        return run(root, "git", &["worktree", "add", "--detach", path]).map(|_| ());
+    }
+    let source = git2::Repository::discover(root).map_err(|error| error.to_string())?;
+    let repository = git2::Repository::open(target).map_err(|error| error.to_string())?;
+    let common = source
+        .commondir()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if repository
+        .commondir()
+        .canonicalize()
+        .map_err(|error| error.to_string())?
+        != common
+    {
+        return Err("pull request checkout belongs to another repository".into());
+    }
+    let target = target.canonicalize().map_err(|error| error.to_string())?;
+    let registered = source
+        .worktrees()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .flatten()
+        .any(|name| {
+            source.find_worktree(name).is_ok_and(|worktree| {
+                worktree.validate().is_ok()
+                    && worktree
+                        .path()
+                        .canonicalize()
+                        .is_ok_and(|path| path == target)
+            })
+        });
+    let common_repository = git2::Repository::open(&common).map_err(|error| error.to_string())?;
+    let main = common_repository
+        .workdir()
+        .and_then(|path| path.canonicalize().ok());
+    if !registered && main.as_ref() != Some(&target) {
+        return Err("pull request checkout is not a registered worktree".into());
+    }
+    Ok(())
+}
+
+fn update_pr_branch(root: &Path, branch: &str) -> Result<String, String> {
+    let repository = git2::Repository::open(root).map_err(|error| error.to_string())?;
+    if repository
+        .find_branch(branch, git2::BranchType::Local)
+        .is_ok()
+    {
+        run(root, "git", &["checkout", branch])?;
+        run(root, "git", &["merge", "--ff-only", "FETCH_HEAD"])
+            .map_err(|error| format!("{error}; PR branch preserved, reconcile it before updating"))
+    } else {
+        run(root, "git", &["checkout", "-b", branch, "FETCH_HEAD"])
+    }
 }
 
 fn run(cwd: &Path, program: &str, arguments: &[&str]) -> Result<String, String> {
@@ -381,7 +537,10 @@ fn parse_list(output: &str) -> Result<Vec<PullRequest>, String> {
         .map(|item| PullRequest {
             number: item["number"].as_u64().unwrap_or_default(),
             title: item["title"].as_str().unwrap_or_default().to_owned(),
-            author: item["author"]["login"].as_str().unwrap_or_default().to_owned(),
+            author: item["author"]["login"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
             branch: item["headRefName"].as_str().unwrap_or_default().to_owned(),
             draft: item["isDraft"].as_bool().unwrap_or_default(),
         })
@@ -397,7 +556,9 @@ fn parse_tea_list(output: &str) -> Result<Vec<PullRequest>, String> {
             let title = item["title"].as_str().unwrap_or_default().to_owned();
             Some(PullRequest {
                 number: item["index"].as_str()?.trim().parse().ok()?,
-                draft: ["WIP:", "[WIP]"].iter().any(|prefix| title.starts_with(prefix)),
+                draft: ["WIP:", "[WIP]"]
+                    .iter()
+                    .any(|prefix| title.starts_with(prefix)),
                 title,
                 author: item["author"].as_str().unwrap_or_default().to_owned(),
                 branch: item["head"].as_str().unwrap_or_default().to_owned(),
@@ -415,8 +576,15 @@ fn parse_comments(output: &str, root: &Path) -> Result<Vec<ReviewComment>, Strin
             let item: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
             Ok(ReviewComment {
                 path: root.join(item["path"].as_str().unwrap_or_default()),
-                line: item["line"].as_u64(),
-                author: item["user"]["login"].as_str().unwrap_or_default().to_owned(),
+                line: if item["side"].as_str() == Some("LEFT") {
+                    None
+                } else {
+                    item["line"].as_u64()
+                },
+                author: item["user"]["login"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
                 body: item["body"].as_str().unwrap_or_default().to_owned(),
             })
         })
@@ -431,7 +599,10 @@ fn parse_gitea_comments(output: &str, root: &Path) -> Result<Vec<ReviewComment>,
         .map(|item| ReviewComment {
             path: root.join(item["path"].as_str().unwrap_or_default()),
             line: item["position"].as_u64().filter(|line| *line > 0),
-            author: item["user"]["login"].as_str().unwrap_or_default().to_owned(),
+            author: item["user"]["login"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
             body: item["body"].as_str().unwrap_or_default().to_owned(),
         })
         .collect())
@@ -463,6 +634,14 @@ mod tests {
     }
 
     #[test]
+    fn base_side_review_comments_have_no_head_location() {
+        let comments = "{\"path\":\"a.rs\",\"line\":10,\"side\":\"LEFT\"}\n{\"path\":\"a.rs\",\"line\":11,\"side\":\"RIGHT\"}\n";
+        let parsed = parse_comments(comments, Path::new("/r")).unwrap();
+        assert_eq!(parsed[0].line, None);
+        assert_eq!(parsed[1].line, Some(11));
+    }
+
+    #[test]
     fn tea_output_is_parsed() {
         let list = r#"[{"index":"12","title":"WIP: Faster","author":"ana","head":"fast"}]"#;
         assert_eq!(
@@ -486,19 +665,127 @@ mod tests {
     fn remote_hosts_pick_the_forge_cli() {
         assert_eq!(remote_host("git@github.com:a/b.git"), "github.com");
         assert_eq!(remote_host("https://github.com/a/b"), "github.com");
-        assert_eq!(remote_host("ssh://git@forgejo.example.org/a/b.git"), "forgejo.example.org");
-        assert_eq!(remote_host("ssh://git@codeberg.org:2222/a/b"), "codeberg.org");
+        assert_eq!(
+            remote_host("ssh://git@forgejo.example.org/a/b.git"),
+            "forgejo.example.org"
+        );
+        assert_eq!(
+            remote_host("ssh://git@codeberg.org:2222/a/b"),
+            "codeberg.org"
+        );
         assert!(remote_is_path("/srv/git/a.git"));
         assert!(remote_is_path("../a.git"));
         assert!(remote_is_path("file:///srv/git/a.git"));
         assert!(!remote_is_path("git@github.com:a/b.git"));
     }
 
+    fn repository(root: &Path) {
+        run(root, "git", &["init"]).unwrap();
+        run(root, "git", &["config", "user.name", "Test"]).unwrap();
+        run(root, "git", &["config", "user.email", "test@example.com"]).unwrap();
+        run(root, "git", &["commit", "--allow-empty", "-m", "initial"]).unwrap();
+    }
+
     #[test]
-    fn pull_requests_get_a_sibling_worktree() {
-        assert_eq!(
-            pr_worktree(Path::new("/src/dust"), 12).unwrap(),
-            PathBuf::from("/src/dust-pr-12")
+    fn pull_requests_reuse_sibling_worktrees_from_any_checkout() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        repository(&root);
+        let first = pr_worktree(&root, 1).unwrap();
+        assert_eq!(first, directory.path().join("repo-pr-1"));
+        prepare_worktree(&root, &first).unwrap();
+        run(&first, "git", &["checkout", "-b", "pr-1"]).unwrap();
+        let second = pr_worktree(&first, 2).unwrap();
+        assert_eq!(second, directory.path().join("repo-pr-2"));
+        prepare_worktree(&first, &second).unwrap();
+        assert_eq!(pr_worktree(&second, 1).unwrap(), first);
+        prepare_worktree(&second, &first).unwrap();
+    }
+
+    #[test]
+    fn foreign_checkout_directories_are_rejected_before_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("repo");
+        let target = directory.path().join("repo-pr-7");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        repository(&root);
+        repository(&target);
+        let before = run(&target, "git", &["rev-parse", "HEAD"]).unwrap();
+        assert!(prepare_worktree(&root, &target).is_err());
+        assert_eq!(run(&target, "git", &["rev-parse", "HEAD"]).unwrap(), before);
+    }
+
+    #[test]
+    fn updating_pr_branches_preserves_local_commits_and_fast_forwards() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        repository(root);
+        let base = run(root, "git", &["rev-parse", "HEAD"]).unwrap();
+        run(root, "git", &["fetch", ".", base.trim()]).unwrap();
+        update_pr_branch(root, "pr-7").unwrap();
+        run(root, "git", &["commit", "--allow-empty", "-m", "local"]).unwrap();
+        let local = run(root, "git", &["rev-parse", "HEAD"]).unwrap();
+        update_pr_branch(root, "pr-7").unwrap();
+        assert_eq!(run(root, "git", &["rev-parse", "HEAD"]).unwrap(), local);
+        run(root, "git", &["checkout", "--detach", base.trim()]).unwrap();
+        run(root, "git", &["commit", "--allow-empty", "-m", "remote"]).unwrap();
+        let remote = run(root, "git", &["rev-parse", "HEAD"]).unwrap();
+        run(root, "git", &["fetch", ".", remote.trim()]).unwrap();
+        assert!(update_pr_branch(root, "pr-7").is_err());
+        assert_eq!(run(root, "git", &["rev-parse", "pr-7"]).unwrap(), local);
+        run(root, "git", &["fetch", ".", local.trim()]).unwrap();
+        run(root, "git", &["branch", "pr-8", base.trim()]).unwrap();
+        update_pr_branch(root, "pr-8").unwrap();
+        assert_eq!(run(root, "git", &["rev-parse", "HEAD"]).unwrap(), local);
+    }
+    #[test]
+    fn untrusted_checkout_is_rejected_before_running_commands() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [(
+                "workspace".into(),
+                crate::workspace::RootIdentity {
+                    canonical_path: root.path().into(),
+                    filesystem_identity: None,
+                },
+            )],
+        )
+        .unwrap();
+        let jobs = ForgeJobs::default();
+        jobs.checkout(root.path().into(), 0, 1, workspace);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Some(reply) = jobs.try_reply() {
+                let ForgeReply::CheckedOut(Err(error)) = reply.reply else {
+                    panic!("trust rejection")
+                };
+                assert!(error.contains("trust"), "{error}");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn line_comments_require_the_pull_request_head_text() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(root.path()).unwrap();
+        std::fs::write(root.path().join("file.txt"), "one\ntwo\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("file.txt")).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap()
+            .to_string();
+        assert!(check_comment_text(root.path(), &commit, "file.txt", "one\ntwo\n").is_ok());
+        assert!(
+            check_comment_text(root.path(), &commit, "file.txt", "inserted\none\ntwo\n").is_err()
         );
     }
 }

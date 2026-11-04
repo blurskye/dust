@@ -3,14 +3,14 @@
 pub(crate) const UNIVERSAL_LAYOUT_DEPTH_CEILING: usize = 64;
 pub(crate) const UNIVERSAL_LAYOUT_WINDOW_CEILING: usize = 1_024;
 
+/// Agent Client Protocol client for AI coding agents.
+pub mod agent;
 /// Public command, configuration, persistence, tool, and WIT API versions.
 pub mod api;
 /// Injectable production and deterministic clock/ID providers.
 pub mod clock;
 /// Bundled/user TOML settings, keymaps, dashboard declarations, and platform paths.
 pub mod config;
-/// Agent Client Protocol client for AI coding agents.
-pub mod agent;
 /// Built-in Debug Adapter Protocol transport and session control.
 pub mod debugger;
 /// Editing state, text, commands, input, transactions, startup, and live session composition.
@@ -25,10 +25,10 @@ pub mod forge;
 pub mod language;
 /// Versioned bounded session, navigation, and history persistence.
 pub mod persistence;
-/// Opening files in a running Dust from programs it starts.
-pub mod remote;
 /// Bounded process supervision and protocol framing shared by built-in features.
 pub mod process;
+/// Opening files in a running Dust from programs it starts.
+pub mod remote;
 /// Structured bounded redacted logs and health snapshots.
 pub mod telemetry;
 /// Headless fixtures exercising production editing and input paths.

@@ -313,6 +313,40 @@ impl PersistenceSession {
         self.recent_files.insert(0, path);
         self.recent_files.truncate(maximum);
     }
+    pub(in crate::editor::session) fn reconcile_marks(&mut self, editor: &EditorState) {
+        self.mark_sources
+            .retain(|name, _| self.marks.iter().any(|mark| &mark.name == name));
+        for mark in &mut self.marks {
+            let Some((id, buffer)) = editor
+                .buffers
+                .iter()
+                .find(|(_, buffer)| buffer.path.as_ref() == Some(&mark.location.path))
+            else {
+                self.mark_sources.remove(&mark.name);
+                continue;
+            };
+            let version = buffer.text.source_version();
+            if let Some((previous_id, previous, revision)) = self.mark_sources.get(&mark.name)
+                && *previous_id == id
+                && previous.same_incarnation(&version)
+                && let Some(mapped) = buffer.text.map_offset_since(
+                    *revision,
+                    crate::editor::text::ByteOffset(mark.location.byte),
+                )
+            {
+                mark.location.byte = mapped.get();
+                if let Some(anchor) = buffer.text.map_offset_since(
+                    *revision,
+                    crate::editor::text::ByteOffset(mark.location.anchor),
+                ) {
+                    mark.location.anchor = anchor.get();
+                }
+            }
+            self.mark_sources
+                .insert(mark.name.clone(), (id, version, buffer.text.revision()));
+        }
+    }
+
     pub(in crate::editor::session) fn set_mark(
         &mut self,
         name: String,
@@ -322,6 +356,7 @@ impl PersistenceSession {
         if name.len() > 64 || name.chars().any(char::is_control) {
             return;
         }
+        self.mark_sources.remove(&name);
         self.marks.retain(|mark| mark.name != name);
         self.marks.push(PersistedMark { name, location });
         let extra = self.marks.len().saturating_sub(maximum);
@@ -348,7 +383,9 @@ impl PersistenceSession {
         if !change {
             // A new jump ends a walk with `ctrl-o`, and a place is only kept once, as in Vim.
             self.jump_index = None;
-            list.retain(|previous| previous.path != location.path || previous.byte != location.byte);
+            list.retain(|previous| {
+                previous.path != location.path || previous.byte != location.byte
+            });
         }
         list.push(location);
         let extra = list.len().saturating_sub(maximum);
@@ -367,20 +404,23 @@ impl PersistenceSession {
             None if back => {
                 if let Some(current) = current {
                     self.record_location(current, false, maximum);
+                    self.jumps.len().checked_sub(1)?
+                } else {
+                    self.jumps.len()
                 }
-                self.jumps.len().checked_sub(1)?
             }
             None => return None,
         };
-        let next = if back { index.checked_sub(1)? } else { index + 1 };
+        let next = if back {
+            index.checked_sub(1)?
+        } else {
+            index + 1
+        };
         let location = self.jumps.get(next)?.clone();
         self.jump_index = Some(next);
         Some(location)
     }
-    pub(in crate::editor::session) fn restore_history(
-        &mut self,
-        state: &mut PersistedState,
-    ) {
+    pub(in crate::editor::session) fn restore_history(&mut self, state: &mut PersistedState) {
         // Loaded history is older than edits made while the read was in flight.
         self.jump_index = None;
         let mut seen = std::collections::HashSet::new();
@@ -555,7 +595,14 @@ fn collect_persistable_editor_panes(
                 .get(*pane)
                 .and_then(|pane| state.views.get(pane.view))
                 .and_then(|view| state.buffers.get(view.buffer))
-                .filter(|buffer| !buffer.dirty)
+                .filter(|buffer| {
+                    !buffer.dirty
+                        && !(buffer.read_only
+                            && buffer
+                                .path
+                                .as_ref()
+                                .is_some_and(|path| !path.starts_with(&state.workspace_root)))
+                })
                 .and_then(|buffer| buffer.path.clone())
             {
                 panes.push((*pane, path));
@@ -591,6 +638,9 @@ pub(in crate::editor::session) fn capture_persisted_layout(
                 return None;
             }
             let path = buffer.path.clone()?;
+            if buffer.read_only && !path.starts_with(&state.workspace_root) {
+                return None;
+            }
             Some(PersistedLayout::Pane {
                 pane: PersistedPane {
                     path,

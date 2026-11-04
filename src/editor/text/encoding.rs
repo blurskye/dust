@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// A line separator observed in the source file.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LineEnding {
     Lf,
     CrLf,

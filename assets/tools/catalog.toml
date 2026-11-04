@@ -503,6 +503,7 @@ name = "rustfmt"
 kind = "formatter"
 languages = ["rust"]
 executable = "rustfmt"
+format_arguments = ["--emit", "stdout"]
 version = "stable toolchain"
 probe_args = ["--version"]
 

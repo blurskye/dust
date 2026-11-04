@@ -1,11 +1,3 @@
-use crate::editor::session::diagnostics::{MAXIMUM_DIAGNOSTICS, MAXIMUM_DIAGNOSTICS_PER_URI};
-use crate::editor::session::documents::VFS_QUEUE_CAPACITY;
-use crate::editor::input::ABSOLUTE_MAX_COUNT;
-use crate::editor::session::persistence::{
-    PERSISTENCE_QUEUE_CAPACITY, STATE_FILE, STATE_MAXIMUM_BYTES,
-};
-use crate::editor::session::syntax::SYNTAX_QUEUE_CAPACITY;
-use crate::editor::session::workspace::TRUST_QUEUE_CAPACITY;
 use super::super::configuration::resolve_configuration;
 use super::{
     CommandRegistry, ConfigurationSession, DebugSession, DocumentSession, ExplorerWatchService,
@@ -14,6 +6,14 @@ use super::{
     UiState, VfsWorker, WindowSession, WorkspaceId, WorkspaceState, build_state,
     register_app_commands, register_builtin_commands,
 };
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
+use crate::editor::session::diagnostics::{MAXIMUM_DIAGNOSTICS, MAXIMUM_DIAGNOSTICS_PER_URI};
+use crate::editor::session::documents::VFS_QUEUE_CAPACITY;
+use crate::editor::session::persistence::{
+    PERSISTENCE_QUEUE_CAPACITY, STATE_FILE, STATE_MAXIMUM_BYTES,
+};
+use crate::editor::session::syntax::SYNTAX_QUEUE_CAPACITY;
+use crate::editor::session::workspace::TRUST_QUEUE_CAPACITY;
 
 impl InteractiveApplication {
     pub(super) fn new(
@@ -48,8 +48,8 @@ impl InteractiveApplication {
             };
         state.policy = configuration.settings.editor.editing_policy();
         let persistence = &configuration.settings.persistence;
-        state.undo_directory = (persistence.enabled && persistence.undo_history)
-            .then(|| state_directory.join("undo"));
+        state.undo_directory =
+            (persistence.enabled && persistence.undo_history).then(|| state_directory.join("undo"));
         state.undo_maximum_bytes = STATE_MAXIMUM_BYTES;
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;
@@ -99,8 +99,9 @@ impl InteractiveApplication {
         let terminal_session =
             super::super::terminal::TerminalSession::new(&configuration.settings.terminals);
         let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
-        let explorer_watch = ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default())
-        .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
+        let explorer_watch =
+            ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default())
+                .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
         let documents = DocumentSession::new(
             VfsWorker::start(vfs_queue_capacity),
             &startup,
@@ -138,7 +139,7 @@ impl InteractiveApplication {
             should_quit: false,
             last_key_at: None,
             flash: None,
-            agent: super::agent::AgentPanel::default(),
+            agent: super::agent::AgentPanel::new(state_directory.join("agents")),
             pull_requests: super::pull_requests::PullRequests::default(),
             tutor: super::tutor::Tutor::new(&state_directory),
             palette_recent: Vec::new(),
@@ -149,11 +150,13 @@ impl InteractiveApplication {
             switch_ends_terminals: None,
             syntax_spans_source: (Vec::new(), Vec::new()),
             format_on_save: None,
+            navigation_reads: std::collections::HashMap::new(),
             lsp_asked: None,
             lsp_waiting: None,
             lsp_retry_at: None,
             lsp_retries: 0,
             disk_stamps: std::collections::HashMap::new(),
+            reload_stamps: std::collections::HashMap::new(),
             next_disk_check: None,
             git_stamp: None,
             replace_query: None,
@@ -183,7 +186,8 @@ impl InteractiveApplication {
         };
         application.project_configuration();
         application.project_window_activation();
-        if let Some(warning) = config_warning.filter(|_| application.ui.config_diagnostic.is_none()) {
+        if let Some(warning) = config_warning.filter(|_| application.ui.config_diagnostic.is_none())
+        {
             application.notify_warning(warning);
         }
         Ok(application)
@@ -216,21 +220,20 @@ impl InteractiveApplication {
         if let Some(buffer) = self
             .documents
             .take_startup_primary(&self.state.window_version(), self.workspace.root_revision())
+            && self.state.buffers.contains_key(buffer)
         {
-            if self.state.buffers.contains_key(buffer) {
-                if let Err(error) = self
-                    .window_session
-                    .check_editor_admission(&(&*self.state).into())
-                {
-                    self.show_error(error);
-                    return;
-                }
-                let mut candidate = self.state.draft();
-                if candidate.show_document(buffer).is_ok() {
-                    if let Err(error) = self.commit_editor_draft(candidate, None, true) {
-                        self.show_error(error);
-                    }
-                }
+            if let Err(error) = self
+                .window_session
+                .check_editor_admission(&(&*self.state).into())
+            {
+                self.show_error(error);
+                return;
+            }
+            let mut candidate = self.state.draft();
+            if candidate.show_document(buffer).is_ok()
+                && let Err(error) = self.commit_editor_draft(candidate, None, true)
+            {
+                self.show_error(error);
             }
         }
     }

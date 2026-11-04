@@ -44,7 +44,11 @@ pub(super) fn register_commands(
     )?;
     for (id, description, initial) in [
         ("test.run.prompt", "Run test by name", "test name="),
-        ("test.list.prompt", "Show test results by name", "tests name="),
+        (
+            "test.list.prompt",
+            "Show test results by name",
+            "tests name=",
+        ),
         ("test.stop.prompt", "Stop test by name", "teststop name="),
     ] {
         register(
@@ -104,11 +108,23 @@ pub(super) fn register_commands(
         |_| AppEffect::SyntaxStatus,
     )?;
     for (id, name, action) in [
-        ("syntax.fold.toggle", "Toggle fold", SyntaxFoldAction::Toggle),
+        (
+            "syntax.fold.toggle",
+            "Toggle fold",
+            SyntaxFoldAction::Toggle,
+        ),
         ("syntax.fold.open", "Open fold", SyntaxFoldAction::Open),
         ("syntax.fold.close", "Close fold", SyntaxFoldAction::Close),
-        ("syntax.fold.open_all", "Open all folds", SyntaxFoldAction::OpenAll),
-        ("syntax.fold.close_all", "Close all folds", SyntaxFoldAction::CloseAll),
+        (
+            "syntax.fold.open_all",
+            "Open all folds",
+            SyntaxFoldAction::OpenAll,
+        ),
+        (
+            "syntax.fold.close_all",
+            "Close all folds",
+            SyntaxFoldAction::CloseAll,
+        ),
     ] {
         register(
             registry,

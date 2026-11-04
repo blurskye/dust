@@ -42,6 +42,7 @@ pub(super) struct InputSession {
     snippet: Option<snippets::SnippetSession>,
     mouse: mouse::MouseState,
     last_search_forward: bool,
+    whole_word_search: bool,
     /// Where the cursor was when a `/` prompt began to move it.
     search_origin: Option<(crate::editor::ViewId, crate::editor::text::ByteOffset)>,
     modal: ModalResolver,
@@ -52,9 +53,11 @@ pub(super) struct InputSession {
     /// The staging effect whose plan was refused for unsaved content. Held here rather
     /// than on the coordinator, whose 26-field ownership census is a frozen boundary,
     /// and because this is a prompt obligation: it is replayed when the answer is Yes.
-    pending_stage: Option<super::AppEffect>,
+    pending_stage: Option<(super::AppEffect, Option<u32>)>,
+    stage_save: Option<crate::files::RequestId>,
     picker_normal: bool,
     documentation: Option<crate::ui::DocumentationPopupState>,
+    history_cleared: bool,
     command_history: Vec<String>,
     search_history: Vec<String>,
     history_index: Option<usize>,
@@ -99,6 +102,9 @@ impl InputSession {
         id: crate::files::RequestId,
     ) {
         self.completion_reads.remove(&id);
+        if self.stage_save == Some(id) {
+            self.clear_pending_stage();
+        }
     }
     pub(in crate::editor::session) fn begin_picker(&mut self) {
         self.picker_normal = false;
@@ -128,6 +134,7 @@ impl InputSession {
             snippet: None,
             mouse: mouse::MouseState::default(),
             last_search_forward: true,
+            whole_word_search: false,
             search_origin: None,
             modal: ModalResolver::with_count_limit(count_limit),
             sequence: KeymapSequence::default(),
@@ -135,8 +142,10 @@ impl InputSession {
             hints: None,
             prompt: None,
             pending_stage: None,
+            stage_save: None,
             picker_normal: false,
             documentation: None,
+            history_cleared: false,
             command_history: Vec::new(),
             search_history: Vec::new(),
             history_index: None,
@@ -170,19 +179,39 @@ impl InputSession {
             None
         }
     }
-    pub(in crate::editor::session) fn set_pending_stage(
-        &mut self,
-        effect: super::AppEffect,
-    ) {
-        self.pending_stage = Some(effect);
+    pub(in crate::editor::session) fn set_pending_stage(&mut self, effect: super::AppEffect) {
+        self.stage_save = None;
+        self.pending_stage = Some((effect, None));
     }
     pub(in crate::editor::session) fn take_pending_stage(
         &mut self,
-    ) -> Option<super::AppEffect> {
+    ) -> Option<(super::AppEffect, Option<u32>)> {
         self.pending_stage.take()
+    }
+    pub(in crate::editor::session) fn set_pending_stage_line(&mut self, line: Option<u32>) {
+        if let Some((_, selected)) = &mut self.pending_stage {
+            *selected = line;
+        }
     }
     pub(in crate::editor::session) fn clear_pending_stage(&mut self) {
         self.pending_stage = None;
+        self.stage_save = None;
+    }
+    pub(in crate::editor::session) fn bind_stage_save(&mut self, request: crate::files::RequestId) {
+        if self.pending_stage.is_some() {
+            self.stage_save = Some(request);
+        }
+    }
+    pub(in crate::editor::session) fn take_stage_save(
+        &mut self,
+        request: crate::files::RequestId,
+    ) -> Option<(super::AppEffect, Option<u32>)> {
+        if self.stage_save == Some(request) {
+            self.stage_save = None;
+            self.take_pending_stage()
+        } else {
+            None
+        }
     }
     pub(in crate::editor::session) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
@@ -192,9 +221,7 @@ impl InputSession {
                 | crate::ui::PromptKind::ReviewComment
                 | crate::ui::PromptKind::BreakpointCondition
                 | crate::ui::PromptKind::ReplaceFind
-                | crate::ui::PromptKind::ReplaceWith => {
-                    "command_prompt"
-                }
+                | crate::ui::PromptKind::ReplaceWith => "command_prompt",
                 crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward => {
                     "search_prompt"
                 }
@@ -207,9 +234,7 @@ impl InputSession {
                 | crate::ui::PromptKind::GitStageUnsaved => "confirmation_prompt",
                 crate::ui::PromptKind::GitDestructive
                 | crate::ui::PromptKind::AgentPermission
-                | crate::ui::PromptKind::SubstituteConfirm => {
-                    "confirmation_prompt"
-                }
+                | crate::ui::PromptKind::SubstituteConfirm => "confirmation_prompt",
             });
         }
         self.documentation

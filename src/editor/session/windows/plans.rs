@@ -1,8 +1,8 @@
 mod commands;
-use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_RESIZE_STEP};
 use super::NativeSurfaceTarget;
 use super::{EditorTopology, EditorWindowCandidate, NativeDescriptions, WindowSession};
 use crate::ui::window::{ContentTypeId, WindowTarget};
+use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_RESIZE_STEP};
 use crate::{
     editor::text::TextVersion,
     editor::{BufferId, EditorOperation, EditorWindowVersion, LayoutNode, PaneId, TabId, ViewId},
@@ -178,32 +178,31 @@ impl WindowSession {
         {
             return Err("dirty close source or focused target changed".into());
         }
-        if let EditorCloseTarget::Buffer { view, buffer } = intent.target {
-            if source
+        if let EditorCloseTarget::Buffer { view, buffer } = intent.target
+            && (source
                 .views()
                 .get(view)
                 .is_none_or(|candidate| candidate.buffer != buffer)
                 || source
                     .panes()
                     .get(intent.pane)
-                    .is_none_or(|pane| pane.view != view)
-            {
-                return Err("dirty close buffer/view target changed".into());
-            }
+                    .is_none_or(|pane| pane.view != view))
+        {
+            return Err("dirty close buffer/view target changed".into());
         }
-        if let EditorCloseTarget::Window { pane, window } = intent.target {
-            if pane != intent.pane
+        if let EditorCloseTarget::Window { pane, window } = intent.target
+            && (pane != intent.pane
                 || self.core.editor.pane_for_window(window) != Some(pane)
-                || source.panes().get(pane).is_none()
-            {
-                return Err("dirty close window target changed".into());
-            }
+                || source.panes().get(pane).is_none())
+        {
+            return Err("dirty close window target changed".into());
         }
-        if intent.dirty[intent.next..].iter().any(|pending| {
-            source
-                .buffers()
-                .get(pending.buffer)
-                .is_none_or(|buffer| buffer.text.source_version() != pending.text)
+        if intent.dirty.iter().enumerate().any(|(index, pending)| {
+            (index >= intent.next || intent.discarded.contains(&pending.buffer))
+                && source
+                    .buffers()
+                    .get(pending.buffer)
+                    .is_none_or(|buffer| buffer.text.source_version() != pending.text)
         }) {
             return Err("dirty close text source changed".into());
         }
@@ -535,8 +534,8 @@ impl WindowSession {
         {
             return Err("window plan owner, editor or catalog source is stale".into());
         }
-        if let Some((window, view, content, tab)) = plan.target_source {
-            if self
+        if let Some((window, view, content, tab)) = plan.target_source
+            && (self
                 .core
                 .graph
                 .window(window)
@@ -547,13 +546,12 @@ impl WindowSession {
                     .graph
                     .view(view)
                     .map(|descriptor| descriptor.content)
-                    != Some(content)
-            {
-                return Err("window target identity is stale".into());
-            }
+                    != Some(content))
+        {
+            return Err("window target identity is stale".into());
         }
-        if let Some((window, view, content)) = plan.clone_source {
-            if self
+        if let Some((window, view, content)) = plan.clone_source
+            && (self
                 .core
                 .graph
                 .window(window)
@@ -564,10 +562,9 @@ impl WindowSession {
                     .graph
                     .view(view)
                     .map(|descriptor| descriptor.content)
-                    != Some(content)
-            {
-                return Err("window clone source identity is stale".into());
-            }
+                    != Some(content))
+        {
+            return Err("window clone source identity is stale".into());
         }
         Ok(())
     }
@@ -718,17 +715,11 @@ impl WindowSession {
                 delta: i16::from(direction)
                     .saturating_mul(i16::try_from(PANE_RESIZE_STEP).unwrap_or(i16::MAX)),
             },
-            LayoutAction::FocusPane(offset) => EditorOperation::FocusPane {
-                offset,
-                wrap: true,
-            },
+            LayoutAction::FocusPane(offset) => EditorOperation::FocusPane { offset, wrap: true },
             LayoutAction::NewTab => EditorOperation::NewTab,
             LayoutAction::CloseTab => EditorOperation::CloseTab,
             LayoutAction::Zoom => EditorOperation::ToggleZoom,
-            LayoutAction::FocusTab(offset) => EditorOperation::FocusTab {
-                offset,
-                wrap: true,
-            },
+            LayoutAction::FocusTab(offset) => EditorOperation::FocusTab { offset, wrap: true },
         });
         plan.hide_dashboard = true;
         Ok(plan)
@@ -773,17 +764,24 @@ impl WindowSession {
                         candidate.dashboard = Some(true);
                     }
                 }
+                commands::NativeAction::SwapEditors(first, second) => {
+                    candidate
+                        .core
+                        .editor
+                        .swap_editors(&mut candidate.core.graph, first, second)
+                        .map_err(|error| error.to_string())?;
+                }
                 _ => return Err("editor transition carries an invalid window action".into()),
             }
         }
-        if let Some(target) = plan.target {
-            if candidate.core.graph.focused() != Some(target) {
-                candidate
-                    .core
-                    .graph
-                    .focus(target)
-                    .map_err(|error| error.to_string())?;
-            }
+        if let Some(target) = plan.target
+            && candidate.core.graph.focused() != Some(target)
+        {
+            candidate
+                .core
+                .graph
+                .focus(target)
+                .map_err(|error| error.to_string())?;
         }
         if plan.hide_dashboard {
             candidate.dashboard = Some(false);
@@ -870,5 +868,56 @@ impl WindowSession {
         self.graph()
             .resolve_target(&target)
             .map_err(|error| TargetError::Rejected(error.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::{EditorState, text::TextBuffer};
+
+    #[test]
+    fn discarded_text_is_revalidated_after_another_save() {
+        let mut state = EditorState::new("/workspace".into());
+        let (a, _) = state.open_text(TextBuffer::from_text("a"), None);
+        state.buffers[a].dirty = true;
+        state
+            .split_active(crate::editor::Axis::Vertical, 500)
+            .unwrap();
+        let (b, _) = state.open_text(TextBuffer::from_text("b"), None);
+        state.buffers[b].dirty = true;
+        state.new_tab().unwrap();
+        state.open_text(TextBuffer::from_text("other"), None);
+        state.focus_tab(-1, true).unwrap();
+        let mut windows = WindowSession::default();
+        windows
+            .core
+            .editor
+            .reconcile(&(&state).into(), &mut windows.core.graph, "scratch")
+            .unwrap();
+        windows
+            .begin_layout_close(LayoutAction::CloseTab, &(&state).into())
+            .unwrap();
+        windows
+            .choose_editor_close(false, &(&state).into())
+            .unwrap();
+        let EditorCloseStep::Save(token) =
+            windows.choose_editor_close(true, &(&state).into()).unwrap()
+        else {
+            panic!("expected save");
+        };
+        state.buffers[a].text = TextBuffer::from_text("new edits");
+        state.buffers[b].dirty = false;
+        windows
+            .core
+            .editor
+            .reconcile(&(&state).into(), &mut windows.core.graph, "scratch")
+            .unwrap();
+        assert!(
+            windows
+                .finish_editor_close_save(&token, &(&state).into())
+                .is_err()
+        );
+        assert_eq!(state.buffers[a].text.to_string(), "new edits");
     }
 }

@@ -62,6 +62,7 @@ pub(in crate::editor::session) struct RunningTask {
     name: String,
     adapter: AdapterContext,
     root: PathBuf,
+    cwd: PathBuf,
 }
 
 impl RunningTask {
@@ -293,7 +294,21 @@ impl TaskSession {
         }
         let (name, task) = plan.remaining.pop_front().ok_or("task plan exhausted")?;
         plan.awaiting = true;
-        let adapter = plan.adapter.clone();
+        let adapter = if name == requested {
+            plan.adapter.clone()
+        } else if let Some(matcher) = &task.matcher {
+            AdapterContext::Linter {
+                matcher: matcher.clone(),
+                lint: false,
+            }
+        } else if let AdapterContext::Linter { matcher, .. } = &plan.adapter {
+            AdapterContext::Linter {
+                matcher: matcher.clone(),
+                lint: false,
+            }
+        } else {
+            AdapterContext::Plain
+        };
         let root = workspace
             .roots()
             .iter()
@@ -397,9 +412,7 @@ impl TaskSession {
         let name = step.requested.clone();
         let result = ready
             .into_execution_result(&step.request, workspace)
-            .and_then(|result| {
-                self.launch_inner(step, result, editor, workspace, configuration)
-            });
+            .and_then(|result| self.launch_inner(step, result, editor, workspace, configuration));
         if result.is_err() {
             self.keys.remove(&name);
             self.plans.remove(&name);
@@ -434,9 +447,7 @@ impl TaskSession {
             }
             _ => None,
         };
-        let diagnostic_source = if step.name == step.requested
-            && matches!(step.adapter, AdapterContext::Linter { .. })
-        {
+        let diagnostic_source = if matches!(step.adapter, AdapterContext::Linter { .. }) {
             Some(TaskDiagnosticRun::capture(
                 &step.requested,
                 editor,
@@ -449,14 +460,18 @@ impl TaskSession {
         let producer = diagnostic_source
             .as_ref()
             .map(|source| source.producer().clone());
+        let cwd = result.cwd.clone();
         let request = JobRequest {
             program: result.executable,
+            argv0: Some(step.request.executable.clone()),
             arguments: step.task.arguments,
             cwd: result.cwd,
             // A task runs with what the user's shell gave Dust, as a terminal does, and its own
             // settings win.
             environment: std::env::vars_os()
-                .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+                .filter_map(|(key, value)| {
+                    Some((key.into_string().ok()?, value.into_string().ok()?))
+                })
                 .chain(step.task.environment)
                 .collect(),
             root_revision: result.root_revision,
@@ -465,9 +480,7 @@ impl TaskSession {
                 maximum_output_bytes: MAXIMUM_OUTPUT_BYTES,
                 maximum_line_bytes: MAXIMUM_LINE_BYTES,
                 maximum_stdin_bytes: MAXIMUM_STDIN_BYTES,
-                timeout: Duration::from_millis(
-                    step.task.timeout_ms.unwrap_or(MAXIMUM_TIMEOUT_MS),
-                ),
+                timeout: Duration::from_millis(step.task.timeout_ms.unwrap_or(MAXIMUM_TIMEOUT_MS)),
             },
         };
         let id = admission
@@ -484,6 +497,7 @@ impl TaskSession {
                 name: step.name,
                 adapter: step.adapter,
                 root: result.root,
+                cwd,
                 diagnostic_source,
             },
         );
@@ -528,8 +542,7 @@ impl TaskSession {
         self.active_output = name.map(str::to_owned);
     }
     fn launch_pending(&self, name: &str) -> bool {
-        self.plans.contains_key(name)
-            || self.preflights.values().any(|step| step.requested == name)
+        self.plans.contains_key(name) || self.preflights.values().any(|step| step.requested == name)
     }
     pub(super) fn is_running(&self, name: &str) -> bool {
         self.launch_pending(name) || self.running.values().any(|task| task.requested == name)
@@ -543,7 +556,10 @@ impl TaskSession {
         let mut found = pending || producer.is_some();
         for (id, task) in &self.running {
             if task.requested == name {
-                self.jobs.cancel(*id).map_err(|e| e.to_string())?;
+                match self.jobs.cancel(*id) {
+                    Ok(()) | Err(crate::process::JobError::Unknown(_)) => {}
+                    Err(error) => return Err(error.to_string()),
+                }
                 found = true;
                 if current
                     .as_ref()
@@ -630,20 +646,17 @@ impl TaskSession {
                     if truncated {
                         self.truncated.insert(job);
                     }
-                    if task.name == task.requested
-                        && matches!(task.adapter, AdapterContext::Formatter { .. })
-                        && stream == JobStream::Stderr
-                    {
-                        continue;
-                    }
-                    let output = &mut task.output;
+                    let formatter_stderr = matches!(task.adapter, AdapterContext::Formatter { .. })
+                        && stream == JobStream::Stderr;
                     let accepted = &bytes[..bytes
                         .len()
-                        .min(self.maximum_output.saturating_sub(output.len()))];
+                        .min(self.maximum_output.saturating_sub(task.output.len()))];
                     if accepted.len() != bytes.len() {
                         self.truncated.insert(job);
                     }
-                    output.extend_from_slice(accepted);
+                    if !formatter_stderr {
+                        task.output.extend_from_slice(accepted);
+                    }
                     let rows = self.rows.entry(task.requested.clone()).or_default();
                     for line in String::from_utf8_lossy(accepted).lines().take(1024) {
                         rows.push(TaskOutputRecord {
@@ -697,7 +710,10 @@ impl TaskSession {
                             && (code == Some(0)
                                 && matches!(task.adapter, AdapterContext::Formatter { .. })
                                 || matches!(code, Some(0 | 1))
-                                    && matches!(task.adapter, AdapterContext::Linter { lint: true, .. }))
+                                    && matches!(
+                                        task.adapter,
+                                        AdapterContext::Linter { lint: true, .. }
+                                    ))
                         {
                             "process exited"
                         } else if code == Some(0) && !truncated {
@@ -721,7 +737,11 @@ impl TaskSession {
                     self.truncated.remove(&job);
                     if !self.current(&task, workspace, configuration) {
                         // Stopping a task can end its output early; that isn't a failure.
-                        if self.statuses.get(&task.requested).is_some_and(|status| status == "cancelled") {
+                        if self
+                            .statuses
+                            .get(&task.requested)
+                            .is_some_and(|status| status == "cancelled")
+                        {
                             continue;
                         }
                         return Some(TaskUpdate::Failed {
@@ -747,8 +767,8 @@ impl TaskSession {
         self.statuses
             .iter()
             .map(|(name, status)| PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                badge: String::new(),
+                kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(format!("task:{name}")),
                 label: name.clone(),
                 detail: status.clone(),
@@ -764,8 +784,8 @@ impl TaskSession {
             .flatten()
             .enumerate()
             .map(|(index, row)| PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                badge: String::new(),
+                kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(format!("output:{name}:{index}")),
                 label: row.text.clone(),
                 detail: format!(
@@ -790,8 +810,8 @@ impl TaskSession {
             .map(|(index, case)| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("test:{name}:{index}")),
                         label: case.name.clone(),
                         detail: format!("{} {}", case.status, case.duration),
@@ -860,9 +880,9 @@ impl TaskSession {
         }
         source.check(editor)?;
         let bytes = &task.output;
-        let replacement = std::str::from_utf8(bytes)
+        let replacement = crate::editor::text::decode_utf8(bytes)
             .map_err(|_| "formatter output is not UTF-8")?
-            .to_owned();
+            .text;
         let text = &editor.buffers[source.buffer()].text;
         // Only what the formatter changed is replaced, so the cursor stays on the code it was on.
         let edits = crate::editor::transaction::changed_spans(&text.to_string(), &replacement)
@@ -888,12 +908,142 @@ impl TaskSession {
     }
 }
 #[cfg(test)]
+impl TaskSession {
+    pub(super) fn fixture_formatter_result(
+        &mut self,
+        name: &str,
+        buffer: crate::editor::BufferId,
+        output: &[u8],
+        editor: &EditorState,
+        workspace: &WorkspaceSession,
+        configuration: u64,
+    ) {
+        let key = RunKey {
+            epoch: Arc::new(()),
+            workspace: workspace.version(),
+            configuration,
+        };
+        self.keys.insert(name.into(), key.clone());
+        let job = JobId(self.running.len() as u64 + 1000);
+        self.running.insert(
+            job,
+            RunningTask {
+                output: output.into(),
+                key,
+                diagnostic_source: None,
+                requested: name.into(),
+                name: name.into(),
+                adapter: AdapterContext::Formatter {
+                    source: FormatterSource::capture(editor, buffer).unwrap(),
+                },
+                root: editor.workspace_root.clone(),
+                cwd: editor.workspace_root.clone(),
+            },
+        );
+        self.events.push_back(JobEvent::Exited {
+            job,
+            code: Some(0),
+            timed_out: false,
+        });
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         editor::text::TextBuffer,
         workspace::{RootIdentity, WorkspaceId, WorkspaceState},
     };
+    #[test]
+    fn formatter_stderr_is_visible_without_entering_the_replacement_payload() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), None);
+        let mut tasks = TaskSession::new(&Config::default());
+        tasks.fixture_formatter_result("format", buffer, b"formatted", &editor, &workspace, 1);
+        tasks.events.push_front(JobEvent::Output {
+            job: JobId(1000),
+            stream: JobStream::Stderr,
+            bytes: b"syntax error at line 4\n".to_vec(),
+            truncated: false,
+        });
+        assert!(matches!(
+            tasks.next_update(&workspace, 1),
+            Some(TaskUpdate::Output)
+        ));
+        assert!(
+            tasks.output_items("format")[0]
+                .label
+                .contains("syntax error")
+        );
+        let Some(TaskUpdate::Finished { task, .. }) = tasks.next_update(&workspace, 1) else {
+            panic!("completion missing")
+        };
+        assert_eq!(task.output, b"formatted");
+    }
+    #[test]
+    fn stopping_with_a_buffered_terminal_event_still_finalizes_cancellation() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+        let mut editor = EditorState::new(root.path().into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None);
+        let mut tasks = TaskSession::new(&Config::default());
+        tasks.fixture_formatter_result("format", buffer, b"text", &editor, &workspace, 1);
+        assert!(tasks.stop("format").is_ok());
+        assert_eq!(tasks.statuses["format"], "cancelled");
+        assert!(tasks.next_update(&workspace, 1).is_none());
+    }
+    #[test]
+    fn identity_formatter_normalizes_bom_and_line_endings() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+        for bytes in [b"a\r\n".as_slice(), b"\xef\xbb\xbfa\r\n".as_slice()] {
+            let mut editor = EditorState::new(root.path().into());
+            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(bytes).unwrap(), None);
+            let source = FormatterSource::capture(&editor, buffer).unwrap();
+            let mut owner = TaskSession::new(&Config::default());
+            let key = RunKey {
+                epoch: Arc::new(()),
+                workspace: workspace.version(),
+                configuration: 1,
+            };
+            owner.keys.insert("format".into(), key.clone());
+            let task = RunningTask {
+                output: bytes.to_vec(),
+                key,
+                diagnostic_source: None,
+                requested: "format".into(),
+                name: "format".into(),
+                adapter: AdapterContext::Formatter { source },
+                root: root.path().into(),
+                cwd: root.path().into(),
+            };
+            let transaction = owner
+                .formatter_transaction(&task, &editor, &workspace, 1, TransactionId(1))
+                .unwrap()
+                .unwrap();
+            editor.apply_transaction(&transaction).unwrap();
+            assert_eq!(editor.buffers[buffer].text.to_bytes(), bytes);
+            assert_eq!(editor.buffers[buffer].text.to_string(), "a\n");
+        }
+    }
     #[test]
     fn task_owner_rejects_retired_plans_and_formatter_incarnations_before_materialization() {
         let root = tempfile::tempdir().unwrap();

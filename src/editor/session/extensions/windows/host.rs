@@ -422,6 +422,7 @@ impl PluginWindowHost {
                         tree,
                         private,
                         scroll: 0,
+                        visible_rows: 0,
                     },
                 );
                 Ok((Some(handle), tree_revision, None))
@@ -887,13 +888,20 @@ impl PluginWindowHost {
     ) -> Vec<(String, u64, PluginUiEvent)> {
         let mut events = Vec::new();
         for (handle, instance) in &mut self.instances {
-            let Some(private) = instance.private.as_mut() else {
-                continue;
-            };
             let dimensions = projection
                 .and_then(|projection| projection.window(instance.window))
                 .map(|window| (window.rect.width, window.rect.height))
                 .filter(|(width, height)| *width > 0 && *height > 0);
+            let visible_rows = dimensions.map_or(0, |(_, height)| usize::from(height));
+            if instance.visible_rows != visible_rows {
+                instance.visible_rows = visible_rows;
+                if visible_rows > 0 {
+                    ensure_focused_visible(instance);
+                }
+            }
+            let Some(private) = instance.private.as_mut() else {
+                continue;
+            };
             if private.dimensions == dimensions {
                 continue;
             }

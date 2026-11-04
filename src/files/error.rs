@@ -15,7 +15,7 @@ pub enum VfsError {
     ExternalModification(PathBuf),
     #[error(
         "`{}` already exists in `{}`",
-        .0.file_name().unwrap_or_default().display(),
+        .0.file_name().unwrap_or_default().to_string_lossy(),
         .0.parent().unwrap_or(std::path::Path::new("")).display()
     )]
     DestinationExists(PathBuf),

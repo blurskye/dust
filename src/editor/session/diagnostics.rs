@@ -209,6 +209,21 @@ impl DiagnosticSession {
             .rows
             .iter()
             .filter(|row| row.problem.owner == set.0 && row.problem.uri == set.1);
+        self.store
+            .replace(
+                batch.producer.owner().clone(),
+                batch.uri.clone(),
+                version,
+                revision,
+                batch.items,
+            )
+            .map_err(|e| e.to_string())?;
+        let retained = self
+            .store
+            .problems(None, None)
+            .into_iter()
+            .filter(|row| row.owner == set.0 && row.uri == set.1)
+            .collect::<Vec<_>>();
         let unchanged = self.batches.get(&set).is_some_and(|old| {
             old.validity == batch.validity
                 && match (&old.document, &batch.document) {
@@ -221,23 +236,15 @@ impl DiagnosticSession {
                     }
                     _ => false,
                 }
-        }) && previous.clone().count() == batch.items.len()
-            && previous.zip(&batch.items).all(|(row, item)| {
+        }) && previous.clone().count() == retained.len()
+            && previous.zip(&retained).all(|(row, item)| {
                 row.problem.range == item.range
                     && row.problem.severity == item.severity
                     && row.problem.source == item.source
                     && row.problem.code == item.code
                     && row.problem.message == item.message
+                    && row.problem.data == item.data
             });
-        self.store
-            .replace(
-                batch.producer.owner().clone(),
-                batch.uri.clone(),
-                version,
-                revision,
-                batch.items,
-            )
-            .map_err(|e| e.to_string())?;
         if unchanged {
             if let Some(old) = self.batches.get_mut(&set) {
                 old.revision = revision;
@@ -360,7 +367,9 @@ impl DiagnosticSession {
         self.rows
             .iter()
             .filter(|row| {
-                row.problem.uri == uri && row.problem.range.start <= end && row.problem.range.end >= start
+                row.problem.uri == uri
+                    && row.problem.range.start <= end
+                    && row.problem.range.end >= start
             })
             .map(|row| &row.problem)
             .collect()
@@ -440,8 +449,14 @@ impl DiagnosticSession {
             }
             let length = ByteOffset(text.len_bytes());
             self.store.move_ranges(owner, uri, |range| {
-                let start = text.map_offset_since(revision, range.start).unwrap_or(range.start).min(length);
-                let end = text.map_offset_since(revision, range.end).unwrap_or(range.end).clamp(start, length);
+                let start = text
+                    .map_offset_since(revision, range.start)
+                    .unwrap_or(range.start)
+                    .min(length);
+                let end = text
+                    .map_offset_since(revision, range.end)
+                    .unwrap_or(range.end)
+                    .clamp(start, length);
                 crate::editor::text::ByteRange::new(start, end).unwrap_or(range)
             });
             batch.revision = Some(text.revision());
@@ -479,6 +494,49 @@ impl DiagnosticSession {
 mod tests {
     use super::*;
     use crate::editor::text::{ByteRange, TextBuffer};
+    #[test]
+    fn equivalent_unsorted_reports_keep_keys_and_metadata_updates_replace_payloads() {
+        let mut editor = EditorState::new("/workspace".into());
+        let path = std::path::PathBuf::from("/workspace/file");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone()));
+        let uri = crate::language::lsp::file_uri(&path);
+        let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
+        let mut owner = DiagnosticSession::new(10, 10);
+        owner.activate(producer.clone());
+        let batch = |data: i32| DiagnosticBatch {
+            producer: producer.clone(),
+            uri: uri.clone(),
+            document: DiagnosticDocument::capture(&editor, buffer),
+            validity: DiagnosticValidity::RequestedSnapshot,
+            items: [2, 0]
+                .into_iter()
+                .map(|at| Diagnostic {
+                    uri: uri.clone(),
+                    version: None,
+                    range: ByteRange::empty(ByteOffset(at)),
+                    severity: DiagnosticSeverity::Error,
+                    source: "test".into(),
+                    code: None,
+                    message: "bad".into(),
+                    related: Vec::new(),
+                    tags: Vec::new(),
+                    fixes: Vec::new(),
+                    data: Some(serde_json::json!(data)),
+                    timestamp: std::time::SystemTime::UNIX_EPOCH,
+                })
+                .collect(),
+        };
+        owner.publish(batch(1), &editor).unwrap();
+        let key = owner.choices().next().unwrap().0;
+        owner.publish(batch(1), &editor).unwrap();
+        assert!(owner.resolve(&key, &editor).is_some());
+        owner.publish(batch(2), &editor).unwrap();
+        assert_eq!(
+            owner.within(&uri, ByteOffset(0), ByteOffset(3))[0].data,
+            Some(serde_json::json!(2))
+        );
+    }
+
     #[test]
     fn diagnostic_sources_keep_canonical_keys_limits_and_expansion_scoped() {
         let root = tempfile::tempdir().unwrap();
@@ -622,10 +680,16 @@ mod tests {
         let text = &mut editor.buffers[buffer].text;
         let edits = crate::editor::text::TextEditSet::new(
             text.revision(),
-            vec![crate::editor::text::TextEdit::new(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(), String::new())],
+            vec![crate::editor::text::TextEdit::new(
+                ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(),
+                String::new(),
+            )],
         );
         text.apply_edits(&edits).unwrap();
         let shown = owner.projection(&editor).expect("moved diagnostics");
-        assert_eq!(shown[0].range, ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap());
+        assert_eq!(
+            shown[0].range,
+            ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()
+        );
     }
 }

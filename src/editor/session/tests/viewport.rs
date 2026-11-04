@@ -1,6 +1,6 @@
-use crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP;
-use crate::editor::session::dispatch::FULL_PAGE_PERCENT;
 use super::*;
+use crate::editor::session::dispatch::FULL_PAGE_PERCENT;
+use crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP;
 
 #[test]
 fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
@@ -62,9 +62,7 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     app.state.views[view].scroll_line = 0;
     app.state.views[view].scroll_wrap_row = 0;
     let body = usize::from(viewport.height.max(1));
-    let amount = body.saturating_mul(usize::from(
-        FULL_PAGE_PERCENT,
-    )) / 100;
+    let amount = body.saturating_mul(usize::from(FULL_PAGE_PERCENT)) / 100;
     let expected_down = {
         let model = VisualRowModel::new(
             &app.state.buffers[buffer].text,
@@ -559,6 +557,26 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
 }
 
 #[test]
+fn session_capture_keeps_project_panes_after_external_navigation() {
+    let mut state = crate::editor::EditorState::new("/workspace".into());
+    let path = PathBuf::from("/workspace/main.rs");
+    state.open_text(TextBuffer::from_text("project"), Some(path.clone()));
+    state
+        .split_active(crate::editor::Axis::Horizontal, 500)
+        .unwrap();
+    let (external, _) = state.open_text(
+        TextBuffer::from_text("library"),
+        Some("/library/lib.rs".into()),
+    );
+    state.buffers[external].read_only = true;
+    let tab = state.active_tab.unwrap();
+    let layout = capture_persisted_layout(&state, &state.tabs[tab].root).unwrap();
+    assert!(
+        matches!(layout, crate::persistence::PersistedLayout::Pane { pane } if pane.path == path)
+    );
+}
+
+#[test]
 fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let mut app = app();
     let text = format!("{}\nx", "0123456789".repeat(8));
@@ -771,7 +789,9 @@ fn dragging_the_border_between_two_windows_resizes_them() {
     app.window_session.observe_size((100, 30));
     app.state.open_text(TextBuffer::from_text("a\n"), None);
     app.set_dashboard_visibility(false);
-    app.apply_layout_action(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal));
+    app.apply_layout_action(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    ));
     app.reconcile_editor_windows();
     let border = |app: &InteractiveApplication| {
         app.compositor_projection()
@@ -795,7 +815,12 @@ fn dragging_the_border_between_two_windows_resizes_them() {
     mouse(&mut app, MouseLeftDrag, before.x - 20);
     mouse(&mut app, MouseLeftUp, before.x - 20);
     let after = border(&app);
-    assert!(after.x.abs_diff(before.x - 20) <= 1, "{} -> {}", before.x, after.x);
+    assert!(
+        after.x.abs_diff(before.x - 20) <= 1,
+        "{} -> {}",
+        before.x,
+        after.x
+    );
 }
 
 #[test]
@@ -821,17 +846,121 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_resize_it() {
             .iter()
             .map(|window| (window.rect.x, window.rect.width))
             .collect::<Vec<_>>();
-        (borders, format!("{windows:?} {:?}", app.state.tabs[app.state.active_tab.unwrap()].root))
+        (
+            borders,
+            format!(
+                "{windows:?} {:?}",
+                app.state.tabs[app.state.active_tab.unwrap()].root
+            ),
+        )
     };
     let (opened, layout) = border(&app);
     assert_eq!(opened.len(), 1, "{layout}");
-    assert!((100..=106).contains(&opened[0]), "the panel opens at about 35%: {layout}");
+    assert!(
+        (100..=106).contains(&opened[0]),
+        "the panel opens at about 35%: {layout}"
+    );
     app.handle_configured_key("ctrl-left".parse::<KeyEvent>().expect("ctrl-left"));
     // As in LazyVim, ctrl-left narrows the focused window and ctrl-right widens it.
     let (narrowed, layout) = border(&app);
-    assert!(narrowed[0] > opened[0], "ctrl-left narrows the panel: {opened:?} -> {layout}");
+    assert!(
+        narrowed[0] > opened[0],
+        "ctrl-left narrows the panel: {opened:?} -> {layout}"
+    );
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("ctrl-right"));
     let (widened, layout) = border(&app);
-    assert!(widened[0] < narrowed[0], "ctrl-right widens it in Normal mode: {narrowed:?} -> {layout}");
+    assert!(
+        widened[0] < narrowed[0],
+        "ctrl-right widens it in Normal mode: {narrowed:?} -> {layout}"
+    );
+}
+
+#[test]
+fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
+    let mut app = app();
+    app.window_session.observe_size((80, 44));
+    let text = (0..200).map(|_| "line\n").collect::<String>();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&text), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(30).unwrap();
+    app.scroll_view("half_down", 1);
+    let down = app.state.buffers[buffer]
+        .text
+        .byte_to_line(app.state.views[view].cursor)
+        .unwrap();
+    assert!(down > 30);
+    app.scroll_view("half_up", 1);
+    assert_eq!(
+        app.state.buffers[buffer]
+            .text
+            .byte_to_line(app.state.views[view].cursor)
+            .unwrap(),
+        30
+    );
+}
+
+#[test]
+fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
+    let mut app = app();
+    app.window_session.observe_size((40, 12));
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.editor.wrap = false;
+    config.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    app.configuration.install_fixture(config);
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&"x".repeat(60)), None);
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(20);
+    app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
+        buffer,
+        revision: app.state.buffers[buffer].text.revision(),
+        position: ByteOffset(5),
+        label: "hint ".repeat(5),
+    });
+    app.ui.substitute_preview.push(crate::ui::UiInlayHint {
+        buffer,
+        revision: app.state.buffers[buffer].text.revision(),
+        position: ByteOffset(10),
+        label: "preview".into(),
+    });
+    app.ensure_cursor_visible();
+    assert!(app.state.views[view].scroll_column > 0);
+    let frame = render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        40,
+        12,
+    );
+    assert!(frame.cursor.is_some());
+}
+
+#[test]
+fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
+    let mut app = app();
+    app.window_session.observe_size((80, 24));
+    app.state
+        .open_text(TextBuffer::from_text(&"line\n".repeat(60)), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let before = app.compositor_projection().unwrap().workspace_bounds.height;
+    app.ui.operation_bar = Some(crate::ui::OperationBarState {
+        operation: "merge".into(),
+        phase: "conflicts".into(),
+        blockers: Vec::new(),
+        actions: Vec::new(),
+    });
+    app.reconcile_editor_windows();
+    let with_bar = app.compositor_projection().unwrap().workspace_bounds.height;
+    assert_eq!(with_bar + 1, before);
+    app.ui.operation_bar = None;
+    app.reconcile_editor_windows();
+    assert_eq!(
+        app.compositor_projection().unwrap().workspace_bounds.height,
+        before
+    );
 }

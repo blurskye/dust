@@ -145,7 +145,9 @@ impl GitOperationBar {
             .collect::<Vec<_>>();
         let mut actions = Vec::new();
         if blockers.is_empty() {
-            actions.push(GitOperationAction::Continue);
+            if operation == "merge" {
+                actions.push(GitOperationAction::Continue);
+            }
         } else {
             actions.push(GitOperationAction::Resolve);
         }
@@ -274,24 +276,36 @@ pub fn read_side_content(
     path: &Path,
     choice: GitConflictChoice,
 ) -> Result<String, GitConflictResolveError> {
-    let repo = git2::Repository::open(repository).map_err(|_| GitConflictResolveError::NotRepository)?;
+    let repo =
+        git2::Repository::open(repository).map_err(|_| GitConflictResolveError::NotRepository)?;
     // Index conflict paths are RELATIVE to the worktree root, while a caller holds an absolute
     // buffer path, so the caller's path is made relative before comparison.
-    let wanted = match (repo.workdir(), std::fs::canonicalize(path)) {
-        (Some(workdir), Ok(canonical)) => {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        repo.workdir().unwrap_or(repository).join(path)
+    };
+    let canonical = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    let wanted = match repo.workdir() {
+        Some(workdir) => {
             let workdir = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
             canonical
                 .strip_prefix(&workdir)
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|_| path.to_path_buf())
         }
-        _ => path.to_path_buf(),
+        None => path.to_path_buf(),
     };
-    let index = repo.index().map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
-    let mut conflicts = index.conflicts().map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
+    let index = repo
+        .index()
+        .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
+    let mut conflicts = index
+        .conflicts()
+        .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
     let mut found: Option<git2::IndexConflict> = None;
     for conflict in conflicts.by_ref() {
-        let conflict = conflict.map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
+        let conflict = conflict
+            .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
         let entry = conflict
             .ancestor
             .as_ref()
@@ -306,9 +320,8 @@ pub fn read_side_content(
         }
     }
     drop(conflicts);
-    let conflict = found.ok_or_else(|| {
-        GitConflictResolveError::NoConflict(wanted.display().to_string())
-    })?;
+    let conflict =
+        found.ok_or_else(|| GitConflictResolveError::NoConflict(wanted.display().to_string()))?;
     let side = match choice {
         GitConflictChoice::Base => conflict.ancestor,
         GitConflictChoice::Ours => conflict.our,
@@ -323,9 +336,8 @@ pub fn read_side_content(
     let blob = repo
         .find_blob(side.id)
         .map_err(|error| GitConflictResolveError::Backend(error.message().to_owned()))?;
-    String::from_utf8(blob.content().to_vec()).map_err(|_| {
-        GitConflictResolveError::NotText(wanted.display().to_string())
-    })
+    String::from_utf8(blob.content().to_vec())
+        .map_err(|_| GitConflictResolveError::NotText(wanted.display().to_string()))
 }
 
 /// Why a recovery action was refused. Every reason is decided BEFORE the first write.
@@ -365,13 +377,23 @@ pub fn continue_operation(
     message: &str,
 ) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
-    let operation = operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("continue"))?;
+    let operation =
+        operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("continue"))?;
+    if operation != "merge" {
+        return Err(GitRecoveryRefusal::Backend(format!(
+            "continuing {operation} is not supported"
+        )));
+    }
     let remaining = conflict_count(&repo)?;
     if remaining > 0 {
         return Err(GitRecoveryRefusal::ConflictsRemain(remaining));
     }
-    let mut index = repo.index().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let tree_id = index.write_tree().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let mut index = repo
+        .index()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let tree_id = index
+        .write_tree()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     let tree = repo
         .find_tree(tree_id)
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
@@ -412,8 +434,11 @@ pub fn continue_operation(
     drop(tree);
     drop(head);
     drop(merge_head);
-    index.clear().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    repo.cleanup_state().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    index
+        .clear()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    repo.cleanup_state()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     Ok(GitRecoveryOutcome {
         operation,
         commit: Some(oid),
@@ -450,18 +475,15 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
     checkout.force();
     repo.checkout_tree(&object, Some(&mut checkout))
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    repo.reference("HEAD", recorded, true, "dust: abort the paused operation")
-        .or_else(|_| {
-            // A symbolic HEAD cannot be pointed at a commit, so the branch it names is moved.
-            let branch = repo
-                .head()
-                .ok()
-                .and_then(|head| head.name().map(str::to_owned))
-                .ok_or_else(|| git2::Error::from_str("HEAD is not on a branch"))?;
-            repo.reference(&branch, recorded, true, "dust: abort the paused operation")
-        })
+    let mut head = repo
+        .find_reference("HEAD")
+        .and_then(|reference| reference.resolve())
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let mut index = repo.index().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    head.set_target(recorded, "dust: abort the paused operation")
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let mut index = repo
+        .index()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     // ORIG_HEAD is a COMMIT, so its tree is reached through the commit rather than directly.
     let recorded_tree = repo
         .find_commit(recorded)
@@ -470,8 +492,11 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
     index
         .read_tree(&recorded_tree)
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    index.write().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    repo.cleanup_state().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    index
+        .write()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    repo.cleanup_state()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     Ok(GitRecoveryOutcome {
         operation,
         commit: None,
@@ -480,8 +505,12 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
 }
 
 fn conflict_count(repo: &git2::Repository) -> Result<usize, GitRecoveryRefusal> {
-    let index = repo.index().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let conflicts = index.conflicts().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let index = repo
+        .index()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let conflicts = index
+        .conflicts()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     Ok(conflicts.count())
 }
 
@@ -492,10 +521,15 @@ fn merge_touched_paths(
     recorded: git2::Oid,
 ) -> Result<std::collections::BTreeSet<PathBuf>, GitRecoveryRefusal> {
     let mut touched = std::collections::BTreeSet::new();
-    let index = repo.index().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    let mut conflicts = index.conflicts().map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let index = repo
+        .index()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    let mut conflicts = index
+        .conflicts()
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     for conflict in conflicts.by_ref() {
-        let conflict = conflict.map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+        let conflict =
+            conflict.map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
         if let Some(entry) = conflict
             .ancestor
             .as_ref()
@@ -514,11 +548,15 @@ fn merge_touched_paths(
         .find_commit(recorded)
         .and_then(|commit| commit.tree())
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    for entry in index.iter() {
-        let path = PathBuf::from(String::from_utf8_lossy(&entry.path).into_owned());
-        let before = recorded_tree.get_path(&path).ok().map(|entry| entry.id());
-        if before != Some(entry.id) {
-            touched.insert(path);
+    let diff = repo
+        .diff_tree_to_index(Some(&recorded_tree), Some(&index), None)
+        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    for delta in diff.deltas() {
+        for path in [delta.old_file().path(), delta.new_file().path()]
+            .into_iter()
+            .flatten()
+        {
+            touched.insert(path.to_path_buf());
         }
     }
     Ok(touched)
@@ -530,10 +568,6 @@ fn risky_changes(
     repo: &git2::Repository,
     touched: &std::collections::BTreeSet<PathBuf>,
 ) -> Result<Vec<String>, GitRecoveryRefusal> {
-    let head_tree = repo
-        .head()
-        .and_then(|head| head.peel_to_tree())
-        .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     let mut options = git2::StatusOptions::new();
     options.include_untracked(true).recurse_untracked_dirs(true);
     let statuses = repo
@@ -549,18 +583,6 @@ fn risky_changes(
         // A conflicted entry belongs to the operation; so does a change the operation made.
         if status.contains(git2::Status::CONFLICTED) || touched.contains(&path) {
             continue;
-        }
-        // A modified path whose content matches the recorded revision is the operation's doing.
-        if let Ok(index_entry) = repo.index().and_then(|index| {
-            index
-                .get_path(&path, 0)
-                .ok_or_else(|| git2::Error::from_str("not staged"))
-        }) {
-            if let Ok(recorded_entry) = head_tree.get_path(&path) {
-                if recorded_entry.id() == index_entry.id {
-                    continue;
-                }
-            }
         }
         risky.push(path.display().to_string());
     }
@@ -602,7 +624,9 @@ pub fn plan_replacement(
     choice: GitConflictChoice,
 ) -> Result<GitReplacementPlan, GitConflictResolveError> {
     if paths.is_empty() {
-        return Err(GitConflictResolveError::NoConflict("(no paths given)".into()));
+        return Err(GitConflictResolveError::NoConflict(
+            "(no paths given)".into(),
+        ));
     }
     let mut files = Vec::new();
     for path in paths {
@@ -614,10 +638,12 @@ pub fn plan_replacement(
 
 /// Apply a plan that was already previewed. Writes EXACTLY the files the plan names — the plan is
 /// the authority, so nothing outside it is touched.
-pub fn apply_replacement(plan: &GitReplacementPlan) -> Result<Vec<PathBuf>, GitConflictResolveError> {
+pub fn apply_replacement(
+    plan: &GitReplacementPlan,
+) -> Result<Vec<PathBuf>, GitConflictResolveError> {
     let mut written = Vec::new();
     for (path, content) in &plan.files {
-        std::fs::write(path, content)
+        crate::files::atomic_write(path, content.as_bytes())
             .map_err(|error| GitConflictResolveError::Backend(error.to_string()))?;
         written.push(path.clone());
     }

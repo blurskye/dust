@@ -160,6 +160,8 @@ pub fn validate_unsaved_documents(
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct GitStatusEntry {
     pub relative_path: PathBuf,
+    /// Repository-relative source of a rename, including sources outside a nested scope.
+    pub original_path: Option<PathBuf>,
     pub status: GitFileStatus,
     pub sources: GitChangeSources,
 }
@@ -240,11 +242,7 @@ impl GitStatusService {
         {
             return Err(GitStatusError::InvalidPolicy);
         }
-        validate_unsaved_documents(
-            &unsaved,
-            policy.maximum_files,
-            policy.maximum_path_bytes,
-        )?;
+        validate_unsaved_documents(&unsaved, policy.maximum_files, policy.maximum_path_bytes)?;
         self.cancel();
         self.next = self.next.saturating_add(1);
         let generation = GitStatusGeneration(self.next);
@@ -404,7 +402,15 @@ pub(super) fn read_status(
         if started.elapsed() > p.deadline {
             return Err(GitStatusError::Deadline);
         }
-        let Some(repo_path) = item.path().map(PathBuf::from) else {
+        let Some(repo_path) = item
+            .index_to_workdir()
+            .and_then(|delta| delta.new_file().path().map(Path::to_path_buf))
+            .or_else(|| {
+                item.head_to_index()
+                    .and_then(|delta| delta.new_file().path().map(Path::to_path_buf))
+            })
+            .or_else(|| item.path().map(PathBuf::from))
+        else {
             continue;
         };
         if !repo_path.starts_with(prefix) {
@@ -448,8 +454,18 @@ pub(super) fn read_status(
             GitFileStatus::Modified
         };
         let unsaved_document_revision = unsaved_document_revision(unsaved, &path);
+        let original_path = if s.is_wt_renamed() {
+            item.index_to_workdir()
+                .and_then(|delta| delta.old_file().path().map(Path::to_path_buf))
+        } else if s.is_index_renamed() {
+            item.head_to_index()
+                .and_then(|delta| delta.old_file().path().map(Path::to_path_buf))
+        } else {
+            None
+        };
         entries.push(GitStatusEntry {
             relative_path: path,
+            original_path,
             status,
             sources: GitChangeSources {
                 staged,
@@ -463,27 +479,31 @@ pub(super) fn read_status(
     // buffer produces no repository status, so it is merged in here rather than being
     // presented as either staged or unstaged.
     for document in unsaved {
-        if entries
+        let position = match entries
             .binary_search_by(|entry| entry.relative_path.as_path().cmp(&document.relative_path))
-            .is_ok()
         {
-            continue;
-        }
+            Ok(_) => continue,
+            Err(position) => position,
+        };
         let cost = document.relative_path.as_os_str().len();
         if entries.len() >= p.maximum_files || bytes.saturating_add(cost) > p.maximum_path_bytes {
             truncated = true;
             break;
         }
         bytes += cost;
-        entries.push(GitStatusEntry {
-            relative_path: document.relative_path.clone(),
-            status: GitFileStatus::Modified,
-            sources: GitChangeSources {
-                staged: false,
-                unstaged: false,
-                unsaved_document_revision: Some(document.document_revision),
+        entries.insert(
+            position,
+            GitStatusEntry {
+                relative_path: document.relative_path.clone(),
+                original_path: None,
+                status: GitFileStatus::Modified,
+                sources: GitChangeSources {
+                    staged: false,
+                    unstaged: false,
+                    unsaved_document_revision: Some(document.document_revision),
+                },
             },
-        });
+        );
     }
     entries.sort();
     Ok(GitStatusSnapshot {

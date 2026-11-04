@@ -83,7 +83,7 @@ fn load_headless_startup(
         return Ok(());
     };
     let mut worker = crate::files::VfsWorker::start(additional_files.len().saturating_add(1));
-    let mut first_view = None;
+    let mut first_buffer = None;
     for path in std::iter::once(path).chain(additional_files) {
         let request = worker.read(path.clone())?;
         let (resolved, bytes) = loop {
@@ -95,11 +95,14 @@ fn load_headless_startup(
             }
         };
         let text = TextBuffer::from_bytes(&bytes)?;
-        let (_, view) = state.open_text(text, Some(resolved));
-        first_view.get_or_insert(view);
+        let (buffer, _) = state.open_text(text, Some(resolved));
+        first_buffer.get_or_insert(buffer);
     }
-    state.active_view = first_view;
-    state.mark_window_changed();
+    if let Some(buffer) = first_buffer {
+        state.show_buffer(buffer).map_err(|error| {
+            ApplicationError::Command(CommandError::InvalidArguments(error.into()))
+        })?;
+    }
     Ok(())
 }
 
@@ -122,6 +125,28 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::editor::{HeadlessApplication, StartupTarget, build_state};
+
+    #[test]
+    fn multiple_startup_files_keep_a_live_active_view() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("a");
+        let second = directory.path().join("b");
+        std::fs::write(&first, "a").unwrap();
+        std::fs::write(&second, "b").unwrap();
+        let app = HeadlessApplication::bootstrap(StartupTarget::File {
+            path: first,
+            additional_files: vec![second],
+            workspace_root: directory.path().into(),
+        })
+        .unwrap();
+        assert_eq!(
+            app.state.buffers[app.state.active_buffer_id().unwrap()]
+                .text
+                .to_string(),
+            "a"
+        );
+        app.state.validate_layout().unwrap();
+    }
 
     #[test]
     fn dashboard_has_no_fake_buffer() {

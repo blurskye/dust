@@ -155,6 +155,13 @@ impl ExplorerState {
         if !matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory) {
             return false;
         }
+        if matches!(
+            node.load,
+            ExplorerLoadState::Unloaded | ExplorerLoadState::Error
+        ) && self.filter.is_empty()
+        {
+            self.expanded.insert(node.id);
+        }
         node.load = ExplorerLoadState::Loading(generation);
         self.rebuild_visible_projection();
         true
@@ -186,6 +193,13 @@ impl ExplorerState {
         let mut reused = BTreeSet::new();
         let mut ids = Vec::new();
         for child in children {
+            if data
+                .by_path
+                .get(&child.path)
+                .is_some_and(|id| data.roots.contains(id))
+            {
+                continue;
+            }
             let existing = old_ids_by_path
                 .get(&child.path)
                 .copied()
@@ -241,21 +255,17 @@ impl ExplorerState {
             parent.children = ids;
             parent.load = ExplorerLoadState::Loaded;
         }
-        // Folders a search reads in the background stay closed.
-        if self.filter.is_empty() {
-            self.expanded.insert(node);
-        }
         self.rebuild_visible_projection();
         true
     }
 
     pub fn set_error(&mut self, node: ExplorerNodeId, generation: u64) {
         let mut changed = false;
-        if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node) {
-            if node.load == ExplorerLoadState::Loading(generation) {
-                node.load = ExplorerLoadState::Error;
-                changed = true;
-            }
+        if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node)
+            && node.load == ExplorerLoadState::Loading(generation)
+        {
+            node.load = ExplorerLoadState::Error;
+            changed = true;
         }
         if changed {
             self.rebuild_visible_projection();
@@ -263,12 +273,12 @@ impl ExplorerState {
     }
 
     pub fn toggle_loaded(&mut self, id: ExplorerNodeId) {
-        if !self
-            .data
-            .nodes
-            .get(&id)
-            .is_some_and(|node| node.load == ExplorerLoadState::Loaded)
-        {
+        if !self.data.nodes.get(&id).is_some_and(|node| {
+            matches!(
+                node.load,
+                ExplorerLoadState::Loaded | ExplorerLoadState::Loading(_)
+            )
+        }) {
             return;
         }
         if !self.expanded.remove(&id) {
@@ -312,16 +322,15 @@ impl ExplorerState {
     }
 
     pub fn select_first_child(&mut self) {
-        if let Some(id) = self.selected {
-            if let Some(child) = self
+        if let Some(id) = self.selected
+            && let Some(child) = self
                 .data
                 .nodes
                 .get(&id)
                 .and_then(|node| node.children.first())
                 .copied()
-            {
-                self.selected = Some(child);
-            }
+        {
+            self.selected = Some(child);
         }
     }
 
@@ -467,10 +476,10 @@ impl ExplorerState {
         let Some(id) = self.selected else { return };
         if self.expanded.remove(&id) {
             self.rebuild_visible_projection();
-        } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent) {
-            if self.visible_positions.contains_key(&parent) {
-                self.selected = Some(parent)
-            }
+        } else if let Some(parent) = self.data.nodes.get(&id).and_then(|node| node.parent)
+            && self.visible_positions.contains_key(&parent)
+        {
+            self.selected = Some(parent)
         }
     }
 }

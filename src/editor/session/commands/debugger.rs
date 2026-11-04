@@ -64,7 +64,11 @@ pub(super) fn register_commands(
         "Show debug stack",
         ContextRequirement::Application,
         ArgumentSchema::default().field("thread", ArgumentType::Integer, false),
-        |invocation| Ok(AppEffect::DapStack(optional_integer_arg(invocation, "thread"))),
+        |invocation| {
+            Ok(AppEffect::DapStack(optional_integer_arg(
+                invocation, "thread",
+            )))
+        },
     )?;
     register(
         registry,
@@ -72,7 +76,11 @@ pub(super) fn register_commands(
         "Show debug variables by scope",
         ContextRequirement::Application,
         ArgumentSchema::default().field("frame", ArgumentType::Integer, false),
-        |invocation| Ok(AppEffect::DapScopes(optional_integer_arg(invocation, "frame"))),
+        |invocation| {
+            Ok(AppEffect::DapScopes(optional_integer_arg(
+                invocation, "frame",
+            )))
+        },
     )?;
     register(
         registry,

@@ -170,7 +170,7 @@ impl TaskSession {
                             if path.is_absolute() {
                                 path
                             } else {
-                                task.root.join(path)
+                                task.cwd.join(path)
                             },
                             captures
                                 .name(&matcher.line_group)

@@ -20,7 +20,7 @@ const RECENT_TEXT_BYTES: usize = 4 << 20;
 pub struct TextBuffer {
     pub(in crate::editor::text) rope: Rope,
     revision: BufferRevision,
-    format: FileFormat,
+    pub(in crate::editor::text) format: FileFormat,
     source: TextVersion,
     /// The latest edits, each with the revision it was applied to, so highlights computed for
     /// an older revision can be moved onto the current text until a new parse arrives.
@@ -252,6 +252,28 @@ impl TextBuffer {
         Ok(())
     }
 
+    pub(crate) fn line_endings(&self, range: ByteRange) -> Vec<super::LineEnding> {
+        let first = self.byte_to_line(range.start).unwrap_or(0);
+        let last = self.byte_to_line(range.end).unwrap_or(first);
+        (first..last)
+            .map(|index| {
+                self.format
+                    .line_endings
+                    .get(index)
+                    .copied()
+                    .unwrap_or(self.format.preferred_line_ending)
+            })
+            .collect()
+    }
+
+    pub(crate) fn set_line_endings(&mut self, first: usize, endings: &[super::LineEnding]) {
+        for (index, ending) in endings.iter().enumerate() {
+            if let Some(target) = self.format.line_endings.get_mut(first + index) {
+                *target = *ending;
+            }
+        }
+    }
+
     /// The text in rope-sized pieces, for hashing or comparing without building a string.
     pub fn chunks(&self) -> impl Iterator<Item = &str> {
         self.rope.chunks()
@@ -303,7 +325,10 @@ impl TextBuffer {
         if revision == self.revision {
             return Some(self.clone());
         }
-        let (_, rope) = self.recent_texts.iter().find(|(before, _)| *before == revision)?;
+        let (_, rope) = self
+            .recent_texts
+            .iter()
+            .find(|(before, _)| *before == revision)?;
         Some(Self {
             rope: rope.clone(),
             revision,
@@ -317,23 +342,25 @@ impl TextBuffer {
     /// Moves a range computed at `revision` onto the current text, or `None` when the edits
     /// since then are no longer remembered or the range was deleted.
     #[must_use]
-    pub fn map_range_since(
-        &self,
-        revision: BufferRevision,
-        range: ByteRange,
-    ) -> Option<ByteRange> {
+    pub fn map_range_since(&self, revision: BufferRevision, range: ByteRange) -> Option<ByteRange> {
         if revision == self.revision {
             return Some(range);
         }
         let start = self.map_offset_since(revision, range.start)?;
         let end = self.map_offset_since(revision, range.end)?;
-        ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
+        ByteRange::new(start, end)
+            .ok()
+            .filter(|range| !range.is_empty())
     }
 
     /// Moves an offset taken at `revision` onto the current text, or `None` when the edits
     /// since then are no longer remembered.
     #[must_use]
-    pub fn map_offset_since(&self, revision: BufferRevision, offset: ByteOffset) -> Option<ByteOffset> {
+    pub fn map_offset_since(
+        &self,
+        revision: BufferRevision,
+        offset: ByteOffset,
+    ) -> Option<ByteOffset> {
         if revision == self.revision {
             return Some(offset);
         }
@@ -344,7 +371,9 @@ impl TextBuffer {
         Some(
             self.recent_edits[first..]
                 .iter()
-                .fold(offset, |offset, (_, delta)| delta.map_offset(offset, Affinity::After)),
+                .fold(offset, |offset, (_, delta)| {
+                    delta.map_offset(offset, Affinity::After)
+                }),
         )
     }
 }
@@ -390,6 +419,16 @@ fn normalize_newlines(text: &str) -> String {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[test]
+    fn protocol_lines_are_delimited_only_by_lf() {
+        let text = TextBuffer::from_text("a\u{000c}b\u{2028}d\nc");
+        assert_eq!(text.len_lines(), 2);
+        let at = crate::editor::text::PositionCodec::new(&text)
+            .lsp_to_byte(1, 0, crate::editor::text::PositionEncoding::Utf8)
+            .unwrap();
+        assert_eq!(&text.to_string()[at.get()..], "c");
+    }
+
     #[test]
     fn exact_snapshots_distinguish_branches_and_reload_but_keep_edit_incarnation() {
         let original = TextBuffer::from_text("before");

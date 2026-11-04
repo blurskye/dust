@@ -112,6 +112,7 @@ pub struct PluginPickerProjection {
     pub query: String,
     pub items: Vec<PluginPickerItem>,
     pub status: PluginProviderSessionStatus,
+    pub error: Option<PluginProviderError>,
     pub revision: u64,
 }
 
@@ -140,6 +141,7 @@ struct ProviderSession {
     items: BTreeMap<String, PluginPickerItem>,
     ranked: Vec<String>,
     status: PluginProviderSessionStatus,
+    error: Option<PluginProviderError>,
     revision: u64,
 }
 
@@ -281,6 +283,7 @@ impl PluginProviderBroker {
                 items: BTreeMap::new(),
                 ranked: Vec::new(),
                 status: PluginProviderSessionStatus::Active,
+                error: None,
                 revision: 1,
             },
         );
@@ -288,13 +291,19 @@ impl PluginProviderBroker {
     }
 
     #[must_use]
-    pub fn requests(&self, plugin: &str, load: PluginLoadId) -> Vec<PluginPickerRequestEnvelope> {
+    pub fn requests(
+        &self,
+        plugin: &str,
+        load: PluginLoadId,
+        command: &str,
+    ) -> Vec<PluginPickerRequestEnvelope> {
         let now = crate::clock::monotonic();
         self.sessions
             .iter()
             .filter(|(_, session)| {
                 session.plugin == plugin
                     && session.load == load
+                    && session.action_command == command
                     && session.status == PluginProviderSessionStatus::Active
                     && session.deadline >= now
             })
@@ -408,7 +417,10 @@ impl PluginProviderBroker {
             PluginProviderTerminal::More => PluginProviderSessionStatus::Active,
             PluginProviderTerminal::Complete => PluginProviderSessionStatus::Complete,
             PluginProviderTerminal::Truncated => PluginProviderSessionStatus::Truncated,
-            PluginProviderTerminal::Error(_) => PluginProviderSessionStatus::Failed,
+            PluginProviderTerminal::Error(error) => {
+                candidate.error = Some(error);
+                PluginProviderSessionStatus::Failed
+            }
         };
         candidate.revision = candidate.revision.checked_add(1).ok_or_else(|| {
             PluginProviderError::new(
@@ -450,17 +462,7 @@ impl PluginProviderBroker {
     }
 
     pub fn cancel(&mut self, request: u64) -> bool {
-        let Some(session) = self.sessions.get_mut(&request) else {
-            return false;
-        };
-        if session.status != PluginProviderSessionStatus::Cancelled {
-            session.status = PluginProviderSessionStatus::Cancelled;
-            session.cancellation_generation = session.cancellation_generation.saturating_add(1);
-            session.revision = session.revision.saturating_add(1);
-            true
-        } else {
-            false
-        }
+        self.sessions.remove(&request).is_some()
     }
 
     #[must_use]
@@ -479,6 +481,7 @@ impl PluginProviderBroker {
                 .filter_map(|id| session.items.get(id).cloned())
                 .collect(),
             status: session.status,
+            error: session.error.clone(),
             revision: session.revision,
         })
     }
@@ -631,7 +634,12 @@ mod tests {
                 buffer_revision: Some(9),
             })
             .unwrap();
-        assert_eq!(broker.requests("demo", PluginLoadId(7)).len(), 1);
+        assert_eq!(
+            broker
+                .requests("demo", PluginLoadId(7), "plugin.demo.run")
+                .len(),
+            1
+        );
         broker
             .apply_chunk(
                 "demo",
@@ -682,10 +690,10 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
-            PluginProviderErrorCode::Cancelled
+            PluginProviderErrorCode::UnknownRequest
         );
         broker.remove_generation("demo", PluginLoadId(6));
-        assert!(broker.projection(request).is_some());
+        assert!(broker.projection(request).is_none());
         broker.remove_generation("demo", PluginLoadId(7));
         assert!(broker.projection(request).is_none());
     }
@@ -812,7 +820,11 @@ mod tests {
         );
         broker.sessions.get_mut(&request).unwrap().deadline =
             crate::clock::monotonic() - Duration::from_millis(1);
-        assert!(broker.requests("demo", PluginLoadId(2)).is_empty());
+        assert!(
+            broker
+                .requests("demo", PluginLoadId(2), "plugin.demo.run")
+                .is_empty()
+        );
         assert_eq!(
             broker
                 .apply_chunk(
@@ -847,6 +859,57 @@ mod tests {
         let stable = broker.projection(request);
         for _ in 0..256 {
             assert_eq!(broker.projection(request), stable);
+        }
+    }
+
+    #[test]
+    fn provider_delivery_errors_and_cancellation_preserve_the_contract() {
+        let mut broker = PluginProviderBroker::default();
+        broker.install(&index(7, 4, 4096)).unwrap();
+        for _ in 0..100 {
+            let request = broker
+                .start(PluginProviderStart {
+                    plugin: "demo".into(),
+                    load: PluginLoadId(7),
+                    provider: "plugin.demo.provider.files".into(),
+                    query: String::new(),
+                    context: String::new(),
+                    workspace_revision: None,
+                    buffer_revision: None,
+                })
+                .unwrap();
+            assert!(
+                broker
+                    .requests("demo", PluginLoadId(7), "plugin.demo.other")
+                    .is_empty()
+            );
+            assert_eq!(
+                broker
+                    .requests("demo", PluginLoadId(7), "plugin.demo.run")
+                    .len(),
+                1
+            );
+            let error = PluginProviderError::new(
+                PluginProviderErrorCode::Unavailable,
+                "Authentication required",
+            );
+            broker
+                .apply_chunk(
+                    "demo",
+                    PluginLoadId(7),
+                    None,
+                    None,
+                    PluginPickerChunk {
+                        request,
+                        sequence: 1,
+                        items: vec![item("one", "One")],
+                        terminal: PluginProviderTerminal::Error(error.clone()),
+                    },
+                )
+                .unwrap();
+            assert_eq!(broker.projection(request).unwrap().error, Some(error));
+            assert!(broker.cancel(request));
+            assert!(broker.sessions.is_empty());
         }
     }
 }

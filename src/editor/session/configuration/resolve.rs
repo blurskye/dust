@@ -8,7 +8,7 @@ use super::{
 pub(in crate::editor::session) fn base_safe_keymaps(
     loaded: &LoadedConfig,
 ) -> (crate::config::LoadedKeymaps, BTreeSet<String>, bool) {
-    let enabled = loaded
+    let mut enabled = loaded
         .config
         .plugins
         .entries
@@ -16,6 +16,20 @@ pub(in crate::editor::session) fn base_safe_keymaps(
         .filter(|(_, entry)| entry.enabled)
         .map(|(id, _)| id.clone())
         .collect::<BTreeSet<_>>();
+    enabled.extend(
+        loaded
+            .installed_plugins
+            .iter()
+            .filter(|owner| {
+                loaded
+                    .config
+                    .plugins
+                    .entries
+                    .get(*owner)
+                    .is_none_or(|entry| entry.enabled)
+            })
+            .cloned(),
+    );
     let mut base = loaded.keymaps.clone();
     let mut entries = base.entries[..base.bundled_count].to_vec();
     let mut spans = Vec::new();
@@ -71,8 +85,7 @@ pub(in crate::editor::session) fn resolve_configuration(
     let (base_keymaps, expected_plugin_indexes, mut deferred_plugin_keymaps) =
         base_safe_keymaps(&loaded);
     let (keymaps, keymap_diagnostic) = if strict {
-        let (entries, bundled_count, groups, bundled_group_count) =
-            keymap_entries(&base_keymaps);
+        let (entries, bundled_count, groups, bundled_group_count) = keymap_entries(&base_keymaps);
         match compile_keymap_entries(
             commands,
             KeymapCompilation {

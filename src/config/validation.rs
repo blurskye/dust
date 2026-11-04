@@ -6,34 +6,31 @@ use super::Config;
 use super::settings::{AmbiguousWidth, TaskConfig, TaskKind, WindowPlacementConfig};
 
 fn task_graph_has_cycle(tasks: &BTreeMap<String, TaskConfig>) -> bool {
-    fn visit(
-        name: &str,
-        tasks: &BTreeMap<String, TaskConfig>,
-        visiting: &mut BTreeSet<String>,
-        visited: &mut BTreeSet<String>,
-    ) -> bool {
-        if visited.contains(name) {
-            return false;
-        }
-        if !visiting.insert(name.to_owned()) {
-            return true;
-        }
-        if tasks.get(name).is_some_and(|task| {
-            task.dependencies
-                .iter()
-                .any(|dependency| visit(dependency, tasks, visiting, visited))
-        }) {
-            return true;
-        }
-        visiting.remove(name);
-        visited.insert(name.to_owned());
-        false
-    }
     let mut visiting = BTreeSet::new();
     let mut visited = BTreeSet::new();
-    tasks
-        .keys()
-        .any(|name| visit(name, tasks, &mut visiting, &mut visited))
+    for name in tasks.keys() {
+        let mut stack = vec![(name.as_str(), false)];
+        while let Some((name, leaving)) = stack.pop() {
+            if leaving {
+                visiting.remove(name);
+                visited.insert(name);
+            } else if !visited.contains(name) {
+                if !visiting.insert(name) {
+                    return true;
+                }
+                stack.push((name, true));
+                if let Some(task) = tasks.get(name) {
+                    stack.extend(
+                        task.dependencies
+                            .iter()
+                            .rev()
+                            .map(|name| (name.as_str(), false)),
+                    );
+                }
+            }
+        }
+    }
+    false
 }
 
 /// What is wrong with one configured task, as the end of "tasks.NAME ...".
@@ -47,7 +44,11 @@ fn task_problem(task: &TaskConfig, tasks: &BTreeMap<String, TaskConfig>) -> Opti
     if task.arguments.len() > 4096 || task.environment.len() > 4096 {
         return Some("has more than 4096 arguments or environment variables".into());
     }
-    if let Some(missing) = task.dependencies.iter().find(|dependency| !tasks.contains_key(*dependency)) {
+    if let Some(missing) = task
+        .dependencies
+        .iter()
+        .find(|dependency| !tasks.contains_key(*dependency))
+    {
         return Some(format!("depends on {missing}, which is not a task"));
     }
     if task
@@ -60,7 +61,10 @@ fn task_problem(task: &TaskConfig, tasks: &BTreeMap<String, TaskConfig>) -> Opti
     if matches!(task.kind, TaskKind::Formatter) && !task.stdin {
         return Some("is a formatter, so it needs stdin = true".into());
     }
-    if task.timeout_ms.is_some_and(|timeout| timeout == 0 || timeout > 86_400_000) {
+    if task
+        .timeout_ms
+        .is_some_and(|timeout| timeout == 0 || timeout > 86_400_000)
+    {
         return Some("timeout_ms must be between 1 and 86400000".into());
     }
     None
@@ -147,7 +151,9 @@ impl Config {
                 .iter()
                 .any(|token| matches!(*token, "<leader>" | "<localleader>"))
             {
-                return Err(format!("{name} must be a literal sequence without leader tokens"));
+                return Err(format!(
+                    "{name} must be a literal sequence without leader tokens"
+                ));
             }
             if sequence.chars().any(char::is_control) {
                 return Err(format!("{name} must not contain control characters"));
@@ -166,7 +172,7 @@ impl Config {
             &self.ui.explorer.glyphs.ascii,
         ];
         let invalid_explorer_glyph = explorer_glyphs.into_iter().any(|glyphs| {
-            let invalid_bounded = [
+            [
                 &glyphs.tree_vertical,
                 &glyphs.tree_middle,
                 &glyphs.tree_last,
@@ -182,8 +188,7 @@ impl Config {
             .any(|glyph| {
                 let width = explorer_glyph_width(glyph);
                 glyph.is_empty() || width == 0 || width > 8 || glyph.chars().any(char::is_control)
-            });
-            invalid_bounded
+            })
         });
         if !(12..=240).contains(&self.ui.explorer.width) || invalid_explorer_glyph {
             return Err("ui.explorer width or glyph policy is invalid".into());
@@ -198,30 +203,28 @@ impl Config {
             return Err("configuration schema is newer than this Dust build".into());
         }
         if self.debug.adapters.iter().any(|(id, adapter)| {
-                id.is_empty()
-                    || !adapter.program.is_absolute()
-                    || adapter.arguments.len() > 4096
-                    || adapter.environment.len() > 4096
-            })
-            || self.debug.sessions.iter().any(|(id, session)| {
-                id.is_empty()
-                    || !self.debug.adapters.contains_key(&session.adapter)
-                    || session.cwd.as_ref().is_some_and(|path| {
-                        path.components()
-                            .any(|part| matches!(part, std::path::Component::ParentDir))
-                    })
-                    || session.program.as_ref().is_some_and(|path| {
-                        path.components()
-                            .any(|part| matches!(part, std::path::Component::ParentDir))
-                    })
-                    || session
-                        .run_in_terminal_profile
-                        .as_ref()
-                        .is_some_and(|profile| !self.terminals.profiles.contains_key(profile))
-                    || session.arguments.len() > 4096
-                    || session.path_maps.len() > 1024
-            })
-        {
+            id.is_empty()
+                || !adapter.program.is_absolute()
+                || adapter.arguments.len() > 4096
+                || adapter.environment.len() > 4096
+        }) || self.debug.sessions.iter().any(|(id, session)| {
+            id.is_empty()
+                || !self.debug.adapters.contains_key(&session.adapter)
+                || session.cwd.as_ref().is_some_and(|path| {
+                    path.components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir))
+                })
+                || session.program.as_ref().is_some_and(|path| {
+                    path.components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir))
+                })
+                || session
+                    .run_in_terminal_profile
+                    .as_ref()
+                    .is_some_and(|profile| !self.terminals.profiles.contains_key(profile))
+                || session.arguments.len() > 4096
+                || session.path_maps.len() > 1024
+        }) {
             return Err("debug policy is invalid".into());
         }
         if self.terminals.default_profile.is_empty()
@@ -239,7 +242,8 @@ impl Config {
         {
             return Err("terminal policy is invalid".into());
         }
-        if (!self.agents.default.is_empty() && !self.agents.profiles.contains_key(&self.agents.default))
+        if (!self.agents.default.is_empty()
+            && !self.agents.profiles.contains_key(&self.agents.default))
             || !(10..=90).contains(&self.agents.panel_width)
             || self.agents.profiles.iter().any(|(name, profile)| {
                 name.is_empty()

@@ -31,19 +31,11 @@ pub struct DebugSessionConfig {
     #[serde(default)]
     pub path_maps: BTreeMap<PathBuf, PathBuf>,
 }
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct DebugConfig {
     #[serde(default)]
     pub adapters: BTreeMap<String, DebugAdapterConfig>,
     #[serde(default)]
     pub sessions: BTreeMap<String, DebugSessionConfig>,
-}
-impl Default for DebugConfig {
-    fn default() -> Self {
-        Self {
-            adapters: BTreeMap::new(),
-            sessions: BTreeMap::new(),
-        }
-    }
 }

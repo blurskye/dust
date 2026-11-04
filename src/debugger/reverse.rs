@@ -167,10 +167,10 @@ impl ReverseRequest {
         }
     }
     pub fn flush(&mut self, writer: &mut Writer, sequence: &mut i64) -> bool {
-        if self.ready.is_none() {
-            if let Ok(control) = self.receiver.try_recv() {
-                self.prepare(control);
-            }
+        if self.ready.is_none()
+            && let Ok(control) = self.receiver.try_recv()
+        {
+            self.prepare(control);
         }
         if let Some(mut value) = self.ready.take() {
             // Assign the actual wire ID at enqueue, not while waiting for space:

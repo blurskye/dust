@@ -15,7 +15,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::settings::{ThemeConfig};
+use super::settings::ThemeConfig;
 use super::themes::ThemeRead;
 use super::{
     Config, DashboardConfig, KeyGroupEntry, KeymapEntry, LoadedConfig, LoadedKeymaps,
@@ -150,6 +150,7 @@ fn parse_bundled_config() -> LoadedConfig {
         .validate()
         .expect("bundled theme fallbacks must be covered by tests");
     LoadedConfig {
+        installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
         user_setting_spans: BTreeMap::new(),
@@ -202,6 +203,7 @@ impl ConfigurationSourceBundle {
         let bundled = load_bundled_config();
         let mut loaded = load_config_capture(&self.config);
         loaded.user_configuration = true;
+        loaded.installed_plugins = installed_plugins(&user_state_directory().join("packages"));
         let user_keymaps = match &self.keymaps.text {
             CapturedText::Missing => LoadedKeymaps {
                 path: self.keymaps.path.clone(),
@@ -255,7 +257,9 @@ impl ConfigurationSourceBundle {
                 append_diagnostic(&mut loaded.diagnostic, diagnostic);
             }
         }
-        if self.selected_theme == bundled.theme.name {
+        if self.selected_theme == bundled.theme.name
+            && matches!(self.theme.text, CapturedText::Missing)
+        {
             loaded.theme = bundled.theme;
             loaded.theme_path = bundled.theme_path;
         } else if let Some(choice) = matches!(self.theme.text, CapturedText::Missing)
@@ -323,6 +327,48 @@ pub(super) fn capture_configuration_bundle_with(
 
 pub(super) fn capture_configuration_bundle(theme_hint: &str) -> ConfigurationSourceBundle {
     capture_configuration_bundle_with(theme_hint, capture_source)
+}
+
+fn installed_plugins(root: &Path) -> BTreeSet<String> {
+    let read = |path: &Path| -> Option<Vec<u8>> {
+        let mut bytes = Vec::new();
+        fs::File::open(path)
+            .ok()?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        (bytes.len() <= 1024 * 1024).then_some(bytes)
+    };
+    let Some(lock) = read(&root.join("dust-packages.lock.json"))
+        .and_then(|bytes| serde_json::from_slice::<crate::tools::PackageLock>(&bytes).ok())
+    else {
+        return BTreeSet::new();
+    };
+    lock.packages
+        .iter()
+        .take(1024)
+        .filter_map(|package| {
+            if package.content_sha256.len() != 64
+                || !package
+                    .content_sha256
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit())
+            {
+                return None;
+            }
+            let bytes = read(
+                &root
+                    .join("activations")
+                    .join(format!("{}.toml", package.content_sha256)),
+            )?;
+            let manifest: crate::extensions::PluginManifest =
+                toml::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
+            manifest
+                .component_sha256
+                .eq_ignore_ascii_case(&package.content_sha256)
+                .then_some(manifest.id)
+        })
+        .collect()
 }
 
 #[must_use]
@@ -559,6 +605,7 @@ pub(super) fn parse_dashboard_capture(
 
 pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
     LoadedConfig {
+        installed_plugins: BTreeSet::new(),
         user_configuration: false,
         user_setting_keys: BTreeSet::new(),
         user_setting_spans: BTreeMap::new(),
@@ -595,6 +642,7 @@ pub fn load_config(path: &Path) -> LoadedConfig {
 pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
     match settings_from_source(source) {
         Ok((config, user_setting_keys, source, ignored)) => LoadedConfig {
+            installed_plugins: BTreeSet::new(),
             user_configuration: false,
             user_setting_keys,
             user_setting_spans: setting_spans(&source),
@@ -606,7 +654,10 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
                     || path.display().to_string(),
                     |name| name.to_string_lossy().into_owned(),
                 );
-                format!("left out settings Dust doesn't have from {file}: {}", ignored.join(", "))
+                format!(
+                    "left out settings Dust doesn't have from {file}: {}",
+                    ignored.join(", ")
+                )
             }),
             keymaps: LoadedKeymaps::default(),
             dashboard: DashboardConfig::default(),
@@ -640,7 +691,9 @@ pub(super) fn settings_from_source(
             Err(error) => error.to_string(),
         };
         match unknown_field(&message) {
-            Some(key) if ignored.len() < 64 && remove_key(&mut user, &key) => ignored.push(key.join(".")),
+            Some(key) if ignored.len() < 64 && remove_key(&mut user, &key) => {
+                ignored.push(key.join("."))
+            }
             _ => return Err(message),
         }
     };
@@ -655,21 +708,38 @@ fn unknown_field(message: &str) -> Option<Vec<String>> {
     let mut key: Vec<String> = message
         .lines()
         .find_map(|line| line.strip_prefix("in "))
-        .map(|table| table.trim().trim_matches('`').split('.').map(str::to_owned).collect())
+        .map(|table| {
+            table
+                .trim()
+                .trim_matches('`')
+                .split('.')
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default();
     key.push(name.to_owned());
     Some(key)
 }
 
 fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
-    let Some((last, parents)) = key.split_last() else {
+    let Some(table) = value.as_table_mut() else {
         return false;
     };
-    let mut table = value.as_table_mut();
-    for parent in parents {
-        table = table.and_then(|table| table.get_mut(parent)).and_then(toml::Value::as_table_mut);
+    if key.len() == 1 {
+        return table.remove(&key[0]).is_some();
     }
-    table.is_some_and(|table| table.remove(last).is_some())
+    // Serde prints table names with dots without quoting literal dots in keys.
+    // Match that display against the actual table keys, retaining their boundaries.
+    for count in 1..key.len() {
+        let parent = key[..count].join(".");
+        if table
+            .get_mut(&parent)
+            .is_some_and(|value| remove_key(value, &key[count..]))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// A setting's bundled default value, by its dotted key.
@@ -766,9 +836,7 @@ pub struct ConfigurationWorkerResult {
 pub(super) enum ConfigurationRequest {
     Reload,
     Themes(ThemeRead),
-    ConfigureWatch {
-        theme: String,
-    },
+    ConfigureWatch { theme: String },
     Shutdown,
 }
 
@@ -808,10 +876,10 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme {
-                                            if let Some(stable) = consistent.fingerprint {
-                                                fingerprint = stable;
-                                            }
+                                        if consistent.theme == theme
+                                            && let Some(stable) = consistent.fingerprint
+                                        {
+                                            fingerprint = stable;
                                         }
                                         changed_at = None;
                                         consistent.candidate
@@ -867,10 +935,10 @@ impl ConfigurationWorker {
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
                                     Ok(consistent) => {
-                                        if consistent.theme == theme {
-                                            if let Some(stable) = consistent.fingerprint {
-                                                fingerprint = stable;
-                                            }
+                                        if consistent.theme == theme
+                                            && let Some(stable) = consistent.fingerprint
+                                        {
+                                            fingerprint = stable;
                                         }
                                         changed_at = None;
                                         generation = generation.saturating_add(1);

@@ -1,6 +1,8 @@
 use std::{
+    ffi::OsString,
     fs,
     io::{self, Read},
+    os::unix::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
@@ -9,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{error::VfsError, vfs::atomic_write};
 
-pub const RECOVERY_VERSION: u32 = 1;
+pub const RECOVERY_VERSION: u32 = 2;
 pub const DOCUMENT_BYTE_CEILING: u64 = 256 * 1024 * 1024;
 pub(super) const RECOVERY_JOURNAL_BYTE_CEILING: u64 = 64 * 1024 * 1024;
 pub(super) const RECOVERY_DIRECTORY_ENTRY_CEILING: usize = 10_000;
@@ -25,7 +27,7 @@ pub(super) const fn recovery_journal_size_allowed(bytes: u64) -> bool {
 
 /// Whether a file this size fits in a recovery journal, leaving room for its path.
 pub const fn recovery_size_allowed(content_bytes: u64) -> bool {
-    recovery_payload_size_allowed(content_bytes, 4096)
+    recovery_payload_size_allowed(content_bytes, 2 * 4096)
 }
 
 pub(super) const fn recovery_payload_size_allowed(content_bytes: u64, path_bytes: u64) -> bool {
@@ -55,9 +57,9 @@ pub(super) fn read_bounded_utf8(
 }
 
 pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
-    let file =
-        fs::File::open(path).map_err(|error| format!("cannot open recovery journal: {error}"))?;
-    read_bounded_utf8(file, RECOVERY_JOURNAL_BYTE_CEILING, "recovery journal")
+    let bytes = super::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
+        .map_err(|error| format!("cannot read recovery journal: {error}"))?;
+    String::from_utf8(bytes).map_err(|error| format!("recovery journal is not UTF-8: {error}"))
 }
 
 pub(super) fn bounded_recovery_entries<T>(entries: impl IntoIterator<Item = T>) -> (Vec<T>, bool) {
@@ -95,9 +97,38 @@ impl RecoveryRecord {
     pub fn new(original_path: Option<&Path>, revision: u64, content: String) -> Self {
         Self {
             version: RECOVERY_VERSION,
-            original_path: original_path.map(|path| path.display().to_string()),
+            original_path: original_path.map(|path| {
+                path.as_os_str()
+                    .as_bytes()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect()
+            }),
             revision,
             content,
+        }
+    }
+
+    /// Version 1 used UTF-8 display paths; version 2 stores native Unix bytes as hex.
+    pub fn path(&self) -> Option<PathBuf> {
+        let path = self.original_path.as_ref()?;
+        match self.version {
+            // Old display paths with replacement characters are ambiguous. Recover
+            // their text into a scratch buffer instead of risking a different file.
+            1 if !path.contains('\u{fffd}') => Some(PathBuf::from(path)),
+            RECOVERY_VERSION if path.len() % 2 == 0 => {
+                let bytes = path
+                    .as_bytes()
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let high = (pair[0] as char).to_digit(16)?;
+                        let low = (pair[1] as char).to_digit(16)?;
+                        Some((high * 16 + low) as u8)
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(PathBuf::from(OsString::from_vec(bytes)))
+            }
+            _ => None,
         }
     }
 }
@@ -131,21 +162,60 @@ pub fn write_recovery(path: &Path, record: &RecoveryRecord) -> Result<(), VfsErr
 
 #[must_use]
 pub fn discover_recovery(directory: &Path) -> RecoveryDiscovery {
-    let mut discovery = RecoveryDiscovery::default();
+    discover_recovery_bounded(directory, 100, RECOVERY_JOURNAL_BYTE_CEILING)
+}
+
+pub(super) fn discover_recovery_bounded(
+    directory: &Path,
+    maximum_records: usize,
+    maximum_bytes: u64,
+) -> RecoveryDiscovery {
+    let mut records = Vec::new();
+    let mut bytes = 0;
+    if maximum_records == 0 {
+        return RecoveryDiscovery::default();
+    }
+    let mut limited = false;
+    let mut diagnostics = visit_recovery(directory, |path, record| {
+        bytes += record.content.len() as u64
+            + record.original_path.as_ref().map_or(0, String::len) as u64;
+        if bytes > maximum_bytes {
+            limited = true;
+            return false;
+        }
+        records.push((path, record));
+        records.len() < maximum_records
+    });
+    if limited {
+        diagnostics.push(format!(
+            "recovery discovery stopped at {maximum_bytes} byte safety ceiling"
+        ));
+    }
+    RecoveryDiscovery {
+        records,
+        diagnostics,
+    }
+}
+
+fn visit_recovery(
+    directory: &Path,
+    mut visit: impl FnMut(PathBuf, RecoveryRecord) -> bool,
+) -> Vec<String> {
+    let mut diagnostics = Vec::new();
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return discovery,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return diagnostics,
         Err(error) => {
-            discovery.diagnostics.push(format!(
+            diagnostics.push(format!(
                 "cannot inspect recovery directory {}: {error}",
                 directory.display()
             ));
-            return discovery;
+            return diagnostics;
         }
     };
     let (scanned, truncated) = bounded_recovery_entries(entries);
     if truncated {
-        discovery.diagnostics.push(format!(
+        diagnostics.push(format!(
             "recovery directory scan stopped at safety ceiling of {RECOVERY_DIRECTORY_ENTRY_CEILING} raw entries"
         ));
     }
@@ -164,24 +234,30 @@ pub fn discover_recovery(directory: &Path) -> RecoveryDiscovery {
             toml::from_str::<RecoveryRecord>(&source).map_err(|error| error.to_string())
         });
         match result {
-            Ok(record) if record.version == RECOVERY_VERSION => {
-                discovery.records.push((path, record));
+            Ok(record)
+                if record.version == 1
+                    || (record.version == RECOVERY_VERSION
+                        && (record.original_path.is_none() || record.path().is_some())) =>
+            {
+                if !visit(path, record) {
+                    break;
+                }
             }
-            Ok(record) => discovery.diagnostics.push(format!(
+            Ok(record) => diagnostics.push(format!(
                 "unsupported recovery version {} in {}",
                 record.version,
                 path.display()
             )),
-            Err(error) => discovery.diagnostics.push(format!(
+            Err(error) => diagnostics.push(format!(
                 "invalid recovery journal {}: {error}",
                 path.display()
             )),
         }
     }
-    discovery
+    diagnostics
 }
 
-/// Removes only valid, current-version journals selected by explicit retention
+/// Removes only valid, supported journals selected by explicit retention
 /// policy. Corrupt and unsupported records remain available for manual
 /// inspection and are reported rather than silently discarded.
 #[must_use]
@@ -191,23 +267,21 @@ pub fn cleanup_recovery(
     maximum_age_days: u64,
     now: SystemTime,
 ) -> RecoveryCleanup {
-    let discovery = discover_recovery(directory);
+    let mut records = Vec::new();
+    // Retention needs only paths and timestamps; drop each payload before reading the next.
+    let diagnostics = visit_recovery(directory, |path, _| {
+        let modified = fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        records.push((path, modified));
+        true
+    });
     let mut cleanup = RecoveryCleanup {
-        diagnostics: discovery.diagnostics,
+        diagnostics,
         ..RecoveryCleanup::default()
     };
     let maximum_age = (maximum_age_days > 0)
         .then(|| Duration::from_secs(maximum_age_days.saturating_mul(86_400)));
-    let mut records = discovery
-        .records
-        .into_iter()
-        .map(|(path, _)| {
-            let modified = fs::metadata(&path)
-                .ok()
-                .and_then(|metadata| metadata.modified().ok());
-            (path, modified)
-        })
-        .collect::<Vec<_>>();
     records.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
         right_modified
             .cmp(left_modified)

@@ -8,9 +8,8 @@ use super::{
     MAXIMUM_LAYOUT_DEPTH, MAXIMUM_LAYOUT_PANES,
     id::{BufferId, PaneId, TabId, ViewId},
     layout::{
-        FocusRectangle, collect_focus_rectangles, focus_score, layout_depth,
-        has_split_on_axis, layout_ratios_are_valid, offset_index, pane_depth, pane_ids,
-        remove_leaf, resize_parent,
+        FocusRectangle, collect_focus_rectangles, focus_score, has_split_on_axis, layout_depth,
+        layout_ratios_are_valid, offset_index, pane_depth, pane_ids, remove_leaf, resize_parent,
         resize_parent_on_axis, split_between, split_leaf, swap_layout_leaves,
     },
     model::{
@@ -380,20 +379,21 @@ impl EditorState {
     }
 
     pub fn open_text(&mut self, text: TextBuffer, path: Option<PathBuf>) -> (BufferId, ViewId) {
-        if let Some(path) = path.as_ref() {
-            if let Some((buffer, _)) = self
+        if let Some(path) = path.as_ref()
+            && let Some((buffer, _)) = self
                 .buffers
                 .iter()
                 .find(|(_, buffer)| buffer.path.as_ref() == Some(path))
-            {
-                if let Some((view, _)) = self.views.iter().find(|(_, view)| view.buffer == buffer) {
-                    self.show_view(view);
-                    return (buffer, view);
-                }
-                let view = self.views.insert(View::new(buffer));
+        {
+            if let Some((view, _)) = self.views.iter().find(|(_, view)| view.buffer == buffer) {
                 self.show_view(view);
                 return (buffer, view);
             }
+            let view = self
+                .views
+                .insert(self.buffers[buffer].restored_view(buffer));
+            self.show_view(view);
+            return (buffer, view);
         }
         let opens_file = path.is_some();
         let previous = self.active_view;
@@ -412,14 +412,22 @@ impl EditorState {
 
     /// A file opened over an untouched empty buffer takes its place, as in Vim.
     fn drop_replaced_scratch(&mut self, replaced: Option<ViewId>) {
-        let Some(buffer) = replaced.and_then(|view| self.views.get(view)).map(|view| view.buffer) else {
+        let Some(buffer) = replaced
+            .and_then(|view| self.views.get(view))
+            .map(|view| view.buffer)
+        else {
             return;
         };
         let untouched = self.buffers.get(buffer).is_some_and(|buffer| {
-            buffer.path.is_none() && !buffer.dirty && !buffer.read_only && buffer.text.len_bytes() == 0
+            buffer.path.is_none()
+                && !buffer.dirty
+                && !buffer.read_only
+                && buffer.text.len_bytes() == 0
         });
         let shown = self.panes.values().any(|pane| {
-            self.views.get(pane.view).is_some_and(|view| view.buffer == buffer)
+            self.views
+                .get(pane.view)
+                .is_some_and(|view| view.buffer == buffer)
         });
         if untouched && !shown && Some(buffer) != self.kept_buffer {
             self.views.retain(|_, view| view.buffer != buffer);
@@ -436,7 +444,10 @@ impl EditorState {
             .iter()
             .find(|(_, view)| view.buffer == buffer)
             .map(|(view, _)| view);
-        let view = existing.unwrap_or_else(|| self.views.insert(View::new(buffer)));
+        let view = existing.unwrap_or_else(|| {
+            self.views
+                .insert(self.buffers[buffer].restored_view(buffer))
+        });
         self.show_view(view);
         Ok(view)
     }
@@ -448,7 +459,10 @@ impl EditorState {
         if !self.panes.contains_key(pane) {
             return Err("focused pane is stale");
         }
-        let buffer = buffer.unwrap_or_else(|| self.buffers.insert(Buffer::new(TextBuffer::from_text(""), None)));
+        let buffer = buffer.unwrap_or_else(|| {
+            self.buffers
+                .insert(Buffer::new(TextBuffer::from_text(""), None))
+        });
         let view = self.views.insert(View::new(buffer));
         let old = std::mem::replace(&mut self.panes[pane].view, view);
         self.views.remove(old);
@@ -493,35 +507,41 @@ impl EditorState {
             return;
         }
         self.leave_kept_pane(view);
-        if let Some(tab_id) = self.active_tab {
-            if let Some(tab) = self.tabs.get(tab_id) {
-                if let Some(pane) = self.panes.get_mut(tab.focused) {
-                    let previous = pane.view;
-                    pane.view = view;
-                    self.active_view = Some(view);
-                    if previous != view
-                        && !self
-                            .panes
-                            .iter()
-                            .any(|(_, candidate)| candidate.view == previous)
-                        && let Some(old) = self.views.remove(previous)
-                    {
-                        // An untouched [No Name] buffer gives way to what opens over it, as
-                        // in Vim, so `ctrl-t` and a picked file leave one tab.
-                        let unused = self.buffers.get(old.buffer).is_some_and(|buffer| {
-                            buffer.path.is_none()
-                                && !buffer.dirty
-                                && buffer.text.len_bytes() == 0
-                                && buffer.origin == BufferOrigin::FileOrScratch
-                        });
-                        if unused && !self.views.values().any(|other| other.buffer == old.buffer) {
-                            self.buffers.remove(old.buffer);
-                        }
-                    }
-                    self.mark_window_changed();
-                    return;
+        if let Some(tab_id) = self.active_tab
+            && let Some(tab) = self.tabs.get(tab_id)
+            && let Some(pane) = self.panes.get_mut(tab.focused)
+        {
+            let previous = pane.view;
+            pane.view = view;
+            self.active_view = Some(view);
+            if previous != view
+                && !self
+                    .panes
+                    .iter()
+                    .any(|(_, candidate)| candidate.view == previous)
+                && let Some(old) = self.views.remove(previous)
+            {
+                if let Some(buffer) = self.buffers.get_mut(old.buffer) {
+                    let mut saved = old.clone();
+                    saved.mode = EditorMode::Normal;
+                    saved.selection = None;
+                    saved.clear_editing_state();
+                    buffer.saved_view = Some(saved);
+                }
+                // An untouched [No Name] buffer gives way to what opens over it, as
+                // in Vim, so `ctrl-t` and a picked file leave one tab.
+                let unused = self.buffers.get(old.buffer).is_some_and(|buffer| {
+                    buffer.path.is_none()
+                        && !buffer.dirty
+                        && buffer.text.len_bytes() == 0
+                        && buffer.origin == BufferOrigin::FileOrScratch
+                });
+                if unused && !self.views.values().any(|other| other.buffer == old.buffer) {
+                    self.buffers.remove(old.buffer);
                 }
             }
+            self.mark_window_changed();
+            return;
         }
         let pane = self.panes.insert(Pane { view });
         let tab = self.tabs.insert(Tab {
@@ -553,10 +573,15 @@ impl EditorState {
                 .is_some_and(|view| view.buffer == kept)
         };
         let focused = tab.focused;
-        if !shows_kept(self, focused) || self.views.get(view).is_some_and(|view| view.buffer == kept) {
+        if !shows_kept(self, focused)
+            || self.views.get(view).is_some_and(|view| view.buffer == kept)
+        {
             return;
         }
-        if let Some(other) = pane_ids(&tab.root).into_iter().find(|pane| !shows_kept(self, *pane)) {
+        if let Some(other) = pane_ids(&tab.root)
+            .into_iter()
+            .find(|pane| !shows_kept(self, *pane))
+        {
             if let Some(tab) = self.tabs.get_mut(tab_id) {
                 tab.focused = other;
             }
@@ -656,15 +681,26 @@ impl EditorState {
     pub fn toggle_zoom(&mut self) -> Result<(), &'static str> {
         if let Some(zoom) = self.zoom.take() {
             let origin_pane = self.tabs.get(zoom.origin_tab).and_then(|tab| {
-                pane_ids(&tab.root)
-                    .into_iter()
-                    .find(|pane| self.panes.get(*pane).is_some_and(|p| p.view == zoom.origin_view))
+                pane_ids(&tab.root).into_iter().find(|pane| {
+                    self.panes
+                        .get(*pane)
+                        .is_some_and(|p| p.view == zoom.origin_view)
+                })
             });
             if let (true, Some(pane)) = (self.active_tab == Some(zoom.tab), origin_pane) {
-                let zoomed = self.active_view.and_then(|view| self.views.get(view)).cloned();
+                let zoomed = self
+                    .active_view
+                    .and_then(|view| self.views.get(view))
+                    .cloned();
                 self.close_active_tab()?;
                 if let Some(zoomed) = zoomed {
-                    self.views[zoom.origin_view] = zoomed;
+                    if self.views[zoom.origin_view].buffer == zoomed.buffer {
+                        self.views[zoom.origin_view] = zoomed;
+                    } else {
+                        let view = self.views.insert(zoomed);
+                        self.panes[pane].view = view;
+                        self.views.remove(zoom.origin_view);
+                    }
                 }
                 self.active_tab = Some(zoom.origin_tab);
                 return self.set_focused_pane(zoom.origin_tab, pane);
@@ -690,7 +726,8 @@ impl EditorState {
 
     #[must_use]
     pub fn is_zoomed(&self) -> bool {
-        self.zoom.is_some_and(|zoom| self.active_tab == Some(zoom.tab))
+        self.zoom
+            .is_some_and(|zoom| self.active_tab == Some(zoom.tab))
     }
 
     #[must_use]
@@ -979,6 +1016,7 @@ impl EditorState {
             }
             view.selection = None;
             view.mode = EditorMode::Normal;
+            view.clear_editing_state();
             view.scroll_line = view
                 .scroll_line
                 .min(target.text.len_lines().saturating_sub(1));

@@ -9,10 +9,13 @@ use std::{
     process::{Command, Stdio},
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use crate::editor::{RegisterShape, RegisterStore, RegisterValue};
+use crate::editor::{
+    CommandInvocation, EditorWindowVersion, RegisterShape, RegisterStore, RegisterValue,
+};
+use std::collections::VecDeque;
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -62,6 +65,11 @@ pub(super) struct ClipboardSession {
     synced_generation: u64,
     /// Text last sent to or read from the system clipboard.
     synced_text: Option<String>,
+    copying: Option<(mpsc::Receiver<bool>, String)>,
+    queued: Option<String>,
+    reading: Option<mpsc::Receiver<Option<String>>>,
+    pastes: VecDeque<(CommandInvocation, EditorWindowVersion)>,
+    paste_ready: bool,
 }
 
 impl ClipboardSession {
@@ -75,59 +83,125 @@ impl ClipboardSession {
 
     /// Send a changed unnamed register to the system clipboard. Returns the text when it must
     /// go through the terminal (OSC 52) because no clipboard program exists.
-    pub(super) fn push(&mut self, registers: &RegisterStore) -> Option<String> {
-        if !self.enabled || registers.generation() == self.synced_generation {
+    pub(super) fn push(&mut self, registers: &mut RegisterStore) -> Option<String> {
+        if !self.enabled {
             return None;
         }
-        self.synced_generation = registers.generation();
-        let text = registers.get('"')?.text.clone();
-        if self.synced_text.as_deref() == Some(text.as_str()) {
-            return None;
+        if registers.generation() != self.synced_generation {
+            if let Some(value) = registers.get('"').cloned() {
+                registers.set('+', value.clone(), true, false);
+                let pending = self.copying.as_ref().map(|(_, text)| text.as_str());
+                self.queued = if pending == Some(value.text.as_str())
+                    || (pending.is_none()
+                        && self.synced_text.as_deref() == Some(value.text.as_str()))
+                {
+                    None
+                } else {
+                    Some(value.text)
+                };
+            }
+            self.synced_generation = registers.generation();
         }
-        self.synced_text = Some(text.clone());
-        let Some(tool) = self.tool else {
-            return Some(text);
+        let mut fallback = None;
+        if let Some((receiver, _)) = &self.copying
+            && let Ok(success) = receiver.try_recv()
+        {
+            let (_, text) = self.copying.take().expect("completed copy");
+            if success {
+                self.synced_text = Some(text);
+            } else if self.queued.is_none() {
+                fallback = Some(text);
+            }
+        }
+        if self.copying.is_none()
+            && let Some(text) = self.queued.take()
+        {
+            if let Some(tool) = self.tool {
+                let (sender, receiver) = mpsc::channel();
+                let copied = text.clone();
+                thread::spawn(move || {
+                    let _ = sender.send(copy(tool, &copied));
+                });
+                self.copying = Some((receiver, text));
+            } else {
+                self.synced_text = Some(text.clone());
+                fallback = Some(text);
+            }
+        }
+        fallback
+    }
+
+    pub(super) fn pull(
+        &mut self,
+        invocation: &CommandInvocation,
+        source: EditorWindowVersion,
+    ) -> bool {
+        if std::mem::take(&mut self.paste_ready) {
+            return false;
+        }
+        let Some(tool) = self.tool.filter(|_| self.enabled) else {
+            return false;
         };
-        let (program, arguments) = tool.copy_command();
-        let child = Command::new(program)
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let Ok(mut child) = child {
-            // The copy programs fork into the background; write and reap off the UI thread.
+        self.pastes.push_back((invocation.clone(), source));
+        if self.reading.is_none() {
+            let (sender, receiver) = mpsc::channel();
             thread::spawn(move || {
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                let _ = child.wait();
+                let _ = sender.send(read(tool));
             });
+            self.reading = Some(receiver);
+        }
+        true
+    }
+
+    pub(super) fn finish_pull(
+        &mut self,
+        registers: &mut RegisterStore,
+        enabled: bool,
+        current: &EditorWindowVersion,
+    ) -> Option<CommandInvocation> {
+        let text = self.reading.as_ref()?.try_recv().ok()?;
+        self.reading = None;
+        if let Some(text) = text {
+            self.import(registers, enabled, text);
+        }
+        while let Some((invocation, source)) = self.pastes.pop_front() {
+            if &source == current {
+                self.paste_ready = true;
+                return Some(invocation);
+            }
         }
         None
     }
 
-    /// Before a paste, take what another program copied into the unnamed and `+` registers.
-    pub(super) fn pull(&mut self, registers: &mut RegisterStore, enabled: bool) {
-        let Some(tool) = self.tool.filter(|_| self.enabled) else {
-            return;
-        };
-        let Some(text) = read(tool) else {
-            return;
-        };
-        if text.is_empty()
-            || self.synced_text.as_deref() == Some(text.as_str())
-            || registers.get('"').is_some_and(|value| value.text == text)
-        {
-            return;
+    pub(super) fn continue_pastes(
+        &mut self,
+        before: &EditorWindowVersion,
+        after: &EditorWindowVersion,
+    ) {
+        for (_, source) in &mut self.pastes {
+            if source == before {
+                *source = after.clone();
+            }
         }
-        // Text copied elsewhere carries no shape; a trailing newline means whole lines, as in
-        // Neovim.
-        let shape = if text.ends_with('\n') {
-            RegisterShape::Line
-        } else {
-            RegisterShape::Character
-        };
+        if !self.pastes.is_empty() {
+            let (sender, receiver) = mpsc::channel();
+            let _ = sender.send(None);
+            self.reading = Some(receiver);
+        }
+    }
+
+    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, text: String) {
+        let cached = registers.get('"').filter(|value| value.text == text);
+        let shape = cached.map_or_else(
+            || {
+                if text.ends_with('\n') {
+                    RegisterShape::Line
+                } else {
+                    RegisterShape::Character
+                }
+            },
+            |value| value.shape,
+        );
         let value = RegisterValue {
             text: text.clone(),
             shape,
@@ -139,8 +213,49 @@ impl ClipboardSession {
     }
 }
 
+fn copy(tool: Tool, text: &str) -> bool {
+    let (program, arguments) = tool.copy_command();
+    let Ok(mut child) = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let stdin = child.stdin.take();
+    let text = text.to_owned();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ =
+            sender.send(stdin.is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok()));
+    });
+    let success = wait_child(&mut child, Instant::now() + READ_TIMEOUT);
+    success && receiver.try_recv().unwrap_or(false)
+}
+
+fn wait_child(child: &mut std::process::Child, deadline: Instant) -> bool {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(2)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
 fn read(tool: Tool) -> Option<String> {
     let (program, arguments) = tool.paste_command();
+    read_command(program, arguments)
+}
+
+fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
+    let deadline = Instant::now() + READ_TIMEOUT;
     let mut child = Command::new(program)
         .args(arguments)
         .stdin(Stdio::null())
@@ -152,17 +267,125 @@ fn read(tool: Tool) -> Option<String> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes);
+        let _ = stdout
+            .by_ref()
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes);
         let _ = sender.send(bytes);
     });
-    let Ok(bytes) = receiver.recv_timeout(READ_TIMEOUT) else {
+    let Ok(bytes) = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    else {
         let _ = child.kill();
         let _ = child.wait();
         return None;
     };
-    let status = child.wait().ok()?;
-    if !status.success() {
+    if !wait_child(&mut child, deadline) {
+        return None;
+    }
+    if bytes.len() > 1024 * 1024 {
         return None;
     }
     String::from_utf8(bytes).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paste_reads_yield_until_the_worker_replies() {
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let version = state.window_version();
+        let invocation =
+            CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let mut session = ClipboardSession {
+            reading: Some(receiver),
+            pastes: VecDeque::from([(invocation.clone(), version.clone())]),
+            ..Default::default()
+        };
+        let mut registers = RegisterStore::default();
+        assert!(
+            session
+                .finish_pull(&mut registers, true, &version)
+                .is_none()
+        );
+        sender.send(Some("text".into())).unwrap();
+        assert_eq!(
+            session.finish_pull(&mut registers, true, &version).unwrap(),
+            invocation
+        );
+        assert_eq!(registers.get('+').unwrap().text, "text");
+    }
+
+    #[test]
+    fn cache_hits_populate_plus_and_empty_reads_clear_old_text() {
+        let mut session = ClipboardSession::default();
+        let mut registers = RegisterStore::default();
+        registers.set(
+            '"',
+            RegisterValue {
+                text: "line\n".into(),
+                shape: RegisterShape::Line,
+            },
+            true,
+            false,
+        );
+        session.import(&mut registers, true, "line\n".into());
+        assert_eq!(registers.get('+'), registers.get('"'));
+        assert_eq!(registers.get('+').unwrap().shape, RegisterShape::Line);
+        session.import(&mut registers, true, String::new());
+        assert_eq!(registers.get('+').unwrap().text, "");
+        assert_eq!(registers.get('"').unwrap().text, "");
+    }
+
+    #[test]
+    fn closed_stdout_does_not_bypass_the_process_deadline() {
+        let start = Instant::now();
+        assert!(read_command("sh", &["-c", "exec 1>&-; sleep 5"]).is_none());
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn copy_queue_keeps_the_latest_yank_and_retries_failures() {
+        let mut session = ClipboardSession {
+            enabled: true,
+            ..Default::default()
+        };
+        let (sender, receiver) = mpsc::channel();
+        session.copying = Some((receiver, "A".into()));
+        let mut registers = RegisterStore::default();
+        for text in ["B", "C"] {
+            registers.set(
+                '"',
+                RegisterValue {
+                    text: text.into(),
+                    shape: RegisterShape::Character,
+                },
+                true,
+                false,
+            );
+            assert_eq!(session.push(&mut registers), None);
+        }
+        assert_eq!(session.queued.as_deref(), Some("C"));
+        sender.send(false).unwrap();
+        assert_eq!(session.push(&mut registers).as_deref(), Some("C"));
+        assert_eq!(session.synced_text.as_deref(), Some("C"));
+
+        let (sender, receiver) = mpsc::channel();
+        session.copying = Some((receiver, "D".into()));
+        registers.set(
+            '"',
+            RegisterValue {
+                text: "C".into(),
+                shape: RegisterShape::Character,
+            },
+            true,
+            false,
+        );
+        assert_eq!(session.push(&mut registers), None);
+        assert_eq!(session.queued.as_deref(), Some("C"));
+        sender.send(true).unwrap();
+        assert_eq!(session.push(&mut registers).as_deref(), Some("C"));
+    }
 }

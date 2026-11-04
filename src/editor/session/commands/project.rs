@@ -118,7 +118,11 @@ pub(super) fn register_commands(
             "Select explorer row at mouse",
             AppEffect::ExplorerMouseSelect,
         ),
-        ("explorer.search", "Search the explorer", AppEffect::ExplorerSearch),
+        (
+            "explorer.search",
+            "Search the explorer",
+            AppEffect::ExplorerSearch,
+        ),
         (
             "explorer.search.delete",
             "Delete the last character of the explorer search",
@@ -162,7 +166,11 @@ pub(super) fn register_commands(
         "Type into the explorer search",
         ContextRequirement::Workspace,
         ArgumentSchema::default().field("text", ArgumentType::String, true),
-        |invocation| Ok(AppEffect::ExplorerSearchInsert(string_arg(invocation, "text")?.to_owned())),
+        |invocation| {
+            Ok(AppEffect::ExplorerSearchInsert(
+                string_arg(invocation, "text")?.to_owned(),
+            ))
+        },
     )?;
     register(
         registry,

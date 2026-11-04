@@ -4,7 +4,7 @@ use crate::editor::{
     state::{BufferId, EditingPolicy, EditorMode, TransactionId, ViewId},
     text::{
         BufferRevision, ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet,
-        next_grapheme_boundary,
+        next_grapheme_boundary, previous_grapheme_boundary,
     },
     transaction::{EditorOperation, EditorTransaction, Precondition},
 };
@@ -136,11 +136,13 @@ pub(super) fn build_join_lines(
     let start = text.line_to_byte(first_line).map_err(failed)?;
     let end = line_content_end(text, last_line)?;
     let mut joined = String::new();
+    let mut boundary = 0;
     for line in first_line..=last_line {
         let value = text.line(line).map_err(failed)?;
         let content = value.strip_suffix('\n').unwrap_or(&value);
         if line == first_line {
             joined.push_str(content.trim_end());
+            boundary = joined.len();
         } else {
             let content = content.trim();
             if !joined.is_empty() && !content.is_empty() {
@@ -149,7 +151,7 @@ pub(super) fn build_join_lines(
             joined.push_str(content);
         }
     }
-    let target = ByteOffset(cursor.get().min(start.get() + joined.len()));
+    let target = ByteOffset(start.get() + boundary);
     transaction.operations.push(EditorOperation::ApplyEdits {
         buffer,
         edits: TextEditSet::new(
@@ -218,6 +220,7 @@ pub(super) fn build_toggle_case(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_indent(
     transaction: &mut EditorTransaction,
     text: &TextBuffer,
@@ -229,8 +232,12 @@ pub(super) fn build_indent(
     policy: EditingPolicy,
 ) -> Result<(), CommandError> {
     let first_line = text.byte_to_line(range.start).map_err(failed)?;
-    let final_byte = range.end.get().saturating_sub(1).max(range.start.get());
-    let last_line = text.byte_to_line(ByteOffset(final_byte)).map_err(failed)?;
+    let final_byte = if range.is_empty() {
+        range.start
+    } else {
+        previous_grapheme_boundary(text, range.end)
+    };
+    let last_line = text.byte_to_line(final_byte).map_err(failed)?;
     let start = text.line_to_byte(first_line).map_err(failed)?;
     let end = if last_line + 1 < text.len_lines() {
         text.line_to_byte(last_line + 1).map_err(failed)?

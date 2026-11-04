@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender},
     },
@@ -310,7 +310,6 @@ fn validate(request: &PtyRequest) -> Result<(), PtyError> {
         || request.arguments.len() > 4096
         || argv > 1024 * 1024
         || env > 1024 * 1024
-        || request.policy.maximum_output_bytes == 0
         || request.policy.maximum_output_bytes > 256 * 1024 * 1024
         || request.policy.maximum_input_bytes == 0
         || request.policy.maximum_input_bytes > 16 * 1024 * 1024
@@ -320,11 +319,44 @@ fn validate(request: &PtyRequest) -> Result<(), PtyError> {
     }
     Ok(())
 }
-struct Child(Box<dyn portable_pty::Child + Send + Sync>);
+struct Child {
+    process: Box<dyn portable_pty::Child + Send + Sync>,
+    reaped: bool,
+}
+impl Child {
+    fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+        let status = self.process.try_wait()?;
+        self.reaped |= status.is_some();
+        Ok(status)
+    }
+    fn kill(&mut self) {
+        if !self.reaped {
+            #[cfg(unix)]
+            if let Some(group) = self.process.process_id() {
+                super::terminate_process_group(group);
+            }
+            let _ = self.process.kill();
+        }
+    }
+    fn terminate(&mut self, master: &dyn portable_pty::MasterPty) {
+        #[cfg(unix)]
+        {
+            if let Some(group) = master.process_group_leader().filter(|group| *group > 0) {
+                super::terminate_process_group(group as u32);
+            }
+            if let Some(group) = self.process.process_id() {
+                super::terminate_process_group(group);
+            }
+        }
+        self.kill();
+    }
+}
 impl Drop for Child {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        if !self.reaped {
+            self.kill();
+            let _ = self.process.wait();
+        }
     }
 }
 fn deliver(
@@ -340,7 +372,7 @@ fn deliver(
             Err(mpsc::TrySendError::Full(returned)) => event = returned,
         }
         if cancel.load(Ordering::Acquire) {
-            let _ = child.0.kill();
+            child.kill();
         }
         thread::sleep(Duration::from_millis(2));
     }
@@ -387,7 +419,25 @@ fn run(
             pixel_height: 0,
         })
         .map_err(|e| fail(e.to_string()))?;
-    let mut command = CommandBuilder::new(&request.program);
+    let program = request.argv0.as_ref().unwrap_or(&request.program);
+    let program = if program.is_absolute() {
+        program.clone()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| fail(error.to_string()))?
+            .join(program)
+    };
+    if program
+        .canonicalize()
+        .map_err(|error| fail(error.to_string()))?
+        != request
+            .program
+            .canonicalize()
+            .map_err(|error| fail(error.to_string()))?
+    {
+        return Err(fail("PTY executable target changed".into()));
+    }
+    let mut command = CommandBuilder::new(program);
     command.args(&request.arguments);
     command.cwd(&request.cwd);
     for (key, value) in &request.environment {
@@ -396,11 +446,13 @@ fn run(
     if cancel.load(Ordering::Acquire) {
         return Err(fail("PTY cancelled before spawn".into()));
     }
-    let mut child = Child(
-        pair.slave
+    let mut child = Child {
+        process: pair
+            .slave
             .spawn_command(command)
             .map_err(|e| fail(e.to_string()))?,
-    );
+        reaped: false,
+    };
     drop(pair.slave);
     let mut reader = pair
         .master
@@ -420,6 +472,8 @@ fn run(
     }
     let (read_tx, read_rx) = mpsc::sync_channel(1);
     let output = events.clone();
+    let output_order = Arc::new(Mutex::new(()));
+    let read_order = output_order.clone();
     let read_resident = resident.clone();
     let maximum = request.policy.maximum_output_bytes;
     thread::Builder::new()
@@ -438,10 +492,13 @@ fn run(
                         Err(e) if e.raw_os_error() == Some(5) => return Ok(()),
                         Err(e) => return Err(e.to_string()),
                     };
-                    if read > maximum.saturating_sub(total) {
+                    if maximum != 0 && read > maximum.saturating_sub(total) {
                         return Err("PTY output limit exceeded; stream is incomplete".into());
                     }
-                    total += read;
+                    total = total.saturating_add(read);
+                    let _order = read_order
+                        .lock()
+                        .map_err(|_| "PTY output ordering failed")?;
                     output
                         .send(PtyEvent::Output {
                             id,
@@ -492,15 +549,22 @@ fn run(
     let mut read_done = false;
     let mut write_done = false;
     let mut failure = None;
+    let mut terminated = false;
     loop {
         if cancel.load(Ordering::Acquire) || failure.is_some() {
-            let _ = child.0.kill();
+            if !terminated {
+                child.terminate(pair.master.as_ref());
+                terminated = true;
+            }
             writer_stop.store(true, Ordering::Release);
         }
         for _ in 0..256 {
             let Ok((sequence, columns, rows)) = resize.try_recv() else {
                 break;
             };
+            let _order = output_order
+                .lock()
+                .map_err(|_| fail("PTY output ordering failed".into()))?;
             pair.master
                 .resize(PtySize {
                     rows,
@@ -523,11 +587,11 @@ fn run(
                 return Ok(());
             }
         }
-        if exit.is_none() {
-            if let Some(status) = child.0.try_wait().map_err(|e| fail(e.to_string()))? {
-                exit = Some(status.exit_code());
-                writer_stop.store(true, Ordering::Release);
-            }
+        if exit.is_none()
+            && let Some(status) = child.try_wait().map_err(|e| fail(e.to_string()))?
+        {
+            exit = Some(status.exit_code());
+            writer_stop.store(true, Ordering::Release);
         }
         for (rx, done) in [(&read_rx, &mut read_done), (&write_rx, &mut write_done)] {
             if !*done {

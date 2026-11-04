@@ -26,24 +26,14 @@ pub struct RecoveryConfig {
 
 impl Default for RecoveryConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
     pub search: WorkspaceSearchConfig,
-}
-
-impl Default for WorkspaceConfig {
-    fn default() -> Self {
-        Self {
-            search: WorkspaceSearchConfig::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

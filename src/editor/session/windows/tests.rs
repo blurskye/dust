@@ -19,6 +19,126 @@ fn editor_fixture() -> (crate::editor::EditorState, WindowSession) {
 }
 
 #[test]
+fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
+    use crate::persistence::{PersistedLayout, PersistedPane, PersistedSession, PersistedTab};
+    use crate::ui::window::ContentTypeId;
+    let (state, mut windows) = editor_fixture();
+    let tab = windows.graph().active_tab().unwrap();
+    let graph = &mut windows.core.graph;
+    let content = graph
+        .create_content(
+            ContentTypeId::new("plugin.demo.panel").unwrap(),
+            ContentAdapterKind::DeclarativeUi,
+            "Panel".into(),
+            false,
+            "plugin.demo",
+            1,
+        )
+        .unwrap();
+    let view = graph.create_view(content, "plugin.demo", 1).unwrap();
+    let panel = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Fullscreen,
+            true,
+            "plugin.demo",
+            1,
+        )
+        .unwrap();
+    let path = std::path::PathBuf::from("/workspace/restored.rs");
+    let session = PersistedSession {
+        roots: vec!["/workspace".into()],
+        tabs: vec![PersistedTab {
+            layout: PersistedLayout::Pane {
+                pane: PersistedPane {
+                    path: path.clone(),
+                    cursor: 0,
+                    anchor: 0,
+                    scroll_line: 0,
+                    scroll_column: 0,
+                },
+            },
+            focused_path: Some(path.clone()),
+        }],
+        active_tab: 0,
+        window_rules: Vec::new(),
+        content_descriptors: Vec::new(),
+        pinned: Vec::new(),
+    };
+    let mut draft = state.draft();
+    draft
+        .restore_layout(
+            &session,
+            &std::collections::HashMap::from([(
+                path.clone(),
+                (
+                    path.clone(),
+                    crate::editor::text::TextBuffer::from_text("restored"),
+                ),
+            )]),
+        )
+        .unwrap();
+    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let transition = windows
+        .prepare_restore_transition(
+            draft,
+            (&state.version(), catalog.clone()),
+            "scratch",
+            super::NativeDescriptions {
+                signature: super::NativeSurfaceSignature {
+                    editor_tab: Some(tab),
+                    editor_window: None,
+                    explorer_visible: false,
+                    explorer_views: std::sync::Arc::from([1]),
+                    focused_explorer: None,
+                    explorer_size: 24,
+                    active_terminal: None,
+                    shown_terminals: std::sync::Arc::from([]),
+                    terminal_focused: false,
+                    terminal_size: 8,
+                    terminal_shrunk: false,
+                    terminal_set_revision: Some(0),
+                    terminal_width: 80,
+                    terminal_height: 24,
+                    dashboard_visible: false,
+                    picker_rect: None,
+                    picker_surface: None,
+                    protected_prompt_height: 0,
+                    configuration_generation: 0,
+                    screen_bottom: 0,
+                },
+                explorer_title: "Explorer",
+                dashboard_title: "Dust",
+                picker_title: "Picker",
+                terminals: &[],
+            },
+            &[("demo".into(), 1)],
+            super::RestoreWindowPolicy {
+                rules: &[],
+                descriptors: &[],
+            },
+        )
+        .unwrap();
+    assert!(
+        windows.graph().window(panel).is_some(),
+        "preparation is detached"
+    );
+    let restored = windows
+        .accept_editor_transition(transition, &state.version(), &catalog)
+        .unwrap();
+    assert_eq!(
+        restored.buffers[restored.active_buffer_id().unwrap()]
+            .path
+            .as_ref(),
+        Some(&path)
+    );
+    assert!(windows.graph().window(panel).is_none());
+    assert!(windows.graph().workspace_tab(tab).is_none());
+    windows.graph().validate().unwrap();
+}
+
+#[test]
 fn candidates_are_bound_to_the_session_and_owner_epoch_not_only_graph_revision() {
     let (state, mut windows) = editor_fixture();
     let (_, mut other) = editor_fixture();
@@ -58,6 +178,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         shown_terminals: Vec::new().into(),
         terminal_focused: false,
         terminal_size: 8,
+        terminal_shrunk: false,
         terminal_set_revision: Some(0),
         terminal_width: 80,
         terminal_height: 24,
@@ -66,6 +187,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         picker_surface: None,
         protected_prompt_height: 0,
         configuration_generation: 0,
+        screen_bottom: 0,
     };
     let error = match windows.prepare_reconcile(
         &(&state).into(),
@@ -336,9 +458,7 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
             let body = crate::ui::geometry::explorer_body_geometry(rect);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
-            if let Some(notice) =
-                crate::ui::geometry::error_notification_geometry(width, height)
-            {
+            if let Some(notice) = crate::ui::geometry::error_notification_geometry(width, height) {
                 assert!(notice.x + notice.width <= width);
                 assert!(notice.y + notice.height <= height);
             }
@@ -770,6 +890,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             shown_terminals: Vec::new().into(),
             terminal_focused: false,
             terminal_size: 8,
+            terminal_shrunk: false,
             terminal_set_revision: Some(0),
             terminal_width: 80,
             terminal_height: 24,
@@ -778,6 +899,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             picker_surface: None,
             protected_prompt_height: 0,
             configuration_generation: 0,
+            screen_bottom: 0,
         },
         explorer_title: "Explorer",
         dashboard_title: "Dust",

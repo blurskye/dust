@@ -9,6 +9,8 @@
 //! other: the source is whatever the inspectors leave, and the inspectors exist only when the
 //! source can still be read.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::WindowRect;
 
 /// The width at which inspectors are worth docking on BOTH sides of the source.
@@ -140,27 +142,33 @@ pub fn debug_pane_tab_at(
 }
 
 /// Long values go on to the next rows, since a value's end is often the part being looked for.
-pub(super) fn wrap_rows(body: &[String], width: u16) -> Vec<String> {
+pub(super) fn wrap_rows(body: &[String], width: u16, grid: &super::CellGrid) -> Vec<String> {
     let width = usize::from(width).max(3);
     let mut wrapped = Vec::new();
     for line in body {
-        let chars: Vec<char> = line.chars().collect();
-        let mut rest = chars.as_slice();
+        let mut rest = line.as_str();
         let mut indent = "";
-        // Each row ends at its last space, and a word longer than a row breaks at the edge.
-        while rest.len() > width - indent.len() {
-            let room = width - indent.len();
-            let cut = rest[..=room]
-                .iter()
-                .rposition(|character| *character == ' ')
-                .filter(|space| *space > 0)
-                .map_or(room, |space| space + 1);
-            let row = rest[..cut].iter().collect::<String>();
-            wrapped.push(format!("{indent}{}", row.trim_end()));
+        while grid.display_width(rest) > width - indent.len() {
+            let mut used = 0;
+            let mut end = 0;
+            let mut space = None;
+            for (at, grapheme) in rest.grapheme_indices(true) {
+                let cells = grid.display_width(grapheme).clamp(1, 2);
+                if used + cells > width - indent.len() {
+                    break;
+                }
+                used += cells;
+                end = at + grapheme.len();
+                if grapheme == " " {
+                    space = Some(end);
+                }
+            }
+            let cut = space.unwrap_or(end);
+            wrapped.push(format!("{indent}{}", rest[..cut].trim_end()));
             rest = &rest[cut..];
             indent = "  ";
         }
-        wrapped.push(format!("{indent}{}", rest.iter().collect::<String>()));
+        wrapped.push(format!("{indent}{rest}"));
     }
     wrapped
 }
@@ -267,13 +275,26 @@ pub struct DebugPanesUiState {
 }
 
 /// Cuts text to the width, ending in an ellipsis so a cut line doesn't read as the whole value.
-fn clip(text: &str, width: u16) -> String {
-    let width = width as usize;
-    if text.chars().count() <= width {
+fn clip(text: &str, width: u16, grid: &super::CellGrid) -> String {
+    let width = usize::from(width);
+    if grid.display_width(text) <= width {
         return text.to_owned();
     }
-    let kept = text.chars().take(width.saturating_sub(1));
-    kept.chain((width > 0).then_some('…')).collect()
+    let ellipsis = grid.display_width("…").min(width);
+    let mut result = String::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true) {
+        let cells = grid.display_width(grapheme).clamp(1, 2);
+        if used + cells > width.saturating_sub(ellipsis) {
+            break;
+        }
+        result.push_str(grapheme);
+        used += cells;
+    }
+    if ellipsis > 0 {
+        result.push('…');
+    }
+    result
 }
 
 fn fill(grid: &mut super::CellGrid, rect: WindowRect) {
@@ -299,13 +320,29 @@ fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
 fn draw_region(grid: &mut super::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
     fill(grid, rect);
     let inner = rect.width.saturating_sub(2);
-    grid.put_text(rect.x + 1, rect.y, &clip(title, inner), super::Style::Accent);
-    for (index, line) in body.iter().take(rect.height.saturating_sub(1) as usize).enumerate() {
+    grid.put_text_clipped(
+        rect.x + 1,
+        rect.y,
+        &clip(title, inner, grid),
+        super::Style::Accent,
+        rect.x.saturating_add(rect.width),
+    );
+    for (index, line) in body
+        .iter()
+        .take(rect.height.saturating_sub(1) as usize)
+        .enumerate()
+    {
         let y = rect.y + 1 + index as u16;
         if y >= rect.y.saturating_add(rect.height) {
             break;
         }
-        grid.put_text(rect.x + 1, y, &clip(line, inner), super::Style::Muted);
+        grid.put_text_clipped(
+            rect.x + 1,
+            y,
+            &clip(line, inner, grid),
+            super::Style::Muted,
+            rect.x.saturating_add(rect.width),
+        );
     }
 }
 
@@ -329,7 +366,7 @@ pub(crate) fn render_debug_panes(
                     let mut values = rows(pane, panes);
                     // A condition is what the breakpoint means, so it wraps rather than cuts.
                     if pane == DebugPane::Breakpoints {
-                        values = wrap_rows(&values, left.width.saturating_sub(2));
+                        values = wrap_rows(&values, left.width.saturating_sub(2), &frame.grid);
                     }
                     if !values.is_empty() {
                         body.push(title.to_owned());
@@ -346,13 +383,15 @@ pub(crate) fn render_debug_panes(
                     body.push("watches:".to_owned());
                     body.extend(watches);
                 }
-                let body = wrap_rows(&body, right.width.saturating_sub(2));
+                let body = wrap_rows(&body, right.width.saturating_sub(2), &frame.grid);
                 draw_region(&mut frame.grid, right, "Variables · Watches", &body);
             }
             if let Some(console) = layout.console {
                 // The newest output is what matters, so the tail is what fits.
                 let body = rows(DebugPane::Console, panes);
-                let start = body.len().saturating_sub(console.height.saturating_sub(1) as usize);
+                let start = body
+                    .len()
+                    .saturating_sub(console.height.saturating_sub(1) as usize);
                 draw_region(&mut frame.grid, console, "Console", &body[start..]);
             }
         }
@@ -368,7 +407,13 @@ pub(crate) fn render_debug_panes(
                 let mut y = strip.y;
                 let mut content_top = strip.y;
                 for (_, label, tab_x, tab_y) in pane_tabs(strip, panes.selected) {
-                    frame.grid.put_text(tab_x, tab_y, &label, super::Style::Default);
+                    frame.grid.put_text_clipped(
+                        tab_x,
+                        tab_y,
+                        &label,
+                        super::Style::Default,
+                        strip.x.saturating_add(strip.width),
+                    );
                     x = tab_x.saturating_add(label.chars().count() as u16 + 1);
                     y = tab_y;
                     content_top = tab_y.saturating_add(1);
@@ -376,9 +421,25 @@ pub(crate) fn render_debug_panes(
                 const NEXT_PANE_HINT: &str = "· <leader>dn";
                 let hint_width = NEXT_PANE_HINT.chars().count() as u16;
                 if x.saturating_sub(strip.x + 1) + hint_width <= inner {
-                    frame.grid.put_text(x, y, NEXT_PANE_HINT, super::Style::Muted);
+                    frame.grid.put_text_clipped(
+                        x,
+                        y,
+                        NEXT_PANE_HINT,
+                        super::Style::Muted,
+                        strip.x.saturating_add(strip.width),
+                    );
                 }
                 let mut body = rows(panes.selected, panes);
+                if panes.selected == DebugPane::Console {
+                    let room = usize::from(
+                        strip
+                            .y
+                            .saturating_add(strip.height)
+                            .saturating_sub(content_top)
+                            .saturating_sub(1),
+                    );
+                    body = body.split_off(body.len().saturating_sub(room));
+                }
                 body.insert(0, format!("{}:", panes.selected.label()));
                 for (index, line) in body
                     .iter()
@@ -389,14 +450,62 @@ pub(crate) fn render_debug_panes(
                     if row >= strip.y.saturating_add(strip.height) {
                         break;
                     }
-                    frame.grid.put_text(
+                    frame.grid.put_text_clipped(
                         strip.x + 1,
                         row,
-                        &clip(line, inner),
+                        &clip(line, inner, &frame.grid),
                         super::Style::Muted,
+                        strip.x.saturating_add(strip.width),
                     );
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wide_inspector_rows_stay_inside_their_region() {
+        let mut grid = super::super::CellGrid::new_with_policy(80, 10, "�", "◌", true);
+        for x in 30..80 {
+            grid.set_cell(x, 1, "x", super::super::Style::Default);
+        }
+        let rect = WindowRect {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 8,
+        };
+        draw_region(&mut grid, rect, "Debug", &["界".repeat(20)]);
+        assert_eq!(grid.get(30, 1).unwrap().symbol, "x");
+        let wrapped = wrap_rows(&["·".repeat(20)], 10, &grid);
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|row| grid.display_width(row) <= 10));
+    }
+
+    #[test]
+    fn narrow_console_shows_the_newest_output() {
+        let mut frame = super::super::Frame {
+            grid: super::super::CellGrid::new(80, 24),
+            cursor: None,
+        };
+        let layout = debug_layout(80, 24).unwrap();
+        assert_eq!(layout.mode, DebugLayoutMode::Narrow);
+        let panes = DebugPanesUiState {
+            selected: DebugPane::Console,
+            target: String::new(),
+            status: String::new(),
+            threads: Vec::new(),
+            stack: Vec::new(),
+            breakpoints: Vec::new(),
+            variables: Vec::new(),
+            watches: Vec::new(),
+            console: (0..100).map(|n| format!("output {n}")).collect(),
+        };
+        render_debug_panes(&mut frame, layout, &panes);
+        assert!((0..24).any(|row| frame.grid.row_text(row).contains("output 99")));
     }
 }

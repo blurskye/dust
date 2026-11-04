@@ -73,21 +73,12 @@ impl Default for PromptTextConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CommandLineConfig {
     /// Glyphs by language-server completion kind, drawn before a completion's label.
     pub completion_kind_icons: std::collections::BTreeMap<String, String>,
     pub text: PromptTextConfig,
-}
-
-impl Default for CommandLineConfig {
-    fn default() -> Self {
-        Self {
-            completion_kind_icons: std::collections::BTreeMap::new(),
-            text: PromptTextConfig::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,9 +123,7 @@ pub struct LspProgressConfig {
 
 impl Default for LspProgressConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -296,9 +285,7 @@ pub struct DocumentationPopupConfig {
 
 impl Default for DocumentationPopupConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -310,9 +297,7 @@ pub struct TerminalPanelConfig {
 
 impl Default for TerminalPanelConfig {
     fn default() -> Self {
-        Self {
-            height: 16,
-        }
+        Self { height: 16 }
     }
 }
 

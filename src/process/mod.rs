@@ -15,6 +15,19 @@ use thiserror::Error;
 mod jobs;
 pub use jobs::{JobError, JobEvent, JobId, JobPolicy, JobRequest, JobStream, JobSupervisor};
 
+#[cfg(unix)]
+pub(crate) fn terminate_process_group(id: u32) {
+    use nix::{
+        sys::signal::{Signal, killpg},
+        unistd::Pid,
+    };
+    let group = Pid::from_raw(id as i32);
+    if killpg(group, Signal::SIGTERM).is_ok() {
+        thread::sleep(std::time::Duration::from_millis(20));
+        let _ = killpg(group, Signal::SIGKILL);
+    }
+}
+
 pub const PROTOCOL_MESSAGE_BYTE_CEILING: usize = 16 * 1024 * 1024;
 const PROTOCOL_HEADER_BYTE_CEILING: usize = 16 * 1024;
 
@@ -45,15 +58,15 @@ pub fn read_content_length_message(
         if line == "\r\n" || line == "\n" {
             break;
         }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|_| ProtocolError::InvalidContentLength)?,
-                );
-            }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| ProtocolError::InvalidContentLength)?,
+            );
         }
     }
     let content_length = content_length.ok_or(ProtocolError::MissingContentLength)?;
@@ -68,7 +81,7 @@ pub fn read_content_length_message(
 }
 
 pub fn write_content_length_message(
-    writer: &mut impl Write,
+    writer: &mut (impl Write + ?Sized),
     value: &Value,
 ) -> Result<(), ProtocolError> {
     let body = serde_json::to_vec(value).map_err(ProtocolError::Json)?;
@@ -200,6 +213,7 @@ impl Default for PtyPolicy {
 #[derive(Clone, Debug)]
 pub struct PtyRequest {
     pub program: PathBuf,
+    pub argv0: Option<PathBuf>,
     pub arguments: Vec<String>,
     pub cwd: PathBuf,
     pub environment: BTreeMap<String, String>,
@@ -482,5 +496,93 @@ mod preflight_lifecycle_tests {
             service.request(request()),
             Err(PreflightError::Invalid)
         ));
+    }
+}
+
+/// Nonblocking child I/O that yields to session cancellation while a pipe is idle.
+pub(crate) struct CancellablePipe<T> {
+    pipe: T,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl<T> CancellablePipe<T> {
+    #[cfg(unix)]
+    pub(crate) fn new(
+        pipe: T,
+        cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> io::Result<Self>
+    where
+        T: std::os::fd::AsFd,
+    {
+        use nix::fcntl::{FcntlArg, OFlag, fcntl};
+        let flags = OFlag::from_bits_truncate(fcntl(&pipe, FcntlArg::F_GETFL)?);
+        fcntl(&pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+        Ok(Self { pipe, cancelled })
+    }
+    #[cfg(not(unix))]
+    pub(crate) fn new(
+        pipe: T,
+        cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> io::Result<Self> {
+        Ok(Self { pipe, cancelled })
+    }
+    fn retry<R>(&mut self, mut operation: impl FnMut(&mut T) -> io::Result<R>) -> io::Result<R> {
+        loop {
+            if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            match operation(&mut self.pipe) {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(std::time::Duration::from_millis(5));
+                }
+                result => return result,
+            }
+        }
+    }
+}
+impl<T: io::Read> io::Read for CancellablePipe<T> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.retry(|pipe| pipe.read(bytes))
+    }
+}
+impl<T: Write> Write for CancellablePipe<T> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.retry(|pipe| pipe.write(bytes))
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.retry(Write::flush)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod cancellable_pipe_tests {
+    use super::*;
+    #[test]
+    fn cancellation_releases_blocked_child_reads_and_writes() {
+        use std::io::Read;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut input =
+            CancellablePipe::new(child.stdin.take().unwrap(), cancelled.clone()).unwrap();
+        let mut output =
+            CancellablePipe::new(child.stdout.take().unwrap(), cancelled.clone()).unwrap();
+        let writer = thread::spawn(move || input.write_all(&vec![0; 1024 * 1024]));
+        let reader = thread::spawn(move || output.read(&mut [0]));
+        thread::sleep(std::time::Duration::from_millis(20));
+        let started = std::time::Instant::now();
+        cancelled.store(true, Ordering::Release);
+        assert!(writer.join().unwrap().is_err());
+        assert!(reader.join().unwrap().is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 }

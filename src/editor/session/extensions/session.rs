@@ -8,7 +8,6 @@ use crate::extensions::{
     PluginContributionCatalog, PluginContributionIndex, PluginError, PluginHostEventQueue,
     PluginLoadId, PluginManager, PluginStorageContribution, PluginStorageRequest,
     PluginStorageResult, PluginStorageService, PluginSubscriptionKind, PluginUiEvent,
-    STORAGE_REQUEST_CEILING, STORAGE_RESULT_QUEUE_BYTE_CEILING,
 };
 use crate::tools::{PackageService, RegistryPackageMetadata, RegistryService};
 use crate::{
@@ -52,11 +51,13 @@ pub(in crate::editor::session) struct InvocationContext<'a> {
     pub navigation: super::windows::NavigationStamp,
     pub interaction_available: bool,
     pub maximum: usize,
+    pub arguments: Vec<String>,
 }
 
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::editor::session) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct ExtensionSession {
+    runtime_epoch: u64,
     windows: windows::PluginWindowHost,
     providers: PluginProviderBroker,
     virtual_documents: PluginVirtualDocumentBroker,
@@ -70,6 +71,7 @@ pub(super) struct ExtensionSession {
     registry: RegistryService,
     registry_intents: HashMap<u64, bool>,
     pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
+    package_preparing: BTreeSet<u64>,
     package_prepared: HashMap<String, (PluginLoadId, u64)>,
     package_commits: HashMap<u64, (String, PluginLoadId)>,
     package_startup_pending: HashMap<String, PluginLoadId>,
@@ -84,6 +86,7 @@ pub(super) struct ExtensionSession {
     ui: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
     events: PluginHostEventQueue,
     observation: Option<HostObservation>,
+    observation_counts: Option<(usize, usize, usize)>,
     storage: PluginStorageService,
     results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
 }
@@ -95,6 +98,7 @@ impl ExtensionSession {
         registry: RegistryService,
     ) -> Self {
         Self {
+            runtime_epoch: 0,
             windows: windows::PluginWindowHost::default(),
             providers: PluginProviderBroker::default(),
             virtual_documents: PluginVirtualDocumentBroker::default(),
@@ -106,6 +110,7 @@ impl ExtensionSession {
             rejected_plugin_loads: BTreeSet::new(),
             registry_intents: HashMap::new(),
             pending_registry_artifact: None,
+            package_preparing: BTreeSet::new(),
             package_prepared: HashMap::new(),
             package_commits: HashMap::new(),
             package_startup_pending: HashMap::new(),
@@ -122,6 +127,7 @@ impl ExtensionSession {
             ui: BTreeMap::new(),
             events: PluginHostEventQueue::default(),
             observation: None,
+            observation_counts: None,
             storage: PluginStorageService::start(root, capacity),
             results: BTreeMap::new(),
         }
@@ -194,9 +200,10 @@ impl ExtensionSession {
         // payloads are built and queued. Full/retired refusal leaves queues intact.
         reservation.enqueue(|| {
             loan.submit(PluginExecutionRequest {
+                runtime_epoch: self.runtime_epoch,
                 plugin: plugin.into(),
                 command: command.into(),
-                arguments: Vec::new(),
+                arguments: context.arguments,
                 snapshot: None,
                 config: BTreeMap::new(),
                 ui_revision: context.ui_revision,
@@ -208,7 +215,11 @@ impl ExtensionSession {
                     .results
                     .remove(&(plugin.into(), load))
                     .unwrap_or_default(),
-                provider_requests: self.providers.requests(plugin, load),
+                provider_requests: self.providers.requests(
+                    plugin,
+                    load,
+                    &format!("plugin.{plugin}.{command}"),
+                ),
                 virtual_document_requests: virtual_requests.deliver(
                     plugin,
                     load,
@@ -243,10 +254,10 @@ impl ExtensionSession {
         let received = self
             .edits
             .receive(reply, &self.manager, workspace, configuration);
-        if received.is_err() {
-            if let Some(origin) = origin {
-                self.confirmations.release_terminal(&origin);
-            }
+        if received.is_err()
+            && let Some(origin) = origin
+        {
+            self.confirmations.release_terminal(&origin);
         }
         received
     }
@@ -293,6 +304,7 @@ impl ExtensionSession {
             workspace,
             configuration,
             &mut self.ui,
+            self.runtime_epoch,
         )
     }
     pub(super) fn retire_stale_confirmations(
@@ -372,8 +384,12 @@ impl ExtensionSession {
     ) {
         let pending = self.ui.entry((plugin, load)).or_default();
         for event in events {
-            if pending.len() == 64 {
-                pending.remove(0);
+            if event.token == 0 && event.action.is_none() {
+                pending.retain(|previous| {
+                    previous.token != 0
+                        || previous.action.is_some()
+                        || previous.handle != event.handle
+                });
             }
             pending.push(event);
         }
@@ -420,6 +436,7 @@ impl ExtensionSession {
         active_confirmation
     }
     pub(super) fn reset_runtime(&mut self) -> bool {
+        self.runtime_epoch = self.runtime_epoch.saturating_add(1);
         let active_confirmation = self.confirmations.reset();
         self.windows.clear_runtime();
         self.providers.reset_runtime();
@@ -446,15 +463,6 @@ impl ExtensionSession {
             .entry((result.plugin.clone(), result.load))
             .or_default();
         pending.push(result);
-        while pending.len() > STORAGE_REQUEST_CEILING
-            || pending
-                .iter()
-                .map(PluginStorageResult::bounded_bytes)
-                .sum::<usize>()
-                > STORAGE_RESULT_QUEUE_BYTE_CEILING
-        {
-            pending.remove(0);
-        }
     }
     pub(super) fn request_storage(
         &mut self,
@@ -496,7 +504,9 @@ impl ExtensionSession {
         retained: usize,
         private: usize,
     ) {
-        if self.observation.as_ref() == Some(&observation) {
+        if self.observation.as_ref() == Some(&observation)
+            && self.observation_counts == Some((roots, retained, private))
+        {
             return;
         }
         for index in self.plugin_contributions.ordered() {
@@ -528,6 +538,7 @@ impl ExtensionSession {
             );
         }
         self.observation = Some(observation);
+        self.observation_counts = Some((roots, retained, private));
     }
 }
 #[cfg(test)]

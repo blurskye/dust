@@ -400,3 +400,75 @@ fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() 
     assert_eq!(state.version(), before);
     assert_eq!(EditorState::test_clone_count(), copies);
 }
+
+#[test]
+fn reload_clears_stale_editing_positions() {
+    let mut state = EditorState::new("/workspace".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text("abcde"), None);
+    state.views[view].block_insert = vec![ByteOffset(0), ByteOffset(4)];
+    state.views[view].multi_marks = vec![ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()];
+    state.views[view]
+        .replace_history
+        .push(super::ReplaceRecord {
+            start: ByteOffset(4),
+            original: "e".into(),
+            inserted_len: 1,
+        });
+    state.views[view].preferred_column = Some(4);
+    assert!(state.replace_buffer_from_disk(buffer, TextBuffer::from_text("x"), "/file".into()));
+    let view = &state.views[view];
+    assert!(view.block_insert.is_empty());
+    assert!(view.multi_marks.is_empty());
+    assert!(view.replace_history.is_empty());
+    assert_eq!(view.preferred_column, None);
+}
+
+#[test]
+fn uppercase_registers_append_and_read_through_lowercase() {
+    let mut registers = RegisterStore::default();
+    for (name, text) in [('a', "one\n"), ('A', "two\n")] {
+        registers.set(
+            name,
+            super::RegisterValue {
+                text: text.into(),
+                shape: super::RegisterShape::Line,
+            },
+            true,
+            true,
+        );
+    }
+    assert_eq!(registers.get('a').unwrap().text, "one\ntwo\n");
+    assert_eq!(registers.get('A'), registers.get('a'));
+    assert_eq!(registers.get('"'), registers.get('a'));
+}
+
+#[test]
+fn switching_buffers_restores_the_last_cursor_and_scroll() {
+    let mut state = EditorState::new("/workspace".into());
+    let (a, view) = state.open_text(
+        TextBuffer::from_text("one\ntwo\nthree"),
+        Some("/workspace/a".into()),
+    );
+    state.views[view].cursor = ByteOffset(8);
+    state.views[view].scroll_line = 2;
+    state.open_text(TextBuffer::from_text("other"), Some("/workspace/b".into()));
+    let view = state.show_buffer(a).unwrap();
+    assert_eq!(state.views[view].cursor, ByteOffset(8));
+    assert_eq!(state.views[view].scroll_line, 2);
+}
+
+#[test]
+fn unzoom_allocates_a_view_when_its_buffer_changes() {
+    let mut state = EditorState::new("/workspace".into());
+    state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()));
+    state
+        .split_active(crate::editor::Axis::Vertical, 500)
+        .unwrap();
+    let origin = state.active_view.unwrap();
+    state.toggle_zoom().unwrap();
+    let (b, _) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()));
+    state.toggle_zoom().unwrap();
+    assert_eq!(state.active_buffer_id(), Some(b));
+    assert_ne!(state.active_view, Some(origin));
+    state.validate_layout().unwrap();
+}

@@ -29,13 +29,13 @@ fields must agree. Yanked exact metadata is rejected. Publisher/name segments
 are 1–128 ASCII alphanumeric, dash or underscore bytes; version is 1–128 ASCII
 alphanumeric, dot, dash or plus bytes. The client does not parse SemVer. Search
 queries are nonempty, control-free and at most 256 bytes; a schema-1 response
-has at most the configured result count and each control-free description is at
+has at most the policy result count and each control-free description is at
 most 4,096 bytes. Exact artifact paths must remain under
 `packages/PUBLISHER/NAME/VERSION/artifacts/` on the official origin.
 
 The client checks status and exact media type, rejects redirects, rejects malformed or multiple Content-Length fields, checks a single valid present length before reading, and always reads through a
 `maximum + 1` streaming ceiling. Artifact SHA-256 is verified before package
-preparation. One configured connect timeout and one configured whole-request
+preparation. One policy connect timeout and one policy whole-request
 timeout apply to every endpoint; metadata and artifact byte ceilings are
 separate. Submission can fail before admission with queue-full or worker-stopped;
 worker results distinguish policy/origin, redirect/status/content-type/content-length,
@@ -43,26 +43,25 @@ oversize, invalid/yanked metadata, checksum, offline miss, unsafe cache,
 HTTP, I/O and thread failures. None of those failures publishes an install
 candidate.
 
-## Current configuration bounds
+## Application policy
 
-`[packages.registry]` is strict configuration. The fixed origin and zero
-redirect limit cannot be relaxed; other accepted values and bundled defaults
-are:
+The application uses `RegistryPolicy::default()`; `[packages.registry]` is not a
+supported configuration section. The fixed origin and zero redirect limit cannot
+be relaxed. Current hardcoded limits are:
 
-| Setting | Default | Accepted range |
-|---|---:|---:|
-| `offline` | `false` | Boolean |
-| `connect_timeout_ms` | 5,000 | 100–30,000 |
-| `request_timeout_ms` | 30,000 | 100–120,000 |
-| `maximum_metadata_bytes` | 1 MiB | 1 KiB–8 MiB |
-| `maximum_artifact_bytes` | 64 MiB | 1 KiB–256 MiB |
-| `maximum_cache_bytes` | 512 MiB | Artifact ceiling–16 GiB |
-| `maximum_cache_entries` | 4,096 | 1–100,000 |
-| `maximum_search_results` | 100 | 1–1,000 |
-| `queue_capacity` | 8 | 1–64 |
+| Policy | Value |
+|---|---:|
+| Offline | `false` |
+| Connect timeout | 5,000 ms |
+| Whole-request timeout | 30,000 ms |
+| Metadata ceiling | 1 MiB |
+| Artifact ceiling | 64 MiB |
+| Cache ceiling | 512 MiB / 4,096 entries |
+| Search results | 100 |
+| Queue capacity | 8 |
 
-These are current configurable client bounds, not the target defaults or a
-claim that the target C-06 maximums are used in production.
+The library policy supports offline cache reads, but the application does not
+currently expose an offline setting.
 
 ## Cache and offline behavior
 
@@ -70,7 +69,7 @@ Bodies use a SHA-256 URL key under the user package registry cache. Each body
 has a separate SHA-256 integrity sidecar. Both must be regular files; the cache
 directory and newly written files receive owner-only modes on Unix. Unsafe
 cache directories, symlinks, missing sidecars, changed bytes, or an overbudget
-cache fail closed. Both body and checksum destinations are fail-closed preflighted before either replacement. Writes use distinct create-new quarantine files, file sync, atomic rename, and parent-directory sync. Pruning enforces configured entry and byte ceilings.
+cache fail closed. Both body and checksum destinations are fail-closed preflighted before either replacement. Writes use distinct create-new quarantine files, file sync, atomic rename, and parent-directory sync. Pruning enforces policy entry and byte ceilings.
 Offline mode performs no request and returns an explicit cache miss unless the
 integrity-checked object exists.
 

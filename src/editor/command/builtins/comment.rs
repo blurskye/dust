@@ -55,9 +55,20 @@ pub(super) fn build_comment_toggle(
             };
             (start + spaced_end, start + indent + body.len())
         });
-        lines.push((start, indent, commented, spaced, closing, start + content.len()));
+        lines.push((
+            start,
+            indent,
+            commented,
+            spaced,
+            closing,
+            start + content.len(),
+        ));
     }
     if lines.is_empty() {
+        transaction.operations.push(EditorOperation::SetMode {
+            view,
+            mode: EditorMode::Normal,
+        });
         return Ok(());
     }
     let uncomment = lines.iter().all(|line| line.2);
@@ -79,11 +90,7 @@ pub(super) fn build_comment_toggle(
         }
         edits
     } else {
-        let indent = lines
-            .iter()
-            .map(|line| line.1)
-            .min()
-            .unwrap_or(0);
+        let indent = lines.iter().map(|line| line.1).min().unwrap_or(0);
         let mut edits = Vec::new();
         for (start, _, _, _, _, end) in &lines {
             edits.push(TextEdit::new(
@@ -105,7 +112,7 @@ pub(super) fn build_comment_toggle(
         if to <= cursor.get() {
             position = position + edit.replacement().len() - (to - from);
         } else if from < cursor.get() {
-            position = position - (cursor.get() - from);
+            position -= cursor.get() - from;
         }
     }
     transaction.operations.push(EditorOperation::ApplyEdits {

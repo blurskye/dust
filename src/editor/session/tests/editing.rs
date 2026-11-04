@@ -496,7 +496,11 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     app.configuration.install_bindings(keymaps, false);
     let (_, view) = app.state.open_text(TextBuffer::from_text(""), None);
     app.set_dashboard_visibility(false);
-    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let text = |app: &InteractiveApplication| {
+        app.state.buffers[app.state.views[view].buffer]
+            .text
+            .to_string()
+    };
 
     app.handle_configured_key(KeyEvent::character('i'));
     app.handle_configured_key(KeyEvent::character('j'));
@@ -513,7 +517,10 @@ fn an_unfinished_insert_mapping_types_its_keys() {
     app.handle_configured_key(KeyEvent::character('j'));
     app.handle_configured_key(KeyEvent::character('k'));
     assert_eq!(text(&app), "jaj");
-    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
 }
 
 #[test]
@@ -656,12 +663,19 @@ fn tutor_moves_on_when_each_step_is_done() {
         app.tutor_tick();
     }
     fn title(app: &InteractiveApplication) -> String {
-        app.ui.tutor.as_ref().map(|bar| bar.title.clone()).unwrap_or_default()
+        app.ui
+            .tutor
+            .as_ref()
+            .map(|bar| bar.title.clone())
+            .unwrap_or_default()
     }
     fn cursor_line(app: &InteractiveApplication) -> String {
         let view = &app.state.views[app.state.active_view.unwrap()];
         let text = &app.state.buffers[view.buffer].text;
-        text.line(text.byte_to_line(view.cursor).unwrap()).unwrap().trim().to_owned()
+        text.line(text.byte_to_line(view.cursor).unwrap())
+            .unwrap()
+            .trim()
+            .to_owned()
     }
     fn wait_root(app: &mut InteractiveApplication) {
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -676,7 +690,11 @@ fn tutor_moves_on_when_each_step_is_done() {
     }
     /// A done step says so for a moment before the next one comes.
     fn next_step(app: &mut InteractiveApplication) {
-        assert!(app.ui.tutor.as_ref().is_some_and(|bar| bar.praised), "{}", title(app));
+        assert!(
+            app.ui.tutor.as_ref().is_some_and(|bar| bar.praised),
+            "{}",
+            title(app)
+        );
         let before = title(app);
         let deadline = Instant::now() + Duration::from_secs(3);
         while title(app) == before {
@@ -704,8 +722,15 @@ fn tutor_moves_on_when_each_step_is_done() {
     press(&mut app, "j");
     next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 2/"), "{}", title(&app));
-    assert!(cursor_line(&app).starts_with("h  left"), "{}", cursor_line(&app));
-    assert!(app.ui.tutor.as_ref().unwrap().target.is_some(), "the X is marked");
+    assert!(
+        cursor_line(&app).starts_with("h  left"),
+        "{}",
+        cursor_line(&app)
+    );
+    assert!(
+        app.ui.tutor.as_ref().unwrap().target.is_some(),
+        "the X is marked"
+    );
     for _ in 0..2 {
         press(&mut app, "j");
     }
@@ -728,7 +753,12 @@ fn tutor_moves_on_when_each_step_is_done() {
         press(&mut app, key);
     }
     let view = &app.state.views[app.state.active_view.unwrap()];
-    assert!(app.state.buffers[view.buffer].text.to_string().contains("    The cow jumped over the moon.\n"));
+    assert!(
+        app.state.buffers[view.buffer]
+            .text
+            .to_string()
+            .contains("    The cow jumped over the moon.\n")
+    );
     // The next step put the cursor on its own practice line.
     next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
@@ -752,7 +782,11 @@ fn tutor_moves_on_when_each_step_is_done() {
     wait_vfs(&mut app);
     app.tutor_tick();
     let card = app.ui.tutor.as_ref().expect("the card stays");
-    assert!(card.away && card.place.contains("`:e practice.rs`"), "{}", card.place);
+    assert!(
+        card.away && card.place.contains("`:e practice.rs`"),
+        "{}",
+        card.place
+    );
     // Back in the practice file, the cursor is on the step's line again.
     app.start_open(practice.join("practice.rs"));
     wait_vfs(&mut app);
@@ -770,7 +804,10 @@ fn tutor_moves_on_when_each_step_is_done() {
     assert_eq!(app.state.workspace_root, home);
     assert!(!practice.exists());
     assert!(app.state.buffers.values().all(|buffer| {
-        buffer.path.as_deref().is_none_or(|path| !path.starts_with(&practice))
+        buffer
+            .path
+            .as_deref()
+            .is_none_or(|path| !path.starts_with(&practice))
     }));
     // The next start asks first; continuing is a fresh practice project at the step the user
     // stopped at.
@@ -849,14 +886,23 @@ fn vim_edits_that_lazyvim_users_reach_for() {
     app.state.views[view].cursor = ByteOffset(0);
     // Visual `U`, `J` and `p`.
     press_keys(&mut app, &["v", "e", "U"]);
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE two\nthree\n");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "ONE two\nthree\n"
+    );
     press_keys(&mut app, &["V", "j", "J"]);
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE two three\n");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "ONE two three\n"
+    );
     app.state.views[view].cursor = ByteOffset(0);
     press_keys(&mut app, &["y", "i", "w"]);
     app.state.views[view].cursor = ByteOffset(4);
     press_keys(&mut app, &["v", "e", "p"]);
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "ONE ONE three\n");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "ONE ONE three\n"
+    );
 }
 
 #[test]
@@ -895,7 +941,10 @@ fn markdown_lines_comment_with_html_comments() {
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("notes buffer");
     press_keys(&mut app, &["g", "c", "c"]);
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "<!-- hello -->\n");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "<!-- hello -->\n"
+    );
     press_keys(&mut app, &["g", "c", "c"]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "hello\n");
 }
@@ -914,7 +963,11 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
         };
         app.handle_configured_key(event);
     };
-    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let text = |app: &InteractiveApplication| {
+        app.state.buffers[app.state.views[view].buffer]
+            .text
+            .to_string()
+    };
 
     // Ctrl-N takes whole words only: `food` is not a match.
     press(&mut app, "ctrl-n");
@@ -943,16 +996,20 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
     press(&mut app, "ctrl-n");
     press(&mut app, "ctrl-n");
     press(&mut app, "d");
-    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
     assert_eq!(text(&app), " bar food \n-x\n-yy\n");
 }
 
 #[test]
 fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let mut app = app();
-    let (_, view) = app
-        .state
-        .open_text(TextBuffer::from_text("cat one\ncat two\n// cat three\ncat four\n"), None);
+    let (_, view) = app.state.open_text(
+        TextBuffer::from_text("cat one\ncat two\n// cat three\ncat four\n"),
+        None,
+    );
     app.set_dashboard_visibility(false);
     let press = |app: &mut InteractiveApplication, key: &str| {
         let event = match key.chars().collect::<Vec<_>>()[..] {
@@ -966,7 +1023,11 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
             app.handle_configured_key(KeyEvent::character(character));
         }
     };
-    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let text = |app: &InteractiveApplication| {
+        app.state.buffers[app.state.views[view].buffer]
+            .text
+            .to_string()
+    };
 
     // `/cat` goes to the second cat; `cgn` changes it and `.` the one after.
     typed(&mut app, "/cat");
@@ -980,12 +1041,18 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
     // `:s///c` asks about each match: skip the first, replace the second.
     typed(&mut app, ":%s/cat/cow/c");
     press(&mut app, "enter");
-    assert_eq!(app.input.prompt().map(|prompt| prompt.kind), Some(crate::ui::PromptKind::SubstituteConfirm));
+    assert_eq!(
+        app.input.prompt().map(|prompt| prompt.kind),
+        Some(crate::ui::PromptKind::SubstituteConfirm)
+    );
     press(&mut app, "n");
     press(&mut app, "y");
     assert_eq!(text(&app), "cat one\ndog two\n// dog three\ncow four\n");
     assert!(app.input.prompt().is_none());
-    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
     press(&mut app, "u");
     assert_eq!(text(&app), "cat one\ndog two\n// dog three\ncat four\n");
 
@@ -1007,9 +1074,10 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
 #[test]
 fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     let mut app = app();
-    let (_, view) = app
-        .state
-        .open_text(TextBuffer::from_text("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = cat;\n"), None);
+    let (_, view) = app.state.open_text(
+        TextBuffer::from_text("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = cat;\n"),
+        None,
+    );
     app.set_dashboard_visibility(false);
     let press = |app: &mut InteractiveApplication, key: &str| {
         let event = match key.chars().collect::<Vec<_>>()[..] {
@@ -1018,7 +1086,11 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
         };
         app.handle_configured_key(event);
     };
-    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let text = |app: &InteractiveApplication| {
+        app.state.buffers[app.state.views[view].buffer]
+            .text
+            .to_string()
+    };
     let marks = |app: &InteractiveApplication| app.state.views[view].multi_marks.len();
 
     // Ctrl-Shift-L takes every match; Q drops the one the cursor is on.
@@ -1026,7 +1098,10 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     press(&mut app, "ctrl-shift-l");
     assert_eq!(marks(&app), 4);
     press(&mut app, "N");
-    assert_eq!(app.state.views[view].cursor, ByteOffset("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = ".len()));
+    assert_eq!(
+        app.state.views[view].cursor,
+        ByteOffset("let cat = 1;\nlet cat = 2;\nlet cat = 3;\nlet dog = ".len())
+    );
     press(&mut app, "Q");
     assert_eq!(marks(&app), 3);
     press(&mut app, "c");
@@ -1034,14 +1109,21 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
         press(&mut app, key);
     }
     press(&mut app, "escape");
-    assert_eq!(text(&app), "let cow = 1;\nlet cow = 2;\nlet cow = 3;\nlet dog = cat;\n");
+    assert_eq!(
+        text(&app),
+        "let cow = 1;\nlet cow = 2;\nlet cow = 3;\nlet dog = cat;\n"
+    );
 
     // q skips the second match for the one after it.
     app.state.views[view].cursor = ByteOffset(4);
     press(&mut app, "ctrl-n");
     press(&mut app, "ctrl-n");
     press(&mut app, "q");
-    let starts: Vec<usize> = app.state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect();
+    let starts: Vec<usize> = app.state.views[view]
+        .multi_marks
+        .iter()
+        .map(|mark| mark.start.get())
+        .collect();
     assert_eq!(starts, vec![4, "let cow = 1;\nlet cow = 2;\nlet ".len()]);
     press(&mut app, "escape");
     // With every match already taken, q just drops the one it is on.
@@ -1058,37 +1140,55 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     press(&mut app, "ctrl-alt-j");
     press(&mut app, "w");
     press(&mut app, "x");
-    assert_eq!(text(&app), "let ow = 1;\nlet ow = 2;\nlet ow = 3;\nlet dog = cat;\n");
+    assert_eq!(
+        text(&app),
+        "let ow = 1;\nlet ow = 2;\nlet ow = 3;\nlet dog = cat;\n"
+    );
     press(&mut app, "A");
     press(&mut app, "!");
     press(&mut app, "escape");
-    assert_eq!(text(&app), "let ow = 1;!\nlet ow = 2;!\nlet ow = 3;!\nlet dog = cat;\n");
+    assert_eq!(
+        text(&app),
+        "let ow = 1;!\nlet ow = 2;!\nlet ow = 3;!\nlet dog = cat;\n"
+    );
 }
 
 #[test]
 fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
     let mut app = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("foobar\nxfoo\n"), None);
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("foobar\nxfoo\n"), None);
     app.set_dashboard_visibility(false);
     for key in ["v", "l", "l"] {
         app.handle_configured_key(KeyEvent::character(key.chars().next().unwrap()));
     }
     app.handle_configured_key("ctrl-shift-l".parse().expect("key"));
-    let starts: Vec<usize> = app.state.views[view].multi_marks.iter().map(|mark| mark.start.get()).collect();
+    let starts: Vec<usize> = app.state.views[view]
+        .multi_marks
+        .iter()
+        .map(|mark| mark.start.get())
+        .collect();
     assert_eq!(starts, vec![0, "foobar\nx".len()]);
 }
 
 #[test]
 fn visual_block_i_and_a_type_before_and_after_every_row() {
     let mut app = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("  x = 1\n  y = 2\n  z = 3\n"), None);
     app.set_dashboard_visibility(false);
     let keys = |app: &mut InteractiveApplication, keys: &str| {
         for character in keys.chars() {
             app.handle_configured_key(KeyEvent::character(character));
         }
     };
-    let text = |app: &InteractiveApplication| app.state.buffers[app.state.views[view].buffer].text.to_string();
+    let text = |app: &InteractiveApplication| {
+        app.state.buffers[app.state.views[view].buffer]
+            .text
+            .to_string()
+    };
     app.state.views[view].cursor = ByteOffset(2);
     app.handle_configured_key("ctrl-v".parse().expect("key"));
     keys(&mut app, "2jIlet ");
@@ -1112,8 +1212,16 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
     for character in ['[', 'o', ']', 'a'] {
         app.handle_configured_key(KeyEvent::character(character));
     }
-    assert_eq!(app.state.buffers[app.state.active_buffer_id().expect("buffer")].text.to_string(), "Header\n");
-    assert_eq!(app.state.views[app.state.active_view.expect("view")].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().expect("buffer")]
+            .text
+            .to_string(),
+        "Header\n"
+    );
+    assert_eq!(
+        app.state.views[app.state.active_view.expect("view")].mode,
+        crate::editor::EditorMode::Normal
+    );
 }
 
 #[test]
@@ -1126,7 +1234,10 @@ fn conflict_keys_move_between_markers_and_wrap() {
     let line = |app: &mut InteractiveApplication| {
         wait_vfs(app);
         let view = &app.state.views[app.state.active_view.expect("view")];
-        app.state.buffers[view.buffer].text.byte_to_line(view.cursor).expect("line")
+        app.state.buffers[view.buffer]
+            .text
+            .byte_to_line(view.cursor)
+            .expect("line")
     };
     app.process_effect(AppEffect::GitConflictNavigate(1));
     assert_eq!(line(&mut app), 1);
@@ -1161,14 +1272,20 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     app.next_disk_check = None;
     app.process_disk_changes();
     wait_vfs(&mut app);
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "from outside\n", "unsaved work stays");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "from outside\n",
+        "unsaved work stays"
+    );
 }
 
 #[test]
 fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     let mut app = app();
-    app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("let word = 1;"), None);
+    app.state.open_text(
+        crate::editor::text::TextBuffer::from_text("let word = 1;"),
+        None,
+    );
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
     let word = ByteRange::new(ByteOffset(4), ByteOffset(8)).unwrap();
@@ -1184,5 +1301,202 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     app.process_syntax();
     let span = app.ui.lsp_semantic_spans.first().expect("the colour stays");
     assert_eq!(span.revision, app.state.buffers[buffer].text.revision());
-    assert_eq!(span.range, ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap());
+    assert_eq!(
+        span.range,
+        ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()
+    );
+}
+
+#[test]
+fn recovery_failure_and_retired_reads_preserve_the_journal() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), None);
+    app.state.buffers[buffer].read_only = true;
+    assert!(app.replace_with_recovered(buffer, "draft".into()).is_err());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "saved");
+    let path = app.state.workspace_root.join("recover.txt");
+    fs::write(&path, "disk").unwrap();
+    let journal = app.state.workspace_root.join("journal.toml");
+    fs::write(&journal, "recoverable").unwrap();
+    let id = app
+        .documents
+        .read_scoped(path, vec![app.state.workspace_root.clone()])
+        .unwrap();
+    app.recovery
+        .register_read(id, journal.clone(), "draft".into(), app.workspace.version());
+    app.workspace.fixture_safe_mode(true);
+    wait_vfs(&mut app);
+    assert_eq!(fs::read_to_string(journal).unwrap(), "recoverable");
+    assert!(
+        app.state
+            .buffers
+            .values()
+            .all(|buffer| buffer.text.to_string() != "draft")
+    );
+}
+
+#[test]
+fn flash_cancels_cached_targets_after_a_reload() {
+    let mut app = app();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abc abc abc"), None);
+    app.set_dashboard_visibility(false);
+    app.begin_flash();
+    press_keys(&mut app, &["a"]);
+    let label = app
+        .flash
+        .as_ref()
+        .unwrap()
+        .targets
+        .iter()
+        .find_map(|target| target.label)
+        .unwrap();
+    app.state.buffers[buffer].text = TextBuffer::from_text("é");
+    app.state.views[view].cursor = ByteOffset(0);
+    press_keys(&mut app, &[&label.to_string()]);
+    assert!(app.flash.is_none());
+    assert_eq!(app.state.views[view].cursor.get(), 0);
+}
+
+#[test]
+fn persisted_navigation_clamps_multibyte_offsets() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("mark.txt");
+    fs::write(&path, "éx").unwrap();
+    app.navigate_persisted_location(crate::persistence::PersistedLocation {
+        path,
+        byte: 1,
+        anchor: 2,
+        scroll_line: 0,
+        scroll_column: 0,
+    });
+    wait_vfs(&mut app);
+    let view = &app.state.views[app.state.active_view.unwrap()];
+    assert_eq!(view.cursor.get(), 0);
+    assert_eq!(view.selection.unwrap().anchor.get(), 2);
+    assert_eq!(view.selection.unwrap().head, view.cursor);
+}
+
+#[test]
+fn cursor_only_commands_do_not_enter_the_change_list() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("changes.txt");
+    app.state
+        .open_text(TextBuffer::from_text("abc def"), Some(path));
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["l", "w", "h"]);
+    assert!(app.persistence.changes().is_empty());
+    press_keys(&mut app, &["x"]);
+    assert_eq!(app.persistence.changes().len(), 1);
+}
+
+#[test]
+fn count_errors_return_operator_pending_views_to_normal() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(
+        &mut app,
+        &["1", "0", "0", "1", "d", "1", "0", "0", "0", "w"],
+    );
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
+}
+
+#[test]
+fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
+    let mut app = app();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("cat cat\nkeep\n"), None);
+    app.set_dashboard_visibility(false);
+    app.run_substitute("%", "cat", "dog", "gn");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "cat cat\nkeep\n"
+    );
+    app.run_substitute("%", "cat", "dog", "z");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "cat cat\nkeep\n"
+    );
+    app.ui.search_query = Some("cat".into());
+    app.run_substitute("%", "", "dog", "g");
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "dog dog\nkeep\n"
+    );
+    app.state.views[view].cursor = ByteOffset(8);
+    app.run_global_delete("", "keep", false);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "dog dog\n");
+    assert!(app.state.views[view].cursor.get() < app.state.buffers[buffer].text.len_bytes());
+}
+
+#[test]
+fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None);
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["x", "q", "a", ".", "q", "@", "a"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "def");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    press_keys(&mut app, &["i", "X", "delete", "escape", "."]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "Xbc");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abc"), None);
+    press_keys(&mut app, &["x", "y", "y", "."]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "c");
+}
+
+#[test]
+fn macro_replay_stops_before_an_edit_after_a_failed_find() {
+    let mut app = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None);
+    app.set_dashboard_visibility(false);
+    for key in "qafzxq".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.state.views[view].cursor = ByteOffset(3);
+    let before = app.state.buffers[buffer].text.to_string();
+    app.replay_macro('a');
+    assert_eq!(app.state.buffers[buffer].text.to_string(), before);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
+fn star_and_hash_repeat_only_whole_identifiers() {
+    let mut app = app();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("foo foobar foo"), None);
+    app.set_dashboard_visibility(false);
+    app.search_word_under_cursor(true);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(11));
+    app.perform_search(true);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+    app.search_word_under_cursor(false);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(11));
+}
+
+#[test]
+fn operator_arrow_motions_are_linewise_like_j_and_k() {
+    for (motion, cursor) in [("down", 1), ("up", 5)] {
+        let mut app = app();
+        let (buffer, view) = app.state.open_text(
+            crate::editor::text::TextBuffer::from_text("abc\ndef\nghi\n"),
+            None,
+        );
+        app.set_dashboard_visibility(false);
+        app.state.views[view].cursor = crate::editor::text::ByteOffset(cursor);
+        app.handle_configured_key(KeyEvent::character('d'));
+        app.handle_configured_key(motion.parse().unwrap());
+        assert_eq!(
+            app.state.buffers[buffer].text.to_string(),
+            "ghi\n",
+            "{motion}"
+        );
+    }
 }

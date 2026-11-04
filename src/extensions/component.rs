@@ -36,8 +36,71 @@ pub mod component_api {
     wasmtime::component::bindgen!({ path: "wit", world: "editor-plugin" });
 }
 
+pub struct ComponentLimits {
+    limits: wasmtime::StoreLimits,
+    maximum_memory_bytes: usize,
+    memory_bytes: usize,
+    last_growth: usize,
+}
+
+impl ComponentLimits {
+    pub fn new(limits: wasmtime::StoreLimits, maximum_memory_bytes: usize) -> Self {
+        Self {
+            limits,
+            maximum_memory_bytes,
+            memory_bytes: 0,
+            last_growth: 0,
+        }
+    }
+}
+
+impl wasmtime::ResourceLimiter for ComponentLimits {
+    fn memory_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        let growth = desired.saturating_sub(current);
+        if growth > self.maximum_memory_bytes.saturating_sub(self.memory_bytes)
+            || !self.limits.memory_growing(current, desired, maximum)?
+        {
+            return Ok(false);
+        }
+        self.memory_bytes += growth;
+        self.last_growth = growth;
+        Ok(true)
+    }
+
+    fn memory_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
+        self.memory_bytes = self.memory_bytes.saturating_sub(self.last_growth);
+        self.last_growth = 0;
+        self.limits.memory_grow_failed(error)
+    }
+
+    fn table_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        self.limits.table_growing(current, desired, maximum)
+    }
+
+    fn instances(&self) -> usize {
+        self.limits.instances()
+    }
+    fn tables(&self) -> usize {
+        self.limits.tables()
+    }
+    fn memories(&self) -> usize {
+        self.limits.memories()
+    }
+}
+
 pub struct ComponentHostState {
-    pub limits: wasmtime::StoreLimits,
+    pub runtime_epoch: u64,
+    pub limits: ComponentLimits,
     pub capabilities: BTreeSet<PluginCapability>,
     pub declared_content_types: BTreeSet<String>,
     pub snapshot: Option<component_api::dust::plugin::host::Snapshot>,
@@ -50,12 +113,15 @@ pub struct ComponentHostState {
     pub ui_requests: Vec<PluginUiRequest>,
     pub ui_events: Vec<component_api::dust::plugin::host::UiEvent>,
     pub next_ui_token: u64,
+    pub pending_ui_tokens: BTreeSet<u64>,
     pub confirmation_requests: Vec<PluginConfirmationRequest>,
     pub confirmation_results: Vec<component_api::dust::plugin::host::ConfirmationResult>,
     pub next_confirmation_token: u64,
     pub host_events: Vec<component_api::dust::plugin::host::HostEvent>,
     pub delivered_host_event_ids: BTreeSet<u64>,
     pub host_event_acknowledgements: Vec<u64>,
+    pub execution_available: bool,
+    pub pending_storage: BTreeMap<u64, usize>,
     pub storage_policy: Option<PluginStorageContribution>,
     pub storage_requests: Vec<PluginStorageRequest>,
     pub storage_results: Vec<component_api::dust::plugin::host::StorageResult>,
@@ -156,6 +222,12 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         request: component_api::dust::plugin::host::UiRequest,
     ) -> Result<u64, component_api::dust::plugin::host::UiError> {
+        if !self.execution_available {
+            return Err(component_ui_error(PluginUiError::new(
+                PluginUiErrorCode::InternalRejected,
+                "UI requests are unavailable during activation",
+            )));
+        }
         if self.confirmation_result_only
             && !matches!(
                 request,
@@ -169,7 +241,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 "confirmation result may update existing plugin UI only",
             )));
         }
-        if self.ui_requests.len() >= 64 {
+        if self.pending_ui_tokens.len() >= 64 {
             return Err(component_ui_error(PluginUiError::new(
                 PluginUiErrorCode::QueueFull,
                 "UI request ceiling exceeded",
@@ -184,12 +256,30 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         })?;
         let kind = convert_component_ui_request(request, &self.declared_content_types)
             .map_err(component_ui_error)?;
+        if self
+            .ui_requests
+            .iter()
+            .map(|request| ui_request_bytes(&request.kind))
+            .chain(std::iter::once(ui_request_bytes(&kind)))
+            .try_fold(0_usize, usize::checked_add)
+            .is_none_or(|bytes| bytes > 1024 * 1024)
+        {
+            return Err(component_ui_error(PluginUiError::new(
+                PluginUiErrorCode::QueueFull,
+                "UI request byte ceiling exceeded",
+            )));
+        }
+        self.pending_ui_tokens.insert(token);
         self.ui_requests.push(PluginUiRequest { token, kind });
         Ok(token)
     }
 
     fn take_ui_events(&mut self) -> Vec<component_api::dust::plugin::host::UiEvent> {
-        std::mem::take(&mut self.ui_events)
+        let events = std::mem::take(&mut self.ui_events);
+        for event in &events {
+            self.pending_ui_tokens.remove(&event.token);
+        }
+        events
     }
 
     fn queue_confirmation(
@@ -271,7 +361,11 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 return Err("invalid host event acknowledgement".into());
             }
         }
-        self.host_event_acknowledgements.extend(unique);
+        unique.extend(self.host_event_acknowledgements.iter().copied());
+        if unique.len() > 64 {
+            return Err("host event acknowledgement ceiling exceeded".into());
+        }
+        self.host_event_acknowledgements = unique.into_iter().collect();
         Ok(())
     }
 
@@ -279,10 +373,10 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         request: component_api::dust::plugin::host::StorageRequest,
     ) -> Result<u64, component_api::dust::plugin::host::StorageError> {
-        if self.confirmation_result_only {
+        if !self.execution_available || self.confirmation_result_only {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::Unavailable,
-                "confirmation result cannot use storage",
+                "storage is unavailable during activation or confirmation results",
             )));
         }
         if !self.capabilities.contains(&PluginCapability::PluginStorage) {
@@ -313,13 +407,36 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             ))
         })?;
         storage::validate_request(&candidate, policy).map_err(component_storage_error)?;
+        let bytes = match &candidate.kind {
+            PluginStorageRequestKind::Get { .. } => storage::STORAGE_VALUE_BYTE_CEILING + 4096,
+            PluginStorageRequestKind::List { .. } => storage::STORAGE_LIST_BYTE_CEILING + 4096,
+            _ => 4096,
+        };
+        if self.pending_storage.len() >= STORAGE_REQUEST_CEILING
+            || self
+                .pending_storage
+                .values()
+                .sum::<usize>()
+                .saturating_add(bytes)
+                > storage::STORAGE_RESULT_QUEUE_BYTE_CEILING
+        {
+            return Err(component_storage_error(PluginStorageError::new(
+                PluginStorageErrorCode::QueueFull,
+                "storage result inbox is full",
+            )));
+        }
+        self.pending_storage.insert(token, bytes);
         self.storage_requests.push(candidate);
         Ok(token)
     }
 
     fn take_storage_results(&mut self) -> Vec<component_api::dust::plugin::host::StorageResult> {
         if self.capabilities.contains(&PluginCapability::PluginStorage) {
-            std::mem::take(&mut self.storage_results)
+            let results = std::mem::take(&mut self.storage_results);
+            for result in &results {
+                self.pending_storage.remove(&result.token);
+            }
+            results
         } else {
             Vec::new()
         }
@@ -856,10 +973,76 @@ pub(super) fn component_ui_error(
     }
 }
 
+fn ui_request_bytes(kind: &PluginUiRequestKind) -> usize {
+    fn tree_bytes(tree: &PluginUiTree) -> usize {
+        tree.nodes
+            .iter()
+            .map(|node| {
+                std::mem::size_of::<PluginUiNode>()
+                    + node.text.len()
+                    + node.action.as_ref().map_or(0, String::len)
+                    + node.children.len() * 8
+            })
+            .sum()
+    }
+    match kind {
+        PluginUiRequestKind::OpenWindow {
+            title,
+            content_type,
+            tree,
+            ..
+        } => title.len() + content_type.len() + tree.as_ref().map_or(0, tree_bytes),
+        PluginUiRequestKind::ReplaceUi { tree, .. } => tree_bytes(tree),
+        PluginUiRequestKind::ReplacePrivate { snapshot, .. } => {
+            snapshot
+                .cells
+                .iter()
+                .map(|cell| cell.grapheme.len() + std::mem::size_of::<PluginPrivateCell>())
+                .sum::<usize>()
+                + snapshot
+                    .hit_regions
+                    .iter()
+                    .map(|hit| hit.action.len() + std::mem::size_of::<PluginPrivateHitRegion>())
+                    .sum::<usize>()
+                + snapshot.styles.len() * std::mem::size_of::<PluginPrivateStyle>()
+        }
+        PluginUiRequestKind::PatchPrivate { patch, .. } => {
+            patch
+                .cells
+                .iter()
+                .map(|cell| cell.grapheme.len() + std::mem::size_of::<PluginPrivateCell>())
+                .sum::<usize>()
+                + patch
+                    .hit_regions
+                    .iter()
+                    .map(|hit| hit.action.len() + std::mem::size_of::<PluginPrivateHitRegion>())
+                    .sum::<usize>()
+                + patch.styles.len() * std::mem::size_of::<PluginPrivateStyle>()
+                + patch.dirty.len() * std::mem::size_of::<PluginPrivateRect>()
+        }
+        _ => 0,
+    }
+}
+
 pub(super) fn convert_component_tree(
     tree: component_api::dust::plugin::host::UiTree,
 ) -> Result<PluginUiTree, PluginUiError> {
-    if tree.nodes.len() > 256 {
+    if tree.nodes.len() > 256
+        || tree.nodes.iter().any(|node| {
+            node.text.len() > 4096
+                || node
+                    .action
+                    .as_ref()
+                    .is_some_and(|action| action.len() > 256)
+        })
+        || tree.nodes.iter().map(|node| node.text.len()).sum::<usize>() > 64 * 1024
+        || tree
+            .nodes
+            .iter()
+            .map(|node| node.children.len())
+            .try_fold(0_usize, usize::checked_add)
+            .is_none_or(|children| children > 1024)
+    {
         return Err(PluginUiError::new(
             PluginUiErrorCode::InvalidTree,
             "retained UI node ceiling exceeded",
@@ -1041,6 +1224,12 @@ pub(super) fn convert_component_ui_request(
                 return Err(PluginUiError::new(
                     PluginUiErrorCode::UndeclaredContent,
                     "content type was not statically declared",
+                ));
+            }
+            if crate::ui::window::validate_title(&request.title).is_err() {
+                return Err(PluginUiError::new(
+                    PluginUiErrorCode::InvalidTree,
+                    "window title ceiling exceeded",
                 ));
             }
             PluginUiRequestKind::OpenWindow {

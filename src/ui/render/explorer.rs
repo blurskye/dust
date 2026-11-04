@@ -31,10 +31,7 @@ pub fn explorer_panel_width(config: &Config, terminal_width: u16) -> Option<u16>
             .ui
             .explorer
             .width
-            .clamp(
-                EXPLORER_MINIMUM_WIDTH,
-                EXPLORER_MAXIMUM_WIDTH,
-            )
+            .clamp(EXPLORER_MINIMUM_WIDTH, EXPLORER_MAXIMUM_WIDTH)
             .min(maximum_panel),
     )
 }
@@ -49,21 +46,21 @@ pub(super) fn place_workspace_frame(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     for y in 0..content.grid.height().min(bounds.height) {
         for x in 0..content.grid.width().min(bounds.width) {
-            if let Some(cell) = content.grid.get(x, y) {
-                if !cell.continuation {
-                    grid.set_cell(
-                        bounds.x.saturating_add(x),
-                        bounds.y.saturating_add(y),
-                        &cell.symbol,
-                        cell.style,
-                    );
-                }
+            if let Some(cell) = content.grid.get(x, y)
+                && !cell.continuation
+            {
+                grid.set_cell(
+                    bounds.x.saturating_add(x),
+                    bounds.y.saturating_add(y),
+                    &cell.symbol,
+                    cell.style,
+                );
             }
         }
     }
@@ -90,8 +87,8 @@ pub(super) fn render_explorer_window(
     let mut local = CellGrid::new_with_policy(
         rect.width,
         rect.height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
@@ -112,21 +109,21 @@ pub(super) fn render_explorer_window(
     );
     for y in 0..rect.height {
         for x in 0..rect.width {
-            if let Some(cell) = local.get(x, y) {
-                if !cell.continuation {
-                    frame.grid.set_cell(
-                        rect.x.saturating_add(x),
-                        rect.y.saturating_add(y),
-                        &cell.symbol,
-                        cell.style,
-                    );
-                }
+            if let Some(cell) = local.get(x, y)
+                && !cell.continuation
+            {
+                frame.grid.set_cell(
+                    rect.x.saturating_add(x),
+                    rect.y.saturating_add(y),
+                    &cell.symbol,
+                    cell.style,
+                );
             }
         }
     }
     if focused && explorer.searching {
         // Typing goes to the search box.
-        let typed = text_width(&EXPLORER_FOCUS_MARKER, config.editor.ambiguous_width)
+        let typed = text_width(EXPLORER_FOCUS_MARKER, config.editor.ambiguous_width)
             + 1
             + text_width(&explorer.query, config.editor.ambiguous_width);
         let x = u16::try_from(typed)
@@ -243,7 +240,7 @@ pub(super) fn render_explorer_dock(
         grid.put_text_clipped(
             1,
             y,
-            &EXPLORER_LOADING_LABEL,
+            EXPLORER_LOADING_LABEL,
             Style::ExplorerCount,
             panel_width.saturating_sub(1),
         );
@@ -293,13 +290,7 @@ fn render_explorer_search_box(
         u16::try_from(text_width(&count, config.editor.ambiguous_width)).unwrap_or(last);
     let count_x = last.saturating_sub(count_width).saturating_sub(1);
     grid.put_text_clipped(count_x, 1, &count, Style::ExplorerCount, last);
-    let x = grid.put_text_clipped(
-        2,
-        1,
-        &EXPLORER_FOCUS_MARKER,
-        Style::ExplorerHeader,
-        count_x,
-    );
+    let x = grid.put_text_clipped(2, 1, EXPLORER_FOCUS_MARKER, Style::ExplorerHeader, count_x);
     grid.put_text_clipped(
         x.saturating_add(1),
         1,

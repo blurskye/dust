@@ -1,22 +1,23 @@
-use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
-use crate::editor::session::lsp::{LSP_MAXIMUM_LOG_LINES, ProjectionChange};
-use crate::ui::render::{TERMINAL_PANEL_MAXIMUM_HEIGHT, TERMINAL_PANEL_MINIMUM_HEIGHT};
-use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, WindowPlacement};
 use super::{
     AppEffect, BufferRevision, ByteOffset, ByteRange, CommandInvocation, CommandValue,
-    DiagnosticOwner, DocumentEvent, DocumentationMarkupKind,
-    DocumentationPopupKind, Duration, EditorMode, EditorOperation, EditorTransaction,
-    ExplorerMutation, HashSet, IndentError, Instant, InteractiveApplication,
-    InteractiveError, KeyEvent, KeyInputKind, LoadedConfig,
+    DiagnosticOwner, DocumentEvent, DocumentationMarkupKind, DocumentationPopupKind, Duration,
+    EditorMode, EditorOperation, EditorTransaction, ExplorerMutation, HashSet, IndentError,
+    Instant, InteractiveApplication, InteractiveError, KeyEvent, KeyInputKind, LoadedConfig,
     LspEvent, LspFeature, LspFeatureResult, LspLaunch, LspMarkupContent, LspMarkupKind,
     LspProgressKind, LspRuntimeSource, LspWorkspaceEdit, MappingResolution, MatcherSource,
     NativeSurfaceTarget, PersistedLocation, PickerAction, PickerItem, PickerItemId, PickerPayload,
     PickerSurfaceKind, PositionCodec, PositionEncoding, Precondition, PromptKind, PtyId,
-    ResourceIntentKind, RestoreContext, RestoreUpdate, SyntaxDocument,
-    SyntaxSupport, TerminalInput, TerminalPanelMode, TextBuffer, TextEdit, TextEditSet, UiEvent,
-    UiFold, UiInlayHint, UiSyntaxSpan, UndoPolicy, VfsResult, WindowRect, command,
-    discover_executable, language_for_document, mode_name, path_from_file_uri,
-    rect_contains_point, terminal_tab_at_column,
+    ResourceIntentKind, RestoreContext, RestoreUpdate, SyntaxDocument, SyntaxSupport,
+    TerminalInput, TerminalPanelMode, TextBuffer, TextEdit, TextEditSet, UiEvent, UiFold,
+    UiInlayHint, UiSyntaxSpan, UndoPolicy, VfsResult, WindowRect, command, discover_executable,
+    language_for_document, mode_name, path_from_file_uri, rect_contains_point,
+    terminal_tab_at_column,
+};
+use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
+use crate::editor::session::lsp::{LSP_MAXIMUM_LOG_LINES, ProjectionChange};
+use crate::ui::render::{TERMINAL_PANEL_MAXIMUM_HEIGHT, TERMINAL_PANEL_MINIMUM_HEIGHT};
+use crate::ui::window::{
+    PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, WindowPlacement,
 };
 
 impl InteractiveApplication {
@@ -26,6 +27,10 @@ impl InteractiveApplication {
         };
         self.flash = Some(super::super::flash::FlashState {
             view,
+            buffer: self.state.views[view].buffer,
+            source: self.state.buffers[self.state.views[view].buffer]
+                .text
+                .source_version(),
             query: String::new(),
             targets: Vec::new(),
         });
@@ -38,6 +43,20 @@ impl InteractiveApplication {
         let Some(mut flash) = self.flash.take() else {
             return;
         };
+        if !self
+            .state
+            .views
+            .get(flash.view)
+            .is_some_and(|view| view.buffer == flash.buffer)
+            || !self
+                .state
+                .buffers
+                .get(flash.buffer)
+                .is_some_and(|buffer| buffer.text.source_version() == flash.source)
+        {
+            self.sync_flash_ui();
+            return;
+        }
         match key.code {
             crate::editor::input::KeyCode::Char(character)
                 if !key.modifiers.control && !key.modifiers.alt =>
@@ -88,14 +107,15 @@ impl InteractiveApplication {
 
     fn flash_jump(&mut self, view: crate::editor::ViewId, target: ByteOffset) {
         self.record_jump();
-        if let Some(view) = self.state.views.get_mut(view) {
-            view.cursor = target;
-            view.preferred_column = None;
-            if let Some(selection) = view.selection.as_mut() {
-                selection.head = target;
-            }
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetCursor {
+                view,
+                position: target,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
         }
-        self.state.mark_editor_changed();
         self.sync_flash_ui();
         self.ensure_cursor_visible();
     }
@@ -151,23 +171,29 @@ impl InteractiveApplication {
         use crate::ui::window::DockEdge;
         let docked = |this: &Self, id: PtyId| {
             let rect = this.terminal_rect(id)?;
-            match this.current_native_placement(NativeSurfaceTarget::Terminal(id.0)).ok()? {
+            match this
+                .current_native_placement(NativeSurfaceTarget::Terminal(id.0))
+                .ok()?
+            {
                 WindowPlacement::Docked { edge, .. } => Some((edge, rect)),
                 _ => None,
             }
         };
         match key.terminal_mouse() {
             Some(TerminalMouseInput::LeftDown) => {
-                let edge_at = self.shown_terminal_windows().into_iter().find_map(|(id, _)| {
-                    let (edge, rect) = docked(self, id)?;
-                    let on_edge = match edge {
-                        DockEdge::Right => column == rect.x,
-                        DockEdge::Left => column + 1 == rect.x.saturating_add(rect.width),
-                        DockEdge::Bottom => row == rect.y,
-                        DockEdge::Top => row + 1 == rect.y.saturating_add(rect.height),
-                    } && rect_contains_point(rect, column, row);
-                    on_edge.then_some((id, edge))
-                });
+                let edge_at = self
+                    .shown_terminal_windows()
+                    .into_iter()
+                    .find_map(|(id, _)| {
+                        let (edge, rect) = docked(self, id)?;
+                        let on_edge = match edge {
+                            DockEdge::Right => column == rect.x,
+                            DockEdge::Left => column + 1 == rect.x.saturating_add(rect.width),
+                            DockEdge::Bottom => row == rect.y,
+                            DockEdge::Top => row + 1 == rect.y.saturating_add(rect.height),
+                        } && rect_contains_point(rect, column, row);
+                        on_edge.then_some((id, edge))
+                    });
                 self.dock_drag = edge_at.map(|(id, _)| id);
                 // The bottom panel's top row holds its tabs, so a click there still picks one.
                 edge_at.is_some_and(|(_, edge)| matches!(edge, DockEdge::Left | DockEdge::Right))
@@ -221,7 +247,10 @@ impl InteractiveApplication {
             .into_iter()
             .map(|(id, _)| id)
             .filter(|id| Some(*id) != active)
-            .find(|id| self.terminal_rect(*id).is_some_and(|rect| rect_contains_point(rect, column, row)))
+            .find(|id| {
+                self.terminal_rect(*id)
+                    .is_some_and(|rect| rect_contains_point(rect, column, row))
+            })
         else {
             return false;
         };
@@ -243,30 +272,47 @@ impl InteractiveApplication {
                 .windows
                 .iter()
                 .filter(|window| rect_contains_point(window.rect, x, y))
-                .find_map(|window| self.window_session.editor_ids().pane_for_window(window.window))
+                .find_map(|window| {
+                    self.window_session
+                        .editor_ids()
+                        .pane_for_window(window.window)
+                })
         };
         match key.terminal_mouse() {
             Some(TerminalMouseInput::LeftDown) => {
-                let sides = projection.borders.iter().find_map(|border| match border.axis {
-                    TileAxis::Horizontal
-                        if column == border.x
-                            && (border.y..border.y.saturating_add(border.length)).contains(&row) =>
-                    {
-                        Some((pane_at(column.wrapping_sub(1), row)?, pane_at(column + 1, row)?))
-                    }
-                    TileAxis::Vertical
-                        if row == border.y
-                            && (border.x..border.x.saturating_add(border.length)).contains(&column) =>
-                    {
-                        Some((pane_at(column, row.wrapping_sub(1))?, pane_at(column, row + 1)?))
-                    }
-                    _ => None,
-                });
+                let sides = projection
+                    .borders
+                    .iter()
+                    .find_map(|border| match border.axis {
+                        TileAxis::Horizontal
+                            if column == border.x
+                                && (border.y..border.y.saturating_add(border.length))
+                                    .contains(&row) =>
+                        {
+                            Some((
+                                pane_at(column.wrapping_sub(1), row)?,
+                                pane_at(column + 1, row)?,
+                                true,
+                            ))
+                        }
+                        TileAxis::Vertical
+                            if row == border.y
+                                && (border.x..border.x.saturating_add(border.length))
+                                    .contains(&column) =>
+                        {
+                            Some((
+                                pane_at(column, row.wrapping_sub(1))?,
+                                pane_at(column, row + 1)?,
+                                false,
+                            ))
+                        }
+                        _ => None,
+                    });
                 self.border_drag = sides;
                 sides.is_some()
             }
             Some(TerminalMouseInput::LeftDrag) => {
-                let Some((first, second)) = self.border_drag else {
+                let Some((first, second, side_by_side)) = self.border_drag else {
                     return false;
                 };
                 let Some(panes) = self.state.panes_of_split_between(first, second) else {
@@ -285,28 +331,24 @@ impl InteractiveApplication {
                     })
                     .map(|window| window.rect)
                     .collect();
-                let (Some(first_rect), Some(second_rect)) = (
-                    projection.windows.iter().find(|window| {
-                        self.window_session.editor_ids().pane_for_window(window.window) == Some(first)
-                    }),
-                    projection.windows.iter().find(|window| {
-                        self.window_session.editor_ids().pane_for_window(window.window)
-                            == Some(second)
-                    }),
-                ) else {
-                    return true;
-                };
-                let side_by_side = second_rect.rect.x > first_rect.rect.x;
                 let (start, end, at) = if side_by_side {
                     (
                         rects.iter().map(|rect| rect.x).min().unwrap_or(0),
-                        rects.iter().map(|rect| rect.x + rect.width).max().unwrap_or(0),
+                        rects
+                            .iter()
+                            .map(|rect| rect.x + rect.width)
+                            .max()
+                            .unwrap_or(0),
                         column,
                     )
                 } else {
                     (
                         rects.iter().map(|rect| rect.y).min().unwrap_or(0),
-                        rects.iter().map(|rect| rect.y + rect.height).max().unwrap_or(0),
+                        rects
+                            .iter()
+                            .map(|rect| rect.y + rect.height)
+                            .max()
+                            .unwrap_or(0),
                         row,
                     )
                 };
@@ -343,11 +385,8 @@ impl InteractiveApplication {
         ) else {
             return false;
         };
-        let top = crate::ui::workspace_top_rows(
-            &self.state,
-            &self.ui,
-            self.configuration.settings(),
-        );
+        let top =
+            crate::ui::workspace_top_rows(&self.state, &self.ui, self.configuration.settings());
         // The same region the renderer gives the panes: above a docked terminal panel.
         let panel_top = self
             .ui
@@ -508,7 +547,10 @@ impl InteractiveApplication {
         // Errors and warnings keep their time, and everything stays in `:messages`.
         if matches!(
             event,
-            UiEvent::Key { kind: KeyInputKind::Press | KeyInputKind::Repeat, .. }
+            UiEvent::Key {
+                kind: KeyInputKind::Press | KeyInputKind::Repeat,
+                ..
+            }
         ) && self.ui.notification.is_some()
             && !self.ui.notification_error
             && !self.ui.notification_warning
@@ -565,6 +607,19 @@ impl InteractiveApplication {
                     && self.input.prompt().is_none()
                 {
                     self.settings_mouse(&key, column, row);
+                    return;
+                }
+                let overlay = if self.ui.picker.is_some() {
+                    Some("picker_mouse")
+                } else if self.input.prompt().is_some() {
+                    Some("prompt_mouse")
+                } else if self.ui.tool_menu.is_some() {
+                    Some("tool_manager_mouse")
+                } else {
+                    None
+                };
+                if let Some(context) = overlay {
+                    self.handle_key_in_context(context, key);
                     return;
                 }
                 if self.input.documentation().is_some() {
@@ -636,45 +691,39 @@ impl InteractiveApplication {
                         window,
                         &self.state.window_version(),
                         self.extension.contributions().version(),
-                    ) {
-                        if self.apply_window_plan(plan).is_ok() {
-                            self.reconcile_editor_windows();
-                        }
+                    ) && self.apply_window_plan(plan).is_ok()
+                    {
+                        self.reconcile_editor_windows();
                     }
                 }
                 if over_terminal
                     && key.terminal_mouse()
                         == Some(crate::editor::input::TerminalMouseInput::LeftDown)
+                    && let Some(rect) = self.terminal_window_rect()
+                    && row == rect.y
+                    && let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
+                        terminal_tab_at_column(
+                            terminal,
+                            self.configuration.settings(),
+                            rect.width,
+                            column.saturating_sub(rect.x),
+                        )
+                    })
                 {
-                    if let Some(rect) = self.terminal_window_rect() {
-                        if row == rect.y {
-                            if let Some(id) = self.ui.terminal_panel.as_ref().and_then(|terminal| {
-                                terminal_tab_at_column(
-                                    terminal,
-                                    self.configuration.settings(),
-                                    rect.width,
-                                    column.saturating_sub(rect.x),
-                                )
-                            }) {
-                                self.process_effect(AppEffect::TerminalFocus(id));
-                                return;
-                            }
-                        }
-                    }
+                    self.process_effect(AppEffect::TerminalFocus(id));
+                    return;
                 }
-                if over_explorer {
-                    if let Some(mouse) = key.terminal_mouse() {
-                        match mouse {
-                            crate::editor::input::TerminalMouseInput::ScrollUp => {
-                                self.move_explorer_selection(-3);
-                                return;
-                            }
-                            crate::editor::input::TerminalMouseInput::ScrollDown => {
-                                self.move_explorer_selection(3);
-                                return;
-                            }
-                            _ => {}
+                if over_explorer && let Some(mouse) = key.terminal_mouse() {
+                    match mouse {
+                        crate::editor::input::TerminalMouseInput::ScrollUp => {
+                            self.move_explorer_selection(-3);
+                            return;
                         }
+                        crate::editor::input::TerminalMouseInput::ScrollDown => {
+                            self.move_explorer_selection(3);
+                            return;
+                        }
+                        _ => {}
                     }
                 }
                 if !over_terminal
@@ -692,29 +741,26 @@ impl InteractiveApplication {
                 if self.ui.picker.is_none()
                     && self.input.prompt().is_none()
                     && self.ui.tool_menu.is_none()
+                    && let Some(context) = plugin_context
                 {
-                    if let Some(context) = plugin_context {
-                        if let Some(window) = self
-                            .compositor_projection()
-                            .and_then(|projection| projection.hit_test(column, row))
-                            .filter(|_| pressed)
-                        {
-                            if self
-                                .window_session
-                                .plan_focus(
-                                    window,
-                                    &self.state.window_version(),
-                                    self.extension.contributions().version(),
-                                )
-                                .and_then(|plan| self.apply_window_plan(plan))
-                                .is_ok()
-                            {
-                                self.reconcile_editor_windows();
-                            }
-                        }
-                        self.handle_key_in_context(&context, key);
-                        return;
+                    if let Some(window) = self
+                        .compositor_projection()
+                        .and_then(|projection| projection.hit_test(column, row))
+                        .filter(|_| pressed)
+                        && self
+                            .window_session
+                            .plan_focus(
+                                window,
+                                &self.state.window_version(),
+                                self.extension.contributions().version(),
+                            )
+                            .and_then(|plan| self.apply_window_plan(plan))
+                            .is_ok()
+                    {
+                        self.reconcile_editor_windows();
                     }
+                    self.handle_key_in_context(&context, key);
+                    return;
                 }
                 let context = if self.ui.picker.is_some() {
                     "picker_mouse"
@@ -736,39 +782,34 @@ impl InteractiveApplication {
                     }
                     "editor_mouse"
                 };
-                if context == "terminal_mouse" && self.window_session.terminal_focused() {
-                    if let Some(id) = self.keyboard_terminal() {
-                        if self.terminal_session.mode(id) == Some(TerminalPanelMode::Input) {
-                            if let Some(window) = self
-                                .window_session
-                                .native_ids()
-                                .terminal(id.0)
-                                .and_then(|ids| self.compositor_projection()?.window(ids.window))
-                            {
-                                if let Some(geometry) = crate::ui::terminal_window_geometry(window)
-                                {
-                                    if let Some(event) = key.terminal_mouse() {
-                                        let rect = WindowRect {
-                                            x: geometry.x,
-                                            y: geometry.body_top,
-                                            width: geometry.width,
-                                            height: geometry.body_height,
-                                        };
-                                        match self.terminal_session.send(
-                                            id,
-                                            TerminalInput::Mouse(event, column, row, rect),
-                                            &self.workspace,
-                                        ) {
-                                            Ok(true) => return,
-                                            Ok(false) => {}
-                                            Err(error) => {
-                                                self.show_error(error);
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                if context == "terminal_mouse"
+                    && self.window_session.terminal_focused()
+                    && let Some(id) = self.keyboard_terminal()
+                    && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
+                    && let Some(window) = self
+                        .window_session
+                        .native_ids()
+                        .terminal(id.0)
+                        .and_then(|ids| self.compositor_projection()?.window(ids.window))
+                    && let Some(geometry) = crate::ui::terminal_window_geometry(window)
+                    && let Some(event) = key.terminal_mouse()
+                {
+                    let rect = WindowRect {
+                        x: geometry.x,
+                        y: geometry.body_top,
+                        width: geometry.width,
+                        height: geometry.body_height,
+                    };
+                    match self.terminal_session.send(
+                        id,
+                        TerminalInput::Mouse(event, column, row, rect),
+                        &self.workspace,
+                    ) {
+                        Ok(true) => return,
+                        Ok(false) => {}
+                        Err(error) => {
+                            self.show_error(error);
+                            return;
                         }
                     }
                 }
@@ -821,7 +862,12 @@ impl InteractiveApplication {
             .into();
         }
         if let Some(menu) = &self.ui.tool_menu {
-            return if menu.searching { "tool_manager_search" } else { "tool_manager" }.into();
+            return if menu.searching {
+                "tool_manager_search"
+            } else {
+                "tool_manager"
+            }
+            .into();
         }
         if let Some(page) = &self.ui.settings {
             return match &page.edit {
@@ -847,7 +893,12 @@ impl InteractiveApplication {
             return "completion".into();
         }
         if self.ui.explorer.is_some() && self.window_session.explorer_focused() {
-            return if self.explorer.searching() { "explorer_search" } else { "explorer" }.into();
+            return if self.explorer.searching() {
+                "explorer_search"
+            } else {
+                "explorer"
+            }
+            .into();
         }
         if let Some(context) = self
             .window_session
@@ -858,7 +909,12 @@ impl InteractiveApplication {
             return context;
         }
         if !self.window_session.dashboard_visible() && self.agent_input_focused() {
-            return if self.agent_normal_mode() { "agent_normal" } else { "agent" }.into();
+            return if self.agent_normal_mode() {
+                "agent_normal"
+            } else {
+                "agent"
+            }
+            .into();
         }
         if self.window_session.dashboard_visible() || self.state.active_view.is_none() {
             return "dashboard".into();
@@ -872,49 +928,16 @@ impl InteractiveApplication {
     }
 
     pub(super) fn send_terminal_focus_report(&mut self, focused: bool) {
-        if let Some(id) = self.keyboard_terminal() {
-            if let Err(error) =
+        if let Some(id) = self.keyboard_terminal()
+            && let Err(error) =
                 self.terminal_session
                     .send(id, TerminalInput::Focus(focused), &self.workspace)
-            {
-                self.show_error(error);
-            }
+        {
+            self.show_error(error);
         }
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
-        if self.window_session.terminal_focused()
-            && self
-                .keyboard_terminal()
-                .and_then(|id| self.terminal_session.mode(id))
-                == Some(TerminalPanelMode::Input)
-        {
-            let encoded = key.terminal_navigation().map(|key| match key {
-                crate::editor::input::TerminalNavigationKey::Up => crate::ui::PtyInputKey::Up,
-                crate::editor::input::TerminalNavigationKey::Down => crate::ui::PtyInputKey::Down,
-                crate::editor::input::TerminalNavigationKey::Left => crate::ui::PtyInputKey::Left,
-                crate::editor::input::TerminalNavigationKey::Right => crate::ui::PtyInputKey::Right,
-                crate::editor::input::TerminalNavigationKey::Home => crate::ui::PtyInputKey::Home,
-                crate::editor::input::TerminalNavigationKey::End => crate::ui::PtyInputKey::End,
-                crate::editor::input::TerminalNavigationKey::PageUp => {
-                    crate::ui::PtyInputKey::PageUp
-                }
-                crate::editor::input::TerminalNavigationKey::PageDown => {
-                    crate::ui::PtyInputKey::PageDown
-                }
-            });
-            if let Some(encoded) = encoded {
-                if let Some(id) = self.keyboard_terminal() {
-                    if let Err(error) =
-                        self.terminal_session
-                            .send(id, TerminalInput::Key(encoded), &self.workspace)
-                    {
-                        self.show_error(error);
-                    }
-                    return;
-                }
-            }
-        }
         let mut context = self.active_input_context();
         // While a snippet runs its keys come first; anything else is Insert as usual.
         if context == "editor.insert"
@@ -938,8 +961,10 @@ impl InteractiveApplication {
         self.lsp_waiting = None;
         self.lsp_retry_at = None;
         self.lsp_retries = 0;
-        self.diagnostics.dismiss_expansion();
-        self.ui.expanded_diagnostic = None;
+        if key.terminal_mouse().is_none() {
+            self.diagnostics.dismiss_expansion();
+            self.ui.expanded_diagnostic = None;
+        }
         let context = context.to_owned();
         let resolution = self.input.resolve(
             &context,
@@ -980,19 +1005,18 @@ impl InteractiveApplication {
                 return;
             }
             MappingResolution::Missing => {
-                if !self.type_unmapped(&context, std::slice::from_ref(&key)) {
-                    if let Some(command_id) = self
+                if !self.type_unmapped(&context, std::slice::from_ref(&key))
+                    && let Some(command_id) = self
                         .configuration
                         .settings()
                         .input
                         .unmatched_commands
                         .get(&context)
                         .cloned()
-                    {
-                        self.invoke_mapped_command(&command_id);
-                        if self.active_input_context() != context {
-                            self.handle_configured_key(key);
-                        }
+                {
+                    self.invoke_mapped_command(&command_id);
+                    if self.active_input_context() != context {
+                        self.handle_configured_key(key);
                     }
                 }
             }
@@ -1002,7 +1026,10 @@ impl InteractiveApplication {
 
     fn typing(&self) -> bool {
         self.state.active_view.is_some_and(|view| {
-            matches!(self.state.views[view].mode, EditorMode::Insert | EditorMode::Replace)
+            matches!(
+                self.state.views[view].mode,
+                EditorMode::Insert | EditorMode::Replace
+            )
         })
     }
 
@@ -1030,18 +1057,17 @@ impl InteractiveApplication {
 
     pub(super) fn handle_configured_paste(&mut self, text: String) {
         self.close_documentation();
-        if self.window_session.terminal_focused() {
-            if let Some(id) = self.keyboard_terminal() {
-                if self.terminal_session.mode(id) == Some(TerminalPanelMode::Input) {
-                    if let Err(error) =
-                        self.terminal_session
-                            .send(id, TerminalInput::Paste(&text), &self.workspace)
-                    {
-                        self.show_error(error);
-                    }
-                    return;
-                }
+        if self.window_session.terminal_focused()
+            && let Some(id) = self.keyboard_terminal()
+            && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
+        {
+            if let Err(error) =
+                self.terminal_session
+                    .send(id, TerminalInput::Paste(&text), &self.workspace)
+            {
+                self.show_error(error);
             }
+            return;
         }
         self.cancel_pending_mapping();
         let context = self.active_input_context();
@@ -1101,7 +1127,9 @@ impl InteractiveApplication {
         match resolution {
             MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
             // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
-            MappingResolution::Replay(prefix, _) if !context.starts_with("editor.") || self.typing() => {
+            MappingResolution::Replay(prefix, _)
+                if !context.starts_with("editor.") || self.typing() =>
+            {
                 self.type_unmapped(&context, &prefix);
             }
             _ => return,
@@ -1137,7 +1165,11 @@ impl InteractiveApplication {
     pub(super) fn view_positions(
         &self,
         replaced: impl Fn(usize) -> bool,
-    ) -> Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize)> {
+    ) -> Vec<(
+        crate::editor::ViewId,
+        crate::editor::text::BufferRevision,
+        usize,
+    )> {
         self.state
             .views
             .iter()
@@ -1146,7 +1178,9 @@ impl InteractiveApplication {
                 if !replaced(text.byte_to_line(view.cursor).ok()?) {
                     return None;
                 }
-                let before = text.slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?).ok()?;
+                let before = text
+                    .slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?)
+                    .ok()?;
                 let non_blank = before.chars().filter(|c| !c.is_whitespace()).count();
                 Some((id, text.revision(), non_blank))
             })
@@ -1154,7 +1188,11 @@ impl InteractiveApplication {
     }
     pub(super) fn restore_view_positions(
         &mut self,
-        positions: Vec<(crate::editor::ViewId, crate::editor::text::BufferRevision, usize)>,
+        positions: Vec<(
+            crate::editor::ViewId,
+            crate::editor::text::BufferRevision,
+            usize,
+        )>,
     ) {
         for (id, revision, non_blank) in positions {
             let Some(view) = self.state.views.get(id) else {
@@ -1165,7 +1203,15 @@ impl InteractiveApplication {
                 continue;
             }
             let text = text.to_string();
-            self.state.views[id].cursor = ByteOffset(nth_non_blank(&text, non_blank));
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_operation(EditorOperation::SetCursor {
+                    view: id,
+                    position: ByteOffset(nth_non_blank(&text, non_blank)),
+                })
+                .with_undo_policy(UndoPolicy::Ignore);
+            if let Err(error) = self.state.apply_transaction(&transaction) {
+                self.show_error(error);
+            }
         }
         self.ensure_cursor_visible();
     }
@@ -1200,7 +1246,10 @@ impl InteractiveApplication {
             == crate::config::ClipboardSync::Unnamedplus
     }
 
-    pub(super) fn invoke(&mut self, mut invocation: CommandInvocation) {
+    pub(super) fn invoke(&mut self, invocation: CommandInvocation) {
+        self.invoke_checked(invocation);
+    }
+    pub(super) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
         }
@@ -1213,9 +1262,11 @@ impl InteractiveApplication {
         if invocation.id.as_str() == "edit.put"
             && matches!(invocation.register, None | Some('"' | '+' | '*'))
             && self.clipboard_shared()
+            && self
+                .clipboard
+                .pull(&invocation, self.state.window_version())
         {
-            let enabled = self.state.policy.registers_enabled;
-            self.clipboard.pull(&mut self.state.registers, enabled);
+            return true;
         }
         if invocation.id.as_str() == "edit.operator"
             && invocation.arguments.get("operator") == Some(&CommandValue::String("comment".into()))
@@ -1248,7 +1299,7 @@ impl InteractiveApplication {
         if search_match.is_some() {
             if !self.select_next_search_match() {
                 self.set_mode(EditorMode::Normal);
-                return;
+                return false;
             }
             invocation = invocation.with_argument("motion", CommandValue::String("visual".into()));
         }
@@ -1282,14 +1333,19 @@ impl InteractiveApplication {
         {
             self.record_jump();
         }
-        if invocation.id.as_str() == "edit.insert_text" {
-            if let Some(CommandValue::String(text)) = invocation.arguments.get("text") {
-                self.language.note_typed(text);
-            }
+        if invocation.id.as_str() == "edit.insert_text"
+            && let Some(CommandValue::String(text)) = invocation.arguments.get("text")
+        {
+            self.language.note_typed(text);
         }
         match self.commands.execute(&self.state, &invocation) {
             Ok(outcome) => {
-                let changed = outcome.transaction.is_some();
+                let text_before = invocation.target.buffer.and_then(|buffer| {
+                    self.state
+                        .buffers
+                        .get(buffer)
+                        .map(|buffer| buffer.text.source_version())
+                });
                 if let Some(mut transaction) = outcome.transaction {
                     let source = self.state.window_version();
                     let snippet_document = self.input.snippet_buffer().and_then(|id| {
@@ -1307,7 +1363,7 @@ impl InteractiveApplication {
                         .prepare_snippet_mirror(snippet_document, &mut transaction);
                     if let Err(error) = self.state.apply_transaction(&transaction) {
                         self.show_error(error);
-                        return;
+                        return false;
                     }
                     if let Some(update) = update {
                         let source = self.state.window_version();
@@ -1325,8 +1381,14 @@ impl InteractiveApplication {
                     }
                 }
 
-                if changed {
-                    self.keep_cursor_off_final_newline();
+                self.keep_cursor_off_final_newline();
+                if invocation.target.buffer.and_then(|buffer| {
+                    self.state
+                        .buffers
+                        .get(buffer)
+                        .map(|buffer| buffer.text.source_version())
+                }) != text_before
+                {
                     self.push_change_location();
                 }
                 self.input.record_successful_invocation(
@@ -1338,6 +1400,7 @@ impl InteractiveApplication {
                 for effect in outcome.effects {
                     self.process_effect(effect);
                 }
+                true
             }
             Err(error) => {
                 // A failed `dfz` or `di(` must not leave the view stuck in operator-pending.
@@ -1350,6 +1413,7 @@ impl InteractiveApplication {
                     self.set_mode(EditorMode::Normal);
                 }
                 self.show_error(error);
+                false
             }
         }
     }
@@ -1374,8 +1438,9 @@ impl InteractiveApplication {
             Ok(()) => self.configuration.note_rejected_keymaps(None),
             Err(diagnostic) => {
                 self.retain_configuration_watch();
-                self.configuration
-                    .note_rejected_keymaps(diagnostic.contains("keymap").then(|| diagnostic.clone()));
+                self.configuration.note_rejected_keymaps(
+                    diagnostic.contains("keymap").then(|| diagnostic.clone()),
+                );
                 let message = if automatic {
                     "auto_reload_rejected"
                 } else {
@@ -1423,8 +1488,12 @@ impl InteractiveApplication {
             self.state.open_text(TextBuffer::from_text(""), None);
             self.set_dashboard_visibility(false);
         }
-        self.configuration
+        let window_contribution = candidate.window_contribution();
+        let receipt = self
+            .configuration
             .commit(candidate, self.extension.contributions())?;
+        let (rules, _) = self.extension.prepare_window_rules(&window_contribution)?;
+        rules.finish(receipt)?;
         for name in self.tasks.names() {
             if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
                 self.diagnostics.clear_owner(&owner);
@@ -1441,6 +1510,9 @@ impl InteractiveApplication {
             .configure(&self.configuration.settings().terminals);
         self.restore_input_focus();
         self.project_configuration();
+        let persistence = &self.configuration.settings().persistence;
+        self.state.undo_directory = (persistence.enabled && persistence.undo_history)
+            .then(|| self.persistence.undo_directory());
         self.project_input_hints();
         self.project_input_documentation();
         self.refresh_completions();
@@ -1450,14 +1522,22 @@ impl InteractiveApplication {
             .language
             .sessions()
             .iter()
-            .map(|(key, state)| (key.clone(), state.server_id.clone()))
+            .map(|(key, state)| {
+                (
+                    key.clone(),
+                    state.server_id.clone(),
+                    state.launch.executable().clone(),
+                )
+            })
             .collect::<Vec<_>>();
-        for (key, server_id) in sessions {
-            let configuration = if maximum_inlays {
-                crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&server_id)
-            } else {
-                crate::language::lsp::LspServerConfiguration::standard()
-            };
+        for (key, server_id, executable) in sessions {
+            let mut configuration =
+                crate::language::lsp::LspServerConfiguration::for_server(&server_id, &executable);
+            if maximum_inlays {
+                configuration.overlay(
+                    crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&server_id),
+                );
+            }
             let _ = self.language.configure(&key, configuration);
         }
         self.schedule_lsp_inlay_refresh(true);
@@ -1513,7 +1593,12 @@ const LSP_CONTENT_MODIFIED_DELAY: Duration = Duration::from_millis(500);
 enum NavigationRead {
     Matcher(MatcherSource),
     Persisted(PersistedLocation),
-    Lsp(crate::language::lsp::LspRange, PositionEncoding),
+    Lsp(
+        crate::language::lsp::LspRange,
+        PositionEncoding,
+        crate::editor::session::windows::NavigationStamp,
+        crate::editor::session::workspace::WorkspaceVersion,
+    ),
     WorkspaceSearch(std::ops::Range<usize>),
     /// A recovery journal's path and text, to put into the file once it is open.
     Recovered(std::path::PathBuf, String),
@@ -1584,7 +1669,8 @@ impl InteractiveApplication {
                         self.search.retire_document_request(id);
                         self.language.retire_document_request(id);
                         self.persistence.retire_document_request(id);
-                        self.recovery.take_read(id);
+                        self.navigation_reads.remove(&id);
+                        self.recovery.take_read(id, self.workspace.version());
                     }
                     self.recovery.stopped();
                     self.search.clear_preview();
@@ -1716,9 +1802,11 @@ impl InteractiveApplication {
                                 .map(NavigationRead::Persisted)
                         })
                         .or_else(|| {
-                            self.language
-                                .take_navigation_read(id)
-                                .map(|(range, encoding)| NavigationRead::Lsp(range, encoding))
+                            self.language.take_navigation_read(id).map(
+                                |(range, encoding, navigation, workspace)| {
+                                    NavigationRead::Lsp(range, encoding, navigation, workspace)
+                                },
+                            )
                         })
                         .or_else(|| {
                             self.search
@@ -1726,17 +1814,29 @@ impl InteractiveApplication {
                                 .map(NavigationRead::WorkspaceSearch)
                         })
                         .or_else(|| {
-                            self.recovery
-                                .take_read(id)
-                                .map(|(journal, content)| NavigationRead::Recovered(journal, content))
+                            self.recovery.take_read(id, self.workspace.version()).map(
+                                |(journal, content)| NavigationRead::Recovered(journal, content),
+                            )
                         });
+                    if let Some((navigation, capture)) = self.navigation_reads.remove(&id)
+                        && (!self.window_session.navigation_current(
+                            &navigation,
+                            &self.state.window_version(),
+                            self.state.active_view,
+                        ) || !self.input.capture_current(&capture))
+                    {
+                        continue;
+                    }
                     // A file deleted since the crash comes back as a new file at its path.
                     if let Some(NavigationRead::Recovered(journal, content)) = &pending
                         && result.is_err()
                     {
                         let (buffer, _) =
-                            self.state.open_text(TextBuffer::from_text(content), Some(path));
-                        self.state.buffers[buffer].dirty = true;
+                            self.state.open_text(TextBuffer::from_text(""), Some(path));
+                        if let Err(error) = self.replace_with_recovered(buffer, content.clone()) {
+                            self.show_error(error);
+                            continue;
+                        }
                         self.finish_recovery(journal, "recovery_restored");
                         continue;
                     }
@@ -1774,9 +1874,38 @@ impl InteractiveApplication {
                             Some(NavigationRead::Persisted(location)) => {
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 let length = self.state.buffers[buffer].text.len_bytes();
-                                let cursor = ByteOffset(location.byte.min(length));
-                                let anchor = ByteOffset(location.anchor.min(length));
-                                self.state.views[view].cursor = cursor;
+                                let clamp = |offset: usize| {
+                                    let mut offset = offset.min(length);
+                                    while !self.state.buffers[buffer]
+                                        .text
+                                        .is_char_boundary(ByteOffset(offset))
+                                    {
+                                        offset -= 1;
+                                    }
+                                    ByteOffset(offset)
+                                };
+                                let cursor = clamp(location.byte);
+                                let anchor = clamp(location.anchor);
+                                let selection =
+                                    (anchor != cursor).then_some(crate::editor::Selection {
+                                        anchor,
+                                        head: cursor,
+                                        kind: crate::editor::SelectionKind::Character,
+                                    });
+                                let transaction = EditorTransaction::new(self.transaction_id())
+                                    .with_operation(EditorOperation::SetCursor {
+                                        view,
+                                        position: cursor,
+                                    })
+                                    .with_operation(EditorOperation::SetSelection {
+                                        view,
+                                        selection,
+                                    })
+                                    .with_undo_policy(UndoPolicy::Ignore);
+                                if let Err(error) = self.state.apply_transaction(&transaction) {
+                                    self.show_error(error);
+                                    continue;
+                                }
                                 self.state.views[view].scroll_line = location.scroll_line.min(
                                     self.state.buffers[buffer]
                                         .text
@@ -1785,18 +1914,31 @@ impl InteractiveApplication {
                                 );
                                 self.state.views[view].scroll_wrap_row = 0;
                                 self.state.views[view].scroll_column = location.scroll_column;
-                                self.state.views[view].selection =
-                                    (anchor != cursor).then_some(crate::editor::Selection {
-                                        anchor,
-                                        head: cursor,
-                                        kind: crate::editor::SelectionKind::Character,
-                                    });
-                                self.state.mark_editor_changed();
                                 self.record_recent_file(path);
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(NavigationRead::Lsp(range, encoding)) => {
+                            Some(NavigationRead::Lsp(range, encoding, navigation, workspace)) => {
+                                if workspace != self.workspace.version() {
+                                    continue;
+                                }
+                                if !self.window_session.navigation_current(
+                                    &navigation,
+                                    &self.state.window_version(),
+                                    self.state.active_view,
+                                ) {
+                                    let mut draft = self.state.draft();
+                                    let buffer = draft.load_document(text, path.clone());
+                                    if let Err(error) = self.commit_editor_draft(draft, None, false)
+                                    {
+                                        self.show_error(error);
+                                    }
+                                    if let Some(buffer) = self.state.buffers.get_mut(buffer) {
+                                        buffer.read_only =
+                                            self.workspace.require_path(&path).is_err();
+                                    }
+                                    continue;
+                                }
                                 let (buffer, view) = self.state.open_text(text, Some(path.clone()));
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
@@ -1859,8 +2001,10 @@ impl InteractiveApplication {
                                 self.state.buffers[buffer].read_only =
                                     self.workspace.require_path(&path).is_err();
                                 self.record_recent_file(path);
-                                self.replace_with_recovered(buffer, content);
-                                self.finish_recovery(&journal, "recovery_restored");
+                                match self.replace_with_recovered(buffer, content) {
+                                    Ok(()) => self.finish_recovery(&journal, "recovery_restored"),
+                                    Err(error) => self.show_error(error),
+                                }
                             }
                             _ => self.show_error(self.message("unexpected_read", &[])),
                         },
@@ -1969,13 +2113,12 @@ impl InteractiveApplication {
             );
             let mut draft = self.state.draft();
             if activate {
-                if reply.split && self.state.active_view.is_some() {
-                    if let Err(error) =
-                        draft.split_document(PANE_DEFAULT_RATIO)
-                    {
-                        self.show_error(error);
-                        return;
-                    }
+                if reply.split
+                    && self.state.active_view.is_some()
+                    && let Err(error) = draft.split_document(PANE_DEFAULT_RATIO)
+                {
+                    self.show_error(error);
+                    return;
                 }
                 draft.open_document(text, path);
             } else {
@@ -2063,7 +2206,10 @@ impl InteractiveApplication {
                             operation
                                 .target()
                                 .or_else(|| operation.source())
-                                .map_or_else(|| "path".into(), |path| self.workspace_relative_label(path))
+                                .map_or_else(
+                                    || "path".into(),
+                                    |path| self.workspace_relative_label(path)
+                                )
                         ),
                         false,
                     );
@@ -2123,11 +2269,11 @@ impl InteractiveApplication {
         let (change, target) = request.into_change();
         match self.state.reconcile_paths(change, target.as_deref()) {
             Ok((draft, recent)) => {
-                if let Some(draft) = draft {
-                    if let Err(error) = self.commit_editor_draft(draft, None, false) {
-                        self.show_error(error);
-                        return;
-                    }
+                if let Some(draft) = draft
+                    && let Err(error) = self.commit_editor_draft(draft, None, false)
+                {
+                    self.show_error(error);
+                    return;
                 }
                 for path in recent {
                     self.record_recent_file(path);
@@ -2318,7 +2464,8 @@ impl InteractiveApplication {
         for (buffer, result) in self.syntax.results() {
             let revision = BufferRevision(result.revision);
             let stale = self.state.buffers.get(*buffer).is_some_and(|target| {
-                target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
+                self.syntax.source(*buffer) == Some(&target.text.source_version())
+                    && target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
             });
             if stale {
                 self.state.buffers[*buffer].syntax_objects =
@@ -2398,17 +2545,17 @@ fn nth_non_blank(text: &str, count: usize) -> usize {
         .map_or(text.len(), |(at, _)| at)
 }
 
-fn move_spans_onto_current_text(
-    spans: &mut Vec<UiSyntaxSpan>,
-    state: &crate::editor::EditorState,
-) {
+fn move_spans_onto_current_text(spans: &mut Vec<UiSyntaxSpan>, state: &crate::editor::EditorState) {
     let current = |span: &UiSyntaxSpan| {
         state
             .buffers
             .get(span.buffer)
             .map(|buffer| buffer.text.revision())
     };
-    if spans.iter().all(|span| current(span).is_none_or(|at| at == span.revision)) {
+    if spans
+        .iter()
+        .all(|span| current(span).is_none_or(|at| at == span.revision))
+    {
         return;
     }
     spans.retain_mut(|span| {
@@ -2441,13 +2588,12 @@ impl InteractiveApplication {
         }
         // A Git or Markdown preview doesn't come from a server, and this runs each frame in a file
         // without one.
-        if self
-            .input
-            .documentation()
-            .is_some_and(|popup| {
-                !matches!(popup.kind, DocumentationPopupKind::Git | DocumentationPopupKind::Notice)
-            })
-        {
+        if self.input.documentation().is_some_and(|popup| {
+            !matches!(
+                popup.kind,
+                DocumentationPopupKind::Git | DocumentationPopupKind::Notice
+            )
+        }) {
             self.close_documentation();
         }
         self.ui.set(Vec::new(), |ui| &mut ui.lsp_semantic_spans);
@@ -2533,14 +2679,13 @@ impl InteractiveApplication {
         let Some(executable) = discover_executable(&definition.executable) else {
             return;
         };
-        let key = Self::tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
+        let key = self.tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
         self.tooling.forget_probe(&key);
         self.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable);
     }
 
     pub(in crate::editor::session) fn append_lsp_log(&mut self, line: String) {
-        self.language
-            .append_log(line, LSP_MAXIMUM_LOG_LINES);
+        self.language.append_log(line, LSP_MAXIMUM_LOG_LINES);
         if self.search.picker_surface() == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
             self.show_lsp_logs();
         }
@@ -2630,11 +2775,16 @@ impl InteractiveApplication {
     ) {
         // The status line's own request: an empty trail is the whole result.
         if self.language.is_breadcrumb_request(generation) {
+            self.language.retry_breadcrumbs();
             return;
         }
         self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
-        if method == "textDocument/formatting" && self.format_on_save.is_some() {
+        if method == "textDocument/formatting"
+            && self.format_on_save.as_ref().is_some_and(|pending| {
+                pending.request.as_ref() == Some(&(server.clone(), generation))
+            })
+        {
             self.append_lsp_log(format!("format on save failed: {message}"));
             self.finish_format_on_save();
             return;
@@ -2654,11 +2804,17 @@ impl InteractiveApplication {
         // must not hide the items the others returned.
         let secondary = method == "textDocument/completion"
             && (self.language.completion_automatic()
-                || self.language.active().is_some_and(|active| *active != server));
+                || self
+                    .language
+                    .active()
+                    .is_some_and(|active| *active != server));
         // A server that fails code actions must not hide what the others offered.
         if method == "textDocument/codeAction" {
             self.language.forget_request(&server, generation);
-            let main = self.language.active().is_some_and(|active| *active == server);
+            let main = self
+                .language
+                .active()
+                .is_some_and(|active| *active == server);
             let label = self.lsp_server_label(&server);
             if main {
                 self.show_error(self.message(
@@ -2791,6 +2947,32 @@ impl InteractiveApplication {
                     version,
                     result,
                 } => {
+                    if context
+                        .document_source(&uri)
+                        .is_some_and(|(buffer, source)| {
+                            self.state
+                                .buffers
+                                .get(*buffer)
+                                .is_none_or(|buffer| buffer.text.source_version() != *source)
+                        })
+                    {
+                        continue;
+                    }
+                    let save_format = method == "textDocument/formatting"
+                        && self.format_on_save.as_ref().is_some_and(|pending| {
+                            pending.request.as_ref() == Some(&(server.clone(), generation))
+                        });
+                    if save_format {
+                        self.present_lsp_result_owned(
+                            &server,
+                            generation,
+                            &method,
+                            &uri,
+                            result,
+                            Some(context),
+                        );
+                        continue;
+                    }
                     let current = self.active_lsp_document_without_text();
                     if !current.as_ref().is_some_and(|(_, document)| {
                         document.uri() == uri && document.version == version
@@ -2802,6 +2984,10 @@ impl InteractiveApplication {
                         continue;
                     }
                     if self.language.is_breadcrumb_request(generation) {
+                        self.refresh_lsp_projection_owner();
+                        if !self.language.accept_breadcrumbs(&server, &uri, version) {
+                            continue;
+                        }
                         if let LspFeatureResult::Symbols(symbols) = result {
                             self.install_lsp_breadcrumbs(symbols, context.encoding());
                         }
@@ -2879,6 +3065,9 @@ impl InteractiveApplication {
                     message,
                 } => self.handle_lsp_request_failure(server, generation, method, message),
                 LspEvent::Stopped { server, success } => {
+                    if context.diagnostic_ambiguous() {
+                        self.language.request_start(&server, None);
+                    }
                     if !success {
                         self.reprobe_failed_path_runtime(&server);
                     }
@@ -2936,10 +3125,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn schedule_lsp_restart(&mut self, key: String) {
-        if let Some(server) =
-            self.language
-                .schedule_restart(&key, Instant::now())
-        {
+        if let Some(server) = self.language.schedule_restart(&key, Instant::now()) {
             self.show_error(self.message("lsp_restart_disabled", &[("server", server)]));
         }
     }
@@ -2980,7 +3166,12 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn process_lsp_breadcrumbs(&mut self) {
         let settings = self.configuration.settings();
         let shown = settings.ui.status_line.enabled
-            && settings.ui.status_line.components.iter().any(|component| component == "breadcrumbs");
+            && settings
+                .ui
+                .status_line
+                .components
+                .iter()
+                .any(|component| component == "breadcrumbs");
         let Some((buffer, document)) = self.active_lsp_document_without_text().filter(|_| shown)
         else {
             self.ui.set(None, |ui| &mut ui.breadcrumbs);
@@ -2989,10 +3180,12 @@ impl InteractiveApplication {
         if self.ui.large_file_buffers.contains(&buffer) {
             return;
         }
-        if let Some(server) = self.language.request_breadcrumbs(buffer, &document, Instant::now()) {
-            if let Some((_, document)) = self.active_lsp_document() {
-                self.language.send_breadcrumbs(&server, buffer, document);
-            }
+        if let Some(server) = self
+            .language
+            .request_breadcrumbs(buffer, &document, Instant::now())
+            && let Some((_, document)) = self.active_lsp_document()
+        {
+            self.language.send_breadcrumbs(&server, buffer, document);
         }
     }
     /// The symbols a cursor can be inside, in the server's order: outer ones before inner ones.
@@ -3020,7 +3213,8 @@ impl InteractiveApplication {
                 })
             })
             .collect();
-        self.ui.set(Some((buffer, symbols)), |ui| &mut ui.breadcrumbs);
+        self.ui
+            .set(Some((buffer, symbols)), |ui| &mut ui.breadcrumbs);
     }
 
     /// Asks every attached server with a colour provider for the active document's colours.
@@ -3054,7 +3248,11 @@ impl InteractiveApplication {
         let revision = buffer.text.revision();
         let spans = colors.into_iter().filter_map(|color| {
             let start = codec
-                .lsp_to_byte(color.range.start.line, color.range.start.character, encoding)
+                .lsp_to_byte(
+                    color.range.start.line,
+                    color.range.start.character,
+                    encoding,
+                )
                 .ok()?;
             let end = codec
                 .lsp_to_byte(color.range.end.line, color.range.end.character, encoding)
@@ -3083,11 +3281,11 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn request_lsp(&mut self, mut feature: LspFeature) {
-        if matches!(feature, LspFeature::Formatting) {
-            if let Some(tool) = self.active_formatter() {
-                self.process_effect(AppEffect::FormatRun(tool));
-                return;
-            }
+        if matches!(feature, LspFeature::Formatting)
+            && let Some(tool) = self.active_formatter()
+        {
+            self.process_effect(AppEffect::FormatRun(tool));
+            return;
         }
         if matches!(feature, LspFeature::InlayHints { .. }) {
             self.schedule_lsp_inlay_refresh(true);
@@ -3122,8 +3320,7 @@ impl InteractiveApplication {
                 feature,
                 LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. }
             )
-            && !(matches!(feature, LspFeature::Completion)
-                && self.language.completion_automatic());
+            && !(matches!(feature, LspFeature::Completion) && self.language.completion_automatic());
         let Some(server) = server else {
             self.start_lsp(None);
             if asked
@@ -3140,8 +3337,12 @@ impl InteractiveApplication {
         };
         // Switching the server or the buffer's owner clears completion state, including where
         // this one started.
-        let completion = matches!(feature, LspFeature::Completion)
-            .then(|| (self.language.completion_start(), self.language.completion_automatic()));
+        let completion = matches!(feature, LspFeature::Completion).then(|| {
+            (
+                self.language.completion_start(),
+                self.language.completion_automatic(),
+            )
+        });
         // A formatter beside the file's main server, such as Ruff by basedpyright, doesn't replace it.
         let formats = matches!(
             feature,
@@ -3203,9 +3404,10 @@ impl InteractiveApplication {
                 .unwrap_or_else(|_| ByteOffset(buffer.len_bytes()));
             let line_start = buffer.line_to_byte(start_line).unwrap_or(start);
             let position = |offset| {
-                codec.byte_to_lsp(offset, encoding).ok().map(|(line, character)| {
-                    crate::language::lsp::LspPosition { line, character }
-                })
+                codec
+                    .byte_to_lsp(offset, encoding)
+                    .ok()
+                    .map(|(line, character)| crate::language::lsp::LspPosition { line, character })
             };
             let diagnostics = self
                 .diagnostics
@@ -3252,7 +3454,16 @@ impl InteractiveApplication {
             .language
             .request_projected(&server, feature, document, offset)
         {
-            Ok(()) => (),
+            Ok(()) => {
+                if formats
+                    && let Some(pending) = self
+                        .format_on_save
+                        .as_mut()
+                        .filter(|pending| pending.buffer == buffer && pending.request.is_none())
+                {
+                    pending.request = Some((server.clone(), self.language.generation()));
+                }
+            }
             // The worker has already reported (or will imminently report) its
             // real startup/exit failure. Avoid replacing that diagnostic with
             // a misleading raw transport-key "not running" error.
@@ -3275,7 +3486,7 @@ impl InteractiveApplication {
             self.reconcile_editor_windows();
             self.input.hold_focus(self.window_session.capture_focus());
         }
-        let policy = &self.configuration.settings().ui.documentation_popup;
+        let config = self.configuration.settings();
         let available = usize::from(self.window_session.width());
         let available = if kind == DocumentationPopupKind::Completion {
             available / 2
@@ -3283,8 +3494,12 @@ impl InteractiveApplication {
             available
         };
         let text_width = available
-            .min(usize::from(crate::ui::render::overlays::DOCUMENTATION_MAX_WIDTH))
-            .saturating_sub(2 + 2 * usize::from(crate::ui::render::overlays::DOCUMENTATION_PADDING));
+            .min(usize::from(
+                crate::ui::render::overlays::DOCUMENTATION_MAX_WIDTH,
+            ))
+            .saturating_sub(
+                2 + 2 * usize::from(crate::ui::render::overlays::DOCUMENTATION_PADDING),
+            );
         self.input.present_documentation(
             kind,
             title,
@@ -3299,7 +3514,7 @@ impl InteractiveApplication {
                     source.value,
                 )
             }),
-            policy,
+            config,
             text_width,
         );
         self.restore_input_focus();
@@ -3401,7 +3616,8 @@ impl InteractiveApplication {
                 );
             }
             LspFeatureResult::Completion { items, incomplete } => {
-                self.language.install_completions(server, items, incomplete, generation);
+                self.language
+                    .install_completions(server, items, incomplete, generation);
                 self.narrow_lsp_completion();
                 if self.ui.language_completion.is_none()
                     && !self.language.request_pending()
@@ -3419,13 +3635,22 @@ impl InteractiveApplication {
                 if locations.is_empty() {
                     self.show_lsp_no_result(server);
                 } else if method == "textDocument/references" || locations.len() > 1 {
-                    self.open_lsp_locations_picker(locations);
+                    self.open_lsp_locations_picker(
+                        locations,
+                        self.language.server_encoding(server),
+                    );
                 } else if let Some(location) = locations.first() {
-                    self.navigate_lsp_location(location);
+                    self.navigate_lsp_location_encoded(
+                        location,
+                        self.language.server_encoding(server),
+                    );
                 }
             }
             LspFeatureResult::Symbols(mut symbols) => {
-                for location in symbols.iter_mut().filter_map(|symbol| symbol.location.as_mut()) {
+                for location in symbols
+                    .iter_mut()
+                    .filter_map(|symbol| symbol.location.as_mut())
+                {
                     if location.uri.is_empty() {
                         location.uri = uri.into();
                     }
@@ -3439,17 +3664,25 @@ impl InteractiveApplication {
                     }
                 }
                 // Formatting was asked for and touches one file, so it applies without a review.
-                if matches!(method, "textDocument/formatting" | "textDocument/rangeFormatting") {
+                if matches!(
+                    method,
+                    "textDocument/formatting" | "textDocument/rangeFormatting"
+                ) {
                     // Typing while the server worked moved the text its edits point at.
                     let edit_is_current = context.as_ref().is_none_or(|context| {
                         self.language.edit_context_current(context)
-                            && context.document_source(uri).is_none_or(|(buffer, version)| {
-                                self.state.buffers.get(*buffer).is_some_and(|buffer| {
-                                    buffer.text.source_version() == *version
+                            && context
+                                .document_source(uri)
+                                .is_none_or(|(buffer, version)| {
+                                    self.state.buffers.get(*buffer).is_some_and(|buffer| {
+                                        buffer.text.source_version() == *version
+                                    })
                                 })
-                            })
                     });
-                    let has_edits = edit.documents.iter().any(|document| !document.edits.is_empty());
+                    let has_edits = edit
+                        .documents
+                        .iter()
+                        .any(|document| !document.edits.is_empty());
                     if edit_is_current && has_edits {
                         let encoding = self.language.server_encoding(server);
                         let replaced = edit
@@ -3467,7 +3700,11 @@ impl InteractiveApplication {
                         }
                         self.restore_view_positions(positions);
                     }
-                    self.finish_format_on_save();
+                    if self.format_on_save.as_ref().is_some_and(|pending| {
+                        pending.request.as_ref() == Some(&(server.to_owned(), generation))
+                    }) {
+                        self.finish_format_on_save();
+                    }
                     return;
                 }
                 self.begin_workspace_proposal_owned(
@@ -3499,11 +3736,7 @@ impl InteractiveApplication {
                             context,
                             &self.state,
                             (uri, None, result.items),
-                            (
-                                true,
-                                MAXIMUM_DIAGNOSTICS_PER_URI,
-                                &server_label,
-                            ),
+                            (true, MAXIMUM_DIAGNOSTICS_PER_URI, &server_label),
                         )
                     });
                 match normalized.and_then(|batch| self.diagnostics.publish(batch, &self.state)) {
@@ -3515,66 +3748,64 @@ impl InteractiveApplication {
                 if !self.language.record_semantic(server, uri, &result) {
                     return;
                 }
-                if let Some(path) = path_from_file_uri(uri) {
-                    if let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri)
+                    && let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                    {
-                        let encoding = self.lsp_position_encoding();
-                        let codec = PositionCodec::new(&buffer.text);
-                        let legend = self
-                            .language
-                            .capabilities()
-                            .map(|value| value.semantic_token_types.as_slice())
-                            .unwrap_or(&[]);
-                        // As in Neovim, a token colours only when the theme gives its
-                        // `@lsp.type.*` group a colour; otherwise tree-sitter's stays.
-                        let theme = self.configuration.theme();
-                        let groups: Vec<_> = legend
-                            .iter()
-                            .map(|name| {
-                                crate::language::syntax::Highlight::for_semantic_token(name)
-                                    .filter(|group| theme.highlight(*group).is_some())
-                            })
-                            .collect();
-                        let mut line = 0usize;
-                        let mut character = 0usize;
-                        let mut spans = Vec::new();
-                        for token in result.data.chunks_exact(5).take(100_000) {
-                            line = line.saturating_add(token[0] as usize);
-                            character = if token[0] == 0 {
-                                character.saturating_add(token[1] as usize)
-                            } else {
-                                token[1] as usize
-                            };
-                            let Some(role) = groups.get(token[3] as usize).copied().flatten()
-                            else {
-                                continue;
-                            };
-                            let Ok(start) = codec.lsp_to_byte(line, character, encoding) else {
-                                continue;
-                            };
-                            let Ok(end) = codec.lsp_to_byte(
-                                line,
-                                character.saturating_add(token[2] as usize),
-                                encoding,
-                            ) else {
-                                continue;
-                            };
-                            let Ok(range) = ByteRange::new(start, end) else {
-                                continue;
-                            };
-                            spans.push(UiSyntaxSpan {
-                                buffer: buffer_id,
-                                revision: buffer.text.revision(),
-                                range,
-                                role,
-                            });
-                        }
-                        self.ui.lsp_semantic_spans = spans;
+                {
+                    let encoding = self.lsp_position_encoding();
+                    let codec = PositionCodec::new(&buffer.text);
+                    let legend = self
+                        .language
+                        .capabilities()
+                        .map(|value| value.semantic_token_types.as_slice())
+                        .unwrap_or(&[]);
+                    // As in Neovim, a token colours only when the theme gives its
+                    // `@lsp.type.*` group a colour; otherwise tree-sitter's stays.
+                    let theme = self.configuration.theme();
+                    let groups: Vec<_> = legend
+                        .iter()
+                        .map(|name| {
+                            crate::language::syntax::Highlight::for_semantic_token(name)
+                                .filter(|group| theme.highlight(*group).is_some())
+                        })
+                        .collect();
+                    let mut line = 0usize;
+                    let mut character = 0usize;
+                    let mut spans = Vec::new();
+                    for token in result.data.chunks_exact(5).take(100_000) {
+                        line = line.saturating_add(token[0] as usize);
+                        character = if token[0] == 0 {
+                            character.saturating_add(token[1] as usize)
+                        } else {
+                            token[1] as usize
+                        };
+                        let Some(role) = groups.get(token[3] as usize).copied().flatten() else {
+                            continue;
+                        };
+                        let Ok(start) = codec.lsp_to_byte(line, character, encoding) else {
+                            continue;
+                        };
+                        let Ok(end) = codec.lsp_to_byte(
+                            line,
+                            character.saturating_add(token[2] as usize),
+                            encoding,
+                        ) else {
+                            continue;
+                        };
+                        let Ok(range) = ByteRange::new(start, end) else {
+                            continue;
+                        };
+                        spans.push(UiSyntaxSpan {
+                            buffer: buffer_id,
+                            revision: buffer.text.revision(),
+                            range,
+                            role,
+                        });
                     }
+                    self.ui.lsp_semantic_spans = spans;
                 }
             }
             LspFeatureResult::SemanticTokenDelta(delta) => {
@@ -3603,33 +3834,32 @@ impl InteractiveApplication {
                     false
                 };
                 let keep_shown = retrying && !self.ui.lsp_inlay_hints.is_empty();
-                if let Some(path) = path_from_file_uri(uri).filter(|_| !keep_shown) {
-                    if let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri).filter(|_| !keep_shown)
+                    && let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                    {
-                        let encoding = self.lsp_position_encoding();
-                        let codec = PositionCodec::new(&buffer.text);
-                        self.ui.lsp_inlay_hints = items
-                            .into_iter()
-                            .filter_map(|item| {
-                                Some(UiInlayHint {
-                                    buffer: buffer_id,
-                                    revision: buffer.text.revision(),
-                                    position: codec
-                                        .lsp_to_byte(
-                                            item.position.line,
-                                            item.position.character,
-                                            encoding,
-                                        )
-                                        .ok()?,
-                                    label: item.label,
-                                })
+                {
+                    let encoding = self.lsp_position_encoding();
+                    let codec = PositionCodec::new(&buffer.text);
+                    self.ui.lsp_inlay_hints = items
+                        .into_iter()
+                        .filter_map(|item| {
+                            Some(UiInlayHint {
+                                buffer: buffer_id,
+                                revision: buffer.text.revision(),
+                                position: codec
+                                    .lsp_to_byte(
+                                        item.position.line,
+                                        item.position.character,
+                                        encoding,
+                                    )
+                                    .ok()?,
+                                label: item.label,
                             })
-                            .collect();
-                    }
+                        })
+                        .collect();
                 }
             }
             LspFeatureResult::CodeLens(items) => {
@@ -3659,78 +3889,74 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::Ranges(items) => {
-                if let Some(path) = path_from_file_uri(uri) {
-                    if let Some((buffer_id, buffer)) = self
+                if let Some(path) = path_from_file_uri(uri)
+                    && let Some((buffer_id, buffer)) = self
                         .state
                         .buffers
                         .iter()
                         .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-                    {
-                        let encoding = self.lsp_position_encoding();
-                        let codec = PositionCodec::new(&buffer.text);
-                        let ranges = items
-                            .into_iter()
-                            .filter_map(|item| {
-                                ByteRange::new(
-                                    codec
-                                        .lsp_to_byte(
-                                            item.start.line,
-                                            item.start.character,
-                                            encoding,
-                                        )
-                                        .ok()?,
-                                    codec
-                                        .lsp_to_byte(item.end.line, item.end.character, encoding)
-                                        .ok()?,
-                                )
-                                .ok()
-                            })
-                            .collect::<Vec<_>>();
-                        match method {
-                            "textDocument/documentHighlight" => {
-                                self.ui.lsp_highlight_spans = ranges
+                {
+                    let encoding = self.lsp_position_encoding();
+                    let codec = PositionCodec::new(&buffer.text);
+                    let ranges = items
+                        .into_iter()
+                        .filter_map(|item| {
+                            ByteRange::new(
+                                codec
+                                    .lsp_to_byte(item.start.line, item.start.character, encoding)
+                                    .ok()?,
+                                codec
+                                    .lsp_to_byte(item.end.line, item.end.character, encoding)
+                                    .ok()?,
+                            )
+                            .ok()
+                        })
+                        .collect::<Vec<_>>();
+                    match method {
+                        "textDocument/documentHighlight" => {
+                            self.ui.lsp_highlight_spans = ranges
+                                .into_iter()
+                                .map(|range| UiSyntaxSpan {
+                                    buffer: buffer_id,
+                                    revision: buffer.text.revision(),
+                                    range,
+                                    role: crate::language::syntax::Highlight::VARIABLE,
+                                })
+                                .collect()
+                        }
+                        "textDocument/foldingRange" => {
+                            if let Some(view) = self.state.active_view {
+                                self.ui.lsp_folds = ranges
                                     .into_iter()
-                                    .map(|range| UiSyntaxSpan {
-                                        buffer: buffer_id,
-                                        revision: buffer.text.revision(),
-                                        range,
-                                        role: crate::language::syntax::Highlight::VARIABLE,
+                                    .filter_map(|range| {
+                                        Some(UiFold {
+                                            view,
+                                            start_line: buffer
+                                                .text
+                                                .byte_to_line(range.start)
+                                                .ok()?,
+                                            end_line: buffer.text.byte_to_line(range.end).ok()?,
+                                            collapsed: false,
+                                        })
                                     })
                                     .collect()
                             }
-                            "textDocument/foldingRange" => {
-                                if let Some(view) = self.state.active_view {
-                                    self.ui.lsp_folds = ranges
-                                        .into_iter()
-                                        .filter_map(|range| {
-                                            Some(UiFold {
-                                                view,
-                                                start_line: buffer
-                                                    .text
-                                                    .byte_to_line(range.start)
-                                                    .ok()?,
-                                                end_line: buffer
-                                                    .text
-                                                    .byte_to_line(range.end)
-                                                    .ok()?,
-                                                collapsed: false,
-                                            })
-                                        })
-                                        .collect()
-                                }
-                            }
-                            "textDocument/selectionRange" => {
-                                self.language.install_selection_ranges(ranges)
-                            }
-                            _ => {}
                         }
+                        "textDocument/selectionRange" => {
+                            self.language.install_selection_ranges(ranges)
+                        }
+                        _ => {}
                     }
                 }
             }
             LspFeatureResult::Colors(_) => {}
             // Nothing to change is a normal answer from a formatter.
             LspFeatureResult::Empty if method == "textDocument/formatting" => {
-                self.finish_format_on_save();
+                if self.format_on_save.as_ref().is_some_and(|pending| {
+                    pending.request.as_ref() == Some(&(server.to_owned(), generation))
+                }) {
+                    self.finish_format_on_save();
+                }
             }
             // Only the last of several servers can say that nobody knows.
             LspFeatureResult::Empty
@@ -3819,10 +4045,7 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let maximum = usize::try_from(
-            crate::editor::session::search::SEARCH_MAXIMUM_FILE_BYTES,
-        )
-        .unwrap_or(usize::MAX);
+        let maximum = crate::editor::session::search::SEARCH_MAXIMUM_FILE_BYTES;
         let roots = self
             .workspace
             .roots()
@@ -4083,10 +4306,7 @@ impl InteractiveApplication {
             .collect::<Vec<_>>();
         let transaction =
             crate::editor::session::lsp_edits::LspEditSources::completion_transaction(
-                edit,
-                encoding,
-                &documents,
-                id,
+                edit, encoding, &documents, id,
             )?;
         let draft = self
             .state
@@ -4102,9 +4322,13 @@ mod formatter_cursor_tests {
     #[test]
     fn a_formatted_file_keeps_the_cursor_on_its_word() {
         let before = "<html><head></head>\n<body><p>Hello World</p></body></html>\n";
-        let after = "<html>\n  <head></head>\n  <body>\n    <p>Hello World</p>\n  </body>\n</html>\n";
+        let after =
+            "<html>\n  <head></head>\n  <body>\n    <p>Hello World</p>\n  </body>\n</html>\n";
         let cursor = before.find("World").unwrap();
-        let non_blank = before[..cursor].chars().filter(|c| !c.is_whitespace()).count();
+        let non_blank = before[..cursor]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .count();
         let moved = super::nth_non_blank(after, non_blank);
         assert_eq!(&after[moved..moved + 5], "World");
         assert_eq!(super::nth_non_blank("a b", 9), 3);

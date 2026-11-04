@@ -2447,14 +2447,14 @@ context = "editor"
 mode = "operator_pending"
 keys = "up"
 command = "input.motion"
-arguments = { motion = "up", linewise = false }
+arguments = { motion = "up", linewise = true }
 [[keymap]]
 id = "builtin.editor.operator-pending.input-motion.down"
 context = "editor"
 mode = "operator_pending"
 keys = "down"
 command = "input.motion"
-arguments = { motion = "down", linewise = false }
+arguments = { motion = "down", linewise = true }
 [[keymap]]
 id = "builtin.editor.operator-pending.input-motion.home"
 context = "editor"
@@ -3293,6 +3293,30 @@ context = "terminal"
 keys = "left"
 command = "terminal.send"
 arguments = { text = "\u001b[D" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.home"
+context = "terminal"
+keys = "home"
+command = "terminal.send"
+arguments = { text = "\u001b[H" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.end"
+context = "terminal"
+keys = "end"
+command = "terminal.send"
+arguments = { text = "\u001b[F" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.pageup"
+context = "terminal"
+keys = "pageup"
+command = "terminal.send"
+arguments = { text = "\u001b[5~" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.pagedown"
+context = "terminal"
+keys = "pagedown"
+command = "terminal.send"
+arguments = { text = "\u001b[6~" }
 [[keymap]]
 id = "builtin.terminal.surface.terminal-send.ctrl-c"
 context = "terminal"

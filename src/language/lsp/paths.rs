@@ -55,7 +55,16 @@ pub fn language_id_for_path(path: &Path) -> Option<&'static str> {
 #[must_use]
 pub fn file_uri(path: &Path) -> String {
     let mut encoded = String::new();
-    for byte in path.to_string_lossy().bytes() {
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let path_text = path.to_string_lossy();
+    #[cfg(not(unix))]
+    let bytes = path_text.as_bytes();
+    for &byte in bytes {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~' | b':') {
             encoded.push(char::from(byte));
         } else {
@@ -85,5 +94,13 @@ pub fn path_from_file_uri(uri: &str) -> Option<PathBuf> {
             index += 1;
         }
     }
-    String::from_utf8(decoded).ok().map(PathBuf::from)
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Some(PathBuf::from(std::ffi::OsString::from_vec(decoded)))
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8(decoded).ok().map(PathBuf::from)
+    }
 }

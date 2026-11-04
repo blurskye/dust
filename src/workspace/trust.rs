@@ -42,6 +42,9 @@ impl TrustStore {
 
     pub fn trust(&mut self, identity: RootIdentity) {
         self.mark_seen(identity.clone());
+        if !self.seen.contains(&identity) {
+            return;
+        }
         self.trusted
             .retain(|candidate| candidate.canonical_path != identity.canonical_path);
         self.trusted.insert(identity);
@@ -56,6 +59,16 @@ impl TrustStore {
         }
         self.seen
             .retain(|candidate| candidate.canonical_path != identity.canonical_path);
+        if self.seen.len() >= TRUST_IDENTITY_LIMIT {
+            let oldest = sorted_identities(&self.seen)
+                .into_iter()
+                .find(|candidate| !self.trusted.contains(candidate));
+            if let Some(oldest) = oldest {
+                self.seen.remove(&oldest);
+            } else {
+                return false;
+            }
+        }
         self.seen.insert(identity);
         true
     }
@@ -66,7 +79,8 @@ impl TrustStore {
 
     /// Drop every record of a folder, trusted or seen, such as one that is being deleted.
     pub fn forget(&mut self, path: &std::path::Path) {
-        self.trusted.retain(|identity| identity.canonical_path != path);
+        self.trusted
+            .retain(|identity| identity.canonical_path != path);
         self.seen.retain(|identity| identity.canonical_path != path);
     }
 
@@ -271,6 +285,66 @@ pub(super) fn persist_trust_database(
     Ok(())
 }
 
+/// Apply only this instance's changes to the current database, under a process-shared lock.
+fn update_trust_database(
+    path: &Path,
+    previous: &TrustDatabase,
+    desired: &TrustDatabase,
+) -> Result<(), TrustStateError> {
+    validate_trust_database(path, desired)?;
+    let parent = path.parent().ok_or_else(|| TrustStateError::Invalid {
+        path: path.to_path_buf(),
+        reason: "trust state path has no parent".into(),
+    })?;
+    let io_error = |source| TrustStateError::Io {
+        operation: "lock",
+        path: path.to_path_buf(),
+        source,
+    };
+    fs::create_dir_all(parent).map_err(io_error)?;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_extension("lock"))
+        .map_err(io_error)?;
+    let _lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+        .map_err(|(_, error)| io_error(io::Error::from_raw_os_error(error as i32)))?;
+    let mut current = load_trust_database(path)?;
+    for (entries, before, after) in [
+        (
+            &mut current.identities,
+            &previous.identities,
+            &desired.identities,
+        ),
+        (&mut current.seen, &previous.seen, &desired.seen),
+    ] {
+        entries.retain(|identity| !before.contains(identity) || after.contains(identity));
+        for identity in after.iter().filter(|identity| !before.contains(identity)) {
+            entries.retain(|candidate| candidate.canonical_path != identity.canonical_path);
+            entries.push(identity.clone());
+        }
+    }
+    // Seen history may be evicted locally; keep every identity another instance still trusts.
+    for identity in &current.identities {
+        if !current.seen.contains(identity) {
+            current.seen.push(identity.clone());
+        }
+    }
+    while current.seen.len() > TRUST_IDENTITY_LIMIT {
+        let Some(position) = current
+            .seen
+            .iter()
+            .position(|identity| !current.identities.contains(identity))
+        else {
+            return Err(TrustStateError::TooManyIdentities);
+        };
+        current.seen.remove(position);
+    }
+    persist_trust_database(path, &current)
+}
+
 #[derive(Debug)]
 pub(super) enum TrustRequest {
     Load {
@@ -317,12 +391,16 @@ impl WorkspaceTrustService {
         thread::Builder::new()
             .name("dust-workspace-trust".into())
             .spawn(move || {
+                let mut previous = TrustDatabase::default();
                 while let Ok(request) = request_receiver.recv() {
                     let event = match request {
-                        TrustRequest::Load { generation, path } => TrustEvent::Loaded {
-                            generation,
-                            result: load_trust_database(&path),
-                        },
+                        TrustRequest::Load { generation, path } => {
+                            let result = load_trust_database(&path);
+                            if let Ok(database) = &result {
+                                previous = database.clone();
+                            }
+                            TrustEvent::Loaded { generation, result }
+                        }
                         TrustRequest::InspectRoot { generation, path } => {
                             TrustEvent::RootInspected {
                                 generation,
@@ -333,10 +411,13 @@ impl WorkspaceTrustService {
                             generation,
                             path,
                             database,
-                        } => TrustEvent::Persisted {
-                            generation,
-                            result: persist_trust_database(&path, &database),
-                        },
+                        } => {
+                            let result = update_trust_database(&path, &previous, &database);
+                            if result.is_ok() {
+                                previous = database;
+                            }
+                            TrustEvent::Persisted { generation, result }
+                        }
                     };
                     if event_sender.send(event).is_err() {
                         break;
@@ -430,5 +511,73 @@ mod generation_tests {
             service.load(PathBuf::new()),
             Err(TrustStateError::Invalid { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn stale_trust_snapshots_cannot_restore_revocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = RootIdentity::capture(dir.path()).unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let b = RootIdentity::capture(b_dir.path()).unwrap();
+        let path = dir.path().join("trust.toml");
+        let initial = TrustDatabase {
+            identities: vec![a.clone()],
+            seen: vec![a.clone()],
+            ..TrustDatabase::default()
+        };
+        persist_trust_database(&path, &initial).unwrap();
+        let revoked = TrustDatabase {
+            identities: vec![],
+            ..initial.clone()
+        };
+        update_trust_database(&path, &initial, &revoked).unwrap();
+        let stale = TrustDatabase {
+            identities: vec![a.clone(), b.clone()],
+            seen: vec![a.clone(), b.clone()],
+            ..TrustDatabase::default()
+        };
+        update_trust_database(&path, &initial, &stale).unwrap();
+        let loaded = load_trust_database(&path).unwrap();
+        assert_eq!(loaded.identities, vec![b]);
+        assert!(loaded.seen.contains(&a));
+    }
+
+    #[test]
+    fn seen_history_stays_within_the_persistence_limit() {
+        let mut store = TrustStore::default();
+        let identities = (0..=TRUST_IDENTITY_LIMIT)
+            .map(|n| RootIdentity {
+                canonical_path: PathBuf::from(format!("/workspace/{n}")),
+                filesystem_identity: Some((1, n as u64)),
+            })
+            .collect::<Vec<_>>();
+        store.trust(identities[0].clone());
+        for identity in &identities[1..] {
+            assert!(store.mark_seen(identity.clone()));
+        }
+        assert!(store.is_trusted(&identities[0]));
+        assert_eq!(store.seen_identities().len(), TRUST_IDENTITY_LIMIT);
+        let database = TrustDatabase {
+            identities: store.identities(),
+            seen: store.seen_identities(),
+            ..TrustDatabase::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        persist_trust_database(&dir.path().join("trust.toml"), &database).unwrap();
+        store.revoke(&identities[0]);
+        persist_trust_database(
+            &dir.path().join("trust.toml"),
+            &TrustDatabase {
+                identities: store.identities(),
+                seen: store.seen_identities(),
+                ..TrustDatabase::default()
+            },
+        )
+        .unwrap();
     }
 }

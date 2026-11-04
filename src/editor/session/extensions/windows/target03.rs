@@ -408,6 +408,7 @@ impl PluginWindowHost {
                 private: (declaration.presenter == PluginPresenterKind::PrivateCells)
                     .then(PluginPrivateState::default),
                 scroll: 0,
+                visible_rows: 0,
             },
         );
         windows

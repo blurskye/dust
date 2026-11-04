@@ -20,15 +20,15 @@ pub(in crate::editor::session) fn validate_configured_commands(
                 "command label for `{}` is empty, unsafe, or oversized",
                 spec.id
             )),
+            None if spec.id.as_str().starts_with("plugin.") => {}
             None => errors.push(format!("missing command label for `{}`", spec.id)),
         }
     }
-    for extra in loaded
-        .config
-        .command_labels
-        .keys()
-        .filter(|id| !command_ids.contains(*id))
-    {
+    for extra in loaded.config.command_labels.keys().filter(|id| {
+        !command_ids.contains(*id)
+            && !super::plugin_owner_from_id(id)
+                .is_some_and(|owner| super::resolve::base_safe_keymaps(loaded).1.contains(owner))
+    }) {
         errors.push(format!(
             "command label references unknown command `{extra}`"
         ));
@@ -39,14 +39,14 @@ pub(in crate::editor::session) fn validate_configured_commands(
     while let Some(index) = remainder.find(marker) {
         remainder = &remainder[index + marker.len()..];
         let trimmed = remainder.trim_start();
-        if let Some(trimmed) = trimmed.strip_prefix('"') {
-            if let Some(end) = trimmed.find('"') {
-                let key = &trimmed[..end];
-                if !loaded.config.messages.contains_key(key) {
-                    errors.push(format!(
-                        "missing message `{key}` used by application surface"
-                    ));
-                }
+        if let Some(trimmed) = trimmed.strip_prefix('"')
+            && let Some(end) = trimmed.find('"')
+        {
+            let key = &trimmed[..end];
+            if !loaded.config.messages.contains_key(key) {
+                errors.push(format!(
+                    "missing message `{key}` used by application surface"
+                ));
             }
         }
     }
@@ -152,12 +152,12 @@ pub(in crate::editor::session) fn invocation_fingerprint(invocation: &CommandInv
     fingerprint
 }
 
-pub(in crate::editor::session) fn keymap_entries<'a>(
-    loaded: &'a crate::config::LoadedKeymaps,
+pub(in crate::editor::session) fn keymap_entries(
+    loaded: &crate::config::LoadedKeymaps,
 ) -> (
-    &'a [crate::config::KeymapEntry],
+    &[crate::config::KeymapEntry],
     usize,
-    &'a [crate::config::KeyGroupEntry],
+    &[crate::config::KeyGroupEntry],
     usize,
 ) {
     (

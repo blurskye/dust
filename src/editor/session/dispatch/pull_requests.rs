@@ -16,24 +16,61 @@ use crate::{
 #[derive(Default)]
 pub(super) struct PullRequests {
     jobs: ForgeJobs,
+    source: Option<crate::editor::session::workspace::WorkspaceVersion>,
+    generation: u64,
+    comment_body: Option<String>,
     /// The file and 1-based line the open comment prompt is about.
-    comment_target: Option<(PathBuf, usize)>,
+    comment_target: Option<(PathBuf, usize, String)>,
+}
+
+impl PullRequests {
+    fn prepare(&mut self, source: crate::editor::session::workspace::WorkspaceVersion) {
+        if self.source.as_ref() != Some(&source) {
+            self.jobs = ForgeJobs::default();
+            self.generation += 1;
+            self.source = Some(source);
+            self.comment_target = None;
+            self.comment_body = None;
+        }
+    }
 }
 
 impl InteractiveApplication {
+    fn pull_request_generation(&mut self) -> u64 {
+        let source = self.workspace.version();
+        self.pull_requests.prepare(source);
+        self.pull_requests.generation
+    }
+
+    fn pull_request_is_current(&self, root: &std::path::Path, generation: u64) -> bool {
+        root == self.state.workspace_root
+            && generation == self.pull_requests.generation
+            && self.pull_requests.source.as_ref() == Some(&self.workspace.version())
+    }
+
     pub(super) fn list_pull_requests(&mut self) {
-        self.pull_requests.jobs.list(self.state.workspace_root.clone());
+        let generation = self.pull_request_generation();
+        self.pull_requests
+            .jobs
+            .list(self.state.workspace_root.clone(), generation);
         self.notify_message("loading pull requests…".into(), false);
     }
 
     pub(super) fn list_review_comments(&mut self) {
-        self.pull_requests
-            .jobs
-            .comments(self.state.workspace_root.clone());
+        self.pull_requests.prepare(self.workspace.version());
+        self.pull_requests.jobs.comments(
+            self.state.workspace_root.clone(),
+            self.pull_requests.generation,
+        );
         self.notify_message("loading review comments…".into(), false);
     }
 
     pub(super) fn begin_review_comment(&mut self) {
+        self.pull_requests.prepare(self.workspace.version());
+        if let Some(body) = self.pull_requests.comment_body.clone() {
+            self.open_prompt(PromptKind::ReviewComment, body);
+            return;
+        }
         let (Some(view), Some(buffer)) = (self.state.active_view, self.state.active_buffer_id())
         else {
             self.show_error("no file to comment on");
@@ -48,39 +85,85 @@ impl InteractiveApplication {
             .byte_to_line(self.state.views[view].cursor)
             .unwrap_or(0)
             + 1;
-        self.pull_requests.comment_target = Some((path, line));
+        self.pull_requests.comment_target =
+            Some((path, line, self.state.buffers[buffer].text.to_string()));
         self.open_prompt(PromptKind::ReviewComment, String::new());
     }
 
     pub(super) fn submit_review_comment(&mut self, body: String) {
-        let Some((path, line)) = self.pull_requests.comment_target.take() else {
+        let Some((path, line, text)) = self.pull_requests.comment_target.clone() else {
             return;
         };
         if body.trim().is_empty() {
             return;
         }
-        self.pull_requests
-            .jobs
-            .comment(self.state.workspace_root.clone(), path, line, body);
+        if self.pull_requests.source.as_ref() != Some(&self.workspace.version()) {
+            self.show_error("the comment belongs to a previous workspace");
+            return;
+        }
+        self.pull_requests.comment_body = Some(body.clone());
+        self.pull_requests.jobs.comment(
+            self.state.workspace_root.clone(),
+            self.pull_requests.generation,
+            path,
+            line,
+            body,
+            text,
+        );
         self.notify_message("sending comment…".into(), false);
     }
 
-    pub(super) fn checkout_pull_request(&mut self, number: u64) {
-        self.pull_requests
-            .jobs
-            .checkout(self.state.workspace_root.clone(), number);
+    pub(super) fn checkout_pull_request(
+        &mut self,
+        root: PathBuf,
+        generation: u64,
+        number: u64,
+        local: Option<PathBuf>,
+    ) {
+        if !self.pull_request_is_current(&root, generation) {
+            return;
+        }
+        if let Some(path) = local {
+            self.switch_workspace_root(path);
+            return;
+        }
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
+            return;
+        }
+        self.pull_requests.jobs.checkout(
+            root,
+            generation,
+            number,
+            self.workspace.edit_scope().clone(),
+        );
         self.notify_message(format!("checking out #{number}…"), false);
     }
 
     pub(super) fn process_pull_request_events(&mut self) {
-        while let Some(reply) = self.pull_requests.jobs.try_reply() {
+        if self.pull_requests.source.as_ref() != Some(&self.workspace.version()) {
+            return;
+        }
+        while let Some(event) = self.pull_requests.jobs.try_reply() {
+            if !self.pull_request_is_current(&event.root, event.generation) {
+                continue;
+            }
+            let root = event.root;
+            let generation = event.generation;
             // The "loading…" notice is answered by whatever this reply shows.
             self.clear_notice();
-            match reply {
+            match event.reply {
                 ForgeReply::List(Err(error))
                 | ForgeReply::CheckedOut(Err(error))
-                | ForgeReply::Comments(Err(error))
-                | ForgeReply::Commented(Err(error)) => self.show_error(error),
+                | ForgeReply::Comments(Err(error)) => self.show_error(error),
+                ForgeReply::Commented(Err(error)) => {
+                    if self.input.prompt().is_none()
+                        && let Some(body) = self.pull_requests.comment_body.clone()
+                    {
+                        self.open_prompt(PromptKind::ReviewComment, body);
+                    }
+                    self.show_error(error);
+                }
                 ForgeReply::Offline { error, local } if local.is_empty() => {
                     self.notify_warning(format!("pull requests unavailable: {error}"));
                 }
@@ -98,9 +181,11 @@ impl InteractiveApplication {
                                     source: String::new(),
                                     action: PickerAction::None,
                                 },
-                                PickerPayload::GitWorktree {
-                                    name: format!("pr-{number}"),
-                                    path,
+                                PickerPayload::PullRequest {
+                                    root: root.clone(),
+                                    generation,
+                                    number,
+                                    local: Some(path),
                                 },
                             )
                         })
@@ -120,7 +205,11 @@ impl InteractiveApplication {
                         .map(|pr| {
                             (
                                 PickerItem {
-                                    badge: if pr.draft { "draft".into() } else { String::new() },
+                                    badge: if pr.draft {
+                                        "draft".into()
+                                    } else {
+                                        String::new()
+                                    },
                                     kind: PickerItemKind::Entry,
                                     id: PickerItemId(format!("pr:{}", pr.number)),
                                     label: format!("#{} {}", pr.number, pr.title),
@@ -128,13 +217,19 @@ impl InteractiveApplication {
                                     source: String::new(),
                                     action: PickerAction::None,
                                 },
-                                PickerPayload::PullRequest(pr.number),
+                                PickerPayload::PullRequest {
+                                    root: root.clone(),
+                                    generation,
+                                    number: pr.number,
+                                    local: None,
+                                },
                             )
                         })
                         .collect();
                     self.install_picker("Pull Requests".to_owned(), items);
-                    self.search
-                        .set_picker_footer("Enter Check out in a worktree · Esc Esc Close".to_owned());
+                    self.search.set_picker_footer(
+                        "Enter Check out in a worktree · Esc Esc Close".to_owned(),
+                    );
                     self.sync_picker_ui();
                 }
                 ForgeReply::CheckedOut(Ok(path)) => self.switch_workspace_root(path),
@@ -162,7 +257,12 @@ impl InteractiveApplication {
                                     },
                                     kind: PickerItemKind::Entry,
                                     id: PickerItemId(format!("review:{index}")),
-                                    label: comment.body.lines().next().unwrap_or_default().to_owned(),
+                                    label: comment
+                                        .body
+                                        .lines()
+                                        .next()
+                                        .unwrap_or_default()
+                                        .to_owned(),
                                     detail: format!(
                                         "{}:{line} · @{}",
                                         shown.display(),
@@ -171,13 +271,16 @@ impl InteractiveApplication {
                                     source: String::new(),
                                     action: PickerAction::None,
                                 },
-                                PickerPayload::LspLocation(LspLocation {
-                                    uri: file_uri(&comment.path),
-                                    range: LspRange {
-                                        start: position.clone(),
-                                        end: position,
+                                PickerPayload::LspLocation(
+                                    LspLocation {
+                                        uri: file_uri(&comment.path),
+                                        range: LspRange {
+                                            start: position.clone(),
+                                            end: position,
+                                        },
                                     },
-                                }),
+                                    crate::editor::text::PositionEncoding::Utf16,
+                                ),
                             )
                         })
                         .collect();
@@ -187,9 +290,165 @@ impl InteractiveApplication {
                     self.sync_picker_ui();
                 }
                 ForgeReply::Commented(Ok(())) => {
+                    self.pull_requests.comment_target = None;
+                    self.pull_requests.comment_body = None;
                     self.notify_message("comment sent".into(), false);
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> InteractiveApplication {
+        InteractiveApplication::new(
+            crate::editor::StartupTarget::Dashboard {
+                root: tempfile::tempdir().unwrap().keep(),
+            },
+            crate::config::load_bundled_config(),
+            false,
+            tempfile::tempdir().unwrap().keep(),
+            false,
+            false,
+            std::sync::Arc::new(crate::clock::SystemClock),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn checkout_admission_requires_trust_and_respects_safe_mode() {
+        let mut app = app();
+        let generation = app.pull_request_generation();
+        app.checkout_pull_request(app.state.workspace_root.clone(), generation, 1, None);
+        assert!(app.pull_requests.jobs.try_reply().is_none());
+        app.workspace.fixture_safe_mode(true);
+        let generation = app.pull_request_generation();
+        app.checkout_pull_request(app.state.workspace_root.clone(), generation, 1, None);
+        assert!(app.pull_requests.jobs.try_reply().is_none());
+    }
+
+    #[test]
+    fn retired_workspace_replies_do_not_open_pickers_or_switch_roots() {
+        let mut app = app();
+        app.pull_requests.prepare(app.workspace.version());
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::List(Ok(vec![crate::forge::PullRequest {
+                number: 1,
+                title: "old".into(),
+                author: "author".into(),
+                branch: "old".into(),
+                draft: false,
+            }])),
+        );
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::CheckedOut(Ok(app.state.workspace_root.join("old"))),
+        );
+        app.workspace.fixture_safe_mode(true);
+        app.process_pull_request_events();
+        assert!(app.ui.picker.is_none());
+        assert!(!app.workspace.root_operation_pending());
+    }
+
+    #[test]
+    fn failed_review_comments_restore_the_body_and_target() {
+        let mut app = app();
+        app.pull_requests.prepare(app.workspace.version());
+        let path = app.state.workspace_root.join("file.txt");
+        app.pull_requests.comment_target = Some((path.clone(), 3, "source".into()));
+        app.pull_requests.comment_body = Some("my draft".into());
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::Commented(Err("offline".into())),
+        );
+        app.process_pull_request_events();
+        assert_eq!(app.input.prompt().unwrap().input, "my draft");
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().0, path);
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().1, 3);
+    }
+    #[test]
+    fn retired_forge_replies_and_picker_payloads_cannot_change_the_workspace() {
+        let mut app = app();
+        let root = app.state.workspace_root.clone();
+        let generation = app.pull_request_generation();
+        let list = vec![crate::forge::PullRequest {
+            number: 7,
+            title: "from A".into(),
+            author: "ana".into(),
+            branch: "fix".into(),
+            draft: false,
+        }];
+        app.pull_requests.jobs.reply_for_test(
+            PathBuf::from("/retired"),
+            generation,
+            ForgeReply::List(Ok(list.clone())),
+        );
+        app.pull_requests.jobs.reply_for_test(
+            root.clone(),
+            generation + 1,
+            ForgeReply::List(Ok(list.clone())),
+        );
+        app.process_pull_request_events();
+        assert!(app.search.picker().is_none());
+        app.pull_requests
+            .jobs
+            .reply_for_test(root.clone(), generation, ForgeReply::List(Ok(list)));
+        app.process_pull_request_events();
+        assert!(
+            matches!(app.search.selected_picker_payload(), Some(PickerPayload::PullRequest { root: source, generation: version, number: 7, local: None }) if source == &root && *version == generation)
+        );
+        let other = tempfile::tempdir().unwrap();
+        app.checkout_pull_request(
+            root.clone(),
+            generation + 1,
+            7,
+            Some(other.path().to_path_buf()),
+        );
+        app.checkout_pull_request(
+            PathBuf::from("/retired"),
+            generation,
+            7,
+            Some(other.path().to_path_buf()),
+        );
+        assert_eq!(app.state.workspace_root, root);
+
+        // Switching between existing roots does not change root_revision.
+        let first = app.workspace.active_root().unwrap();
+        let second = app
+            .workspace
+            .fixture_add_root(
+                "other".into(),
+                crate::workspace::RootIdentity::capture(other.path()).unwrap(),
+            )
+            .unwrap();
+        app.workspace.set_active_root(first).unwrap();
+        let generation = app.pull_request_generation();
+        let revision = app.workspace.root_revision();
+        app.workspace.set_active_root(second).unwrap();
+        app.workspace.set_active_root(first).unwrap();
+        assert_eq!(app.workspace.root_revision(), revision);
+        assert!(!app.pull_request_is_current(&root, generation));
+        app.close_picker();
+        app.pull_requests.jobs.reply_for_test(
+            root.clone(),
+            generation,
+            ForgeReply::CheckedOut(Ok(other.path().to_path_buf())),
+        );
+        app.process_pull_request_events();
+        app.checkout_pull_request(
+            root.clone(),
+            generation,
+            7,
+            Some(other.path().to_path_buf()),
+        );
+        assert_eq!(app.state.workspace_root, root);
+        assert!(app.pull_request_generation() > generation);
     }
 }

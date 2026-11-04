@@ -121,10 +121,10 @@ impl ExtensionSession {
         if provider.is_some_and(|request| !self.provider_presentable(request)) {
             return;
         }
-        if self.active_picker != provider {
-            if let Some(previous) = self.active_picker.take() {
-                self.providers.cancel(previous);
-            }
+        if self.active_picker != provider
+            && let Some(previous) = self.active_picker.take()
+        {
+            self.providers.cancel(previous);
         }
         self.active_picker = provider;
     }
@@ -164,7 +164,7 @@ impl ExtensionSession {
         request: u64,
         item: &str,
         command: &str,
-    ) -> Option<String> {
+    ) -> Option<(String, Vec<String>)> {
         if !self.provider_visible(request)
             || !self.manager.is_active_generation(plugin, load)
             || !self
@@ -173,9 +173,22 @@ impl ExtensionSession {
         {
             return None;
         }
-        command
-            .strip_prefix(&format!("plugin.{plugin}."))
-            .map(str::to_owned)
+        let projection = self.providers.projection(request)?;
+        let selected = projection
+            .items
+            .iter()
+            .find(|candidate| candidate.id == item)?;
+        let command = command
+            .strip_prefix(&format!("plugin.{plugin}."))?
+            .to_owned();
+        Some((
+            command,
+            vec![
+                request.to_string(),
+                selected.id.clone(),
+                serde_json::to_string(&selected.action_data).ok()?,
+            ],
+        ))
     }
     pub(in crate::editor::session) fn open_virtual(
         &mut self,
@@ -213,6 +226,12 @@ impl ExtensionSession {
                 return Err("virtual document source changed".into());
             }
             return Ok(VirtualOpen::Existing(entry.buffer));
+        }
+        if self
+            .virtual_documents
+            .is_opening(&plugin, load, source, &key)
+        {
+            return Err("virtual document is already opening".into());
         }
         let command = command
             .strip_prefix(&format!("plugin.{plugin}."))
@@ -318,6 +337,13 @@ impl ExtensionSession {
         self.virtual_documents
             .check_proposal(plugin, load, &proposal)
             .map_err(|error| error.detail)?;
+        if let crate::extensions::PluginVirtualDocumentProposalKind::Error(error) = &proposal.kind {
+            let detail = error.detail.clone();
+            self.virtual_documents
+                .apply(plugin, load, proposal)
+                .map_err(|error| error.detail)?;
+            return Err(detail);
+        }
         context
             .windows
             .check_editor_admission(&context.editor.into())?;

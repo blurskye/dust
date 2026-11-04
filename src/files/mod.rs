@@ -10,18 +10,21 @@ pub use recovery::{
 mod explorer_intent;
 pub(crate) use explorer_intent::{ExplorerIoReply, ExplorerRenameSource, PreparedExplorerMutation};
 mod vfs;
-pub(crate) use vfs::VfsReply;
 pub use vfs::{
     CheckedResourceIntent, ExplorerMutation, RequestId, ResourceIntentKind, VfsRequest, VfsResult,
-    VfsWorker, WriteExpectation, atomic_write, read_file,
+    VfsWorker, WriteExpectation, atomic_write, checked_atomic_write, read_file,
 };
+pub(crate) use vfs::{VfsReply, lock_file};
 mod project_root;
 pub use project_root::{
     PROJECT_ROOT_ANCESTOR_CEILING, PROJECT_ROOT_MARKER_CEILING, ProjectRootResolution,
     ProjectRootService, ProjectRootStrategy,
 };
 mod directory;
-pub use directory::{linked_worktree_repository, DirectoryEntry, DirectoryEntryKind, DirectoryListing, DirectoryService};
+pub use directory::{
+    DirectoryEntry, DirectoryEntryKind, DirectoryListing, DirectoryService,
+    linked_worktree_repository,
+};
 mod watch;
 pub use watch::{
     ExplorerDirectoryFingerprint, ExplorerWatchBatch, ExplorerWatchEntryFingerprint,

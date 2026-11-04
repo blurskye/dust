@@ -56,7 +56,11 @@ pub(in crate::editor::session) enum Intent {
 }
 pub(in crate::editor::session) enum SearchUpdate {
     Batch,
-    Complete { intent: Intent, files: usize },
+    Complete {
+        intent: Intent,
+        files: usize,
+        truncated: bool,
+    },
     Failed(String),
 }
 impl SearchSession {
@@ -363,6 +367,7 @@ impl SearchSession {
                 self.intent.take().map(|intent| SearchUpdate::Complete {
                     intent,
                     files: summary.files_searched,
+                    truncated: summary.truncated,
                 })
             }
             WorkspaceSearchEvent::Failed { error, .. } => {

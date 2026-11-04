@@ -6,10 +6,7 @@ use std::collections::BTreeMap;
 
 use super::InteractiveApplication;
 use super::WindowPlacement;
-use crate::{
-    language::lsp::{LspLocation, LspPosition, LspRange, file_uri},
-    remote::{RemoteRequest, RemoteServer, SERVER_VARIABLE, lazygit_config},
-};
+use crate::remote::{RemoteRequest, RemoteServer, SERVER_VARIABLE, lazygit_config};
 
 impl InteractiveApplication {
     /// Listen for `dust --remote` and tell terminals where to find this session. Without a
@@ -59,17 +56,19 @@ impl InteractiveApplication {
             self.place_active_terminal(WindowPlacement::Hidden);
         }
         for request in opens {
-            let position = LspPosition {
-                line: request.line.unwrap_or(1) - 1,
-                character: 0,
-            };
-            self.navigate_lsp_location(&LspLocation {
-                uri: file_uri(&request.path),
-                range: LspRange {
-                    start: position.clone(),
-                    end: position,
-                },
-            });
+            let navigation = self
+                .window_session
+                .navigation_stamp(self.state.window_version(), self.state.active_view);
+            if let Err(error) = self.documents.request_open_at_line(
+                request.path,
+                &self.state.workspace_root,
+                &self.state.window_version(),
+                self.workspace.version(),
+                navigation,
+                Some(request.line.unwrap_or(1).saturating_sub(1)),
+            ) {
+                self.show_document_failure(error);
+            }
         }
     }
 }

@@ -359,13 +359,13 @@ pub(in crate::editor::session) fn validate_private_snapshot(
             ));
         }
     }
-    if let Some(cursor) = snapshot.cursor {
-        if !policy.cursor || cursor.x >= width || cursor.y >= height {
-            return Err(ui_error(
-                PluginUiErrorCode::InvalidCursor,
-                "private cursor is disallowed or outside local bounds",
-            ));
-        }
+    if let Some(cursor) = snapshot.cursor
+        && (!policy.cursor || cursor.x >= width || cursor.y >= height)
+    {
+        return Err(ui_error(
+            PluginUiErrorCode::InvalidCursor,
+            "private cursor is disallowed or outside local bounds",
+        ));
     }
     let mut hit_rectangles = Vec::new();
     for hit in &snapshot.hit_regions {
@@ -585,10 +585,11 @@ pub(in crate::editor::session) fn validate_tree(
         let node = nodes
             .get(&id)
             .ok_or_else(|| "retained UI child is missing".to_owned())?;
-        if visited.insert(id) {
-            for child in &node.children {
-                visit(*child, depth + 1, nodes, visited, stack)?;
-            }
+        if !visited.insert(id) {
+            return Err("retained UI node has multiple parents".into());
+        }
+        for child in &node.children {
+            visit(*child, depth + 1, nodes, visited, stack)?;
         }
         stack.remove(&id);
         Ok(())
@@ -615,7 +616,11 @@ pub(in crate::editor::session) fn focusable_nodes(tree: &PluginUiTree) -> Vec<u6
         id: u64,
         nodes: &BTreeMap<u64, &crate::extensions::PluginUiNode>,
         ordered: &mut Vec<u64>,
+        visited: &mut BTreeSet<u64>,
     ) {
+        if !visited.insert(id) || visited.len() > MAXIMUM_PLUGIN_UI_NODES {
+            return;
+        }
         let Some(node) = nodes.get(&id) else { return };
         if !node.text.is_empty()
             && (matches!(node.kind, PluginUiNodeKind::List | PluginUiNodeKind::Button)
@@ -624,10 +629,10 @@ pub(in crate::editor::session) fn focusable_nodes(tree: &PluginUiTree) -> Vec<u6
             ordered.push(id);
         }
         for child in &node.children {
-            collect(*child, nodes, ordered);
+            collect(*child, nodes, ordered, visited);
         }
     }
-    collect(tree.root, &nodes, &mut ordered);
+    collect(tree.root, &nodes, &mut ordered, &mut BTreeSet::new());
     ordered
 }
 
@@ -649,6 +654,11 @@ pub(in crate::editor::session) fn ensure_focused_visible(instance: &mut PluginWi
         .and_then(|node| rows.iter().position(|row| row.node == node))
     {
         instance.scroll = instance.scroll.min(index);
+        if instance.visible_rows > 0
+            && index >= instance.scroll.saturating_add(instance.visible_rows)
+        {
+            instance.scroll = index + 1 - instance.visible_rows;
+        }
     }
 }
 
@@ -668,7 +678,11 @@ pub(in crate::editor::session) fn tree_rows(
         nodes: &BTreeMap<u64, &crate::extensions::PluginUiNode>,
         focused_node: Option<u64>,
         rows: &mut Vec<PluginSurfaceRow>,
+        visited: &mut BTreeSet<u64>,
     ) {
+        if !visited.insert(id) || visited.len() > MAXIMUM_PLUGIN_UI_NODES {
+            return;
+        }
         let Some(node) = nodes.get(&id) else { return };
         if !node.text.is_empty() {
             rows.push(PluginSurfaceRow {
@@ -689,9 +703,16 @@ pub(in crate::editor::session) fn tree_rows(
             });
         }
         for child in &node.children {
-            collect(*child, depth + 1, nodes, focused_node, rows);
+            collect(*child, depth + 1, nodes, focused_node, rows, visited);
         }
     }
-    collect(tree.root, 0, &nodes, focused_node, &mut rows);
+    collect(
+        tree.root,
+        0,
+        &nodes,
+        focused_node,
+        &mut rows,
+        &mut BTreeSet::new(),
+    );
     rows
 }

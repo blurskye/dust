@@ -98,7 +98,11 @@ while True:
     )];
     let mut service = DapService::new();
     service.start_absolute(configuration).unwrap();
-    wait(|| request_log(root.path()).iter().any(|line| line == "configurationDone"));
+    wait(|| {
+        request_log(root.path())
+            .iter()
+            .any(|line| line == "configurationDone")
+    });
     let log = request_log(root.path());
     let position = |name: &str| log.iter().position(|line| line == name).expect(name);
     assert!(
@@ -111,7 +115,10 @@ while True:
 fn a_rejection_says_why_rather_than_only_that_it_failed() {
     let delve = json!({"message":"Failed to launch","body":{"error":{"format":"Failed to launch: {why}","variables":{"why":"Build error"}}}});
     assert_eq!(rejection_detail(&delve), "Failed to launch: Build error");
-    assert_eq!(rejection_detail(&json!({"message":"no such file"})), "no such file");
+    assert_eq!(
+        rejection_detail(&json!({"message":"no such file"})),
+        "no such file"
+    );
 }
 #[test]
 fn stopping_lets_the_adapter_end_its_program_and_clean_up() {
@@ -132,10 +139,16 @@ log.write('cleaned up\n')
     let script = root.path().join("cleanup.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
     wait(|| request_log(root.path()).iter().any(|line| line == "launch"));
     service.stop().unwrap();
-    wait(|| request_log(root.path()).iter().any(|line| line == "cleaned up"));
+    wait(|| {
+        request_log(root.path())
+            .iter()
+            .any(|line| line == "cleaned up")
+    });
 }
 #[test]
 fn startup_reply_survives_stop_and_wrong_commands_cannot_consume_requests() {
@@ -636,16 +649,14 @@ fn child_requests_happen_only_when_a_row_is_expanded() {
     let script = root.path().join("logging.py");
     std::fs::write(&script, LOGGING_ADAPTER).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Stopped { .. })));
 
     // OPENING A VIEW requests the scopes and STOPS THERE: the child request for the scope's
     // variables is NOT made while the list is built.
-    control_and_wait(
-        &mut service,
-        DapControl::Scopes { frame_id: 1 },
-        "scopes",
-    );
+    control_and_wait(&mut service, DapControl::Scopes { frame_id: 1 }, "scopes");
     assert!(
         request_log(root.path())
             .iter()
@@ -719,4 +730,228 @@ fn the_bridge_reads_one_whole_message_at_a_time() {
     assert_eq!(frame_body_length(&frame), 2);
     assert_eq!(read_adapter_frame(&mut input).unwrap().last(), Some(&b'1'));
     assert!(read_adapter_frame(&mut input).is_err());
+}
+
+#[test]
+fn responses_keep_request_context_and_breakpoints_survive_execution_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("correlation.py");
+    let prefix = LOGGING_ADAPTER
+        .split("while True:\n m=read()")
+        .next()
+        .unwrap();
+    let body = r#"
+evaluations=[]
+while True:
+ m=read()
+ if m is None: break
+ c=m.get('command');a=m.get('arguments',{});body={}
+ if c=='initialize':
+  assert a['supportsVariablePaging'] is True
+  body={'supportTerminateDebuggee':True}
+ if c=='threads': body={'threads':[{'id':42,'name':'main'}]}
+ if c=='pause': assert a['threadId']==42
+ if c=='evaluate':
+  evaluations.append(m)
+  if len(evaluations)<2: continue
+  for item in reversed(evaluations): send({'type':'response','request_seq':item['seq'],'command':'evaluate','success':True,'body':{'result':item['arguments']['expression']+'-value','variablesReference':0}})
+  evaluations=[];continue
+ if c=='setBreakpoints':
+  send({'type':'event','event':'stopped','body':{'reason':'breakpoint','threadId':42}})
+  body={'breakpoints':[{'id':7,'verified':False,'line':20}]}
+ if c=='variables': body={'variables':[{'name':'child','value':'current','variablesReference':7}]}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='setBreakpoints': send({'type':'event','event':'breakpoint','body':{'reason':'changed','breakpoint':{'id':7,'verified':True,'line':21}}})
+ if c=='disconnect': break
+"#;
+    std::fs::write(&script, format!("{prefix}{body}")).unwrap();
+    let mut service = DapService::new();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
+    service.control(DapControl::Pause).unwrap();
+    wait(|| {
+        matches!(
+            service.try_event(),
+            Some(DapEvent::Response {
+                response: DapResponse::Threads(_),
+                ..
+            })
+        )
+    });
+    for expression in ["a", "b"] {
+        service
+            .control(DapControl::Evaluate {
+                expression: expression.into(),
+                frame_id: None,
+                context: "watch".into(),
+            })
+            .unwrap();
+    }
+    let mut values = Vec::new();
+    wait(|| {
+        while let Some(event) = service.try_event() {
+            match event {
+                DapEvent::Response {
+                    request: Some(DapControl::Evaluate { expression, .. }),
+                    response: DapResponse::Evaluate(value),
+                    ..
+                } => values.push((expression, value.value)),
+                DapEvent::Failed { message, .. } => panic!("{message}"),
+                _ => {}
+            }
+        }
+        values.len() == 2
+    });
+    assert_eq!(
+        values,
+        [
+            ("b".into(), "b-value".into()),
+            ("a".into(), "a-value".into())
+        ]
+    );
+    let path = root.path().join("main.rs");
+    service
+        .control(DapControl::SetBreakpoints {
+            path: path.clone(),
+            breakpoints: vec![DapSourceBreakpoint {
+                path: path.clone(),
+                line: 20,
+                column: None,
+                condition: None,
+                hit_condition: None,
+                log_message: None,
+            }],
+        })
+        .unwrap();
+    let mut acknowledged = false;
+    let mut changed = false;
+    wait(|| {
+        while let Some(event) = service.try_event() {
+            match event {
+                DapEvent::Response {
+                    response: DapResponse::Breakpoints(_),
+                    request: Some(DapControl::SetBreakpoints { breakpoints, .. }),
+                    ..
+                } => {
+                    assert_eq!(breakpoints[0].line, 20);
+                    acknowledged = true;
+                }
+                DapEvent::Response {
+                    response:
+                        DapResponse::BreakpointChanged {
+                            path: actual,
+                            requested: 20,
+                            verified: true,
+                            line: Some(21),
+                            ..
+                        },
+                    ..
+                } => {
+                    assert_eq!(actual, path);
+                    changed = true;
+                }
+                DapEvent::Failed { message, .. } => panic!("{message}"),
+                _ => {}
+            }
+        }
+        acknowledged && changed
+    });
+    service
+        .control(DapControl::Variables {
+            reference: 8,
+            start: 200,
+            count: 200,
+        })
+        .unwrap();
+    wait(|| {
+        matches!(
+            service.try_event(),
+            Some(DapEvent::Response {
+                request: Some(DapControl::Variables {
+                    reference: 8,
+                    start: 200,
+                    count: 200
+                }),
+                response: DapResponse::Variables(_),
+                ..
+            })
+        )
+    });
+    service
+        .control(DapControl::Disconnect {
+            terminate_debuggee: false,
+        })
+        .unwrap();
+    wait(|| {
+        matches!(
+            service.try_event(),
+            Some(DapEvent::Response {
+                response: DapResponse::Disconnected {
+                    terminate_debuggee: false
+                },
+                ..
+            })
+        )
+    });
+    service.stop().unwrap();
+    wait(|| service.pending() == 0);
+}
+#[test]
+fn configuration_done_rejection_is_a_startup_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("config.py");
+    let prefix = LOGGING_ADAPTER
+        .split("while True:\n m=read()")
+        .next()
+        .unwrap();
+    let body = r#"
+while True:
+ m=read()
+ if m is None: break
+ c=m.get('command')
+ body={'supportsConfigurationDoneRequest':True} if c=='initialize' else {}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':c!='configurationDone','body':body,'message':'configuration rejected'})
+ if c=='launch': send({'type':'event','event':'initialized','body':{}})
+"#;
+    std::fs::write(&script, format!("{prefix}{body}")).unwrap();
+    let mut service = DapService::new();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
+    wait(|| match service.try_event() {
+        Some(DapEvent::Failed { message, .. }) => {
+            assert!(message.contains("configuration rejected"));
+            true
+        }
+        _ => false,
+    });
+    service.stop().unwrap();
+    wait(|| service.pending() == 0);
+}
+#[cfg(target_os = "linux")]
+#[test]
+fn abnormal_adapter_exit_releases_inherited_pipes_and_resident_leases() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("descendant.py");
+    let prefix = LOGGING_ADAPTER
+        .split("while True:\n m=read()")
+        .next()
+        .unwrap();
+    std::fs::write(&script, format!("{prefix}\nimport subprocess,os\np=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])\npathlib.Path('helper-pid').write_text(str(p.pid))\nos._exit(1)\n")).unwrap();
+    let mut service = DapService::new();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
+    wait(|| root.path().join("helper-pid").exists());
+    wait(|| {
+        while service.try_event().is_some() {}
+        service.pending() == 0
+    });
+    let pid = std::fs::read_to_string(root.path().join("helper-pid")).unwrap();
+    wait(|| {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .map_or(true, |stat| stat.split_whitespace().nth(2) == Some("Z"))
+    });
 }

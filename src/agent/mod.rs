@@ -5,13 +5,19 @@
 //! (`gemini --experimental-acp`) runs as a child process and speaks JSON-RPC 2.0 as one
 //! JSON object per line on stdin/stdout.
 
+use crate::language::lsp::file_uri;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
     collections::BTreeMap,
-    io::{BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Command, Stdio},
-    sync::mpsc::{self, Receiver},
+    process::{Child, Command, Stdio},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+    },
     thread,
 };
 
@@ -20,14 +26,23 @@ pub mod mcp;
 
 pub const PROTOCOL_VERSION: u64 = 1;
 const LINE_BYTE_CEILING: usize = 16 * 1024 * 1024;
+const MESSAGE_CAPACITY: usize = 256;
+const WRITE_CAPACITY: usize = 16;
 
 /// What arrives from the agent, in order.
 #[derive(Debug)]
 pub enum AgentMessage {
     /// The reply to one of our requests.
-    Response { id: u64, result: Result<Value, String> },
+    Response {
+        id: u64,
+        result: Result<Value, String>,
+    },
     /// A request the agent makes of the editor: permission and file access.
-    Request { id: Value, method: String, params: Value },
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
     /// `session/update` and other notifications.
     Notification { method: String, params: Value },
     /// A line the agent wrote to stderr.
@@ -39,8 +54,10 @@ pub enum AgentMessage {
 /// A running agent process.
 pub struct AgentProcess {
     child: Child,
-    stdin: ChildStdin,
+    writes: SyncSender<String>,
     messages: Receiver<AgentMessage>,
+    failures: Receiver<String>,
+    log: Arc<Mutex<Option<String>>>,
     next_id: u64,
 }
 
@@ -51,35 +68,51 @@ impl AgentProcess {
         environment: &BTreeMap<String, String>,
         cwd: &Path,
     ) -> Result<Self, String> {
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(arguments)
             .envs(environment)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
             .spawn()
             .map_err(|error| format!("{}: {error}", program.display()))?;
-        let stdin = child.stdin.take().ok_or("agent stdin is unavailable")?;
+        let mut stdin = child.stdin.take().ok_or("agent stdin is unavailable")?;
         let stdout = child.stdout.take().ok_or("agent stdout is unavailable")?;
         let stderr = child.stderr.take();
-        let (sender, messages) = mpsc::channel();
-        let log = sender.clone();
+        let (sender, messages) = mpsc::sync_channel(MESSAGE_CAPACITY);
+        let (writes, incoming) = mpsc::sync_channel::<String>(WRITE_CAPACITY);
+        let (failed, failures) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            while let Ok(line) = incoming.recv() {
+                if let Err(error) = stdin
+                    .write_all(line.as_bytes())
+                    .and_then(|()| stdin.flush())
+                {
+                    let _ = failed.try_send(format!("writing to the agent failed: {error}"));
+                    break;
+                }
+            }
+        });
+        let log = Arc::new(Mutex::new(None));
+        let output_log = log.clone();
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
             let reason = loop {
-                line.clear();
-                match reader.read_line(&mut line) {
+                match read_line(&mut reader, &mut line, LINE_BYTE_CEILING) {
                     Ok(0) => break "the agent exited".to_owned(),
-                    Ok(_) if line.len() > LINE_BYTE_CEILING => {
-                        break "the agent sent an oversized message".to_owned();
-                    }
                     Ok(_) => {
                         let Some(message) = parse_line(line.trim()) else {
                             continue;
                         };
-                        if sender.send(message).is_err() {
+                        if let AgentMessage::Log(line) = message {
+                            *output_log.lock().unwrap() = Some(line);
+                        } else if sender.send(message).is_err() {
                             return;
                         }
                     }
@@ -89,18 +122,24 @@ impl AgentProcess {
             let _ = sender.send(AgentMessage::Exited(reason));
         });
         if let Some(stderr) = stderr {
+            let log = log.clone();
             thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    if log.send(AgentMessage::Log(line)).is_err() {
-                        return;
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while let Ok(count) = read_line(&mut reader, &mut line, LINE_BYTE_CEILING) {
+                    if count == 0 {
+                        break;
                     }
+                    *log.lock().unwrap() = Some(line.trim_end().to_owned());
                 }
             });
         }
         Ok(Self {
             child,
-            stdin,
+            writes,
             messages,
+            failures,
+            log,
             next_id: 1,
         })
     }
@@ -129,24 +168,50 @@ impl AgentProcess {
     }
 
     pub fn try_message(&self) -> Option<AgentMessage> {
-        self.messages.try_recv().ok()
+        self.failures
+            .try_recv()
+            .ok()
+            .map(AgentMessage::Exited)
+            .or_else(|| self.messages.try_recv().ok())
+            .or_else(|| self.take_log().map(AgentMessage::Log))
+    }
+
+    pub fn take_log(&self) -> Option<String> {
+        self.log.lock().unwrap().take()
     }
 
     fn write(&mut self, message: &Value) -> Result<(), String> {
         let mut line = message.to_string();
         line.push('\n');
-        self.stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| self.stdin.flush())
-            .map_err(|error| format!("writing to the agent failed: {error}"))
+        self.writes.try_send(line).map_err(|error| match error {
+            TrySendError::Full(_) => "the agent input queue is full".to_owned(),
+            TrySendError::Disconnected(_) => "the agent input is closed".to_owned(),
+        })
     }
 }
 
 impl Drop for AgentProcess {
     fn drop(&mut self) {
+        #[cfg(unix)]
+        let _ = nix::sys::signal::killpg(
+            nix::unistd::Pid::from_raw(self.child.id() as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        );
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn read_line(reader: &mut impl BufRead, line: &mut String, ceiling: usize) -> io::Result<usize> {
+    line.clear();
+    let count = reader.take(ceiling as u64 + 1).read_line(line)?;
+    if count > ceiling {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the agent sent an oversized message",
+        ));
+    }
+    Ok(count)
 }
 
 fn parse_line(line: &str) -> Option<AgentMessage> {
@@ -156,8 +221,14 @@ fn parse_line(line: &str) -> Option<AgentMessage> {
     let Ok(mut value) = serde_json::from_str::<Value>(line) else {
         return Some(AgentMessage::Log(line.to_owned()));
     };
-    let method = value.get("method").and_then(Value::as_str).map(str::to_owned);
-    let params = value.get_mut("params").map(Value::take).unwrap_or(Value::Null);
+    let method = value
+        .get("method")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let params = value
+        .get_mut("params")
+        .map(Value::take)
+        .unwrap_or(Value::Null);
     match (method, value.get("id").cloned()) {
         (Some(method), Some(id)) => Some(AgentMessage::Request { id, method, params }),
         (Some(method), None) => Some(AgentMessage::Notification { method, params }),
@@ -165,7 +236,10 @@ fn parse_line(line: &str) -> Option<AgentMessage> {
             let id = id.as_u64()?;
             let result = match value.get_mut("error") {
                 Some(error) => Err(error_text(error)),
-                None => Ok(value.get_mut("result").map(Value::take).unwrap_or(Value::Null)),
+                None => Ok(value
+                    .get_mut("result")
+                    .map(Value::take)
+                    .unwrap_or(Value::Null)),
             };
             Some(AgentMessage::Response { id, result })
         }
@@ -248,7 +322,10 @@ pub fn rejoin_params(session: &str, cwd: &Path, tools: &Value, meta: Option<&Val
 pub enum PromptPart {
     Text(String),
     /// A file and, optionally, the exact text of a selection in it.
-    File { path: PathBuf, text: Option<String> },
+    File {
+        path: PathBuf,
+        text: Option<String>,
+    },
 }
 
 #[must_use]
@@ -272,10 +349,6 @@ pub fn prompt_params(session: &str, parts: &[PromptPart]) -> Value {
         })
         .collect::<Vec<_>>();
     json!({"sessionId": session, "prompt": blocks})
-}
-
-fn file_uri(path: &Path) -> String {
-    format!("file://{}", path.display())
 }
 
 /// A `session/update` notification, reduced to what the panel shows.
@@ -306,7 +379,12 @@ pub enum SessionUpdate {
 #[must_use]
 pub fn session_update(params: &Value) -> SessionUpdate {
     let update = &params["update"];
-    let text = |value: &Value| value["content"]["text"].as_str().unwrap_or_default().to_owned();
+    let text = |value: &Value| {
+        value["content"]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    };
     let string = |key: &str| update[key].as_str().map(str::to_owned);
     match update["sessionUpdate"].as_str().unwrap_or_default() {
         "agent_message_chunk" => SessionUpdate::AgentText(text(update)),
@@ -331,7 +409,10 @@ pub fn session_update(params: &Value) -> SessionUpdate {
                 .filter_map(|command| {
                     Some((
                         command["name"].as_str()?.trim_start_matches('/').to_owned(),
-                        command["description"].as_str().unwrap_or_default().to_owned(),
+                        command["description"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned(),
                     ))
                 })
                 .collect(),
@@ -394,8 +475,24 @@ pub fn session_options(result: &Value) -> Vec<SessionOption> {
     }
     let mut options = Vec::new();
     let legacy = [
-        ("modes", "mode", "Mode", "currentModeId", "availableModes", "id", OptionSource::Mode),
-        ("models", "model", "Model", "currentModelId", "availableModels", "modelId", OptionSource::Model),
+        (
+            "modes",
+            "mode",
+            "Mode",
+            "currentModeId",
+            "availableModes",
+            "id",
+            OptionSource::Mode,
+        ),
+        (
+            "models",
+            "model",
+            "Model",
+            "currentModelId",
+            "availableModels",
+            "modelId",
+            OptionSource::Model,
+        ),
     ];
     for (field, id, name, current, available, key, source) in legacy {
         let Some(values) = result[field][available].as_array() else {
@@ -405,7 +502,10 @@ pub fn session_options(result: &Value) -> Vec<SessionOption> {
             id: id.into(),
             name: name.into(),
             category: id.into(),
-            current: result[field][current].as_str().unwrap_or_default().to_owned(),
+            current: result[field][current]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
             values: values
                 .iter()
                 .map(|value| OptionValue {
@@ -460,14 +560,24 @@ fn config_options(value: &Value) -> Vec<SessionOption> {
 
 /// The request that sets `option` to `value` in `session`.
 #[must_use]
-pub fn set_option_request(session: &str, option: &SessionOption, value: &str) -> (&'static str, Value) {
+pub fn set_option_request(
+    session: &str,
+    option: &SessionOption,
+    value: &str,
+) -> (&'static str, Value) {
     match option.source {
         OptionSource::Config => (
             "session/set_config_option",
             json!({"sessionId": session, "configId": option.id, "value": value}),
         ),
-        OptionSource::Mode => ("session/set_mode", json!({"sessionId": session, "modeId": value})),
-        OptionSource::Model => ("session/set_model", json!({"sessionId": session, "modelId": value})),
+        OptionSource::Mode => (
+            "session/set_mode",
+            json!({"sessionId": session, "modeId": value}),
+        ),
+        OptionSource::Model => (
+            "session/set_model",
+            json!({"sessionId": session, "modelId": value}),
+        ),
     }
 }
 
@@ -488,7 +598,10 @@ pub fn auth_methods(initialize: &Value) -> Vec<AuthMethod> {
         .map(|method| AuthMethod {
             id: method["id"].as_str().unwrap_or_default().to_owned(),
             name: method["name"].as_str().unwrap_or_default().to_owned(),
-            description: method["description"].as_str().unwrap_or_default().to_owned(),
+            description: method["description"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
         })
         .collect()
 }
@@ -525,7 +638,11 @@ pub fn permission_changes(params: &Value) -> Vec<PathBuf> {
         return Vec::new();
     }
     let locations = call["locations"].as_array().into_iter().flatten();
-    let diffs = call["content"].as_array().into_iter().flatten().filter(|item| item["type"] == "diff");
+    let diffs = call["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "diff");
     let mut paths: Vec<PathBuf> = locations
         .chain(diffs)
         .filter_map(|item| item["path"].as_str())
@@ -573,10 +690,16 @@ fn tool_arguments(input: &Value) -> String {
     };
     let mut text = String::new();
     for (name, value) in arguments.iter().take(SHOWN) {
-        let value = value.as_str().map_or_else(|| value.to_string(), str::to_owned);
+        let value = value
+            .as_str()
+            .map_or_else(|| value.to_string(), str::to_owned);
         let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
         let clipped: String = value.chars().take(LINE).collect();
-        let more = if clipped.len() < value.len() { "…" } else { "" };
+        let more = if clipped.len() < value.len() {
+            "…"
+        } else {
+            ""
+        };
         text.push_str(&format!("\n{name}: {clipped}{more}"));
     }
     if arguments.len() > SHOWN {
@@ -590,7 +713,11 @@ fn changed_lines(old: &str, new: &str) -> String {
     const SHOWN: usize = 6;
     let old: Vec<&str> = old.lines().collect();
     let new: Vec<&str> = new.lines().collect();
-    let front = old.iter().zip(&new).take_while(|(old, new)| old == new).count();
+    let front = old
+        .iter()
+        .zip(&new)
+        .take_while(|(old, new)| old == new)
+        .count();
     let back = old[front..]
         .iter()
         .rev()
@@ -645,7 +772,9 @@ pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String 
         return text.to_owned();
     }
     let skip = usize::try_from(line.unwrap_or(1).saturating_sub(1)).unwrap_or(usize::MAX);
-    let take = limit.map_or(usize::MAX, |limit| usize::try_from(limit).unwrap_or(usize::MAX));
+    let take = limit.map_or(usize::MAX, |limit| {
+        usize::try_from(limit).unwrap_or(usize::MAX)
+    });
     text.split_inclusive('\n').skip(skip).take(take).collect()
 }
 
@@ -653,11 +782,143 @@ pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String 
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn fixture(script: &str) -> AgentProcess {
+        AgentProcess::spawn(
+            Path::new("/bin/sh"),
+            &["-c".into(), script.into()],
+            &BTreeMap::new(),
+            Path::new("/"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn agent_lines_are_bounded_before_a_newline_or_eof() {
+        let mut reader = BufReader::new(io::repeat(b'x'));
+        let mut line = String::new();
+        let error = read_line(&mut reader, &mut line, 64).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(line.len(), 65);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_pipe_writes_never_wait_for_a_reader() {
+        let mut process = fixture("sleep 60");
+        let started = std::time::Instant::now();
+        let text = "x".repeat(128 * 1024);
+        let mut full = false;
+        for _ in 0..WRITE_CAPACITY + 2 {
+            if let Err(error) = process.notify("test", json!({"text": text})) {
+                assert!(error.contains("queue is full"), "{error}");
+                full = true;
+                break;
+            }
+        }
+        assert!(full, "a stalled reader must bound pending writes");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_write_failures_arrive_as_exit_messages() {
+        let mut process = fixture("read -r line; exec 0<&-; printf 'closed\\n'; sleep 60");
+        process.notify("test", Value::Null).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if matches!(process.try_message(), Some(AgentMessage::Log(line)) if line == "closed") {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        process
+            .notify("test", json!({"text": "x".repeat(128 * 1024)}))
+            .unwrap();
+        loop {
+            if let Some(AgentMessage::Exited(reason)) = process.try_message() {
+                assert!(reason.contains("writing to the agent failed"), "{reason}");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_stderr_is_coalesced_without_delaying_responses() {
+        let process = fixture(
+            r#"i=0; while [ "$i" -lt 5000 ]; do echo log >&2; i=$((i+1)); done; echo last >&2; printf '{"id":1,"result":{}}\n'; sleep 60"#,
+        );
+        let message = process
+            .messages
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(matches!(message, AgentMessage::Response { id: 1, .. }));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while process.log.lock().unwrap().as_deref() != Some("last") {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(process.try_message(), Some(AgentMessage::Log(line)) if line == "last"));
+        assert!(process.try_message().is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_an_agent_kills_its_descendants() {
+        let process = fixture("sleep 60 & echo pid:$!; wait");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let pid = loop {
+            if let Some(AgentMessage::Log(line)) = process.try_message() {
+                break line.strip_prefix("pid:").unwrap().parse::<u32>().unwrap();
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        };
+        drop(process);
+        loop {
+            match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                Err(_) => break,
+                Ok(stat) if stat.split_whitespace().nth(2) == Some("Z") => break,
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "descendant {pid} survived"
+            );
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn attachment_uris_escape_filename_characters() {
+        let parts = [
+            PromptPart::File {
+                path: "/work/a#b %é.rs".into(),
+                text: None,
+            },
+            PromptPart::File {
+                path: "/work/a#b %é.rs".into(),
+                text: Some("selected".into()),
+            },
+        ];
+        let params = prompt_params("s", &parts);
+        let expected = "file:///work/a%23b%20%25%C3%A9.rs";
+        assert_eq!(params["prompt"][0]["uri"], expected);
+        assert_eq!(params["prompt"][1]["resource"]["uri"], expected);
+    }
+
     #[test]
     fn lines_are_parsed_into_responses_requests_and_notifications() {
         assert!(matches!(
             parse_line(r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"s"}}"#),
-            Some(AgentMessage::Response { id: 3, result: Ok(_) })
+            Some(AgentMessage::Response {
+                id: 3,
+                result: Ok(_)
+            })
         ));
         assert!(matches!(
             parse_line(r#"{"jsonrpc":"2.0","id":4,"error":{"code":1,"message":"no"}}"#),
@@ -712,7 +973,10 @@ mod tests {
     #[test]
     fn updates_reduce_to_panel_entries() {
         let chunk = json!({"sessionId": "s", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}});
-        assert_eq!(session_update(&chunk), SessionUpdate::AgentText("hi".into()));
+        assert_eq!(
+            session_update(&chunk),
+            SessionUpdate::AgentText("hi".into())
+        );
         let tool = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t", "title": "Read main.rs", "status": "in_progress"}});
         assert_eq!(
             session_update(&tool),
@@ -738,7 +1002,10 @@ mod tests {
         assert_eq!(options[0].values.len(), 2);
         assert_eq!(options[1].category, "thought_level");
         assert_eq!(options[1].values[1].value, "high");
-        assert_eq!(set_option_request("s", &options[1], "low").0, "session/set_config_option");
+        assert_eq!(
+            set_option_request("s", &options[1], "low").0,
+            "session/set_config_option"
+        );
 
         let legacy = json!({
             "modes": {"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]},
@@ -748,7 +1015,10 @@ mod tests {
         assert_eq!(options[0].current, "default");
         assert_eq!(options[1].values[0].value, "m1");
         let (method, params) = set_option_request("s", &options[0], "plan");
-        assert_eq!((method, params["modeId"].as_str()), ("session/set_mode", Some("plan")));
+        assert_eq!(
+            (method, params["modeId"].as_str()),
+            ("session/set_mode", Some("plan"))
+        );
     }
 
     #[test]

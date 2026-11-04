@@ -57,7 +57,8 @@ pub struct Buffer {
     pub origin: BufferOrigin,
     pub dirty: bool,
     pub saved_revision: BufferRevision,
-    saved_text: std::sync::Arc<str>,
+    saved_text: Option<std::sync::Arc<str>>,
+    pub(crate) saved_view: Option<View>,
     persisted_bytes: std::sync::Arc<[u8]>,
     pub undo: UndoTree,
     /// Tree-sitter text objects from the parse of `revision`, set by the syntax session.
@@ -88,7 +89,7 @@ impl Buffer {
 
     #[must_use]
     pub fn new(text: TextBuffer, path: Option<PathBuf>) -> Self {
-        let saved_text = text.to_string().into();
+        let saved_text = Some(text.to_string().into());
         let saved_revision = text.revision();
         let persisted_bytes = text.to_bytes().into();
         Self {
@@ -100,6 +101,7 @@ impl Buffer {
             dirty: false,
             saved_revision,
             saved_text,
+            saved_view: None,
             persisted_bytes,
             syntax_objects: None,
         }
@@ -111,7 +113,27 @@ impl Buffer {
     }
 
     pub fn refresh_dirty(&mut self) {
-        self.dirty = !self.text.text_equals(&self.saved_text);
+        self.dirty = self
+            .saved_text
+            .as_ref()
+            .is_none_or(|saved| !self.text.text_equals(saved));
+    }
+
+    pub(crate) fn restored_view(&self, buffer: super::BufferId) -> View {
+        let mut view = self.saved_view.clone().unwrap_or_else(|| View::new(buffer));
+        view.cursor = view.cursor.min(ByteOffset(self.text.len_bytes()));
+        while !self.text.is_char_boundary(view.cursor) {
+            view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
+        }
+        view.scroll_line = view
+            .scroll_line
+            .min(self.text.len_lines().saturating_sub(1));
+        view
+    }
+
+    pub(crate) fn set_saved_text(&mut self, text: Option<std::sync::Arc<str>>) {
+        self.saved_text = text;
+        self.refresh_dirty();
     }
 
     pub fn mark_saved(&mut self, revision: BufferRevision) {
@@ -129,7 +151,7 @@ impl Buffer {
         self.path = path;
         self.saved_revision = revision;
         if let Ok(saved) = TextBuffer::from_bytes(&bytes) {
-            self.saved_text = saved.to_string().into();
+            self.saved_text = Some(saved.to_string().into());
         }
         self.persisted_bytes = bytes.into();
         self.refresh_dirty();
@@ -137,15 +159,15 @@ impl Buffer {
 
     /// Pick up the history saved with this file, when the file still holds the saved text.
     pub fn restore_undo_history(&mut self, directory: &std::path::Path, maximum_bytes: usize) {
-        if let Some(path) = &self.path {
-            if let Some(tree) = crate::editor::transaction::load_undo_history(
+        if let Some(path) = &self.path
+            && let Some(tree) = crate::editor::transaction::load_undo_history(
                 directory,
                 path,
                 &self.text,
                 maximum_bytes,
-            ) {
-                self.undo = tree;
-            }
+            )
+        {
+            self.undo = tree;
         }
     }
 
@@ -180,6 +202,13 @@ pub struct View {
 }
 
 impl View {
+    pub(crate) fn clear_editing_state(&mut self) {
+        self.replace_history.clear();
+        self.block_insert.clear();
+        self.multi_marks.clear();
+        self.preferred_column = None;
+    }
+
     #[must_use]
     pub fn new(buffer: BufferId) -> Self {
         Self {
@@ -223,15 +252,34 @@ impl RegisterStore {
     pub fn set(
         &mut self,
         name: char,
-        value: RegisterValue,
+        mut value: RegisterValue,
         enabled: bool,
         mirror_named_to_unnamed: bool,
     ) {
         if !enabled || name == '_' {
             return;
         }
+        let lower = name.to_ascii_lowercase();
+        if name.is_ascii_uppercase()
+            && let Some(previous) = self.values.get(&lower)
+        {
+            let mut text = previous.text.clone();
+            if previous.shape == RegisterShape::Line && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(&value.text);
+            if previous.shape == RegisterShape::Line || value.shape == RegisterShape::Line {
+                value.shape = RegisterShape::Line;
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+            } else if value.shape != previous.shape {
+                value.shape = RegisterShape::Character;
+            }
+            value.text = text;
+        }
         self.generation = self.generation.wrapping_add(1);
-        self.values.insert(name, value.clone());
+        self.values.insert(lower, value.clone());
         if mirror_named_to_unnamed && name != '"' {
             self.values.insert('"', value);
         }
@@ -244,7 +292,7 @@ impl RegisterStore {
 
     #[must_use]
     pub fn get(&self, name: char) -> Option<&RegisterValue> {
-        self.values.get(&name)
+        self.values.get(&name.to_ascii_lowercase())
     }
 
     pub fn set_macro(&mut self, name: char, invocations: Vec<CommandInvocation>) {

@@ -78,29 +78,19 @@ fn build_layout(
             let buffer = state.load_hidden_text(text.clone(), canonical.clone());
             let mut view = crate::editor::View::new(buffer);
             let length = state.buffers[buffer].text.len_bytes();
-            let boundary = |offset: usize| {
-                let mut offset = offset.min(length);
-                while !state.buffers[buffer]
-                    .text
-                    .is_char_boundary(ByteOffset(offset))
-                {
-                    offset -= 1;
-                }
-                ByteOffset(offset)
-            };
-            view.cursor = boundary(pane.cursor);
+            let mut offset = pane.cursor.min(length);
+            while !state.buffers[buffer]
+                .text
+                .is_char_boundary(ByteOffset(offset))
+            {
+                offset -= 1;
+            }
+            view.cursor = ByteOffset(offset);
             view.scroll_line = pane
                 .scroll_line
                 .min(state.buffers[buffer].text.len_lines().saturating_sub(1));
             view.scroll_wrap_row = 0;
             view.scroll_column = pane.scroll_column;
-            if pane.anchor != pane.cursor {
-                view.selection = Some(crate::editor::Selection {
-                    anchor: boundary(pane.anchor),
-                    head: view.cursor,
-                    kind: crate::editor::SelectionKind::Character,
-                });
-            }
             let view = state.views.insert(view);
             let pane_id = state.panes.insert(crate::editor::Pane { view });
             Some((

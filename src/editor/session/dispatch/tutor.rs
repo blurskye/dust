@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use super::{
-    InteractiveApplication, PersistedSession, PickerAction, PickerItem, PickerItemId, PickerPayload,
-    RestoreContext,
+    InteractiveApplication, PersistedSession, PickerAction, PickerItem, PickerItemId,
+    PickerPayload, RestoreContext,
 };
 use crate::editor::text::{ByteOffset, ByteRange};
 use crate::editor::{BufferId, CommandInvocation, CommandValue, EditorMode, InvocationSource};
@@ -80,7 +80,10 @@ impl Language {
     fn files(self) -> &'static [(&'static str, &'static str)] {
         macro_rules! practice_file {
             ($name:literal, $path:literal) => {
-                ($name, include_str!(concat!("../../../../assets/defaults/tutor/", $path)))
+                (
+                    $name,
+                    include_str!(concat!("../../../../assets/defaults/tutor/", $path)),
+                )
             };
         }
         match self {
@@ -88,7 +91,7 @@ impl Language {
                 practice_file!("practice.rs", "rust/practice.rs"),
                 practice_file!("src/main.rs", "rust/src/main.rs"),
                 practice_file!("src/greet.rs", "rust/src/greet.rs"),
-                practice_file!("Cargo.toml", "rust/Cargo.toml"),
+                practice_file!("Cargo.toml", "rust/Cargo.toml.in"),
                 practice_file!(".gitignore", "rust/gitignore"),
             ],
             Self::TypeScript => &[
@@ -111,9 +114,9 @@ impl Language {
 
     /// The practice project's files with the practice lines in place.
     fn practice_files(self) -> impl Iterator<Item = (&'static str, String)> {
-        self.files().iter().map(|(name, text)| {
-            (*name, text.replacen("PRACTICE_LINES\n", PRACTICE_LINES, 1))
-        })
+        self.files()
+            .iter()
+            .map(|(name, text)| (*name, text.replacen("PRACTICE_LINES\n", PRACTICE_LINES, 1)))
     }
 
     /// The greet file as the git lessons find it: changed since the commit.
@@ -212,9 +215,10 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
         step.press = fill(&step.press);
         step.open = step.open.as_deref().map(fill);
         step.practice = practice;
-        if let (Some(wanted), Some((_, text))) =
-            (&step.indented, files.iter().find(|(name, _)| *name == step.file()))
-        {
+        if let (Some(wanted), Some((_, text))) = (
+            &step.indented,
+            files.iter().find(|(name, _)| *name == step.file()),
+        ) {
             step.indent = text
                 .lines()
                 .find(|line| line.contains(wanted.as_str()))
@@ -227,7 +231,9 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
 
 /// Write the practice project to a new temporary folder and commit it, then change the greet
 /// file so the git lessons have something to show.
-fn create_practice_project(language: Language) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
+fn create_practice_project(
+    language: Language,
+) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
     let folder = tempfile::Builder::new().prefix("dust-tutor-").tempdir()?;
     for (name, text) in language.practice_files() {
         let path = folder.path().join(name);
@@ -242,7 +248,14 @@ fn create_practice_project(language: Language) -> Result<tempfile::TempDir, Box<
     index.write()?;
     let tree = repository.find_tree(index.write_tree()?)?;
     let signature = git2::Signature::now("Dust tutor", "tutor@dust.invalid")?;
-    repository.commit(Some("HEAD"), &signature, &signature, "Practice project", &tree, &[])?;
+    repository.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "Practice project",
+        &tree,
+        &[],
+    )?;
     let (greet, changed) = language.changed_greet();
     std::fs::write(folder.path().join(greet), changed)?;
     Ok(folder)
@@ -318,7 +331,11 @@ impl Tutor {
         let step = parts.next()?.parse::<usize>().ok()?;
         let language = parts
             .next()
-            .and_then(|id| Language::ALL.into_iter().find(|language| language.id() == id))
+            .and_then(|id| {
+                Language::ALL
+                    .into_iter()
+                    .find(|language| language.id() == id)
+            })
             .unwrap_or(Language::Rust);
         Some(TutorStart { language, step })
     }
@@ -341,11 +358,14 @@ fn invocation_matches(pattern: &str, invocation: &CommandInvocation) -> bool {
     parts.next() == Some(invocation.id.as_str())
         && parts.all(|pair| {
             pair.split_once('=').is_some_and(|(key, value)| {
-                invocation.arguments.get(key).is_some_and(|actual| match actual {
-                    CommandValue::String(text) => text == value,
-                    CommandValue::Bool(flag) => flag.to_string() == value,
-                    CommandValue::Integer(number) => number.to_string() == value,
-                })
+                invocation
+                    .arguments
+                    .get(key)
+                    .is_some_and(|actual| match actual {
+                        CommandValue::String(text) => text == value,
+                        CommandValue::Bool(flag) => flag.to_string() == value,
+                        CommandValue::Integer(number) => number.to_string() == value,
+                    })
             })
         })
 }
@@ -369,7 +389,11 @@ impl InteractiveApplication {
                         self.start_open(back);
                     }
                 }
-                Stage::Entering | Stage::Leaving => {}
+                Stage::Entering => {
+                    let root = practice.root.clone();
+                    self.switch_workspace_root(root);
+                }
+                Stage::Leaving => {}
             }
             return;
         }
@@ -396,7 +420,10 @@ impl InteractiveApplication {
                 PickerPayload::Tutor(start),
             )
         };
-        let saved = self.tutor.saved_start().filter(|start| start.step < steps.len());
+        let saved = self
+            .tutor
+            .saved_start()
+            .filter(|start| start.step < steps.len());
         let mut items = Vec::new();
         if let Some(start) = saved {
             items.push(row(
@@ -425,8 +452,13 @@ impl InteractiveApplication {
                 TutorStart { language, step: 0 },
             ));
         }
-        self.install_surface_picker(crate::ui::PickerSurfaceKind::Choice, "Tutor".to_owned(), items);
-        self.search.set_picker_footer("Enter start · Esc not now".to_owned());
+        self.install_surface_picker(
+            crate::ui::PickerSurfaceKind::Choice,
+            "Tutor".to_owned(),
+            items,
+        );
+        self.search
+            .set_picker_footer("Enter start · Esc not now".to_owned());
         self.sync_picker_ui();
     }
 
@@ -449,16 +481,30 @@ impl InteractiveApplication {
                 return self.show_error(format!("could not make the practice project: {error}"));
             }
         };
-        let root = folder.path().canonicalize().unwrap_or_else(|_| folder.path().to_path_buf());
+        let root = folder
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| folder.path().to_path_buf());
         let home = self
             .state
             .workspace_root
             .canonicalize()
             .unwrap_or_else(|_| self.state.workspace_root.clone());
         self.switch_workspace_root(root.clone());
-        // Unsaved files block the move; the error says so and the tutor doesn't start.
-        if !self.workspace.root_operation_pending() {
+        // Keep the same project while confirming that running terminals may stop.
+        if !self.workspace.root_operation_pending()
+            && self.switch_ends_terminals.as_ref() != Some(&root)
+        {
             return;
+        }
+        let mut step = start.step.min(self.tutor.steps.len().saturating_sub(1));
+        while step > 0
+            && self.tutor.steps[step]
+                .done
+                .iter()
+                .any(|command| matches!(command.as_str(), "history.undo" | "history.redo"))
+        {
+            step -= 1;
         }
         self.tutor.practice = Some(Practice {
             _folder: folder,
@@ -468,7 +514,7 @@ impl InteractiveApplication {
             dashboard: self.ui.dashboard,
             stage: Stage::Entering,
             language: start.language,
-            start: start.step.min(self.tutor.steps.len().saturating_sub(1)),
+            start: step,
         });
     }
 
@@ -500,7 +546,11 @@ impl InteractiveApplication {
         let Some(step) = self.tutor.step() else {
             return;
         };
-        if step.done.iter().any(|pattern| invocation_matches(pattern, invocation)) {
+        if step
+            .done
+            .iter()
+            .any(|pattern| invocation_matches(pattern, invocation))
+        {
             self.tutor.observed = true;
         }
     }
@@ -521,10 +571,12 @@ impl InteractiveApplication {
                 self.tutor_go(index, false);
             }
             // The move failed and said why.
+            Stage::Entering if self.switch_ends_terminals.as_ref() == Some(&practice.root) => {}
             Stage::Entering => self.tutor.practice = None,
             Stage::Leaving if self.state.workspace_root == practice.home => self.tutor_restore(),
             Stage::Leaving => {
                 practice.stage = Stage::Running;
+                self.sync_tutor_card();
                 self.show_error("could not leave the practice project: :TutorQuit tries again");
             }
             Stage::Running => self.tutor_step_tick(),
@@ -613,7 +665,12 @@ impl InteractiveApplication {
 
     /// Set up the windows and file the step starts from.
     fn tutor_scene(&mut self, index: usize) {
-        let Some(root) = self.tutor.practice.as_ref().map(|practice| practice.root.clone()) else {
+        let Some(root) = self
+            .tutor
+            .practice
+            .as_ref()
+            .map(|practice| practice.root.clone())
+        else {
             return;
         };
         let step = &self.tutor.steps[index];
@@ -691,7 +748,6 @@ impl InteractiveApplication {
             return;
         }
         let (root, home) = (practice.root.clone(), practice.home.clone());
-        self.tutor.current = None;
         self.ui.set(None, |ui| &mut ui.tutor);
         // Unsaved practice files would block the move; they are thrown away with the folder.
         let unsaved = self
@@ -706,7 +762,8 @@ impl InteractiveApplication {
             .collect::<Vec<_>>();
         for (id, path, revision, bytes) in unsaved {
             if std::fs::write(&path, &bytes).is_ok() {
-                self.state.mark_buffer_saved_as(id, revision, bytes, Some(path));
+                self.state
+                    .mark_buffer_saved_as(id, revision, bytes, Some(path));
             }
         }
         if let Some(practice) = &mut self.tutor.practice {
@@ -719,6 +776,7 @@ impl InteractiveApplication {
 
     /// Back in the user's project: put their layout back and delete the practice project.
     fn tutor_restore(&mut self) {
+        self.tutor.current = None;
         let Some(practice) = self.tutor.practice.take() else {
             return;
         };
@@ -764,7 +822,12 @@ impl InteractiveApplication {
         let card = place.map(|(index, (place, away, line))| {
             let step = &self.tutor.steps[index];
             crate::ui::TutorCard {
-                title: format!("Tutor {}/{} · {}", index + 1, self.tutor.steps.len(), step.chapter),
+                title: format!(
+                    "Tutor {}/{} · {}",
+                    index + 1,
+                    self.tutor.steps.len(),
+                    step.chapter
+                ),
                 text: step.text.replace("<leader>", leader),
                 press: step.press.replace("<leader>", leader),
                 pointer: pointer.into(),
@@ -791,13 +854,19 @@ impl InteractiveApplication {
         let front = self.state.active_buffer_id();
         let front_is_file = front.is_some_and(|id| self.state.buffers[id].path.is_some());
         if front_is_file && front != buffer && self.tutor.done_at.is_none() {
-            return (format!("This step is in {file}: type `:e {file}` and `enter` to go back."), true, None);
+            return (
+                format!("This step is in {file}: type `:e {file}` and `enter` to go back."),
+                true,
+                None,
+            );
         }
         let line = buffer.and_then(|buffer| {
             let text = &self.state.buffers[buffer].text;
             let wanted = step.at.as_deref().or(step.mark.as_deref())?;
-            let line = (0..text.len_lines())
-                .find(|line| text.line(*line).is_ok_and(|content| content.contains(wanted)))?;
+            let line = (0..text.len_lines()).find(|line| {
+                text.line(*line)
+                    .is_ok_and(|content| content.contains(wanted))
+            })?;
             Some((buffer, line))
         });
         let place = match line {
@@ -820,7 +889,10 @@ impl InteractiveApplication {
         let Some(buffer) = self.tutor_buffer(step.file()) else {
             return false;
         };
-        let active = self.state.active_view.and_then(|view| self.state.views.get(view));
+        let active = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view));
         let text = &self.state.buffers[buffer].text;
         if let Some(expected) = &step.cursor {
             let Some(view) = active.filter(|view| view.buffer == buffer) else {
@@ -935,6 +1007,113 @@ impl InteractiveApplication {
 mod tests {
     use super::*;
 
+    fn app() -> InteractiveApplication {
+        InteractiveApplication::new(
+            crate::editor::StartupTarget::Dashboard {
+                root: tempfile::tempdir().unwrap().keep(),
+            },
+            crate::config::load_bundled_config(),
+            false,
+            tempfile::tempdir().unwrap().keep(),
+            false,
+            false,
+            std::sync::Arc::new(crate::clock::SystemClock),
+        )
+        .unwrap()
+    }
+
+    fn running_terminal(app: &mut InteractiveApplication) {
+        app.terminal_session.fixture(
+            crate::process::PtyId(1),
+            crate::editor::session::terminal::TerminalFixture {
+                profile: "shell".into(),
+                screen: crate::ui::PtyScreen::new(80, 8, 100),
+                running: true,
+                exit_code: None,
+                truncated: false,
+            },
+            app.workspace.version(),
+        );
+        app.terminal_session
+            .fixture_cwd(crate::process::PtyId(1), app.state.workspace_root.clone());
+    }
+
+    fn enter(app: &mut InteractiveApplication) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.workspace.root_operation_pending() {
+            app.process_trust_events();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        app.tutor_tick();
+    }
+
+    #[test]
+    fn tutor_retries_the_same_practice_root_after_terminal_confirmation() {
+        let mut app = app();
+        running_terminal(&mut app);
+        let start = TutorStart {
+            language: Language::Rust,
+            step: 0,
+        };
+        app.start_tutor(start);
+        let root = app.tutor.practice.as_ref().unwrap().root.clone();
+        assert!(!app.workspace.root_operation_pending());
+        app.tutor_tick();
+        assert_eq!(app.tutor.practice.as_ref().unwrap().root, root);
+        app.start_tutor(start);
+        assert!(app.workspace.root_operation_pending());
+        assert_eq!(app.tutor.practice.as_ref().unwrap().root, root);
+    }
+
+    #[test]
+    fn refused_tutor_exit_keeps_the_lesson_and_card() {
+        let mut app = app();
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 2,
+        });
+        enter(&mut app);
+        assert_eq!(app.tutor.current, Some(2));
+        running_terminal(&mut app);
+        app.tutor_leave();
+        app.tutor_tick();
+        assert_eq!(app.tutor.current, Some(2));
+        assert!(app.ui.tutor.is_some());
+        assert_eq!(app.tutor.practice.as_ref().unwrap().stage, Stage::Running);
+    }
+
+    #[test]
+    fn resuming_undo_and_redo_starts_at_the_prerequisite_edit() {
+        for command in ["history.undo", "history.redo"] {
+            let mut app = app();
+            let steps = lessons(Language::Rust).unwrap();
+            let step = steps
+                .iter()
+                .position(|step| step.done.iter().any(|done| done == command))
+                .unwrap();
+            app.start_tutor(TutorStart {
+                language: Language::Rust,
+                step,
+            });
+            let resumed = app.tutor.practice.as_ref().unwrap().start;
+            assert!(resumed < step);
+            assert!(app.tutor.steps[resumed].gone.is_some());
+        }
+    }
+
+    #[test]
+    fn rust_practice_manifest_is_emitted_with_its_cargo_name() {
+        let files = Language::Rust.practice_files().collect::<Vec<_>>();
+        let manifest = files
+            .iter()
+            .find(|(name, _)| *name == "Cargo.toml")
+            .unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest.1).unwrap();
+        assert!(parsed.get("package").is_some());
+        assert!(!files.iter().any(|(name, _)| *name == "Cargo.toml.in"));
+    }
+
     #[test]
     fn every_lesson_checks_a_real_command_and_practice_line() {
         let mut registry = crate::editor::CommandRegistry::default();
@@ -948,7 +1127,11 @@ mod tests {
             files.retain(|(name, _)| *name != greet);
             files.push((greet, changed));
             for step in &steps {
-                assert!(!step.press.is_empty() && !step.press.contains('{'), "{}", step.press);
+                assert!(
+                    !step.press.is_empty() && !step.press.contains('{'),
+                    "{}",
+                    step.press
+                );
                 for pattern in &step.done {
                     let id = pattern.split_whitespace().next().unwrap_or_default();
                     assert!(
@@ -960,16 +1143,26 @@ mod tests {
                     .iter()
                     .find(|(name, _)| *name == step.file())
                     .map(|(_, text)| text.as_str())
-                    .unwrap_or_else(|| panic!("the {language:?} practice project has no {}", step.file()));
+                    .unwrap_or_else(|| {
+                        panic!("the {language:?} practice project has no {}", step.file())
+                    });
                 let has = |wanted: &str| text.lines().any(|line| line.contains(wanted));
                 for wanted in step.at.iter().chain(&step.gone).chain(&step.commented) {
                     assert!(has(wanted), "{} has no line {wanted:?}", step.file());
                 }
                 if let Some(mark) = &step.mark {
-                    assert!(text.contains(mark.as_str()), "{} has no {mark:?}", step.file());
+                    assert!(
+                        text.contains(mark.as_str()),
+                        "{} has no {mark:?}",
+                        step.file()
+                    );
                 }
                 if let Some(wanted) = &step.line {
-                    assert!(!has(wanted), "{language:?}: {wanted:?} is already in {}", step.file());
+                    assert!(
+                        !has(wanted),
+                        "{language:?}: {wanted:?} is already in {}",
+                        step.file()
+                    );
                 }
             }
         }
@@ -986,7 +1179,9 @@ mod tests {
             while let (Some(text), Some(key)) = (parts.next(), parts.next()) {
                 if key == "<leader>" {
                     keys = vec!["<leader>".to_owned()];
-                } else if !keys.is_empty() && (text.trim().is_empty() || keys.len() == 1 && text.trim() == "then") {
+                } else if !keys.is_empty()
+                    && (text.trim().is_empty() || keys.len() == 1 && text.trim() == "then")
+                {
                     keys.push(key.to_owned());
                 } else if !keys.is_empty() {
                     break;
@@ -1002,7 +1197,9 @@ mod tests {
                 .and_then(|entry| entry.command.clone())
                 .unwrap_or_else(|| panic!("no key {sequence} for step {:?}", step.press));
             assert!(
-                step.done.iter().any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
+                step.done
+                    .iter()
+                    .any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
                 "{sequence} runs {command}, but step {:?} waits for {:?}",
                 step.press,
                 step.done
@@ -1021,21 +1218,29 @@ mod tests {
                 .filter_map(|entry| entry.path().map(str::to_owned))
                 .collect::<Vec<_>>();
             assert_eq!(changed, [language.practice_names()[2]]);
-            let practice = std::fs::read_to_string(folder.path().join(language.practice_names()[0]))
-                .expect("practice file");
-            assert!(practice.contains("    The X marks the spot.\n") && !practice.contains("PRACTICE_LINES"));
+            let practice =
+                std::fs::read_to_string(folder.path().join(language.practice_names()[0]))
+                    .expect("practice file");
+            assert!(
+                practice.contains("    The X marks the spot.\n")
+                    && !practice.contains("PRACTICE_LINES")
+            );
         }
     }
 
     #[test]
     fn patterns_match_the_command_and_its_arguments() {
-        let invocation = CommandInvocation::new("input.motion", crate::editor::InvocationSource::Keymap)
-            .expect("id")
-            .with_argument("motion", CommandValue::String("down".into()))
-            .with_argument("linewise", CommandValue::Bool(false));
+        let invocation =
+            CommandInvocation::new("input.motion", crate::editor::InvocationSource::Keymap)
+                .expect("id")
+                .with_argument("motion", CommandValue::String("down".into()))
+                .with_argument("linewise", CommandValue::Bool(false));
         assert!(invocation_matches("input.motion", &invocation));
         assert!(invocation_matches("input.motion motion=down", &invocation));
-        assert!(invocation_matches("input.motion motion=down linewise=false", &invocation));
+        assert!(invocation_matches(
+            "input.motion motion=down linewise=false",
+            &invocation
+        ));
         assert!(!invocation_matches("input.motion motion=up", &invocation));
         assert!(!invocation_matches("input.find.begin", &invocation));
     }

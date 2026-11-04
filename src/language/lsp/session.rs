@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{ChildStdin, Command, Stdio},
+    process::{Command, Stdio},
     sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -62,13 +62,14 @@ pub(super) enum SessionCommand {
         applied: bool,
         reason: Option<String>,
     },
-    Stop,
 }
 
 pub(super) struct SessionHandle {
     sender: SyncSender<SessionCommand>,
     origin: std::sync::Arc<()>,
     thread: Option<JoinHandle<()>>,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    stop_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub struct LspService {
@@ -165,7 +166,11 @@ impl LspService {
         let (sender, commands) = mpsc::sync_channel(COMMAND_QUEUE);
         let server = session_key.to_owned();
         let origin = std::sync::Arc::new(());
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_requested = Default::default();
         let events = EventSender {
+            stop_requested: std::sync::Arc::clone(&stop_requested),
+            cancelled: cancelled.clone(),
             channel: self.events.clone(),
             commands: sender.clone(),
             context: EditContext {
@@ -173,21 +178,22 @@ impl LspService {
                 server: server.clone().into(),
                 encoding: PositionEncoding::Utf16,
                 diagnostic_ambiguous: false,
+                disk: None,
                 sources: std::sync::Arc::new(HashMap::new()),
             },
         };
         // Canonical preflight pins the executable identity, but multicall and
         // rustup proxy binaries still dispatch from the requested argv[0].
         let executable_name = requested_executable_name(definition);
-        send_event(
-            &events,
-            LspEvent::Starting {
-                server: server.clone(),
-            },
-        );
         let thread = thread::Builder::new()
             .name(format!("dust-lsp-{server}"))
             .spawn(move || {
+                send_event(
+                    &events,
+                    LspEvent::Starting {
+                        server: server.clone(),
+                    },
+                );
                 run_session(
                     server,
                     executable,
@@ -210,6 +216,8 @@ impl LspService {
                 sender,
                 origin,
                 thread: Some(thread),
+                cancelled,
+                stop_requested,
             },
         );
         Ok(())
@@ -326,11 +334,25 @@ impl LspService {
             .sessions
             .remove(server)
             .ok_or_else(|| LspError::NotRunning(server.into()))?;
-        let _ = session.sender.try_send(SessionCommand::Stop);
-        if let Some(thread) = session.thread.take() {
-            let _ = thread.join();
-        }
+        session
+            .stop_requested
+            .store(true, std::sync::atomic::Ordering::Release);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            session
+                .cancelled
+                .store(true, std::sync::atomic::Ordering::Release);
+            if let Some(thread) = session.thread.take() {
+                let _ = thread.join();
+            }
+        });
         Ok(())
+    }
+
+    pub(crate) fn begin_shutdown(&mut self) {
+        for server in self.sessions.keys().cloned().collect::<Vec<_>>() {
+            let _ = self.stop(&server);
+        }
     }
 
     #[must_use]
@@ -431,7 +453,7 @@ pub(super) fn run_session(
             return;
         }
     };
-    let Some(mut stdin) = child.stdin.take() else {
+    let Some(stdin) = child.stdin.take() else {
         fail_child(
             &mut child,
             &events,
@@ -450,44 +472,75 @@ pub(super) fn run_session(
         return;
     };
     let stderr = child.stderr.take();
+    let cancelled = events.cancelled.clone();
+    struct Cancel(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Cancel {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let _cancel = Cancel(cancelled.clone());
+    let pipes = (|| {
+        Ok::<_, std::io::Error>((
+            crate::process::CancellablePipe::new(stdin, cancelled.clone())?,
+            crate::process::CancellablePipe::new(stdout, cancelled.clone())?,
+            stderr
+                .map(|pipe| crate::process::CancellablePipe::new(pipe, cancelled.clone()))
+                .transpose()?,
+        ))
+    })();
+    let (mut stdin, stdout, stderr) = match pipes {
+        Ok(pipes) => pipes,
+        Err(error) => {
+            fail_child(&mut child, &events, &server, &error.to_string());
+            return;
+        }
+    };
     let (messages, message_receiver) = mpsc::sync_channel(MESSAGE_QUEUE);
-    // Neither pipe reader is ever joined. They end at end of file, which a daemon the server
-    // started and left holding its pipes, as Biome's does, can put off for as long as it lives.
-    thread::spawn(move || {
+    let reader_cancelled = cancelled.clone();
+    let reader = thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
-            let message = match read_content_length_message(&mut reader) {
+            let mut message = match read_content_length_message(&mut reader) {
                 Ok(Some(message)) => Ok(message),
                 Ok(None) => break,
                 Err(error) => Err(error.to_string()),
             };
-            if messages.try_send(message).is_err() {
-                break;
+            loop {
+                if reader_cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+                match messages.try_send(message) {
+                    Ok(()) => break,
+                    Err(TrySendError::Full(value)) => {
+                        message = value;
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(TrySendError::Disconnected(_)) => return,
+                }
             }
         }
     });
-    if let Some(stderr) = stderr {
+    let log_reader = stderr.map(|stderr| {
         let events = events.clone();
         let server = server.clone();
         thread::spawn(move || {
-            for line in BufReader::new(stderr)
-                .lines()
-                .take(policy.maximum_log_lines.min(MAX_LOG_LINES))
-            {
+            for (index, line) in BufReader::new(stderr).lines().enumerate() {
                 let Ok(line) = line else {
                     break;
                 };
-                let message = sanitize_log(&line, MAX_LOG_LINE_BYTES);
-                send_event(
-                    &events,
-                    LspEvent::Log {
-                        server: server.clone(),
-                        message,
-                    },
-                );
+                if index < policy.maximum_log_lines.min(MAX_LOG_LINES) {
+                    send_event(
+                        &events,
+                        LspEvent::Log {
+                            server: server.clone(),
+                            message: sanitize_log(&line, MAX_LOG_LINE_BYTES),
+                        },
+                    );
+                }
             }
-        });
-    }
+        })
+    });
 
     let initialize = initialize_message(&root, configuration.initialization_options.as_ref());
     if let Err(error) = write_content_length_message(&mut stdin, &initialize) {
@@ -506,7 +559,7 @@ pub(super) fn run_session(
     let mut initialized = false;
     let mut capabilities = LspCapabilities::default();
     let mut base_capabilities = LspCapabilities::default();
-    let mut dynamic_registrations = HashMap::<String, String>::new();
+    let mut dynamic_registrations = HashMap::<String, (String, Value)>::new();
     let mut documents = HashMap::<String, LspDocument>::new();
     let mut document_sources = HashMap::new();
     let mut diagnostic_lineage = super::origins::DiagnosticLineage::default();
@@ -528,40 +581,55 @@ pub(super) fn run_session(
             .request_timeout
             .clamp(Duration::from_secs(1), Duration::from_secs(60));
 
-    while !stopping {
+    while !stopping && !cancelled.load(std::sync::atomic::Ordering::Acquire) {
         loop {
             match commands.try_recv() {
-                Ok(command) => handle_command(
-                    command,
-                    &server,
-                    &root,
-                    &executable,
-                    &mut stdin,
-                    initialized,
-                    &capabilities,
-                    &mut documents,
-                    &mut document_sources,
-                    &mut diagnostic_lineage,
-                    &mut apply_requests,
-                    &mut opened_documents,
-                    &mut pending,
-                    &mut next_request_id,
-                    policy.request_timeout.min(Duration::from_secs(60)),
-                    logs.len(),
-                    &events,
-                    &mut stopping,
-                    &mut configuration,
-                ),
-                Err(TryRecvError::Empty) => break,
+                Ok(command) if !cancelled.load(std::sync::atomic::Ordering::Acquire) => {
+                    handle_command(
+                        command,
+                        &server,
+                        &root,
+                        &executable,
+                        &mut stdin,
+                        initialized,
+                        &capabilities,
+                        &mut documents,
+                        &mut document_sources,
+                        &mut diagnostic_lineage,
+                        &mut apply_requests,
+                        &mut opened_documents,
+                        &mut pending,
+                        &mut next_request_id,
+                        policy.request_timeout.min(Duration::from_secs(60)),
+                        logs.len(),
+                        &events,
+                        &mut stopping,
+                        &mut configuration,
+                    )
+                }
+                Ok(_) | Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     stopping = true;
                     break;
                 }
             }
+            if stopping {
+                break;
+            }
+        }
+        if stopping
+            || events
+                .stop_requested
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            break;
         }
         match message_receiver.recv_timeout(Duration::from_millis(10)) {
             Ok(Ok(message)) => {
-                if message.get("id").and_then(Value::as_i64) == Some(1) && !initialized {
+                if message.get("method").is_none()
+                    && message.get("id").and_then(Value::as_i64) == Some(1)
+                    && !initialized
+                {
                     match initialize_capabilities(message.get("result")) {
                         Ok(negotiated) => {
                             base_capabilities = negotiated.clone();
@@ -611,6 +679,7 @@ pub(super) fn run_session(
                     handle_server_message(
                         ServerMessageContext {
                             server: &server,
+                            root: &root,
                             stdin: &mut stdin,
                             events: &events,
                             logs: &mut logs,
@@ -625,10 +694,10 @@ pub(super) fn run_session(
                         },
                         &message,
                     );
-                } else if let Some(id) = message.get("id").and_then(Value::as_i64) {
-                    if let Some(request) = pending.remove(&id) {
-                        handle_response(&server, request, message, &events);
-                    }
+                } else if let Some(id) = message.get("id").and_then(Value::as_i64)
+                    && let Some(request) = pending.remove(&id)
+                {
+                    handle_response(&server, request, message, &events);
                 }
             }
             Ok(Err(error)) => {
@@ -698,13 +767,10 @@ pub(super) fn run_session(
             stopping = true;
         }
     }
-    for id in pending.keys() {
-        send_cancel(&mut stdin, *id);
-    }
-    for uri in opened_documents {
-        send_close(&mut stdin, &uri);
-    }
-    if initialized {
+    if initialized && !cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        for uri in opened_documents {
+            send_close(&mut stdin, &uri);
+        }
         let _ = write_content_length_message(
             &mut stdin,
             &json!({"jsonrpc":"2.0","id":next_request_id,"method":"shutdown","params":null}),
@@ -714,8 +780,22 @@ pub(super) fn run_session(
             &json!({"jsonrpc":"2.0","method":"exit","params":null}),
         );
     }
+    if events
+        .stop_requested
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        let deadline = Instant::now() + Duration::from_millis(200);
+        while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    cancelled.store(true, std::sync::atomic::Ordering::Release);
     let _ = child.kill();
     let _ = child.wait();
+    let _ = reader.join();
+    if let Some(reader) = log_reader {
+        let _ = reader.join();
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -724,7 +804,7 @@ pub(super) fn handle_command(
     server: &str,
     root: &Path,
     executable: &Path,
-    stdin: &mut ChildStdin,
+    stdin: &mut impl std::io::Write,
     initialized: bool,
     capabilities: &LspCapabilities,
     documents: &mut HashMap<String, LspDocument>,
@@ -746,6 +826,24 @@ pub(super) fn handle_command(
     let command = match command {
         SessionCommand::SyncOwned { document, source } => {
             diagnostic_lineage.observe(document.uri(), &source);
+            if diagnostic_lineage.ambiguous(&document.uri()) {
+                let events = EventSender {
+                    context: EditContext {
+                        diagnostic_ambiguous: true,
+                        ..events.context.clone()
+                    },
+                    ..events.clone()
+                };
+                send_event(
+                    &events,
+                    LspEvent::Stopped {
+                        server: server.into(),
+                        success: true,
+                    },
+                );
+                *stopping = true;
+                return;
+            }
             document_sources.insert(document.uri(), source);
             SessionCommand::Sync(document)
         }
@@ -877,7 +975,25 @@ pub(super) fn handle_command(
             let message = json!({
                 "jsonrpc":"2.0", "id":id, "method":feature.method(), "params":params
             });
-            if write_content_length_message(stdin, &message).is_ok() {
+            if let Err(error) = write_content_length_message(stdin, &message) {
+                send_event(
+                    events,
+                    LspEvent::RequestFailed {
+                        server: server.into(),
+                        generation,
+                        method: feature.method().into(),
+                        message: error.to_string(),
+                    },
+                );
+                send_event(
+                    events,
+                    LspEvent::Failed {
+                        server: server.into(),
+                        message: format!("language server request write failed: {error}"),
+                    },
+                );
+                *stopping = true;
+            } else {
                 let edit_sources = if matches!(
                     feature,
                     LspFeature::Rename { .. }
@@ -970,12 +1086,11 @@ pub(super) fn handle_command(
                 },
             },
         ),
-        SessionCommand::Stop => *stopping = true,
     }
 }
 
 fn write_apply_response(
-    stdin: &mut ChildStdin,
+    stdin: &mut impl std::io::Write,
     request_id: ServerRequestId,
     applied: bool,
     reason: Option<String>,
@@ -1000,10 +1115,24 @@ impl LspService {
         source: (crate::editor::BufferId, crate::editor::text::TextVersion),
         encoding: PositionEncoding,
     ) -> super::origins::EditSourceFixture {
-        let (sender, commands) = mpsc::sync_channel(1);
+        self.replace_edit_source_fixture_for("owned-edit-fixture", uri, source, encoding, 1)
+    }
+    pub(crate) fn replace_edit_source_fixture_for(
+        &mut self,
+        server: &str,
+        uri: String,
+        source: (crate::editor::BufferId, crate::editor::text::TextVersion),
+        encoding: PositionEncoding,
+        capacity: usize,
+    ) -> super::origins::EditSourceFixture {
+        let (sender, commands) = mpsc::sync_channel(capacity);
         let origin = std::sync::Arc::new(());
-        let server = "owned-edit-fixture".to_owned();
+        let server = server.to_owned();
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_requested = Default::default();
         let events = EventSender {
+            stop_requested: std::sync::Arc::clone(&stop_requested),
+            cancelled: cancelled.clone(),
             channel: self.events.clone(),
             commands: sender.clone(),
             context: EditContext {
@@ -1011,6 +1140,7 @@ impl LspService {
                 server: server.clone().into(),
                 encoding,
                 diagnostic_ambiguous: false,
+                disk: None,
                 sources: std::sync::Arc::new(HashMap::from([(uri, source)])),
             },
         };
@@ -1020,6 +1150,8 @@ impl LspService {
                 sender,
                 origin,
                 thread: None,
+                cancelled,
+                stop_requested,
             },
         );
         super::origins::EditSourceFixture {
@@ -1027,5 +1159,79 @@ impl LspService {
             commands,
             pending: HashMap::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod lineage_tests {
+    use super::*;
+    #[test]
+    fn reopening_a_document_retires_the_old_diagnostic_transport() {
+        use crate::editor::{EditorState, text::TextBuffer};
+        let mut editor = EditorState::new("/fixture".into());
+        let first = TextBuffer::from_text("first");
+        let (buffer, _) = editor.open_text(first.clone(), Some("/fixture/main.rs".into()));
+        let document = LspDocument {
+            path: "/fixture/main.rs".into(),
+            language_id: "rust".into(),
+            version: 0,
+            text: "first".into(),
+        };
+        let mut service = LspService::new();
+        let endpoint = service.replace_edit_source_fixture(
+            document.uri(),
+            (buffer, first.source_version()),
+            PositionEncoding::Utf16,
+        );
+        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut documents = HashMap::new();
+        let mut sources = HashMap::new();
+        let mut opened = HashSet::new();
+        let mut pending = HashMap::new();
+        let mut apply = HashMap::new();
+        let mut stopping = false;
+        let mut next = 2;
+        let mut config = LspServerConfiguration::standard();
+        let mut sink = Vec::new();
+        for command in [
+            SessionCommand::SyncOwned {
+                document: document.clone(),
+                source: (buffer, first.source_version()),
+            },
+            SessionCommand::Close(document.uri()),
+            SessionCommand::SyncOwned {
+                document,
+                source: (buffer, TextBuffer::from_text("second").source_version()),
+            },
+        ] {
+            handle_command(
+                command,
+                "owned-edit-fixture",
+                Path::new("/fixture"),
+                Path::new("/server"),
+                &mut sink,
+                true,
+                &LspCapabilities::default(),
+                &mut documents,
+                &mut sources,
+                &mut lineage,
+                &mut apply,
+                &mut opened,
+                &mut pending,
+                &mut next,
+                Duration::from_secs(1),
+                0,
+                &endpoint.events,
+                &mut stopping,
+                &mut config,
+            );
+        }
+        assert!(stopping);
+        let event = service.try_owned_event().unwrap();
+        assert!(matches!(
+            event.event,
+            LspEvent::Stopped { success: true, .. }
+        ));
+        assert!(event.context.diagnostic_ambiguous());
     }
 }

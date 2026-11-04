@@ -317,12 +317,10 @@ impl ExplorerSession {
                 .as_ref()
                 .is_some_and(|key| Arc::ptr_eq(key, &intent.key))
                 && matches!(intent.phase, Phase::Admitting | Phase::Preparing(_))
-        }) {
-            if let Some(intent) = self.mutation.take() {
-                if let Phase::Preparing(id) = intent.phase {
-                    ids.push(id);
-                }
-            }
+        }) && let Some(intent) = self.mutation.take()
+            && let Phase::Preparing(id) = intent.phase
+        {
+            ids.push(id);
         }
         ids
     }
@@ -351,7 +349,10 @@ impl ExplorerSession {
         let notice = format!(
             "{} `{}`; select a destination and press p",
             if cut { "moving" } else { "copied" },
-            path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned()
+            )
         );
         self.clipboard = Some((path, cut, scope));
         Ok(notice)
@@ -496,14 +497,13 @@ impl ExplorerSession {
                 Some(update)
             }
             (ExplorerIoReply::Applied { result: Ok(()), .. }, Phase::Applying(_)) => {
-                if let ExplorerMutation::Rename { source, .. } = &intent.operation {
-                    if self
+                if let ExplorerMutation::Rename { source, .. } = &intent.operation
+                    && self
                         .clipboard
                         .as_ref()
                         .is_some_and(|(path, cut, _)| *cut && path == source)
-                    {
-                        self.clipboard = None;
-                    }
+                {
+                    self.clipboard = None;
                 }
                 Some(MutationUpdate::Complete {
                     operation: intent.operation,
@@ -594,16 +594,15 @@ impl ExplorerSession {
             .mutation
             .as_ref()
             .is_some_and(|intent| !self.mutation_current(intent, &scope, configuration, editor))
+            && let Some(intent) = self.mutation.take()
         {
-            if let Some(intent) = self.mutation.take() {
-                match intent.phase {
-                    Phase::Preparing(id) => ids.push(id),
-                    Phase::Applying(id) => {
-                        ids.push(id);
-                        may_write = true;
-                    }
-                    _ => {}
+            match intent.phase {
+                Phase::Preparing(id) => ids.push(id),
+                Phase::Applying(id) => {
+                    ids.push(id);
+                    may_write = true;
                 }
+                _ => {}
             }
         }
         if self.open.as_ref().is_some_and(|open| {
@@ -611,12 +610,10 @@ impl ExplorerSession {
                 || open.source != (scope, configuration)
                 || !open.editor.same_editor(editor)
                 || editor.revision().is_none()
-        }) {
-            if let Some(open) = self.open.take() {
-                if let Some((id, _)) = open.read {
-                    ids.push(id);
-                }
-            }
+        }) && let Some(open) = self.open.take()
+            && let Some((id, _)) = open.read
+        {
+            ids.push(id);
         }
         (ids, may_write)
     }
@@ -629,10 +626,10 @@ impl ExplorerSession {
     }
     pub(in crate::editor::session) fn retire_intents(&mut self) -> (Vec<RequestId>, bool) {
         let mut ids = self.cancel_rename();
-        if let Some(open) = self.open.take() {
-            if let Some((id, _)) = open.read {
-                ids.push(id);
-            }
+        if let Some(open) = self.open.take()
+            && let Some((id, _)) = open.read
+        {
+            ids.push(id);
         }
         let mut may_write = false;
         if let Some(intent) = self.mutation.take() {

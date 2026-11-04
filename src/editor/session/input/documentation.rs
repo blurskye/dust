@@ -1,13 +1,12 @@
 use super::InputSession;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::{
-    config::DocumentationPopupConfig,
     editor::text::ByteRange,
     ui::{
-        DocumentationMarkupKind, DocumentationPopupKind,
-        DocumentationPopupState, DocumentationSection,
+        DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
+        DocumentationSection,
     },
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Hover and completion documentation is cut to these bounds before it is laid out.
 pub(crate) const DOCUMENTATION_MAXIMUM_SECTIONS: usize = 16;
@@ -29,9 +28,10 @@ impl InputSession {
         direction: isize,
         step: usize,
         visible_rows: usize,
+        total_rows: usize,
     ) {
         if let Some(popup) = &mut self.documentation {
-            let maximum = popup.line_count().saturating_sub(visible_rows.max(1));
+            let maximum = total_rows.saturating_sub(visible_rows.max(1));
             popup.scroll = if direction < 0 {
                 popup.scroll.saturating_sub(step)
             } else {
@@ -39,6 +39,7 @@ impl InputSession {
             };
         }
     }
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::editor::session) fn present_documentation(
         &mut self,
         kind: DocumentationPopupKind,
@@ -46,9 +47,10 @@ impl InputSession {
         provider: String,
         source_range: Option<ByteRange>,
         source_sections: impl IntoIterator<Item = (DocumentationMarkupKind, String)>,
-        policy: &DocumentationPopupConfig,
+        config: &crate::config::Config,
         text_width: usize,
     ) {
+        let policy = &config.ui.documentation_popup;
         self.capture_changed();
         if !policy.enabled {
             self.documentation = None;
@@ -57,7 +59,10 @@ impl InputSession {
         let mut remaining_lines = DOCUMENTATION_MAXIMUM_LINES;
         let mut remaining_bytes = DOCUMENTATION_MAXIMUM_BYTES;
         let mut sections = Vec::new();
-        for (markup, value) in source_sections.into_iter().take(DOCUMENTATION_MAXIMUM_SECTIONS) {
+        for (markup, value) in source_sections
+            .into_iter()
+            .take(DOCUMENTATION_MAXIMUM_SECTIONS)
+        {
             if remaining_lines == 0 || remaining_bytes == 0 {
                 break;
             }
@@ -66,7 +71,7 @@ impl InputSession {
             let mut spans = Vec::new();
             let markdown = markup == DocumentationMarkupKind::Markdown;
             let source_rows = if markdown {
-                markdown_rows(&normalized, text_width)
+                markdown_rows(&normalized, text_width, config.editor.ambiguous_width)
             } else {
                 normalized
                     .split('\n')
@@ -90,7 +95,20 @@ impl InputSession {
                 remaining_bytes = remaining_bytes.saturating_sub(end);
                 // Markdown is laid out already and diffs keep their lines; plain prose fits the
                 // popup.
-                let rows = if !markdown && kind != DocumentationPopupKind::Git {
+                let rows = if kind == DocumentationPopupKind::Git {
+                    let mut rows = Vec::new();
+                    let mut row = String::new();
+                    for character in sanitized[..end].chars() {
+                        if !row.is_empty()
+                            && row.width() + character.width().unwrap_or(0) > text_width.max(1)
+                        {
+                            rows.push(std::mem::take(&mut row));
+                        }
+                        row.push(character);
+                    }
+                    rows.push(row);
+                    rows
+                } else if !markdown {
                     wrap_prose(&sanitized[..end], text_width)
                 } else {
                     vec![sanitized[..end].to_owned()]
@@ -130,18 +148,31 @@ impl InputSession {
 }
 
 /// A display row and its styled runs, as byte ranges in the row.
-type StyledRow = (String, Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>);
+type StyledRow = (
+    String,
+    Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>,
+);
 
 /// Markdown rendered as the agent transcript is, one row per line. Control characters and the
 /// base64 badge images language servers put in hovers are dropped first.
-fn markdown_rows(source: &str, width: usize) -> Vec<StyledRow> {
+fn markdown_rows(
+    source: &str,
+    width: usize,
+    ambiguous_width: crate::config::AmbiguousWidth,
+) -> Vec<StyledRow> {
     let clean = source
         .split('\n')
         .map(without_data_images)
         .collect::<Vec<_>>()
         .join("\n")
-        .replace(|character: char| character.is_control() && !matches!(character, '\n' | '\t'), "");
-    let mut styled = crate::ui::markdown::Styled::default();
+        .replace(
+            |character: char| character.is_control() && !matches!(character, '\n' | '\t'),
+            "",
+        );
+    let mut styled = crate::ui::markdown::Styled {
+        ambiguous_width,
+        ..Default::default()
+    };
     crate::ui::markdown::render_compact(&mut styled, &clean, width);
     let mut rows = Vec::new();
     let mut start = 0;
@@ -152,14 +183,20 @@ fn markdown_rows(source: &str, width: usize) -> Vec<StyledRow> {
             .iter()
             .filter(|(span, _)| span.start < range.end && span.end > range.start)
             .map(|(span, role)| {
-                (span.start.max(range.start) - start..span.end.min(range.end) - start, *role)
+                (
+                    span.start.max(range.start) - start..span.end.min(range.end) - start,
+                    *role,
+                )
             })
             .collect();
         rows.push((line.to_owned(), spans));
         start = range.end + 1;
     }
     // The renderer ends every block with a newline.
-    if rows.last().is_some_and(|(line, _): &StyledRow| line.is_empty()) {
+    if rows
+        .last()
+        .is_some_and(|(line, _): &StyledRow| line.is_empty())
+    {
         rows.pop();
     }
     rows
@@ -221,14 +258,25 @@ mod tests {
             "# Title\n*em* and `code` &lt;T&gt; ~~gone~~\n- [x] done\n\
              ![badge](data:image/svg+xml;base64,AA==) 2 * 3\nOther\n=====",
             40,
+            crate::config::AmbiguousWidth::Narrow,
         );
-        let text = rows.iter().map(|(line, _)| line.as_str()).collect::<Vec<_>>();
-        assert_eq!(text, ["Title", "em and code <T> gone", "✓ done", " 2 * 3", "Other"]);
+        let text = rows
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            text,
+            ["Title", "em and code <T> gone", "✓ done", " 2 * 3", "Other"]
+        );
         assert_eq!(rows[4].1, [(0..5, Highlight::HEADING)]);
         assert_eq!(rows[0].1, [(0..5, Highlight::HEADING)]);
         assert_eq!(
             rows[1].1,
-            [(0..2, Highlight::ITALIC), (7..11, Highlight::RAW), (16..20, Highlight::STRIKETHROUGH)]
+            [
+                (0..2, Highlight::ITALIC),
+                (7..11, Highlight::RAW),
+                (16..20, Highlight::STRIKETHROUGH)
+            ]
         );
     }
 
@@ -239,5 +287,24 @@ mod tests {
         assert_eq!(wrap_prose("one two three", 7), ["one two", "three"]);
         assert_eq!(wrap_prose("  one two", 5), ["  one", "  two"]);
         assert_eq!(wrap_prose("unbreakable x", 6), ["unbrea", "kable", "x"]);
+    }
+    #[test]
+    fn long_git_lines_store_scrollable_wrapped_rows() {
+        let mut input = super::InputSession::new(100);
+        let text = format!("+{}", "x".repeat(1000));
+        input.present_documentation(
+            super::DocumentationPopupKind::Git,
+            "hunk".into(),
+            String::new(),
+            None,
+            [(super::DocumentationMarkupKind::PlainText, text.clone())],
+            &crate::config::load_bundled_config().config,
+            40,
+        );
+        let popup = input.documentation().unwrap();
+        assert!(popup.line_count() > 20);
+        assert_eq!(popup.sections[0].lines.concat(), text);
+        input.scroll_documentation(1, 10, 10, input.documentation().unwrap().line_count());
+        assert_eq!(input.documentation().unwrap().scroll, 10);
     }
 }

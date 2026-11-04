@@ -32,8 +32,8 @@ use nix::{
 };
 
 use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle};
-use crate::language::syntax::Highlight;
 use crate::editor::input::{KeyCode, KeyEvent, Modifiers};
+use crate::language::syntax::Highlight;
 use thiserror::Error;
 
 use crate::ui::{Frame, Style};
@@ -44,13 +44,14 @@ fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let value = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |value, (index, byte)| value | u32::from(*byte) << (16 - 8 * index));
+        let value = chunk.iter().enumerate().fold(0u32, |value, (index, byte)| {
+            value | u32::from(*byte) << (16 - 8 * index)
+        });
         for index in 0..4 {
             if index <= chunk.len() {
-                out.push(char::from(ALPHABET[(value >> (18 - 6 * index) & 63) as usize]));
+                out.push(char::from(
+                    ALPHABET[(value >> (18 - 6 * index) & 63) as usize],
+                ));
             } else {
                 out.push('=');
             }
@@ -84,6 +85,7 @@ pub struct TerminalSession {
     input: Option<File>,
     /// crossterm may still hold keys it parsed in its last read.
     buffered: Cell<bool>,
+    enhanced_keyboard: bool,
     previous: Option<Frame>,
     options: TerminalOptions,
     theme: ThemeConfig,
@@ -128,6 +130,8 @@ impl TerminalSession {
             let _ = restore_terminal(&mut stdout);
             return Err(TerminalError::Io(error));
         }
+        event::poll(Duration::ZERO)?;
+        let enhanced_keyboard = terminal::supports_keyboard_enhancement().unwrap_or(false);
         let (color_tier, color_source) = configured_color_tier(options.color_mode);
         Ok(Self {
             stdout,
@@ -137,6 +141,7 @@ impl TerminalSession {
                 File::open("/dev/tty").ok()
             },
             buffered: Cell::new(false),
+            enhanced_keyboard,
             previous: None,
             options,
             theme,
@@ -216,24 +221,25 @@ impl TerminalSession {
         // full millisecond, and is asked again after every key: several keys can arrive in
         // one read, and the rest would otherwise wait for the next keypress.
         const READ: Duration = Duration::from_millis(1);
-        if !self.buffered.get() && !self.wait_for_input(timeout)? {
-            return Ok(None);
+        if !self.buffered.get() {
+            self.wait_for_input(timeout)?;
         }
+        // SIGWINCH may be delivered to another thread, leaving crossterm's signal pipe
+        // ready without interrupting the stdin wait. Check it even after a timeout.
         loop {
             if !event::poll(READ)? {
                 self.buffered.set(false);
                 return Ok(None);
             }
             self.buffered.set(true);
-            if let Some(event) = normalize_event(event::read()?) {
+            if let Some(event) = normalize_keyboard_event(event::read()?, !self.enhanced_keyboard) {
                 return Ok(Some(event));
             }
         }
     }
 
-    /// Wait until the terminal has input or a signal arrives; a resize comes as SIGWINCH,
-    /// which crossterm turns into an event.
-    fn wait_for_input(&self, timeout: Duration) -> io::Result<bool> {
+    /// Wait for terminal input; crossterm's pending signals are checked afterwards.
+    fn wait_for_input(&self, timeout: Duration) -> io::Result<()> {
         let stdin = io::stdin();
         let terminal = match &self.input {
             Some(tty) => tty.as_fd(),
@@ -242,8 +248,7 @@ impl TerminalSession {
         let timeout =
             PollTimeout::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(PollTimeout::MAX);
         match poll(&mut [PollFd::new(terminal, PollFlags::POLLIN)], timeout) {
-            Ok(ready) => Ok(ready > 0),
-            Err(Errno::EINTR) => Ok(true),
+            Ok(_) | Err(Errno::EINTR) => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
@@ -326,7 +331,11 @@ fn queue_frame(
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = execute!(self.stdout, EndSynchronizedUpdate, PopKeyboardEnhancementFlags);
+        let _ = execute!(
+            self.stdout,
+            EndSynchronizedUpdate,
+            PopKeyboardEnhancementFlags
+        );
         if self.options.mouse {
             let _ = execute!(self.stdout, DisableMouseCapture);
         }
@@ -696,6 +705,10 @@ pub enum UiEvent {
 
 #[must_use]
 pub fn normalize_event(event: Event) -> Option<UiEvent> {
+    normalize_keyboard_event(event, false)
+}
+
+fn normalize_keyboard_event(event: Event, legacy: bool) -> Option<UiEvent> {
     match event {
         Event::Key(key) => {
             let code = match key.code {
@@ -704,10 +717,10 @@ pub fn normalize_event(event: Event) -> Option<UiEvent> {
                 // Ctrl+4 and Ctrl+7; restore the conventional logical keys so
                 // configurable bindings behave the same with and without an
                 // enhanced keyboard protocol.
-                CtKeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                CtKeyCode::Char('4') if legacy && key.modifiers.contains(KeyModifiers::CONTROL) => {
                     KeyCode::Char('\\')
                 }
-                CtKeyCode::Char('7') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                CtKeyCode::Char('7') if legacy && key.modifiers.contains(KeyModifiers::CONTROL) => {
                     KeyCode::Char('/')
                 }
                 CtKeyCode::Char(character) => KeyCode::Char(character),
@@ -803,6 +816,86 @@ mod tests {
         ColorTier, KeyInputKind, UiEvent, configured_color_tier, normalize_event, queue_style,
         terminal_color, tier_color,
     };
+
+    #[test]
+    fn resize_events_are_serviced_without_tty_input() {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+
+        if std::env::var_os("DUST_TEST_RESIZE_CHILD").is_some() {
+            let terminal = super::TerminalSession::enter(
+                super::TerminalOptions {
+                    color_mode: crate::config::ColorMode::Ansi16,
+                    alternate_screen: false,
+                    bracketed_paste: false,
+                    focus_events: false,
+                    mouse: false,
+                },
+                crate::config::load_bundled_config().theme,
+            )
+            .unwrap();
+            print!("resize-ready");
+            std::io::stdout().flush().unwrap();
+            // Let SIGWINCH queue the event before the tty readiness wait starts.
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(
+                terminal.poll_event(Duration::from_millis(50)).unwrap(),
+                Some(UiEvent::Resize(120, 40))
+            );
+            return;
+        }
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "ui::terminal::tests::resize_events_are_serviced_without_tty_input",
+            "--nocapture",
+        ]);
+        command.env("DUST_TEST_RESIZE_CHILD", "1");
+        command.env("TERM", "xterm-256color");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let mut output = pair.master.try_clone_reader().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            let mut byte = [0];
+            while output.read(&mut byte).is_ok_and(|count| count != 0) {
+                text.push(char::from(byte[0]));
+                if text.ends_with("resize-ready") {
+                    let _ = sender.send(());
+                    break;
+                }
+            }
+        });
+        receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        pair.master
+            .resize(PtySize {
+                rows: 40,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "{status:?}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "resize child timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
 
     #[test]
     fn base64_matches_the_standard_alphabet_and_padding() {
@@ -990,7 +1083,10 @@ mod tests {
             ColorTier::TrueColor,
         )
         .expect("queue reversed style");
-        let (text, background) = (&theme.styles.terminal_text, &theme.styles.terminal_background);
+        let (text, background) = (
+            &theme.styles.terminal_text,
+            &theme.styles.terminal_background,
+        );
         let mut swapped = Vec::new();
         crossterm::queue!(
             swapped,
@@ -1059,15 +1155,29 @@ mod tests {
     }
 
     #[test]
+    fn enhanced_control_digits_keep_their_identity() {
+        for digit in ['4', '7'] {
+            let event = normalize_event(Event::Key(KeyEvent::new(
+                KeyCode::Char(digit),
+                KeyModifiers::CONTROL,
+            )));
+            assert!(
+                matches!(event, Some(UiEvent::Key { key: crate::editor::input::KeyEvent { code: DustKeyCode::Char(c), .. }, .. }) if c == digit)
+            );
+        }
+    }
+
+    #[test]
     fn legacy_terminal_control_bytes_normalize_to_slash_and_backslash() {
-        let slash = normalize_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('7'),
-            KeyModifiers::CONTROL,
-        )));
-        let backslash = normalize_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('4'),
-            KeyModifiers::CONTROL,
-        )));
+        use super::normalize_keyboard_event;
+        let slash = normalize_keyboard_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::CONTROL)),
+            true,
+        );
+        let backslash = normalize_keyboard_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL)),
+            true,
+        );
         assert_eq!(
             slash,
             Some(UiEvent::Key {

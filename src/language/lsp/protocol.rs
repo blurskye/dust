@@ -1,4 +1,4 @@
-use std::{path::Path, process::ChildStdin};
+use std::path::Path;
 
 use serde_json::{Value, json};
 
@@ -11,10 +11,10 @@ use super::{
     MAX_LOG_LINE_BYTES,
     markdown::sanitize_markdown,
     model::{
-        LspCapabilities, LspCodeAction, LspCodeLens, LspCommand, LspCompletionItem, LspDiagnostic, LspDocument,
-        LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHover, LspInlayHint,
-        LspLocation, LspMarkupContent, LspMarkupKind, LspPosition, LspProgressKind,
-        LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
+        LspCapabilities, LspCodeAction, LspCodeLens, LspColor, LspCommand, LspCompletionItem,
+        LspDiagnostic, LspDocument, LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult,
+        LspHover, LspInlayHint, LspLocation, LspMarkupContent, LspMarkupKind, LspPosition,
+        LspProgressKind, LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
         LspSemanticTokenEdit, LspSemanticTokens, LspSymbol, LspTextEdit, LspWorkspaceEdit,
         SyncKind,
     },
@@ -118,7 +118,13 @@ pub(super) fn initialize_capabilities(result: Option<&Value>) -> Result<LspCapab
         range_formatting: capability(capabilities, "documentRangeFormattingProvider"),
         code_action: capability(capabilities, "codeActionProvider"),
         execute_command: capability(capabilities, "executeCommandProvider"),
-        semantic_tokens: capability(capabilities, "semanticTokensProvider"),
+        semantic_tokens: capabilities
+            .pointer("/semanticTokensProvider/full")
+            .is_some_and(|v| v == &Value::Bool(true) || v.is_object()),
+        semantic_tokens_delta: capabilities
+            .pointer("/semanticTokensProvider/full/delta")
+            .and_then(Value::as_bool)
+            == Some(true),
         inlay_hints: capability(capabilities, "inlayHintProvider"),
         pull_diagnostics: capability(capabilities, "diagnosticProvider"),
         code_lens: capability(capabilities, "codeLensProvider"),
@@ -146,7 +152,7 @@ pub(super) fn capability(capabilities: &Value, key: &str) -> bool {
     }
 }
 
-pub(super) fn send_open(stdin: &mut ChildStdin, document: &LspDocument) {
+pub(super) fn send_open(stdin: &mut (impl std::io::Write + ?Sized), document: &LspDocument) {
     let _ = write_content_length_message(
         stdin,
         &json!({
@@ -157,7 +163,7 @@ pub(super) fn send_open(stdin: &mut ChildStdin, document: &LspDocument) {
 }
 
 pub(super) fn send_change(
-    stdin: &mut ChildStdin,
+    stdin: &mut (impl std::io::Write + ?Sized),
     previous: Option<&LspDocument>,
     document: &LspDocument,
     capabilities: &LspCapabilities,
@@ -236,7 +242,7 @@ pub(super) fn protocol_units(text: &str, encoding: PositionEncoding) -> usize {
     }
 }
 
-pub(super) fn send_save(stdin: &mut ChildStdin, document: &LspDocument) {
+pub(super) fn send_save(stdin: &mut (impl std::io::Write + ?Sized), document: &LspDocument) {
     let _ = write_content_length_message(
         stdin,
         &json!({
@@ -246,7 +252,7 @@ pub(super) fn send_save(stdin: &mut ChildStdin, document: &LspDocument) {
     );
 }
 
-pub(super) fn send_close(stdin: &mut ChildStdin, uri: &str) {
+pub(super) fn send_close(stdin: &mut (impl std::io::Write + ?Sized), uri: &str) {
     let _ = write_content_length_message(
         stdin,
         &json!({
@@ -255,7 +261,7 @@ pub(super) fn send_close(stdin: &mut ChildStdin, uri: &str) {
     );
 }
 
-pub(super) fn send_cancel(stdin: &mut ChildStdin, id: i64) {
+pub(super) fn send_cancel(stdin: &mut (impl std::io::Write + ?Sized), id: i64) {
     let _ = write_content_length_message(
         stdin,
         &json!({
@@ -321,7 +327,9 @@ fn diagnostic_json(diagnostic: &LspDiagnostic) -> Value {
     }
     if let Some(code) = &diagnostic.code {
         // TypeScript matches its fixes on the number it sent.
-        value["code"] = code.parse::<i64>().map_or_else(|_| json!(code), |code| json!(code));
+        value["code"] = code
+            .parse::<i64>()
+            .map_or_else(|_| json!(code), |code| json!(code));
     }
     if let Some(source) = &diagnostic.source {
         value["source"] = json!(source);
@@ -472,6 +480,9 @@ pub(super) fn normalize_result(
             }))
         }
         LspFeature::SemanticTokensDelta { .. } => {
+            if result.get("data").is_some() {
+                return normalize_result(&LspFeature::SemanticTokensFull, result);
+            }
             let edits = result
                 .get("edits")
                 .and_then(Value::as_array)
@@ -505,8 +516,8 @@ pub(super) fn normalize_result(
                             .ok_or("semantic delta value invalid")
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                if data.len() % 5 != 0 {
-                    return Err("semantic delta insert is not token tuples".into());
+                if data.len() > 500_000 {
+                    return Err("semantic delta insert exceeds ceiling".into());
                 }
                 normalized.push(LspSemanticTokenEdit {
                     start,
@@ -823,7 +834,10 @@ fn collect_symbols(
             .and_then(|location| locations(location).ok()?.into_iter().next())
             .or_else(|| {
                 let range = value.get("selectionRange").or_else(|| value.get("range"))?;
-                Some(LspLocation { uri: String::new(), range: parse_range(range)? })
+                Some(LspLocation {
+                    uri: String::new(),
+                    range: parse_range(range)?,
+                })
             });
         found.push(LspSymbol {
             name: format!("{}{name}", "  ".repeat(depth)),
@@ -847,8 +861,21 @@ fn collect_symbols(
 pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> {
     let mut documents = Vec::new();
     let mut resources = Vec::new();
+    let count = value
+        .get("changes")
+        .and_then(Value::as_object)
+        .map_or(0, |c| c.len())
+        .saturating_add(
+            value
+                .get("documentChanges")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+        );
+    if count > 256 {
+        return Err("workspace edit exceeds 256 documents or operations".into());
+    }
     if let Some(changes) = value.get("changes").and_then(Value::as_object) {
-        for (uri, edits) in changes.iter().take(256) {
+        for (uri, edits) in changes.iter() {
             documents.push(LspDocumentEdit {
                 uri: uri.clone(),
                 version: None,
@@ -857,7 +884,7 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
         }
     }
     if let Some(changes) = value.get("documentChanges").and_then(Value::as_array) {
-        for change in changes.iter().take(256) {
+        for change in changes.iter() {
             let Some(text_document) = change.get("textDocument") else {
                 let kind = change
                     .get("kind")
@@ -968,19 +995,23 @@ pub(super) fn text_edits(value: &Value) -> Result<Vec<LspTextEdit>, String> {
     let values = value
         .as_array()
         .ok_or_else(|| "text edits are not a list".to_owned())?;
+    if values.len() > 4096 {
+        return Err("document edit exceeds 4096 edits".into());
+    }
     values
         .iter()
-        .take(4096)
         .map(|value| parse_text_edit(value).ok_or_else(|| "text edit is malformed".to_owned()))
         .collect()
 }
 
 pub(super) fn parse_text_edit(value: &Value) -> Option<LspTextEdit> {
     Some(LspTextEdit {
-        range: parse_range(value
-            .get("range")
-            .or_else(|| value.get("insert"))
-            .or_else(|| value.get("replace"))?)?,
+        range: parse_range(
+            value
+                .get("range")
+                .or_else(|| value.get("insert"))
+                .or_else(|| value.get("replace"))?,
+        )?,
         new_text: value.get("newText")?.as_str()?.to_owned(),
     })
 }

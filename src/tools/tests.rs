@@ -52,7 +52,13 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
             .iter()
             .all(|tool| (tool.kind == ToolKind::Agent) == tool.languages.is_empty())
     );
-    assert_eq!(catalog.iter().filter(|tool| tool.kind == ToolKind::Agent).count(), 3);
+    assert_eq!(
+        catalog
+            .iter()
+            .filter(|tool| tool.kind == ToolKind::Agent)
+            .count(),
+        3
+    );
     assert!(
         catalog
             .iter()
@@ -182,21 +188,19 @@ fn catalog_uses_dust_managed_installation_methods_not_system_programs() {
 
 #[test]
 fn javascript_tools_prepend_their_private_bun_backed_node_runtime() {
-    let definition = bundled_tool_catalog()
-        .into_iter()
-        .find(|tool| tool.id == "pyright")
-        .expect("pyright catalog entry");
-    let directory = tempfile::tempdir().expect("tool store");
-    let bin = directory.path().join("pyright/bin");
-    std::fs::create_dir_all(&bin).expect("tool bin");
-    std::fs::write(bin.join("node"), b"test runtime").expect("private node runtime");
-    let environment = tool_launch_environment_at(directory.path(), &definition);
-    let path = environment.get("PATH").expect("JavaScript PATH");
-    assert_eq!(
-        std::env::split_paths(path).next(),
-        Some(bin),
-        "the package shebang must resolve node to Dust's Bun runtime"
-    );
+    for id in ["pyright", "pi-acp"] {
+        let definition = bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == id)
+            .unwrap();
+        let directory = tempfile::tempdir().expect("tool store");
+        let bin = directory.path().join(id).join("bin");
+        std::fs::create_dir_all(&bin).expect("tool bin");
+        std::fs::write(bin.join("node"), b"test runtime").expect("private node runtime");
+        let environment = tool_launch_environment_at(directory.path(), &definition);
+        let path = environment.get("PATH").expect("JavaScript PATH");
+        assert_eq!(std::env::split_paths(path).next(), Some(bin));
+    }
 }
 
 #[test]
@@ -797,7 +801,10 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
             assert!(result.result.is_ok(), "{result:?}");
             finished.push(result.id);
         }
-        assert!(std::time::Instant::now() < deadline, "queued work timed out");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "queued work timed out"
+        );
         std::thread::yield_now();
     }
     assert_eq!(finished, ids);
@@ -938,4 +945,361 @@ fn current_test_process_is_discoverable_without_a_shell() {
         discover_executable(executable.to_str().expect("UTF-8 path")),
         Some(executable)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn version_service_shutdown_with_full_results_is_bounded() {
+    use std::{sync::mpsc, thread, time::Duration};
+    let service = super::ToolVersionService::start();
+    for id in 0..40 {
+        let request = ToolVersionRequest {
+            id: id.to_string(),
+            executable: "/bin/echo".into(),
+            arguments: vec!["version".into()],
+            environment: Default::default(),
+            current_directory: None,
+            timeout: Duration::from_secs(1),
+        };
+        while service.probe(request.clone()).is_err() {
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+    thread::sleep(Duration::from_millis(500));
+    let (done, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        drop(service);
+        done.send(()).unwrap();
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("version worker shutdown");
+}
+
+#[cfg(unix)]
+#[test]
+fn version_probe_stops_continuous_oversized_output() {
+    let started = std::time::Instant::now();
+    let result = probe_tool_version(
+        ToolVersionRequest {
+            id: "continuous".into(),
+            executable: "/bin/sh".into(),
+            arguments: vec![
+                "-c".into(),
+                "while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done".into(),
+            ],
+            environment: Default::default(),
+            current_directory: None,
+            timeout: std::time::Duration::from_millis(100),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    );
+    assert!(result.unwrap_err().contains("exceeded its limit"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+}
+
+pub(super) fn package_fixture(
+    name: &str,
+) -> (
+    super::PackageManifest,
+    crate::extensions::PluginManifest,
+    Vec<u8>,
+) {
+    use sha2::{Digest, Sha256};
+    let bytes = b"\0asm\x0d\0\x01\0".to_vec();
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let manifest = super::PackageManifest {
+        name: name.into(),
+        version: "1.0.0".into(),
+        component: "plugin.wasm".into(),
+        source: super::PackageSource::Registry {
+            registry: "https://example.invalid".into(),
+            version: "1.0.0".into(),
+            archive_sha256: digest.clone(),
+        },
+        dependencies: Vec::new(),
+    };
+    let plugin = crate::extensions::PluginManifest {
+        id: name.into(),
+        version: "1.0.0".into(),
+        component_sha256: digest,
+        capabilities: Default::default(),
+        commands: Default::default(),
+        contributions: Default::default(),
+    };
+    (manifest, plugin, bytes)
+}
+
+#[test]
+fn package_gc_preserves_removed_package_for_rollback() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
+    manager.remove("demo").unwrap();
+    assert_eq!(manager.gc(256).unwrap(), 0);
+    manager.rollback().unwrap();
+    assert_eq!(manager.activations().unwrap()[0].0.id, "demo");
+}
+
+#[test]
+fn package_activation_identity_is_independent_of_component() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    for name in ["one", "two"] {
+        let (manifest, plugin, bytes) = package_fixture(name);
+        let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
+    }
+    manager.gc(256).unwrap();
+    let plugins = manager.activations().unwrap();
+    assert_eq!(
+        plugins
+            .iter()
+            .map(|(plugin, _)| plugin.id.as_str())
+            .collect::<Vec<_>>(),
+        ["one", "two"]
+    );
+    let mut updated = package_fixture("two");
+    updated.1.version = "2.0.0".into();
+    let object = manager
+        .stage_verified_object(&updated.0, &updated.2)
+        .unwrap();
+    manager
+        .commit_prepared(&updated.0, &updated.1, &object)
+        .unwrap();
+    manager.gc(256).unwrap();
+    manager.rollback().unwrap();
+    assert_eq!(manager.activations().unwrap()[1].0.version, "1.0.0");
+}
+
+#[test]
+fn package_commit_accepts_and_normalizes_uppercase_digest() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (mut manifest, mut plugin, bytes) = package_fixture("demo");
+    if let super::PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
+        *archive_sha256 = archive_sha256.to_ascii_uppercase();
+    }
+    plugin.component_sha256 = plugin.component_sha256.to_ascii_uppercase();
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    let lock = manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
+    assert_eq!(
+        lock.packages[0].content_sha256,
+        plugin.component_sha256.to_ascii_lowercase()
+    );
+    manager.activations().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn package_managers_serialize_concurrent_lock_updates() {
+    let root = tempfile::tempdir().unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let threads = (0..8)
+        .map(|id| {
+            let root = root.path().to_path_buf();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let manager = super::PackageManager::new(root, 1024 * 1024, 1024).unwrap();
+                let (manifest, plugin, bytes) = package_fixture(&format!("package-{id}"));
+                let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+                barrier.wait();
+                manager
+                    .commit_prepared(&manifest, &plugin, &object)
+                    .unwrap();
+                manager.gc(256).unwrap();
+            })
+        })
+        .collect::<Vec<_>>();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    assert_eq!(manager.activations().unwrap().len(), 8);
+}
+
+#[test]
+fn catalog_filetypes_preserve_exact_extension_case_before_fallback() {
+    use super::mason_filetype_for_path;
+    use std::path::Path;
+    assert_eq!(
+        mason_filetype_for_path(Path::new("module.EX")),
+        Some("euphoria3")
+    );
+    assert_eq!(
+        mason_filetype_for_path(Path::new("module.ex")),
+        Some("elixir")
+    );
+    assert_eq!(
+        mason_filetype_for_path(Path::new("rules.BUILD")),
+        Some("bzl")
+    );
+    assert_eq!(
+        mason_filetype_for_path(Path::new("source.RS")),
+        Some("rust")
+    );
+}
+
+#[test]
+fn package_service_keeps_every_completion_under_backpressure() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut service = super::PackageService::start(root.path().into(), 1, 1024, 1024);
+    let mut admitted = Vec::new();
+    for _ in 0..3 {
+        admitted.push(service.request(super::PackageOperation::List).unwrap());
+        thread::sleep(Duration::from_millis(50));
+    }
+    let mut received = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while service.pending_count() != 0 {
+        for event in service.poll().unwrap() {
+            match event {
+                super::PackageServiceEvent::Completed(result) => received.push(result.id),
+                event => panic!("unexpected {event:?}"),
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing admitted package completion"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(received, admitted);
+}
+
+#[test]
+fn registry_service_keeps_every_result_under_backpressure() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let service = super::RegistryService::start(
+        super::RegistryPolicy {
+            offline: true,
+            queue_capacity: 1,
+            ..Default::default()
+        },
+        root.path().into(),
+    )
+    .unwrap();
+    let mut admitted = Vec::new();
+    for _ in 0..3 {
+        admitted.push(
+            service
+                .request(super::RegistryRequest::Search {
+                    query: "fixture".into(),
+                })
+                .unwrap(),
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+    let mut received = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while received.len() < admitted.len() {
+        received.extend(service.poll().unwrap().into_iter().map(|event| event.id));
+        assert!(
+            Instant::now() < deadline,
+            "missing admitted registry completion"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(received, admitted);
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    let root = tempfile::tempdir().unwrap();
+    let runtime = root.path().join(".runtimes/uv");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    fs::write(runtime.join("bin/uv"), "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(runtime.join("bin/uv"), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(
+        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime_artifact("uv").unwrap().sha256,
+    )
+    .unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. })))
+        .unwrap();
+    let old = root.path().join(&definition.id);
+    fs::create_dir_all(old.join("bin")).unwrap();
+    let script = format!("#!{}/uv-tools/python\nprevious tool\n", old.display());
+    fs::write(old.join("bin").join(&definition.executable), &script).unwrap();
+    let (_cancel, cancellations) = mpsc::channel();
+    let result = super::runtimes::install_uv_tool(
+        &definition,
+        root.path(),
+        &["invalid-fixture".into()],
+        &cancellations,
+        &mut |_, _, _| {},
+        None,
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(old.join("bin").join(&definition.executable)).unwrap(),
+        script
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn installer_cancellation_terminates_descendant_processes() {
+    use std::{
+        fs,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let (cancel, cancellations) = mpsc::channel();
+    let cwd = root.path().to_path_buf();
+    let worker = thread::spawn(move || {
+        super::runtimes::run_managed(
+            std::path::Path::new("/bin/sh"),
+            &[
+                "-c".into(),
+                "trap '' TERM; sleep 30 & echo $! > descendant; wait".into(),
+            ],
+            &cwd,
+            &std::collections::BTreeMap::from([("PATH".into(), std::env::var("PATH").unwrap())]),
+            &cancellations,
+            None,
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !root.path().join("descendant").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    cancel.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
+    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
+    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+}
+
+#[test]
+fn rustfmt_is_available_as_a_stdin_formatter() {
+    let tool = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rustfmt")
+        .unwrap();
+    assert_eq!(tool.kind, ToolKind::Formatter);
+    assert_eq!(tool.format_arguments, ["--emit", "stdout"]);
 }

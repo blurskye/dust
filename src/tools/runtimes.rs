@@ -65,13 +65,10 @@ pub(super) fn managed_runtime(
     }
     fs::create_dir_all(runtime.parent().ok_or("runtime has no parent")?)
         .map_err(|error| format!("cannot create runtime directory: {error}"))?;
-    let staging = root.join(format!(
-        ".runtime-{name}-{}",
-        next_temp_suffix()
-    ));
+    let staging = root.join(format!(".runtime-{name}-{}", next_temp_suffix()));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage runtime: {error}"))?;
     let result = (|| {
-        let bytes = download_checked(artifact.url, artifact.sha256, report)?;
+        let bytes = download_checked(artifact.url, artifact.sha256, cancellations, report)?;
         report("extracting runtime", 0, None);
         let bin = staging.join("bin");
         let staged_executable = bin.join(name);
@@ -109,23 +106,23 @@ pub(super) fn managed_bun_runtime(
 ) -> Result<PathBuf, String> {
     // NixOS uses Dust's exact checked GNU Bun artifact so PATH cannot silently
     // change the runtime processed by the private compatibility environment.
-    if compatibility.is_none() {
-        if let Some(bun) = discover_executable("bun") {
-            let bun = fs::canonicalize(&bun)
-                .map_err(|error| format!("cannot canonicalize Bun runtime: {error}"))?;
-            if bun.is_file() && bun.is_absolute() {
-                report("verifying Bun runtime", 0, None);
-                run_managed(
-                    &bun,
-                    &["--version".into()],
-                    root,
-                    &BTreeMap::from([("HOME".into(), root.display().to_string())]),
-                    cancellations,
-                    None,
-                )
-                .map_err(|error| format!("configured Bun runtime is not runnable: {error}"))?;
-                return Ok(bun);
-            }
+    if compatibility.is_none()
+        && let Some(bun) = discover_executable("bun")
+    {
+        let bun = fs::canonicalize(&bun)
+            .map_err(|error| format!("cannot canonicalize Bun runtime: {error}"))?;
+        if bun.is_file() && bun.is_absolute() {
+            report("verifying Bun runtime", 0, None);
+            run_managed(
+                &bun,
+                &["--version".into()],
+                root,
+                &BTreeMap::from([("HOME".into(), root.display().to_string())]),
+                cancellations,
+                None,
+            )
+            .map_err(|error| format!("configured Bun runtime is not runnable: {error}"))?;
+            return Ok(bun);
         }
     }
     if compatibility.is_none() && !fhs_glibc_loader_available() {
@@ -156,7 +153,13 @@ pub(super) fn run_managed(
         let path = env::join_paths(paths).map_err(|_| "Dust Nix compatibility PATH is invalid")?;
         effective_environment.insert("PATH".into(), path.to_string_lossy().into_owned());
     }
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
         .args(arguments)
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -170,13 +173,23 @@ pub(super) fn run_managed(
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
     loop {
         if cancellations.try_recv().is_ok() {
+            #[cfg(unix)]
+            crate::process::terminate_process_group(child.id());
             let _ = child.kill();
             let _ = child.wait();
+            if let Some(output) = installer_output.as_ref() {
+                let _ = output.recv_timeout(Duration::from_secs(1));
+            }
             return Err("tool installation cancelled".into());
         }
         if Instant::now() >= deadline {
+            #[cfg(unix)]
+            crate::process::terminate_process_group(child.id());
             let _ = child.kill();
             let _ = child.wait();
+            if let Some(output) = installer_output.as_ref() {
+                let _ = output.recv_timeout(Duration::from_secs(1));
+            }
             return Err("tool installation exceeded the 15-minute ceiling".into());
         }
         match child.try_wait() {
@@ -297,17 +310,24 @@ pub(super) fn install_uv_tool(
 ) -> Result<Option<PathBuf>, String> {
     let uv = managed_runtime(root, "uv", cancellations, report, compatibility)?;
     let destination = root.join(&definition.id);
-    if destination.exists() {
+    let backup = root.join(format!(
+        ".previous-{}-{}",
+        definition.id,
+        next_temp_suffix()
+    ));
+    let had_previous = destination.exists();
+    if had_previous {
         let metadata = fs::symlink_metadata(&destination)
             .map_err(|error| format!("cannot inspect managed tool: {error}"))?;
         if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
             return Err("managed tool destination is not a real directory".into());
         }
-        fs::remove_dir_all(&destination)
-            .map_err(|error| format!("cannot replace tool: {error}"))?;
+        fs::rename(&destination, &backup)
+            .map_err(|error| format!("cannot preserve previous tool: {error}"))?;
     }
-    fs::create_dir(&destination).map_err(|error| format!("cannot create managed tool: {error}"))?;
     let result = (|| {
+        fs::create_dir(&destination)
+            .map_err(|error| format!("cannot create managed tool: {error}"))?;
         // uv links the executables into a side folder that becomes `bin` only once they are
         // patched, so a language server can't start one while patchelf still writes it.
         let staged_bin = destination.join(".bin-staging");
@@ -349,11 +369,18 @@ pub(super) fn install_uv_tool(
         }
         write_managed_tool_version(&destination, definition)?;
         let bin = destination.join("bin");
-        fs::rename(&staged_bin, &bin).map_err(|error| format!("cannot activate tool bin: {error}"))?;
+        fs::rename(&staged_bin, &bin)
+            .map_err(|error| format!("cannot activate tool bin: {error}"))?;
         Ok(Some(bin.join(&definition.executable)))
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&destination);
+        if had_previous {
+            fs::rename(&backup, &destination)
+                .map_err(|error| format!("cannot restore previous tool: {error}"))?;
+        }
+    } else if had_previous {
+        let _ = fs::remove_dir_all(&backup);
     }
     result
 }
@@ -416,11 +443,15 @@ pub(super) fn install_path_rustup_component(
     let deadline = Instant::now() + TOOL_INSTALL_TIMEOUT;
     loop {
         if cancellations.try_recv().is_ok() {
+            #[cfg(unix)]
+            crate::process::terminate_process_group(child.id());
             let _ = child.kill();
             let _ = child.wait();
             return Err("rustup component installation cancelled".into());
         }
         if Instant::now() >= deadline {
+            #[cfg(unix)]
+            crate::process::terminate_process_group(child.id());
             let _ = child.kill();
             let _ = child.wait();
             return Err("rustup component installation exceeded the 15-minute ceiling".into());
@@ -519,11 +550,7 @@ pub(super) fn install_rustup_component(
         .join("toolchains/stable-x86_64-unknown-linux-gnu/bin")
         .join(&definition.executable);
     prepare_executable(&target)?;
-    let staging = root.join(format!(
-        ".tool-{}-{}",
-        definition.id,
-        next_temp_suffix()
-    ));
+    let staging = root.join(format!(".tool-{}-{}", definition.id, next_temp_suffix()));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage rust component: {error}"))?;
     let result = (|| {
         let bin = staging.join("bin");
@@ -579,11 +606,7 @@ pub(super) fn uninstall_managed_tool(
     if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
         return Err("managed tool destination is not a real directory".into());
     }
-    let removed = root.join(format!(
-        ".removed-{}-{}",
-        definition.id,
-        next_temp_suffix()
-    ));
+    let removed = root.join(format!(".removed-{}-{}", definition.id, next_temp_suffix()));
     fs::rename(&destination, &removed)
         .map_err(|error| format!("cannot deactivate managed tool: {error}"))?;
     fs::remove_dir_all(&removed)
@@ -721,8 +744,11 @@ mod installer_output_tests {
     fn a_failed_installer_reports_the_end_of_what_it_printed() {
         let (reader, mut writer) = std::io::pipe().expect("pipe");
         let output = read_installer_output(reader);
-        std::io::Write::write_all(&mut writer, b"fetching\n\nbuilding\nerror: no such attribute\n\n")
-            .expect("write");
+        std::io::Write::write_all(
+            &mut writer,
+            b"fetching\n\nbuilding\nerror: no such attribute\n\n",
+        )
+        .expect("write");
         std::io::Write::write_all(&mut writer, b"exit 1\n").expect("write");
         drop(writer);
         assert_eq!(

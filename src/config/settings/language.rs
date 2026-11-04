@@ -42,9 +42,7 @@ pub struct SyntaxConfig {
 }
 impl Default for SyntaxConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -65,4 +63,3 @@ impl Default for PersistenceConfig {
         }
     }
 }
-

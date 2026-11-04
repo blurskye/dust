@@ -115,9 +115,11 @@ impl ModalResolver {
 
     pub fn cancel_pending(&mut self) {
         let count_limit = self.count_limit;
+        let macro_recording = self.macro_recording;
         let last_find = self.last_find.take();
         *self = Self::with_count_limit(count_limit);
         self.last_find = last_find;
+        self.macro_recording = macro_recording;
     }
 
     #[must_use]
@@ -162,6 +164,18 @@ impl ModalResolver {
         mode: EditorMode,
         input: GrammarInput,
     ) -> Result<InputAction, InputError> {
+        let result = self.feed_inner(mode, input);
+        if result.is_err() {
+            self.reset_pending();
+        }
+        result
+    }
+
+    fn feed_inner(
+        &mut self,
+        mode: EditorMode,
+        input: GrammarInput,
+    ) -> Result<InputAction, InputError> {
         match input {
             GrammarInput::Cancel => {
                 self.reset_pending();
@@ -176,7 +190,7 @@ impl ModalResolver {
                 Ok(InputAction::Pending)
             }
             GrammarInput::Zero => {
-                if self.count.is_some() || self.operator.is_some() {
+                if self.count.is_some() {
                     self.push_count(0)?;
                     Ok(InputAction::Pending)
                 } else {
@@ -650,5 +664,78 @@ mod tests {
             resolver.pending_context(),
             Some(PendingInputContext::MacroRecord)
         );
+    }
+    #[test]
+    fn cancelling_pending_grammar_keeps_macro_recording() {
+        let mut resolver = ModalResolver::default();
+        resolver
+            .feed(
+                EditorMode::Normal,
+                GrammarInput::MacroRecordSelect("a".into()),
+            )
+            .unwrap();
+        resolver.cancel_pending();
+        assert!(resolver.macro_recording());
+        let InputAction::Invoke(stop) = resolver
+            .feed(EditorMode::Normal, GrammarInput::MacroRecordToggle)
+            .unwrap()
+        else {
+            panic!("stop recording")
+        };
+        assert_eq!(stop.id.as_str(), "macro.record.stop");
+    }
+
+    #[test]
+    fn operator_zero_is_a_motion_and_count_failures_clear_pending_grammar() {
+        let mut resolver = ModalResolver::with_count_limit(10);
+        resolver
+            .feed(
+                EditorMode::Normal,
+                GrammarInput::OperatorBegin("delete".into()),
+            )
+            .unwrap();
+        let InputAction::Invoke(delete) = resolver
+            .feed(EditorMode::OperatorPending, GrammarInput::Zero)
+            .unwrap()
+        else {
+            panic!("delete to start")
+        };
+        assert_eq!(
+            delete.arguments["motion"],
+            CommandValue::String("line_start".into())
+        );
+        resolver
+            .feed(EditorMode::Normal, GrammarInput::Count(9))
+            .unwrap();
+        assert!(
+            resolver
+                .feed(EditorMode::Normal, GrammarInput::Count(9))
+                .is_err()
+        );
+        assert!(!resolver.has_pending_grammar());
+        resolver
+            .feed(EditorMode::Normal, GrammarInput::Count(9))
+            .unwrap();
+        resolver
+            .feed(
+                EditorMode::Normal,
+                GrammarInput::OperatorBegin("delete".into()),
+            )
+            .unwrap();
+        resolver
+            .feed(EditorMode::OperatorPending, GrammarInput::Count(9))
+            .unwrap();
+        assert!(
+            resolver
+                .feed(
+                    EditorMode::OperatorPending,
+                    GrammarInput::Motion {
+                        motion: "word_forward".into(),
+                        linewise: false
+                    }
+                )
+                .is_err()
+        );
+        assert!(!resolver.has_pending_grammar());
     }
 }

@@ -361,10 +361,17 @@ fn a_full_click_shows_the_file_in_place_of_the_open_one_and_leaves_focus_on_it()
     let first = session.wait_for_opened_file().expect("first file");
     let body = session.explorer_body(1);
     session.click(body.x, body.y.saturating_add(3));
-    session.mouse(crate::editor::input::KeyCode::MouseLeftUp, body.x, body.y.saturating_add(3));
+    session.mouse(
+        crate::editor::input::KeyCode::MouseLeftUp,
+        body.x,
+        body.y.saturating_add(3),
+    );
     let second = session.wait_for_opened_file().expect("second file");
     assert_ne!(first, second, "the clicked file replaces the one on screen");
-    assert!(!session.explorer_focused(), "the release leaves focus on the file");
+    assert!(
+        !session.explorer_focused(),
+        "the release leaves focus on the file"
+    );
 }
 
 #[test]
@@ -372,14 +379,23 @@ fn moving_the_pointer_does_not_move_focus() {
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.explorer_fixture();
-    assert!(session.explorer_focused(), "the fixture starts in the explorer");
+    assert!(
+        session.explorer_focused(),
+        "the fixture starts in the explorer"
+    );
     session.mouse(crate::editor::input::KeyCode::MouseMove, 60, 5);
-    assert!(session.explorer_focused(), "hovering the editor keeps the explorer");
+    assert!(
+        session.explorer_focused(),
+        "hovering the editor keeps the explorer"
+    );
     session.click(60, 5);
     assert!(!session.explorer_focused(), "a click moves focus");
     let body = session.explorer_body(1);
     session.mouse(crate::editor::input::KeyCode::MouseMove, body.x, body.y);
-    assert!(!session.explorer_focused(), "hovering the tree keeps the editor");
+    assert!(
+        !session.explorer_focused(),
+        "hovering the tree keeps the editor"
+    );
 }
 
 #[test]
@@ -463,7 +479,10 @@ fn a_key_press_dismisses_information_but_not_errors() {
     session.notice("read once");
     assert!(session.projection().notification.is_some());
     session.key("j");
-    assert!(session.projection().notification.is_none(), "information goes");
+    assert!(
+        session.projection().notification.is_none(),
+        "information goes"
+    );
     session.error("broken");
     session.key("j");
     assert_eq!(session.projection().notification.as_deref(), Some("broken"));
@@ -478,14 +497,27 @@ fn wide_notice_text_stays_inside_its_box() {
     session.notice(&"界".repeat(30));
     let after = session.frame();
     let symbol = |x: u16, y: u16| after.grid.get(x, y).unwrap().symbol.clone();
-    let left = (0..40).find(|x| symbol(*x, 1) == "╭").expect("top left corner");
-    let right = (left..40).find(|x| symbol(*x, 1) == "╮").expect("top right corner");
-    let bottom = (2..12).find(|y| symbol(left, *y) == "╰").expect("bottom corner");
-    assert!(right < 40 && bottom >= 4, "the text wraps inside the screen");
+    let left = (0..40)
+        .find(|x| symbol(*x, 1) == "╭")
+        .expect("top left corner");
+    let right = (left..40)
+        .find(|x| symbol(*x, 1) == "╮")
+        .expect("top right corner");
+    let bottom = (2..12)
+        .find(|y| symbol(left, *y) == "╰")
+        .expect("bottom corner");
+    assert!(
+        right < 40 && bottom >= 4,
+        "the text wraps inside the screen"
+    );
     for y in 0..12 {
         for x in 0..40 {
             if !((left..=right).contains(&x) && (1..=bottom).contains(&y)) {
-                assert_eq!(before.grid.get(x, y), after.grid.get(x, y), "outside notice at {x},{y}");
+                assert_eq!(
+                    before.grid.get(x, y),
+                    after.grid.get(x, y),
+                    "outside notice at {x},{y}"
+                );
             }
         }
     }

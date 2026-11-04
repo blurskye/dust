@@ -60,6 +60,7 @@ pub(super) struct Launch {
     program: Option<PathBuf>,
     /// The adapter runs the program itself, so a script needs no execute bit.
     source_program: bool,
+    automatic_program: bool,
     executable: Option<PathBuf>,
     phase: Phase,
     terminal: Option<TerminalPolicy>,
@@ -84,6 +85,7 @@ impl Launch {
             adapter: self.session.adapter.clone(),
             request: self.session.request.clone(),
             program: self.program.clone(),
+            document: self.tool.as_ref().map(|tool| tool.document.clone()),
             target: match self.session.request {
                 DebugRequestKind::Attach => declared_target(&self.session.arguments),
                 DebugRequestKind::Launch => None,
@@ -101,9 +103,49 @@ impl DebugSession {
         workspace: &WorkspaceSession,
         tools: &[ToolEntry],
     ) -> Result<DebugIntent, String> {
+        self.request_debug_inner(
+            selection, program, document, policy, workspace, tools, false,
+        )
+    }
+    pub(in crate::editor::session) fn request_restart(
+        &mut self,
+        policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
+        workspace: &WorkspaceSession,
+        tools: &[ToolEntry],
+    ) -> Result<DebugIntent, String> {
+        let target = self.target.clone().ok_or("debugger has no launch target")?;
+        let document = target.document.as_deref().and_then(|path| {
+            crate::language::lsp::language_id_for_path(path).map(|language| (path, language))
+        });
+        let intent = self.request_debug_inner(
+            (target.configuration.as_deref(), Some(&target.adapter)),
+            target.program.clone(),
+            document,
+            policy,
+            workspace,
+            tools,
+            true,
+        )?;
+        let launch = self.launch.take();
+        self.stop().map_err(|error| error.to_string())?;
+        self.launch = launch;
+        Ok(intent)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn request_debug_inner(
+        &mut self,
+        selection: (Option<&str>, Option<&str>),
+        program: Option<PathBuf>,
+        document: Option<(&Path, &str)>,
+        policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
+        workspace: &WorkspaceSession,
+        tools: &[ToolEntry],
+        restarting: bool,
+    ) -> Result<DebugIntent, String> {
         let (name, requested) = selection;
+        let automatic_program = name.is_none() && program.is_none();
         let (policy, terminals, revision) = policy;
-        if !self.service.available() {
+        if !(self.service.available() || restarting && self.service.is_running()) {
             return Err("debugger launch is closed or full".into());
         }
         self.refresh(policy, workspace.version());
@@ -211,7 +253,9 @@ impl DebugSession {
                 // The program being debugged runs with what the user's shell gave Dust. Delve
                 // also needs it to find `go`, and hangs without one.
                 environment: std::env::vars_os()
-                    .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+                    .filter_map(|(key, value)| {
+                        Some((key.into_string().ok()?, value.into_string().ok()?))
+                    })
                     .collect(),
             };
             let session = DebugSessionConfig {
@@ -304,6 +348,7 @@ impl DebugSession {
             cwd,
             program,
             source_program,
+            automatic_program,
             executable: None,
             phase: Phase::Requested,
             terminal,
@@ -402,10 +447,14 @@ impl DebugSession {
                     *program = result.root.join(&*program);
                 }
                 if launch.source_program {
-                    let target = program
-                        .canonicalize()
-                        .map_err(|_| format!("debug program {} does not exist", program.display()))?;
-                    if !launch.roots.iter().any(|r| target.starts_with(&r.canonical_path)) {
+                    let target = program.canonicalize().map_err(|_| {
+                        format!("debug program {} does not exist", program.display())
+                    })?;
+                    if !launch
+                        .roots
+                        .iter()
+                        .any(|r| target.starts_with(&r.canonical_path))
+                    {
                         return Err("debug program is outside every workspace root".into());
                     }
                     *program = target;
@@ -500,7 +549,10 @@ impl DebugSession {
                 arguments.insert("cwd".into(), serde_json::json!(launch.cwd));
                 // As in VS Code, or `input()` gets end of file.
                 let adapter_runs_terminal = launch.configuration.is_none()
-                    && matches!(launch.session.adapter.as_str(), "debugpy" | "delve" | "codelldb");
+                    && matches!(
+                        launch.session.adapter.as_str(),
+                        "debugpy" | "delve" | "codelldb"
+                    );
                 // CodeLLDB asks for a terminal without being told to.
                 match launch.session.adapter.as_str() {
                     "debugpy" if adapter_runs_terminal => {
@@ -540,7 +592,11 @@ impl DebugSession {
                 if let Some(program) = launch.program {
                     // Go builds packages, so a file beside the active one still has to compile.
                     let program = match program.parent() {
-                        Some(package) if launch.session.adapter == "delve" => package.to_owned(),
+                        Some(package)
+                            if launch.session.adapter == "delve" && launch.automatic_program =>
+                        {
+                            package.to_owned()
+                        }
                         _ => program,
                     };
                     arguments.insert("program".into(), serde_json::json!(program));
@@ -613,6 +669,60 @@ pub(super) use tests::original_launch_fixture;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restart_uses_original_source_and_validates_before_stopping() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let policy = DebugConfig::default();
+        let terminals = crate::config::TerminalsConfig::default();
+        let mut owner = DebugSession::new(&policy, workspace.version());
+        let (service, _adapter) = crate::debugger::test_session();
+        owner.service = service;
+        let path = root.path().join("original.py");
+        std::fs::write(&path, "print(1)").unwrap();
+        owner.target = Some(super::super::DapTargetIdentity {
+            configuration: None,
+            adapter: "debugpy".into(),
+            request: DebugRequestKind::Launch,
+            program: Some(path.clone()),
+            document: Some(path.clone()),
+            target: None,
+        });
+        assert!(
+            owner
+                .request_restart((&policy, &terminals, 1), &workspace, &[])
+                .is_err()
+        );
+        assert!(owner.service.is_running());
+        let definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|definition| definition.id == "debugpy")
+            .unwrap();
+        let tools = [ToolEntry {
+            definition,
+            status: ToolStatus::Installed("/bin/false".into()),
+        }];
+        owner
+            .request_restart((&policy, &terminals, 1), &workspace, &tools)
+            .unwrap();
+        assert_eq!(
+            owner
+                .launch
+                .as_ref()
+                .unwrap()
+                .tool
+                .as_ref()
+                .unwrap()
+                .document,
+            path
+        );
+        assert_eq!(owner.launch.as_ref().unwrap().cwd, root.path());
+    }
     pub(in crate::editor::session::debugger) fn original_launch_fixture() {
         use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
         use std::time::{Duration, Instant};
@@ -793,10 +903,7 @@ mod tests {
                 cwd: None,
                 program: None,
                 run_in_terminal_profile: None,
-                arguments: BTreeMap::from([(
-                    "processId".into(),
-                    serde_json::json!(4242),
-                )]),
+                arguments: BTreeMap::from([("processId".into(), serde_json::json!(4242))]),
                 path_maps: BTreeMap::new(),
             },
         );
@@ -866,4 +973,118 @@ mod tests {
         );
     }
 
+    #[test]
+    fn configured_delve_targets_reach_the_adapter_unchanged() {
+        use crate::editor::session::workspace::{DiscoveryKind, WorkspacePreflightEvent};
+        use std::time::{Duration, Instant};
+        for directory in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let target = root.path().join("target");
+            if directory {
+                std::fs::create_dir(&target).unwrap();
+            } else {
+                std::fs::write(&target, "executable target").unwrap();
+            }
+            let script = root.path().join("adapter.py");
+            std::fs::write(&script, crate::debugger::TEST_ADAPTER).unwrap();
+            let identity = RootIdentity::capture(root.path()).unwrap();
+            let state = crate::workspace::WorkspaceState::new(
+                crate::workspace::WorkspaceId(1),
+                [("root".into(), identity.clone())],
+            )
+            .unwrap();
+            let mut workspace =
+                WorkspaceSession::new(state, root.path().join("trust"), 2, false, false, 2);
+            workspace
+                .fixture_identity(RootId(1), identity.clone())
+                .unwrap();
+            workspace.fixture_trust_identity(identity);
+            workspace.reconcile_trust();
+            let python = crate::debugger::test_python();
+            let mut policy = DebugConfig::default();
+            policy.adapters.insert(
+                "delve".into(),
+                DebugAdapterConfig {
+                    program: python.clone(),
+                    arguments: vec!["-u".into(), script.display().to_string()],
+                    environment: BTreeMap::new(),
+                },
+            );
+            policy.sessions.insert(
+                "configured".into(),
+                DebugSessionConfig {
+                    adapter: "delve".into(),
+                    request: DebugRequestKind::Launch,
+                    cwd: None,
+                    program: Some(target.clone()),
+                    run_in_terminal_profile: None,
+                    arguments: BTreeMap::new(),
+                    path_maps: BTreeMap::new(),
+                },
+            );
+            let definition = crate::tools::bundled_tool_catalog()
+                .into_iter()
+                .find(|d| d.id == "delve")
+                .unwrap();
+            let tools = [ToolEntry {
+                definition,
+                status: ToolStatus::Installed(python),
+            }];
+            let mut owner = DebugSession::new(&policy, workspace.version());
+            let terminals = crate::config::TerminalsConfig::default();
+            let intent = owner
+                .request_debug(
+                    (Some("configured"), None),
+                    None,
+                    None,
+                    (&policy, &terminals, 1),
+                    &workspace,
+                    &tools,
+                )
+                .unwrap();
+            owner.authorize_debug(intent, &workspace).unwrap();
+            owner
+                .advance_debug(
+                    workspace.execution_lane(DiscoveryKind::Debugger),
+                    &policy,
+                    1,
+                    &tools,
+                )
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let events = workspace.preflight_events();
+                if !events.is_empty() {
+                    for event in events {
+                        match event {
+                            WorkspacePreflightEvent::Ready(ready) => {
+                                owner.debug_preflight(ready).unwrap()
+                            }
+                            _ => panic!("preflight failed"),
+                        }
+                    }
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            owner
+                .advance_debug(
+                    workspace.execution_lane(DiscoveryKind::Debugger),
+                    &policy,
+                    1,
+                    &tools,
+                )
+                .unwrap();
+            while !root.path().join("launch-program").exists() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("launch-program")).unwrap(),
+                target.display().to_string()
+            );
+            owner.stop().unwrap();
+        }
+    }
 }

@@ -56,6 +56,7 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
+            argv0: None,
             arguments: vec!["--version".into()],
             cwd: ready.cwd,
             environment: BTreeMap::new(),
@@ -133,6 +134,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
+            argv0: None,
             arguments: vec![],
             cwd: ready.cwd,
             environment: env,
@@ -206,6 +208,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
+            argv0: None,
             arguments: vec![],
             cwd: ready.cwd,
             environment,

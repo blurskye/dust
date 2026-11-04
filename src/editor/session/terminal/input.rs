@@ -75,7 +75,7 @@ impl TerminalSession {
                 .unwrap_or((terminal.screen.scrollback_len().saturating_add(row), column))
         };
         terminal.mode = TerminalPanelMode::Normal;
-        terminal.normal_cursor = Some(cursor);
+        terminal.normal_cursor = Some(clamp_terminal_cursor(&terminal.screen, cursor));
         terminal.visual_anchor = None;
         terminal.visual_linewise = false;
         keep_terminal_cursor_visible(terminal);
@@ -114,7 +114,15 @@ impl TerminalSession {
         match motion {
             "left" => cursor.1 = cursor.1.saturating_sub(1),
             "right" => {
-                cursor.1 = cursor.1.saturating_add(1).min(
+                let step = terminal
+                    .screen
+                    .history_row(cursor.0)
+                    .and_then(|row| {
+                        row.get(cursor.1 + 1)
+                            .map(|cell| if cell.continuation { 2 } else { 1 })
+                    })
+                    .unwrap_or(1);
+                cursor.1 = cursor.1.saturating_add(step).min(
                     terminal
                         .screen
                         .history_row(cursor.0)
@@ -248,7 +256,13 @@ impl TerminalSession {
         let mut tabs = self
             .tabs
             .iter()
-            .filter(|(tab_id, tab)| if terminal.side { **tab_id == id } else { !tab.side })
+            .filter(|(tab_id, tab)| {
+                if terminal.side {
+                    **tab_id == id
+                } else {
+                    !tab.side
+                }
+            })
             .map(|(tab_id, tab)| TerminalTabState {
                 phase: tab.phase(),
                 id: tab_id.0,
@@ -300,11 +314,11 @@ fn terminal_row_end(row: &[crate::ui::PtyCell]) -> usize {
 
 pub(super) fn clamp_terminal_cursor(screen: &PtyScreen, cursor: (usize, usize)) -> (usize, usize) {
     let row = cursor.0.min(screen.history_len().saturating_sub(1));
-    let column = cursor.1.min(
-        screen
-            .history_row(row)
-            .map_or(0, |cells| cells.len().saturating_sub(1)),
-    );
+    let cells = screen.history_row(row).unwrap_or_default();
+    let mut column = cursor.1.min(cells.len().saturating_sub(1));
+    while column > 0 && cells.get(column).is_some_and(|cell| cell.continuation) {
+        column -= 1;
+    }
     (row, column)
 }
 
@@ -317,6 +331,8 @@ fn terminal_yank_text(
     if screen.history_len() == 0 {
         return String::new();
     }
+    let first = clamp_terminal_cursor(screen, first);
+    let second = clamp_terminal_cursor(screen, second);
     let (start, end) = if first <= second {
         (first, second)
     } else {

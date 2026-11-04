@@ -2,7 +2,9 @@
 //! run by name, read as "Category: Label", with its key on the right and the commands run
 //! from here most recently at the top. Enter runs the command.
 
-use super::{CommandInvocation, CommandValue, InteractiveApplication, InvocationSource, PromptKind};
+use super::{
+    CommandInvocation, CommandValue, InteractiveApplication, InvocationSource, PromptKind,
+};
 use crate::{
     editor::{ArgumentType, session::search::PickerPayload},
     workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
@@ -28,21 +30,28 @@ impl InteractiveApplication {
             .specs()
             .filter(|spec| {
                 let id = spec.id.as_str();
-                !palette.hidden.iter().any(|prefix| id.starts_with(prefix.as_str()))
+                !palette
+                    .hidden
+                    .iter()
+                    .any(|prefix| id.starts_with(prefix.as_str()))
                     && (palette.prompts.contains_key(id)
-                        || spec.arguments.fields.values().all(|field| {
-                            !field.required || field.kind == ArgumentType::Bool
-                        }))
+                        || spec
+                            .arguments
+                            .fields
+                            .values()
+                            .all(|field| !field.required || field.kind == ArgumentType::Bool))
             })
             .map(|spec| {
                 let id = spec.id.as_str().to_owned();
-                let label = settings.command_labels.get(&id).cloned().unwrap_or_default();
+                let label = settings
+                    .command_labels
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_default();
                 let category = palette
                     .categories
                     .iter()
-                    .filter(|(prefix, _)| {
-                        id == **prefix || id.starts_with(&format!("{prefix}."))
-                    })
+                    .filter(|(prefix, _)| id == **prefix || id.starts_with(&format!("{prefix}.")))
                     .max_by_key(|(prefix, _)| prefix.len())
                     .map(|(_, category)| category.as_str());
                 let label = match category {
@@ -96,7 +105,9 @@ impl InteractiveApplication {
     /// Esc closes the palette at once, as in VS Code: it has no list mode worth stopping in.
     pub(super) fn palette_is_open(&self) -> bool {
         let title = self.message("picker_commands_title", &[]);
-        self.search.picker().is_some_and(|picker| picker.presentation().title == title)
+        self.search
+            .picker()
+            .is_some_and(|picker| picker.presentation().title == title)
     }
 
     /// Runs the chosen row and moves it to the top of the palette. Flags such as `force` stay
@@ -105,7 +116,12 @@ impl InteractiveApplication {
         self.palette_recent.retain(|previous| previous != id);
         self.palette_recent.insert(0, id.to_owned());
         self.palette_recent.truncate(RECENT);
-        let prompt = self.configuration.settings().command_palette.prompts.get(id);
+        let prompt = self
+            .configuration
+            .settings()
+            .command_palette
+            .prompts
+            .get(id);
         if let Some(initial) = prompt.cloned() {
             self.open_prompt(PromptKind::Command, initial);
             return;

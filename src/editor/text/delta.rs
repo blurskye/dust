@@ -39,7 +39,9 @@ impl EditDelta {
             if offset.get() < start || (offset.get() == start && affinity == Affinity::Before) {
                 break;
             }
-            if offset.get() <= end {
+            if offset.get() < end
+                || (offset.get() == start && start == end && affinity == Affinity::Before)
+            {
                 let mapped = i128::try_from(start).expect("usize always fits i128")
                     + shift
                     + if affinity == Affinity::After {
@@ -62,6 +64,28 @@ impl EditDelta {
 #[cfg(test)]
 mod tests {
     use crate::editor::text::{Affinity, ByteOffset, ByteRange, DeltaSpan, EditDelta};
+
+    #[test]
+    fn adjacent_replacement_and_insertion_both_move_the_boundary() {
+        let delta = EditDelta::new(vec![
+            DeltaSpan {
+                old: ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+                inserted_len: 2,
+            },
+            DeltaSpan {
+                old: ByteRange::empty(ByteOffset(1)),
+                inserted_len: 1,
+            },
+        ]);
+        assert_eq!(
+            delta.map_offset(ByteOffset(1), Affinity::After),
+            ByteOffset(3)
+        );
+        assert_eq!(
+            delta.map_offset(ByteOffset(1), Affinity::Before),
+            ByteOffset(2)
+        );
+    }
 
     #[test]
     fn affinity_controls_insert_boundary() {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::session::tasks::TaskUpdate;
 use crate::{
     config::{Config, ProblemMatcherConfig, TaskConfig, TaskKind},
     editor::StartupTarget,
@@ -31,6 +32,7 @@ fn fixture() -> (
         path_group: "path".into(),
         line_group: "line".into(),
         column_group: Some("column".into()),
+        column_encoding: None,
         severity_group: None,
         message_group: "message".into(),
         name_group: None,
@@ -93,6 +95,7 @@ fn completed(
         name: name.into(),
         adapter,
         root: editor.workspace_root.clone(),
+        cwd: editor.workspace_root.clone(),
         diagnostic_source: Some(source),
     }
 }
@@ -624,4 +627,134 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
     assert!(
         matches!(tasks.next_linter_update(&editor,&workspace,1,&diagnostics),Some(LinterUpdate::Failed(error)) if error.contains("filesystem identity changed"))
     );
+}
+
+#[test]
+fn relative_linter_and_test_paths_use_the_task_working_directory() {
+    let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
+    std::fs::create_dir_all(root.path().join("sub/src")).unwrap();
+    let path = root.path().join("sub/src/main.rs");
+    editor.open_text(TextBuffer::from_text("text"), Some(path.clone()));
+    let mut task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"src/main.rs:1:1:problem\n",
+    );
+    task.cwd = root.path().join("sub");
+    let matcher = config.tasks["first"].matcher.clone().unwrap();
+    task.adapter = AdapterContext::Test {
+        matcher: matcher.clone(),
+    };
+    tasks.apply_test_result(&task);
+    assert_eq!(tasks.tests["first"][0].source.as_ref().unwrap().0, path);
+    task.adapter = AdapterContext::Linter {
+        matcher,
+        lint: true,
+    };
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+        .unwrap();
+    let Some(LinterUpdate::Publish { batches, .. }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
+        panic!("publication missing")
+    };
+    assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&path));
+}
+
+#[test]
+fn a_failing_dependency_publishes_its_matched_diagnostics() {
+    let (root, mut editor, workspace, mut config, mut tasks, mut diagnostics) = fixture();
+    editor.open_text(
+        TextBuffer::from_text("text"),
+        Some(root.path().join("source")),
+    );
+    let mut dependency = config.tasks["first"].clone();
+    dependency.matcher = None;
+    dependency.arguments = vec![
+        "-c".into(),
+        "printf 'source:1:1:compile failed\n'; exit 1".into(),
+    ];
+    config.tasks.insert("dependency".into(), dependency);
+    config
+        .tasks
+        .get_mut("first")
+        .unwrap()
+        .dependencies
+        .push("dependency".into());
+    tasks.configure(&config);
+    tasks
+        .plan_checked(
+            "first",
+            &AdapterContext::Linter {
+                matcher: config.tasks["first"].matcher.clone().unwrap(),
+                lint: false,
+            },
+            &config,
+            &workspace,
+            1,
+        )
+        .unwrap();
+    let (step, _) = tasks.step("first", &workspace, 1).unwrap();
+    let producer = tasks
+        .launch_inner(
+            step,
+            crate::process::ExecutionPreflightResult {
+                id: crate::process::PreflightId(1),
+                executable: "/bin/sh".into(),
+                cwd: root.path().into(),
+                root: root.path().into(),
+                root_revision: workspace.root_revision(),
+            },
+            &editor,
+            &workspace,
+            1,
+        )
+        .unwrap()
+        .unwrap();
+    diagnostics.activate(producer);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let task = loop {
+        if let Some(TaskUpdate::Finished {
+            task, code, next, ..
+        }) = tasks.next_update(&workspace, 1)
+        {
+            assert_eq!(code, Some(1));
+            assert!(!next);
+            break task;
+        }
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    };
+    tasks
+        .begin_linter(*task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+        .unwrap();
+    assert!(matches!(
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
+        Some(LinterUpdate::Publish { .. })
+    ));
+}
+
+#[test]
+fn character_columns_use_the_existing_position_codec() {
+    let text = TextBuffer::from_text("éx");
+    let diagnostics = convert(
+        std::path::Path::new("/tmp/file"),
+        vec![Raw {
+            line: 0,
+            column: 1,
+            encoding: crate::editor::text::PositionEncoding::Utf32,
+            severity: DiagnosticSeverity::Error,
+            message: "bad x".into(),
+        }],
+        &text,
+        None,
+        "test",
+    )
+    .unwrap();
+    assert_eq!(diagnostics[0].range.start.get(), 2);
 }

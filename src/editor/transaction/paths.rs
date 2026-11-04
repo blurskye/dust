@@ -114,13 +114,13 @@ impl EditorState {
             })
             .collect::<Vec<_>>();
         for (_, path) in &destinations {
-            if let Some(path) = path {
-                if self.buffers.iter().any(|(id, buffer)| {
+            if let Some(path) = path
+                && self.buffers.iter().any(|(id, buffer)| {
                     buffer.path.as_ref() == Some(path)
                         && !destinations.iter().any(|(expected, _)| *expected == id)
-                }) {
-                    return Err("filesystem operation completed, but destination belongs to another buffer; paths were not reconciled".into());
-                }
+                })
+            {
+                return Err("filesystem operation completed, but destination belongs to another buffer; paths were not reconciled".into());
             }
         }
         if destinations.is_empty() {
@@ -132,6 +132,9 @@ impl EditorState {
             .collect();
         let mut draft = self.draft();
         for (id, path) in destinations {
+            if path.is_none() {
+                draft.state.buffers[id].set_saved_text(None);
+            }
             let dirty = path.is_none() || draft.state.buffers[id].dirty;
             draft.state.set_buffer_path_and_dirty(id, path, dirty);
         }
@@ -143,6 +146,19 @@ impl EditorState {
 mod tests {
     use super::*;
     use crate::editor::text::TextBuffer;
+    #[test]
+    fn deleted_files_remain_unsaved_after_edits_are_undone() {
+        let mut state = EditorState::new("/workspace".into());
+        let path = std::path::PathBuf::from("/workspace/deleted");
+        let (buffer, _) = state.open_text(TextBuffer::from_text("retained"), Some(path.clone()));
+        let change = state.capture_path_change(&path).unwrap();
+        let (draft, _) = state.reconcile_paths(change, None).unwrap();
+        state = draft.unwrap().accept(&state.version()).unwrap();
+        state.buffers[buffer].refresh_dirty();
+        assert!(state.buffers[buffer].dirty);
+        assert_eq!(state.buffers[buffer].text.to_string(), "retained");
+    }
+
     #[test]
     fn path_reconciliation_preserves_edits_and_rejects_replaced_buffer_ownership_before_clone() {
         let root = tempfile::tempdir().unwrap();

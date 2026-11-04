@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::editor::{
     state::{EditingPolicy, RegisterShape, SelectionKind, View},
     text::{
@@ -125,7 +127,7 @@ pub(super) fn motion_target(
         }
         "word_end" => {
             for index in 0..count {
-                if index > 0 {
+                if index > 0 || word_end(text, target) == target {
                     target = next_grapheme_boundary(text, target);
                 }
                 target = word_end(text, target);
@@ -133,7 +135,7 @@ pub(super) fn motion_target(
         }
         "big_word_end" => {
             for index in 0..count {
-                if index > 0 {
+                if index > 0 || big_word_end(text, target) == target {
                     target = next_grapheme_boundary(text, target);
                 }
                 target = big_word_end(text, target);
@@ -309,7 +311,7 @@ pub(super) fn repeat_visual_ranges(
     }
 }
 
-pub(super) fn visual_ranges(
+pub(crate) fn visual_ranges(
     text: &TextBuffer,
     view: &View,
     policy: EditingPolicy,
@@ -392,12 +394,14 @@ pub(super) fn visual_ranges(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn operator_range(
     text: &TextBuffer,
     objects: &[crate::language::syntax::SyntaxObject],
     cursor: ByteOffset,
     motion: &str,
     count: usize,
+    change_word: bool,
     linewise: bool,
     character: Option<char>,
     policy: EditingPolicy,
@@ -441,24 +445,40 @@ pub(super) fn operator_range(
         }
         return ByteRange::new(cursor, end).map_err(failed);
     }
-    let target = motion_target(text, cursor, motion, count, character, policy, None)?;
+    let target = if change_word {
+        let first = if motion == "big_word_end" {
+            big_word_end(text, cursor)
+        } else {
+            word_end(text, cursor)
+        };
+        motion_target(
+            text,
+            first,
+            motion,
+            count.saturating_sub(1),
+            character,
+            policy,
+            None,
+        )?
+    } else {
+        motion_target(text, cursor, motion, count, character, policy, None)?
+    };
     let (start, mut end) = if target < cursor {
         (target, cursor)
     } else {
         (cursor, target)
     };
-    if target >= cursor
-        && matches!(
-            motion,
-            "word_end"
-                | "big_word_end"
-                | "line_end"
-                | "matching_pair"
-                | "find_forward"
-                | "till_forward"
-                | "till_forward_again"
-        )
-    {
+    if matches!(
+        motion,
+        "word_end"
+            | "big_word_end"
+            | "line_end"
+            | "matching_pair"
+            | "find_forward"
+            | "find_backward"
+            | "till_forward"
+            | "till_forward_again"
+    ) {
         end = next_grapheme_boundary(text, end);
     }
     ByteRange::new(start, end).map_err(failed)
@@ -547,7 +567,10 @@ pub(super) fn word_class(character: char) -> u8 {
 
 /// In Normal mode the cursor sits on a character, so a line shorter than the wanted column
 /// puts it on its last one.
-pub(super) fn on_last_character(text: &TextBuffer, offset: ByteOffset) -> Result<ByteOffset, CommandError> {
+pub(super) fn on_last_character(
+    text: &TextBuffer,
+    offset: ByteOffset,
+) -> Result<ByteOffset, CommandError> {
     let line = text.byte_to_line(offset).map_err(failed)?;
     let start = text.line_to_byte(line).map_err(failed)?;
     let end = line_content_end(text, line)?;
@@ -583,13 +606,13 @@ pub(super) fn word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset 
     if cursor.get() >= source.len() {
         return cursor;
     }
-    let mut iter = source[cursor.get()..].char_indices();
-    let current = iter
-        .next()
-        .map_or(0, |(_, character)| word_class(character));
+    let mut iter = source[cursor.get()..].grapheme_indices(true);
+    let current = iter.next().map_or(0, |(_, character)| {
+        word_class(character.chars().next().unwrap_or(' '))
+    });
     let mut seen_other = false;
     for (relative, character) in iter {
-        let class = word_class(character);
+        let class = word_class(character.chars().next().unwrap_or(' '));
         if !seen_other && class != current {
             seen_other = true;
         }
@@ -607,8 +630,8 @@ pub(super) fn big_word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOff
         .next()
         .is_some_and(char::is_whitespace);
     let mut separator_seen = starts_in_space;
-    for (relative, character) in source[cursor.get()..].char_indices() {
-        if character.is_whitespace() {
+    for (relative, character) in source[cursor.get()..].grapheme_indices(true) {
+        if character.chars().all(char::is_whitespace) {
             separator_seen = true;
         } else if separator_seen {
             return ByteOffset(cursor.get() + relative);
@@ -621,8 +644,8 @@ pub(super) fn big_word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOf
     let source = text.to_string();
     let mut target = 0;
     let mut seen_nonspace = false;
-    for (index, character) in source[..cursor.get()].char_indices().rev() {
-        if character.is_whitespace() {
+    for (index, character) in source[..cursor.get()].grapheme_indices(true).rev() {
+        if character.chars().all(char::is_whitespace) {
             if seen_nonspace {
                 break;
             }
@@ -637,20 +660,20 @@ pub(super) fn big_word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOf
 pub(super) fn word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
     let source = text.to_string();
     let before = &source[..cursor.get()];
-    let mut iter = before.char_indices().rev();
+    let mut iter = before.grapheme_indices(true).rev();
     let Some((mut target, mut character)) = iter.next() else {
         return ByteOffset(0);
     };
-    while character.is_whitespace() {
+    while character.chars().all(char::is_whitespace) {
         let Some((index, next)) = iter.next() else {
             return ByteOffset(0);
         };
         target = index;
         character = next;
     }
-    let class = word_class(character);
+    let class = word_class(character.chars().next().unwrap_or(' '));
     for (index, previous) in iter {
-        if word_class(previous) != class {
+        if word_class(previous.chars().next().unwrap_or(' ')) != class {
             break;
         }
         target = index;
@@ -662,8 +685,8 @@ pub(super) fn big_word_end(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset 
     let source = text.to_string();
     let mut end = cursor.get();
     let mut seen_nonspace = false;
-    for (relative, character) in source[cursor.get()..].char_indices() {
-        if character.is_whitespace() {
+    for (relative, character) in source[cursor.get()..].grapheme_indices(true) {
+        if character.chars().all(char::is_whitespace) {
             if seen_nonspace {
                 break;
             }
@@ -728,20 +751,20 @@ pub(super) fn matching_pair(
 
 pub(super) fn word_end(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
     let source = text.to_string();
-    let mut iter = source[cursor.get()..].char_indices().peekable();
+    let mut iter = source[cursor.get()..].grapheme_indices(true).peekable();
     while iter
         .peek()
-        .is_some_and(|(_, character)| character.is_whitespace())
+        .is_some_and(|(_, character)| character.chars().all(char::is_whitespace))
     {
         iter.next();
     }
     let Some((first, character)) = iter.next() else {
         return ByteOffset(source.len());
     };
-    let class = word_class(character);
+    let class = word_class(character.chars().next().unwrap_or(' '));
     let mut end = cursor.get() + first;
     for (relative, next) in iter {
-        if word_class(next) != class {
+        if word_class(next.chars().next().unwrap_or(' ')) != class {
             break;
         }
         end = cursor.get() + relative;

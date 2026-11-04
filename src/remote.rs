@@ -1,6 +1,6 @@
 //! Requests to a running Dust from programs it starts. Dust listens on a Unix socket named
 //! in `DUST_SERVER`. `dust --remote FILE` (lazygit's edit key) sends one line per file,
-//! `<line>\t<absolute path>` with line 0 when none was given, and exits. `dust --agent-tools`
+//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits. `dust --agent-tools`
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
@@ -8,6 +8,7 @@ use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
+        ffi::{OsStrExt, OsStringExt},
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
     },
@@ -47,20 +48,26 @@ pub struct AgentRequest {
 
 /// The connection a subagent's answer goes back on.
 #[derive(Debug)]
-pub struct Reply(UnixStream);
+pub struct Reply {
+    stream: UnixStream,
+    sender: mpsc::SyncSender<(UnixStream, Result<String, String>)>,
+}
 
 impl Reply {
     /// Written from a worker thread, so a reader that stalls cannot stall Dust.
     pub fn send(self, answer: Result<String, String>) {
-        let message = match answer {
-            Ok(text) => json!({"text": text}),
-            Err(error) => json!({"error": error}),
-        };
-        let mut stream = self.0;
-        thread::spawn(move || {
-            let _ = stream.write_all(format!("{message}\n").as_bytes());
-        });
+        // A full queue closes this connection; it must not create another worker.
+        let _ = self.sender.try_send((self.stream, answer));
     }
+}
+
+fn send_reply(mut stream: UnixStream, answer: Result<String, String>) -> io::Result<()> {
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let message = match answer {
+        Ok(text) => json!({"text": text}),
+        Err(error) => json!({"error": error}),
+    };
+    stream.write_all(format!("{message}\n").as_bytes())
 }
 
 #[derive(Debug)]
@@ -83,6 +90,15 @@ impl RemoteServer {
         let listener = UnixListener::bind(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         let (sender, requests) = mpsc::channel();
+        let (replies, pending) = mpsc::sync_channel(8);
+        thread::Builder::new()
+            .name("dust-remote-replies".into())
+            .spawn(move || {
+                while let Ok((stream, answer)) = pending.recv() {
+                    // Failed delivery closes the socket and lets the next answer proceed.
+                    let _ = send_reply(stream, answer);
+                }
+            })?;
         thread::Builder::new()
             .name("dust-remote".into())
             .spawn(move || {
@@ -95,10 +111,15 @@ impl RemoteServer {
                     let reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
                     for line in reader.lines().map_while(Result::ok) {
                         let request = match line.strip_prefix(AGENT_PREFIX) {
-                            Some(body) => stream
-                                .try_clone()
-                                .ok()
-                                .and_then(|reply| parse_agent(body, Reply(reply))),
+                            Some(body) => stream.try_clone().ok().and_then(|reply| {
+                                parse_agent(
+                                    body,
+                                    Reply {
+                                        stream: reply,
+                                        sender: replies.clone(),
+                                    },
+                                )
+                            }),
                             None => parse(&line).map(RemoteRequest::Open),
                         };
                         let asked_for_agent = matches!(request, Some(RemoteRequest::Agent(_)));
@@ -136,7 +157,13 @@ impl Drop for RemoteServer {
 
 fn parse(line: &str) -> Option<RemoteOpen> {
     let (number, path) = line.split_once('\t')?;
-    let path = PathBuf::from(path);
+    let path = if path.starts_with('[') {
+        PathBuf::from(std::ffi::OsString::from_vec(
+            serde_json::from_str(path).ok()?,
+        ))
+    } else {
+        PathBuf::from(path)
+    };
     path.is_absolute().then(|| RemoteOpen {
         path,
         line: number.parse().ok().filter(|line| *line > 0),
@@ -147,10 +174,19 @@ fn parse_agent(body: &str, reply: Reply) -> Option<RemoteRequest> {
     let request: Value = serde_json::from_str(body).ok()?;
     Some(RemoteRequest::Agent(AgentRequest {
         parent: request["parent"].as_u64()?,
-        description: request["description"].as_str().unwrap_or_default().to_owned(),
+        description: request["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
         prompt: request["prompt"].as_str()?.to_owned(),
-        agent: request["agent"].as_str().filter(|name| !name.is_empty()).map(str::to_owned),
-        model: request["model"].as_str().filter(|name| !name.is_empty()).map(str::to_owned),
+        agent: request["agent"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
+        model: request["model"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
         reply,
     }))
 }
@@ -172,7 +208,10 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
     let mut message = String::new();
     for (index, path) in paths.iter().enumerate() {
         let line = if index == 0 { line.unwrap_or(0) } else { 0 };
-        message.push_str(&format!("{line}\t{}\n", std::path::absolute(path)?.display()));
+        let path = std::path::absolute(path)?;
+        let encoded =
+            serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        message.push_str(&format!("{line}\t{encoded}\n"));
     }
     stream.write_all(message.as_bytes())
 }
@@ -198,7 +237,9 @@ pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
         .or_else(|| {
             let config = std::env::var_os("XDG_CONFIG_HOME")
                 .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
+                })?;
             let file = config.join("lazygit/config.yml");
             file.is_file().then(|| file.display().to_string())
         });
@@ -217,7 +258,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let file = directory.path().join("a.rs");
-        send(server.path(), &[file.clone(), PathBuf::from("/b.rs")], Some(12)).unwrap();
+        send(
+            server.path(),
+            &[file.clone(), PathBuf::from("/b.rs")],
+            Some(12),
+        )
+        .unwrap();
         let mut received = Vec::new();
         for _ in 0..200 {
             received.extend(server.try_request().and_then(|request| match request {
@@ -232,11 +278,65 @@ mod tests {
         assert_eq!(
             received,
             [
-                RemoteOpen { path: file, line: Some(12) },
-                RemoteOpen { path: "/b.rs".into(), line: None },
+                RemoteOpen {
+                    path: file,
+                    line: Some(12)
+                },
+                RemoteOpen {
+                    path: "/b.rs".into(),
+                    line: None
+                },
             ]
         );
         assert!(parse("3\trelative.rs").is_none());
+    }
+
+    #[test]
+    fn remote_paths_preserve_newlines_tabs_and_non_utf8_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let file = directory
+            .path()
+            .join(std::ffi::OsString::from_vec(b"a\n\tb-\xff.rs".to_vec()));
+        send(server.path(), std::slice::from_ref(&file), Some(9)).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(RemoteRequest::Open(open)) = server.try_request() {
+                assert_eq!(
+                    open,
+                    RemoteOpen {
+                        path: file,
+                        line: Some(9)
+                    }
+                );
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn stalled_reply_delivery_times_out_and_admission_is_bounded() {
+        let (stream, _stalled) = UnixStream::pair().unwrap();
+        let started = std::time::Instant::now();
+        let error = send_reply(stream, Ok("x".repeat(4 * 1024 * 1024))).unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let (sender, _pending) = mpsc::sync_channel(1);
+        let (stream, _reader) = UnixStream::pair().unwrap();
+        Reply {
+            stream,
+            sender: sender.clone(),
+        }
+        .send(Ok("first".into()));
+        let (stream, mut reader) = UnixStream::pair().unwrap();
+        Reply { stream, sender }.send(Ok("rejected".into()));
+        let mut byte = [0];
+        assert_eq!(reader.read(&mut byte).unwrap(), 0);
     }
 
     #[test]
@@ -245,7 +345,10 @@ mod tests {
         let server = RemoteServer::start(directory.path()).unwrap();
         let path = server.path().to_owned();
         let asking = thread::spawn(move || {
-            ask_agent(&path, &json!({"parent": 3, "description": "look", "prompt": "find it"}))
+            ask_agent(
+                &path,
+                &json!({"parent": 3, "description": "look", "prompt": "find it"}),
+            )
         });
         let request = loop {
             if let Some(RemoteRequest::Agent(request)) = server.try_request() {
@@ -253,7 +356,14 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        assert_eq!((request.parent, request.prompt.as_str(), request.agent.as_deref()), (3, "find it", None));
+        assert_eq!(
+            (
+                request.parent,
+                request.prompt.as_str(),
+                request.agent.as_deref()
+            ),
+            (3, "find it", None)
+        );
         request.reply.send(Ok("found".into()));
         assert_eq!(asking.join().unwrap().unwrap(), json!({"text": "found"}));
     }

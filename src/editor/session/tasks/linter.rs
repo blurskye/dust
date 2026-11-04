@@ -8,7 +8,7 @@ use crate::editor::session::{
 use crate::{
     editor::{
         EditorState,
-        text::{ByteOffset, ByteRange, TextBuffer},
+        text::{ByteRange, TextBuffer},
     },
     files::{RequestId, VfsResult},
     workspace::{Diagnostic, DiagnosticProducer, DiagnosticSeverity},
@@ -21,6 +21,7 @@ use std::{
 struct Raw {
     line: usize,
     column: usize,
+    encoding: crate::editor::text::PositionEncoding,
     severity: DiagnosticSeverity,
     message: String,
 }
@@ -177,7 +178,8 @@ impl TaskSession {
         let text = std::str::from_utf8(&task.output).map_err(|_| "linter output is not UTF-8")?;
         let regex = self
             .matchers
-            .get(&task.requested)
+            .get(&task.name)
+            .or_else(|| self.matchers.get(&task.requested))
             .ok_or("linter matcher unavailable")?;
         let mut raw = BTreeMap::<PathBuf, Vec<Raw>>::new();
         for (index, captures) in regex
@@ -200,7 +202,7 @@ impl TaskSession {
             let path = if path.is_absolute() {
                 path
             } else {
-                task.root.join(path)
+                task.cwd.join(path)
             };
             if !path.starts_with(&task.root) {
                 return Err("linter path is outside its task root".into());
@@ -252,6 +254,9 @@ impl TaskSession {
             raw.entry(path).or_default().push(Raw {
                 line,
                 column,
+                encoding: matcher
+                    .column_encoding
+                    .unwrap_or(crate::editor::text::PositionEncoding::Utf8),
                 severity,
                 message,
             });
@@ -490,13 +495,10 @@ fn convert(
     let uri = crate::language::lsp::file_uri(path);
     raw.into_iter()
         .map(|raw| {
-            let line = text
-                .line_to_byte(raw.line)
-                .map_err(|_| "linter line is outside its source")?;
-            let offset = line
-                .get()
-                .checked_add(raw.column)
-                .ok_or("linter column overflow")?;
+            let start = crate::editor::text::PositionCodec::new(text)
+                .lsp_to_byte(raw.line, raw.column, raw.encoding)
+                .map_err(|_| "linter column is outside its source or splits UTF-8")?;
+            let offset = start.get();
             let end = text
                 .line_to_byte(raw.line.saturating_add(1))
                 .map(|next| next.get().saturating_sub(1))
@@ -504,9 +506,7 @@ fn convert(
             if offset > end {
                 return Err("linter column crosses its source line".into());
             }
-            let start = ByteOffset(offset);
-            text.validate_offset(start)
-                .map_err(|_| "linter column is outside its source or splits UTF-8")?;
+
             Ok(Diagnostic {
                 uri: uri.clone(),
                 version,

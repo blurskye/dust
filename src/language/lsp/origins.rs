@@ -23,6 +23,7 @@ pub(crate) struct EditContext {
     pub(super) encoding: PositionEncoding,
     pub(super) diagnostic_ambiguous: bool,
     pub(super) sources: Arc<HashMap<String, (crate::editor::BufferId, TextVersion)>>,
+    pub(super) disk: Option<(String, crate::editor::text::TextBuffer)>,
 }
 impl EditContext {
     pub(crate) fn diagnostic_producer(
@@ -36,6 +37,12 @@ impl EditContext {
     }
     pub(crate) fn diagnostic_ambiguous(&self) -> bool {
         self.diagnostic_ambiguous
+    }
+    pub(crate) fn disk_document(&self, uri: &str) -> Option<&crate::editor::text::TextBuffer> {
+        self.disk
+            .as_ref()
+            .filter(|(path, _)| path == uri)
+            .map(|(_, text)| text)
     }
     pub(crate) fn encoding(&self) -> PositionEncoding {
         self.encoding
@@ -57,14 +64,30 @@ pub(super) struct EventSender {
     pub channel: SyncSender<OwnedLspEvent>,
     pub context: EditContext,
     pub commands: SyncSender<SessionCommand>,
+    pub cancelled: Arc<std::sync::atomic::AtomicBool>,
+    pub stop_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 impl EventSender {
     pub fn send(&self, event: LspEvent) {
-        let _ = self.channel.try_send(OwnedLspEvent {
+        let expendable = matches!(event, LspEvent::Log { .. });
+        let mut event = OwnedLspEvent {
             event,
             context: self.context.clone(),
             reply: None,
-        });
+        };
+        loop {
+            if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            match self.channel.try_send(event) {
+                Ok(()) | Err(TrySendError::Disconnected(_)) => return,
+                Err(TrySendError::Full(_)) if expendable => return,
+                Err(TrySendError::Full(value)) => {
+                    event = value;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        }
     }
     pub fn apply(
         &self,
@@ -160,6 +183,26 @@ pub(crate) struct EditSourceFixture {
 }
 #[cfg(test)]
 impl EditSourceFixture {
+    pub(crate) fn saved_uri(&self) -> Option<String> {
+        while let Ok(command) = self.commands.try_recv() {
+            if let SessionCommand::Save(document) = command {
+                return Some(document.uri());
+            }
+        }
+        None
+    }
+    pub(crate) fn executed_command(&self) -> Option<String> {
+        while let Ok(command) = self.commands.try_recv() {
+            if let SessionCommand::Request {
+                feature: super::model::LspFeature::ExecuteCommand(command),
+                ..
+            } = command
+            {
+                return Some(command.command);
+            }
+        }
+        None
+    }
     pub(crate) fn request(&mut self, id: ServerRequestId, edit: LspWorkspaceEdit) -> bool {
         if self.pending.contains_key(&id) {
             return false;
@@ -211,6 +254,33 @@ impl EditSourceFixture {
     ) {
         lineage.observe(uri.into(), &source);
         Arc::make_mut(&mut self.events.context.sources).insert(uri.into(), source);
+    }
+    pub(crate) fn take_synced_source(&self) -> Option<crate::editor::BufferId> {
+        match self.commands.try_recv().ok()? {
+            SessionCommand::SyncOwned { source, .. } => Some(source.0),
+            _ => panic!("expected owned document sync"),
+        }
+    }
+    pub(crate) fn publish_disk_diagnostics(
+        &self,
+        uri: &str,
+        text: &str,
+        diagnostics: Vec<LspDiagnostic>,
+    ) {
+        let events = EventSender {
+            context: EditContext {
+                sources: Arc::new(HashMap::new()),
+                disk: Some((uri.into(), crate::editor::text::TextBuffer::from_text(text))),
+                ..self.events.context.clone()
+            },
+            ..self.events.clone()
+        };
+        events.send(LspEvent::Diagnostics {
+            server: self.events.context.server.to_string(),
+            uri: uri.into(),
+            version: None,
+            diagnostics,
+        });
     }
     pub(crate) fn block_responses(&self) {
         self.events
@@ -271,5 +341,52 @@ impl DiagnosticLineage {
     }
     pub(crate) fn ambiguous(&self, uri: &str) -> bool {
         self.exhausted || self.ambiguous.contains(uri)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn full_event_queue_retains_lifecycle_and_result_events() {
+        let (channel, receiver) = mpsc::sync_channel(1);
+        let (commands, _) = mpsc::sync_channel(1);
+        let sender = EventSender {
+            channel,
+            commands,
+            cancelled: Default::default(),
+            stop_requested: Default::default(),
+            context: EditContext {
+                session: Arc::new(()),
+                server: "fixture".into(),
+                encoding: PositionEncoding::Utf16,
+                diagnostic_ambiguous: false,
+                sources: Arc::new(HashMap::new()),
+                disk: None,
+            },
+        };
+        sender.send(LspEvent::Log {
+            server: "fixture".into(),
+            message: "full".into(),
+        });
+        let worker = std::thread::spawn(move || {
+            sender.send(LspEvent::Running {
+                server: "fixture".into(),
+                capabilities: Default::default(),
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(matches!(
+            receiver.recv().unwrap().event,
+            LspEvent::Log { .. }
+        ));
+        assert!(matches!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+                .event,
+            LspEvent::Running { .. }
+        ));
+        worker.join().unwrap();
     }
 }

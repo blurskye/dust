@@ -153,7 +153,21 @@ impl WorkspaceEditSession {
         if !preparing.slots.is_empty() {
             return Err("workspace file preparation already started".into());
         }
-        preparing.slots = files.into_iter().map(Slot::Waiting).collect();
+        let creates = files
+            .iter()
+            .filter_map(|file| {
+                if let InputFile::Create(path) = file {
+                    Some(path.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<std::collections::HashSet<_>>();
+        preparing.slots = files
+            .into_iter()
+            .filter(|file| !matches!(file, InputFile::Read(path) if creates.contains(path)))
+            .map(Slot::Waiting)
+            .collect();
         preparing.roots = roots;
         preparing.maximum = maximum;
         Ok(())

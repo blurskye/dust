@@ -173,7 +173,7 @@ fn prepare(
             use std::os::unix::fs::OpenOptionsExt;
             let file = fs::OpenOptions::new()
                 .read(true)
-                .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+                .custom_flags(nix::libc::O_PATH | nix::libc::O_NOFOLLOW)
                 .open(&path)
                 .map_err(|e| error(&path, e.to_string()))?;
             let metadata = file.metadata().map_err(|e| error(&path, e.to_string()))?;
@@ -340,6 +340,39 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn explorer_rename_and_delete_do_not_require_source_read_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let target = root.path().join("target");
+        fs::write(&source, "private").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o0)).unwrap();
+        let roots = vec![RootIdentity::capture(root.path()).unwrap()];
+        let intent = prepare(
+            ExplorerMutation::Rename {
+                source: source.clone(),
+                target: target.clone(),
+            },
+            roots.clone(),
+            1024,
+        )
+        .unwrap();
+        apply(intent).unwrap();
+        assert!(!source.exists());
+        assert!(target.exists());
+        let intent = prepare(
+            ExplorerMutation::Delete {
+                path: target.clone(),
+            },
+            roots,
+            1024,
+        )
+        .unwrap();
+        apply(intent).unwrap();
+        assert!(!target.exists());
+    }
+
     #[test]
     fn participating_roots_isolate_missing_roots_and_refuse_replaced_nested_or_cross_root_targets()
     {

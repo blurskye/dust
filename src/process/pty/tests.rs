@@ -5,6 +5,7 @@ use std::{path::Path, time::Instant};
 fn request(root: &Path, script: &str) -> PtyRequest {
     PtyRequest {
         program: "/bin/sh".into(),
+        argv0: None,
         arguments: vec!["-c".into(), script.into()],
         cwd: root.into(),
         environment: Default::default(),
@@ -216,4 +217,150 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
         thread::sleep(Duration::from_millis(1));
     }
     crate::debugger::terminal_reply_source_fixture();
+}
+
+#[test]
+fn reaped_pty_child_is_never_signalled_again() {
+    #[derive(Debug, Clone)]
+    struct Process(Arc<AtomicUsize>);
+    impl portable_pty::ChildKiller for Process {
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+    impl portable_pty::Child for Process {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            Ok(Some(portable_pty::ExitStatus::with_exit_code(0)))
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            Ok(portable_pty::ExitStatus::with_exit_code(0))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+        #[cfg(windows)]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+    let signals = Arc::new(AtomicUsize::new(0));
+    let mut child = Child {
+        process: Box::new(Process(signals.clone())),
+        reaped: false,
+    };
+    assert!(child.try_wait().unwrap().is_some());
+    child.kill();
+    drop(child);
+    assert_eq!(signals.load(Ordering::Relaxed), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
+    let root = tempfile::tempdir().unwrap();
+    let mut service = PtyService::start(1);
+    let id = service
+        .open(request(
+            root.path(),
+            "trap '' HUP TERM; sleep 30 & printf 'READY\\n'; wait",
+        ))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        if service.poll().unwrap().iter().any(|event| matches!(event, PtyEvent::Output { bytes, .. } if bytes.windows(5).any(|text| text == b"READY"))) { break; }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    service.close(id).unwrap();
+    drain(&mut service, id);
+    while service.residents.load(Ordering::Acquire) != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "PTY descendants retained I/O workers"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
+    let root = tempfile::tempdir().unwrap();
+    let invocation = root.path().join("custom-sh");
+    std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
+    let mut service = PtyService::start(1);
+    let mut request = request(root.path(), "printf '%s' \"$0\"");
+    request.program = invocation.canonicalize().unwrap();
+    request.argv0 = Some(invocation.clone());
+    request.policy.maximum_output_bytes = 0;
+    let id = service.open(request).unwrap();
+    let mut output = Vec::new();
+    for event in drain(&mut service, id) {
+        match event {
+            PtyEvent::Output { bytes, .. } => output.extend(bytes),
+            PtyEvent::IoComplete { result, .. } => result.unwrap(),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        String::from_utf8(output).unwrap().trim_end(),
+        invocation.to_str().unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn pty_resize_ack_precedes_the_childs_resize_output() {
+    let root = tempfile::tempdir().unwrap();
+    let mut service = PtyService::start(1);
+    let script = root.path().join("resize.py");
+    std::fs::write(&script, "import os,signal,time\ndef resized(*_): os.write(1, b'\\x1b[1;999HX')\nsignal.signal(signal.SIGWINCH, resized)\nos.write(1, b'\\x1b[?1049hREADY')\ntime.sleep(30)\n").unwrap();
+    let mut request = request(root.path(), "");
+    request.program =
+        crate::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
+    request.arguments = vec![script.display().to_string()];
+    let id = service.open(request).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut screen = crate::ui::PtyScreen::new(80, 8, 8);
+    while !screen.lines().iter().any(|line| line.contains("READY")) {
+        for event in service.poll().unwrap() {
+            if let PtyEvent::Output { bytes, .. } = event {
+                screen.feed_bytes(&bytes);
+            }
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    service.resize_checked(id, 1, 40, 8).unwrap();
+    let mut acknowledged = false;
+    loop {
+        for event in service.poll().unwrap() {
+            match event {
+                PtyEvent::Resized { columns, rows, .. } => {
+                    acknowledged = true;
+                    screen.resize(columns, rows);
+                }
+                PtyEvent::Output { bytes, .. } => {
+                    assert!(acknowledged, "resize output overtook the acknowledgement");
+                    screen.feed_bytes(&bytes);
+                }
+                _ => {}
+            }
+        }
+        if screen.history_row(0).unwrap()[39].text == "X" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing resize frame: {:?}",
+            screen.lines()
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    service.close(id).unwrap();
+    drain(&mut service, id);
 }

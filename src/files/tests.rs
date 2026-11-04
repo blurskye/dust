@@ -142,6 +142,76 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
 }
 
 #[test]
+fn project_roots_accept_jsonc_configs_and_whitespace_separated_go_directives() {
+    use super::project_root::project_root_is_valid;
+    let root = tempdir().unwrap();
+    for marker in ["tsconfig.json", "jsconfig.json"] {
+        fs::write(
+            root.path().join(marker),
+            r#"{
+            // TypeScript permits comments and trailing commas.
+            "compilerOptions": { "paths": ["https://example/*",], }, /* comment */
+        }"#,
+        )
+        .unwrap();
+        assert!(project_root_is_valid(
+            root.path(),
+            &[marker.into()],
+            ProjectRootStrategy::Node
+        ));
+        for invalid in ["/*", r#"{ "x": 1 /* unterminated }"#, "{,}"] {
+            fs::write(root.path().join(marker), invalid).unwrap();
+            assert!(!project_root_is_valid(
+                root.path(),
+                &[marker.into()],
+                ProjectRootStrategy::Node
+            ));
+        }
+    }
+    fs::write(
+        root.path().join("package.json"),
+        "{ /* comment */ \"name\": \"demo\", }",
+    )
+    .unwrap();
+    assert!(!project_root_is_valid(
+        root.path(),
+        &["package.json".into()],
+        ProjectRootStrategy::Node
+    ));
+    for (marker, source) in [
+        ("go.mod", "module\texample.com/demo\n"),
+        ("go.work", "go\t1.22\nuse ./demo\n"),
+    ] {
+        fs::write(root.path().join(marker), source).unwrap();
+        assert!(project_root_is_valid(
+            root.path(),
+            &[marker.into()],
+            ProjectRootStrategy::Go
+        ));
+    }
+}
+
+#[test]
+fn explorer_watch_detects_ignore_rule_edits_in_parent_directories() {
+    let root = tempdir().unwrap();
+    let child = root.path().join("child");
+    fs::create_dir(&child).unwrap();
+    fs::write(root.path().join(".gitignore"), "one.txt\n").unwrap();
+    let roots = vec![root.path().to_path_buf()];
+    let before = explorer_directory_fingerprint(&child, &roots, 10, 4096).unwrap();
+    // Same length and no entry-name changes, including in the child listing.
+    fs::write(root.path().join(".gitignore"), "two.txt\n").unwrap();
+    let after = explorer_directory_fingerprint(&child, &roots, 10, 4096).unwrap();
+    assert_eq!(before.entries, after.entries);
+    assert_ne!(before, after);
+    fs::write(root.path().join(".ignore"), "three.txt\n").unwrap();
+    assert_ne!(
+        after,
+        explorer_directory_fingerprint(&child, &roots, 10, 4096).unwrap()
+    );
+}
+
+#[test]
 fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {
     let root = tempdir().unwrap();
     let canonical = fs::canonicalize(root.path()).unwrap();
@@ -295,6 +365,52 @@ fn recovery_journals_are_versioned_atomic_and_corruption_tolerant() {
 }
 
 #[test]
+fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = tempdir().unwrap();
+    let source = root
+        .path()
+        .join(std::ffi::OsString::from_vec(vec![b'x', 0xff]));
+    let replacement = root.path().join("x\u{fffd}");
+    let record = RecoveryRecord::new(Some(&source), 1, "unsaved".into());
+    write_recovery(&root.path().join("native.toml"), &record).unwrap();
+    let discovery = discover_recovery(root.path());
+    assert_eq!(discovery.records[0].1.path(), Some(source));
+    assert_ne!(discovery.records[0].1.path(), Some(replacement));
+    let legacy = RecoveryRecord {
+        version: 1,
+        original_path: Some("old.txt".into()),
+        revision: 0,
+        content: "old".into(),
+    };
+    fs::write(
+        root.path().join("legacy.toml"),
+        toml::to_string(&legacy).unwrap(),
+    )
+    .unwrap();
+    let discovery = discover_recovery(root.path());
+    assert_eq!(discovery.records.len(), 2);
+    assert_eq!(discovery.records[0].1.path(), Some("old.txt".into()));
+    let ambiguous = RecoveryRecord {
+        original_path: Some("x\u{fffd}".into()),
+        ..legacy
+    };
+    assert!(ambiguous.path().is_none());
+    fs::write(
+        root.path().join("ambiguous.toml"),
+        toml::to_string(&ambiguous).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(discover_recovery(root.path()).records.len(), 3);
+    assert!(super::recovery_size_allowed(
+        RECOVERY_PAYLOAD_BYTE_CEILING - 8192
+    ));
+    assert!(!super::recovery_size_allowed(
+        RECOVERY_PAYLOAD_BYTE_CEILING - 8191
+    ));
+}
+
+#[test]
 fn recovery_safety_ceilings_are_testable_without_large_disk_fixtures() {
     assert!(recovery_journal_size_allowed(RECOVERY_JOURNAL_BYTE_CEILING));
     assert!(!recovery_journal_size_allowed(
@@ -356,6 +472,31 @@ fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
         path.exists(),
         "invalid journals remain available for inspection"
     );
+}
+
+#[test]
+fn recovery_discovery_bounds_records_and_aggregate_content() {
+    let root = tempdir().unwrap();
+    for name in ["a", "b", "c"] {
+        write_recovery(
+            &root.path().join(format!("{name}.toml")),
+            &RecoveryRecord::new(None, 1, "1234".into()),
+        )
+        .unwrap();
+    }
+    let limited = super::recovery::discover_recovery_bounded(root.path(), 1, 100);
+    assert_eq!(limited.records.len(), 1);
+    let limited = super::recovery::discover_recovery_bounded(root.path(), 100, 8);
+    assert_eq!(limited.records.len(), 2);
+    assert_eq!(limited.diagnostics.len(), 1);
+    assert!(limited.diagnostics[0].contains("byte safety ceiling"));
+    assert!(
+        super::recovery::discover_recovery_bounded(root.path(), 0, 100)
+            .records
+            .is_empty()
+    );
+    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
+    assert_eq!(cleanup.deleted.len(), 3);
 }
 
 #[test]
@@ -488,10 +629,16 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
 
     let listing = list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 10)
         .expect("root listing");
-    assert!(listing.entries.iter().any(|entry| entry.name == ".worktree"));
+    assert!(
+        listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == ".worktree")
+    );
     let inside = root.join(".worktree");
-    let listing = list_scoped_directory(1, 0, &inside, std::slice::from_ref(&root), false, false, 10)
-        .expect("worktree folder listing");
+    let listing =
+        list_scoped_directory(1, 0, &inside, std::slice::from_ref(&root), false, false, 10)
+            .expect("worktree folder listing");
     assert!(listing.entries.iter().any(|entry| entry.name == "feat"));
 
     let searched = |root: &Path| {
@@ -526,7 +673,9 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         let mut entries = Vec::new();
         loop {
             match service.try_event() {
-                Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
+                Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => {
+                    entries.extend(batch)
+                }
                 Some(super::WorkspaceFileEvent::Complete { .. }) => break,
                 Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
                 _ => {}
@@ -536,13 +685,18 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         }
         entries
             .iter()
-            .map(|entry: &super::WorkspaceFileEntry| entry.relative_path.to_string_lossy().into_owned())
+            .map(|entry: &super::WorkspaceFileEntry| {
+                entry.relative_path.to_string_lossy().into_owned()
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(found(&root), [".worktree/feat/feat.txt", "main.txt"]);
     assert_eq!(found(&worktree), ["feat.txt"]);
 
-    assert_eq!(super::linked_worktree_repository(&worktree).as_deref(), root.file_name().and_then(|name| name.to_str()));
+    assert_eq!(
+        super::linked_worktree_repository(&worktree).as_deref(),
+        root.file_name().and_then(|name| name.to_str())
+    );
     assert_eq!(super::linked_worktree_repository(&root), None);
 }
 
@@ -648,6 +802,93 @@ fn scoped_directory_listing_does_not_traverse_symlink_escape_and_handles_non_utf
         ),
         Err(VfsError::OutsideScope(_))
     ));
+}
+
+#[test]
+fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = tempdir().unwrap();
+    let paths = [0xfe, 0xff].map(|byte| {
+        root.path()
+            .join(std::ffi::OsString::from_vec(vec![b'x', byte]))
+    });
+    assert_eq!(
+        paths[0].display().to_string(),
+        paths[1].display().to_string()
+    );
+    assert_ne!(
+        super::workspace_files::file_id(&paths[0]),
+        super::workspace_files::file_id(&paths[1])
+    );
+    for path in paths {
+        if let Err(error) = fs::write(&path, "needle") {
+            // Some filesystems require UTF-8 names; the identity checks above still apply.
+            assert_eq!(error.raw_os_error(), Some(nix::libc::EILSEQ));
+            return;
+        }
+    }
+    let mut service = super::WorkspaceFileService::default();
+    service
+        .start(super::WorkspaceFilePolicy {
+            roots: vec![root.path().to_path_buf()],
+            root_revision: 1,
+            include_hidden: true,
+            include_ignored: true,
+            maximum_files: 10,
+            maximum_path_bytes: 4096,
+            batch_size: 10,
+            event_queue_capacity: 8,
+        })
+        .unwrap();
+    let mut entries = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match service.try_event() {
+            Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
+            Some(super::WorkspaceFileEvent::Complete { .. }) => break,
+            Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries[0].relative_path.display().to_string(),
+        entries[1].relative_path.display().to_string()
+    );
+    assert_ne!(entries[0].id, entries[1].id);
+    let mut search = WorkspaceSearchService::default();
+    search.start(search_policy(root.path(), "needle")).unwrap();
+    let (matches, _) = collect_search(&search);
+    assert_eq!(matches.len(), 2);
+    assert_ne!(matches[0].id, matches[1].id);
+}
+
+#[test]
+fn workspace_search_positions_many_matches_after_a_large_prefix() {
+    let root = tempdir().unwrap();
+    let prefix = 7 * 1024 * 1024;
+    fs::write(
+        root.path().join("large.txt"),
+        format!("{}{}\nend a", "x".repeat(prefix), "a".repeat(10_000)),
+    )
+    .unwrap();
+    let mut policy = search_policy(root.path(), "a");
+    policy.maximum_file_bytes = 8 * 1024 * 1024;
+    policy.maximum_total_bytes = 8 * 1024 * 1024;
+    policy.maximum_results = 10_001;
+    let mut service = WorkspaceSearchService::default();
+    service.start(policy).unwrap();
+    let (matches, _) = collect_search(&service);
+    assert_eq!(matches.len(), 10_001);
+    for (index, found) in matches[..10_000].iter().enumerate() {
+        assert_eq!(
+            (found.line, found.column, found.end_line, found.end_column),
+            (0, prefix + index, 0, prefix + index + 1)
+        );
+    }
+    assert_eq!((matches[10_000].line, matches[10_000].column), (1, 4));
 }
 
 #[test]
@@ -818,11 +1059,10 @@ fn scoped_read_rejects_symlink_escape_after_canonicalization() {
             result,
             ..
         }) = worker.try_result().expect("result")
+            && result_id == id
         {
-            if result_id == id {
-                assert!(matches!(result, Err(VfsError::OutsideScope(_))));
-                break;
-            }
+            assert!(matches!(result, Err(VfsError::OutsideScope(_))));
+            break;
         }
         assert!(Instant::now() < deadline, "scoped read timed out");
         std::thread::sleep(Duration::from_millis(5));
@@ -880,10 +1120,9 @@ fn explorer_mutations_are_scoped_non_overwriting_and_worker_owned() {
                 result,
                 ..
             }) = worker.try_result().expect("worker")
+                && result_id == id
             {
-                if result_id == id {
-                    return result;
-                }
+                return result;
             }
             assert!(Instant::now() < deadline, "explorer mutation timed out");
             std::thread::sleep(Duration::from_millis(2));
@@ -1018,4 +1257,34 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
             .collect::<Vec<_>>(),
         vec!["b.txt", "sub/a.txt"]
     );
+}
+
+#[test]
+fn patterned_project_marker_detects_opam_project() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("example.opam"), "opam-version: \"2.0\"").unwrap();
+    let result = super::project_root::resolve_project_root(
+        1,
+        1,
+        &root.path().join("main.ml"),
+        root.path(),
+        &["*.opam".into()],
+        ProjectRootStrategy::Marker,
+    )
+    .unwrap();
+    assert_eq!(
+        result.project_root,
+        Some(root.path().canonicalize().unwrap())
+    );
+    std::fs::remove_file(root.path().join("example.opam")).unwrap();
+    let result = super::project_root::resolve_project_root(
+        1,
+        1,
+        &root.path().join("main.ml"),
+        root.path(),
+        &["*.opam".into()],
+        ProjectRootStrategy::Marker,
+    )
+    .unwrap();
+    assert!(result.project_root.is_none());
 }

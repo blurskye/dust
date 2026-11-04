@@ -45,15 +45,14 @@ impl LspServerConfiguration {
         if matches!(
             server_id,
             "astro-language-server" | "astro" | "vue-language-server" | "vue_ls"
-        ) {
-            if let Some(tsdk) = typescript_sdk_for_executable(executable) {
-                return Self {
-                    initialization_options: Some(json!({
-                        "typescript":{"tsdk":tsdk.to_string_lossy()}
-                    })),
-                    settings: json!({}),
-                };
-            }
+        ) && let Some(tsdk) = typescript_sdk_for_executable(executable)
+        {
+            return Self {
+                initialization_options: Some(json!({
+                    "typescript":{"tsdk":tsdk.to_string_lossy()}
+                })),
+                settings: json!({}),
+            };
         }
         // What nvim-lspconfig sends: these servers format and validate only when told to.
         match server_id {
@@ -77,6 +76,25 @@ impl LspServerConfiguration {
         }
     }
 
+    pub(crate) fn overlay(&mut self, other: Self) {
+        fn merge(target: &mut Value, source: Value) {
+            match (target, source) {
+                (Value::Object(target), Value::Object(source)) => {
+                    for (key, value) in source {
+                        merge(target.entry(key).or_insert(Value::Null), value);
+                    }
+                }
+                (target, source) => *target = source,
+            }
+        }
+        if let Some(options) = other.initialization_options {
+            merge(
+                self.initialization_options.get_or_insert(Value::Null),
+                options,
+            );
+        }
+        merge(&mut self.settings, other.settings);
+    }
     #[must_use]
     pub fn initialization_options(&self) -> Option<&Value> {
         self.initialization_options.as_ref()
@@ -258,6 +276,7 @@ pub struct LspCapabilities {
     pub code_action: bool,
     pub execute_command: bool,
     pub semantic_tokens: bool,
+    pub semantic_tokens_delta: bool,
     pub inlay_hints: bool,
     pub pull_diagnostics: bool,
     pub code_lens: bool,
@@ -403,7 +422,11 @@ pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
         let channel = |hex: &str| u8::from_str_radix(hex, 16).ok();
         match digits.len() {
             6 | 8 => {
-                return Some((channel(&digits[0..2])?, channel(&digits[2..4])?, channel(&digits[4..6])?));
+                return Some((
+                    channel(&digits[0..2])?,
+                    channel(&digits[2..4])?,
+                    channel(&digits[4..6])?,
+                ));
             }
             3 | 4 => {
                 let short = |i: usize| channel(&digits[i..=i]).map(|v| v * 17);
@@ -537,7 +560,9 @@ pub struct LspCodeAction {
 pub enum LspFeature {
     Hover,
     Completion,
-    CompletionResolve { item: Value },
+    CompletionResolve {
+        item: Value,
+    },
     SignatureHelp,
     Definition,
     Declaration,
@@ -545,16 +570,31 @@ pub enum LspFeature {
     Implementation,
     References,
     DocumentSymbols,
-    WorkspaceSymbols { query: String },
-    Rename { new_name: String },
+    WorkspaceSymbols {
+        query: String,
+    },
+    Rename {
+        new_name: String,
+    },
     Formatting,
-    RangeFormatting { range: LspRange },
-    CodeAction { range: LspRange, diagnostics: Vec<LspDiagnostic> },
+    RangeFormatting {
+        range: LspRange,
+    },
+    CodeAction {
+        range: LspRange,
+        diagnostics: Vec<LspDiagnostic>,
+    },
     ExecuteCommand(LspCommand),
-    PullDiagnostics { previous_result_id: Option<String> },
+    PullDiagnostics {
+        previous_result_id: Option<String>,
+    },
     SemanticTokensFull,
-    SemanticTokensDelta { previous_result_id: String },
-    InlayHints { range: LspRange },
+    SemanticTokensDelta {
+        previous_result_id: String,
+    },
+    InlayHints {
+        range: LspRange,
+    },
     CodeLens,
     DocumentHighlights,
     FoldingRanges,
@@ -563,7 +603,7 @@ pub enum LspFeature {
 }
 
 impl LspFeature {
-    pub(super) fn method(&self) -> &'static str {
+    pub(crate) fn method(&self) -> &'static str {
         match self {
             Self::Hover => "textDocument/hover",
             Self::Completion => "textDocument/completion",
@@ -612,9 +652,8 @@ impl LspFeature {
             Self::CodeAction { .. } => capabilities.code_action,
             Self::ExecuteCommand(_) => capabilities.execute_command,
             Self::PullDiagnostics { .. } => capabilities.pull_diagnostics,
-            Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => {
-                capabilities.semantic_tokens
-            }
+            Self::SemanticTokensFull => capabilities.semantic_tokens,
+            Self::SemanticTokensDelta { .. } => capabilities.semantic_tokens_delta,
             Self::InlayHints { .. } => capabilities.inlay_hints,
             Self::CodeLens => capabilities.code_lens,
             Self::DocumentHighlights => capabilities.document_highlights,
@@ -648,6 +687,7 @@ impl LspFeature {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum LspFeatureResult {
     Hover(LspHover),
     /// `incomplete` means the server cut the list short and wants asking again as typing goes on.

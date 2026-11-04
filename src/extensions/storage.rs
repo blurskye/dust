@@ -3,6 +3,7 @@
 use super::{PluginLoadId, PluginStorageContribution};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
@@ -181,7 +182,7 @@ struct Work {
 
 pub struct PluginStorageService {
     sender: SyncSender<Work>,
-    receiver: Receiver<PluginStorageResult>,
+    receiver: Receiver<(u64, PluginStorageResult)>,
     generations: Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
     stopped: bool,
 }
@@ -191,7 +192,7 @@ impl PluginStorageService {
     pub fn start(root: PathBuf, capacity: usize) -> Self {
         let capacity = capacity.clamp(1, STORAGE_REQUEST_CEILING);
         let (sender, requests) = mpsc::sync_channel::<Work>(capacity);
-        let (results, receiver) = mpsc::sync_channel::<PluginStorageResult>(capacity);
+        let (results, receiver) = mpsc::sync_channel::<(u64, PluginStorageResult)>(capacity);
         let generations = Arc::new(Mutex::new(BTreeMap::new()));
         let worker_generations = Arc::clone(&generations);
         thread::Builder::new()
@@ -203,6 +204,7 @@ impl PluginStorageService {
                         .lock()
                         .ok()
                         .and_then(|owners| owners.get(&work.plugin).copied());
+                    let epoch = work.epoch;
                     let result = if current != Some((work.load, work.epoch)) {
                         PluginStorageResult::rejected(
                             work.plugin,
@@ -216,7 +218,7 @@ impl PluginStorageService {
                     } else {
                         process(&root, work, &mut temporary, &worker_generations)
                     };
-                    if results.send(result).is_err() {
+                    if results.send((epoch, result)).is_err() {
                         break;
                     }
                 }
@@ -240,23 +242,21 @@ impl PluginStorageService {
     }
 
     pub fn reset_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock() {
-            if let Some((current, epoch)) = generations.get_mut(plugin) {
-                if *current == load {
-                    *epoch = epoch.saturating_add(1).max(1);
-                }
-            }
+        if let Ok(mut generations) = self.generations.lock()
+            && let Some((current, epoch)) = generations.get_mut(plugin)
+            && *current == load
+        {
+            *epoch = epoch.saturating_add(1).max(1);
         }
     }
 
     pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock() {
-            if generations
+        if let Ok(mut generations) = self.generations.lock()
+            && generations
                 .get(plugin)
                 .is_some_and(|(current, _)| *current == load)
-            {
-                generations.remove(plugin);
-            }
+        {
+            generations.remove(plugin);
         }
     }
 
@@ -316,7 +316,17 @@ impl PluginStorageService {
         let mut results = Vec::new();
         loop {
             match self.receiver.try_recv() {
-                Ok(result) => results.push(result),
+                Ok((epoch, result)) => {
+                    if self
+                        .generations
+                        .lock()
+                        .ok()
+                        .and_then(|owners| owners.get(&result.plugin).copied())
+                        == Some((result.load, epoch))
+                    {
+                        results.push(result);
+                    }
+                }
                 Err(TryRecvError::Empty) => return results,
                 Err(TryRecvError::Disconnected) => {
                     self.stopped = true;
@@ -413,6 +423,27 @@ fn process(
     let load = work.load;
     let path = root.join(format!("{:x}.json", Sha256::digest(plugin.as_bytes())));
     let result = (|| {
+        fs::create_dir_all(root)
+            .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
+        let metadata = fs::symlink_metadata(root)
+            .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
+        if !metadata.file_type().is_dir() {
+            return Err(PluginStorageError::new(
+                PluginStorageErrorCode::Unavailable,
+                "storage root is not a regular directory",
+            ));
+        }
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .custom_flags(nix::libc::O_NOFOLLOW)
+            .open(path.with_extension("lock"))
+            .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
+        let _lock = nix::fcntl::Flock::lock(lock, nix::fcntl::FlockArg::LockExclusive).map_err(
+            |(_, error)| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error),
+        )?;
         let current = load_state(&path)?;
         match work.request.kind {
             PluginStorageRequestKind::Get { key } => {
@@ -488,7 +519,6 @@ fn process(
                 }
                 let mut candidate = current.clone();
                 candidate.records.remove(&key);
-                validate_state(&candidate, &work.policy)?;
                 persist(PersistContext {
                     root,
                     path: &path,
@@ -723,7 +753,8 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         ));
     }
     let temp = root.join(format!(
-        ".storage-{:08x}-{:016x}.tmp",
+        ".storage-{}-{:08x}-{:016x}.tmp",
+        path.file_stem().unwrap_or_default().to_string_lossy(),
         std::process::id(),
         *temporary
     ));
@@ -743,11 +774,10 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         file.write_all(&bytes)?;
         file.flush()?;
         file.sync_all()?;
-        let current = generations
+        let owners = generations
             .lock()
-            .ok()
-            .and_then(|owners| owners.get(plugin).copied());
-        if current != Some((load, epoch)) {
+            .map_err(|_| std::io::Error::other("storage generation lock poisoned"))?;
+        if owners.get(plugin).copied() != Some((load, epoch)) {
             cancelled = true;
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
@@ -755,6 +785,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
             ));
         }
         fs::rename(&temp, path)?;
+        drop(owners);
         fs::File::open(root)?.sync_all()?;
         Ok::<_, std::io::Error>(())
     })();
@@ -1191,5 +1222,186 @@ mod tests {
             PluginStorageErrorCode::Corrupt
         );
         assert_eq!(fs::read(outside).unwrap(), b"outside");
+    }
+
+    fn result(service: &mut PluginStorageService) -> PluginStorageResult {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = service.poll().pop() {
+                return result;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn storage_transactions_share_a_stable_lock_and_deletions_reduce_quota() {
+        let root = tempfile::tempdir().unwrap();
+        let mut first = PluginStorageService::start(root.path().into(), 8);
+        let mut second = PluginStorageService::start(root.path().into(), 8);
+        let load = PluginLoadId(1);
+        first.install_generation("demo", load);
+        second.install_generation("demo", load);
+        let policy = PluginStorageContribution {
+            maximum_items: 4,
+            maximum_value_bytes: 8,
+            maximum_total_bytes: 128,
+        };
+        let path = root
+            .path()
+            .join(format!("{:x}.lock", Sha256::digest(b"demo")));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+        for (service, key) in [(&mut first, "one"), (&mut second, "two")] {
+            service
+                .request(
+                    "demo".into(),
+                    load,
+                    policy.clone(),
+                    PluginStorageRequest {
+                        token: 1,
+                        kind: PluginStorageRequestKind::CompareAndSet {
+                            key: key.into(),
+                            expected_revision: None,
+                            value: vec![1],
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        assert!(first.poll().is_empty());
+        assert!(second.poll().is_empty());
+        drop(lock);
+        let a = result(&mut first);
+        let b = result(&mut second);
+        assert!(a.error.is_none() && b.error.is_none());
+        assert_ne!(a.revision, b.revision);
+        first
+            .request(
+                "demo".into(),
+                load,
+                policy.clone(),
+                PluginStorageRequest {
+                    token: 3,
+                    kind: PluginStorageRequestKind::CompareAndSet {
+                        key: "three".into(),
+                        expected_revision: None,
+                        value: vec![1],
+                    },
+                },
+            )
+            .unwrap();
+        assert!(result(&mut first).error.is_none());
+        let state = load_state(
+            &root
+                .path()
+                .join(format!("{:x}.json", Sha256::digest(b"demo"))),
+        )
+        .unwrap();
+        assert_eq!(state.records.len(), 3);
+        let lowered = PluginStorageContribution {
+            maximum_items: 1,
+            ..policy
+        };
+        first
+            .request(
+                "demo".into(),
+                load,
+                lowered,
+                PluginStorageRequest {
+                    token: 2,
+                    kind: PluginStorageRequestKind::Delete {
+                        key: "one".into(),
+                        expected_revision: a.revision.unwrap(),
+                    },
+                },
+            )
+            .unwrap();
+        assert!(result(&mut first).error.is_none());
+    }
+
+    #[test]
+    fn buffered_storage_results_are_discarded_after_reset() {
+        let root = tempfile::tempdir().unwrap();
+        let mut service = PluginStorageService::start(root.path().into(), 8);
+        let load = PluginLoadId(1);
+        service.install_generation("demo", load);
+        service
+            .request(
+                "demo".into(),
+                load,
+                PluginStorageContribution {
+                    maximum_items: 1,
+                    maximum_value_bytes: 8,
+                    maximum_total_bytes: 32,
+                },
+                PluginStorageRequest {
+                    token: 1,
+                    kind: PluginStorageRequestKind::Get { key: "one".into() },
+                },
+            )
+            .unwrap();
+        let completion = service
+            .receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        service.reset_generation("demo", load);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(completion).unwrap();
+        service.receiver = receiver;
+        assert!(service.poll().is_empty());
+    }
+
+    #[test]
+    fn storage_revocation_prevents_a_waiting_transaction_from_committing() {
+        let root = tempfile::tempdir().unwrap();
+        let mut service = PluginStorageService::start(root.path().into(), 8);
+        let load = PluginLoadId(1);
+        service.install_generation("demo", load);
+        let lock_path = root
+            .path()
+            .join(format!("{:x}.lock", Sha256::digest(b"demo")));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+            .unwrap();
+        let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+        service
+            .request(
+                "demo".into(),
+                load,
+                policy(),
+                request(
+                    1,
+                    PluginStorageRequestKind::CompareAndSet {
+                        key: "one".into(),
+                        expected_revision: None,
+                        value: vec![1],
+                    },
+                ),
+            )
+            .unwrap();
+        service.reset_generation("demo", load);
+        drop(lock);
+        let (_, result) = service
+            .receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(
+            result.error.unwrap().code,
+            PluginStorageErrorCode::GenerationLost
+        );
+        assert!(
+            !root
+                .path()
+                .join(format!("{:x}.json", Sha256::digest(b"demo")))
+                .exists()
+        );
     }
 }

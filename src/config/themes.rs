@@ -108,6 +108,18 @@ pub(crate) struct ThemeRead {
     pub(crate) cancelled: Arc<AtomicBool>,
     pub(crate) reply: SyncSender<ThemeCatalog>,
 }
+pub(crate) fn snapshot(choice: &ThemeChoice) -> Result<String, String> {
+    let mut value = serde_json::to_value(&choice.theme).map_err(|e| e.to_string())?;
+    value
+        .as_object_mut()
+        .ok_or("invalid theme snapshot")?
+        .insert(
+            "bundled".into(),
+            serde_json::Value::Bool(choice.path.to_string_lossy().starts_with("<bundled:theme:")),
+        );
+    serde_json::to_string(&value).map_err(|e| e.to_string())
+}
+
 pub(super) fn discover(request: ThemeRead) {
     if request.cancelled.load(Ordering::Acquire) {
         return;
@@ -119,16 +131,25 @@ pub(super) fn discover(request: ThemeRead) {
             }
             // A bundled theme comes from this build, so a copy saved by an older one, with
             // fields since removed, still restores and picks up the new colours.
-            #[derive(serde::Deserialize)]
-            struct Named {
-                name: String,
-            }
-            let bundled = serde_json::from_str::<Named>(source)
-                .ok()
-                .and_then(|saved| bundled_named(&saved.name));
-            let theme: ThemeConfig = match bundled {
+            let mut saved: serde_json::Value =
+                serde_json::from_str(source).map_err(|e| format!("invalid saved theme: {e}"))?;
+            let bundled = saved
+                .as_object_mut()
+                .and_then(|object| object.remove("bundled"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let choice = bundled
+                .then(|| {
+                    saved
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(bundled_named)
+                })
+                .flatten();
+            let path = choice.as_ref().map(|choice| choice.path.clone());
+            let theme: ThemeConfig = match choice {
                 Some(choice) => choice.theme,
-                None => serde_json::from_str(source)
+                None => serde_json::from_value(saved)
                     .map_err(|e| format!("invalid saved theme: {e}"))?,
             };
             if theme.name.is_empty()
@@ -139,7 +160,7 @@ pub(super) fn discover(request: ThemeRead) {
             }
             theme.validate()?;
             Ok(ThemeChoice {
-                path: format!("<editor-state:theme:{}>", theme.name).into(),
+                path: path.unwrap_or_else(|| format!("<editor-state:theme:{}>", theme.name).into()),
                 theme,
             })
         })();

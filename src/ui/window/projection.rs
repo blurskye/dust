@@ -90,15 +90,45 @@ pub(super) fn append_tiled_window(
     root: Option<TiledLayoutNode>,
     window: WindowId,
 ) -> Option<TiledLayoutNode> {
-    Some(match root {
-        None => TiledLayoutNode::Window(window),
-        Some(root) => TiledLayoutNode::Split {
-            axis: TileAxis::Horizontal,
-            ratio: 500,
-            first: Box::new(root),
-            second: Box::new(TiledLayoutNode::Window(window)),
-        },
-    })
+    fn append(node: TiledLayoutNode, window: WindowId) -> TiledLayoutNode {
+        match node {
+            TiledLayoutNode::Window(_) => TiledLayoutNode::Split {
+                axis: TileAxis::Horizontal,
+                ratio: 500,
+                first: Box::new(node),
+                second: Box::new(TiledLayoutNode::Window(window)),
+            },
+            TiledLayoutNode::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => {
+                if depth(&first) <= depth(&second) {
+                    TiledLayoutNode::Split {
+                        axis,
+                        ratio,
+                        first: Box::new(append(*first, window)),
+                        second,
+                    }
+                } else {
+                    TiledLayoutNode::Split {
+                        axis,
+                        ratio,
+                        first,
+                        second: Box::new(append(*second, window)),
+                    }
+                }
+            }
+        }
+    }
+    fn depth(node: &TiledLayoutNode) -> usize {
+        match node {
+            TiledLayoutNode::Window(_) => 1,
+            TiledLayoutNode::Split { first, second, .. } => 1 + depth(first).max(depth(second)),
+        }
+    }
+    Some(root.map_or(TiledLayoutNode::Window(window), |root| append(root, window)))
 }
 
 pub(super) fn remove_tiled_window(
@@ -204,22 +234,50 @@ pub(super) fn spatial_score(
     let candidate_center_x = candidate_left.saturating_add(u32::from(candidate.width) / 2);
     let candidate_center_y = candidate_top.saturating_add(u32::from(candidate.height) / 2);
     match direction {
-        SpatialDirection::Left if candidate_center_x < source_center_x => Some((
-            source_left.saturating_sub(candidate_right).max(1),
-            source_center_y.abs_diff(candidate_center_y),
-        )),
-        SpatialDirection::Right if candidate_center_x > source_center_x => Some((
-            candidate_left.saturating_sub(source_right).max(1),
-            source_center_y.abs_diff(candidate_center_y),
-        )),
-        SpatialDirection::Up if candidate_center_y < source_center_y => Some((
-            source_top.saturating_sub(candidate_bottom).max(1),
-            source_center_x.abs_diff(candidate_center_x),
-        )),
-        SpatialDirection::Down if candidate_center_y > source_center_y => Some((
-            candidate_top.saturating_sub(source_bottom).max(1),
-            source_center_x.abs_diff(candidate_center_x),
-        )),
+        SpatialDirection::Left
+            if (candidate_right <= source_left
+                || (candidate_left <= source_left && candidate_center_x < source_center_x))
+                && candidate_top < source_bottom
+                && source_top < candidate_bottom =>
+        {
+            Some((
+                source_left.saturating_sub(candidate_right).max(1),
+                source_center_y.abs_diff(candidate_center_y),
+            ))
+        }
+        SpatialDirection::Right
+            if (candidate_left >= source_right
+                || (candidate_right >= source_right && candidate_center_x > source_center_x))
+                && candidate_top < source_bottom
+                && source_top < candidate_bottom =>
+        {
+            Some((
+                candidate_left.saturating_sub(source_right).max(1),
+                source_center_y.abs_diff(candidate_center_y),
+            ))
+        }
+        SpatialDirection::Up
+            if (candidate_bottom <= source_top
+                || (candidate_top <= source_top && candidate_center_y < source_center_y))
+                && candidate_left < source_right
+                && source_left < candidate_right =>
+        {
+            Some((
+                source_top.saturating_sub(candidate_bottom).max(1),
+                source_center_x.abs_diff(candidate_center_x),
+            ))
+        }
+        SpatialDirection::Down
+            if (candidate_top >= source_bottom
+                || (candidate_bottom >= source_bottom && candidate_center_y > source_center_y))
+                && candidate_left < source_right
+                && source_left < candidate_right =>
+        {
+            Some((
+                candidate_top.saturating_sub(source_bottom).max(1),
+                source_center_x.abs_diff(candidate_center_x),
+            ))
+        }
         _ => None,
     }
 }

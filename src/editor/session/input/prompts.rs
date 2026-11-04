@@ -1,5 +1,5 @@
-use crate::editor::session::input::COMPLETION_LIMIT;
 use super::InputSession;
+use crate::editor::session::input::COMPLETION_LIMIT;
 use crate::{
     editor::{EditorMode, PromptMove, ViewId},
     ui::{CompletionItem, ConfirmationChoice, ConfirmationState, PromptKind, PromptState},
@@ -134,6 +134,7 @@ impl InputSession {
         &self.search_history
     }
     pub(in crate::editor::session) fn clear_history(&mut self) {
+        self.history_cleared = true;
         self.command_history.clear();
         self.search_history.clear();
         self.history_index = None;
@@ -143,8 +144,16 @@ impl InputSession {
         commands: Vec<String>,
         searches: Vec<String>,
     ) {
-        self.command_history = commands;
-        self.search_history = searches;
+        if self.history_cleared {
+            return;
+        }
+        let merge = |mut saved: Vec<String>, current: &mut Vec<String>| {
+            saved.retain(|entry| !current.contains(entry));
+            saved.append(current);
+            *current = saved;
+        };
+        merge(commands, &mut self.command_history);
+        merge(searches, &mut self.search_history);
         for history in [&mut self.command_history, &mut self.search_history] {
             let excess = history.len().saturating_sub(super::HISTORY_LIMIT);
             history.drain(..excess);
@@ -299,10 +308,7 @@ impl InputSession {
         }
     }
 
-    pub(in crate::editor::session) fn prompt_history(
-        &mut self,
-        direction: i8,
-    ) {
+    pub(in crate::editor::session) fn prompt_history(&mut self, direction: i8) {
         let Some(kind) = self.prompt.as_ref().map(|prompt| prompt.kind) else {
             return;
         };
@@ -353,10 +359,7 @@ impl InputSession {
         }
     }
 
-    pub(in crate::editor::session) fn prompt_complete(
-        &mut self,
-        direction: i8,
-    ) {
+    pub(in crate::editor::session) fn prompt_complete(&mut self, direction: i8) {
         let Some(prompt) = &mut self.prompt else {
             return;
         };
@@ -441,41 +444,45 @@ impl InputSession {
         let input = prompt.input.clone();
         let mut request = None;
         let mut candidates = BTreeMap::<String, String>::new();
-        if let Some((command, fragment)) = input.split_once(char::is_whitespace) {
-            if policy.input.command_aliases.get(command).is_some_and(|id| takes_path(id)) {
-                let fragment = fragment.trim();
-                let query = fragment.to_lowercase();
-                for path in buffers {
-                    let label = path.display().to_string();
-                    if label.to_lowercase().contains(&query) {
-                        let detail = &policy.command_labels["file.open"];
-                        candidates.insert(label, detail.clone());
-                    }
+        if let Some((command, fragment)) = input.split_once(char::is_whitespace)
+            && policy
+                .input
+                .command_aliases
+                .get(command)
+                .is_some_and(|id| takes_path(id))
+        {
+            let fragment = fragment.trim();
+            let query = fragment.to_lowercase();
+            for path in buffers {
+                let label = path.display().to_string();
+                if label.to_lowercase().contains(&query) {
+                    let detail = &policy.command_labels["file.open"];
+                    candidates.insert(label, detail.clone());
                 }
-                self.completion_generation = self.completion_generation.saturating_add(1);
-                let generation = self.completion_generation;
-                let entered = PathBuf::from(fragment);
-                let parent = entered.parent().filter(|path| !path.as_os_str().is_empty());
-                let directory = parent.map_or_else(
-                    || root.to_path_buf(),
-                    |parent| {
-                        if parent.is_absolute() {
-                            parent.to_path_buf()
-                        } else {
-                            root.join(parent)
-                        }
-                    },
-                );
-                request = Some(PromptCompletionRequest {
-                    key: PromptCompletionKey {
-                        generation,
-                        prompt_input: input.clone(),
-                        fragment: fragment.into(),
-                    },
-                    directory,
-                    limit: COMPLETION_LIMIT,
-                });
             }
+            self.completion_generation = self.completion_generation.saturating_add(1);
+            let generation = self.completion_generation;
+            let entered = PathBuf::from(fragment);
+            let parent = entered.parent().filter(|path| !path.as_os_str().is_empty());
+            let directory = parent.map_or_else(
+                || root.to_path_buf(),
+                |parent| {
+                    if parent.is_absolute() {
+                        parent.to_path_buf()
+                    } else {
+                        root.join(parent)
+                    }
+                },
+            );
+            request = Some(PromptCompletionRequest {
+                key: PromptCompletionKey {
+                    generation,
+                    prompt_input: input.clone(),
+                    fragment: fragment.into(),
+                },
+                directory,
+                limit: COMPLETION_LIMIT,
+            });
         }
         let mut ordered = candidates.into_iter().collect::<Vec<_>>();
         if request.is_none() && !input.contains(char::is_whitespace) {
@@ -485,7 +492,12 @@ impl InputSession {
             prompt.completions = ordered
                 .into_iter()
                 .take(COMPLETION_LIMIT)
-                .map(|(label, detail)| CompletionItem { icon: None, label, detail, color: None })
+                .map(|(label, detail)| CompletionItem {
+                    icon: None,
+                    label,
+                    detail,
+                    color: None,
+                })
                 .collect();
             if prompt
                 .selected_completion
@@ -589,7 +601,9 @@ fn command_completions<'a>(
         .map(|(command_id, rank)| (rank, policy.command_labels[&command_id].clone()))
         .collect::<Vec<_>>();
     rows.sort();
-    rows.into_iter().map(|(rank, label)| (rank.3, label)).collect()
+    rows.into_iter()
+        .map(|(rank, label)| (rank.3, label))
+        .collect()
 }
 
 /// Commands whose argument is a path, which the command line completes from files.

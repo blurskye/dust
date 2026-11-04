@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use alacritty_terminal::{
     event::{Event, EventListener},
     grid::Dimensions,
-    index::{Column, Line},
+    index::{Column, Line, Point, Side},
+    selection::{Selection, SelectionType},
     term::{
         Config, Term, TermMode,
         cell::{Cell, Flags},
@@ -66,19 +67,19 @@ pub enum PtyInputKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtyMouseEvent {
     Press(u8),
-    Release,
+    Release(u8),
     Move(u8),
 }
 
 /// What the terminal answers the program, such as its cursor position when asked.
 #[derive(Clone, Default)]
-struct Replies(Arc<Mutex<Vec<u8>>>);
+struct Replies(Arc<Mutex<Vec<Event>>>);
 impl EventListener for Replies {
     fn send_event(&self, event: Event) {
-        if let Event::PtyWrite(text) = event
+        if matches!(event, Event::PtyWrite(_) | Event::ColorRequest(..))
             && let Ok(mut replies) = self.0.lock()
         {
-            replies.extend_from_slice(text.as_bytes());
+            replies.push(event);
         }
     }
 }
@@ -103,10 +104,13 @@ pub struct PtyScreen {
     term: Term<Replies>,
     parser: Processor,
     replies: Replies,
+    scrollback_bytes: Option<usize>,
+    default_colors: (crate::config::ThemeColor, crate::config::ThemeColor),
 }
 impl PtyScreen {
     pub fn new(columns: u16, rows: u16, maximum_scrollback_lines: usize) -> Self {
         let replies = Replies::default();
+        let theme = crate::config::load_bundled_config().theme;
         let config = Config {
             scrolling_history: maximum_scrollback_lines.max(1),
             ..Config::default()
@@ -115,29 +119,140 @@ impl PtyScreen {
             term: Term::new(config, &size(columns, rows), replies.clone()),
             parser: Processor::new(),
             replies,
+            scrollback_bytes: None,
+            default_colors: (
+                theme.styles.terminal_background.foreground,
+                theme.styles.terminal_background.background,
+            ),
         }
+    }
+    pub fn with_scrollback_bytes(columns: u16, rows: u16, bytes: usize) -> Self {
+        let mut screen = Self::new(columns, rows, Self::scrollback_lines(columns, bytes));
+        screen.scrollback_bytes = Some(bytes);
+        screen
+    }
+    fn scrollback_lines(columns: u16, bytes: usize) -> usize {
+        bytes
+            / (usize::from(columns.max(2)) * std::mem::size_of::<Cell>()
+                + std::mem::size_of::<alacritty_terminal::grid::Row<Cell>>())
     }
     pub fn feed_bytes(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
-        // A program that began a synchronized update and never ended it still gets shown.
-        if self
-            .parser
-            .sync_timeout()
-            .sync_timeout()
-            .is_some_and(|deadline| deadline <= std::time::Instant::now())
-        {
+        self.expire_sync(std::time::Instant::now());
+    }
+    pub fn feed_bytes_tracked(
+        &mut self,
+        bytes: &[u8],
+        cursor: &mut Option<(usize, usize)>,
+        anchor: &mut Option<(usize, usize)>,
+        offset: &mut usize,
+    ) {
+        let Some(old_cursor) = *cursor else {
+            self.feed_bytes(bytes);
+            return;
+        };
+        let old_anchor = anchor.unwrap_or(old_cursor);
+        let point = |(row, column): (usize, usize)| {
+            Point::new(
+                Line(row as i32 - self.scrollback_len() as i32),
+                Column(column),
+            )
+        };
+        let mut selection = Selection::new(SelectionType::Simple, point(old_anchor), Side::Left);
+        selection.update(point(old_cursor), Side::Right);
+        selection.include_all();
+        self.term.selection = Some(selection);
+        self.feed_bytes(bytes);
+        let selection = self
+            .term
+            .selection
+            .take()
+            .and_then(|selection| selection.to_range(&self.term));
+        if let Some(selection) = selection {
+            let position = |point: Point| {
+                (
+                    (point.line.0 + self.scrollback_len() as i32).max(0) as usize,
+                    point.column.0,
+                )
+            };
+            let (new_anchor, new_cursor) = if old_anchor <= old_cursor {
+                (position(selection.start), position(selection.end))
+            } else {
+                (position(selection.end), position(selection.start))
+            };
+            *cursor = Some(new_cursor);
+            if anchor.is_some() {
+                *anchor = Some(new_anchor);
+            }
+            *offset = offset.saturating_sub(old_cursor.0.saturating_sub(new_cursor.0));
+        } else {
+            *cursor = Some((0, 0));
+            *anchor = None;
+            *offset = 0;
+        }
+    }
+    pub fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.parser.sync_timeout().sync_timeout()
+    }
+    pub fn expire_sync(&mut self, now: std::time::Instant) -> bool {
+        if self.sync_deadline().is_some_and(|deadline| deadline <= now) {
             self.parser.stop_sync(&mut self.term);
+            true
+        } else {
+            false
         }
     }
     /// Bytes the terminal owes the program, such as answers to cursor-position queries.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        self.replies
+        let events = self
+            .replies
             .0
             .lock()
-            .map(|mut replies| std::mem::take(&mut *replies))
-            .unwrap_or_default()
+            .map(|mut events| std::mem::take(&mut *events))
+            .unwrap_or_default();
+        let mut replies = Vec::new();
+        for event in events {
+            let text = match event {
+                Event::PtyWrite(text) => text,
+                Event::ColorRequest(index, format) => {
+                    let default = if index == NamedColor::Background as usize {
+                        self.default_colors.1
+                    } else {
+                        self.default_colors.0
+                    };
+                    let rgb = self.term.colors()[index].or_else(|| {
+                        let color = if index < 256 {
+                            crate::config::ThemeColor::Indexed(index as u8)
+                        } else {
+                            default
+                        };
+                        color
+                            .rgb()
+                            .map(|(r, g, b)| alacritty_terminal::vte::ansi::Rgb { r, g, b })
+                    });
+                    let Some(rgb) = rgb else { continue };
+                    format(rgb)
+                }
+                _ => continue,
+            };
+            replies.extend_from_slice(text.as_bytes());
+        }
+        replies
     }
+    pub fn set_theme(&mut self, theme: &crate::config::ThemeConfig) {
+        self.default_colors = (
+            theme.styles.terminal_background.foreground,
+            theme.styles.terminal_background.background,
+        );
+    }
+
     pub fn resize(&mut self, columns: u16, rows: u16) {
+        if let Some(bytes) = self.scrollback_bytes {
+            self.term.set_options(Config {
+                scrolling_history: Self::scrollback_lines(columns, bytes),
+                ..Config::default()
+            });
+        }
         self.term.resize(size(columns, rows));
     }
     #[must_use]
@@ -168,7 +283,7 @@ impl PtyScreen {
         let grid = self.term.grid();
         Some(
             (0..grid.columns())
-                .map(|column| pty_cell(&grid[line][Column(column)]))
+                .map(|column| pty_cell(&grid[line][Column(column)], self.term.colors()))
                 .collect(),
         )
     }
@@ -230,11 +345,11 @@ fn size(columns: u16, rows: u16) -> Size {
     }
 }
 
-fn pty_cell(cell: &Cell) -> PtyCell {
+fn pty_cell(cell: &Cell, colors: &alacritty_terminal::term::color::Colors) -> PtyCell {
     let flags = cell.flags;
     let style = PtyStyle {
-        foreground: pty_color(cell.fg),
-        background: pty_color(cell.bg),
+        foreground: pty_color(cell.fg, colors),
+        background: pty_color(cell.bg, colors),
         bold: flags.contains(Flags::BOLD),
         dim: flags.contains(Flags::DIM) || matches!(cell.fg, Color::Named(named) if is_dim(named)),
         italic: flags.contains(Flags::ITALIC),
@@ -249,13 +364,12 @@ fn pty_cell(cell: &Cell) -> PtyCell {
             continuation: true,
         };
     }
-    let mut text = if flags.intersects(Flags::HIDDEN | Flags::LEADING_WIDE_CHAR_SPACER)
-        || cell.c == '\0'
-    {
-        " ".to_owned()
-    } else {
-        cell.c.to_string()
-    };
+    let mut text =
+        if flags.intersects(Flags::HIDDEN | Flags::LEADING_WIDE_CHAR_SPACER) || cell.c == '\0' {
+            " ".to_owned()
+        } else {
+            cell.c.to_string()
+        };
     text.extend(cell.zerowidth().into_iter().flatten());
     PtyCell {
         text,
@@ -271,7 +385,15 @@ fn is_dim(color: NamedColor) -> bool {
 
 /// The program's colours in the panel's terms; the default foreground and background are left
 /// to the theme.
-fn pty_color(color: Color) -> Option<PtyColor> {
+fn pty_color(color: Color, colors: &alacritty_terminal::term::color::Colors) -> Option<PtyColor> {
+    let index = match color {
+        Color::Indexed(index) => Some(usize::from(index)),
+        Color::Named(named) => Some(named as usize),
+        Color::Spec(_) => None,
+    };
+    if let Some(rgb) = index.and_then(|index| colors[index]) {
+        return Some(PtyColor::Rgb(rgb.r, rgb.g, rgb.b));
+    }
     match color {
         Color::Spec(rgb) => Some(PtyColor::Rgb(rgb.r, rgb.g, rgb.b)),
         Color::Indexed(index) => Some(PtyColor::Indexed(index)),
@@ -308,7 +430,10 @@ pub fn encode_key(key: PtyInputKey, application: bool) -> &'static [u8] {
     }
 }
 pub fn encode_paste(text: &str, bracketed: bool, ceiling: usize) -> Option<Vec<u8>> {
-    let sanitized = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
+    let sanitized = text
+        .replace("\x1b[200~", "")
+        .replace("\x1b[201~", "")
+        .replace('\x1b', "");
     let needed = sanitized.len() + if bracketed { 12 } else { 0 };
     if needed > ceiling {
         return None;
@@ -367,9 +492,9 @@ pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u
         crate::editor::input::TerminalMouseInput::LeftDown => PtyMouseEvent::Press(0),
         crate::editor::input::TerminalMouseInput::MiddleDown => PtyMouseEvent::Press(1),
         crate::editor::input::TerminalMouseInput::RightDown => PtyMouseEvent::Press(2),
-        crate::editor::input::TerminalMouseInput::LeftUp
-        | crate::editor::input::TerminalMouseInput::MiddleUp
-        | crate::editor::input::TerminalMouseInput::RightUp => PtyMouseEvent::Release,
+        crate::editor::input::TerminalMouseInput::LeftUp => PtyMouseEvent::Release(0),
+        crate::editor::input::TerminalMouseInput::MiddleUp => PtyMouseEvent::Release(1),
+        crate::editor::input::TerminalMouseInput::RightUp => PtyMouseEvent::Release(2),
         crate::editor::input::TerminalMouseInput::LeftDrag => PtyMouseEvent::Move(0),
         crate::editor::input::TerminalMouseInput::MiddleDrag => PtyMouseEvent::Move(1),
         crate::editor::input::TerminalMouseInput::RightDrag => PtyMouseEvent::Move(2),
@@ -390,17 +515,35 @@ pub fn encode_sgr_mouse(
     mode: PtyMouseMode,
     sgr: bool,
 ) -> Option<Vec<u8>> {
-    if mode == PtyMouseMode::Off || !sgr {
+    if mode == PtyMouseMode::Off {
         return None;
     }
     let (button, final_byte) = match event {
         PtyMouseEvent::Press(b) => (b, 'M'),
-        PtyMouseEvent::Release => (0, 'm'),
+        PtyMouseEvent::Release(button) => (button, 'm'),
         PtyMouseEvent::Move(b) if matches!(mode, PtyMouseMode::Drag | PtyMouseMode::Any) => {
             (b.saturating_add(32), 'M')
         }
         PtyMouseEvent::Move(_) => return None,
     };
+    if !sgr {
+        if column > 222 || row > 222 {
+            return None;
+        }
+        let button = if matches!(event, PtyMouseEvent::Release(_)) {
+            3
+        } else {
+            button
+        };
+        return Some(vec![
+            0x1b,
+            b'[',
+            b'M',
+            button + 32,
+            column as u8 + 33,
+            row as u8 + 33,
+        ]);
+    }
     Some(
         format!(
             "\x1b[<{button};{};{}{final_byte}",
@@ -433,6 +576,101 @@ mod tests {
     }
 
     #[test]
+    fn history_byte_budget_is_recomputed_after_resize() {
+        let mut screen = PtyScreen::with_scrollback_bytes(10, 2, 4096);
+        for _ in 0..100 {
+            screen.feed_bytes(b"x\r\n");
+        }
+        assert!(screen.scrollback_len() <= PtyScreen::scrollback_lines(10, 4096));
+        screen.resize(100, 2);
+        for _ in 0..100 {
+            screen.feed_bytes(b"x\r\n");
+        }
+        assert!(screen.scrollback_len() <= PtyScreen::scrollback_lines(100, 4096));
+        assert!(PtyScreen::scrollback_lines(100, 4096) < PtyScreen::scrollback_lines(10, 4096));
+    }
+
+    #[test]
+    fn quiet_synchronized_output_expires_without_more_bytes() {
+        let mut screen = PtyScreen::new(10, 2, 4);
+        screen.feed_bytes(b"\x1b[?2026hframe");
+        let deadline = screen
+            .sync_deadline()
+            .expect("synchronized update deadline");
+        assert!(!screen.lines().iter().any(|line| line.contains("frame")));
+        assert!(screen.expire_sync(deadline));
+        assert!(screen.lines().iter().any(|line| line.contains("frame")));
+        assert!(screen.sync_deadline().is_none());
+    }
+
+    #[test]
+    fn terminal_palette_overrides_and_color_queries_use_program_colors() {
+        let mut screen = PtyScreen::new(10, 2, 4);
+        screen
+            .feed_bytes(b"\x1b]4;1;rgb:00/ff/00\x07\x1b[31mX\x1b]11;rgb:12/34/56\x07\x1b]11;?\x07");
+        assert_eq!(
+            row(&screen, 0)[0].style.foreground,
+            Some(PtyColor::Rgb(0, 255, 0))
+        );
+        assert_eq!(
+            String::from_utf8(screen.take_replies()).unwrap(),
+            "\x1b]11;rgb:1212/3434/5656\x07"
+        );
+        screen.feed_bytes(b"\x1b]11\x07\x1b]11;?\x07");
+        assert!(
+            !screen.take_replies().is_empty(),
+            "the theme answers a default background query"
+        );
+    }
+
+    #[test]
+    fn mouse_releases_preserve_buttons_and_legacy_reports_are_bounded() {
+        for button in 0..=2 {
+            assert_eq!(
+                encode_sgr_mouse(
+                    PtyMouseEvent::Release(button),
+                    2,
+                    3,
+                    PtyMouseMode::Click,
+                    true
+                )
+                .unwrap(),
+                format!("\x1b[<{button};3;4m").as_bytes(),
+            );
+        }
+        assert_eq!(
+            encode_sgr_mouse(PtyMouseEvent::Press(2), 2, 3, PtyMouseMode::Click, false).unwrap(),
+            b"\x1b[M\x22\x23\x24"
+        );
+        assert_eq!(
+            encode_sgr_mouse(PtyMouseEvent::Release(2), 2, 3, PtyMouseMode::Click, false).unwrap(),
+            b"\x1b[M\x23\x23\x24"
+        );
+        assert!(
+            encode_sgr_mouse(PtyMouseEvent::Press(0), 223, 0, PtyMouseMode::Click, false).is_none()
+        );
+        assert!(
+            encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Click, false).is_none()
+        );
+    }
+
+    #[test]
+    fn scrollback_eviction_preserves_retained_selection_text() {
+        let mut screen = PtyScreen::new(10, 2, 3);
+        screen.feed_bytes(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+        assert_eq!(screen.scrollback_len(), 3);
+        let mut cursor = Some((2, 2));
+        let mut anchor = Some((1, 0));
+        let mut offset = 1;
+        screen.feed_bytes_tracked(b"\r\nsix", &mut cursor, &mut anchor, &mut offset);
+        assert_eq!(cursor, Some((1, 2)));
+        assert_eq!(anchor, Some((0, 0)));
+        assert_eq!(offset, 0);
+        assert_eq!(screen.lines()[0], "two");
+        assert_eq!(screen.lines()[1], "three");
+    }
+
+    #[test]
     fn shrinking_keeps_blank_rows_out_of_history() {
         let mut screen = PtyScreen::new(20, 10, 64);
         screen.feed_bytes(b"prompt$ ");
@@ -443,7 +681,11 @@ mod tests {
 
         screen.feed_bytes(b"\r\n1\r\n2\r\n3");
         screen.resize(20, 2);
-        assert_eq!(screen.scrollback_len(), 2, "output above the cursor is kept");
+        assert_eq!(
+            screen.scrollback_len(),
+            2,
+            "output above the cursor is kept"
+        );
         assert_eq!(screen.lines()[0], "prompt$");
         assert_eq!(screen.cursor().1, 1);
     }
@@ -592,5 +834,13 @@ mod tests {
         screen.feed_bytes(b"ok\xff!\xe2\x82\x1b[m");
         assert_eq!(screen.lines()[0], "ok\u{fffd}!\u{fffd}");
         assert!(!screen.lines()[0].contains('\u{1b}'));
+    }
+
+    #[test]
+    fn paste_sanitization_cannot_reconstruct_escape_sequences() {
+        let encoded = encode_paste("\x1b[201\x1b[201\x1b[200~~~\ncommand\n", true, 128).unwrap();
+        let payload = &encoded[6..encoded.len() - 6];
+        assert!(!payload.contains(&0x1b));
+        assert!(payload.ends_with(b"\ncommand\n"));
     }
 }

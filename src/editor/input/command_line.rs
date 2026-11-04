@@ -16,7 +16,10 @@ fn substitute_parts(input: &str) -> Option<(&str, Vec<String>)> {
         .chars()
         .next()
         .filter(|character| !character.is_alphanumeric() && !character.is_whitespace())?;
-    Some((range, split_unescaped(&rest[delimiter.len_utf8()..], delimiter)))
+    Some((
+        range,
+        split_unescaped(&rest[delimiter.len_utf8()..], delimiter),
+    ))
 }
 
 fn parse_substitute(input: &str) -> Option<Result<CommandInvocation, ExParseError>> {
@@ -44,9 +47,16 @@ fn parse_global(input: &str) -> Option<Result<CommandInvocation, ExParseError>> 
     let name_at = input
         .find(|character: char| !(character.is_ascii_digit() || "%.,$'<>".contains(character)))?;
     let (range, rest) = input.split_at(name_at);
-    let (invert, rest) = [("vglobal", true), ("global!", true), ("global", false), ("g!", true), ("v", true), ("g", false)]
-        .into_iter()
-        .find_map(|(name, invert)| rest.strip_prefix(name).map(|rest| (invert, rest)))?;
+    let (invert, rest) = [
+        ("vglobal", true),
+        ("global!", true),
+        ("global", false),
+        ("g!", true),
+        ("v", true),
+        ("g", false),
+    ]
+    .into_iter()
+    .find_map(|(name, invert)| rest.strip_prefix(name).map(|rest| (invert, rest)))?;
     let delimiter = rest
         .chars()
         .next()
@@ -89,20 +99,35 @@ pub fn typed_substitution(input: &str) -> Option<(String, String, String, String
     let input = input.trim_start().trim_start_matches(':');
     let (range, parts) = substitute_parts(input)?;
     let mut parts = parts.into_iter();
-    let pattern = parts.next().filter(|pattern| !pattern.is_empty())?;
+    let pattern = parts.next()?;
     let replacement = parts.next()?;
-    Some((range.to_owned(), pattern, replacement, parts.next().unwrap_or_default()))
+    Some((
+        range.to_owned(),
+        pattern,
+        replacement,
+        parts.next().unwrap_or_default(),
+    ))
 }
 
-/// Splits on `delimiter`, turning `\\/` into a plain `/` and leaving other escapes for the regex.
+/// Split delimiters while preserving their literal meaning in patterns and replacements.
 fn split_unescaped(text: &str, delimiter: char) -> Vec<String> {
     let mut parts = vec![String::new()];
     let mut characters = text.chars();
     while let Some(character) = characters.next() {
+        let pattern = parts.len() == 1;
         let current = parts.last_mut().expect("starts with one part");
         if character == '\\' {
             match characters.next() {
-                Some(next) if next == delimiter => current.push(next),
+                Some(next) if next == delimiter => {
+                    if pattern {
+                        current.push_str(&regex::escape(&next.to_string()));
+                    } else {
+                        if matches!(next, '&' | '\\') {
+                            current.push('\\');
+                        }
+                        current.push(next);
+                    }
+                }
                 Some(next) => {
                     current.push('\\');
                     current.push(next);
@@ -137,7 +162,11 @@ pub fn parse_ex(
     if input == "$" || input.bytes().all(|byte| byte.is_ascii_digit()) {
         let mut invocation = command("view.cursor.move")?
             .with_argument("motion", CommandValue::String("document_end".into()));
-        invocation.count = input.parse::<u64>().ok().map(|line| line.max(1)).and_then(std::num::NonZeroU64::new);
+        invocation.count = input
+            .parse::<u64>()
+            .ok()
+            .map(|line| line.max(1))
+            .and_then(std::num::NonZeroU64::new);
         return Ok(invocation);
     }
     // Visual mode opens the line with its range; other commands don't use it.
@@ -161,11 +190,14 @@ pub fn parse_ex(
             "verify" if rest.is_empty() => command("package.verify")?,
             "rollback" if rest.is_empty() => command("package.rollback")?,
             "gc" if rest.is_empty() => command("package.gc")?,
-            "remove" if !rest.is_empty() => command("package.remove")?
-                .with_argument("name", CommandValue::String(rest.into())),
-            _ => return Err(ExParseError::UnexpectedArguments(format!(
-                "{arguments}: use search list verify rollback gc remove"
-            ))),
+            "remove" if !rest.is_empty() => {
+                command("package.remove")?.with_argument("name", CommandValue::String(rest.into()))
+            }
+            _ => {
+                return Err(ExParseError::UnexpectedArguments(format!(
+                    "{arguments}: use search list verify rollback gc remove"
+                )));
+            }
         }
     } else if name == "config" {
         match arguments.split_once(char::is_whitespace) {
@@ -328,11 +360,14 @@ pub fn parse_ex(
             }
             "workspace.git.worktree.create" => {
                 let mut parts = arguments.split_whitespace();
-                let branch = parts.next().ok_or(ExParseError::MissingArgument("branch"))?;
-                let mut invocation =
-                    command(command_id)?.with_argument("branch", CommandValue::String(branch.into()));
+                let branch = parts
+                    .next()
+                    .ok_or(ExParseError::MissingArgument("branch"))?;
+                let mut invocation = command(command_id)?
+                    .with_argument("branch", CommandValue::String(branch.into()));
                 if let Some(path) = parts.next() {
-                    invocation = invocation.with_argument("path", CommandValue::String(path.into()));
+                    invocation =
+                        invocation.with_argument("path", CommandValue::String(path.into()));
                 }
                 if parts.next().is_some() {
                     return Err(ExParseError::UnexpectedArguments(arguments.into()));
@@ -430,12 +465,43 @@ mod tests {
     }
 
     #[test]
+    fn escaped_delimiters_keep_regex_and_replacement_meaning() {
+        let global = parse_ex(r"g.\..d", &aliases()).unwrap();
+        assert_eq!(
+            global.arguments["pattern"],
+            CommandValue::String(r"\.".into())
+        );
+        let substitute = parse_ex(r"s.\..x.", &aliases()).unwrap();
+        assert_eq!(
+            substitute.arguments["pattern"],
+            CommandValue::String(r"\.".into())
+        );
+        let substitute = parse_ex(r"s&x&\&&", &aliases()).unwrap();
+        assert_eq!(
+            substitute.arguments["replacement"],
+            CommandValue::String(r"\&".into())
+        );
+        let substitute = parse_ex(r"s/a\/b/c\/d/", &aliases()).unwrap();
+        assert_eq!(
+            substitute.arguments["pattern"],
+            CommandValue::String("a/b".into())
+        );
+        assert_eq!(
+            substitute.arguments["replacement"],
+            CommandValue::String("c/d".into())
+        );
+    }
+
+    #[test]
     fn a_line_number_goes_to_that_line() {
         let line = parse_ex(":5", &aliases()).expect("line");
         assert_eq!(line.id.as_str(), "view.cursor.move");
         assert_eq!(line.count.map(std::num::NonZeroU64::get), Some(5));
         let last = parse_ex("$", &aliases()).expect("last line");
-        assert_eq!(last.arguments["motion"], CommandValue::String("document_end".into()));
+        assert_eq!(
+            last.arguments["motion"],
+            CommandValue::String("document_end".into())
+        );
         assert_eq!(last.count, None);
     }
 
@@ -451,9 +517,15 @@ mod tests {
             Some(&CommandValue::String("total * 10".into()))
         );
         let search = parse_ex("package.registry.search theme", &aliases).expect("search");
-        assert_eq!(search.arguments["query"], CommandValue::String("theme".into()));
+        assert_eq!(
+            search.arguments["query"],
+            CommandValue::String("theme".into())
+        );
         let named = parse_ex("package.registry.search query=theme", &aliases).expect("named");
-        assert_eq!(named.arguments["query"], CommandValue::String("theme".into()));
+        assert_eq!(
+            named.arguments["query"],
+            CommandValue::String("theme".into())
+        );
         let edit = parse_ex("edit src/main.rs", &aliases).expect("edit");
         assert_eq!(edit.id.as_str(), "file.open");
         assert_eq!(
@@ -561,7 +633,10 @@ mod tests {
         for (line, force) in [("e", false), ("e!", true)] {
             let reload = parse_ex(line, &aliases).expect("reload");
             assert_eq!(reload.id.as_str(), "file.reload");
-            assert_eq!(reload.arguments.get("force"), Some(&CommandValue::Bool(force)));
+            assert_eq!(
+                reload.arguments.get("force"),
+                Some(&CommandValue::Bool(force))
+            );
         }
         let theme = parse_ex("theme.select nord", &aliases).expect("named theme");
         assert_eq!(
@@ -570,6 +645,9 @@ mod tests {
         );
         let forced = parse_ex("e! a.txt", &aliases).expect("forced open");
         assert_eq!(forced.id.as_str(), "file.open");
-        assert_eq!(forced.arguments.get("force"), Some(&CommandValue::Bool(true)));
+        assert_eq!(
+            forced.arguments.get("force"),
+            Some(&CommandValue::Bool(true))
+        );
     }
 }

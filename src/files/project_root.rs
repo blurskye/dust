@@ -189,6 +189,16 @@ pub(super) fn resolve_project_root(
 }
 
 pub(super) fn regular_project_marker(directory: &Path, marker: &str) -> Option<fs::Metadata> {
+    if marker.contains(['*', '?', '[']) {
+        let pattern = globset::Glob::new(marker).ok()?.compile_matcher();
+        return fs::read_dir(directory)
+            .ok()?
+            .take(4096)
+            .filter_map(Result::ok)
+            .filter(|entry| pattern.is_match(entry.file_name()))
+            .filter_map(|entry| fs::symlink_metadata(entry.path()).ok())
+            .find(|metadata| !metadata.file_type().is_symlink());
+    }
     let metadata = fs::symlink_metadata(directory.join(marker)).ok()?;
     (!metadata.file_type().is_symlink()).then_some(metadata)
 }
@@ -250,16 +260,18 @@ pub(super) fn project_root_is_valid(
             (markers.iter().any(|marker| marker == "go.mod")
                 && bounded_project_marker(directory, "go.mod").is_some_and(|source| {
                     source.lines().any(|line| {
-                        let line = line.trim();
-                        line.strip_prefix("module ")
-                            .is_some_and(|module| !module.trim().is_empty())
+                        let mut words = line.split_ascii_whitespace();
+                        words.next() == Some("module")
+                            && words.next().is_some_and(|word| !word.starts_with("//"))
                     })
                 }))
                 || (markers.iter().any(|marker| marker == "go.work")
                     && bounded_project_marker(directory, "go.work").is_some_and(|source| {
-                        source
-                            .lines()
-                            .any(|line| line.trim_start().starts_with("go "))
+                        source.lines().any(|line| {
+                            let mut words = line.split_ascii_whitespace();
+                            words.next() == Some("go")
+                                && words.next().is_some_and(|word| !word.starts_with("//"))
+                        })
                     }))
         }
         ProjectRootStrategy::Node => markers
@@ -270,10 +282,16 @@ pub(super) fn project_root_is_valid(
                     "tsconfig.json" | "jsconfig.json" | "package.json"
                 )
             })
-            .filter_map(|marker| bounded_project_marker(directory, marker))
-            .any(|source| {
-                serde_json::from_str::<serde_json::Value>(&source)
-                    .is_ok_and(|value| value.is_object())
+            .any(|marker| {
+                bounded_project_marker(directory, marker).is_some_and(|source| {
+                    let source = if marker == "package.json" {
+                        source
+                    } else {
+                        jsonc_source(&source)
+                    };
+                    serde_json::from_str::<serde_json::Value>(&source)
+                        .is_ok_and(|value| value.is_object())
+                })
             }),
         ProjectRootStrategy::Python => {
             (markers.iter().any(|marker| marker == "pyproject.toml")
@@ -290,4 +308,67 @@ pub(super) fn project_root_is_valid(
                     .any(|marker| regular_project_marker(directory, marker).is_some())
         }
     }
+}
+
+// Preserve string contents and offsets while removing JSONC comments and trailing commas.
+fn jsonc_source(source: &str) -> String {
+    let mut bytes = source.as_bytes().to_vec();
+    let mut index = 0;
+    let mut quoted = false;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if quoted => index += 2,
+            b'"' => {
+                quoted = !quoted;
+                index += 1;
+            }
+            b'/' if !quoted && bytes.get(index + 1) == Some(&b'/') => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    bytes[index] = b' ';
+                    index += 1;
+                }
+            }
+            b'/' if !quoted && bytes.get(index + 1) == Some(&b'*') => {
+                let start = index;
+                index += 2;
+                while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
+                    index += 1;
+                }
+                if index + 1 >= bytes.len() {
+                    return source.to_owned();
+                }
+                index += 2;
+                bytes[start..index].fill(b' ');
+            }
+            _ => index += 1,
+        }
+    }
+    index = 0;
+    quoted = false;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if quoted => index += 2,
+            b'"' => {
+                quoted = !quoted;
+                index += 1;
+            }
+            b',' if !quoted => {
+                if bytes[..index]
+                    .iter()
+                    .rfind(|byte| !byte.is_ascii_whitespace())
+                    .is_some_and(|byte| !matches!(byte, b'{' | b'[' | b',' | b':'))
+                    && bytes[index + 1..]
+                        .iter()
+                        .find(|byte| !byte.is_ascii_whitespace())
+                        .is_some_and(|byte| matches!(byte, b'}' | b']'))
+                {
+                    bytes[index] = b' ';
+                }
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    // Every modified byte is ASCII, and every byte of a comment was replaced.
+    String::from_utf8(bytes).expect("JSONC comment removal preserves UTF-8")
 }

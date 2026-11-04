@@ -49,6 +49,8 @@ pub struct LockedPackage {
     pub version: String,
     pub source: PackageSource,
     pub content_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_sha256: Option<String>,
     pub dependencies: Vec<String>,
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -175,6 +177,7 @@ pub fn resolve_manifests(
                 version: manifest.version.clone(),
                 source: manifest.source.clone(),
                 content_sha256,
+                activation_sha256: None,
                 dependencies: manifest
                     .dependencies
                     .iter()
@@ -203,11 +206,7 @@ pub fn write_lock_atomic(
     if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(PackageError::InvalidManifest);
     }
-    let temp = path.with_extension(format!(
-        "tmp.{}.{}",
-        std::process::id(),
-        next_temp_suffix()
-    ));
+    let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), next_temp_suffix()));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -238,11 +237,7 @@ pub(super) fn write_protected_atomic(
     {
         return Err(PackageError::InvalidManifest);
     }
-    let temp = path.with_extension(format!(
-        "tmp.{}.{}",
-        std::process::id(),
-        next_temp_suffix()
-    ));
+    let temp = path.with_extension(format!("tmp.{}.{}", std::process::id(), next_temp_suffix()));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]

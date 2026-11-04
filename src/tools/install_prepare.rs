@@ -103,10 +103,7 @@ pub(super) fn write_private_workspace_file(
             return Ok(());
         }
     }
-    let staging = root.join(format!(
-        ".{name}-{}",
-        next_temp_suffix()
-    ));
+    let staging = root.join(format!(".{name}-{}", next_temp_suffix()));
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

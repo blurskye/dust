@@ -8,7 +8,9 @@ pub fn git_browse_url(file: &Path, line: usize) -> Result<String, String> {
     let repo = git2::Repository::discover(file).map_err(|_| "not inside a Git repository")?;
     let workdir = repo.workdir().ok_or("the repository has no working tree")?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let workdir = workdir.canonicalize().unwrap_or_else(|_| workdir.to_path_buf());
+    let workdir = workdir
+        .canonicalize()
+        .unwrap_or_else(|_| workdir.to_path_buf());
     let relative = canonical
         .strip_prefix(&workdir)
         .map_err(|_| "the file is outside the repository")?;
@@ -33,9 +35,10 @@ pub fn git_browse_url(file: &Path, line: usize) -> Result<String, String> {
             .id()
             .to_string(),
     };
+    let reference = encode_component(&reference);
     let path = relative
         .components()
-        .map(|part| part.as_os_str().to_string_lossy())
+        .map(|part| encode_component(&part.as_os_str().to_string_lossy()))
         .collect::<Vec<_>>()
         .join("/");
     Ok(if base.contains("gitlab") {
@@ -46,6 +49,19 @@ pub fn git_browse_url(file: &Path, line: usize) -> Result<String, String> {
         // Gitea, Forgejo and Codeberg.
         format!("{base}/src/branch/{reference}/{path}#L{line}")
     })
+}
+
+fn encode_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 /// `git@host:owner/repo.git`, `ssh://git@host/owner/repo` or `https://host/owner/repo.git`
@@ -63,7 +79,12 @@ fn web_base(remote: &str) -> Option<String> {
         rest.split_once('/')?
     } else {
         let (user_host, path) = remote.split_once(':')?;
-        (user_host.rsplit_once('@').map_or(user_host, |(_, host)| host), path)
+        (
+            user_host
+                .rsplit_once('@')
+                .map_or(user_host, |(_, host)| host),
+            path,
+        )
     };
     // An ssh port is not the web port.
     let host = host.split_once(':').map_or(host, |(host, _)| host);
@@ -76,6 +97,31 @@ fn web_base(remote: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::web_base;
+
+    #[test]
+    fn browse_urls_escape_file_and_branch_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let name = "notes#draft %.rs";
+        let file = dir.path().join(name);
+        std::fs::write(&file, "text").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(name)).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "test", &tree, &[])
+            .unwrap();
+        repo.branch("feature/a#b", &repo.find_commit(oid).unwrap(), false)
+            .unwrap();
+        repo.set_head("refs/heads/feature/a#b").unwrap();
+        repo.remote("origin", "git@github.com:owner/repo.git")
+            .unwrap();
+        assert_eq!(
+            super::git_browse_url(&file, 3).unwrap(),
+            "https://github.com/owner/repo/blob/feature%2Fa%23b/notes%23draft%20%25.rs#L3"
+        );
+    }
 
     #[test]
     fn remote_urls_become_web_urls() {

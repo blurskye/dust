@@ -62,6 +62,7 @@ pub(in crate::editor::session) struct ExplorerSession {
     open: Option<intent::OpenIntent>,
     clipboard: Option<(PathBuf, bool, WorkspaceVersion)>,
     directory: DirectoryService,
+    maximum_entries: BTreeMap<ExplorerNodeId, usize>,
     pending: Option<PendingDirectoryLoad>,
     epoch: Arc<()>,
     roots: Vec<PathBuf>,
@@ -98,6 +99,7 @@ impl ExplorerSession {
             open: None,
             clipboard: None,
             directory: DirectoryService::default(),
+            maximum_entries: BTreeMap::new(),
             pending: None,
             epoch: Arc::new(()),
             roots: Vec::new(),
@@ -318,6 +320,7 @@ impl ExplorerSession {
             .iter()
             .map(|r| r.identity.canonical_path.clone())
             .collect();
+        self.maximum_entries.clear();
         self.primary.tree.reset_roots(roots, revision);
         self.synchronize_tree_data(PRIMARY_EXPLORER_VIEW);
         self.mark_view_changed();
@@ -333,7 +336,14 @@ impl ExplorerSession {
         self.mark_view_changed();
     }
     pub(in crate::editor::session) fn toggle_loaded(&mut self, id: ExplorerNodeId) {
+        let was_expanded = self.tree().is_expanded(id);
         self.tree_mut().toggle_loaded(id);
+        if !was_expanded
+            && self.tree().is_expanded(id)
+            && let Some(node) = self.tree().node(id)
+        {
+            self.watch_reload.push_back(node.path.clone());
+        }
         self.mark_view_changed();
     }
     pub(in crate::editor::session) fn navigate(&mut self, delta: isize) {
@@ -415,6 +425,7 @@ impl ExplorerSession {
         let Some(path) = self.tree().node(node).map(|node| node.path.clone()) else {
             return Ok(());
         };
+        let maximum = self.maximum_entries.get(&node).copied().unwrap_or(maximum);
         let generation = self
             .directory
             .list(
@@ -448,6 +459,11 @@ impl ExplorerSession {
         let result = self.directory.poll_result()?;
         let (source_view, node, generation, revision, expected, policy, epoch) =
             self.pending.take()?;
+        let source_view = if self.tree_for(source_view).is_some() {
+            source_view
+        } else {
+            PRIMARY_EXPLORER_VIEW
+        };
         if expected != scope || policy != configuration || !Arc::ptr_eq(&epoch, &self.epoch) {
             // Only retire the old load in its original tree; IDs can be reused after reset.
             if revision == self.tree().root_revision() {
@@ -470,6 +486,8 @@ impl ExplorerSession {
                         .retain(|old| old.canonical_path != identity.canonical_path);
                     self.observed_roots.push(identity);
                 }
+                let truncated = listing.truncated;
+                let count = listing.entries.len();
                 let children = listing
                     .entries
                     .into_iter()
@@ -493,15 +511,30 @@ impl ExplorerSession {
                 let select_first_child = root_selected && self.root_count == 1;
                 if let Some(tree) = self.tree_for_mut(source_view) {
                     tree.apply_load(node, generation, revision, children);
+                    if truncated && count >= 100_000 {
+                        tree.begin_load(node, generation);
+                        tree.set_error(node, generation);
+                    }
                     if select_first_child {
                         tree.select_first_child();
                     }
                 }
+                if truncated && count < 100_000 {
+                    self.maximum_entries
+                        .insert(node, count.saturating_mul(2).clamp(1, 100_000));
+                    self.next_load = Some(node);
+                }
                 self.synchronize_tree_data(source_view);
                 self.mark_view_changed();
-                if root_selected && self.root_count == 1 && self.active_view == source_view {
-                }
-                Some(Ok(()))
+
+                Some(if truncated && count >= 100_000 {
+                    Err(
+                        "directory listing exceeds 100000 entries; showing a partial listing"
+                            .into(),
+                    )
+                } else {
+                    Ok(())
+                })
             }
             Ok(_) => {
                 if revision == self.tree().root_revision() {
@@ -530,13 +563,24 @@ impl ExplorerSession {
     pub(in crate::editor::session) fn continue_follow(
         &mut self,
     ) -> Result<Option<ExplorerNodeId>, String> {
-        if self.pending() {
+        if self.pending() || self.next_load.is_some() {
             return Ok(None);
         }
         let Some(target) = self.follow.clone() else {
             return Ok(None);
         };
         if let Some(id) = self.tree().id_for_path(&target) {
+            let ancestors = target
+                .ancestors()
+                .skip(1)
+                .filter_map(|path| self.tree().id_for_path(path))
+                .collect::<Vec<_>>();
+            self.tree_mut().set_filter("");
+            for ancestor in ancestors {
+                if !self.tree().is_expanded(ancestor) {
+                    self.tree_mut().toggle_loaded(ancestor);
+                }
+            }
             self.tree_mut().select(id);
             self.mark_view_changed();
             self.follow = None;
@@ -587,13 +631,13 @@ impl ExplorerSession {
         if self.watch_observation == Some(observation) {
             return Ok(());
         }
-        self.watch_observation = Some(observation);
         match self.watch.reconcile(
             observation.1,
             self.roots.clone(),
             self.watched_directories(),
         ) {
             Ok(generation) => {
+                self.watch_observation = Some(observation);
                 self.watch_generation = generation;
                 Ok(())
             }
@@ -631,6 +675,7 @@ impl ExplorerSession {
                     && root_revision == self.tree().root_revision() =>
                 {
                     self.watch_generation = None;
+                    self.watch_observation = None;
                     return Err("explorer watch worker rejected the active set".into());
                 }
                 _ => {}
@@ -697,8 +742,7 @@ impl ExplorerSession {
         let visible_ids = tree.visible_ids();
         let total = visible_ids.len();
         let selected_id = tree.selected_id();
-        let selected = selected_id
-            .and_then(|id| tree.visible_index(id));
+        let selected = selected_id.and_then(|id| tree.visible_index(id));
         let maximum = usize::from(body.height);
         let previous_scroll = self.active_scroll().min(total.saturating_sub(maximum));
         let scroll = selected.map_or(previous_scroll, |selected| {
@@ -862,7 +906,9 @@ impl ExplorerSession {
         self.follow.is_some()
     }
 }
-pub(in crate::editor::session) fn explorer_icon_role(color: crate::files::ExplorerIconColor) -> ExplorerSegmentRole {
+pub(in crate::editor::session) fn explorer_icon_role(
+    color: crate::files::ExplorerIconColor,
+) -> ExplorerSegmentRole {
     match color {
         crate::files::ExplorerIconColor::Azure => ExplorerSegmentRole::IconAzure,
         crate::files::ExplorerIconColor::Blue => ExplorerSegmentRole::IconBlue,
@@ -875,7 +921,6 @@ pub(in crate::editor::session) fn explorer_icon_role(color: crate::files::Explor
         crate::files::ExplorerIconColor::Yellow => ExplorerSegmentRole::IconYellow,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -897,8 +942,7 @@ mod tests {
             1,
         );
         let mut owner = ExplorerSession::new(
-            ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default())
-                .unwrap(),
+            ExplorerWatchService::start(crate::files::ExplorerWatchPolicy::default()).unwrap(),
         );
         owner.reset_roots(workspace.roots(), workspace.root_revision());
         (owner, workspace.version())
@@ -911,6 +955,111 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn reopening_a_collapsed_directory_reloads_missed_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut owner, source) = fixture(root.path());
+        let node = owner.tree().selected_id().unwrap();
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        drain(&mut owner, source.clone());
+        owner.toggle_loaded(node);
+        std::fs::write(root.path().join("new.txt"), "new").unwrap();
+        owner.toggle_loaded(node);
+        assert_eq!(owner.next_reload(), Some(node));
+        owner.load(node, source.clone(), 1, 100).unwrap();
+        drain(&mut owner, source);
+        assert!(
+            owner
+                .tree()
+                .id_for_path(&root.path().join("new.txt"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn truncated_directories_continue_with_a_larger_existing_limit() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..5 {
+            std::fs::write(root.path().join(format!("file{index}")), "text").unwrap();
+        }
+        let (mut owner, scope) = fixture(root.path());
+        let node = owner.tree().selected_id().unwrap();
+        owner.load(node, scope.clone(), 1, 2).unwrap();
+        drain(&mut owner, scope.clone());
+        while let Some(node) = owner.next_reload() {
+            owner.load(node, scope.clone(), 1, 2).unwrap();
+            drain(&mut owner, scope.clone());
+        }
+        assert!(
+            owner
+                .tree()
+                .id_for_path(&root.path().join("file4"))
+                .is_some()
+        );
+        assert_eq!(owner.tree().node(node).unwrap().children.len(), 5);
+    }
+
+    #[test]
+    fn failed_watch_reconciliation_is_retried_without_tree_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("dir");
+        std::fs::create_dir(&dir).unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let node = owner.tree().selected_id().unwrap();
+        owner.load(node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let node = owner.tree().id_for_path(&dir).unwrap();
+        owner.load(node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope);
+        std::fs::remove_dir(&dir).unwrap();
+        owner.reconcile_watch(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while owner.poll_watch(true).is_ok() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(owner.watch_observation.is_none());
+        std::fs::create_dir(&dir).unwrap();
+        let attempts = owner.watch.reconcile_count();
+        owner.reconcile_watch(true).unwrap();
+        assert!(owner.watch.reconcile_count() > attempts);
+    }
+
+    #[test]
+    fn follow_reveals_cached_children_and_closed_clone_loads_finish() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("dir");
+        std::fs::create_dir(&directory).unwrap();
+        let file = directory.join("file");
+        std::fs::write(&file, "text").unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let dir = owner.tree().id_for_path(&directory).unwrap();
+        owner.load(dir, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        if owner.tree().is_expanded(dir) {
+            owner.tree_mut().toggle_loaded(dir);
+        }
+        owner.follow(file.clone());
+        owner.continue_follow().unwrap();
+        assert!(owner.tree().is_expanded(dir));
+        assert_eq!(owner.tree().selected_id(), owner.tree().id_for_path(&file));
+        let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        let clone = candidate.id();
+        owner.accept_clone(candidate).unwrap();
+        owner.active_view = clone;
+        owner.load(dir, scope.clone(), 1, 100).unwrap();
+        owner.cloned_views.remove(&clone);
+        owner.active_view = PRIMARY_EXPLORER_VIEW;
+        drain(&mut owner, scope);
+        assert_eq!(
+            owner.tree().node(dir).unwrap().load,
+            ExplorerLoadState::Loaded
+        );
+    }
+
     #[test]
     fn closing_and_reopening_retires_old_directory_results_before_tree_projection() {
         let root = tempfile::tempdir().unwrap();

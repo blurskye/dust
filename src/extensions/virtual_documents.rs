@@ -207,6 +207,21 @@ impl PluginVirtualDocumentBroker {
         }
         Ok(())
     }
+    pub fn is_opening(&self, plugin: &str, load: PluginLoadId, source: &str, key: &str) -> bool {
+        let now = crate::clock::monotonic();
+        self.documents.values().any(|document| {
+            document.plugin == plugin
+                && document.load == load
+                && document.source == source
+                && document.key == key
+                && document.revision == 0
+                && !document.closed
+                && document
+                    .pending_request
+                    .and_then(|request| self.pending.get(&request))
+                    .is_some_and(|pending| pending.deadline >= now)
+        })
+    }
     pub fn start(
         &mut self,
         plugin: &str,
@@ -226,26 +241,15 @@ impl PluginVirtualDocumentBroker {
             })?
             .clone();
         let now = crate::clock::monotonic();
-        let expired = self
-            .pending
-            .iter()
-            .filter_map(|(request, pending)| {
-                (pending.plugin == plugin
-                    && pending.load == load
-                    && pending.source == source
-                    && pending.deadline < now)
-                    .then_some((*request, pending.document))
-            })
-            .collect::<Vec<_>>();
-        for (request, document) in expired {
-            self.pending.remove(&request);
-            if self
-                .documents
-                .get(&document)
-                .is_some_and(|doc| doc.revision == 0)
-            {
-                self.documents.remove(&document);
-            }
+        self.expire_requests(now);
+        if let Some((document, _)) = self.documents.iter().find(|(_, document)| {
+            document.plugin == plugin
+                && document.load == load
+                && document.source == source
+                && document.key == key
+                && !document.closed
+        }) {
+            return Ok(*document);
         }
         let active = self
             .documents
@@ -276,13 +280,35 @@ impl PluginVirtualDocumentBroker {
                 closed: false,
             },
         );
-        self.create_request(
+        if let Err(error) = self.create_request(
             document,
             PluginVirtualDocumentRequestKind::Open,
             now,
             owner.declaration.deadline_milliseconds,
-        )?;
+        ) {
+            self.documents.remove(&document);
+            return Err(error);
+        }
         Ok(document)
+    }
+    fn expire_requests(&mut self, now: Instant) {
+        let expired = self
+            .pending
+            .iter()
+            .filter_map(|(id, pending)| (pending.deadline < now).then_some((*id, pending.document)))
+            .collect::<Vec<_>>();
+        for (request, document) in expired {
+            self.pending.remove(&request);
+            if self
+                .documents
+                .get(&document)
+                .is_some_and(|doc| doc.revision == 0 || doc.closed)
+            {
+                self.documents.remove(&document);
+            } else if let Some(doc) = self.documents.get_mut(&document) {
+                doc.pending_request = None;
+            }
+        }
     }
     pub fn refresh(
         &mut self,
@@ -321,6 +347,7 @@ impl PluginVirtualDocumentBroker {
         document: u64,
         kind: PluginVirtualDocumentRequestKind,
     ) -> Result<(), PluginVirtualDocumentError> {
+        self.expire_requests(crate::clock::monotonic());
         let doc = self.documents.get(&document).ok_or_else(|| {
             err(
                 PluginVirtualDocumentErrorCode::UnknownDocument,
@@ -396,6 +423,7 @@ impl PluginVirtualDocumentBroker {
         command: &str,
     ) -> Vec<PluginVirtualDocumentRequest> {
         let now = crate::clock::monotonic();
+        self.expire_requests(now);
         let ids = self
             .pending
             .iter()
@@ -663,7 +691,15 @@ impl PluginVirtualDocumentBroker {
                 }
                 candidate.closed = true;
             }
-            PluginVirtualDocumentProposalKind::Error(error) => return Err(error),
+            PluginVirtualDocumentProposalKind::Error(error) => {
+                self.pending.remove(&proposal.request);
+                if candidate.revision == 0 {
+                    self.documents.remove(&proposal.document);
+                } else if let Some(document) = self.documents.get_mut(&proposal.document) {
+                    document.pending_request = None;
+                }
+                return Err(error);
+            }
         }
         candidate.pending_request = None;
         self.documents.insert(proposal.document, candidate);
@@ -692,20 +728,16 @@ impl PluginVirtualDocumentBroker {
     }
 
     pub fn cancel(&mut self, plugin: &str, load: PluginLoadId, document: u64) -> bool {
-        let Some(d) = self.documents.get_mut(&document) else {
+        let Some(d) = self.documents.get(&document) else {
             return false;
         };
         if d.plugin != plugin || d.load != load {
             return false;
         }
-        let Some(next) = d.cancellation_generation.checked_add(1) else {
-            return false;
-        };
-        d.closed = true;
-        d.cancellation_generation = next;
-        if let Some(r) = d.pending_request.take() {
-            self.pending.remove(&r);
+        if let Some(request) = d.pending_request {
+            self.pending.remove(&request);
         }
+        self.documents.remove(&document);
         true
     }
     pub fn snapshot(&self, document: u64) -> Option<PluginVirtualDocumentSnapshot> {
@@ -1086,5 +1118,120 @@ mod tests {
         assert!(!b.remove_generation("demo", PluginLoadId(8)));
         assert!(b.remove_generation("demo", PluginLoadId(7)));
         assert!(b.snapshot(d).is_none());
+    }
+
+    #[test]
+    fn virtual_document_retries_deduplicate_and_release_cancelled_text() {
+        let mut broker = PluginVirtualDocumentBroker::default();
+        broker.install(&index()).unwrap();
+        let load = PluginLoadId(7);
+        let source = "plugin.demo.virtual.help";
+        let document = broker.start("demo", load, source, "key".into()).unwrap();
+        assert_eq!(
+            broker.start("demo", load, source, "key".into()).unwrap(),
+            document
+        );
+        assert_eq!(broker.pending.len(), 1);
+        let request = broker
+            .requests_for_command("demo", load, "plugin.demo.run")
+            .pop()
+            .unwrap();
+        broker
+            .apply(
+                "demo",
+                load,
+                PluginVirtualDocumentProposal {
+                    request: request.request,
+                    document,
+                    cancellation_generation: request.cancellation_generation,
+                    kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
+                        expected_revision: None,
+                        revision: 1,
+                        title: "Help".into(),
+                        language: "markdown".into(),
+                        text: "old text".into(),
+                    }),
+                },
+            )
+            .unwrap();
+        broker.refresh("demo", load, document).unwrap();
+        let request = broker
+            .requests_for_command("demo", load, "plugin.demo.run")
+            .pop()
+            .unwrap();
+        let error = err(PluginVirtualDocumentErrorCode::Internal, "retry later");
+        assert_eq!(
+            broker
+                .apply(
+                    "demo",
+                    load,
+                    PluginVirtualDocumentProposal {
+                        request: request.request,
+                        document,
+                        cancellation_generation: request.cancellation_generation,
+                        kind: PluginVirtualDocumentProposalKind::Error(error.clone())
+                    }
+                )
+                .unwrap_err(),
+            error
+        );
+        assert_eq!(broker.snapshot(document).unwrap().text, "old text");
+        broker.refresh("demo", load, document).unwrap();
+        for pending in broker.pending.values_mut() {
+            pending.deadline = crate::clock::monotonic() - Duration::from_secs(1);
+        }
+        broker.refresh("demo", load, document).unwrap();
+        assert_eq!(broker.pending.len(), 1);
+        broker.cancel("demo", load, document);
+        assert!(broker.documents.is_empty() && broker.pending.is_empty());
+        for _ in 0..100 {
+            let document = broker.start("demo", load, source, "key".into()).unwrap();
+            broker.cancel("demo", load, document);
+        }
+        assert!(broker.documents.is_empty());
+    }
+
+    #[test]
+    fn failed_virtual_request_admission_does_not_leave_a_document() {
+        let mut broker = PluginVirtualDocumentBroker::default();
+        let mut index = index();
+        index.virtual_documents[0].maximum_concurrent_documents = 100;
+        broker.install(&index).unwrap();
+        for key in 0..64 {
+            broker
+                .start(
+                    "demo",
+                    PluginLoadId(7),
+                    "plugin.demo.virtual.help",
+                    key.to_string(),
+                )
+                .unwrap();
+        }
+        assert!(
+            broker
+                .start(
+                    "demo",
+                    PluginLoadId(7),
+                    "plugin.demo.virtual.help",
+                    "overflow".into()
+                )
+                .is_err()
+        );
+        assert_eq!(broker.documents.len(), 64);
+        assert!(broker.is_opening("demo", PluginLoadId(7), "plugin.demo.virtual.help", "0"));
+        for pending in broker.pending.values_mut() {
+            pending.deadline = crate::clock::monotonic() - Duration::from_secs(1);
+        }
+        assert!(
+            broker
+                .start(
+                    "demo",
+                    PluginLoadId(7),
+                    "plugin.demo.virtual.help",
+                    "overflow".into()
+                )
+                .is_ok()
+        );
+        assert_eq!(broker.documents.len(), 1);
     }
 }

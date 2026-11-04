@@ -104,7 +104,7 @@ pub fn terminal_tab_at_column(
         if index > 0 {
             x = x.saturating_add(
                 u16::try_from(text_width(
-                    &TERMINAL_TAB_SEPARATOR,
+                    TERMINAL_TAB_SEPARATOR,
                     config.editor.ambiguous_width,
                 ))
                 .unwrap_or(u16::MAX),
@@ -139,8 +139,8 @@ pub(super) fn dock_terminal_panel(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     for y in 0..workspace.grid.height().min(height) {
@@ -164,7 +164,7 @@ pub(super) fn dock_terminal_panel(
         grid.set_cell(
             x,
             geometry.top,
-            &TERMINAL_PANEL_DIVIDER,
+            TERMINAL_PANEL_DIVIDER,
             Style::TerminalBorder,
         );
     }
@@ -181,7 +181,7 @@ pub(super) fn dock_terminal_panel(
             title_x = grid.put_text_clipped(
                 title_x,
                 geometry.top,
-                &TERMINAL_TAB_SEPARATOR,
+                TERMINAL_TAB_SEPARATOR,
                 Style::TerminalBorder,
                 right,
             );
@@ -247,7 +247,7 @@ pub(super) fn dock_terminal_panel(
                     (source_row, column) >= start && (source_row, column) <= end
                 }
             });
-            grid.set_cell(
+            grid.put_text_clipped(
                 geometry
                     .x
                     .saturating_add(u16::try_from(column).unwrap_or(u16::MAX)),
@@ -258,6 +258,7 @@ pub(super) fn dock_terminal_panel(
                 } else {
                     Style::Terminal(cell.style)
                 },
+                geometry.x.saturating_add(geometry.width),
             );
         }
     }
@@ -383,9 +384,7 @@ pub(super) fn render_key_hints(
         &bottom_right.to_string(),
         Style::KeyHintBorder,
     );
-    let inner_left = left
-        .saturating_add(1)
-        .saturating_add(KEY_HINT_PADDING);
+    let inner_left = left.saturating_add(1).saturating_add(KEY_HINT_PADDING);
     let inner_right = right.saturating_sub(1 + KEY_HINT_PADDING);
     if inner_left >= inner_right {
         return;
@@ -398,8 +397,8 @@ pub(super) fn render_key_hints(
         inner_right,
     );
     let body_top = top.saturating_add(2);
-    let gap_total = KEY_HINT_COLUMN_GAP
-        .saturating_mul(u16::try_from(columns.saturating_sub(1)).unwrap_or(0));
+    let gap_total =
+        KEY_HINT_COLUMN_GAP.saturating_mul(u16::try_from(columns.saturating_sub(1)).unwrap_or(0));
     let column_width = inner_right
         .saturating_sub(inner_left)
         .saturating_sub(gap_total)
@@ -415,9 +414,7 @@ pub(super) fn render_key_hints(
                 .unwrap_or(0)
                 .saturating_mul(column_width.saturating_add(KEY_HINT_COLUMN_GAP)),
         );
-        let y = body_top.saturating_add(
-            u16::try_from(row_index).unwrap_or(u16::MAX),
-        );
+        let y = body_top.saturating_add(u16::try_from(row_index).unwrap_or(u16::MAX));
         if y >= bottom {
             continue;
         }
@@ -440,7 +437,8 @@ pub(super) fn render_key_hints(
         }
         // A label too long for its column ends in an ellipsis instead of stopping mid-word.
         let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
-        let label = super::surfaces::ellipsized(&row.label, room, crate::config::AmbiguousWidth::Narrow);
+        let label =
+            super::surfaces::ellipsized(&row.label, room, crate::config::AmbiguousWidth::Narrow);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,

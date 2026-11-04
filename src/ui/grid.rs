@@ -168,14 +168,17 @@ impl CellGrid {
             return;
         }
         let index = self.index(x, y);
-        if self.cells[index].continuation && x > 0 {
-            let previous = self.index(x - 1, y);
-            self.cells[previous] = Cell::default();
-        }
-        if x + 1 < self.width {
-            let next = self.index(x + 1, y);
-            if self.cells[next].continuation {
-                self.cells[next] = Cell::default();
+        for occupied in x..x + display_width as u16 {
+            let at = self.index(occupied, y);
+            if self.cells[at].continuation && occupied > 0 {
+                let previous = self.index(occupied - 1, y);
+                self.cells[previous] = Cell::default();
+            }
+            if occupied + 1 < self.width {
+                let next = self.index(occupied + 1, y);
+                if self.cells[next].continuation {
+                    self.cells[next] = Cell::default();
+                }
             }
         }
         self.cells[index] = Cell {
@@ -278,6 +281,16 @@ impl CellGrid {
 #[cfg(test)]
 mod tests {
     use super::{CellGrid, Style};
+
+    #[test]
+    fn overlapping_wide_writes_clear_the_old_trailing_cell() {
+        let mut grid = super::CellGrid::new(6, 1);
+        grid.set_cell(2, 0, "界", super::Style::Default);
+        grid.set_cell(1, 0, "語", super::Style::Default);
+        assert!(grid.get(2, 0).unwrap().continuation);
+        assert!(!grid.get(3, 0).unwrap().continuation);
+        assert_eq!(grid.get(3, 0).unwrap().symbol, " ");
+    }
 
     #[test]
     fn wide_graphemes_mark_continuation_and_controls_are_sanitized() {

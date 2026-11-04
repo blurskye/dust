@@ -1,10 +1,15 @@
 use crate::editor::text::{ByteOffset, PositionError, TextBuffer};
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub enum PositionEncoding {
+    #[serde(rename = "utf-8")]
     Utf8,
     #[default]
+    #[serde(rename = "utf-16")]
     Utf16,
+    #[serde(rename = "utf-32")]
     Utf32,
 }
 
@@ -167,7 +172,9 @@ mod tests {
         }
         assert!(codec.lsp_to_byte(0, 2, PositionEncoding::Utf16).is_err());
         assert_eq!(
-            codec.lsp_to_byte(0, 99, PositionEncoding::Utf16).expect("past the end"),
+            codec
+                .lsp_to_byte(0, 99, PositionEncoding::Utf16)
+                .expect("past the end"),
             ByteOffset(7)
         );
     }

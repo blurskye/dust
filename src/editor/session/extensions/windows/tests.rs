@@ -572,6 +572,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let event_execution = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("events").into(),
             arguments: Vec::new(),
@@ -607,6 +608,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let opened = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
             arguments: vec!["1".into()],
@@ -639,6 +641,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     };
     let requested = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
             arguments: Vec::new(),
@@ -662,6 +665,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     let confirmation_request = requested.confirmation_requests[0].token;
     let full = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
             arguments: vec!["1".into()],
@@ -698,6 +702,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     ] {
         let answered = crate::extensions::execute_component(
             crate::extensions::PluginExecutionRequest {
+                runtime_epoch: 0,
                 plugin: "demo".into(),
                 command: "confirmation".into(),
                 arguments: Vec::new(),
@@ -752,6 +757,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     for phase in 0..7 {
         let execution = crate::extensions::execute_component(
             crate::extensions::PluginExecutionRequest {
+                runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("storage").into(),
                 arguments: Vec::new(),
@@ -822,10 +828,15 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         .expect("provider request");
     let mut last_envelope = None;
     for phase in 0..3 {
-        let requests = providers.requests("demo", crate::extensions::PluginLoadId(44));
+        let requests = providers.requests(
+            "demo",
+            crate::extensions::PluginLoadId(44),
+            "plugin.demo.provider",
+        );
         last_envelope = requests.first().cloned();
         let execution = crate::extensions::execute_component(
             crate::extensions::PluginExecutionRequest {
+                runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("provider").into(),
                 arguments: Vec::new(),
@@ -870,6 +881,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert!(providers.cancel(provider_request));
     let late = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("provider").into(),
             arguments: Vec::new(),
@@ -899,7 +911,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             )
             .unwrap_err()
             .code,
-        crate::extensions::PluginProviderErrorCode::Cancelled
+        crate::extensions::PluginProviderErrorCode::UnknownRequest
     );
 
     let mut virtuals = crate::extensions::PluginVirtualDocumentBroker::default();
@@ -922,6 +934,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         );
         let execution = crate::extensions::execute_component(
             crate::extensions::PluginExecutionRequest {
+                runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("virtual").into(),
                 arguments: Vec::new(),
@@ -971,6 +984,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     .expect("trap runtime");
     let trapped = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("trap").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1030,6 +1044,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     .expect("deadline runtime");
     let interrupted = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("spin").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1074,6 +1089,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     for phase in 0..5 {
         let execution = crate::extensions::execute_component(
             crate::extensions::PluginExecutionRequest {
+                runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("drive").into(),
                 arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1116,6 +1132,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let private_open = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1167,6 +1184,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         .2;
     let private_replace = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1200,6 +1218,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let private_patch = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1240,6 +1259,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         .expect("private action");
     let private_close = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1273,8 +1293,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert_eq!(close_event.handle, Some(private_handle));
     assert!(host.private_snapshots(&graph).is_empty());
 
+    // A restored session retires the earlier, deliberately undelivered receipts.
     let flood = crate::extensions::execute_component(
         crate::extensions::PluginExecutionRequest {
+            runtime_epoch: 1,
             plugin: ("demo").into(),
             command: ("flood").into(),
             arguments: vec![graph.revision().expect("revision").to_string()],
@@ -1282,7 +1304,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             config: BTreeMap::new(),
             ui_revision: None,
             confirmation_available: true,
-            ui_events: events,
+            ui_events: Vec::new(),
             confirmation_results: Vec::new(),
             host_events: Vec::new(),
             storage_results: Vec::new(),
@@ -4028,4 +4050,91 @@ fn remove_fixture(
     windows.remove_plugin_generation(plugin, load)?;
     *graph = windows.graph().clone();
     Ok(host.remove_generation(plugin, load))
+}
+
+#[test]
+fn retained_ui_rejects_shared_children_and_bounds_traversals() {
+    let mut tree = tree(1, "hello");
+    tree.nodes[0].children.push(3);
+    assert_eq!(
+        validate_tree(&index("demo", 1), &tree, None)
+            .unwrap_err()
+            .code,
+        PluginUiErrorCode::InvalidTree
+    );
+    assert_eq!(tree_rows(&tree, None).len(), 2);
+    assert_eq!(focusable_nodes(&tree), vec![3]);
+    tree.nodes[0].children.pop();
+    tree.nodes[1].children.push(3);
+    assert!(validate_tree(&index("demo", 1), &tree, None).is_err());
+    tree.nodes[2].children.push(1);
+    assert_eq!(tree_rows(&tree, None).len(), 2);
+}
+
+#[test]
+fn retained_keyboard_focus_scrolls_with_the_projected_height() {
+    use crate::ui::window::WindowRect;
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("builtin.test", 1).unwrap();
+    let mut host = PluginWindowHost::default();
+    let index = index("demo", 1);
+    let mut tree = tree(1, "");
+    tree.nodes.truncate(1);
+    tree.nodes[0].children = (2..=11).collect();
+    for id in 2..=11 {
+        tree.nodes.push(crate::extensions::PluginUiNode {
+            id,
+            kind: PluginUiNodeKind::Button,
+            text: format!("Button {id}"),
+            style: PluginUiStyle::Default,
+            action: Some("plugin.demo.open".into()),
+            children: Vec::new(),
+        });
+    }
+    let mut request = open_request(graph.revision().unwrap(), tree);
+    if let PluginUiRequestKind::OpenWindow { placement, .. } = &mut request.kind {
+        *placement = PluginRequestedPlacement::Floating {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 3,
+        };
+    }
+    assert!(
+        process_fixture(&mut host, &mut graph, &index, request)
+            .error
+            .is_none()
+    );
+    let projection = graph.compositor_snapshot(tab).unwrap().project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 10,
+        },
+        1,
+        1,
+    );
+    host.synchronize_private_geometry(Some(&projection));
+    let height = host.instances.values().next().unwrap().visible_rows;
+    assert!(height > 0);
+    let mut catalog = crate::extensions::PluginContributionCatalog::default();
+    catalog.install(index).unwrap();
+    host.interact_focused(&graph, &catalog, PluginUiInteraction::Focus(4))
+        .unwrap();
+    let instance = host.instances.values().next().unwrap();
+    assert_eq!(instance.focused_node, Some(6));
+    assert!(instance.scroll <= 4 && instance.scroll + height > 4);
+    assert!(instance.scroll > 0);
+    host.interact_focused(&graph, &catalog, PluginUiInteraction::Scroll(5))
+        .unwrap();
+    let manual_scroll = host.instances.values().next().unwrap().scroll;
+    host.synchronize_private_geometry(Some(&projection));
+    assert_eq!(
+        host.instances.values().next().unwrap().scroll,
+        manual_scroll
+    );
+    host.interact_focused(&graph, &catalog, PluginUiInteraction::Focus(-4))
+        .unwrap();
+    assert_eq!(host.instances.values().next().unwrap().scroll, 0);
 }

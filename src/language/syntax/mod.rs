@@ -247,7 +247,9 @@ pub fn validate_builtin_queries() -> Result<(), String> {
         .iter()
         .find(|capture| !uncoloured_capture(capture) && Highlight::for_capture(capture).is_none())
     {
-        return Err(format!("markdown_inline highlights: unsupported capture {capture}"));
+        return Err(format!(
+            "markdown_inline highlights: unsupported capture {capture}"
+        ));
     }
     Ok(())
 }
@@ -660,8 +662,9 @@ impl SyntaxService {
                         .ok()
                         .and_then(|map| map.get(&document).copied())
                         == Some(generation)
+                        && etx.send(event).is_err()
                     {
-                        let _ = etx.try_send(event);
+                        break;
                     }
                 }
             })
@@ -757,7 +760,11 @@ fn highlight_spans(
 
 /// Markdown's inline text, such as `code`, *emphasis* and links, has its own grammar. Each
 /// paragraph, heading and table cell is parsed with it, as Neovim injects `markdown_inline`.
-fn markdown_inline_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) -> Vec<SyntaxSpan> {
+fn markdown_inline_spans(
+    tree: &tree_sitter::Tree,
+    source: &str,
+    maximum: usize,
+) -> Vec<SyntaxSpan> {
     thread_local! {
         static QUERY: Option<Query> = Query::new(
             &tree_sitter_md_025::INLINE_LANGUAGE.into(),
@@ -766,7 +773,10 @@ fn markdown_inline_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize)
         .ok();
     }
     let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_md_025::INLINE_LANGUAGE.into()).is_err() {
+    if parser
+        .set_language(&tree_sitter_md_025::INLINE_LANGUAGE.into())
+        .is_err()
+    {
         return Vec::new();
     }
     let mut inline = Vec::new();
@@ -817,7 +827,13 @@ fn markdown_inline_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize)
             if room == 0 {
                 break;
             }
-            spans.extend(highlight_spans(query, &tree, source, room, "markdown_inline"));
+            spans.extend(highlight_spans(
+                query,
+                &tree,
+                source,
+                room,
+                "markdown_inline",
+            ));
         }
         spans
     })
@@ -842,7 +858,9 @@ fn markdown_fence_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) 
             .and_then(|name| source.get(name.byte_range()))
             .and_then(language_for_fence)
             .filter(|language| *language != SyntaxLanguage::Markdown);
-        let content = children.iter().find(|child| child.kind() == "code_fence_content");
+        let content = children
+            .iter()
+            .find(|child| child.kind() == "code_fence_content");
         let (Some(language), Some(content)) = (language, content) else {
             continue;
         };
@@ -985,9 +1003,15 @@ pub fn language_for_document(path: Option<&Path>, start: &str) -> Option<SyntaxL
 #[must_use]
 pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
     match path.file_name().and_then(|name| name.to_str()) {
-        Some(".bashrc") | Some(".bash_profile") | Some(".zshrc") | Some(".profile") | Some("PKGBUILD") => return Some(SyntaxLanguage::Bash),
+        Some(".bashrc")
+        | Some(".bash_profile")
+        | Some(".zshrc")
+        | Some(".profile")
+        | Some("PKGBUILD") => return Some(SyntaxLanguage::Bash),
         Some("Gemfile") | Some("Rakefile") => return Some(SyntaxLanguage::Ruby),
-        Some("Makefile") | Some("makefile") | Some("GNUmakefile") => return Some(SyntaxLanguage::Make),
+        Some("Makefile") | Some("makefile") | Some("GNUmakefile") => {
+            return Some(SyntaxLanguage::Make);
+        }
         Some("CMakeLists.txt") => return Some(SyntaxLanguage::CMake),
         Some(".gitconfig") | Some(".editorconfig") => return Some(SyntaxLanguage::Ini),
         _ => {}
@@ -1074,8 +1098,13 @@ fn parse(request: Request) -> SyntaxEvent {
             }
         };
         let maximum = request.policy.maximum_spans;
-        let mut spans =
-            highlight_spans(query, &tree, &request.source, maximum, request.language.id());
+        let mut spans = highlight_spans(
+            query,
+            &tree,
+            &request.source,
+            maximum,
+            request.language.id(),
+        );
         if request.language == SyntaxLanguage::Markdown {
             let room = maximum.saturating_sub(spans.len());
             spans.extend(markdown_inline_spans(&tree, &request.source, room));
@@ -1092,7 +1121,12 @@ fn parse(request: Request) -> SyntaxEvent {
         }
     };
     let folds = match descriptor.folds.map_or_else(
-        || Ok(indentation_folds(&request.source, request.policy.maximum_folds)),
+        || {
+            Ok(indentation_folds(
+                &request.source,
+                request.policy.maximum_folds,
+            ))
+        },
         |query| {
             query_rows(
                 &descriptor.language,
@@ -1195,9 +1229,16 @@ fn indentation_folds(source: &str, limit: usize) -> Vec<SyntaxFold> {
             || body.split(|c: char| !c.is_alphanumeric()).next() == Some("end");
         while let Some(&(opened, start)) = open.last().filter(|(opened, _)| *opened >= indent) {
             open.pop();
-            let end = if opened == indent && closes { row } else { previous };
+            let end = if opened == indent && closes {
+                row
+            } else {
+                previous
+            };
             if end > start {
-                folds.push(SyntaxFold { start_row: start, end_row: end });
+                folds.push(SyntaxFold {
+                    start_row: start,
+                    end_row: end,
+                });
             }
         }
         open.push((indent, row));
@@ -1205,7 +1246,10 @@ fn indentation_folds(source: &str, limit: usize) -> Vec<SyntaxFold> {
     }
     for (_, start) in open {
         if previous > start {
-            folds.push(SyntaxFold { start_row: start, end_row: previous });
+            folds.push(SyntaxFold {
+                start_row: start,
+                end_row: previous,
+            });
         }
     }
     folds.sort_by_key(|fold| fold.start_row);
@@ -1225,6 +1269,39 @@ fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saturated_result_queue_retains_completed_parses() {
+        let service = SyntaxService::start(1);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        for id in 1..=3 {
+            loop {
+                match service.submit(
+                    SyntaxDocumentId(id),
+                    1,
+                    0,
+                    SyntaxLanguage::Rust,
+                    "fn main() {}".into(),
+                    SyntaxPolicy::default(),
+                ) {
+                    Ok(()) => break,
+                    Err(SyntaxError::QueueFull) => {
+                        assert!(std::time::Instant::now() < deadline);
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let mut completed = 0;
+        while completed < 3 {
+            if service.try_event().unwrap().is_some() {
+                completed += 1;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
     #[test]
     fn languages_without_a_fold_query_fold_by_indentation() {
         let rows = |source: &str| {
@@ -1260,11 +1337,15 @@ mod tests {
         };
         let folds = result.folds;
         assert!(
-            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (1, 5)),
+            folds
+                .iter()
+                .any(|fold| (fold.start_row, fold.end_row) == (1, 5)),
             "{folds:?}"
         );
         assert!(
-            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (2, 4)),
+            folds
+                .iter()
+                .any(|fold| (fold.start_row, fold.end_row) == (2, 4)),
             "{folds:?}"
         );
     }
@@ -1284,7 +1365,9 @@ mod tests {
         };
         let folds = result.folds;
         assert!(
-            folds.iter().any(|fold| (fold.start_row, fold.end_row) == (0, 2)),
+            folds
+                .iter()
+                .any(|fold| (fold.start_row, fold.end_row) == (0, 2)),
             "{folds:?}"
         );
         assert!(folds.iter().all(|fold| fold.end_row != 3), "{folds:?}");
@@ -1408,7 +1491,9 @@ mod tests {
             let language = language_for_path(Path::new(path)).expect(path);
             let at = source.find(word).expect(word);
             assert!(
-                highlight(language, source).iter().any(|span| span.start <= at && at < span.end),
+                highlight(language, source)
+                    .iter()
+                    .any(|span| span.start <= at && at < span.end),
                 "{path}: `{word}` is coloured"
             );
         }
@@ -1419,7 +1504,10 @@ mod tests {
         let spans = highlight(SyntaxLanguage::Toml, source);
         let role_at = |word: &str| {
             let at = source.find(word).expect(word);
-            spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role.name())
+            spans
+                .iter()
+                .find(|span| span.start <= at && at < span.end)
+                .map(|span| span.role.name())
         };
         assert_eq!(role_at("package"), Some("@keyword"));
         assert_eq!(role_at("name"), Some("@type"));
@@ -1429,12 +1517,24 @@ mod tests {
     #[test]
     fn scripts_without_an_extension_are_known_by_their_first_line() {
         let script = Path::new("scripts/ui-shot");
-        assert_eq!(language_for_document(Some(script), "#!/usr/bin/env bash\nset -e\n"), Some(SyntaxLanguage::Bash));
-        assert_eq!(language_for_document(Some(script), "#!/usr/bin/python3 -u\n"), Some(SyntaxLanguage::Python));
-        assert_eq!(language_for_document(Some(script), "#!/usr/bin/env -S node --flag\n"), Some(SyntaxLanguage::JavaScript));
+        assert_eq!(
+            language_for_document(Some(script), "#!/usr/bin/env bash\nset -e\n"),
+            Some(SyntaxLanguage::Bash)
+        );
+        assert_eq!(
+            language_for_document(Some(script), "#!/usr/bin/python3 -u\n"),
+            Some(SyntaxLanguage::Python)
+        );
+        assert_eq!(
+            language_for_document(Some(script), "#!/usr/bin/env -S node --flag\n"),
+            Some(SyntaxLanguage::JavaScript)
+        );
         assert_eq!(language_for_document(Some(script), "echo hi\n"), None);
         // The file name wins over the first line.
-        assert_eq!(language_for_document(Some(Path::new("a.py")), "#!/bin/sh\n"), Some(SyntaxLanguage::Python));
+        assert_eq!(
+            language_for_document(Some(Path::new("a.py")), "#!/bin/sh\n"),
+            Some(SyntaxLanguage::Python)
+        );
     }
     #[test]
     fn oversized_source_falls_back() {

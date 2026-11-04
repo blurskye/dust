@@ -46,7 +46,11 @@ pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Val
 /// subagents can work at once. Without Dust's socket and a tab there are no tools.
 pub fn serve(target: Option<(PathBuf, u64)>, profiles: &str) -> io::Result<()> {
     let output = Arc::new(Mutex::new(io::stdout()));
-    let tools = if target.is_some() { vec![tool(profiles)] } else { Vec::new() };
+    let tools = if target.is_some() {
+        vec![tool(profiles)]
+    } else {
+        Vec::new()
+    };
     for line in io::stdin().lock().lines() {
         let line = line?;
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
@@ -68,7 +72,13 @@ pub fn serve(target: Option<(PathBuf, u64)>, profiles: &str) -> io::Result<()> {
             "tools/list" => Ok(json!({"tools": tools})),
             "tools/call" => {
                 let Some((socket, tab)) = target.clone() else {
-                    write(&output, &answer(id, Err(json!({"code": -32602, "message": "Dust offers no tools here"}))));
+                    write(
+                        &output,
+                        &answer(
+                            id,
+                            Err(json!({"code": -32602, "message": "Dust offers no tools here"})),
+                        ),
+                    );
                     continue;
                 };
                 let (params, output) = (params.clone(), Arc::clone(&output));
@@ -151,7 +161,13 @@ fn call(socket: &Path, tab: u64, params: &Value) -> Value {
         match remote::ask_agent(socket, &request) {
             Ok(reply) => match reply["text"].as_str() {
                 Some(text) => (text.to_owned(), false),
-                None => (reply["error"].as_str().unwrap_or("the subagent gave no answer").to_owned(), true),
+                None => (
+                    reply["error"]
+                        .as_str()
+                        .unwrap_or("the subagent gave no answer")
+                        .to_owned(),
+                    true,
+                ),
             },
             Err(error) => (format!("could not reach Dust: {error}"), true),
         }

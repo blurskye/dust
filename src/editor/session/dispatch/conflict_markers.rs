@@ -21,7 +21,7 @@ fn conflict_block_at(lines: &[&str], line: usize) -> Option<ConflictBlock> {
     let mut found = None;
     let mut index = 0;
     while index < lines.len() {
-        if lines[index].starts_with("<<<<<<<") {
+        if marker_width(lines[index], '<').is_some() {
             let block = read_block(lines, index)?;
             if line <= block.end {
                 return Some(block);
@@ -35,15 +35,25 @@ fn conflict_block_at(lines: &[&str], line: usize) -> Option<ConflictBlock> {
     found
 }
 
+fn marker_width(line: &str, marker: char) -> Option<usize> {
+    let width = line.chars().take_while(|ch| *ch == marker).count();
+    (width >= 7 && (line.len() == width || line.as_bytes().get(width) == Some(&b' ')))
+        .then_some(width)
+}
+
 fn read_block(lines: &[&str], start: usize) -> Option<ConflictBlock> {
+    let width = marker_width(lines[start], '<')?;
     let mut base = None;
     let mut separator = None;
     for (index, line) in lines.iter().enumerate().skip(start + 1) {
-        if line.starts_with("|||||||") && separator.is_none() {
+        if marker_width(line, '|') == Some(width) && separator.is_none() {
             base = Some(index);
-        } else if line.starts_with("=======") && separator.is_none() {
+        } else if line.len() == width
+            && line.bytes().all(|byte| byte == b'=')
+            && separator.is_none()
+        {
             separator = Some(index);
-        } else if line.starts_with(">>>>>>>") {
+        } else if marker_width(line, '>') == Some(width) {
             return Some(ConflictBlock {
                 start,
                 base,
@@ -84,13 +94,16 @@ impl InteractiveApplication {
             return;
         };
         let replacement = resolved_text(&lines, block, side);
-        let range = text.line_to_byte(block.start).and_then(|start| {
+        let range = text.line_to_byte(block.start).map(|start| {
             let end = text
                 .line_to_byte(block.end + 1)
                 .unwrap_or(ByteOffset(text.len_bytes()));
-            Ok((start, end))
+            (start, end)
         });
-        let Some(range) = range.ok().and_then(|(start, end)| ByteRange::new(start, end).ok()) else {
+        let Some(range) = range
+            .ok()
+            .and_then(|(start, end)| ByteRange::new(start, end).ok())
+        else {
             self.show_error("the conflict block could not be located");
             return;
         };
@@ -137,6 +150,19 @@ mod tests {
     use super::*;
 
     const TEXT: &str = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\nb\n";
+
+    #[test]
+    fn marker_content_and_mismatched_widths_are_preserved() {
+        let text = "<<<<<<<< HEAD\nours\n======= section\nmore\n=======\nstill ours\n========\ntheirs\n>>>>>>> other\n>>>>>>>> other\n";
+        let lines = text.lines().collect::<Vec<_>>();
+        let block = conflict_block_at(&lines, 0).unwrap();
+        assert_eq!(
+            resolved_text(&lines, block, "ours"),
+            "ours\n======= section\nmore\n=======\nstill ours\n"
+        );
+        assert_eq!(block.end, 9);
+        assert!(conflict_block_at(&["<<<<<<<content", "=======", ">>>>>>>"], 0).is_none());
+    }
 
     #[test]
     fn a_block_resolves_to_either_side_or_both() {

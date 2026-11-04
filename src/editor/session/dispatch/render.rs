@@ -1,7 +1,3 @@
-use crate::editor::session::search::MAXIMUM_PICKER_ITEMS;
-use crate::ui::render::{SCRATCH_LABEL, TERMINAL_PANEL_RESIZE_STEP};
-use crate::ui::window::{PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, PANE_RESIZE_STEP};
-use super::super::configuration::configured_text_width;
 use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
 };
@@ -10,18 +6,23 @@ use super::{
     WindowPlacement, WindowRect, explorer_panel_width,
 };
 use super::{
-    BTreeMap, ByteOffset, ByteRange, EditorMode, EditorOperation, EditorTransaction,
-    EditorWindowBridge, EditorWindowLayoutState, LogLevel, NativeDescriptions,
-    NativeSurfaceSignature, NativeSurfaceWindowBinding, Precondition, ProjectionRequest,
-    TransactionId, UiEditorWindowBinding, UndoPolicy, ViewId, VisualRowAnchor, VisualRowModel,
-    active_editor_pane_viewport, editor_state_content_width, screen_foot_rows, workspace_top_rows,
-    snap_display_column, snap_display_column_forward, terminal_panel_geometry,
+    BTreeMap, EditorMode, EditorOperation, EditorTransaction, EditorWindowBridge,
+    EditorWindowLayoutState, LogLevel, NativeDescriptions, NativeSurfaceSignature,
+    NativeSurfaceWindowBinding, Precondition, ProjectionRequest, TransactionId,
+    UiEditorWindowBinding, UndoPolicy, ViewId, VisualRowAnchor, VisualRowModel,
+    active_editor_pane_viewport, editor_state_content_width, screen_foot_rows, snap_display_column,
+    snap_display_column_forward, terminal_panel_geometry, workspace_top_rows,
 };
 use super::{Duration, InteractiveApplication, LiveCrashSnapshot, PluginStatus};
 use super::{PickerOrigin, PickerPayload, PickerSurfaceKind};
+use crate::editor::session::search::MAXIMUM_PICKER_ITEMS;
 use crate::editor::{RegisterShape, RegisterValue};
 use crate::files::ResourceIntentKind;
 use crate::ui::ExplorerUiState;
+use crate::ui::render::{SCRATCH_LABEL, TERMINAL_PANEL_RESIZE_STEP};
+use crate::ui::window::{
+    PANE_DEFAULT_RATIO, PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH, PANE_RESIZE_STEP,
+};
 use crate::workspace::{
     ExplorerKind, ExplorerLoadState, ExplorerNodeId, PickerAction, PickerItem, PickerItemId,
 };
@@ -97,21 +98,19 @@ impl InteractiveApplication {
         self.sync_ui_diagnostics();
         self.retire_stale_picker();
         self.retire_stale_explorer_intents();
-        self.window_session.project_content(
-            self.ui.picker.as_ref(),
-            self.configuration.settings(),
-        );
+        self.window_session
+            .project_content(self.ui.picker.as_ref(), self.configuration.settings());
         if let Some(geometry) = self.window_session.content().picker {
-            if let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height)) {
-                if let Some(ui) = &mut self.ui.picker {
-                    ui.scroll = scroll;
-                }
+            if let Some(scroll) = self.search.picker_scroll(usize::from(geometry.list.height))
+                && let Some(ui) = &mut self.ui.picker
+            {
+                ui.scroll = scroll;
             }
             let preview_rows = usize::from(geometry.preview_rows);
-            if let Some(scroll) = self.search.picker_preview_scroll(preview_rows) {
-                if let Some(ui) = &mut self.ui.picker {
-                    ui.preview_side_scroll = (scroll, scroll);
-                }
+            if let Some(scroll) = self.search.picker_preview_scroll(preview_rows)
+                && let Some(ui) = &mut self.ui.picker
+            {
+                ui.preview_side_scroll = (scroll, scroll);
             }
         }
         self.ui.surface_content = self.window_session.content().clone();
@@ -162,21 +161,14 @@ impl InteractiveApplication {
         self.ui.set(hints, |ui| &mut ui.key_hints);
     }
     pub(super) fn notify_message(&mut self, message: String, error: bool) {
-        self.notices.notify(
-            message,
-            error,
-            self.clock.monotonic(),
-            NOTICE_TIMEOUT,
-        );
+        self.notices
+            .notify(message, error, self.clock.monotonic(), NOTICE_TIMEOUT);
         self.project_notice();
     }
     /// A small yellow notice: something is missing, but what could be shown is shown.
     pub(super) fn notify_warning(&mut self, message: String) {
-        self.notices.warn(
-            message,
-            self.clock.monotonic(),
-            NOTICE_TIMEOUT,
-        );
+        self.notices
+            .warn(message, self.clock.monotonic(), NOTICE_TIMEOUT);
         self.project_notice();
     }
     pub(super) fn clear_notice(&mut self) {
@@ -464,9 +456,9 @@ impl InteractiveApplication {
                 return;
             };
             let (columns, rows) = (geometry.width.max(1), geometry.body_height.max(1));
-            if let Err(error) = self
-                .terminal_session
-                .resize(id, columns, rows, source, &self.workspace)
+            if let Err(error) =
+                self.terminal_session
+                    .resize(id, columns, rows, source, &self.workspace)
             {
                 self.show_error(error);
             }
@@ -496,15 +488,6 @@ impl InteractiveApplication {
             return Err("universal compositor projection is missing or stale".into());
         }
         self.window_session.place_native(target, placement)?;
-        if placement == WindowPlacement::Hidden {
-            match target {
-                NativeSurfaceTarget::Explorer | NativeSurfaceTarget::ExplorerView(_) => {
-                    self.set_explorer_focus(false)
-                }
-                NativeSurfaceTarget::Terminal(_) => self.set_terminal_focus(false),
-                NativeSurfaceTarget::Dashboard | NativeSurfaceTarget::Picker(_) => {}
-            }
-        }
         self.reconcile_editor_windows();
         if matches!(target, NativeSurfaceTarget::Terminal(_))
             && placement != WindowPlacement::Hidden
@@ -575,11 +558,7 @@ impl InteractiveApplication {
             _ => None,
         };
         let Some(source) = explorer_source else {
-            return self.run_window_command(WindowCommand::Clone(
-                target,
-                axis,
-                PANE_DEFAULT_RATIO,
-            ));
+            return self.run_window_command(WindowCommand::Clone(target, axis, PANE_DEFAULT_RATIO));
         };
         let explorer = self
             .explorer
@@ -877,15 +856,12 @@ impl InteractiveApplication {
         let mut clones = Vec::new();
         for (view, window, rect) in explorer_windows {
             let body = if view == 1 {
-                self.window_session.content().explorer.unwrap_or_else(|| {
-                    crate::ui::geometry::explorer_body_geometry(
-                        rect,
-                    )
-                })
+                self.window_session
+                    .content()
+                    .explorer
+                    .unwrap_or_else(|| crate::ui::geometry::explorer_body_geometry(rect))
             } else {
-                crate::ui::geometry::explorer_body_geometry(
-                    rect,
-                )
+                crate::ui::geometry::explorer_body_geometry(rect)
             };
             let Ok(projection) = self.explorer.projection_for(
                 super::super::explorer::ExplorerViewId(view),
@@ -1094,9 +1070,7 @@ impl InteractiveApplication {
             _ => return None,
         };
         let rect = self.compositor_projection()?.window(window)?.rect;
-        let body = crate::ui::geometry::explorer_body_geometry(
-            rect,
-        );
+        let body = crate::ui::geometry::explorer_body_geometry(rect);
         if !rect_contains_point(body, column, row) {
             return None;
         }
@@ -1110,7 +1084,10 @@ impl InteractiveApplication {
                 .map(|candidate| &candidate.content)
         };
         let index = usize::from(row.saturating_sub(body.y));
-        explorer_ui?.rows.get(index).map(|row| ExplorerNodeId(row.node_id))
+        explorer_ui?
+            .rows
+            .get(index)
+            .map(|row| ExplorerNodeId(row.node_id))
     }
 
     pub(in crate::editor::session) fn refresh_explorer(&mut self) {
@@ -1166,8 +1143,8 @@ impl InteractiveApplication {
                 ));
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: self.workspace_relative_label(&file.canonical_path),
                         detail: self.message(
@@ -1202,8 +1179,8 @@ impl InteractiveApplication {
                     };
                     (
                         PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                            badge: String::new(),
+                            kind: crate::workspace::PickerItemKind::Entry,
                             id: PickerItemId(format!("resource-intent:{index}")),
                             label: self.workspace_relative_label(&intent.source),
                             detail,
@@ -1321,16 +1298,36 @@ impl InteractiveApplication {
         let first_column = if wrap_enabled || available == 0 {
             0
         } else {
-            let line_start = buffer.text.line_to_byte(line).unwrap_or(ByteOffset(0));
-            let prefix = buffer
+            let source_column = visual_rows.cursor_projection(view.cursor).1;
+            let line_start = buffer
                 .text
-                .slice(ByteRange::new(line_start, view.cursor).expect("cursor line range"))
-                .unwrap_or_default();
-            let cursor_column = configured_text_width(
-                &prefix,
-                self.configuration.settings().editor.tab_width,
-                self.configuration.settings().editor.ambiguous_width,
-            );
+                .line_to_byte(line)
+                .unwrap_or(crate::editor::text::ByteOffset(0));
+            let mut hints = self
+                .ui
+                .lsp_inlay_hints
+                .iter()
+                .chain(&self.ui.substitute_preview)
+                .filter(|hint| {
+                    hint.buffer == view.buffer
+                        && hint.revision == buffer.text.revision()
+                        && hint.position >= line_start
+                        && hint.position <= view.cursor
+                })
+                .take(10_000)
+                .collect::<Vec<_>>();
+            hints.sort_unstable_by_key(|hint| hint.position);
+            let virtual_width = hints
+                .into_iter()
+                .take(32)
+                .map(|hint| {
+                    crate::ui::geometry::text_width(
+                        &hint.label,
+                        self.configuration.settings().editor.ambiguous_width,
+                    )
+                })
+                .sum::<usize>();
+            let cursor_column = source_column.saturating_add(virtual_width);
             let margin = usize::from(
                 self.configuration
                     .settings()
@@ -1349,7 +1346,8 @@ impl InteractiveApplication {
                 cursor_column.saturating_sub(available.saturating_sub(margin).saturating_sub(1))
             } else {
                 view.scroll_column
-            };
+            }
+            .min(source_column);
             let line_text = buffer.text.line(line).unwrap_or_default();
             let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
             let snapped = snap_display_column(
@@ -1483,6 +1481,7 @@ impl InteractiveApplication {
                         != Some(WindowPlacement::Hidden)
             }),
             terminal_size,
+            terminal_shrunk: self.window_session.terminal_shrunk(),
             terminal_set_revision: self.terminal_session.revision(),
             terminal_width: self.window_session.width(),
             terminal_height: self.window_session.height(),
@@ -1511,6 +1510,12 @@ impl InteractiveApplication {
                 .height
             }),
             configuration_generation: self.configuration.generation(),
+            screen_bottom: screen_foot_rows(
+                &self.state,
+                &self.ui,
+                self.configuration.settings(),
+                self.window_session.height(),
+            ),
         }
     }
 
@@ -1606,11 +1611,8 @@ impl InteractiveApplication {
                             ..Default::default()
                         },
                     );
-                    let top = workspace_top_rows(
-                        &self.state,
-                        &self.ui,
-                        self.configuration.settings(),
-                    );
+                    let top =
+                        workspace_top_rows(&self.state, &self.ui, self.configuration.settings());
                     let (left, right, bottom_panes) = self
                         .ui
                         .debug_panes
@@ -1619,18 +1621,12 @@ impl InteractiveApplication {
                         .and_then(|_| {
                             crate::ui::debug_pane_insets(
                                 preliminary.workspace_bounds.width,
-                                preliminary
-                                    .workspace_bounds
-                                    .height
-                                    .saturating_sub(top),
+                                preliminary.workspace_bounds.height.saturating_sub(top),
                             )
                         })
                         .unwrap_or_default();
                     let protected = self.input.prompt().map(|prompt| {
-                        let prompt_height = preliminary
-                            .workspace_bounds
-                            .height
-                            .saturating_sub(top);
+                        let prompt_height = preliminary.workspace_bounds.height.saturating_sub(top);
                         let geometry = crate::ui::prompt_geometry_for_state(
                             self.window_session.width(),
                             prompt_height,
@@ -1649,10 +1645,7 @@ impl InteractiveApplication {
                         source_revision: revision,
                         graph_revision,
                         bounds: preliminary.bounds,
-                        minimum_size: (
-                            PANE_MINIMUM_WIDTH,
-                            PANE_MINIMUM_HEIGHT,
-                        ),
+                        minimum_size: (PANE_MINIMUM_WIDTH, PANE_MINIMUM_HEIGHT),
                         insets: crate::ui::window::TiledInsets {
                             screen_bottom,
                             top,

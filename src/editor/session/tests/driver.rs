@@ -1,7 +1,7 @@
 //! Restricted driver for migrated input/configuration workflows. It deliberately
 //! offers no mutable application, editor, configuration, registry or UI access.
-use crate::editor::session::persistence::STATE_FILE;
 use super::InteractiveApplication;
+use crate::editor::session::persistence::STATE_FILE;
 use crate::{
     clock::{Clock, ManualClock},
     config::LoadedConfig,
@@ -419,9 +419,7 @@ impl TestSession {
             .and_then(|projection| projection.window(ids.window))
             .expect("projected explorer fixture")
             .rect;
-        crate::ui::geometry::explorer_body_geometry(
-            rect,
-        )
+        crate::ui::geometry::explorer_body_geometry(rect)
     }
     pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
         let ids = self.explorer_content_ids();
@@ -780,13 +778,7 @@ impl TestSession {
             ))
         ));
         assert!(
-            !self
-                ._state
-                .path()
-                .join(
-                    &STATE_FILE
-                )
-                .exists(),
+            !self._state.path().join(STATE_FILE).exists(),
             "expired shutdown wrote an exit snapshot"
         );
     }
@@ -980,13 +972,9 @@ impl TestSession {
         let id = self.application.displayed_terminal().expect("terminal");
         let source = self.terminal_geometry_source().expect("geometry");
         self.application.terminal_session.request_stop(id)?;
-        self.application.terminal_session.resize(
-            id,
-            70,
-            5,
-            source,
-            &self.application.workspace,
-        )
+        self.application
+            .terminal_session
+            .resize(id, 70, 5, source, &self.application.workspace)
     }
     pub(super) fn terminal_pending_resizes(&self) -> Option<usize> {
         let id = self.application.displayed_terminal()?;

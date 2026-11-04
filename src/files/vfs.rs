@@ -21,7 +21,7 @@ use super::{
     explorer_intent::{ExplorerIo, ExplorerIoReply, PreparedExplorerMutation},
     recovery::{
         DOCUMENT_BYTE_CEILING, RecoveryCleanup, RecoveryDiscovery, RecoveryRecord,
-        cleanup_recovery, discover_recovery, read_bounded_bytes, write_recovery,
+        cleanup_recovery, discover_recovery_bounded, read_bounded_bytes, write_recovery,
     },
 };
 
@@ -625,8 +625,11 @@ impl VfsWorker {
                                     directory,
                                     maximum_records,
                                 } => {
-                                    let mut discovery = discover_recovery(&directory);
-                                    discovery.records.truncate(maximum_records);
+                                    let discovery = discover_recovery_bounded(
+                                        &directory,
+                                        maximum_records,
+                                        super::recovery::RECOVERY_JOURNAL_BYTE_CEILING,
+                                    );
                                     VfsResult::RecoveryDiscovered { id, discovery }
                                 }
                                 VfsRequest::WriteRecovery { id, path, record } => {
@@ -1269,11 +1272,7 @@ pub(super) fn apply_explorer_mutation(
         ExplorerMutation::Rename { source, target } => {
             let source = scoped_existing_path(source, roots)?;
             let target = scoped_missing_target(target, roots)?;
-            fs::rename(&source, &target).map_err(|error| VfsError::Io {
-                operation: "rename explorer path",
-                path: source,
-                source: error,
-            })
+            rename_noreplace(&source, &target)
         }
         ExplorerMutation::Copy { source, target } => {
             let source = scoped_existing_path(source, roots)?;
@@ -1398,10 +1397,7 @@ pub(super) fn resolve_resource_intent(
     maximum_bytes: usize,
 ) -> Result<CheckedResourceIntent, VfsError> {
     use std::os::unix::fs::MetadataExt;
-    let source = canonical_path(source)?;
-    if !roots.iter().any(|root| source.starts_with(root)) {
-        return Err(VfsError::OutsideScope(source));
-    }
+    let source = scoped_existing_path(source, roots)?;
     let metadata = fs::metadata(&source).map_err(|source_error| VfsError::Io {
         operation: "inspect resource source",
         path: source.clone(),
@@ -1496,17 +1492,10 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
                 path: parent.clone(),
                 source: source_error,
             })?;
-            if parent_metadata.dev() != *parent_device
-                || parent_metadata.ino() != *parent_inode
-                || fs::symlink_metadata(target).is_ok()
-            {
+            if parent_metadata.dev() != *parent_device || parent_metadata.ino() != *parent_inode {
                 return Err(VfsError::ChangedOnDisk);
             }
-            fs::rename(&source, target).map_err(|source_error| VfsError::Io {
-                operation: "rename resource",
-                path: source,
-                source: source_error,
-            })
+            rename_noreplace(&source, target)
         }
     }
 }
@@ -1516,6 +1505,28 @@ pub(super) fn canonical_path(path: &Path) -> Result<PathBuf, VfsError> {
         operation: "canonicalize",
         path: path.to_path_buf(),
         source,
+    })
+}
+
+fn rename_noreplace(source: &Path, target: &Path) -> Result<(), VfsError> {
+    use nix::fcntl::{AT_FDCWD, RenameFlags, renameat2};
+    renameat2(
+        AT_FDCWD,
+        source,
+        AT_FDCWD,
+        target,
+        RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(|error| {
+        if error == nix::errno::Errno::EEXIST {
+            VfsError::DestinationExists(target.to_path_buf())
+        } else {
+            VfsError::Io {
+                operation: "rename",
+                path: source.to_path_buf(),
+                source: error.into(),
+            }
+        }
     })
 }
 
@@ -1539,11 +1550,24 @@ pub(super) fn list_directory(
 }
 
 pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
-    let file = fs::File::open(path).map_err(|source| VfsError::Io {
-        operation: "open for reading",
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|source| VfsError::Io {
+            operation: "open for reading",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let metadata = file.metadata().map_err(|source| VfsError::Io {
+        operation: "inspect read target",
         path: path.to_path_buf(),
         source,
     })?;
+    if !metadata.is_file() {
+        return Err(VfsError::NotRegularFile(path.to_path_buf()));
+    }
     read_bounded_bytes(file, maximum_bytes)
         .map_err(|source| VfsError::Io {
             operation: "read",
@@ -1557,56 +1581,32 @@ pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
 }
 
 pub fn read_file(path: &Path) -> Result<Vec<u8>, VfsError> {
-    let metadata = fs::metadata(path).map_err(|source| VfsError::Io {
-        operation: "inspect read target",
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if !metadata.is_file() {
-        return Err(VfsError::Io {
-            operation: "read non-regular file",
-            path: path.to_path_buf(),
-            source: io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "document target is not a regular file",
-            ),
-        });
-    }
-    let file = fs::File::open(path).map_err(|source| VfsError::Io {
-        operation: "open for reading",
-        path: path.to_path_buf(),
-        source,
-    })?;
-    read_bounded_bytes(file, DOCUMENT_BYTE_CEILING)
-        .map_err(|source| VfsError::Io {
-            operation: "read",
-            path: path.to_path_buf(),
-            source,
-        })?
-        .ok_or_else(|| VfsError::DocumentTooLarge {
-            path: path.to_path_buf(),
-            maximum_bytes: DOCUMENT_BYTE_CEILING,
-        })
+    read_file_with_ceiling(path, DOCUMENT_BYTE_CEILING)
 }
 
-pub(super) fn checked_atomic_write(
+pub fn checked_atomic_write(
     path: &Path,
     bytes: &[u8],
     expectation: &WriteExpectation,
 ) -> Result<(), VfsError> {
+    let temporary = stage_atomic_write(path, bytes)?;
+    commit_atomic_write(path, temporary, expectation)
+}
+
+fn commit_atomic_write(
+    path: &Path,
+    temporary: NamedTempFile,
+    expectation: &WriteExpectation,
+) -> Result<(), VfsError> {
     match expectation {
-        WriteExpectation::Any => {}
-        WriteExpectation::Missing => match fs::metadata(path) {
-            Ok(_) => return Err(VfsError::DestinationExists(path.to_path_buf())),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(VfsError::Io {
-                    operation: "inspect destination",
-                    path: path.to_path_buf(),
-                    source,
-                });
-            }
-        },
+        WriteExpectation::Any => {
+            temporary.persist(path).map_err(|error| VfsError::Io {
+                operation: "replace destination",
+                path: path.to_path_buf(),
+                source: error.error,
+            })?;
+        }
+        WriteExpectation::Missing => persist_missing(path, temporary)?,
         WriteExpectation::Exact(expected) => {
             // A new file's buffer starts empty, with nothing on disk to compare it with yet.
             let new_file = expected.is_empty()
@@ -1614,17 +1614,102 @@ pub(super) fn checked_atomic_write(
                     fs::symlink_metadata(path),
                     Err(error) if error.kind() == io::ErrorKind::NotFound
                 );
-            if !new_file && read_file(path)? != *expected {
-                return Err(VfsError::ExternalModification(path.to_path_buf()));
+            if new_file {
+                persist_missing(path, temporary)?;
+            } else {
+                if read_file(path)? != *expected {
+                    return Err(VfsError::ExternalModification(path.to_path_buf()));
+                }
+                replace_exact(path, temporary, expected)?;
             }
         }
     }
-    atomic_write(path, bytes)
+    sync_parent(
+        path.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new(".")),
+    )
+}
+
+fn persist_missing(path: &Path, temporary: NamedTempFile) -> Result<(), VfsError> {
+    temporary.persist_noclobber(path).map_err(|error| {
+        if error.error.kind() == io::ErrorKind::AlreadyExists {
+            VfsError::DestinationExists(path.to_path_buf())
+        } else {
+            VfsError::Io {
+                operation: "create destination",
+                path: path.to_path_buf(),
+                source: error.error,
+            }
+        }
+    })?;
+    Ok(())
+}
+
+fn replace_exact(path: &Path, temporary: NamedTempFile, expected: &[u8]) -> Result<(), VfsError> {
+    use nix::fcntl::{AT_FDCWD, RenameFlags, renameat2};
+    // Keep the displaced entry until its bytes have been checked as well: another
+    // writer can replace the destination between final validation and this exchange.
+    renameat2(
+        AT_FDCWD,
+        temporary.path(),
+        AT_FDCWD,
+        path,
+        RenameFlags::RENAME_EXCHANGE,
+    )
+    .map_err(|source| VfsError::Io {
+        operation: "replace destination",
+        path: path.to_path_buf(),
+        source: source.into(),
+    })?;
+    if read_file(temporary.path()).is_ok_and(|bytes| bytes == expected) {
+        return Ok(());
+    }
+    let (_, preserved) = temporary.keep().map_err(|error| VfsError::Io {
+        operation: "preserve externally modified destination",
+        path: path.to_path_buf(),
+        source: error.error,
+    })?;
+    sync_parent(preserved.parent().unwrap_or(Path::new(".")))?;
+    Err(VfsError::Io {
+        operation: "save",
+        path: path.to_path_buf(),
+        source: io::Error::other(format!(
+            "destination changed during replacement; displaced file preserved at {}",
+            preserved.display()
+        )),
+    })
+}
+
+/// Lock a stable sidecar across atomic replacements of the data file.
+#[cfg(unix)]
+pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "lock target must be a regular file",
+        ));
+    }
+    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+        .map_err(|(_, error)| io::Error::from(error))
 }
 
 /// Write through a same-directory temporary file, sync it, then atomically
 /// replace the destination through tempfile's platform-specific persistence.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
+    checked_atomic_write(path, bytes, &WriteExpectation::Any)
+}
+
+fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -1662,13 +1747,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
             path: path.to_path_buf(),
             source,
         })?;
-    temporary.persist(path).map_err(|error| VfsError::Io {
-        operation: "replace destination",
-        path: path.to_path_buf(),
-        source: error.error,
-    })?;
-    sync_parent(parent)?;
-    Ok(())
+    Ok(temporary)
 }
 
 #[cfg(unix)]
@@ -1700,6 +1779,120 @@ mod lifecycle_tests {
             thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn staged_writes_recheck_expectations_and_preserve_displaced_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("file");
+        let temporary = stage_atomic_write(&path, b"editor").unwrap();
+        fs::write(&path, b"external").unwrap();
+        assert!(matches!(
+            commit_atomic_write(&path, temporary, &WriteExpectation::Missing),
+            Err(VfsError::DestinationExists(_))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"external");
+
+        let temporary = stage_atomic_write(&path, b"editor").unwrap();
+        fs::write(&path, b"newer").unwrap();
+        assert!(matches!(
+            commit_atomic_write(
+                &path,
+                temporary,
+                &WriteExpectation::Exact(b"external".to_vec())
+            ),
+            Err(VfsError::ExternalModification(_))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"newer");
+
+        // Simulate a replacement after final validation but before the exchange.
+        let temporary = stage_atomic_write(&path, b"editor").unwrap();
+        let preserved = temporary.path().to_path_buf();
+        let error = replace_exact(&path, temporary, b"external").unwrap_err();
+        assert!(error.to_string().contains(&preserved.display().to_string()));
+        assert_eq!(fs::read(&preserved).unwrap(), b"newer");
+        assert_eq!(fs::read(&path).unwrap(), b"editor");
+
+        fs::remove_file(&path).unwrap();
+        let dangling = root.path().join("dangling");
+        std::os::unix::fs::symlink(&dangling, &path).unwrap();
+        assert!(matches!(
+            checked_atomic_write(&path, b"editor", &WriteExpectation::Missing),
+            Err(VfsError::DestinationExists(_))
+        ));
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn rename_noreplace_preserves_a_destination_created_after_validation() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let target = root.path().join("target");
+        fs::write(&source, b"source").unwrap();
+        let roots = vec![root.path().to_path_buf()];
+        let target = scoped_missing_target(&target, &roots).unwrap();
+        fs::write(&target, b"other writer").unwrap();
+        assert!(matches!(
+            rename_noreplace(&source, &target),
+            Err(VfsError::DestinationExists(_))
+        ));
+        assert_eq!(fs::read(&source).unwrap(), b"source");
+        assert_eq!(fs::read(&target).unwrap(), b"other writer");
+        fs::remove_file(&target).unwrap();
+        rename_noreplace(&source, &target).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&target).unwrap(), b"source");
+    }
+
+    #[test]
+    fn resource_preparation_rejects_source_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real");
+        let link = root.path().join("link");
+        fs::write(&real, b"keep").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let roots = vec![root.path().to_path_buf()];
+        for target in [None, Some(root.path().join("renamed"))] {
+            assert!(resolve_resource_intent(&link, target.as_deref(), &roots, 1024).is_err());
+        }
+        assert_eq!(fs::read(&real).unwrap(), b"keep");
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn bounded_worker_read_rejects_fifo_and_keeps_servicing_requests() {
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("fifo");
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).unwrap();
+        let mut worker = VfsWorker::start(2);
+        worker
+            .read_scoped_bounded(fifo.clone(), vec![root.path().to_path_buf()], 1024)
+            .unwrap();
+        assert!(matches!(
+            result(&worker),
+            VfsResult::Read {
+                result: Err(VfsError::NotRegularFile(_)),
+                ..
+            }
+        ));
+        assert!(matches!(read_file(&fifo), Err(VfsError::NotRegularFile(_))));
+        let path = root.path().join("file");
+        worker.write(path.clone(), b"saved".to_vec()).unwrap();
+        assert!(matches!(
+            result(&worker),
+            VfsResult::Write { result: Ok(()), .. }
+        ));
+        assert_eq!(fs::read(path).unwrap(), b"saved");
+    }
+
     #[test]
     fn queued_write_cancellation_is_exact_and_full_admission_never_writes() {
         let root = tempfile::tempdir().unwrap();

@@ -89,9 +89,7 @@ pub struct LargeFileConfig {
 }
 impl Default for LargeFileConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -121,9 +119,7 @@ pub struct GitSignsConfig {
 
 impl Default for GitSignsConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -135,9 +131,7 @@ pub struct IndentGuideConfig {
 
 impl Default for IndentGuideConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-        }
+        Self { enabled: true }
     }
 }
 

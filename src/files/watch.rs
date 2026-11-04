@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -24,6 +25,7 @@ pub struct ExplorerWatchEntryFingerprint {
 pub struct ExplorerDirectoryFingerprint {
     pub directory: PathBuf,
     pub entries: Vec<ExplorerWatchEntryFingerprint>,
+    pub ignore_rules: [u8; 32],
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerWatchPolicy {
@@ -95,6 +97,49 @@ pub(super) struct ExplorerWatchSet {
     changed_at: Option<std::time::Instant>,
 }
 
+impl ExplorerWatchSet {
+    fn retain_previous(&mut self, previous: Self) {
+        if self.root_revision != previous.root_revision || self.roots != previous.roots {
+            return;
+        }
+        for (directory, fingerprint) in previous.fingerprints {
+            if self.directories.contains(&directory) {
+                self.fingerprints.insert(directory, fingerprint);
+            }
+        }
+        self.pending = previous
+            .pending
+            .into_iter()
+            .filter(|directory| self.directories.contains(directory))
+            .collect();
+        self.changed_at = previous.changed_at;
+    }
+
+    fn publish(&mut self, events: &SyncSender<ExplorerWatchEvent>, maximum: usize) {
+        let directories = self
+            .pending
+            .iter()
+            .take(maximum)
+            .cloned()
+            .collect::<Vec<_>>();
+        if events
+            .try_send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+                generation: self.generation,
+                root_revision: self.root_revision,
+                directories: directories.clone(),
+            }))
+            .is_ok()
+        {
+            for directory in directories {
+                self.pending.remove(&directory);
+            }
+            if self.pending.is_empty() {
+                self.changed_at = None;
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 pub(super) fn watch_name_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt;
@@ -152,9 +197,30 @@ pub fn explorer_directory_fingerprint(
         });
     }
     entries.sort();
+    let mut ignore_rules = Sha256::new();
+    // A parent's ignore rules also filter every expanded descendant listing.
+    for ancestor in canonical.ancestors() {
+        for name in [".gitignore", ".ignore", ".git/info/exclude"] {
+            let path = ancestor.join(name);
+            match super::vfs::read_file_with_ceiling(&path, 512 * 1024) {
+                Ok(bytes) => {
+                    ignore_rules.update(watch_name_bytes(path.as_os_str()));
+                    ignore_rules.update((bytes.len() as u64).to_le_bytes());
+                    ignore_rules.update(bytes);
+                }
+                Err(super::VfsError::Io { source, .. })
+                    if matches!(
+                        source.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) => {}
+                Err(_) => return Err(ExplorerWatchError::WorkerUnavailable),
+            }
+        }
+    }
     Ok(ExplorerDirectoryFingerprint {
         directory: canonical,
         entries,
+        ignore_rules: ignore_rules.finalize().into(),
     })
 }
 
@@ -333,7 +399,7 @@ pub(super) fn explorer_watch_worker(
                     .collect::<Result<BTreeMap<_, _>, _>>();
                 match fingerprints {
                     Ok(fingerprints) => {
-                        active = Some(ExplorerWatchSet {
+                        let mut next = ExplorerWatchSet {
                             generation,
                             root_revision,
                             roots,
@@ -341,7 +407,11 @@ pub(super) fn explorer_watch_worker(
                             fingerprints,
                             pending: BTreeSet::new(),
                             changed_at: None,
-                        })
+                        };
+                        if let Some(previous) = active.take() {
+                            next.retain_previous(previous);
+                        }
+                        active = Some(next);
                     }
                     Err(_) => {
                         let _ = events.try_send(ExplorerWatchEvent::Failed {
@@ -377,17 +447,7 @@ pub(super) fn explorer_watch_worker(
                                 .changed_at
                                 .is_some_and(|at| at.elapsed() >= policy.debounce)
                         {
-                            let directories = std::mem::take(&mut set.pending)
-                                .into_iter()
-                                .take(policy.maximum_events)
-                                .collect();
-                            let _ =
-                                events.try_send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                                    generation: set.generation,
-                                    root_revision: set.root_revision,
-                                    directories,
-                                }));
-                            set.changed_at = None;
+                            set.publish(&events, policy.maximum_events);
                         }
                     }
                     Err(_) => {
@@ -400,5 +460,86 @@ pub(super) fn explorer_watch_worker(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn watch_set(generation: u64, directories: Vec<PathBuf>) -> ExplorerWatchSet {
+        ExplorerWatchSet {
+            generation: ExplorerWatchGeneration(generation),
+            root_revision: 1,
+            roots: directories.clone(),
+            directories,
+            fingerprints: BTreeMap::new(),
+            pending: BTreeSet::new(),
+            changed_at: None,
+        }
+    }
+
+    #[test]
+    fn reconciliation_preserves_retained_fingerprints_and_pending_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("a");
+        let added = root.path().join("b");
+        fs::create_dir(&directory).unwrap();
+        fs::create_dir(&added).unwrap();
+        let roots = vec![root.path().to_path_buf()];
+        let before = explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap();
+        fs::write(directory.join("new"), "new").unwrap();
+        let after = explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap();
+        let mut previous = watch_set(1, vec![directory.clone()]);
+        previous.roots = roots.clone();
+        previous
+            .fingerprints
+            .insert(directory.clone(), before.clone());
+        previous.pending.insert(directory.clone());
+        previous.changed_at = Some(std::time::Instant::now());
+        let mut next = watch_set(2, vec![directory.clone(), added]);
+        next.roots = roots;
+        next.fingerprints.insert(directory.clone(), after);
+        next.retain_previous(previous);
+        assert_eq!(next.fingerprints[&directory], before);
+        assert!(next.changed_at.is_some());
+        let (send, receive) = mpsc::sync_channel(1);
+        next.publish(&send, 1);
+        assert_eq!(
+            receive.recv().unwrap(),
+            ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+                generation: ExplorerWatchGeneration(2),
+                root_revision: 1,
+                directories: vec![directory],
+            })
+        );
+    }
+
+    #[test]
+    fn full_event_queue_retries_pending_directory_batches() {
+        let a = PathBuf::from("a");
+        let b = PathBuf::from("b");
+        let mut set = watch_set(2, vec![a.clone(), b.clone()]);
+        set.pending.extend([a.clone(), b.clone()]);
+        set.changed_at = Some(std::time::Instant::now());
+        let (send, receive) = mpsc::sync_channel(1);
+        send.try_send(ExplorerWatchEvent::Failed {
+            generation: ExplorerWatchGeneration(1),
+            root_revision: 1,
+        })
+        .unwrap();
+        set.publish(&send, 1);
+        assert_eq!(set.pending.len(), 2);
+        assert!(set.changed_at.is_some());
+        receive.recv().unwrap();
+        for directory in [a, b] {
+            set.publish(&send, 1);
+            assert!(
+                matches!(receive.recv().unwrap(), ExplorerWatchEvent::Batch(batch)
+                if batch.directories == vec![directory])
+            );
+        }
+        assert!(set.pending.is_empty());
+        assert!(set.changed_at.is_none());
     }
 }

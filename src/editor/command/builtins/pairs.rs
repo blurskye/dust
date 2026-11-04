@@ -45,10 +45,17 @@ pub(super) fn build_surround_add(
         buffer,
         edits: TextEditSet::new(
             text.revision(),
-            vec![
-                TextEdit::new(ByteRange::empty(range.start), open),
-                TextEdit::new(ByteRange::empty(end), close),
-            ],
+            if range.start == end {
+                vec![TextEdit::new(
+                    ByteRange::empty(end),
+                    format!("{open}{close}"),
+                )]
+            } else {
+                vec![
+                    TextEdit::new(ByteRange::empty(range.start), open),
+                    TextEdit::new(ByteRange::empty(end), close),
+                ]
+            },
         ),
     });
     transaction.operations.push(EditorOperation::SetCursor {
@@ -124,11 +131,7 @@ pub(super) fn auto_pair(text: &TextBuffer, cursor: ByteOffset, typed: &str) -> O
 }
 
 /// `auto_pair` for text that replaces `range`: what counts is around the range, not in it.
-pub(super) fn auto_pair_over(
-    text: &TextBuffer,
-    range: ByteRange,
-    typed: &str,
-) -> Option<AutoPair> {
+pub(super) fn auto_pair_over(text: &TextBuffer, range: ByteRange, typed: &str) -> Option<AutoPair> {
     let mut characters = typed.chars();
     let typed = characters.next()?;
     if characters.next().is_some() {
@@ -136,6 +139,21 @@ pub(super) fn auto_pair_over(
     }
     let (next, _) = neighbours(text, range.end);
     let (_, previous) = neighbours(text, range.start);
+    if matches!(typed, '"' | '\'' | '`') {
+        let line = text.byte_to_line(range.start).ok()?;
+        let start = text.line_to_byte(line).ok()?;
+        let before = text.slice(ByteRange::new(start, range.start).ok()?).ok()?;
+        if before
+            .chars()
+            .rev()
+            .take_while(|character| *character == '\\')
+            .count()
+            % 2
+            == 1
+        {
+            return None;
+        }
+    }
     if matches!(typed, ')' | ']' | '}' | '"' | '\'' | '`') && next == Some(typed) {
         return Some(AutoPair::Skip);
     }
@@ -149,9 +167,7 @@ pub(super) fn auto_pair_over(
     if next.is_some_and(|next| next.is_alphanumeric() || "_%'[\".`$".contains(next)) {
         return None;
     }
-    if close == typed
-        && previous.is_some_and(|previous| previous.is_alphanumeric() || previous == '\\')
-    {
+    if close == typed && previous.is_some_and(|previous| previous.is_alphanumeric()) {
         return None;
     }
     Some(AutoPair::Open(close))

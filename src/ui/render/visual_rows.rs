@@ -1,15 +1,15 @@
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     config::{AmbiguousWidth, Config, EditorConfig, LineNumbers},
-    ui::render::editor::{GUTTER_PADDING, LINE_NUMBER_SEPARATOR},
     editor::{
         EditorState,
         text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
     },
     ui::geometry::text_width,
+    ui::render::editor::{GUTTER_PADDING, LINE_NUMBER_SEPARATOR},
 };
 
 use super::{UiState, editor::display_column};
@@ -31,6 +31,8 @@ pub struct VisualRowModel<'a> {
     tab_width: usize,
     ambiguous_width: AmbiguousWidth,
     inlay_widths: BTreeMap<ByteOffset, usize>,
+    rows: RefCell<BTreeMap<usize, Vec<VisualRowSlice>>>,
+    diagnostic_rows: Option<(usize, Vec<(String, crate::ui::Style)>)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +87,7 @@ impl<'a> VisualRowModel<'a> {
         wrap: bool,
     ) -> Self {
         let mut inlay_widths = BTreeMap::<ByteOffset, usize>::new();
+        let mut labels = BTreeMap::<ByteOffset, Vec<&str>>::new();
         if let Some(buffer) = state.views.get(view).map(|view| view.buffer) {
             let revision = text.revision();
             let mut hints = ui
@@ -105,6 +108,7 @@ impl<'a> VisualRowModel<'a> {
                     continue;
                 }
                 *count = count.saturating_add(1);
+                labels.entry(hint.position).or_default().push(&hint.label);
                 let width = text_width(&hint.label, config.editor.ambiguous_width);
                 inlay_widths
                     .entry(hint.position)
@@ -112,7 +116,46 @@ impl<'a> VisualRowModel<'a> {
                     .or_insert(width);
             }
         }
-        Self::new_with_minimum_digits(VisualRowConstruction {
+        let content_width = usize::from(pane_width.saturating_sub(editor_state_gutter_width(
+            state,
+            text,
+            &config.editor,
+            pane_width,
+        )))
+        .max(1);
+        for (position, width) in &mut inlay_widths {
+            if !wrap {
+                continue;
+            }
+            let line = text.byte_to_line(*position).unwrap_or(0);
+            let line_start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
+            let source = text.line(line).unwrap_or_default();
+            let source_width = source
+                .get(position.get().saturating_sub(line_start.get())..)
+                .unwrap_or_default()
+                .graphemes(true)
+                .next()
+                .map_or(0, |g| {
+                    if g == "\t" {
+                        config.editor.tab_width.max(1)
+                    } else {
+                        text_width(g, config.editor.ambiguous_width).max(1)
+                    }
+                });
+            let limit = content_width.saturating_sub(source_width);
+            let mut used = 0;
+            for label in &labels[position] {
+                for grapheme in label.graphemes(true) {
+                    let cells = text_width(grapheme, config.editor.ambiguous_width).clamp(1, 2);
+                    if used + cells > limit {
+                        break;
+                    }
+                    used += cells;
+                }
+            }
+            *width = used;
+        }
+        let mut model = Self::new_with_minimum_digits(VisualRowConstruction {
             text,
             view,
             ui,
@@ -121,7 +164,22 @@ impl<'a> VisualRowModel<'a> {
             wrap,
             minimum_digits: editor_line_number_digits(state),
             inlay_widths,
-        })
+        });
+        if let Some(buffer) = state
+            .views
+            .get(view)
+            .and_then(|view| state.buffers.get(view.buffer))
+            && !ui.large_file_buffers.contains(&state.views[view].buffer)
+        {
+            model.diagnostic_rows = super::editor::expanded_diagnostic_rows(
+                text,
+                buffer.path.as_deref(),
+                ui,
+                config,
+                model.content_width as u16,
+            );
+        }
+        model
     }
 
     fn new_with_minimum_digits(construction: VisualRowConstruction<'a, '_>) -> Self {
@@ -150,11 +208,11 @@ impl<'a> VisualRowModel<'a> {
         folds.sort_unstable_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
         let mut normalized_folds: Vec<(usize, usize)> = Vec::with_capacity(folds.len());
         for (start, end) in folds {
-            if let Some(last) = normalized_folds.last_mut() {
-                if start <= last.1 {
-                    last.1 = last.1.max(end);
-                    continue;
-                }
+            if let Some(last) = normalized_folds.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+                continue;
             }
             normalized_folds.push((start, end));
         }
@@ -172,7 +230,44 @@ impl<'a> VisualRowModel<'a> {
             tab_width: config.editor.tab_width.max(1),
             ambiguous_width: config.editor.ambiguous_width,
             inlay_widths,
+            rows: RefCell::default(),
+            diagnostic_rows: None,
         }
+    }
+
+    pub(super) fn diagnostic_rows(&self, line: usize) -> &[(String, crate::ui::Style)] {
+        self.diagnostic_rows
+            .as_ref()
+            .filter(|(at, _)| *at == line)
+            .map_or(&[], |(_, rows)| rows.as_slice())
+    }
+
+    #[must_use]
+    pub fn painted_row(&self, start: VisualRowAnchor, mut row: usize) -> Option<VisualRowAnchor> {
+        let mut current = self.normalize(start);
+        loop {
+            if row == 0 {
+                return Some(current);
+            }
+            let next = self.next(current);
+            let extra = if next.line != current.line || next == current {
+                self.diagnostic_rows(current.line).len()
+            } else {
+                0
+            };
+            if row <= extra {
+                return Some(current);
+            }
+            if next == current {
+                return None;
+            }
+            row -= 1 + extra;
+            current = next;
+        }
+    }
+
+    pub(super) fn inlay_width(&self, position: ByteOffset) -> usize {
+        self.inlay_widths.get(&position).copied().unwrap_or(0)
     }
 
     pub(super) fn containing_fold(&self, line: usize) -> Option<(usize, usize)> {
@@ -195,6 +290,14 @@ impl<'a> VisualRowModel<'a> {
     /// alone consumes one row and its visible width is clipped to that body.
     #[must_use]
     pub fn line_rows(&self, line: usize) -> Vec<VisualRowSlice> {
+        self.rows
+            .borrow_mut()
+            .entry(line)
+            .or_insert_with(|| self.compute_line_rows(line))
+            .clone()
+    }
+
+    fn compute_line_rows(&self, line: usize) -> Vec<VisualRowSlice> {
         let text = self.text.line(line).unwrap_or_default();
         let content = text.strip_suffix('\n').unwrap_or(&text);
         if !self.wrap {
@@ -391,7 +494,14 @@ impl<'a> VisualRowModel<'a> {
 
     #[must_use]
     pub fn rows_for_line(&self, line: usize) -> usize {
-        self.line_rows(line).len()
+        if !self.wrap {
+            return 1;
+        }
+        self.rows
+            .borrow_mut()
+            .entry(line)
+            .or_insert_with(|| self.compute_line_rows(line))
+            .len()
     }
 
     pub(super) fn next_line(&self, line: usize) -> usize {
@@ -400,9 +510,11 @@ impl<'a> VisualRowModel<'a> {
             .iter()
             .find_map(|&(start, end)| (start == line).then_some(end))
             .unwrap_or(line);
-        folded_end
-            .saturating_add(1)
-            .min(self.text.len_lines().saturating_sub(1))
+        if folded_end >= self.text.len_lines().saturating_sub(1) {
+            line
+        } else {
+            folded_end + 1
+        }
     }
 
     pub(super) fn previous_line(&self, line: usize) -> usize {
@@ -532,7 +644,8 @@ impl<'a> VisualRowModel<'a> {
     ) -> Option<usize> {
         let mut current = self.normalize(start);
         let target = self.normalize(target);
-        for row in 0..height {
+        let mut row = 0;
+        while row < height {
             if current == target {
                 return Some(row);
             }
@@ -540,6 +653,11 @@ impl<'a> VisualRowModel<'a> {
             if next == current {
                 break;
             }
+            row += 1 + if next.line != current.line {
+                self.diagnostic_rows(current.line).len()
+            } else {
+                0
+            };
             current = next;
         }
         None
@@ -577,7 +695,7 @@ pub(super) fn is_indent_guide_column(
     indentation: usize,
     indent_width: usize,
 ) -> bool {
-    column < indentation && column % indent_width == 0
+    column < indentation && column.is_multiple_of(indent_width)
 }
 
 pub(super) const INDENT_GUIDE_SCOPE_SCAN_LIMIT: usize = 1_024;
@@ -797,4 +915,41 @@ pub fn editor_state_content_width(
     usize::from(
         pane_width.saturating_sub(editor_state_gutter_width(state, text, config, pane_width)),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paging_reuses_cached_line_slices() {
+        let text = crate::editor::text::TextBuffer::from_text(&"a".repeat(1 << 20));
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        let ui = UiState::default();
+        let model = VisualRowModel::new(
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            80,
+            true,
+        );
+        let last = model.forward(VisualRowAnchor::default(), 1000);
+        assert_eq!(last.wrap_row, 1000);
+        assert_eq!(model.rows.borrow().len(), 1);
+        let pointer = model.rows.borrow()[&0].as_ptr();
+        assert_eq!(model.forward(last, 1000).wrap_row, 2000);
+        assert_eq!(model.rows.borrow()[&0].as_ptr(), pointer);
+        let unwrapped = VisualRowModel::new(
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            80,
+            false,
+        );
+        assert_eq!(unwrapped.rows_for_line(0), 1);
+        assert!(unwrapped.rows.borrow().is_empty());
+    }
 }

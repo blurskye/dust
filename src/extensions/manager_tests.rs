@@ -92,12 +92,68 @@ fn manifest() -> PluginManifest {
 }
 
 #[test]
+fn completed_component_execution_cancels_its_epoch_timer() {
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let core = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let bytes = wit_component::ComponentEncoder::default()
+        .module(core)
+        .unwrap()
+        .validate(true)
+        .encode()
+        .unwrap();
+    let object = root.path().join("fixture.wasm");
+    fs::write(&object, &bytes).unwrap();
+    let mut plugin = manifest();
+    plugin.component_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    plugin.contributions = Default::default();
+    plugin.capabilities.insert(PluginCapability::ShowMessage);
+    let declaration = plugin.commands["run"].clone();
+    for command in [
+        "drive",
+        "trap",
+        "flood",
+        "spin",
+        "private",
+        "events",
+        "storage",
+        "provider",
+        "virtual",
+        "confirmation",
+        "confirmationprobe",
+    ] {
+        plugin.commands.insert(command.into(), declaration.clone());
+    }
+    let limits = PluginLimits {
+        epoch_deadline_ticks: 100,
+        ..Default::default()
+    };
+    let mut outcome = super::index::load_component(root.path(), &object, plugin, &limits).unwrap();
+    let mut invocation = empty_execution_request();
+    invocation.command = "confirmationprobe".into();
+    super::index::execute_component(invocation, &mut outcome.runtime).unwrap();
+    std::thread::sleep(Duration::from_millis(1100));
+    let runtime = &mut outcome.runtime;
+    assert!(
+        runtime
+            .bindings
+            .call_execute_command(&mut runtime.store, "confirmationprobe", &[])
+            .unwrap()
+            .is_ok()
+    );
+}
+
+#[test]
 fn component_host_queues_declared_ui_requests_without_graph_authority() {
     use component_api::dust::plugin::host::{
         Host, OpenWindowRequest, UiNode, UiNodeKind, UiRequest, UiStyle, UiTree, WindowPlacement,
     };
     let mut host = ComponentHostState {
-        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        runtime_epoch: 0,
+        limits: super::component::ComponentLimits::new(
+            wasmtime::StoreLimitsBuilder::new().build(),
+            64 * 1024 * 1024,
+        ),
         capabilities: BTreeSet::new(),
         declared_content_types: ["plugin.demo.chat-panel".into()].into_iter().collect(),
         snapshot: None,
@@ -110,12 +166,15 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
         confirmation_requests: Vec::new(),
         confirmation_results: Vec::new(),
         next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
+        execution_available: true,
+        pending_storage: BTreeMap::new(),
         storage_policy: None,
         storage_requests: Vec::new(),
         storage_results: Vec::new(),
@@ -162,6 +221,41 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
             .is_err()
     );
     assert_eq!(host.ui_requests.len(), 1);
+    let mut oversized = request("plugin.demo.chat-panel");
+    if let UiRequest::OpenWindow(open) = &mut oversized {
+        open.tree.as_mut().unwrap().nodes[0].text = "x".repeat(4097);
+    }
+    assert!(host.queue_ui_request(oversized).is_err());
+    let mut title = request("plugin.demo.chat-panel");
+    if let UiRequest::OpenWindow(open) = &mut title {
+        open.title = "t".repeat(4097);
+    }
+    assert!(host.queue_ui_request(title).is_err());
+    let mut title = request("plugin.demo.chat-panel");
+    if let UiRequest::OpenWindow(open) = &mut title {
+        open.title = "t".repeat(4096);
+    }
+    assert!(host.queue_ui_request(title).is_ok());
+    for _ in 0..64 {
+        let mut large = request("plugin.demo.chat-panel");
+        if let UiRequest::OpenWindow(open) = &mut large {
+            let mut node = open.tree.as_ref().unwrap().nodes[0].clone();
+            node.text = "x".repeat(4096);
+            open.tree.as_mut().unwrap().nodes = vec![node; 16];
+        }
+        if host.queue_ui_request(large).is_err() {
+            break;
+        }
+    }
+    assert!(host.ui_requests.len() < 64);
+    host.capabilities
+        .insert(PluginCapability::EventSubscriptions);
+    host.delivered_host_event_ids = BTreeSet::from([1, 2]);
+    for _ in 0..64 {
+        host.acknowledge_host_events(vec![1]).unwrap();
+    }
+    host.acknowledge_host_events(vec![2]).unwrap();
+    assert_eq!(host.host_event_acknowledgements, vec![1, 2]);
 }
 
 #[test]
@@ -170,7 +264,11 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
         ConfirmationAnswer, ConfirmationErrorCode, ConfirmationRequest, Host,
     };
     let mut host = ComponentHostState {
-        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        runtime_epoch: 0,
+        limits: super::component::ComponentLimits::new(
+            wasmtime::StoreLimitsBuilder::new().build(),
+            64 * 1024 * 1024,
+        ),
         capabilities: BTreeSet::new(),
         declared_content_types: BTreeSet::new(),
         snapshot: None,
@@ -183,12 +281,15 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
         confirmation_requests: Vec::new(),
         confirmation_results: Vec::new(),
         next_confirmation_token: 1,
         host_events: Vec::new(),
         delivered_host_event_ids: BTreeSet::new(),
         host_event_acknowledgements: Vec::new(),
+        execution_available: true,
+        pending_storage: BTreeMap::new(),
         storage_policy: None,
         storage_requests: Vec::new(),
         storage_results: Vec::new(),
@@ -237,7 +338,11 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         maximum_total_bytes: 16_384,
     };
     let mut host = ComponentHostState {
-        limits: wasmtime::StoreLimitsBuilder::new().build(),
+        runtime_epoch: 0,
+        limits: super::component::ComponentLimits::new(
+            wasmtime::StoreLimitsBuilder::new().build(),
+            64 * 1024 * 1024,
+        ),
         capabilities: [
             PluginCapability::PluginStorage,
             PluginCapability::VirtualDocuments,
@@ -253,6 +358,7 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         ui_requests: Vec::new(),
         ui_events: Vec::new(),
         next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
         confirmation_requests: Vec::new(),
         confirmation_results: Vec::new(),
         next_confirmation_token: 1,
@@ -261,6 +367,8 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         host_event_acknowledgements: Vec::new(),
         confirmation_available: true,
         confirmation_result_only: false,
+        execution_available: true,
+        pending_storage: BTreeMap::new(),
         storage_policy: Some(policy),
         storage_requests: Vec::new(),
         storage_results: Vec::new(),
@@ -279,8 +387,13 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         component_api::dust::plugin::host::StorageErrorCode::InvalidKey
     );
     for _ in 0..STORAGE_REQUEST_CEILING {
-        host.queue_storage_request(StorageRequest::Get("valid".into()))
-            .expect("bounded storage request");
+        host.queue_storage_request(StorageRequest::Delete(
+            component_api::dust::plugin::host::StorageDeleteRequest {
+                key: "valid".into(),
+                expected_revision: 1,
+            },
+        ))
+        .expect("bounded storage request");
     }
     assert_eq!(
         host.queue_storage_request(StorageRequest::Get("valid".into()))
@@ -399,10 +512,9 @@ fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
         .expect("editor other");
     let mut conflicts = PluginContributionCatalog::default();
     conflicts.install(demo).expect("first default");
-    assert!(matches!(
-        conflicts.install(other),
-        Err(PluginError::ContributionConflict)
-    ));
+    conflicts
+        .install(other)
+        .expect("key conflicts resolve after user overrides");
 }
 
 #[test]
@@ -724,8 +836,38 @@ fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
     assert_eq!((event.revision, event.coalesced), (2, 1));
     queue.acknowledge("demo", PluginLoadId(8), &[event.id]);
     assert_eq!(queue.pending("demo", PluginLoadId(9)), 1);
+    queue
+        .observe(
+            "demo",
+            PluginLoadId(9),
+            PluginSubscriptionKind::WorkspaceMetadataChanged,
+            3,
+            "roots=3",
+        )
+        .unwrap();
     queue.acknowledge("demo", PluginLoadId(9), &[event.id]);
-    assert_eq!(queue.pending("demo", PluginLoadId(9)), 0);
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 1);
+    queue
+        .observe(
+            "demo",
+            PluginLoadId(9),
+            PluginSubscriptionKind::ActiveSurfaceChanged,
+            1,
+            "panel",
+        )
+        .unwrap();
+    queue
+        .observe(
+            "demo",
+            PluginLoadId(9),
+            PluginSubscriptionKind::WorkspaceMetadataChanged,
+            3,
+            "roots=3",
+        )
+        .unwrap();
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 2);
+    queue.acknowledge("demo", PluginLoadId(9), &[event.id]);
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 2);
     let stable = queue.clone();
     for _ in 0..256 {
         assert!(
@@ -734,8 +876,8 @@ fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
                     "demo",
                     PluginLoadId(9),
                     PluginSubscriptionKind::WorkspaceMetadataChanged,
-                    2,
-                    "roots=2"
+                    3,
+                    "roots=3"
                 )
                 .unwrap()
         );
@@ -895,6 +1037,9 @@ pub(crate) struct CapturedExecution {
     request: PluginExecutionRequest,
 }
 impl CapturedExecution {
+    pub(crate) fn arguments(&self) -> &[String] {
+        &self.request.arguments
+    }
     pub(crate) fn snapshot(&self) -> Option<&PluginSnapshot> {
         self.request.snapshot.as_ref()
     }
@@ -1003,6 +1148,7 @@ impl ExecutionFixture {
 }
 pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
     PluginExecutionRequest {
+        runtime_epoch: 0,
         plugin: "demo".into(),
         command: "run".into(),
         generation: 7,
@@ -1018,4 +1164,305 @@ pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
         provider_requests: Vec::new(),
         virtual_document_requests: Vec::new(),
     }
+}
+
+#[test]
+fn component_memory_budget_covers_multiple_memories() {
+    let engine = wasmtime::Engine::default();
+    let limits = super::component::ComponentLimits::new(
+        wasmtime::StoreLimitsBuilder::new().memories(4).build(),
+        128 * 1024,
+    );
+    let mut store = wasmtime::Store::new(&engine, limits);
+    store.limiter(|limits| limits);
+    let first = wasmtime::Memory::new(&mut store, wasmtime::MemoryType::new(1, None)).unwrap();
+    let second = wasmtime::Memory::new(&mut store, wasmtime::MemoryType::new(1, Some(1))).unwrap();
+    assert!(first.grow(&mut store, 1).is_err());
+    assert!(wasmtime::Memory::new(&mut store, wasmtime::MemoryType::new(1, None)).is_err());
+    assert_eq!(second.size(&store), 1);
+}
+
+fn retained_runtime(
+    limits: &PluginLimits,
+    looping_activation: bool,
+) -> Result<super::execution::LoadOutcome, PluginError> {
+    fn number(bytes: &[u8], at: &mut usize) -> usize {
+        let (mut value, mut shift) = (0, 0);
+        loop {
+            let byte = bytes[*at];
+            *at += 1;
+            value |= usize::from(byte & 127) << shift;
+            if byte < 128 {
+                return value;
+            }
+            shift += 7;
+        }
+    }
+    fn encode(mut value: usize, output: &mut Vec<u8>) {
+        loop {
+            let byte = (value & 127) as u8;
+            value >>= 7;
+            output.push(byte | if value > 0 { 128 } else { 0 });
+            if value == 0 {
+                break;
+            }
+        }
+    }
+    let original = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let mut core = original.to_vec();
+    if looping_activation {
+        let mut at = 8;
+        while at < original.len() {
+            let section = original[at];
+            at += 1;
+            let length = number(original, &mut at);
+            let end = at + length;
+            if section == 10 {
+                let count = number(original, &mut at);
+                let mut payload = Vec::new();
+                encode(count, &mut payload);
+                for function in 0..count {
+                    let length = number(original, &mut at);
+                    // The fixed guest exports activate as function 70, after 15 imports.
+                    let body: &[u8] = if function == 55 {
+                        &[0, 3, 64, 12, 0, 11, 0, 11]
+                    } else {
+                        &original[at..at + length]
+                    };
+                    encode(body.len(), &mut payload);
+                    payload.extend_from_slice(body);
+                    at += length;
+                }
+                // Locate the section header separately; its length is variable-width.
+                let mut header = 8;
+                while original[header] != 10 {
+                    header += 1;
+                    let length = number(original, &mut header);
+                    header += length;
+                }
+                core = original[..header + 1].to_vec();
+                encode(payload.len(), &mut core);
+                core.extend(payload);
+                core.extend_from_slice(&original[end..]);
+                break;
+            }
+            at = end;
+        }
+    }
+    use sha2::Digest;
+    let component = wit_component::ComponentEncoder::default()
+        .module(&core)
+        .unwrap()
+        .validate(true)
+        .encode()
+        .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("guest.wasm");
+    fs::write(&path, &component).unwrap();
+    let mut manifest = manifest();
+    manifest.component_sha256 = format!("{:x}", sha2::Sha256::digest(&component));
+    let command = manifest.commands["run"].clone();
+    for name in [
+        "drive",
+        "trap",
+        "flood",
+        "spin",
+        "private",
+        "events",
+        "storage",
+        "provider",
+        "virtual",
+        "confirmation",
+        "confirmationprobe",
+    ] {
+        manifest.commands.insert(name.into(), command.clone());
+    }
+    manifest
+        .capabilities
+        .insert(PluginCapability::EventSubscriptions);
+    manifest
+        .capabilities
+        .insert(PluginCapability::PluginStorage);
+    manifest.contributions.storage = Some(PluginStorageContribution {
+        maximum_items: 64,
+        maximum_value_bytes: 256 * 1024,
+        maximum_total_bytes: 4 * 1024 * 1024,
+    });
+    let mut activation_limits = limits.clone();
+    if !looping_activation {
+        activation_limits.epoch_deadline_ticks = 1000;
+    }
+    let mut outcome =
+        super::index::load_component(root.path(), &path, manifest, &activation_limits)?;
+    outcome.runtime.limits = limits.clone();
+    Ok(outcome)
+}
+
+#[test]
+fn component_activation_and_each_command_have_their_own_deadline() {
+    let limits = PluginLimits {
+        fuel: 1_000_000_000,
+        epoch_deadline_ticks: 1,
+        ..Default::default()
+    };
+    let error = retained_runtime(&limits, true)
+        .err()
+        .expect("activation must time out");
+    assert!(error.to_string().contains("interrupt"), "{error}");
+    let limits = PluginLimits {
+        fuel: u64::MAX,
+        epoch_deadline_ticks: 20,
+        ..Default::default()
+    };
+    let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
+    let mut request = empty_execution_request();
+    request.command = "events".into();
+    super::index::execute_component(request, &mut runtime).unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    let start = std::time::Instant::now();
+    let mut request = empty_execution_request();
+    request.command = "spin".into();
+    assert!(super::index::execute_component(request, &mut runtime).is_err());
+    assert!(
+        start.elapsed() >= Duration::from_millis(120),
+        "a previous invocation interrupted this one"
+    );
+}
+
+#[test]
+fn component_storage_inbox_retains_unread_results_and_reserves_capacity() {
+    use component_api::dust::plugin::host::{Host, StorageRequest};
+    let limits = PluginLimits {
+        epoch_deadline_ticks: 1000,
+        ..Default::default()
+    };
+    let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
+    assert!(
+        runtime
+            .store
+            .data_mut()
+            .queue_storage_request(StorageRequest::Get("one".into()))
+            .is_err(),
+        "activation storage is unavailable"
+    );
+    let mut request = empty_execution_request();
+    request.command = "events".into();
+    request.storage_results.push(PluginStorageResult {
+        plugin: "demo".into(),
+        load: PluginLoadId(1),
+        token: 1,
+        value: Some(vec![42]),
+        revision: Some(1),
+        entries: Vec::new(),
+        truncated: false,
+        error: None,
+    });
+    super::index::execute_component(request, &mut runtime).unwrap();
+    let mut request = empty_execution_request();
+    request.command = "events".into();
+    super::index::execute_component(request, &mut runtime).unwrap();
+    assert_eq!(
+        runtime.store.data_mut().take_storage_results()[0].value,
+        Some(vec![42])
+    );
+    let host = runtime.store.data_mut();
+    let mut accepted = 0;
+    while host
+        .queue_storage_request(StorageRequest::Get("one".into()))
+        .is_ok()
+    {
+        accepted += 1;
+    }
+    assert!(accepted > 0 && accepted < 64);
+    assert_eq!(host.pending_storage.len(), accepted);
+    let mut request = empty_execution_request();
+    request.command = "events".into();
+    request.runtime_epoch = 1;
+    super::index::execute_component(request, &mut runtime).unwrap();
+    assert!(runtime.store.data().pending_storage.is_empty());
+}
+
+#[test]
+fn component_ui_queue_reserves_receipts_until_guest_drain() {
+    use component_api::dust::plugin::host::{
+        Host, OpenWindowRequest, UiEvent, UiRequest, WindowPlacement,
+    };
+    let limits = PluginLimits {
+        epoch_deadline_ticks: 1000,
+        ..Default::default()
+    };
+    let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
+    let mut invocation = empty_execution_request();
+    invocation.command = "events".into();
+    super::index::execute_component(invocation, &mut runtime).unwrap();
+    let host = runtime.store.data_mut();
+    let request = || {
+        UiRequest::OpenWindow(OpenWindowRequest {
+            expected_graph_revision: 1,
+            content_type: "plugin.demo.chat-panel".into(),
+            title: "Panel".into(),
+            placement: WindowPlacement::Floating,
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 3,
+            size: 3,
+            tree: None,
+        })
+    };
+    for _ in 0..64 {
+        host.queue_ui_request(request()).unwrap();
+    }
+    host.ui_requests.clear();
+    assert!(host.queue_ui_request(request()).is_err());
+    host.ui_events.push(UiEvent {
+        token: 1,
+        handle: Some(10),
+        graph_revision: Some(2),
+        tree_revision: None,
+        surface_revision: None,
+        geometry: None,
+        action: None,
+        error: None,
+    });
+    assert_eq!(host.take_ui_events()[0].handle, Some(10));
+    assert!(host.queue_ui_request(request()).is_ok());
+}
+
+#[test]
+fn manager_accepts_a_component_inside_a_symlinked_store() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("real");
+    fs::create_dir(&store).unwrap();
+    let link = root.path().join("store");
+    std::os::unix::fs::symlink(&store, &link).unwrap();
+    fs::write(store.join("guest.wasm"), b"\0asm").unwrap();
+    let mut manager = PluginManager::start(4);
+    let load = manager
+        .load(
+            link.clone(),
+            link.join("guest.wasm"),
+            manifest(),
+            PluginLimits::default(),
+        )
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let events = manager.poll().unwrap();
+        if events
+            .iter()
+            .any(|event| matches!(event, PluginEvent::Indexed { .. }))
+        {
+            break;
+        }
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, PluginEvent::Failed { .. })),
+            "symlinked store rejected"
+        );
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(manager.load_id("demo"), Some(load));
 }

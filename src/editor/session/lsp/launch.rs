@@ -121,6 +121,27 @@ pub(super) struct Preparation {
     preflights: HashMap<PreflightId, Preflight>,
 }
 impl LspSession {
+    pub(in crate::editor::session) fn cancel_launches(&mut self, definition: &str) {
+        if self
+            .preparation
+            .root
+            .as_ref()
+            .is_some_and(|(_, p)| p.value.definition.id == definition)
+        {
+            self.preparation.root = None;
+        }
+        if self
+            .preparation
+            .nix
+            .as_ref()
+            .is_some_and(|(_, p)| p.value.definition.id == definition)
+        {
+            self.preparation.nix = None;
+        }
+        self.preparation
+            .preflights
+            .retain(|_, p| p.pending.value.definition.id != definition);
+    }
     pub(in crate::editor::session) fn launch_pending(&self, definition: &str) -> bool {
         self.preparation
             .root
@@ -153,9 +174,31 @@ impl LspSession {
     pub(in crate::editor::session) fn close_preparation(&mut self) {
         self.retire_launches();
         self.preparation.worker.close();
+        self.service.begin_shutdown();
     }
     pub(in crate::editor::session) fn preparation_pending(&self) -> bool {
         self.preparation.worker.pending()
+    }
+    pub(in crate::editor::session) fn retire_server_launches(&mut self, server: &str) {
+        if self
+            .preparation
+            .root
+            .as_ref()
+            .is_some_and(|(_, pending)| pending.value.definition.id == server)
+        {
+            self.preparation.root = None;
+        }
+        if self
+            .preparation
+            .nix
+            .as_ref()
+            .is_some_and(|(_, pending)| pending.value.definition.id == server)
+        {
+            self.preparation.nix = None;
+        }
+        self.preparation
+            .preflights
+            .retain(|_, pending| pending.pending.value.definition.id != server);
     }
     pub(in crate::editor::session) fn retire_launches(&mut self) {
         self.preparation.root = None;
@@ -205,7 +248,9 @@ impl LspSession {
             value: pending,
             source,
         } = pending;
-        if !source.current(&context)
+        if self.is_stopped(&pending.definition.id)
+            || self.explicitly_detached(&pending.definition.id, pending.buffer)
+            || !source.current(&context)
             || !lane.current(&source.workspace)
             || resolution.root_revision != lane.root_revision()
             || resolution.document != pending.document.path
@@ -437,7 +482,12 @@ impl LspSession {
             workspace: workspace.version(),
             configuration,
         };
-        if workspace.safe_mode() || !settings.enabled || !pending.source.current(&context) {
+        if self.is_stopped(&pending.value.definition.id)
+            || self.explicitly_detached(&pending.value.definition.id, pending.value.buffer)
+            || workspace.safe_mode()
+            || !settings.enabled
+            || !pending.source.current(&context)
+        {
             return Err("language-server preflight document source changed".into());
         }
         workspace
@@ -475,14 +525,15 @@ impl LspSession {
             request_timeout: Duration::from_millis(super::LSP_REQUEST_TIMEOUT_MS),
             maximum_log_lines: super::LSP_MAXIMUM_LOG_LINES,
         };
-        let configuration = if settings.inlay_hint_level == crate::config::InlayHintLevel::Max {
-            crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&definition.id)
-        } else {
-            crate::language::lsp::LspServerConfiguration::for_server(
-                &definition.id,
-                &result.executable,
-            )
-        };
+        let mut configuration = crate::language::lsp::LspServerConfiguration::for_server(
+            &definition.id,
+            &result.executable,
+        );
+        if settings.inlay_hint_level == crate::config::InlayHintLevel::Max {
+            configuration.overlay(
+                crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&definition.id),
+            );
+        }
         self.start(
             crate::language::lsp::LspSessionLaunch {
                 session_key: &session_key,
@@ -557,5 +608,103 @@ mod tests {
         );
         editor.buffers.remove(buffer);
         assert!(!source.current(&context(&editor, &workspace)));
+    }
+    #[test]
+    fn stopping_a_definition_retires_pending_root_nix_and_preflight_launches() {
+        use crate::editor::text::TextBuffer;
+        let root = tempfile::tempdir().unwrap();
+        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity)],
+        )
+        .unwrap();
+        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let mut editor = EditorState::new(root.path().into());
+        let path = root.path().join("source.rs");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        let definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|d| d.id == "rust-analyzer")
+            .unwrap();
+        let document = LspDocument {
+            path: path.clone(),
+            language_id: "rust".into(),
+            version: 0,
+            text: "old".into(),
+        };
+        let context = LaunchContext {
+            editor: &editor,
+            workspace: workspace.version(),
+            configuration: 1,
+        };
+        let source = || Source::capture(buffer, &path, &context).unwrap();
+        let mut owner = LspSession::default();
+        owner.preparation.root = Some((
+            1,
+            Pending {
+                source: source(),
+                value: PendingLspProjectRoot {
+                    asked: true,
+                    definition: definition.clone(),
+                    launch_source: LspLaunchSource::Direct {
+                        executable: "/server".into(),
+                        managed: false,
+                    },
+                    root_id: crate::workspace::RootId(1),
+                    workspace_root: root.path().into(),
+                    buffer,
+                    document: document.clone(),
+                },
+            },
+        ));
+        owner.preparation.nix = Some((
+            2,
+            Pending {
+                source: source(),
+                value: PendingNixLspWorkspace {
+                    session_key: "owned".into(),
+                    definition: definition.clone(),
+                    nix: "/nix".into(),
+                    shell: "default".into(),
+                    root_id: crate::workspace::RootId(1),
+                    project_root: root.path().into(),
+                    buffer,
+                    document: document.clone(),
+                    restart: false,
+                },
+            },
+        ));
+        owner.preparation.preflights.insert(
+            PreflightId(3),
+            Preflight {
+                pending: Pending {
+                    source: source(),
+                    value: LspLaunchRequest {
+                        session_key: "owned".into(),
+                        definition: definition.clone(),
+                        launch: LspLaunch::Direct {
+                            executable: "/server".into(),
+                            managed: false,
+                        },
+                        root_id: crate::workspace::RootId(1),
+                        project_root: root.path().into(),
+                        buffer,
+                        document,
+                        restart: false,
+                    },
+                },
+                request: ExecutionPreflightRequest {
+                    executable: "/server".into(),
+                    cwd: root.path().into(),
+                    roots: vec![root.path().into()],
+                    root_revision: 1,
+                },
+            },
+        );
+        assert!(owner.launch_pending(&definition.id));
+        owner.cancel_launches(&definition.id);
+        assert!(!owner.launch_pending(&definition.id));
+        assert!(!owner.owns_preflight(PreflightId(3)));
     }
 }

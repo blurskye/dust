@@ -313,7 +313,10 @@ pub(super) fn resize_parent_on_axis(
 /// moves one of its borders.
 pub(super) fn has_split_on_axis(node: &LayoutNode, target: PaneId, requested_axis: Axis) -> bool {
     let LayoutNode::Split {
-        axis, first, second, ..
+        axis,
+        first,
+        second,
+        ..
     } = node
     else {
         return false;

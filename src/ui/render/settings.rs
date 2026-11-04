@@ -1,9 +1,9 @@
 //! The Settings page: a float with the sections down the left and every setting with its value
 //! on the right, laid out like VS Code's settings editor.
 
-use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::config::{AmbiguousWidth, Config};
 use crate::language::syntax::Highlight;
+use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::{Style, geometry::text_width};
 
 use super::{Frame, editor::cursor_style, surfaces::ellipsized};
@@ -48,7 +48,10 @@ pub struct SettingsRow {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SettingsValue {
     Bool(bool),
-    Choice { current: String, choices: Vec<String> },
+    Choice {
+        current: String,
+        choices: Vec<String>,
+    },
     Number(String),
     Text(String),
     /// Strings edited as one comma-separated line.
@@ -60,8 +63,14 @@ pub enum SettingsValue {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SettingsEdit {
     /// `cursor` is a byte offset into `text`.
-    Text { text: String, cursor: usize, error: Option<String> },
-    Choice { selected: usize },
+    Text {
+        text: String,
+        cursor: usize,
+        error: Option<String>,
+    },
+    Choice {
+        selected: usize,
+    },
 }
 
 impl SettingsPageState {
@@ -136,6 +145,61 @@ pub enum SettingsHit {
     Section(usize),
     Line(usize),
     Search,
+    Choice(usize),
+    Border,
+}
+
+fn choice_geometry(
+    page: &SettingsPageState,
+    layout: SettingsLayout,
+) -> Option<(crate::ui::window::WindowRect, usize)> {
+    let SettingsEdit::Choice { selected } = page.edit.as_ref()? else {
+        return None;
+    };
+    let SettingsValue::Choice { choices, .. } = &page.selected_row()?.value else {
+        return None;
+    };
+    let offset: usize = page.lines[..page.selected]
+        .iter()
+        .map(|line| settings_line_height(*line))
+        .sum();
+    let y = layout
+        .list_top
+        .checked_add(u16::try_from(offset.checked_sub(page.scroll)?).ok()?)?;
+    let bottom = layout.list_top + layout.list_height;
+    if y >= bottom {
+        return None;
+    }
+    let widest = choices
+        .iter()
+        .map(|choice| width_of(choice, AmbiguousWidth::Wide))
+        .max()
+        .unwrap_or(0);
+    let width = widest.saturating_add(6).min(layout.list_width);
+    let below = bottom.saturating_sub(y + 1);
+    let above = y.saturating_sub(layout.list_top);
+    let wanted = u16::try_from(choices.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let (top, height) = if wanted <= below || below >= above {
+        (y + 1, wanted.min(below))
+    } else {
+        let height = wanted.min(above);
+        (y - height, height)
+    };
+    if height < 3 {
+        return None;
+    }
+    let first = (*selected + 1).saturating_sub(usize::from(height - 2));
+    Some((
+        crate::ui::window::WindowRect {
+            x: (layout.list_x + layout.list_width).saturating_sub(width + 1),
+            y: top,
+            width,
+            height,
+        },
+        first,
+    ))
 }
 
 /// What a click at this cell lands on.
@@ -148,6 +212,24 @@ pub fn settings_hit(
     row: u16,
 ) -> Option<SettingsHit> {
     let layout = settings_layout(width, height)?;
+    if let Some((rect, first)) = choice_geometry(page, layout)
+        && column >= rect.x
+        && column < rect.x + rect.width
+        && row >= rect.y
+        && row < rect.y + rect.height
+    {
+        return Some(
+            if row == rect.y
+                || row + 1 == rect.y + rect.height
+                || column == rect.x
+                || column + 1 == rect.x + rect.width
+            {
+                SettingsHit::Border
+            } else {
+                SettingsHit::Choice(first + usize::from(row - rect.y - 1))
+            },
+        );
+    }
     if row == layout.top + 1 && column > layout.left && column < layout.left + layout.width {
         return Some(SettingsHit::Search);
     }
@@ -155,10 +237,11 @@ pub fn settings_hit(
         return None;
     }
     let offset = usize::from(row - layout.list_top);
-    if let Some(sections) = layout.sections {
-        if column > layout.left && column <= layout.left + sections {
-            return (offset < page.sections.len()).then_some(SettingsHit::Section(offset));
-        }
+    if let Some(sections) = layout.sections
+        && column > layout.left
+        && column <= layout.left + sections
+    {
+        return (offset < page.sections.len()).then_some(SettingsHit::Section(offset));
     }
     if column < layout.list_x || column >= layout.list_x + layout.list_width {
         return None;
@@ -207,12 +290,16 @@ fn draw_box(frame: &mut Frame, x: u16, y: u16, width: u16, height: u16) {
     }
     for column in x..x + width {
         frame.grid.set_cell(column, y, "─", Style::Border);
-        frame.grid.set_cell(column, y + height - 1, "─", Style::Border);
+        frame
+            .grid
+            .set_cell(column, y + height - 1, "─", Style::Border);
     }
     frame.grid.set_cell(x, y, "╭", Style::Border);
     frame.grid.set_cell(x + width - 1, y, "╮", Style::Border);
     frame.grid.set_cell(x, y + height - 1, "╰", Style::Border);
-    frame.grid.set_cell(x + width - 1, y + height - 1, "╯", Style::Border);
+    frame
+        .grid
+        .set_cell(x + width - 1, y + height - 1, "╯", Style::Border);
 }
 
 fn width_of(text: &str, ambiguous: AmbiguousWidth) -> u16 {
@@ -234,7 +321,9 @@ pub(super) fn render_settings(
     let ambiguous = config.editor.ambiguous_width;
     let right = layout.left + layout.width;
     draw_box(frame, layout.left, layout.top, layout.width, layout.height);
-    frame.grid.put_text(layout.left + 2, layout.top, " Settings ", Style::Accent);
+    frame
+        .grid
+        .put_text(layout.left + 2, layout.top, " Settings ", Style::Accent);
     let mut keys: Vec<&str> = page
         .rows
         .iter()
@@ -268,7 +357,9 @@ pub(super) fn render_settings(
     let shown = shown.len();
     let count = format!("{shown} setting{} ", if shown == 1 { "" } else { "s" });
     let count_x = (search_x + search_width).saturating_sub(width_of(&count, ambiguous));
-    frame.grid.put_text(count_x, search_y, &count, Style::Status);
+    frame
+        .grid
+        .put_text(count_x, search_y, &count, Style::Status);
     if page.query.is_empty() && !page.searching {
         frame.grid.put_text_clipped(
             search_x + 1,
@@ -305,10 +396,7 @@ pub(super) fn render_settings(
             else {
                 break;
             };
-            let present = page
-                .lines
-                .iter()
-                .any(|line| *line == SettingsLine::Heading(index));
+            let present = page.lines.contains(&SettingsLine::Heading(index));
             let style = if current_section == Some(index) {
                 fill(frame, layout.left + 1, y, sections, Style::Selection);
                 frame.grid.set_cell(layout.left + 1, y, "▌", Style::Accent);
@@ -365,7 +453,11 @@ pub(super) fn render_settings(
                     continue;
                 };
                 let selected = index == page.selected;
-                let base = if selected { Style::Selection } else { Style::Default };
+                let base = if selected {
+                    Style::Selection
+                } else {
+                    Style::Default
+                };
                 for offset in 0..2 {
                     if let (Some(y), true) = (row_y(offset), selected) {
                         fill(frame, layout.list_x, y, layout.list_width, Style::Selection);
@@ -387,7 +479,9 @@ pub(super) fn render_settings(
                     let control_limit = (layout.list_width / 2).clamp(8, 44);
                     let control_x = match editing {
                         Some(SettingsEdit::Text { text, cursor, .. }) => {
-                            let field = control_limit.max(16).min(layout.list_width.saturating_sub(4));
+                            let field = control_limit
+                                .max(16)
+                                .min(layout.list_width.saturating_sub(4));
                             let x = list_right.saturating_sub(field + 1);
                             fill(frame, x, y, field, Style::Status);
                             let inner = usize::from(field.saturating_sub(2));
@@ -405,8 +499,7 @@ pub(super) fn render_settings(
                                 x + field - 1,
                             );
                             let cursor_x = x + 1 + width_of(&before[skip..], ambiguous);
-                            frame.cursor =
-                                Some((cursor_x, y, cursor_style(PROMPT_CURSOR)));
+                            frame.cursor = Some((cursor_x, y, cursor_style(PROMPT_CURSOR)));
                             x
                         }
                         _ => {
@@ -421,17 +514,25 @@ pub(super) fn render_settings(
                             x
                         }
                     };
-                    let title_style = if selected { base } else { Style::Syntax(Highlight::STRONG) };
+                    let title_style = if selected {
+                        base
+                    } else {
+                        Style::Syntax(Highlight::STRONG)
+                    };
                     let title = ellipsized(
                         &row.title,
                         usize::from(control_x.saturating_sub(layout.list_x + 4)),
                         ambiguous,
                     );
-                    frame.grid.put_text(layout.list_x + 2, y, &title, title_style);
+                    frame
+                        .grid
+                        .put_text(layout.list_x + 2, y, &title, title_style);
                 }
                 if let Some(y) = row_y(1) {
                     let error = match editing {
-                        Some(SettingsEdit::Text { error: Some(error), .. }) => Some(error),
+                        Some(SettingsEdit::Text {
+                            error: Some(error), ..
+                        }) => Some(error),
                         _ => None,
                     };
                     let mut about = error.cloned().unwrap_or_else(|| row.about.clone());
@@ -443,51 +544,53 @@ pub(super) fn render_settings(
                         (false, true) => Style::Selection,
                         (false, false) => Style::Muted,
                     };
-                    let about = ellipsized(&about, usize::from(layout.list_width.saturating_sub(3)), ambiguous);
+                    let about = ellipsized(
+                        &about,
+                        usize::from(layout.list_width.saturating_sub(3)),
+                        ambiguous,
+                    );
                     frame.grid.put_text(layout.list_x + 2, y, &about, style);
                 }
             }
         }
     }
-    if !page.lines.iter().any(|line| matches!(line, SettingsLine::Setting(_))) {
+    if !page
+        .lines
+        .iter()
+        .any(|line| matches!(line, SettingsLine::Setting(_)))
+    {
         let text = if page.query.is_empty() {
             "No settings.".to_owned()
         } else {
             format!("No settings match \"{}\".", page.query)
         };
-        frame.grid.put_text_clipped(layout.list_x + 2, layout.list_top + 1, &text, Style::Muted, list_right);
+        frame.grid.put_text_clipped(
+            layout.list_x + 2,
+            layout.list_top + 1,
+            &text,
+            Style::Muted,
+            list_right,
+        );
     }
 
     // A dropdown under the selected setting while a choice is open.
-    if let (Some(SettingsEdit::Choice { selected }), Some(y), Some(row)) =
+    if let (Some(SettingsEdit::Choice { selected }), Some(_y), Some(row)) =
         (&page.edit, selected_y, page.selected_row())
     {
         let (current, choices) = match &row.value {
             SettingsValue::Choice { current, choices } => (current.as_str(), choices.as_slice()),
             _ => ("", &[][..]),
         };
-        let widest = choices
-            .iter()
-            .map(|choice| width_of(choice, ambiguous))
-            .max()
-            .unwrap_or(0);
-        let box_width = (widest + 6).min(layout.list_width);
-        let room_below = bottom.saturating_sub(y + 1);
-        let room_above = y.saturating_sub(layout.list_top);
-        let wanted = u16::try_from(choices.len()).unwrap_or(u16::MAX).saturating_add(2);
-        let (box_top, box_height) = if wanted <= room_below || room_below >= room_above {
-            (y + 1, wanted.min(room_below))
-        } else {
-            let height = wanted.min(room_above);
-            (y - height, height)
-        };
-        let box_x = list_right.saturating_sub(box_width + 1);
-        if box_height >= 3 {
+        if let Some((rect, first)) = choice_geometry(page, layout) {
+            let (box_x, box_top, box_width, box_height) = (rect.x, rect.y, rect.width, rect.height);
             draw_box(frame, box_x, box_top, box_width, box_height);
             let visible = usize::from(box_height - 2);
-            let first = (*selected + 1).saturating_sub(visible);
-            for (offset, (index, choice)) in
-                choices.iter().enumerate().skip(first).take(visible).enumerate()
+            for (offset, (index, choice)) in choices
+                .iter()
+                .enumerate()
+                .skip(first)
+                .take(visible)
+                .enumerate()
             {
                 let y = box_top + 1 + u16::try_from(offset).unwrap_or(0);
                 let style = if index == *selected {
@@ -497,8 +600,19 @@ pub(super) fn render_settings(
                     Style::Default
                 };
                 let mark = if choice == current { "✓" } else { " " };
-                frame.grid.put_text(box_x + 2, y, mark, if index == *selected { style } else { Style::Accent });
-                frame.grid.put_text_clipped(box_x + 4, y, choice, style, box_x + box_width - 1);
+                frame.grid.put_text(
+                    box_x + 2,
+                    y,
+                    mark,
+                    if index == *selected {
+                        style
+                    } else {
+                        Style::Accent
+                    },
+                );
+                frame
+                    .grid
+                    .put_text_clipped(box_x + 4, y, choice, style, box_x + box_width - 1);
             }
         }
     }
@@ -511,7 +625,12 @@ pub(super) fn render_settings(
         (Some(SettingsEdit::Choice { .. }), _) => {
             &[("↑↓ choose", 1), ("Enter select", 0), ("Esc cancel", 0)]
         }
-        (None, true) => &[("Type to filter", 1), ("↑↓ move", 2), ("Enter done", 0), ("Esc clear", 0)],
+        (None, true) => &[
+            ("Type to filter", 1),
+            ("↑↓ move", 2),
+            ("Enter done", 0),
+            ("Esc clear", 0),
+        ],
         (None, false) => &[
             ("↑↓ move", 4),
             ("Tab section", 3),
@@ -524,7 +643,10 @@ pub(super) fn render_settings(
             ("Esc close", 0),
         ],
     };
-    let status_width = page.status.as_ref().map_or(0, |(text, _)| width_of(text, ambiguous) + 4);
+    let status_width = page
+        .status
+        .as_ref()
+        .map_or(0, |(text, _)| width_of(text, ambiguous) + 4);
     let help_right = right.saturating_sub(2 + status_width);
     let room = help_right.saturating_sub(layout.left + 2);
     let mut help = String::new();
@@ -540,11 +662,50 @@ pub(super) fn render_settings(
         }
     }
     let help = ellipsized(&help, usize::from(room), ambiguous);
-    frame.grid.put_text(layout.left + 2, footer_y, &help, Style::Muted);
+    frame
+        .grid
+        .put_text(layout.left + 2, footer_y, &help, Style::Muted);
     if let Some((text, failed)) = &page.status {
         let style = if *failed { Style::Error } else { Style::Accent };
         let text = ellipsized(text, usize::from(layout.width.saturating_sub(6)), ambiguous);
         let x = right.saturating_sub(2 + width_of(&text, ambiguous));
         frame.grid.put_text(x, footer_y, &text, style);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropdown_hits_precede_the_settings_underneath() {
+        let page = SettingsPageState {
+            rows: vec![SettingsRow {
+                key: "editor.line_numbers".into(),
+                section: 0,
+                title: "Numbers".into(),
+                about: String::new(),
+                value: SettingsValue::Choice {
+                    current: "absolute".into(),
+                    choices: vec!["off".into(), "absolute".into(), "hybrid".into()],
+                },
+                modified: false,
+                restart: false,
+            }],
+            lines: vec![SettingsLine::Setting(0)],
+            edit: Some(SettingsEdit::Choice { selected: 0 }),
+            ..Default::default()
+        };
+        let layout = settings_layout(100, 30).unwrap();
+        let (rect, first) = choice_geometry(&page, layout).unwrap();
+        assert_eq!(first, 0);
+        assert_eq!(
+            settings_hit(&page, 100, 30, rect.x + 2, rect.y + 3),
+            Some(SettingsHit::Choice(2))
+        );
+        assert_eq!(
+            settings_hit(&page, 100, 30, rect.x, rect.y + 1),
+            Some(SettingsHit::Border)
+        );
     }
 }

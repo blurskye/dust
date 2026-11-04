@@ -107,23 +107,22 @@ impl HeadlessEditor {
                 Ok(InputAction::Pending)
             }
             MappingResolution::Missing => {
-                if let Some(character) = key.text_character() {
-                    if let Some(command_id) = self
+                if let Some(character) = key.text_character()
+                    && let Some(command_id) = self
                         .config
                         .input
                         .character_fallback_commands
                         .get(&context)
                         .cloned()
                         .or_else(|| self.config.input.text_commands.get(&context).cloned())
-                    {
-                        let invocation = CommandInvocation::new(
-                            &command_id,
-                            crate::editor::InvocationSource::Keymap,
-                        )?
-                        .with_argument("text", CommandValue::String(character.to_string()));
-                        self.execute(invocation)?;
-                        return Ok(InputAction::Text(character.to_string()));
-                    }
+                {
+                    let invocation = CommandInvocation::new(
+                        &command_id,
+                        crate::editor::InvocationSource::Keymap,
+                    )?
+                    .with_argument("text", CommandValue::String(character.to_string()));
+                    self.execute(invocation)?;
+                    return Ok(InputAction::Text(character.to_string()));
                 }
                 Ok(InputAction::Unmapped)
             }
@@ -470,7 +469,9 @@ mod tests {
             .expect("unindent line");
         assert_eq!(editor.text(), "z cd\n");
         // `s` is flash in LazyVim; `cl` substitutes.
-        editor.feed(KeyEvent::character('c')).expect("change operator");
+        editor
+            .feed(KeyEvent::character('c'))
+            .expect("change operator");
         editor.feed(KeyEvent::character('l')).expect("substitute");
         editor
             .feed(KeyEvent::character('Q'))

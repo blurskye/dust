@@ -19,6 +19,7 @@ enum Pending {
         buffer: BufferId,
         revision: BufferRevision,
         path: PathBuf,
+        original_path: Option<PathBuf>,
     },
     Delete {
         path: PathBuf,
@@ -48,8 +49,11 @@ pub(super) const WRITE_DEBOUNCE_MS: u64 = 250;
 
 pub(super) struct RecoverySession {
     directory: PathBuf,
+    session: String,
     records: Vec<(PathBuf, RecoveryRecord)>,
+    recovered: HashMap<BufferId, PathBuf>,
     revisions: HashMap<BufferId, BufferRevision>,
+    paths: HashMap<BufferId, Option<PathBuf>>,
     pruned: HashMap<BufferId, BufferRevision>,
     oversized: std::collections::HashSet<BufferId>,
     pub(super) oversized_notice: bool,
@@ -59,14 +63,27 @@ pub(super) struct RecoverySession {
     pending: HashMap<RequestId, Pending>,
     /// Original files being read so a journal can be recovered into them: the journal's path
     /// and the text it holds, by read.
-    reads: HashMap<RequestId, (PathBuf, String)>,
+    reads: HashMap<RequestId, (PathBuf, String, super::workspace::WorkspaceVersion)>,
 }
 impl RecoverySession {
     pub(super) fn new(directory: PathBuf) -> Self {
+        static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let session = format!(
+            "{}-{}-{}",
+            std::process::id(),
+            crate::clock::system_time()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        );
         Self {
             directory,
+            session,
             records: Vec::new(),
+            recovered: HashMap::new(),
             revisions: HashMap::new(),
+            paths: HashMap::new(),
             pruned: HashMap::new(),
             oversized: std::collections::HashSet::new(),
             oversized_notice: false,
@@ -77,11 +94,24 @@ impl RecoverySession {
             reads: HashMap::new(),
         }
     }
-    pub(super) fn register_read(&mut self, id: RequestId, journal: PathBuf, content: String) {
-        self.reads.insert(id, (journal, content));
+    pub(super) fn register_read(
+        &mut self,
+        id: RequestId,
+        journal: PathBuf,
+        content: String,
+        workspace: super::workspace::WorkspaceVersion,
+    ) {
+        self.reads.insert(id, (journal, content, workspace));
     }
-    pub(super) fn take_read(&mut self, id: RequestId) -> Option<(PathBuf, String)> {
-        self.reads.remove(&id)
+    pub(super) fn take_read(
+        &mut self,
+        id: RequestId,
+        workspace: super::workspace::WorkspaceVersion,
+    ) -> Option<(PathBuf, String)> {
+        self.reads
+            .remove(&id)
+            .filter(|(_, _, source)| *source == workspace)
+            .map(|(journal, content, _)| (journal, content))
     }
     pub(super) fn records(&self) -> &[(PathBuf, RecoveryRecord)] {
         &self.records
@@ -96,16 +126,25 @@ impl RecoverySession {
             self.scheduled.clear();
         }
     }
+    pub(super) fn retain_recovered(&mut self, buffer: BufferId, journal: PathBuf) {
+        self.records.retain(|(path, _)| path != &journal);
+        self.recovered.insert(buffer, journal);
+    }
     pub(super) fn path(&self, buffer: BufferId) -> PathBuf {
+        if let Some(path) = self.recovered.get(&buffer) {
+            return path.clone();
+        }
         let identifier = format!("{buffer:?}")
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect::<String>();
-        self.directory.join(format!("buffer-{identifier}.toml"))
+        self.directory
+            .join(format!("buffer-{}-{identifier}.toml", self.session))
     }
-    fn recorded(&self, buffer: BufferId, revision: BufferRevision) -> bool {
-        self.revisions.get(&buffer) == Some(&revision)
-            || self.pruned.get(&buffer) == Some(&revision)
+    fn recorded(&self, buffer: BufferId, revision: BufferRevision, path: &Option<PathBuf>) -> bool {
+        self.paths.get(&buffer) == Some(path)
+            && (self.revisions.get(&buffer) == Some(&revision)
+                || self.pruned.get(&buffer) == Some(&revision))
     }
     pub(super) fn schedule(
         &mut self,
@@ -118,21 +157,23 @@ impl RecoverySession {
         if !config.enabled {
             return;
         }
-        if !self.discovery_queued {
-            if let Ok(id) = io.discover(&self.directory, MAXIMUM_DISCOVERED_JOURNALS) {
-                self.discovery_queued = true;
-                self.pending.insert(id, Pending::Discovery);
-            }
+        if !exiting
+            && !self.discovery_queued
+            && let Ok(id) = io.discover(&self.directory, MAXIMUM_DISCOVERED_JOURNALS)
+        {
+            self.discovery_queued = true;
+            self.pending.insert(id, Pending::Discovery);
         }
-        if !self.cleanup_queued {
-            if let Ok(id) = io.cleanup(
+        if !exiting
+            && !self.cleanup_queued
+            && let Ok(id) = io.cleanup(
                 &self.directory,
                 MAXIMUM_RETAINED_JOURNALS,
                 MAXIMUM_JOURNAL_AGE_DAYS,
-            ) {
-                self.cleanup_queued = true;
-                self.pending.insert(id, Pending::Cleanup);
-            }
+            )
+        {
+            self.cleanup_queued = true;
+            self.pending.insert(id, Pending::Cleanup);
         }
         let debounce = Duration::from_millis(WRITE_DEBOUNCE_MS);
         for (buffer, state) in &editor.buffers {
@@ -146,7 +187,7 @@ impl RecoverySession {
                 continue;
             }
             if state.dirty {
-                if !self.recorded(buffer, revision)
+                if !self.recorded(buffer, revision, &state.path)
                     && (exiting
                         || self
                             .scheduled
@@ -161,23 +202,27 @@ impl RecoverySession {
             } else {
                 self.scheduled.remove(&buffer);
                 self.pruned.remove(&buffer);
-                if let Some(revision) = self.revisions.get(&buffer).copied() {
+                if let Some(revision) = self
+                    .revisions
+                    .get(&buffer)
+                    .copied()
+                    .or_else(|| self.recovered.contains_key(&buffer).then_some(revision))
+                {
                     let path = self.path(buffer);
                     if !self
                         .pending
                         .values()
                         .any(|p| matches!(p, Pending::Delete { path: p, .. } if *p == path))
+                        && let Ok(id) = io.delete(&path)
                     {
-                        if let Ok(id) = io.delete(&path) {
-                            self.pending.insert(
-                                id,
-                                Pending::Delete {
-                                    path,
-                                    buffer: Some((buffer, revision)),
-                                    announce: false,
-                                },
-                            );
-                        }
+                        self.pending.insert(
+                            id,
+                            Pending::Delete {
+                                path,
+                                buffer: Some((buffer, revision)),
+                                announce: false,
+                            },
+                        );
                     }
                 }
             }
@@ -202,12 +247,14 @@ impl RecoverySession {
                 self.scheduled.remove(&buffer);
                 self.pruned.remove(&buffer);
                 self.revisions.insert(buffer, revision);
+                self.paths.insert(buffer, state.path.clone());
                 self.pending.insert(
                     id,
                     Pending::Write {
                         buffer,
                         revision,
                         path,
+                        original_path: state.path.clone(),
                     },
                 );
             }
@@ -252,6 +299,19 @@ impl RecoverySession {
         self.pending.clear();
         self.revisions.clear();
         self.scheduled.clear();
+    }
+    pub(super) fn unwritten(&self, editor: &EditorState, config: &RecoveryConfig) -> usize {
+        if !config.enabled {
+            return 0;
+        }
+        editor.buffers.iter().filter(|(buffer, state)| {
+            state.dirty
+                && !state.is_virtual_read_only()
+                && (!self.recorded(*buffer, state.text.revision(), &state.path)
+                    || self.pending.values().any(|pending| {
+                        matches!(pending, Pending::Write { buffer: writing, .. } if writing == buffer)
+                    }))
+        }).count()
     }
     pub(super) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
         let id = match &result {
@@ -316,7 +376,10 @@ impl RecoverySession {
             }
             (
                 Pending::Write {
-                    buffer, revision, ..
+                    buffer,
+                    revision,
+                    original_path,
+                    ..
                 },
                 VfsResult::RecoveryWritten { result, .. },
             ) => match result {
@@ -325,7 +388,9 @@ impl RecoverySession {
                     RecoveryUpdate::Quiet
                 }
                 Err(error) => {
-                    if self.revisions.get(&buffer) == Some(&revision) {
+                    if self.revisions.get(&buffer) == Some(&revision)
+                        && self.paths.get(&buffer) == Some(&original_path)
+                    {
                         self.revisions.remove(&buffer);
                     }
                     RecoveryUpdate::Error(error.to_string())
@@ -347,6 +412,7 @@ impl RecoverySession {
                 Ok(()) => {
                     self.records.retain(|(p, _)| *p != path);
                     if let Some((buffer, revision)) = buffer {
+                        self.recovered.remove(&buffer);
                         if self.revisions.get(&buffer) == Some(&revision) {
                             self.revisions.remove(&buffer);
                         }

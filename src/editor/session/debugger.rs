@@ -65,6 +65,7 @@ enum Choice {
     Value(String),
 }
 pub(in crate::editor::session) struct DebugSelection {
+    expansion: Vec<i64>,
     source: DapContext,
     choice: Choice,
 }
@@ -84,6 +85,8 @@ struct Choices {
 pub(in crate::editor::session) struct SourceTarget {
     pub navigation: NavigationStamp,
     pub capture: Arc<()>,
+    pub line: u64,
+    pub column: u64,
 }
 struct Source {
     context: DapContext,
@@ -113,6 +116,7 @@ pub(in crate::editor::session) struct DapTargetIdentity {
     pub request: crate::config::DebugRequestKind,
     /// The program a launch runs. An ATTACH has none.
     pub program: Option<std::path::PathBuf>,
+    pub document: Option<std::path::PathBuf>,
     /// The target an ATTACH names, taken from the configuration's own arguments.
     pub target: Option<String>,
 }
@@ -149,6 +153,8 @@ pub(super) struct DebugSession {
     /// current. A request with no record is presented as before: the session cannot prove it
     /// belongs to another stop, so it does not pretend to know.
     issued_stack: VecDeque<u64>,
+    requests: HashMap<u64, (u64, Option<u64>)>,
+    watch_refresh: VecDeque<String>,
     issued_scopes: VecDeque<(i64, u64)>,
     issued_variables: BTreeMap<i64, u64>,
     /// Pages of variables asked for and not yet answered, oldest first: the protocol's variables
@@ -173,7 +179,6 @@ pub(super) struct DebugSession {
     pending_submissions: VecDeque<(u64, u64, Option<i64>, Option<String>)>,
     /// Requests awaiting an answer, oldest first. A `setBreakpoints` response carries no request
     /// sequence, so answers are matched to requests in the order they were sent.
-    pending_breakpoints: std::collections::VecDeque<PathBuf>,
     watches: Vec<String>,
     configuration: Option<String>,
     /// What this session is attached to or running, RETAINED across a successful start so an
@@ -203,6 +208,8 @@ impl DebugSession {
             stop_epoch: 0,
             stopped_values: BTreeMap::new(),
             issued_stack: VecDeque::new(),
+            requests: HashMap::new(),
+            watch_refresh: VecDeque::new(),
             issued_scopes: VecDeque::new(),
             issued_variables: BTreeMap::new(),
             pending_variable_pages: VecDeque::new(),
@@ -221,7 +228,6 @@ impl DebugSession {
             variables: Vec::new(),
             watch_values: BTreeMap::new(),
             evaluations: VecDeque::new(),
-            pending_breakpoints: std::collections::VecDeque::new(),
             watches: Vec::new(),
             configuration: None,
             target: None,
@@ -271,7 +277,6 @@ impl DebugSession {
         self.breakpoints.clear();
         self.breakpoint_states.clear();
         self.disabled_breakpoints.clear();
-        self.pending_breakpoints.clear();
         self.watches.clear();
     }
     pub(in crate::editor::session) fn begin_shutdown(&mut self) {
@@ -361,7 +366,10 @@ impl DebugSession {
         });
         errors
     }
-    pub(in crate::editor::session) fn control(&mut self, control: DapControl) -> Result<(), DapError> {
+    pub(in crate::editor::session) fn control(
+        &mut self,
+        control: DapControl,
+    ) -> Result<(), DapError> {
         // Source requests require a private selection and an original activation target.
         if matches!(control, DapControl::Source { .. }) {
             return Err(DapError::Retired);
@@ -384,11 +392,12 @@ impl DebugSession {
                 self.note_refused_expansion(reference);
                 return Ok(());
             }
-            self.service.control(control)?;
+            self.send_control(control)?;
             if !continuation {
                 self.expansion.push(reference);
             }
-            self.pending_variable_pages.push_back((reference, start, count));
+            self.pending_variable_pages
+                .push_back((reference, start, count));
             self.note_issued(false, None, Some(reference), epoch);
             return Ok(());
         }
@@ -409,12 +418,86 @@ impl DebugSession {
             DapControl::Variables { reference, .. } => Some(*reference),
             _ => None,
         };
-        self.service.control(control)?;
+        self.send_control(control)?;
         self.evaluations.extend(evaluation);
         // Recorded only once the request is actually away, so a refused send leaves nothing that a
         // later answer could be matched against.
         self.note_issued(stack, scopes, reference, epoch);
         Ok(())
+    }
+    fn send_control(&mut self, control: DapControl) -> Result<(), DapError> {
+        let repl = matches!(&control, DapControl::Evaluate { context, .. } if context != "watch");
+        let result = self
+            .service
+            .context()
+            .ok_or(DapError::NotRunning)
+            .and_then(|context| self.service.control_tracked(&context, control));
+        match result {
+            Ok(id) => {
+                let submission = repl
+                    .then(|| self.pending_submissions.back().map(|p| p.0))
+                    .flatten();
+                self.requests.insert(id, (self.stop_epoch, submission));
+                Ok(())
+            }
+            Err(error) => {
+                if repl {
+                    self.pending_submissions.pop_back();
+                }
+                Err(error)
+            }
+        }
+    }
+    fn prepare_answer(&mut self, id: u64, request: &DapControl, failed: bool) {
+        let (epoch, submission) = self.requests.remove(&id).unwrap_or((self.stop_epoch, None));
+        match request {
+            DapControl::Evaluate {
+                expression,
+                context,
+                ..
+            } => {
+                let watch = (context == "watch").then(|| expression.clone());
+                if let Some(position) = self.evaluations.iter().position(|old| old == &watch) {
+                    self.evaluations.remove(position);
+                }
+                self.evaluations.push_front(watch);
+                if let Some(submission) = submission
+                    && let Some(position) = self
+                        .pending_submissions
+                        .iter()
+                        .position(|p| p.0 == submission)
+                    && let Some(pending) = self.pending_submissions.remove(position)
+                    && !failed
+                {
+                    self.pending_submissions.push_front(pending);
+                }
+            }
+            DapControl::StackTrace { .. } => {
+                self.issued_stack.clear();
+                if !failed {
+                    self.issued_stack.push_back(epoch);
+                }
+            }
+            DapControl::Scopes { frame_id } => {
+                self.issued_scopes.clear();
+                if !failed {
+                    self.issued_scopes.push_back((*frame_id, epoch));
+                }
+            }
+            DapControl::Variables {
+                reference,
+                start,
+                count,
+            } => {
+                self.pending_variable_pages.clear();
+                self.issued_variables.clear();
+                if !failed {
+                    self.pending_variable_pages
+                        .push_back((*reference, *start, *count));
+                }
+            }
+            _ => {}
+        }
     }
     /// The stop a stopped-data request belongs to, recorded at issue time.
     pub(in crate::editor::session) fn note_issued(
@@ -455,20 +538,78 @@ impl DebugSession {
         ));
     }
     pub(in crate::editor::session) fn try_event(&mut self) -> Option<DapEvent> {
-        // An adapter's answer to a breakpoint request is what may verify a breakpoint, so it is
-        // applied HERE, where the real event arrives, rather than assumed when the request is sent.
-        if let Some(event) = self.try_event_once() {
-            if let DapEvent::Response { response, .. } = &event {
-                if matches!(response, DapResponse::Breakpoints(_)) {
-                    self.apply_breakpoint_answer(response);
-                }
-            }
-            return Some(event);
-        }
-        None
+        self.try_event_once()
     }
     fn try_event_once(&mut self) -> Option<DapEvent> {
+        self.refresh_watches();
         let (context, event) = self.service.try_owned_event()?;
+        match &event {
+            DapEvent::Response {
+                request_id,
+                request: Some(request),
+                ..
+            } => self.prepare_answer(*request_id, request, false),
+            DapEvent::RequestFailed {
+                request_id,
+                request: Some(request),
+                ..
+            } => self.prepare_answer(*request_id, request, true),
+            _ => {}
+        }
+        match &event {
+            DapEvent::Response {
+                request: Some(DapControl::SetBreakpoints { path, breakpoints }),
+                response,
+                ..
+            } => {
+                self.apply_breakpoints(path, breakpoints, response);
+            }
+            DapEvent::Response {
+                response: DapResponse::Disconnected { terminate_debuggee },
+                ..
+            } => {
+                self.end_state = Some(if *terminate_debuggee {
+                    crate::debugger::DapSessionEnd::Terminated
+                } else {
+                    crate::debugger::DapSessionEnd::Detached
+                });
+            }
+            DapEvent::Response {
+                response:
+                    DapResponse::BreakpointChanged {
+                        path,
+                        requested,
+                        verified,
+                        line,
+                        removed,
+                    },
+                ..
+            } => {
+                let key = (path.clone(), *requested);
+                if !self.disabled_breakpoints.contains(&key)
+                    && self
+                        .breakpoints
+                        .get(path)
+                        .is_some_and(|rows| rows.iter().any(|row| row.line == *requested))
+                {
+                    if *removed {
+                        self.breakpoint_states.remove(&key);
+                    } else {
+                        self.breakpoint_states.insert(
+                            key,
+                            if *verified {
+                                crate::debugger::DapBreakpointState::Verified {
+                                    line: line.unwrap_or(*requested),
+                                }
+                            } else {
+                                crate::debugger::DapBreakpointState::Requested { accepted: false }
+                            },
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
         self.event_source = Some(context);
         // Remember WHICH adapter is talking, so a record created later (by a submission) can still
         // name the actor that produced it.
@@ -516,7 +657,10 @@ impl DebugSession {
                 self.source = None;
             }
             DapEvent::RequestFailed { command, .. }
-                if matches!(command.as_str(), "threads" | "stackTrace" | "scopes" | "variables") =>
+                if matches!(
+                    command.as_str(),
+                    "threads" | "stackTrace" | "scopes" | "variables"
+                ) =>
             {
                 self.stop_follow = StopFollow::Idle;
             }
@@ -622,7 +766,9 @@ impl DebugSession {
             self.console.pop_front();
         }
     }
-    pub(in crate::editor::session) fn console(&self) -> impl Iterator<Item = &crate::debugger::DapConsoleEntry> {
+    pub(in crate::editor::session) fn console(
+        &self,
+    ) -> impl Iterator<Item = &crate::debugger::DapConsoleEntry> {
         self.console.iter()
     }
     pub(in crate::editor::session) fn watches(&self) -> &[String] {
@@ -700,14 +846,22 @@ impl DebugSession {
                 crate::debugger::DapBreakpointState::Requested { accepted: true },
             );
         }
-        self.pending_breakpoints.push_back(row.path.clone());
+
         let result = if self.service.is_running() {
             // A SENT request is not a fact: every row it carries becomes `Requested`, and the
             // path is queued so the adapter's answer can be matched to what was asked.
             self.service
                 .control(DapControl::SetBreakpoints {
                     path: row.path.clone(),
-                    breakpoints: rows.clone(),
+                    breakpoints: rows
+                        .iter()
+                        .filter(|r| {
+                            !self
+                                .disabled_breakpoints
+                                .contains(&(r.path.clone(), r.line))
+                        })
+                        .cloned()
+                        .collect(),
                 })
                 .map_err(|e| e.to_string())
         } else {
@@ -716,14 +870,14 @@ impl DebugSession {
         // A breakpoint that was REMOVED carries no verdict any more, so none may linger.
         if let Some(removed) = removed_line {
             self.breakpoint_states.remove(&(row.path.clone(), removed));
-            self.disabled_breakpoints.remove(&(row.path.clone(), removed));
+            self.disabled_breakpoints
+                .remove(&(row.path.clone(), removed));
         }
         if empty {
             self.breakpoint_states
                 .retain(|(path, _), _| path != &row.path);
             self.disabled_breakpoints
                 .retain(|(path, _)| path != &row.path);
-            self.pending_breakpoints.retain(|path| path != &row.path);
         }
         if empty {
             self.breakpoints.remove(&row.path);
@@ -731,27 +885,28 @@ impl DebugSession {
         result?;
         Ok(removed)
     }
-    /// Apply the adapter's answer to the requests waiting for one, oldest first. A breakpoint the
-    /// adapter did not verify stays unverified, and a DISABLED one stays disabled whatever the
-    /// adapter says, because its state is the user's rather than the adapter's.
-    pub(in crate::editor::session) fn apply_breakpoint_answer(
+    fn apply_breakpoints(
         &mut self,
+        path: &std::path::Path,
+        rows: &[DapSourceBreakpoint],
         answer: &DapResponse,
-    ) -> bool {
-        let Some(path) = self.pending_breakpoints.pop_front() else {
-            return false;
-        };
-        let rows = self.breakpoints.get(&path).cloned().unwrap_or_default();
-        let disabled = rows
-            .iter()
-            .map(|row| self.disabled_breakpoints.contains(&(path.clone(), row.line)))
-            .collect::<Vec<_>>();
-        let states = crate::debugger::breakpoint_states(&rows, &disabled, answer);
+    ) {
+        let path = path.to_path_buf();
+        let states = crate::debugger::breakpoint_states(rows, &[], answer);
         for (row, state) in rows.iter().zip(states) {
+            if self
+                .disabled_breakpoints
+                .contains(&(path.clone(), row.line))
+                || !self
+                    .breakpoints
+                    .get(&path)
+                    .is_some_and(|current| current.iter().any(|r| r == row))
+            {
+                continue;
+            }
             self.breakpoint_states
                 .insert((path.clone(), row.line), state);
         }
-        true
     }
     /// Disable or enable a breakpoint. Session state, and independent of the adapter.
     pub(in crate::editor::session) fn set_breakpoint_disabled(
@@ -768,17 +923,43 @@ impl DebugSession {
         } else {
             self.disabled_breakpoints.remove(&key);
             // Re-enabled: it is a request again until the adapter answers for it.
-            self.breakpoint_states
-                .insert(key, crate::debugger::DapBreakpointState::Requested { accepted: true });
+            self.breakpoint_states.insert(
+                key,
+                crate::debugger::DapBreakpointState::Requested { accepted: true },
+            );
+        }
+        self.resend_breakpoints(path);
+    }
+    fn resend_breakpoints(&mut self, path: &std::path::Path) {
+        if self.service.is_running() {
+            let breakpoints = self
+                .breakpoints
+                .get(path)
+                .into_iter()
+                .flatten()
+                .filter(|row| {
+                    !self
+                        .disabled_breakpoints
+                        .contains(&(row.path.clone(), row.line))
+                })
+                .cloned()
+                .collect();
+            if let Err(error) = self.service.control(DapControl::SetBreakpoints {
+                path: path.into(),
+                breakpoints,
+            }) {
+                self.push_console(crate::debugger::DapConsoleEntry::new(
+                    crate::debugger::DapConsoleOrigin::Notice,
+                    "dust",
+                    error.to_string(),
+                ));
+            }
         }
     }
     /// TERMINATE: ask for the debuggee to end with the session, and record that we asked.
     pub(in crate::editor::session) fn terminate_debuggee(&mut self) -> Result<(), String> {
         self.end_session(DapControl::Disconnect {
             terminate_debuggee: true,
-        })
-        .map(|()| {
-            self.end_state = Some(crate::debugger::DapSessionEnd::Terminated);
         })
     }
     /// DETACH: leave the session WITHOUT asking the debuggee to stop. The editor is no longer
@@ -788,15 +969,9 @@ impl DebugSession {
         self.end_session(DapControl::Disconnect {
             terminate_debuggee: false,
         })
-        .map(|()| {
-            self.end_state = Some(crate::debugger::DapSessionEnd::Detached);
-        })
     }
     fn end_session(&mut self, control: DapControl) -> Result<(), String> {
-        if self.service.is_running() {
-            self.service.control(control).map_err(|e| e.to_string())?;
-        }
-        Ok(())
+        self.service.control(control).map_err(|e| e.to_string())
     }
     /// The threads the adapter last reported.
     pub(in crate::editor::session) fn threads(&self) -> &[String] {
@@ -829,13 +1004,16 @@ impl DebugSession {
     pub(in crate::editor::session) fn startup_breakpoints(
         &mut self,
     ) -> Vec<(PathBuf, Vec<DapSourceBreakpoint>)> {
-        self.pending_breakpoints = self.breakpoints.keys().cloned().collect();
         self.breakpoints
             .iter()
             .map(|(path, rows)| {
                 let enabled = rows
                     .iter()
-                    .filter(|row| !self.disabled_breakpoints.contains(&(path.clone(), row.line)))
+                    .filter(|row| {
+                        !self
+                            .disabled_breakpoints
+                            .contains(&(path.clone(), row.line))
+                    })
                     .cloned()
                     .collect();
                 (path.clone(), enabled)
@@ -972,22 +1150,23 @@ impl DebugSession {
         {
             return DebugResponse::Retired;
         }
-        if matches!(response, DapResponse::Evaluate(_)) {
-            if let Some(expression) = self.evaluations.pop_front().flatten() {
-                if let DapResponse::Evaluate(value) = response {
-                    self.watch_values.insert(expression, value.value);
-                }
-                return DebugResponse::Absorbed;
+        if matches!(response, DapResponse::Evaluate(_))
+            && let Some(expression) = self.evaluations.pop_front().flatten()
+        {
+            if let DapResponse::Evaluate(value) = response {
+                self.watch_values.insert(expression, value.value);
             }
+            return DebugResponse::Absorbed;
         }
         let response = match self.follow_stop(response) {
             Ok(response) => response,
             Err(followed) => return followed,
         };
         let (kind, rows) = match response {
-            DapResponse::Threads(rows) => (
-                "threads",
-                {
+            DapResponse::Disconnected { .. } | DapResponse::BreakpointChanged { .. } => {
+                return DebugResponse::Absorbed;
+            }
+            DapResponse::Threads(rows) => ("threads", {
                 // RETAINED: the left inspector shows the process's threads, not only a picker.
                 self.threads = rows
                     .iter()
@@ -1008,8 +1187,7 @@ impl DebugSession {
                         })
                         .collect(),
                 )
-                }
-            ),
+            }),
             DapResponse::Stack(rows) => {
                 let issued = self.issued_stack.pop_front();
                 if Self::is_current_stop_answer(issued, self.stop_epoch) {
@@ -1038,26 +1216,26 @@ impl DebugSession {
                 self.expansion.clear();
                 self.pending_variable_pages.clear();
                 (
-                "scopes",
-                self.controls(
-                    rows.into_iter()
-                        .map(|r| {
-                            (
-                                r.name,
-                                if r.expensive {
-                                    "expensive".into()
-                                } else {
-                                    String::new()
-                                },
-                                DapControl::Variables {
-                                    reference: r.variables_reference,
-                                    start: 0,
-                                    count: VARIABLE_PAGE,
-                                },
-                            )
-                        })
-                        .collect(),
-                ),
+                    "scopes",
+                    self.controls(
+                        rows.into_iter()
+                            .map(|r| {
+                                (
+                                    r.name,
+                                    if r.expensive {
+                                        "expensive".into()
+                                    } else {
+                                        String::new()
+                                    },
+                                    DapControl::Variables {
+                                        reference: r.variables_reference,
+                                        start: 0,
+                                        count: VARIABLE_PAGE,
+                                    },
+                                )
+                            })
+                            .collect(),
+                    ),
                 )
             }
             DapResponse::Variables(rows) => (
@@ -1069,23 +1247,8 @@ impl DebugSession {
                     // this one: it is refused rather than presented as current. A value whose
                     // request is unrecorded is presented as before, because the session cannot
                     // prove it belongs to another stop.
-                    let epoch = self.stop_epoch;
                     let page = self.pending_variable_pages.pop_front();
-                    let mut current = Vec::new();
-                    let mut refused = false;
-                    for row in rows {
-                        if Self::is_current_stop_answer(
-                            self.issued_variables.get(&row.variables_reference).copied(),
-                            epoch,
-                        ) {
-                            current.push(row);
-                        } else {
-                            refused = true;
-                        }
-                    }
-                    if refused {
-                        self.note_refused_answer();
-                    }
+                    let current = rows;
                     // Every value that IS current is STAMPED with the stop it was read at.
                     for row in current.iter() {
                         self.record_stopped_value(
@@ -1125,18 +1288,19 @@ impl DebugSession {
                         .collect();
                     // A FULL page means more may follow, so the continuation carries the EXACT
                     // count shown and asks for the next page by OFFSET rather than guessing.
-                    if let Some((reference, start, count)) = page {
-                        if count > 0 && shown as u64 >= count {
-                            values.push((
-                                format!("load more ({shown} shown)"),
-                                format!("continue from {}", start + shown as u64),
-                                Choice::Control(DapControl::Variables {
-                                    reference,
-                                    start: start + shown as u64,
-                                    count: VARIABLE_PAGE,
-                                }),
-                            ));
-                        }
+                    if let Some((reference, start, count)) = page
+                        && count > 0
+                        && shown as u64 >= count
+                    {
+                        values.push((
+                            format!("load more ({shown} shown)"),
+                            format!("continue from {}", start + shown as u64),
+                            Choice::Control(DapControl::Variables {
+                                reference,
+                                start: start + shown as u64,
+                                count: VARIABLE_PAGE,
+                            }),
+                        ));
                     }
                     self.install(values)
                 },
@@ -1149,7 +1313,10 @@ impl DebugSession {
     fn follow_stop(&mut self, response: DapResponse) -> Result<DapResponse, DebugResponse> {
         match (self.stop_follow, response) {
             (StopFollow::Threads(stopped), DapResponse::Threads(rows)) => {
-                self.threads = rows.iter().map(|r| format!("{} ({})", r.name, r.id)).collect();
+                self.threads = rows
+                    .iter()
+                    .map(|r| format!("{} ({})", r.name, r.id))
+                    .collect();
                 self.stop_follow = StopFollow::Idle;
                 self.stopped_thread = stopped.or(rows.first().map(|r| r.id));
                 if let Some(thread_id) = self.stopped_thread {
@@ -1169,20 +1336,18 @@ impl DebugSession {
                     self.note_refused_answer();
                     return Err(DebugResponse::Absorbed);
                 }
-                self.stack = rows.iter().map(|f| format!("{}:{}", f.name, f.line)).collect();
+                self.stack = rows
+                    .iter()
+                    .map(|f| format!("{}:{}", f.name, f.line))
+                    .collect();
                 let Some(top) = rows.into_iter().next() else {
                     return Err(DebugResponse::Absorbed);
                 };
                 self.console_frame = Some(top.id);
                 self.stop_follow = StopFollow::Scopes;
                 self.follow_control(DapControl::Scopes { frame_id: top.id });
-                for expression in self.watches.clone().into_iter().take(100) {
-                    self.follow_control(DapControl::Evaluate {
-                        expression,
-                        frame_id: Some(top.id),
-                        context: "watch".into(),
-                    });
-                }
+                self.watch_refresh = self.watches.iter().cloned().collect();
+                self.refresh_watches();
                 Err(match top.path {
                     Some(path) => {
                         self.execution = Some((path.clone(), top.line));
@@ -1229,6 +1394,35 @@ impl DebugSession {
             (_, response) => Ok(response),
         }
     }
+    fn refresh_watches(&mut self) {
+        if self
+            .event_source
+            .as_ref()
+            .is_some_and(|source| !self.service.current(source))
+        {
+            self.watch_refresh.clear();
+            return;
+        }
+        for _ in 0..16 {
+            let Some(expression) = self.watch_refresh.front().cloned() else {
+                break;
+            };
+            match self.control(DapControl::Evaluate {
+                expression,
+                frame_id: self.console_frame,
+                context: "watch".into(),
+            }) {
+                Ok(()) => {
+                    self.watch_refresh.pop_front();
+                }
+                Err(DapError::Full) => break,
+                Err(_) => {
+                    self.watch_refresh.clear();
+                    break;
+                }
+            }
+        }
+    }
     fn follow_control(&mut self, control: DapControl) {
         if let Err(error) = self.control(control) {
             self.stop_follow = StopFollow::Idle;
@@ -1246,6 +1440,12 @@ impl DebugSession {
         self.watch_values.clear();
         // The adapter actor drops what was in flight when a stop ends, so its answers never come.
         self.evaluations.clear();
+        self.pending_submissions.clear();
+        self.issued_stack.clear();
+        self.issued_scopes.clear();
+        self.issued_variables.clear();
+        self.watch_refresh.clear();
+        self.requests.clear();
     }
     pub(in crate::editor::session) fn frames(
         &mut self,
@@ -1306,7 +1506,11 @@ impl DebugSession {
         self.console_frame = None;
     }
     /// Record a value read at the CURRENT stop.
-    pub(in crate::editor::session) fn record_stopped_value(&mut self, reference: i64, value: String) {
+    pub(in crate::editor::session) fn record_stopped_value(
+        &mut self,
+        reference: i64,
+        value: String,
+    ) {
         self.stopped_values
             .insert(reference, (self.stop_epoch, value));
     }
@@ -1345,6 +1549,7 @@ impl DebugSession {
             self.console_frame = Some(frame.id);
         }
         Ok(DebugSelection {
+            expansion: self.expansion.clone(),
             source: choices.source,
             choice,
         })
@@ -1352,19 +1557,22 @@ impl DebugSession {
     pub(in crate::editor::session) fn activate(
         &mut self,
         selection: DebugSelection,
-        target: SourceTarget,
+        mut target: SourceTarget,
     ) -> Result<Option<DebugLocation>, DapError> {
         if !self.service.current(&selection.source) {
             return Err(DapError::Retired);
         }
+        self.expansion = selection.expansion;
         match selection.choice {
             Choice::Value(_) => Ok(None),
             Choice::Control(control) => {
-                self.service.control_owned(&selection.source, control)?;
+                self.control(control)?;
                 Ok(None)
             }
             Choice::Frame(frame) => {
                 if let Some(reference) = frame.source_reference {
+                    target.line = frame.line;
+                    target.column = frame.column;
                     if self.source.is_some() {
                         return Err(DapError::Full);
                     }
@@ -1376,10 +1584,7 @@ impl DebugSession {
                     });
                     Ok(None)
                 } else {
-                    self.service.control_owned(
-                        &selection.source,
-                        DapControl::Scopes { frame_id: frame.id },
-                    )?;
+                    self.control(DapControl::Scopes { frame_id: frame.id })?;
                     Ok(frame.path.map(|path| DebugLocation {
                         path,
                         line: frame.line,

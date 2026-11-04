@@ -269,19 +269,17 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
     let rejected_view = graph
         .create_view(content, "builtin", 1)
         .expect("extra view");
-    let before_open = graph.clone();
-    assert_eq!(
-        graph.open_window(
+    graph
+        .open_window(
             tab,
             rejected_view,
             WindowPlacement::Tiled,
             true,
             "builtin",
             1,
-        ),
-        Err(WindowError::TiledLayoutTooDeep)
-    );
-    assert_eq!(graph, before_open);
+        )
+        .expect("temporary insertion stays shallow");
+    graph.validate().unwrap();
 
     let floating_view = graph
         .create_view(content, "builtin", 1)
@@ -301,17 +299,11 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
             1,
         )
         .expect("floating window");
-    let before_place = graph.clone();
-    assert_eq!(
-        graph.place(floating, WindowPlacement::Tiled),
-        Err(WindowError::TiledLayoutTooDeep)
-    );
-    assert_eq!(graph, before_place);
-    assert_eq!(
-        graph.rehost(floating, tab, floating_view, WindowPlacement::Tiled, true,),
-        Err(WindowError::TiledLayoutTooDeep)
-    );
-    assert_eq!(graph, before_place);
+    graph.place(floating, WindowPlacement::Tiled).unwrap();
+    graph
+        .rehost(floating, tab, floating_view, WindowPlacement::Tiled, true)
+        .unwrap();
+    graph.validate().unwrap();
 
     let before_stale = graph.clone();
     assert_eq!(
@@ -1154,4 +1146,80 @@ fn ids_placements_focus_and_removal_order_are_validated() {
         graph.remove_content(content),
         Err(WindowError::ContentStillViewed)
     );
+}
+
+#[test]
+fn fullscreen_moves_focus_and_rejects_suppressed_windows() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let a = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    let bview = graph.create_view(content, "builtin", 1).unwrap();
+    let b = graph
+        .open_window(tab, bview, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    graph.focus(a).unwrap();
+    graph.place(b, WindowPlacement::Fullscreen).unwrap();
+    assert_eq!(graph.focused(), Some(b));
+    assert!(graph.focus(a).is_err());
+}
+
+#[test]
+fn hiding_the_last_window_keeps_the_active_tab() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let a = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    let other = graph.create_workspace_tab("builtin", 1).unwrap();
+    let bview = graph.create_view(content, "builtin", 1).unwrap();
+    graph
+        .open_window(other, bview, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    graph.focus(a).unwrap();
+    graph.place(a, WindowPlacement::Hidden).unwrap();
+    assert_eq!(graph.focused(), None);
+    assert_eq!(graph.active_tab(), Some(tab));
+}
+
+#[test]
+fn panes_below_a_wide_pane_are_not_its_left_neighbor() {
+    let top = WindowRect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 10,
+    };
+    let bottom = WindowRect {
+        x: 0,
+        y: 10,
+        width: 40,
+        height: 10,
+    };
+    assert_eq!(
+        super::projection::spatial_score(top, bottom, SpatialDirection::Left),
+        None
+    );
+    assert!(super::projection::spatial_score(top, bottom, SpatialDirection::Down).is_some());
+}
+
+#[test]
+fn sixty_five_windows_can_be_installed_before_a_balanced_root() {
+    let (mut graph, content, first, tab) = graph_with_content();
+    let mut windows = Vec::new();
+    for index in 0..65 {
+        let view = if index == 0 {
+            first
+        } else {
+            graph.create_view(content, "builtin", 1).unwrap()
+        };
+        windows.push(
+            graph
+                .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+                .unwrap(),
+        );
+    }
+    graph
+        .set_tiled_layout(tab, Some(balanced_layout(&windows)))
+        .unwrap();
+    graph.validate().unwrap();
 }

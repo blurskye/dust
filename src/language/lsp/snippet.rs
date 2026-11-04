@@ -14,105 +14,196 @@ pub fn parse_snippet(source: &str, maximum_bytes: usize) -> Result<ParsedSnippet
     if source.len() > maximum_bytes {
         return Err("snippet exceeds byte ceiling".into());
     }
-    let bytes = source.as_bytes();
-    let mut index = 0usize;
+    let mut values = std::collections::HashMap::new();
+    expand(
+        source,
+        &mut 0,
+        false,
+        0,
+        &mut values,
+        &mut Vec::new(),
+        &mut String::new(),
+        maximum_bytes,
+    )?;
     let mut text = String::new();
-    let mut stops = Vec::new();
-    while index < bytes.len() {
-        if bytes[index] == b'\\'
-            && index + 1 < bytes.len()
-            && matches!(bytes[index + 1], b'$' | b'}' | b'\\')
+    let mut tabstops = Vec::new();
+    expand(
+        source,
+        &mut 0,
+        false,
+        0,
+        &mut values,
+        &mut tabstops,
+        &mut text,
+        maximum_bytes,
+    )?;
+    tabstops.sort_by_key(|stop| (stop.index == 0, stop.index, stop.start));
+    Ok(ParsedSnippet {
+        first_tabstop: tabstops.first().map(|stop| stop.start),
+        text,
+        tabstops,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand(
+    source: &str,
+    cursor: &mut usize,
+    nested: bool,
+    depth: usize,
+    values: &mut std::collections::HashMap<u32, String>,
+    stops: &mut Vec<SnippetTabstop>,
+    text: &mut String,
+    maximum_bytes: usize,
+) -> Result<(), String> {
+    if depth > 32 {
+        return Err("snippet nesting exceeds limit".into());
+    }
+    let bytes = source.as_bytes();
+    while *cursor < bytes.len() {
+        if text.len() > maximum_bytes {
+            return Err("expanded snippet exceeds byte ceiling".into());
+        }
+        let byte = bytes[*cursor];
+        if byte == b'}' && nested {
+            *cursor += 1;
+            return Ok(());
+        }
+        if byte == b'\\'
+            && bytes
+                .get(*cursor + 1)
+                .is_some_and(|b| matches!(b, b'$' | b'}' | b'\\'))
         {
-            text.push(bytes[index + 1] as char);
-            index += 2;
+            text.push(bytes[*cursor + 1] as char);
+            *cursor += 2;
             continue;
         }
-        if bytes[index] != b'$' {
-            let character = source[index..]
+        if byte != b'$' {
+            let character = source[*cursor..]
                 .chars()
                 .next()
                 .ok_or("snippet UTF-8 boundary")?;
             text.push(character);
-            index += character.len_utf8();
+            *cursor += character.len_utf8();
             continue;
         }
-        index += 1;
-        if index >= bytes.len() {
-            text.push('$');
-            break;
+        *cursor += 1;
+        let braced = bytes.get(*cursor) == Some(&b'{');
+        if braced {
+            *cursor += 1;
         }
-        if bytes[index].is_ascii_digit() {
-            let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1
-            }
-            let number = source[start..index]
-                .parse::<u32>()
-                .map_err(|_| "invalid tabstop")?;
-            stops.push((number, text.len(), text.len()));
-            continue;
+        let start = *cursor;
+        while bytes.get(*cursor).is_some_and(u8::is_ascii_digit) {
+            *cursor += 1;
         }
-        if bytes[index] == b'{' {
-            index += 1;
-            let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1
-            }
-            if start == index {
+        if start == *cursor {
+            if braced {
                 return Err("snippet placeholder has no index".into());
             }
-            let number = source[start..index]
-                .parse::<u32>()
-                .map_err(|_| "invalid placeholder")?;
-            let stop_position = stops.len();
-            stops.push((number, text.len(), text.len()));
-            if index >= bytes.len() {
-                return Err("unterminated snippet placeholder".into());
-            }
-            match bytes[index] {
-                b'}' => index += 1,
-                b':' => {
-                    index += 1;
-                    let start = index;
-                    while index < bytes.len() && bytes[index] != b'}' {
-                        index += 1
-                    }
-                    if index >= bytes.len() {
-                        return Err("unterminated snippet default".into());
-                    }
-                    text.push_str(&source[start..index]);
-                    index += 1
-                }
-                b'|' => {
-                    index += 1;
-                    let start = index;
-                    while index + 1 < bytes.len()
-                        && !(bytes[index] == b'|' && bytes[index + 1] == b'}')
-                    {
-                        index += 1
-                    }
-                    if index + 1 >= bytes.len() {
-                        return Err("unterminated snippet choice".into());
-                    }
-                    let choice = source[start..index].split(',').next().unwrap_or_default();
-                    text.push_str(choice);
-                    index += 2
-                }
-                _ => return Err("unsupported snippet placeholder".into()),
-            }
-            stops[stop_position].2 = text.len();
+            text.push('$');
             continue;
         }
-        text.push('$');
+        let number = source[start..*cursor]
+            .parse::<u32>()
+            .map_err(|_| "invalid tabstop")?;
+        let position = text.len();
+        let stop = stops.len();
+        stops.push(SnippetTabstop {
+            index: number,
+            start: position,
+            end: position,
+        });
+        let default = braced && bytes.get(*cursor) == Some(&b':');
+        if default {
+            *cursor += 1;
+            expand(
+                source,
+                cursor,
+                true,
+                depth + 1,
+                values,
+                stops,
+                text,
+                maximum_bytes,
+            )?;
+            values.insert(number, text[position..].to_owned());
+        } else if braced && bytes.get(*cursor) == Some(&b'|') {
+            *cursor += 1;
+            let mut choice = String::new();
+            let mut first = true;
+            loop {
+                match bytes.get(*cursor) {
+                    Some(b'|') if bytes.get(*cursor + 1) == Some(&b'}') => {
+                        *cursor += 2;
+                        break;
+                    }
+                    Some(b',') => {
+                        first = false;
+                        *cursor += 1;
+                    }
+                    Some(_) => {
+                        if bytes[*cursor] == b'\\' && *cursor + 1 < bytes.len() {
+                            *cursor += 1;
+                        }
+                        let character = source[*cursor..]
+                            .chars()
+                            .next()
+                            .ok_or("snippet choice boundary")?;
+                        if first {
+                            choice.push(character);
+                        }
+                        *cursor += character.len_utf8();
+                    }
+                    None => return Err("unterminated snippet choice".into()),
+                }
+            }
+            text.push_str(&choice);
+            values.insert(number, choice);
+        } else {
+            if braced {
+                if bytes.get(*cursor) != Some(&b'}') {
+                    return Err("unsupported snippet placeholder".into());
+                }
+                *cursor += 1;
+            }
+            if let Some(value) = values.get(&number) {
+                text.push_str(value);
+            }
+        }
+        stops[stop].end = text.len();
     }
-    stops.sort_by_key(|(number, start, _)| ((*number == 0), *number, *start));
-    let first = stops.first().map(|(_, start, _)| *start);
-    Ok(ParsedSnippet {
-        text,
-        first_tabstop: first,
-        tabstops: stops
-            .into_iter()
-            .map(|(index, start, end)| SnippetTabstop { index, start, end })
-            .collect(),
-    })
+    if nested {
+        return Err("unterminated snippet default".into());
+    }
+    if text.len() > maximum_bytes {
+        return Err("expanded snippet exceeds byte ceiling".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn nested_defaults_and_mirrors_expand_with_linked_ranges() {
+        let parsed = parse_snippet("call(${1:${2:value}})$0", 1024).unwrap();
+        assert_eq!(parsed.text, "call(value)");
+        assert_eq!((parsed.tabstops[0].start, parsed.tabstops[0].end), (5, 10));
+        assert_eq!(
+            (
+                parsed.tabstops[1].index,
+                parsed.tabstops[1].start,
+                parsed.tabstops[1].end
+            ),
+            (2, 5, 10)
+        );
+        let parsed = parse_snippet("${1:name} = $1;$0", 1024).unwrap();
+        assert_eq!(parsed.text, "name = name;");
+        assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (7, 11));
+        assert_eq!(
+            parse_snippet("$1 = ${1:name}", 1024).unwrap().text,
+            "name = name"
+        );
+        assert_eq!(parse_snippet("${1:a\\}b}", 1024).unwrap().text, "a}b");
+    }
 }

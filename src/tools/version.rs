@@ -74,10 +74,17 @@ impl ToolVersionService {
                     };
                     let id = request.id.clone();
                     let result = probe_tool_version(request, &worker_cancel);
-                    if worker_cancel.load(Ordering::Acquire)
-                        || results.send(ToolVersionResult { id, result }).is_err()
-                    {
-                        break;
+                    let mut result = ToolVersionResult { id, result };
+                    loop {
+                        if worker_cancel.load(Ordering::Acquire) {
+                            return;
+                        }
+                        match results.try_send(result) {
+                            Ok(()) => break,
+                            Err(TrySendError::Disconnected(_)) => return,
+                            Err(TrySendError::Full(returned)) => result = returned,
+                        }
+                        thread::sleep(Duration::from_millis(2));
                     }
                 }
             })
@@ -131,6 +138,7 @@ pub(super) fn drain_version_pipe<Fd: std::os::fd::AsFd>(
                 output.extend_from_slice(&buffer[..read.min(remaining)]);
                 if read > remaining || output.len() > MAXIMUM_TOOL_VERSION_BYTES as usize {
                     *oversized = true;
+                    return Err("version probe output exceeded its limit".into());
                 }
             }
             Err(nix::errno::Errno::EAGAIN) => return Ok(false),

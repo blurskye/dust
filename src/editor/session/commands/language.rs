@@ -7,7 +7,11 @@ pub(super) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
 ) -> Result<(), CommandError> {
     for (id, title, category) in [
-        ("tools.menu.open", "Tool Manager: install language servers (Mason)", "all"),
+        (
+            "tools.menu.open",
+            "Tool Manager: install language servers (Mason)",
+            "all",
+        ),
         ("lsp.menu.open", "Open language-server manager", "lsp"),
         ("dap.menu.open", "Open debug-adapter manager", "dap"),
     ] {
@@ -31,7 +35,11 @@ pub(super) fn register_commands(
             "Select next tool",
             AppEffect::MoveToolMenu(1),
         ),
-        ("tools.search", "Search the tool manager", AppEffect::ToolSearch),
+        (
+            "tools.search",
+            "Search the tool manager",
+            AppEffect::ToolSearch,
+        ),
         (
             "tools.search.delete",
             "Delete the last character of the tool search",
@@ -318,7 +326,11 @@ pub(super) fn register_commands(
         "Type into the tool search",
         ContextRequirement::Application,
         ArgumentSchema::default().field("text", ArgumentType::String, true),
-        |invocation| Ok(AppEffect::ToolSearchInsert(string_arg(invocation, "text")?.to_owned())),
+        |invocation| {
+            Ok(AppEffect::ToolSearchInsert(
+                string_arg(invocation, "text")?.to_owned(),
+            ))
+        },
     )?;
     for (id, title, effect) in [
         (

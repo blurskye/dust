@@ -34,6 +34,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         DapEvent::Response {
             adapter: "same-name".into(),
             stop_generation: 1,
+            request_id: 0,
+            request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
         },
     );
@@ -44,6 +46,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
     let target = || SourceTarget {
         navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
         capture: Arc::new(()),
+        line: 1,
+        column: 1,
     };
     let selection = owner.take_selection(&keys[0].key).unwrap();
     owner.activate(selection, target()).unwrap();
@@ -66,6 +70,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         DapEvent::Response {
             adapter: "same-name".into(),
             stop_generation: 2,
+            request_id: 0,
+            request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
         },
     );
@@ -202,9 +208,10 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
     );
 
     // THE ADAPTER'S ANSWER verifies exactly what it verified.
-    assert!(
-        owner.apply_breakpoint_answer(&DapResponse::Breakpoints(vec![(true, Some(11), None)])),
-        "the answer is matched to the request that was waiting"
+    owner.apply_breakpoints(
+        &path,
+        &[at(10)],
+        &DapResponse::Breakpoints(vec![(true, Some(11), None)]),
     );
     assert_eq!(
         owner.breakpoint_state(&path, 10),
@@ -214,10 +221,11 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
 
     // AN ANSWER THAT DECLINES: still not verified, and the state says which case it is.
     owner.breakpoint(at(20), false).unwrap();
-    owner.apply_breakpoint_answer(&DapResponse::Breakpoints(vec![
-        (true, Some(20), None),
-        (false, None, None),
-    ]));
+    owner.apply_breakpoints(
+        &path,
+        &[at(10), at(20)],
+        &DapResponse::Breakpoints(vec![(true, Some(20), None), (false, None, None)]),
+    );
     // The queue holds one pending request per send, so the answer above applied to line 20's
     // request and line 20 was NOT verified.
     let declined = owner
@@ -234,7 +242,11 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
         owner.breakpoint_state(&path, 10),
         Some(DapBreakpointState::Disabled)
     );
-    owner.apply_breakpoint_answer(&DapResponse::Breakpoints(vec![(true, Some(10), None)]));
+    owner.apply_breakpoints(
+        &path,
+        &[at(10)],
+        &DapResponse::Breakpoints(vec![(true, Some(10), None)]),
+    );
     assert_eq!(
         owner.breakpoint_state(&path, 10),
         Some(DapBreakpointState::Disabled),
@@ -274,7 +286,25 @@ fn detaching_and_terminating_are_different_session_facts() {
 
     // DETACH: the session reports that it LEFT, and that it did not ask for the program to stop.
     let mut detached = DebugSession::new(&policy, workspace.version());
-    detached.detach_debuggee().expect("detach is accepted");
+    let (service, adapter) = crate::debugger::test_session();
+    detached.service = service;
+    detached.detach_debuggee().expect("detach is admitted");
+    assert_eq!(detached.end_state(), None);
+    adapter.event(
+        0,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_id: 1,
+            request: Some(DapControl::Disconnect {
+                terminate_debuggee: false,
+            }),
+            response: DapResponse::Disconnected {
+                terminate_debuggee: false,
+            },
+        },
+    );
+    detached.try_event().unwrap();
     assert_eq!(
         detached.end_state(),
         Some(DapSessionEnd::Detached),
@@ -283,7 +313,27 @@ fn detaching_and_terminating_are_different_session_facts() {
 
     // TERMINATE: a DIFFERENT reported fact.
     let mut terminated = DebugSession::new(&policy, workspace.version());
-    terminated.terminate_debuggee().expect("terminate is accepted");
+    let (service, adapter) = crate::debugger::test_session();
+    terminated.service = service;
+    terminated
+        .terminate_debuggee()
+        .expect("terminate is admitted");
+    assert_eq!(terminated.end_state(), None);
+    adapter.event(
+        0,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_id: 1,
+            request: Some(DapControl::Disconnect {
+                terminate_debuggee: true,
+            }),
+            response: DapResponse::Disconnected {
+                terminate_debuggee: true,
+            },
+        },
+    );
+    terminated.try_event().unwrap();
     assert_eq!(
         terminated.end_state(),
         Some(DapSessionEnd::Terminated),
@@ -318,10 +368,7 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
     let entries = owner.console().cloned().collect::<Vec<_>>();
     assert_eq!(entries.len(), 3, "all three origins are kept: {entries:?}");
     assert_eq!(
-        entries
-            .iter()
-            .map(|entry| entry.origin)
-            .collect::<Vec<_>>(),
+        entries.iter().map(|entry| entry.origin).collect::<Vec<_>>(),
         vec![
             DapConsoleOrigin::Command,
             DapConsoleOrigin::Evaluation,
@@ -331,13 +378,11 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
     );
     // The separation the clause asks for, asserted in both directions.
     assert_ne!(
-        entries[1].origin,
-        entries[2].origin,
+        entries[1].origin, entries[2].origin,
         "an evaluation result is not program output"
     );
     assert_ne!(
-        entries[0].origin,
-        entries[1].origin,
+        entries[0].origin, entries[1].origin,
         "and the command the user typed is neither of them"
     );
     assert_eq!(entries[2].text, "hello", "the program's own text is intact");
@@ -440,10 +485,15 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
             DapEvent::Response {
                 adapter: "same-name".into(),
                 stop_generation: 1,
+                request_id: 0,
+                request: None,
                 response: crate::debugger::DapResponse::Threads(Vec::new()),
             },
         );
-        assert!(owner.try_event().is_some(), "the session accepts an event from its actor");
+        assert!(
+            owner.try_event().is_some(),
+            "the session accepts an event from its actor"
+        );
     };
 
     let variable = |value: &str| crate::debugger::DapVariable {
@@ -461,7 +511,9 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     // (ii) SAME STOP, through the REAL issue path: the request is recorded as it goes out, so its
     // answer belongs to this stop, and the value IS presentable.
     owner.begin_stop();
-    owner.control(request()).expect("the fake adapter accepts a variables request");
+    owner
+        .control(request())
+        .expect("the fake adapter accepts a variables request");
     prime(&mut owner);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("1")]));
     assert_eq!(
@@ -477,30 +529,32 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     // (i) EARLIER STOP: the request is issued at one stop, execution RUNS ON, and only then does
     // the answer arrive. It answers the earlier stop, so it can never be presented as current.
     owner.begin_stop();
-    owner.control(request()).expect("the fake adapter accepts a variables request");
+    owner
+        .control(request())
+        .expect("the fake adapter accepts a variables request");
+    adapter.event(
+        1,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 1,
+            request_id: 2,
+            request: Some(request()),
+            response: DapResponse::Variables(vec![variable("1")]),
+        },
+    );
     owner.begin_running();
-    prime(&mut owner);
-    let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("1")]));
-    assert_eq!(
-        owner.current_stopped_value(7),
-        None,
-        "a value answering an EARLIER stop can never be presented as current"
-    );
-    let DebugResponse::Picker { rows, .. } = &presented else {
-        panic!("expected a variables picker, not a retired or bare result")
-    };
-    assert!(rows.is_empty(), "the stale answer presents NOTHING");
+    adapter.advance(2);
     assert!(
-        owner
-            .console
-            .iter()
-            .any(|entry| entry.text.contains("earlier stop")),
-        "the refusal is a visible notice rather than silence"
+        owner.try_event().is_none(),
+        "the transport retires the original stopped request"
     );
+    assert_eq!(owner.current_stopped_value(7), None);
 
     // A RE-STOP then answers for the NEW stop, and that value IS current.
     owner.begin_stop();
-    owner.control(request()).expect("the fake adapter accepts a variables request");
+    owner
+        .control(request())
+        .expect("the fake adapter accepts a variables request");
     prime(&mut owner);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("2")]));
     assert_eq!(
@@ -537,10 +591,15 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
             DapEvent::Response {
                 adapter: "same-name".into(),
                 stop_generation: 1,
+                request_id: 0,
+                request: None,
                 response: crate::debugger::DapResponse::Threads(Vec::new()),
             },
         );
-        assert!(owner.try_event().is_some(), "the session accepts an event from its actor");
+        assert!(
+            owner.try_event().is_some(),
+            "the session accepts an event from its actor"
+        );
     };
 
     // A stop, and a FRAME selected from that stop: selecting it binds the console to it.
@@ -587,10 +646,21 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
         .expect("the answer is a record");
 
     // (1) The submission captured the ACTOR, the STOP and the FRAME that produced it.
-    assert_eq!(first.actor.as_deref(), Some("same-name"), "the actor is captured");
+    assert_eq!(
+        first.actor.as_deref(),
+        Some("same-name"),
+        "the actor is captured"
+    );
     assert_eq!(first.stop, Some(stop), "the stop is captured");
-    assert_eq!(first.frame, Some(42), "the frame the console is bound to is captured");
-    assert!(first.submission.is_some(), "a submission has its own identity");
+    assert_eq!(
+        first.frame,
+        Some(42),
+        "the frame the console is bound to is captured"
+    );
+    assert!(
+        first.submission.is_some(),
+        "a submission has its own identity"
+    );
     assert_ne!(
         first.submission, second.submission,
         "the newer draft has its OWN identity, not the first one's"
@@ -602,11 +672,21 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
         Some("first = 1"),
         "the late result lands on the record that ASKED for it"
     );
-    assert_eq!(answer.submission, first.submission, "the answer names its submission");
-    assert_eq!(answer.frame, Some(42), "the answer carries the frame that produced it");
+    assert_eq!(
+        answer.submission, first.submission,
+        "the answer names its submission"
+    );
+    assert_eq!(
+        answer.frame,
+        Some(42),
+        "the answer carries the frame that produced it"
+    );
 
     // (3) The NEWER draft is untouched: no result, and still waiting for its own.
-    assert_eq!(second.result, None, "the newer draft is NOT updated by a late result");
+    assert_eq!(
+        second.result, None,
+        "the newer draft is NOT updated by a late result"
+    );
     assert_eq!(
         owner.pending_submissions.len(),
         1,
@@ -638,10 +718,15 @@ fn prime_for(owner: &mut DebugSession, adapter: &crate::debugger::TestAdapter) {
         DapEvent::Response {
             adapter: "same-name".into(),
             stop_generation: 1,
+            request_id: 0,
+            request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
         },
     );
-    assert!(owner.try_event().is_some(), "the session accepts an event from its actor");
+    assert!(
+        owner.try_event().is_some(),
+        "the session accepts an event from its actor"
+    );
 }
 
 fn leaf_variables(count: u64) -> Vec<crate::debugger::DapVariable> {
@@ -677,9 +762,9 @@ fn a_full_page_of_variables_offers_an_exact_continuation_that_carries_the_next_o
     );
 
     prime_for(&mut owner, &adapter);
-    let presented = owner.response(crate::debugger::DapResponse::Variables(
-        leaf_variables(page),
-    ));
+    let presented = owner.response(crate::debugger::DapResponse::Variables(leaf_variables(
+        page,
+    )));
     let DebugResponse::Picker { rows, .. } = &presented else {
         panic!("expected a variables picker");
     };
@@ -690,7 +775,9 @@ fn a_full_page_of_variables_offers_an_exact_continuation_that_carries_the_next_o
     );
     let continuation = rows.last().unwrap();
     assert!(
-        continuation.detail.contains(&format!("continue from {page}")),
+        continuation
+            .detail
+            .contains(&format!("continue from {page}")),
         "the continuation carries the exact offset: {}",
         continuation.detail
     );
@@ -835,4 +922,322 @@ fn the_left_inspector_retains_threads_and_a_stack_that_running_on_invalidates() 
         owner.threads().is_empty(),
         "and the previous stop's thread list is invalidated with it"
     );
+}
+
+fn request_fixture() -> (DebugSession, crate::debugger::TestAdapter) {
+    let root = tempfile::tempdir().unwrap();
+    let state = WorkspaceState::new(
+        WorkspaceId(1),
+        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+    )
+    .unwrap();
+    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+    let mut owner = DebugSession::new(&DebugConfig::default(), workspace.version());
+    let (service, adapter) = crate::debugger::test_session();
+    owner.service = service;
+    (owner, adapter)
+}
+fn evaluation(value: &str) -> DapResponse {
+    DapResponse::Evaluate(crate::debugger::DapVariable {
+        name: "result".into(),
+        value: value.into(),
+        type_name: None,
+        variables_reference: 0,
+    })
+}
+#[test]
+fn evaluation_answers_follow_the_original_watch_and_console_submission() {
+    let (mut owner, adapter) = request_fixture();
+    let watch = |expression: &str| DapControl::Evaluate {
+        expression: expression.into(),
+        frame_id: None,
+        context: "watch".into(),
+    };
+    owner.control(watch("a")).unwrap();
+    owner.control(watch("b")).unwrap();
+    for (id, expression, value) in [(2, "b", "B"), (1, "a", "A")] {
+        adapter.event(
+            0,
+            DapEvent::Response {
+                adapter: "same-name".into(),
+                stop_generation: 0,
+                request_id: id,
+                request: Some(watch(expression)),
+                response: evaluation(value),
+            },
+        );
+        let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+            panic!()
+        };
+        assert!(matches!(owner.response(response), DebugResponse::Absorbed));
+    }
+    assert_eq!(owner.watch_values.get("a").unwrap(), "A");
+    assert_eq!(owner.watch_values.get("b").unwrap(), "B");
+    let repl = |expression: &str| DapControl::Evaluate {
+        expression: expression.into(),
+        frame_id: None,
+        context: "repl".into(),
+    };
+    owner.record_console_command("bad".into());
+    owner.control(repl("bad")).unwrap();
+    adapter.event(
+        0,
+        DapEvent::RequestFailed {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_seq: 9,
+            request_id: 3,
+            request: Some(repl("bad")),
+            command: "evaluate".into(),
+            message: "rejected".into(),
+        },
+    );
+    owner.try_event().unwrap();
+    assert!(!owner.watch_request_failed("evaluate"));
+    assert!(owner.pending_submissions.is_empty());
+    owner.record_console_command("good".into());
+    owner.control(repl("good")).unwrap();
+    adapter.event(
+        0,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_id: 4,
+            request: Some(repl("good")),
+            response: evaluation("ok"),
+        },
+    );
+    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+        panic!()
+    };
+    assert!(matches!(owner.response(response), DebugResponse::Result(_)));
+    owner.record_console_evaluation("ok".into());
+    assert!(
+        owner
+            .console
+            .iter()
+            .find(|entry| entry.text == "bad")
+            .unwrap()
+            .result
+            .is_none()
+    );
+    assert_eq!(
+        owner
+            .console
+            .iter()
+            .find(|entry| entry.text == "good")
+            .unwrap()
+            .result
+            .as_deref(),
+        Some("ok")
+    );
+    owner.stop().unwrap();
+    assert!(owner.pending_submissions.is_empty());
+    owner.record_console_command("no session".into());
+    assert!(owner.control(repl("no session")).is_err());
+    assert!(owner.pending_submissions.is_empty());
+}
+#[test]
+fn stopped_request_bookkeeping_is_retired_on_continue_and_failure() {
+    let (mut owner, _) = request_fixture();
+    owner.note_issued(true, Some(3), Some(7), 0);
+    owner.begin_running();
+    assert!(
+        owner.issued_stack.is_empty()
+            && owner.issued_scopes.is_empty()
+            && owner.issued_variables.is_empty()
+    );
+    owner.note_issued(true, Some(3), Some(7), owner.stop_epoch);
+    owner.prepare_answer(
+        1,
+        &DapControl::StackTrace {
+            thread_id: 1,
+            start: 0,
+            levels: 20,
+        },
+        true,
+    );
+    owner.prepare_answer(2, &DapControl::Scopes { frame_id: 3 }, true);
+    assert!(owner.issued_stack.is_empty() && owner.issued_scopes.is_empty());
+}
+#[test]
+fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() {
+    let (mut owner, adapter) = request_fixture();
+    owner.issued_variables.insert(7, u64::MAX);
+    let request = DapControl::Variables {
+        reference: 8,
+        start: 0,
+        count: 1,
+    };
+    owner.control(request.clone()).unwrap();
+    adapter.event(
+        0,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_id: 1,
+            request: Some(request),
+            response: DapResponse::Variables(vec![crate::debugger::DapVariable {
+                name: "current".into(),
+                value: "value".into(),
+                type_name: None,
+                variables_reference: 7,
+            }]),
+        },
+    );
+    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+        panic!()
+    };
+    let DebugResponse::Picker { rows, .. } = owner.response(response) else {
+        panic!()
+    };
+    assert_eq!(rows.len(), 2, "current child and load-more row");
+    let selection = owner.take_selection(&rows[0].key).unwrap();
+    owner.dismiss_choices();
+    let editor = EditorState::new("/fixture".into());
+    let windows = super::super::windows::WindowSession::new(false, 10);
+    owner
+        .activate(
+            selection,
+            SourceTarget {
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                capture: Arc::new(()),
+                line: 1,
+                column: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(owner.expansion, vec![8, 7]);
+    assert_eq!(owner.pending_variable_pages.back().unwrap().0, 7);
+}
+#[test]
+fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list() {
+    let (mut owner, adapter) = request_fixture();
+    let path = PathBuf::from("/source.rs");
+    let at = |line| DapSourceBreakpoint {
+        path: path.clone(),
+        line,
+        column: None,
+        condition: None,
+        hit_condition: None,
+        log_message: None,
+    };
+    owner.breakpoint(at(10), false).unwrap();
+    let Some(DapControl::SetBreakpoints {
+        breakpoints: first, ..
+    }) = adapter.control()
+    else {
+        panic!()
+    };
+    owner.breakpoint(at(20), false).unwrap();
+    adapter.control();
+    owner.breakpoint(at(10), true).unwrap();
+    adapter.control();
+    owner.apply_breakpoints(
+        &path,
+        &first,
+        &DapResponse::Breakpoints(vec![(true, Some(10), None)]),
+    );
+    assert!(!owner.breakpoint_state(&path, 20).unwrap().is_verified());
+    owner.set_breakpoint_disabled(&path, 20, true);
+    assert!(
+        matches!(adapter.control(), Some(DapControl::SetBreakpoints { breakpoints, .. }) if breakpoints.is_empty())
+    );
+    owner.set_breakpoint_disabled(&path, 20, false);
+    assert!(
+        matches!(adapter.control(), Some(DapControl::SetBreakpoints { breakpoints, .. }) if breakpoints.len() == 1)
+    );
+    adapter.event(
+        0,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 0,
+            request_id: 0,
+            request: None,
+            response: DapResponse::BreakpointChanged {
+                path: path.clone(),
+                requested: 20,
+                verified: true,
+                line: Some(21),
+                removed: false,
+            },
+        },
+    );
+    owner.try_event().unwrap();
+    assert_eq!(
+        owner.breakpoint_state(&path, 20),
+        Some(crate::debugger::DapBreakpointState::Verified { line: 21 })
+    );
+}
+#[test]
+fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
+    let (mut owner, adapter) = request_fixture();
+    owner.watch_refresh = (0..101).map(|i| format!("watch{i}")).collect();
+    owner.refresh_watches();
+    owner.refresh_watches();
+    owner.refresh_watches();
+    assert!(!owner.watch_refresh.is_empty());
+    let mut seen = Vec::new();
+    for _ in 0..20 {
+        while let Some(DapControl::Evaluate { expression, .. }) = adapter.control() {
+            seen.push(expression);
+        }
+        owner.refresh_watches();
+        if owner.watch_refresh.is_empty() {
+            break;
+        }
+    }
+    while let Some(DapControl::Evaluate { expression, .. }) = adapter.control() {
+        seen.push(expression);
+    }
+    assert_eq!(seen.len(), 101);
+    assert_eq!(seen.last().unwrap(), "watch100");
+    owner.event_source = owner.service.context();
+    owner.watch_refresh.push_back("retired stop".into());
+    adapter.advance(1);
+    owner.refresh_watches();
+    assert!(owner.watch_refresh.is_empty());
+    assert!(adapter.control().is_none());
+}
+
+#[test]
+fn virtual_source_requests_retain_the_selected_frame_position() {
+    let root = tempfile::tempdir().unwrap();
+    let state = WorkspaceState::new(
+        WorkspaceId(1),
+        [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+    )
+    .unwrap();
+    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+    let mut owner = DebugSession::new(&DebugConfig::default(), workspace.version());
+    let (service, adapter) = crate::debugger::test_session();
+    owner.service = service;
+    let editor = EditorState::new(root.path().into());
+    let windows = super::super::windows::WindowSession::new(false, 10);
+    let rows = owner.frames(vec![DapStackFrame {
+        id: 1,
+        name: "virtual".into(),
+        path: None,
+        line: 200,
+        column: 5,
+        source_reference: Some(7),
+    }]);
+    let selection = owner.take_selection(&rows[0].key).unwrap();
+    owner
+        .activate(
+            selection,
+            SourceTarget {
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                capture: Arc::new(()),
+                line: 1,
+                column: 1,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        adapter.control(),
+        Some(DapControl::Source { reference: 7 })
+    ));
+    let source = owner.take_source().unwrap();
+    assert_eq!((source.line, source.column), (200, 5));
 }

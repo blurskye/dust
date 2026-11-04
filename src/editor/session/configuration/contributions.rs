@@ -50,7 +50,11 @@ impl ConfigurationSession {
         catalog: &PluginContributionCatalog,
     ) -> Result<ContributionCandidate, String> {
         let keymaps = self.compile_contributions(commands, catalog, false)?;
-        let windows = self.resolve_plugin_window_rules(catalog)?;
+        let windows = Self::resolve_plugin_window_rules(
+            self.raw_windows(),
+            self.expected_plugin_indexes(),
+            catalog,
+        )?;
         Ok(ContributionCandidate {
             stamp: self.stamp.clone(),
             catalog: catalog.version(),
@@ -119,15 +123,16 @@ impl ConfigurationSession {
         Ok(receipt)
     }
 
-    fn resolve_plugin_window_rules(
-        &self,
+    pub(super) fn resolve_plugin_window_rules(
+        windows: &WindowsConfig,
+        expected: &std::collections::BTreeSet<String>,
         catalog: &PluginContributionCatalog,
     ) -> Result<WindowsConfig, String> {
-        for rule in &self.raw_windows().rules {
+        for rule in &windows.rules {
             let Some(owner) = plugin_owner_from_id(&rule.content_type) else {
                 continue;
             };
-            if !self.expected_plugin_indexes().contains(owner) {
+            if !expected.contains(owner) {
                 return Err(format!(
                     "plugin window selector `{}` does not name an enabled plugin",
                     rule.content_type
@@ -165,7 +170,7 @@ impl ConfigurationSession {
                 ));
             }
         }
-        Ok(self.raw_windows().clone())
+        Ok(windows.clone())
     }
 }
 

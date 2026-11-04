@@ -16,6 +16,10 @@ pub struct Change {
     pub start: usize,
     pub removed: String,
     pub inserted: String,
+    #[serde(default)]
+    pub removed_endings: Vec<crate::editor::text::LineEnding>,
+    #[serde(default)]
+    pub inserted_endings: Vec<crate::editor::text::LineEnding>,
 }
 
 impl Change {
@@ -24,6 +28,8 @@ impl Change {
             start: self.start,
             removed: self.inserted.clone(),
             inserted: self.removed.clone(),
+            removed_endings: self.inserted_endings.clone(),
+            inserted_endings: self.removed_endings.clone(),
         }
     }
 }
@@ -217,28 +223,66 @@ pub(crate) fn save_undo_history(
     tree: UndoTree,
     maximum_bytes: usize,
 ) {
-    thread::spawn(move || {
-        let file = undo_file(&directory, &path);
-        if tree.is_empty() {
-            let _ = fs::remove_file(file);
-            return;
-        }
-        let saved = UndoFile {
-            text_sha256: text_sha256(&text),
-            tree,
-        };
-        let Ok(json) = serde_json::to_vec(&saved) else {
-            return;
-        };
-        if json.len() > maximum_bytes {
-            let _ = fs::remove_file(file);
-            return;
-        }
-        let partial = file.with_extension(format!("{}.partial", std::process::id()));
-        let _ = fs::create_dir_all(&directory)
-            .and_then(|()| fs::write(&partial, json))
-            .and_then(|()| fs::rename(&partial, &file));
+    type Save = (PathBuf, PathBuf, TextBuffer, UndoTree, usize);
+    type Queue = (
+        std::sync::Mutex<std::collections::BTreeMap<PathBuf, Save>>,
+        std::sync::Condvar,
+    );
+    static QUEUE: std::sync::OnceLock<Arc<Queue>> = std::sync::OnceLock::new();
+    let queue = QUEUE.get_or_init(|| {
+        let queue = Arc::new((
+            std::sync::Mutex::new(std::collections::BTreeMap::<PathBuf, Save>::new()),
+            std::sync::Condvar::new(),
+        ));
+        let worker = queue.clone();
+        thread::spawn(move || {
+            loop {
+                let mut jobs = worker.0.lock().expect("undo queue");
+                while jobs.is_empty() {
+                    jobs = worker.1.wait(jobs).expect("undo queue");
+                }
+                let (_, (directory, path, text, tree, maximum_bytes)) =
+                    jobs.pop_first().expect("queued undo save");
+                drop(jobs);
+                write_undo_history(directory, path, text, tree, maximum_bytes);
+            }
+        });
+        queue
     });
+    queue.0.lock().expect("undo queue").insert(
+        undo_file(&directory, &path),
+        (directory, path, text, tree, maximum_bytes),
+    );
+    queue.1.notify_one();
+}
+
+fn write_undo_history(
+    directory: PathBuf,
+    path: PathBuf,
+    text: TextBuffer,
+    tree: UndoTree,
+    maximum_bytes: usize,
+) {
+    let file = undo_file(&directory, &path);
+    if tree.is_empty() {
+        let _ = fs::remove_file(file);
+        return;
+    }
+    let saved = UndoFile {
+        text_sha256: text_sha256(&text),
+        tree,
+    };
+    let Ok(json) = serde_json::to_vec(&saved) else {
+        return;
+    };
+    if json.len() > maximum_bytes {
+        let _ = fs::remove_file(file);
+        return;
+    }
+    let partial = file.with_extension(format!("{}.partial", std::process::id()));
+    let _ = fs::create_dir_all(&directory)
+        .and_then(|()| fs::write(&partial, json))
+        .and_then(|()| fs::rename(&partial, &file));
 }
 
 #[cfg(test)]
@@ -258,7 +302,36 @@ mod tests {
             start: at,
             removed: String::new(),
             inserted: text.into(),
+            removed_endings: Vec::new(),
+            inserted_endings: Vec::new(),
         }]
+    }
+
+    #[test]
+    fn successive_history_saves_publish_the_latest_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("file");
+        for count in 1..=20 {
+            let mut tree = UndoTree::default();
+            tree.record(insert(0, &"x".repeat(count)), false);
+            super::save_undo_history(
+                root.path().into(),
+                path.clone(),
+                crate::editor::text::TextBuffer::from_text(&"x".repeat(count)),
+                tree,
+                1 << 20,
+            );
+        }
+        let text = crate::editor::text::TextBuffer::from_text(&"x".repeat(20));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(mut tree) = super::load_undo_history(root.path(), &path, &text, 1 << 20) {
+                assert_eq!(tree.undo().unwrap()[0].removed, "x".repeat(20));
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 
     #[test]

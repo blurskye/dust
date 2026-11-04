@@ -39,7 +39,10 @@ pub(in crate::editor::session) enum WorkspaceUpdate {
     Failure(WorkspaceFailure),
     RootAdded(PathBuf),
     /// The editor moved from the `old` root to the new `path`.
-    RootSwitched { path: PathBuf, old: PathBuf },
+    RootSwitched {
+        path: PathBuf,
+        old: PathBuf,
+    },
 }
 struct RootOperation {
     generation: u64,
@@ -274,16 +277,19 @@ impl WorkspaceSession {
         let mut changed = false;
         for identity in &identities {
             changed |= self.store.mark_seen(identity.clone());
+            if !self.store.is_seen(identity) {
+                return Err(WorkspaceFailure::Plain(
+                    "trust state contains too many identities".into(),
+                ));
+            }
         }
         self.confirmation = Some(Confirmation {
             source: self.version(),
             identities,
         });
-        if changed {
-            if let Err(error) = self.persist_state(None) {
-                self.confirmation = None;
-                return Err(error);
-            }
+        if changed && let Err(error) = self.persist_state(None) {
+            self.confirmation = None;
+            return Err(error);
         }
         Ok(())
     }
@@ -331,7 +337,10 @@ impl WorkspaceSession {
         self.persist_state(Some(WorkspaceTrust::Untrusted))
     }
     /// Forget a folder that is going away, so the trust file doesn't collect dead entries.
-    pub(in crate::editor::session) fn forget_folder(&mut self, path: &Path) -> Result<(), WorkspaceFailure> {
+    pub(in crate::editor::session) fn forget_folder(
+        &mut self,
+        path: &Path,
+    ) -> Result<(), WorkspaceFailure> {
         self.store.forget(path);
         // Before the trust file has loaded, writing it would drop what it holds.
         if !self.database_ready {
@@ -340,6 +349,9 @@ impl WorkspaceSession {
         self.persist_state(None)
     }
     fn persist_state(&mut self, target: Option<WorkspaceTrust>) -> Result<(), WorkspaceFailure> {
+        if !self.database_ready {
+            return Err(WorkspaceFailure::Message("workspace_trust_not_ready"));
+        }
         match self.service.persist(
             self.state_path.clone(),
             self.store.identities(),
@@ -401,7 +413,7 @@ impl WorkspaceSession {
                 if self.load_generation == Some(generation) =>
             {
                 self.load_generation = None;
-                self.database_ready = true;
+                self.database_ready = result.is_ok();
                 match result {
                     Ok(db) => {
                         self.store.replace(db.identities);
@@ -424,10 +436,7 @@ impl WorkspaceSession {
                     .as_ref()
                     .is_some_and(|(g, _, _)| *g == generation) =>
             {
-                let (_, root, source) = self.identity_generation.take().expect("matched identity");
-                if source != self.version {
-                    return;
-                }
+                let (_, root, _) = self.identity_generation.take().expect("matched identity");
                 match result {
                     Ok(identity) => match self.state.replace_root_identity(root, identity) {
                         Ok(()) => {
@@ -605,46 +614,66 @@ mod tests {
         (owner, directory)
     }
     #[test]
+    fn failed_trust_load_cannot_replace_the_original_database() {
+        let (mut owner, _directory) = fixture();
+        std::fs::write(&owner.state_path, "broken database").unwrap();
+        owner.load_generation = Some(7);
+        let mut updates = Vec::new();
+        owner.accept_event(
+            TrustEvent::Loaded {
+                generation: 7,
+                result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
+            },
+            &mut updates,
+        );
+        assert!(!owner.database_ready);
+        assert!(owner.persist_state(None).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&owner.state_path).unwrap(),
+            "broken database"
+        );
+    }
+    #[test]
+    fn revoking_trust_does_not_retire_initial_root_inspection() {
+        let (mut owner, _directory) = fixture();
+        let root = owner.state.roots()[0].clone();
+        owner.identity_ready = false;
+        owner.identity_generation = Some((7, root.id, owner.version()));
+        assert!(owner.revoke().is_ok());
+        owner.accept_event(
+            TrustEvent::RootInspected {
+                generation: 7,
+                result: Ok(root.identity),
+            },
+            &mut Vec::new(),
+        );
+        assert!(owner.identity_ready);
+    }
+    #[test]
     fn confirmation_is_bound_to_identity_root_selection_cancellation_and_safe_mode() {
         let (mut owner, _directory) = fixture();
         owner
             .request_confirmation()
             .unwrap_or_else(|_| panic!("prompt"));
         owner.cancel_confirmation();
-        assert!(
-            owner
-                .confirm()
-                .is_err()
-        );
+        assert!(owner.confirm().is_err());
         owner
             .request_confirmation()
             .unwrap_or_else(|_| panic!("prompt"));
         owner.set_active_root(RootId(2)).unwrap();
-        assert!(
-            owner
-                .confirm()
-                .is_err()
-        );
+        assert!(owner.confirm().is_err());
         owner
             .request_confirmation()
             .unwrap_or_else(|_| panic!("prompt"));
         let mut replacement = owner.roots()[0].identity.clone();
         replacement.filesystem_identity = Some((1, 99));
         owner.fixture_identity(RootId(1), replacement).unwrap();
-        assert!(
-            owner
-                .confirm()
-                .is_err()
-        );
+        assert!(owner.confirm().is_err());
         owner
             .request_confirmation()
             .unwrap_or_else(|_| panic!("prompt"));
         owner.fixture_safe_mode(true);
-        assert!(
-            owner
-                .confirm()
-                .is_err()
-        );
+        assert!(owner.confirm().is_err());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while owner.persist.is_some() {
             owner.poll();

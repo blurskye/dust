@@ -17,7 +17,10 @@ use std::{
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) enum PickerPayload {
     /// A row whose whole text opens in a popup with this title, such as a past notice.
-    Notice { title: String, text: String },
+    Notice {
+        title: String,
+        text: String,
+    },
     /// A row that groups others and is not an action: accepting it does nothing, and
     /// selection steps over it.
     Section,
@@ -32,7 +35,12 @@ pub(in crate::editor::session) enum PickerPayload {
     /// Where the tutor starts: the saved step, or the first one in a language.
     Tutor(crate::editor::session::dispatch::tutor::TutorStart),
     /// A pull request number from `gh pr list`.
-    PullRequest(u64),
+    PullRequest {
+        root: PathBuf,
+        generation: u64,
+        number: u64,
+        local: Option<PathBuf>,
+    },
     GitWorktree {
         #[allow(dead_code)]
         name: String,
@@ -43,7 +51,10 @@ pub(in crate::editor::session) enum PickerPayload {
     },
     Theme(crate::editor::session::configuration::ThemeKey),
     WorkspaceSearch(String),
-    LspLocation(crate::language::lsp::LspLocation),
+    LspLocation(
+        crate::language::lsp::LspLocation,
+        crate::editor::text::PositionEncoding,
+    ),
     Diagnostic(crate::editor::session::diagnostics::DiagnosticKey),
     CodeAction(crate::editor::session::lsp_edits::CodeActionKey),
     Buffer(crate::editor::BufferId),
@@ -183,7 +194,8 @@ impl SearchSession {
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> Result<PickerEpoch, &'static str> {
-        if !self.picker.take_help_install() && self.picker.help_open {
+        let help_install = self.picker.take_help_install();
+        if !help_install && self.picker.help_open {
             // A genuinely new surface supersedes both the help page and what it was showing, so
             // the stale snapshot is dropped rather than restored later.
             self.picker.help_open = false;
@@ -196,12 +208,13 @@ impl SearchSession {
             .interaction
             .as_ref()
             .filter(|picker| {
-                picker.source == (scope.clone(), configuration)
-                    && matches!(
-                        (picker.origin, content.origin),
-                        (PickerOrigin::Files, PickerOrigin::Files)
-                            | (PickerOrigin::Grep, PickerOrigin::Grep)
-                    )
+                let same_origin = match (picker.origin, content.origin) {
+                    (PickerOrigin::Files, PickerOrigin::Files)
+                    | (PickerOrigin::Grep, PickerOrigin::Grep) => true,
+                    (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
+                    _ => false,
+                };
+                picker.source == (scope.clone(), configuration) && same_origin
             })
             .map(|picker| {
                 (
@@ -235,14 +248,20 @@ impl SearchSession {
         let mut selected = None;
         if let Some((original, previous_query, previous_selection)) = previous {
             epoch = original;
-            if matches!(content.origin, PickerOrigin::Files) {
+            if matches!(
+                content.origin,
+                PickerOrigin::Files | PickerOrigin::PluginProvider(_)
+            ) {
                 query = previous_query.clone();
             }
             if query == previous_query {
                 selected = previous_selection;
             }
         }
-        if matches!(content.origin, PickerOrigin::Files) {
+        if matches!(
+            content.origin,
+            PickerOrigin::Files | PickerOrigin::PluginProvider(_)
+        ) {
             state.set_query(query);
         } else {
             state.set_unfiltered_query(query);
@@ -250,10 +269,10 @@ impl SearchSession {
         if let Some(selected) = selected {
             state.select_id(&selected);
         }
-        if !matches!(content.origin, PickerOrigin::Files) {
+        if !help_install && !matches!(content.origin, PickerOrigin::Files) {
             self.cancel_files();
         }
-        if !matches!(content.origin, PickerOrigin::Grep) && self.live {
+        if !help_install && !matches!(content.origin, PickerOrigin::Grep) && self.live {
             self.cancel_grep();
             self.live = false;
             self.query.clear();
@@ -295,7 +314,9 @@ impl SearchSession {
         let name = picker.state.query().trim();
         (!name.is_empty()
             && picker.state.selected_item().is_none()
-            && picker.payloads.contains_key(&PickerItemId("git-worktree-new".into())))
+            && picker
+                .payloads
+                .contains_key(&PickerItemId("git-worktree-new".into())))
         .then(|| name.to_owned())
     }
     pub(in crate::editor::session) fn selected_picker_payload(&self) -> Option<&PickerPayload> {

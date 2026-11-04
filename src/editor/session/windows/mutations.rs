@@ -202,13 +202,22 @@ impl WindowSession {
     ) -> Result<super::EditorWindowCandidate, String> {
         descriptions.signature.dashboard_visible = false;
         let restored_descriptions = descriptions.clone();
-        let mut transition = self.prepare_editor_transition(
-            proposal,
-            source.0,
-            source.1,
-            scratch,
-            Some(descriptions),
-        )?;
+        proposal.check_current(source.0)?;
+        self.check_editor_admission(&proposal.topology())?;
+        let mut candidate = self.candidate()?;
+        for (plugin, load) in generations {
+            candidate
+                .core
+                .graph
+                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
+                .map_err(|error| error.to_string())?;
+        }
+        candidate
+            .core
+            .editor
+            .reconcile(&proposal.topology(), &mut candidate.core.graph, scratch)
+            .map_err(|error| error.to_string())?;
+        let mut transition = self.stage_editor_transition(proposal, candidate, source.1)?;
         validate_window_rules(policy.rules).map_err(|error| error.to_string())?;
         for rule in policy.rules {
             transition
@@ -272,14 +281,6 @@ impl WindowSession {
                 &placements,
             )
             .map_err(|error| error.to_string())?;
-        for (plugin, load) in generations {
-            transition
-                .candidate
-                .core
-                .graph
-                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
-                .map_err(|error| error.to_string())?;
-        }
         transition.candidate.core.native.invalidate();
         transition
             .candidate
@@ -509,18 +510,17 @@ impl WindowSession {
             && matches!(target, NativeSurfaceTarget::Terminal(id) if self.focused_terminal() == Some(id));
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
-        if placement == WindowPlacement::Hidden {
-            if let Some(current) = core
+        if placement == WindowPlacement::Hidden
+            && let Some(current) = core
                 .native
                 .ids_for_target(target)
                 .and_then(|ids| core.graph.window(ids.window))
                 .map(|w| w.placement)
                 .filter(|p| *p != WindowPlacement::Hidden)
-            {
-                core.native
-                    .place_target(target, current)
-                    .map_err(|e| e.to_string())?;
-            }
+        {
+            core.native
+                .place_target(target, current)
+                .map_err(|e| e.to_string())?;
         }
         let ids = core
             .native
@@ -880,22 +880,18 @@ impl WindowSession {
         if !rules
             .iter()
             .any(|(content_type, _)| *content_type == "builtin.explorer")
+            && let Some(ids) = self.native_ids().explorer()
+            && let Some(window) = self.graph().window(ids.window)
         {
-            if let Some(ids) = self.native_ids().explorer() {
-                if let Some(window) = self.graph().window(ids.window) {
-                    rules.push(("builtin.explorer", window.placement));
-                }
-            }
+            rules.push(("builtin.explorer", window.placement));
         }
         if !rules
             .iter()
             .any(|(content_type, _)| *content_type == "builtin.terminal")
+            && let Some(ids) = selected.and_then(|id| self.native_ids().terminal(id))
+            && let Some(window) = self.graph().window(ids.window)
         {
-            if let Some(ids) = selected.and_then(|id| self.native_ids().terminal(id)) {
-                if let Some(window) = self.graph().window(ids.window) {
-                    rules.push(("builtin.terminal", window.placement));
-                }
-            }
+            rules.push(("builtin.terminal", window.placement));
         }
         rules
             .into_iter()

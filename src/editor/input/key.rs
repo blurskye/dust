@@ -299,7 +299,9 @@ impl FromStr for KeyEvent {
             "focus-lost" => KeyCode::FocusLost,
             name if name.len() > 1
                 && name.starts_with('f')
-                && name[1..].parse::<u8>().is_ok_and(|number| (1..=12).contains(&number)) =>
+                && name[1..]
+                    .parse::<u8>()
+                    .is_ok_and(|number| (1..=12).contains(&number)) =>
             {
                 KeyCode::F(name[1..].parse().unwrap_or(1))
             }

@@ -107,6 +107,10 @@ impl StructuredLogs {
 }
 fn write_record(path: &PathBuf, record: &LogRecord, policy: &LogPolicy) -> std::io::Result<()> {
     use std::io::Write;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let _lock = crate::files::lock_file(&path.with_extension("jsonl.lock"))?;
     if fs::metadata(path).is_ok_and(|metadata| metadata.len() >= policy.maximum_file_bytes) {
         for index in (1..policy.rotations).rev() {
             let from = path.with_extension(format!("jsonl.{index}"));
@@ -114,9 +118,6 @@ fn write_record(path: &PathBuf, record: &LogRecord, policy: &LogPolicy) -> std::
             let _ = fs::rename(from, to);
         }
         let _ = fs::rename(path, path.with_extension("jsonl.1"));
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
     }
     let mut options = fs::OpenOptions::new();
     options.create(true).append(true);
@@ -126,8 +127,9 @@ fn write_record(path: &PathBuf, record: &LogRecord, policy: &LogPolicy) -> std::
         options.mode(0o600);
     }
     let mut file = options.open(path)?;
-    serde_json::to_writer(&mut file, record)?;
-    file.write_all(b"\n")
+    let mut bytes = serde_json::to_vec(record)?;
+    bytes.push(b'\n');
+    file.write_all(&bytes)
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LiveCrashSnapshot {
@@ -176,13 +178,13 @@ fn write_live_snapshot(path: &PathBuf, snapshot: &LiveCrashSnapshot) -> std::io:
             fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         }
     }
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "crash snapshot target must be a regular file",
-            ));
-        }
+    if let Ok(metadata) = fs::symlink_metadata(path)
+        && (!metadata.file_type().is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "crash snapshot target must be a regular file",
+        ));
     }
     let bytes = serde_json::to_vec(snapshot).map_err(std::io::Error::other)?;
     if bytes.len() > 64 * 1024 {
@@ -218,4 +220,59 @@ pub struct HealthSnapshot {
     pub safe_mode: bool,
     pub recovery_pending: usize,
     pub notes: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_log_writers_keep_records_and_rotation_intact() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("dust.jsonl");
+        let policy = LogPolicy {
+            maximum_records: 1000,
+            maximum_field_bytes: 8192,
+            maximum_file_bytes: 64 * 1024,
+            rotations: 32,
+            sensitive_keys: Vec::new(),
+        };
+        thread::scope(|scope| {
+            for writer in 0..4 {
+                let path = &path;
+                let policy = &policy;
+                scope.spawn(move || {
+                    for index in 0..50 {
+                        write_record(
+                            path,
+                            &LogRecord {
+                                timestamp_ms: 0,
+                                level: LogLevel::Info,
+                                subsystem: writer.to_string(),
+                                event: index.to_string(),
+                                fields: BTreeMap::from([("text".into(), "x".repeat(4096))]),
+                            },
+                            policy,
+                        )
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        let mut records = std::collections::BTreeSet::new();
+        for entry in fs::read_dir(directory.path()).unwrap().flatten() {
+            if entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "lock")
+            {
+                continue;
+            }
+            for line in fs::read_to_string(entry.path()).unwrap().lines() {
+                let record: LogRecord = serde_json::from_str(line).unwrap();
+                assert!(records.insert((record.subsystem, record.event)));
+            }
+        }
+        assert_eq!(records.len(), 200);
+    }
 }

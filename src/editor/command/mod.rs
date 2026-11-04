@@ -1,6 +1,7 @@
 mod builtins;
 
 pub use builtins::register_builtin_commands;
+pub(crate) use builtins::visual_ranges;
 
 use std::{collections::BTreeMap, fmt, num::NonZeroU64, sync::Arc};
 

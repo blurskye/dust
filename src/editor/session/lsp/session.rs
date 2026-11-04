@@ -14,7 +14,9 @@ mod projection;
 pub(in crate::editor::session) use projection::ProjectionChange;
 // LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.
 use super::{
-    lsp_edits::{CodeActionChoice, CodeActionKey, EditDocument, OfferedAction, LspEditSources, SourcePlan},
+    lsp_edits::{
+        CodeActionChoice, CodeActionKey, EditDocument, LspEditSources, OfferedAction, SourcePlan,
+    },
     workspace_edits::{OriginKey, PreparedFiles},
 };
 use crate::{
@@ -42,6 +44,7 @@ pub(in crate::editor::session) struct LspProjectionOwner {
     pub buffer: BufferId,
     pub view: ViewId,
     pub revision: BufferRevision,
+    pub text: TextVersion,
     pub uri: String,
     pub language: String,
 }
@@ -141,12 +144,15 @@ pub(super) struct LspSession {
     install_hinted: HashSet<String>,
     /// Servers a person stopped; opening a file doesn't start them until asked again.
     stopped: HashSet<String>,
+    detached: HashSet<(String, BufferId)>,
     errors: BTreeMap<String, String>,
     navigation_reads: HashMap<
         crate::files::RequestId,
         (
             crate::language::lsp::LspRange,
             crate::editor::text::PositionEncoding,
+            crate::editor::session::windows::NavigationStamp,
+            crate::editor::session::workspace::WorkspaceVersion,
         ),
     >,
     #[cfg(test)]
@@ -161,8 +167,11 @@ impl LspSession {
         id: crate::files::RequestId,
         range: crate::language::lsp::LspRange,
         encoding: crate::editor::text::PositionEncoding,
+        navigation: crate::editor::session::windows::NavigationStamp,
+        workspace: crate::editor::session::workspace::WorkspaceVersion,
     ) {
-        self.navigation_reads.insert(id, (range, encoding));
+        self.navigation_reads
+            .insert(id, (range, encoding, navigation, workspace));
     }
     pub(super) fn take_navigation_read(
         &mut self,
@@ -170,6 +179,8 @@ impl LspSession {
     ) -> Option<(
         crate::language::lsp::LspRange,
         crate::editor::text::PositionEncoding,
+        crate::editor::session::windows::NavigationStamp,
+        crate::editor::session::workspace::WorkspaceVersion,
     )> {
         self.navigation_reads.remove(&id)
     }
@@ -208,6 +219,19 @@ impl LspSession {
     }
     pub(super) fn close(&self, server: &str, uri: String) -> Result<(), LspError> {
         self.service.close(server, uri)
+    }
+    pub(super) fn explicitly_detached(&self, server: &str, buffer: BufferId) -> bool {
+        self.detached.contains(&(server.to_owned(), buffer))
+    }
+    pub(super) fn clear_detached(&mut self, buffer: BufferId) {
+        self.detached.retain(|(_, id)| *id != buffer);
+    }
+    pub(super) fn set_detached(&mut self, server: String, buffer: BufferId, detached: bool) {
+        if detached {
+            self.detached.insert((server, buffer));
+        } else {
+            self.detached.remove(&(server, buffer));
+        }
     }
     pub(super) fn save(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
         self.service.save(server, document)
@@ -256,10 +280,7 @@ impl LspSession {
     pub(super) fn clear_actions(&mut self) {
         self.edits.clear_actions();
     }
-    pub(super) fn take_action(
-        &mut self,
-        key: &CodeActionKey,
-    ) -> Result<OfferedAction, String> {
+    pub(super) fn take_action(&mut self, key: &CodeActionKey) -> Result<OfferedAction, String> {
         self.edits.take_action(key, &self.service)
     }
     pub(super) fn poll_event(&self) -> Option<OwnedLspEvent> {
@@ -305,7 +326,36 @@ impl LspSession {
         applied: bool,
         reason: Option<String>,
     ) -> Result<(), String> {
-        self.edits.finish(key, applied, reason)
+        let command = self.edits.take_command(key);
+        self.edits.finish(key, applied, reason)?;
+        if applied && let Some((server, command)) = command {
+            let document = self
+                .sessions
+                .get(&server)
+                .and_then(|session| session.documents.values().next())
+                .cloned()
+                .ok_or("code-action server is no longer attached")?;
+            let generation = self
+                .next_generation()
+                .ok_or("language-server request identity exhausted")?;
+            self.service
+                .request(
+                    &server,
+                    crate::language::lsp::LspFeature::ExecuteCommand(command),
+                    document,
+                    crate::editor::text::ByteOffset(0),
+                    generation,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+    pub(super) fn set_edit_command(
+        &mut self,
+        server: String,
+        command: crate::language::lsp::LspCommand,
+    ) {
+        self.edits.set_command(server, command);
     }
     pub(super) fn diagnostic_batch(
         &self,
@@ -397,25 +447,25 @@ impl LspSession {
         );
         let mut documents = previous.map_or_else(HashMap::new, |s| s.documents);
         documents.insert(buffer, document.clone());
+        self.retire_projection_server(&key);
         self.forget_synced(&key);
         if origin.2 {
             for (id, replay) in &mut documents {
-                if *id != buffer {
-                    if let Some(current) = editor
+                if *id != buffer
+                    && let Some(current) = editor
                         .buffers
                         .get(*id)
                         .filter(|b| b.path.as_ref() == Some(&replay.path))
+                {
+                    replay.version = current.text.revision().0;
+                    replay.text = current.text.to_string();
+                    let version = current.text.source_version();
+                    if self
+                        .service
+                        .sync_owned(&key, replay.clone(), (*id, version.clone()))
+                        .is_ok()
                     {
-                        replay.version = current.text.revision().0;
-                        replay.text = current.text.to_string();
-                        let version = current.text.source_version();
-                        if self
-                            .service
-                            .sync_owned(&key, replay.clone(), (*id, version.clone()))
-                            .is_ok()
-                        {
-                            self.synced.insert((key.clone(), *id), version);
-                        }
+                        self.synced.insert((key.clone(), *id), version);
                     }
                 }
             }
@@ -443,7 +493,37 @@ impl LspSession {
         }
         Ok(())
     }
+    pub(super) fn retry_documents(&mut self, editor: &EditorState) {
+        for (key, session) in &mut self.sessions {
+            if !session.desired_running || session.capabilities.is_none() {
+                continue;
+            }
+            for (id, document) in &mut session.documents {
+                let Some(buffer) = editor
+                    .buffers
+                    .get(*id)
+                    .filter(|b| b.path.as_ref() == Some(&document.path))
+                else {
+                    continue;
+                };
+                let version = buffer.text.source_version();
+                if self.synced.contains_key(&(key.clone(), *id)) {
+                    continue;
+                }
+                document.text = buffer.text.to_string();
+                document.version = buffer.text.revision().0;
+                if self
+                    .service
+                    .sync_owned(key, document.clone(), (*id, version.clone()))
+                    .is_ok()
+                {
+                    self.synced.insert((key.clone(), *id), version);
+                }
+            }
+        }
+    }
     pub(super) fn remove(&mut self, key: &str) {
+        self.retire_projection_server(key);
         self.sessions.remove(key);
         self.forget_synced(key);
     }
@@ -466,6 +546,7 @@ impl LspSession {
         self.active.as_deref() == Some(key)
     }
     pub(super) fn stopped(&mut self, key: &str) -> bool {
+        self.retire_projection_server(key);
         self.forget_synced(key);
         self.sessions.get_mut(key).is_some_and(|state| {
             state.capabilities = None;
@@ -486,11 +567,7 @@ impl LspSession {
             state.desired_running = true;
         }
     }
-    pub(super) fn schedule_restart(
-        &mut self,
-        key: &str,
-        now: Instant,
-    ) -> Option<String> {
+    pub(super) fn schedule_restart(&mut self, key: &str, now: Instant) -> Option<String> {
         let state = self.sessions.get_mut(key)?;
         if !state.desired_running || state.restart_due.is_some() {
             return None;
@@ -529,11 +606,6 @@ impl LspSession {
         if let Some(state) = self.sessions.get_mut(key) {
             state.documents.insert(buffer, document);
             self.synced.insert((key.into(), buffer), version);
-        }
-    }
-    pub(super) fn invalidate_active_document(&mut self, buffer: BufferId) {
-        if let Some(key) = &self.active {
-            self.synced.remove(&(key.clone(), buffer));
         }
     }
     pub(super) fn invalidate_document(&mut self, key: &str, buffer: BufferId) {
@@ -587,6 +659,20 @@ impl LspSession {
 }
 #[cfg(test)]
 impl LspSession {
+    pub(super) fn fixture_transport(
+        &mut self,
+        key: &str,
+        document: &LspDocument,
+        source: (BufferId, TextVersion),
+    ) -> crate::language::lsp::EditSourceFixture {
+        self.service.replace_edit_source_fixture_for(
+            key,
+            document.uri(),
+            source,
+            crate::editor::text::PositionEncoding::Utf16,
+            16,
+        )
+    }
     pub(super) fn fixture_session(&mut self, key: String, state: LspRuntimeState) {
         self.sessions.insert(key, state);
     }

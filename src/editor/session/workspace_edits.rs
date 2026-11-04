@@ -245,11 +245,24 @@ impl WorkspaceEditSession {
             return Err("too many staged workspace resources".into());
         }
         for path in &p.creates {
+            if drafts.iter().any(|draft| &draft.canonical_path == path) {
+                continue;
+            }
             drafts.push(WorkspaceEditDraft {
                 canonical_path: path.clone(),
                 expected_revision: None,
                 edits: Vec::new(),
             });
+        }
+        if p.resources.iter().any(|resource| {
+            matches!(resource.kind, ResourceIntentKind::Rename { .. })
+                && drafts
+                    .iter()
+                    .any(|draft| draft.canonical_path == resource.source && !draft.edits.is_empty())
+        }) {
+            return Err(
+                "text edits and renames of the same file cannot be applied together".into(),
+            );
         }
         let proposal = WorkspaceEditProposal::build(
             p.source.id,
@@ -428,26 +441,16 @@ impl WorkspaceEditSession {
             return None;
         }
         let (_, request) = self.applying.remove(&id).expect("checked worker request");
-        let retired = request.retired.as_deref().or_else(|| {
+        let retired = request.retired.clone().or_else(|| {
             (&request.workspace != workspace || request.configuration != configuration)
-                .then_some("source change")
+                .then(|| "source change".to_owned())
         });
         Some(match reply.into_result() {
             crate::files::VfsResult::ResourceApplied { result, .. } => {
-                if let Some(reason) = retired {
-                    Err(match result {
-                        Ok(()) => format!(
-                            "proposal {} resource completed on disk after {reason}; editor paths were not reconciled",
-                            request.proposal.0
-                        ),
-                        Err(error) => format!(
-                            "proposal {} resource failed after {reason}: {error}",
-                            request.proposal.0
-                        ),
-                    })
-                } else {
-                    result.map(|()| request).map_err(|error| error.to_string())
-                }
+                result.map(|()| request).map_err(|error| match retired {
+                    Some(reason) => format!("resource failed after {reason}: {error}"),
+                    None => error.to_string(),
+                })
             }
             _ => Err("wrong workspace resource terminal; disk outcome is unknown".into()),
         })

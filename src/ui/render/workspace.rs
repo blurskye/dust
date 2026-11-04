@@ -1,16 +1,12 @@
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
 use crate::ui::render::editor::END_OF_BUFFER_MARKER;
+use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
 use crate::{
     config::{AmbiguousWidth, Config},
     editor::EditorState,
     ui::{CellGrid, Style, window::TileAxis},
 };
 
-use super::{
-    Frame, UiState,
-    editor::render_editor_view,
-    overlays::render_content_tab_line,
-};
+use super::{Frame, UiState, editor::render_editor_view, overlays::render_content_tab_line};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {
@@ -260,11 +256,13 @@ pub(super) fn render_non_tiled_editor_window(
     else {
         return false;
     };
+    let mut local_config = config.clone();
+    local_config.ui.status_line.enabled = false;
     let rendered = render_editor_view(
         state,
         binding.view,
         ui,
-        config,
+        &local_config,
         projected.rect.width,
         projected.rect.height,
     );
@@ -325,11 +323,11 @@ pub(super) fn render_workspace(
         let mut grid = CellGrid::new_with_policy(
             width,
             height,
-            &CONTROL_CHARACTER_REPLACEMENT,
-            &ZERO_WIDTH_REPLACEMENT,
+            CONTROL_CHARACTER_REPLACEMENT,
+            ZERO_WIDTH_REPLACEMENT,
             config.editor.ambiguous_width == AmbiguousWidth::Wide,
         );
-        grid.put_text(0, 0, &END_OF_BUFFER_MARKER, Style::Muted);
+        grid.put_text(0, 0, END_OF_BUFFER_MARKER, Style::Muted);
         return Frame { grid, cursor: None };
     };
     let Some(tab) = state.tabs.get(tab_id) else {
@@ -367,8 +365,8 @@ pub(super) fn render_workspace(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     if projection.tab_line_visible {
@@ -430,10 +428,10 @@ pub(super) fn render_workspace(
                 }
             }
         }
-        if rect.pane == tab.focused {
-            if let Some((x, y, shape)) = frame.cursor {
-                cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
-            }
+        if rect.pane == tab.focused
+            && let Some((x, y, shape)) = frame.cursor
+        {
+            cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
         }
     }
     let (horizontal, vertical) = ('─', '│');

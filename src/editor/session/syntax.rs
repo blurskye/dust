@@ -7,7 +7,7 @@ use crate::{
     config::SyntaxConfig,
     editor::{
         BufferId,
-        text::{BufferRevision, TextBuffer},
+        text::{BufferRevision, TextBuffer, TextVersion},
     },
     language::syntax::{
         SyntaxDocumentId, SyntaxEvent, SyntaxLanguage, SyntaxPolicy, SyntaxResult, SyntaxService,
@@ -43,9 +43,10 @@ pub(super) enum IndentError {
 /// Owns parser admission, document identities, debounce and accepted results.
 pub(super) struct SyntaxSession {
     service: SyntaxService,
+    versions: HashMap<BufferId, TextVersion>,
     documents: HashMap<BufferId, SyntaxDocumentId>,
     submitted: HashMap<BufferId, (BufferRevision, u64, SyntaxLanguage)>,
-    accepted: HashMap<BufferId, SyntaxResult>,
+    accepted: HashMap<BufferId, (TextVersion, SyntaxResult)>,
     failures: HashMap<BufferId, SyntaxFailure>,
     due: HashMap<BufferId, (BufferRevision, Instant)>,
     next_document: u64,
@@ -56,6 +57,7 @@ impl SyntaxSession {
     pub(super) fn new(queue_capacity: usize) -> Self {
         Self {
             service: SyntaxService::start(queue_capacity),
+            versions: HashMap::new(),
             documents: HashMap::new(),
             submitted: HashMap::new(),
             accepted: HashMap::new(),
@@ -67,6 +69,7 @@ impl SyntaxSession {
     }
 
     fn close(&mut self, buffer: BufferId) {
+        self.versions.remove(&buffer);
         if let Some(document) = self.documents.remove(&buffer) {
             self.service.cancel(document);
         }
@@ -85,6 +88,24 @@ impl SyntaxSession {
         now: Instant,
         too_large: &str,
     ) -> usize {
+        for doc in documents {
+            let source = doc.text.source_version();
+            if self
+                .versions
+                .get(&doc.buffer)
+                .is_some_and(|previous| !previous.same_incarnation(&source))
+            {
+                self.close(doc.buffer);
+            } else if self
+                .versions
+                .get(&doc.buffer)
+                .is_some_and(|previous| *previous != source)
+            {
+                self.submitted.remove(&doc.buffer);
+                self.failures.remove(&doc.buffer);
+            }
+            self.versions.insert(doc.buffer, source);
+        }
         let live = documents
             .iter()
             .filter_map(|doc| {
@@ -98,6 +119,7 @@ impl SyntaxSession {
             .documents
             .keys()
             .chain(self.due.keys())
+            .chain(self.versions.keys())
             .filter(|id| !live.contains_key(id))
             .copied()
             .collect::<Vec<_>>();
@@ -106,7 +128,7 @@ impl SyntaxSession {
         }
         // An older parse stays until the next one lands, so editing doesn't blank the colours;
         // anything that needs the exact text checks the revision itself.
-        self.accepted.retain(|buffer, result| {
+        self.accepted.retain(|buffer, (_, result)| {
             live.get(buffer)
                 .is_some_and(|(_, language)| *language == result.language)
         });
@@ -219,7 +241,10 @@ impl SyntaxSession {
         match event {
             SyntaxEvent::Parsed(result) => {
                 self.failures.remove(&buffer);
-                self.accepted.insert(buffer, result);
+                let Some(source) = self.versions.get(&buffer) else {
+                    return;
+                };
+                self.accepted.insert(buffer, (source.clone(), result));
             }
             SyntaxEvent::Failed { diagnostic, .. } => {
                 self.accepted.remove(&buffer);
@@ -249,10 +274,15 @@ impl SyntaxSession {
     }
 
     pub(super) fn result(&self, buffer: BufferId) -> Option<&SyntaxResult> {
-        self.accepted.get(&buffer)
+        self.accepted.get(&buffer).map(|(_, result)| result)
+    }
+    pub(super) fn source(&self, buffer: BufferId) -> Option<&TextVersion> {
+        self.accepted.get(&buffer).map(|(source, _)| source)
     }
     pub(super) fn results(&self) -> impl Iterator<Item = (&BufferId, &SyntaxResult)> {
-        self.accepted.iter()
+        self.accepted
+            .iter()
+            .map(|(buffer, (_, result))| (buffer, result))
     }
     pub(super) fn failure(&self, buffer: BufferId) -> Option<&str> {
         self.failures
@@ -267,6 +297,9 @@ impl SyntaxSession {
         language: SyntaxLanguage,
         line: usize,
     ) -> Result<usize, IndentError> {
+        if self.source(buffer) != self.versions.get(&buffer) {
+            return Err(IndentError::Pending);
+        }
         let result = self
             .result(buffer)
             .filter(|result| result.revision == revision.0 && result.language == language)
@@ -291,6 +324,35 @@ mod tests {
     use slotmap::SlotMap;
 
     #[test]
+    fn every_admitted_parse_event_is_delivered() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let text = TextBuffer::from_text("fn main() {}");
+        let documents = (0..12)
+            .map(|_| SyntaxDocument {
+                buffer: ids.insert(()),
+                text: &text,
+                language: Some(SyntaxLanguage::Rust),
+                enabled: true,
+            })
+            .collect::<Vec<_>>();
+        let config = SyntaxConfig::default();
+        let mut session = SyntaxSession::new(2);
+        let start = Instant::now();
+        session.tick(&documents, &config, start, "large");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.results().count() < documents.len() {
+            session.tick(
+                &documents,
+                &config,
+                start + Duration::from_millis(100),
+                "large",
+            );
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
     fn unchanged_ticks_materialize_no_additional_source_and_disable_cancels_identity() {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
@@ -312,10 +374,7 @@ mod tests {
         }
         session.tick(
             &documents,
-            &SyntaxConfig {
-                enabled: false,
-                ..config
-            },
+            &SyntaxConfig { enabled: false },
             now,
             "too large",
         );
@@ -355,7 +414,55 @@ mod tests {
             enabled: true,
         }];
         session.tick(&documents, &config, now, "too large");
-        assert_eq!(session.result(buffer).map(|result| result.revision), Some(parsed));
+        assert_eq!(
+            session.result(buffer).map(|result| result.revision),
+            Some(parsed)
+        );
+    }
+
+    #[test]
+    fn reload_at_the_same_revision_retires_syntax_objects() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let original = TextBuffer::from_text("fn old() {}\n");
+        let mut session = SyntaxSession::new(2);
+        let config = SyntaxConfig::default();
+        let mut now = Instant::now();
+        for _ in 0..400 {
+            session.tick(
+                &[SyntaxDocument {
+                    buffer,
+                    text: &original,
+                    language: Some(SyntaxLanguage::Rust),
+                    enabled: true,
+                }],
+                &config,
+                now,
+                "large",
+            );
+            if session.result(buffer).is_some() {
+                break;
+            }
+            now += Duration::from_millis(SYNTAX_DEBOUNCE_MS);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(session.result(buffer).is_some());
+        let replacement = TextBuffer::from_text("// replacement\n");
+        assert_eq!(original.revision(), replacement.revision());
+        session.tick(
+            &[SyntaxDocument {
+                buffer,
+                text: &replacement,
+                language: Some(SyntaxLanguage::Rust),
+                enabled: true,
+            }],
+            &config,
+            now,
+            "large",
+        );
+        assert!(session.result(buffer).is_none());
+        assert!(session.submitted.is_empty());
+        assert!(session.due.contains_key(&buffer));
     }
 
     #[test]

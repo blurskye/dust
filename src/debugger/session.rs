@@ -17,7 +17,10 @@ const RESIDENT: usize = 8;
 
 #[derive(Debug)]
 pub(super) struct Actor {
-    pub(super) cancel: AtomicBool,
+    pub(super) cancel: Arc<AtomicBool>,
+    pub(super) supports_terminate: AtomicBool,
+    launch: bool,
+    next_request: AtomicU64,
     retired: AtomicBool,
     done: AtomicBool,
     pub(super) generation: AtomicU64,
@@ -39,6 +42,7 @@ pub(crate) struct DapContext {
 }
 pub(super) struct Control {
     pub(super) value: DapControl,
+    pub(super) request_id: u64,
     pub(super) generation: u64,
 }
 #[derive(Clone)]
@@ -209,7 +213,10 @@ impl DapService {
             return Err(DapError::InvalidConfiguration);
         }
         let actor = Arc::new(Actor {
-            cancel: AtomicBool::new(false),
+            cancel: Arc::new(AtomicBool::new(false)),
+            supports_terminate: AtomicBool::new(false),
+            launch: launch.request == "launch",
+            next_request: AtomicU64::new(1),
             retired: AtomicBool::new(false),
             done: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -271,6 +278,13 @@ impl DapService {
         source: &DapContext,
         control: DapControl,
     ) -> Result<(), DapError> {
+        self.control_tracked(source, control).map(|_| ())
+    }
+    pub(crate) fn control_tracked(
+        &self,
+        source: &DapContext,
+        control: DapControl,
+    ) -> Result<u64, DapError> {
         if !self.current(source) {
             return Err(DapError::Retired);
         }
@@ -278,20 +292,32 @@ impl DapService {
         if matches!(control, DapControl::Stop) {
             session.actor.cancel.store(true, Ordering::Release);
             session.actor.live.store(false, Ordering::Release);
-            return Ok(());
+            return Ok(0);
         }
         if session.actor.cancel.load(Ordering::Acquire) {
             return Err(DapError::NotRunning);
         }
+        if let DapControl::Disconnect { terminate_debuggee } = &control
+            && *terminate_debuggee != session.actor.launch
+            && !session.actor.supports_terminate.load(Ordering::Acquire)
+        {
+            return Err(DapError::InvalidConfiguration);
+        }
         if !control_bounded(&control) {
+            return Err(DapError::InvalidConfiguration);
+        }
+        let request_id = session.actor.next_request.fetch_add(1, Ordering::AcqRel);
+        if request_id == u64::MAX {
             return Err(DapError::InvalidConfiguration);
         }
         session
             .sender
             .try_send(Control {
+                request_id,
                 value: control,
                 generation: source.generation,
             })
+            .map(|()| request_id)
             .map_err(|e| match e {
                 mpsc::TrySendError::Full(_) => DapError::Full,
                 mpsc::TrySendError::Disconnected(_) => DapError::NotRunning,
@@ -323,7 +349,19 @@ impl DapService {
                 result
             };
             match result {
-                Ok((source, event)) => {
+                Ok((mut source, event)) => {
+                    let session_scoped = matches!(
+                        &event,
+                        DapEvent::Response {
+                            response: super::DapResponse::Breakpoints(_)
+                                | super::DapResponse::Disconnected { .. }
+                                | super::DapResponse::BreakpointChanged { .. },
+                            ..
+                        }
+                    ) || matches!(&event, DapEvent::RequestFailed { command, .. } if command == "setBreakpoints" || command == "disconnect");
+                    if session_scoped {
+                        source.generation = session.actor.generation.load(Ordering::Acquire);
+                    }
                     if matches!(
                         event,
                         DapEvent::Response { .. }
@@ -383,9 +421,10 @@ pub(super) struct Writer {
 }
 impl Writer {
     pub(super) fn start(
-        mut pipe: std::process::ChildStdin,
+        pipe: std::process::ChildStdin,
         events: Events,
     ) -> std::io::Result<(Self, thread::JoinHandle<()>)> {
+        let mut pipe = crate::process::CancellablePipe::new(pipe, events.actor.cancel.clone())?;
         let (sender, receiver) = mpsc::sync_channel::<(Value, Option<Arc<AtomicU8>>)>(CAPACITY);
         let actor = events.actor.clone();
         let worker = thread::Builder::new()
@@ -523,7 +562,10 @@ impl TestAdapter {
 #[cfg(test)]
 pub(crate) fn fixture() -> (DapService, TestAdapter) {
     let actor = Arc::new(Actor {
-        cancel: AtomicBool::new(false),
+        cancel: Arc::new(AtomicBool::new(false)),
+        supports_terminate: AtomicBool::new(true),
+        launch: true,
+        next_request: AtomicU64::new(1),
         retired: AtomicBool::new(false),
         done: AtomicBool::new(false),
         generation: AtomicU64::new(0),
@@ -646,5 +688,71 @@ impl ExecutionScope {
         let selected = crate::files::participating_roots(&requested, &canonical, &self.roots)
             .map_err(|e| e.to_string())?;
         crate::files::roots_current(&selected).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    use crate::debugger::{DapResponse, DapSourceBreakpoint};
+    #[test]
+    fn unsupported_detach_is_refused_before_admission() {
+        let (service, adapter) = fixture();
+        service
+            .session
+            .as_ref()
+            .unwrap()
+            .actor
+            .supports_terminate
+            .store(false, Ordering::Release);
+        assert!(
+            service
+                .control(DapControl::Disconnect {
+                    terminate_debuggee: false
+                })
+                .is_err()
+        );
+        assert!(adapter.control().is_none());
+        service
+            .control(DapControl::Disconnect {
+                terminate_debuggee: true,
+            })
+            .unwrap();
+        assert!(matches!(
+            adapter.control(),
+            Some(DapControl::Disconnect {
+                terminate_debuggee: true
+            })
+        ));
+    }
+    #[test]
+    fn queued_breakpoint_answers_survive_new_stop_generations() {
+        let (mut service, adapter) = fixture();
+        let path = std::path::PathBuf::from("/source");
+        adapter.event(
+            0,
+            DapEvent::Response {
+                adapter: "same-name".into(),
+                stop_generation: 0,
+                request_id: 4,
+                request: Some(DapControl::SetBreakpoints {
+                    path: path.clone(),
+                    breakpoints: vec![DapSourceBreakpoint {
+                        path,
+                        line: 20,
+                        column: None,
+                        condition: None,
+                        hit_condition: None,
+                        log_message: None,
+                    }],
+                }),
+                response: DapResponse::Breakpoints(vec![(true, Some(20), None)]),
+            },
+        );
+        adapter.advance(1);
+        assert!(matches!(
+            service.try_event(),
+            Some(DapEvent::Response { request_id: 4, .. })
+        ));
     }
 }

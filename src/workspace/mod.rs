@@ -5,7 +5,7 @@ pub mod search_workflow;
 
 const ABSOLUTE_ROOT_LIMIT: usize = 64;
 const ABSOLUTE_DIAGNOSTIC_LIMIT: usize = 100_000;
-const ABSOLUTE_PICKER_ITEM_LIMIT: usize = 100_000;
+pub(crate) const ABSOLUTE_PICKER_ITEM_LIMIT: usize = 100_000;
 const ABSOLUTE_PROPOSAL_FILE_LIMIT: usize = 1_024;
 const ABSOLUTE_PROPOSAL_EDIT_LIMIT: usize = 100_000;
 mod root;
@@ -29,8 +29,8 @@ pub use diagnostics::{
 };
 mod picker;
 pub use picker::{
-    fuzzy_score, PickerAction, PickerItem, PickerItemId, PickerItemKind, PickerPresentation,
-    PickerRowPresentation, PickerState,
+    PickerAction, PickerItem, PickerItemId, PickerItemKind, PickerPresentation,
+    PickerRowPresentation, PickerState, fuzzy_score,
 };
 mod edit;
 pub use edit::{

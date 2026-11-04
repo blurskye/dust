@@ -55,11 +55,7 @@ pub(super) fn install_tool(
             compatibility,
         );
     }
-    let staging = root.join(format!(
-        ".tool-{}-{}",
-        definition.id,
-        next_temp_suffix()
-    ));
+    let staging = root.join(format!(".tool-{}-{}", definition.id, next_temp_suffix()));
     fs::create_dir(&staging).map_err(|error| format!("cannot stage tool installation: {error}"))?;
     let result = (|| {
         let bin = staging.join("bin");
@@ -73,7 +69,7 @@ pub(super) fn install_tool(
                 executable_path,
                 tree,
             } => {
-                let bytes = download_checked(url, sha256, report)?;
+                let bytes = download_checked(url, sha256, cancellations, report)?;
                 report("extracting", 0, None);
                 if let Some(tree) = tree {
                     extract_zip_tree(&bytes, tree, &staging)?;
@@ -127,11 +123,11 @@ pub(super) fn install_tool(
                 unreachable!("handled before staging")
             }
         }
-        if let Some(compatibility) = compatibility {
-            if !matches!(install, ToolInstall::NpmPackage { .. }) {
-                report("applying Nix compatibility", 0, None);
-                patch_nix_compatibility_tree(&staging, compatibility, cancellations)?;
-            }
+        if let Some(compatibility) = compatibility
+            && !matches!(install, ToolInstall::NpmPackage { .. })
+        {
+            report("applying Nix compatibility", 0, None);
+            patch_nix_compatibility_tree(&staging, compatibility, cancellations)?;
         }
         if !matches!(install, ToolInstall::NpmPackage { .. }) {
             report("verifying", 0, None);

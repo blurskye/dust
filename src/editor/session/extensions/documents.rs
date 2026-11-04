@@ -56,11 +56,24 @@ impl VirtualDocumentEditorBridge {
             {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
+            let mut text = state.topology().buffers()[entry.buffer].text.clone();
+            text.apply_edits(&crate::editor::text::TextEditSet::new(
+                text.revision(),
+                vec![crate::editor::text::TextEdit::new(
+                    crate::editor::text::ByteRange::new(
+                        crate::editor::text::ByteOffset(0),
+                        crate::editor::text::ByteOffset(text.len_bytes()),
+                    )
+                    .map_err(|_| VirtualDocumentEditorError::StaleRevision)?,
+                    snapshot.text.clone(),
+                )],
+            ))
+            .map_err(|_| VirtualDocumentEditorError::StaleRevision)?;
             if !state.replace_virtual_read_only(
                 entry.buffer,
                 entry.revision,
                 snapshot.revision,
-                TextBuffer::from_text(&snapshot.text),
+                text,
             ) {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
@@ -236,10 +249,12 @@ mod tests {
         let view = state.active_view.unwrap();
         state.views[view].cursor = ByteOffset(3);
         let buffers = state.buffers.len();
+        let text_revision = state.buffers[b].text.revision();
         assert_eq!(
             publish(&mut bridge, &mut state, &snap(2, "héllo refreshed")).unwrap(),
             b
         );
+        assert!(state.buffers[b].text.revision() > text_revision);
         assert_eq!(state.active_view, Some(view));
         assert_eq!(state.views[view].cursor, ByteOffset(3));
         let before = state.buffers[b].text.to_string();

@@ -27,14 +27,14 @@ use super::windows::{
 pub(super) mod commands;
 use crate::editor::session::debugger::DebugSession;
 pub(super) mod agent;
+mod conflict_markers;
 mod effects;
 mod events;
-mod conflict_markers;
 mod palette;
-mod substitute;
 mod pull_requests;
 mod remote;
 mod settings;
+mod substitute;
 
 #[cfg(test)]
 use super::persistence::capture_persisted_layout;
@@ -78,9 +78,7 @@ use crate::language::lsp::{
     LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent, LspMarkupKind,
     LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
 };
-use crate::language::syntax::{
-    SyntaxSupport, builtin_languages, language_for_document,
-};
+use crate::language::syntax::{SyntaxSupport, builtin_languages, language_for_document};
 use crate::persistence::{
     PersistedLargeFileOverride, PersistedLocation, PersistedSession, PersistedState,
     PersistedWindowRule, PersistencePolicy, PersistenceService, STATE_VERSION,
@@ -89,19 +87,19 @@ use crate::process::PtyId;
 use crate::telemetry::{LiveCrashSnapshot, LogLevel};
 use crate::tools::{
     PackageOperation, RegistryRequest, RegistryResult, RegistryService, ToolDefinition, ToolKind,
-    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_formatter, managed_tool_executable,
-    nix_lsp_launch_environment, nix_lsp_profile_installed,
+    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_formatter,
+    managed_tool_executable, nix_lsp_launch_environment, nix_lsp_profile_installed,
 };
 use crate::ui::{
-    DocumentationMarkupKind, DocumentationPopupKind,
-    EditorWindowBinding as UiEditorWindowBinding, EditorWindowLayoutState, KeyInputKind,
-    NativeSurfaceWindowBinding, PickerSurfaceKind, PromptKind,
-    TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow, ToolMenuState,
-    ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint, UiState, UiSyntaxSpan,
-    VisualRowAnchor, VisualRowModel, active_editor_pane_viewport, editor_pane_viewport_at,
-    editor_state_content_width, editor_state_gutter_width, screen_foot_rows, workspace_top_rows,
-    explorer_panel_width, render as render_frame, snap_display_column, snap_display_column_forward,
-    terminal_panel_geometry, terminal_tab_at_column,
+    DocumentationMarkupKind, DocumentationPopupKind, EditorWindowBinding as UiEditorWindowBinding,
+    EditorWindowLayoutState, KeyInputKind, NativeSurfaceWindowBinding, PickerSurfaceKind,
+    PromptKind, TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow,
+    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint,
+    UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel, active_editor_pane_viewport,
+    editor_pane_viewport_at, editor_state_content_width, editor_state_gutter_width,
+    explorer_panel_width, render as render_frame, screen_foot_rows, snap_display_column,
+    snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column,
+    workspace_top_rows,
 };
 use crate::workspace::{
     DiagnosticOwner, ExecutionSource, ExplorerKind, FileSnapshot, PickerAction, PickerItem,
@@ -163,13 +161,21 @@ impl<T> std::ops::DerefMut for Tracked<T> {
 
 /// A save waiting for the language server to format the buffer.
 struct FormatOnSave {
+    request: Option<(String, u64)>,
     buffer: crate::editor::BufferId,
+    source: crate::editor::text::TextVersion,
+    path: Option<std::path::PathBuf>,
+    formatter: Option<String>,
     quit_after: bool,
     deadline: std::time::Instant,
 }
 
 struct InteractiveApplication {
     format_on_save: Option<FormatOnSave>,
+    navigation_reads: std::collections::HashMap<
+        crate::files::RequestId,
+        (super::windows::NavigationStamp, std::sync::Arc<()>),
+    >,
     /// The last request someone asked for, until their next key.
     lsp_asked: Option<crate::language::lsp::LspFeature>,
     /// Asked for before its server could answer, and sent again once it has started and
@@ -180,7 +186,10 @@ struct InteractiveApplication {
     lsp_retry_at: Option<std::time::Instant>,
     lsp_retries: u8,
     /// Last seen modification time and length of each open file.
-    disk_stamps: std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
+    disk_stamps:
+        std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
+    reload_stamps:
+        std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
     /// When the repository's index and HEAD last changed, as of the last disk check.
     pub(super) git_stamp: Option<[Option<std::time::SystemTime>; 2]>,
@@ -214,7 +223,7 @@ struct InteractiveApplication {
     /// Commands last run from the palette, newest first.
     palette_recent: Vec<String>,
     /// The split border being dragged with the mouse: the panes on its two sides.
-    border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId)>,
+    border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId, bool)>,
     /// The docked terminal whose inner edge is being dragged with the mouse.
     dock_drag: Option<PtyId>,
     /// The column a buffer tab was last dragged at with the mouse.
@@ -225,6 +234,7 @@ struct InteractiveApplication {
     /// switches.
     switch_ends_terminals: Option<PathBuf>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
+    #[allow(clippy::type_complexity)]
     syntax_spans_source: (
         Vec<(crate::editor::BufferId, u64, u64)>,
         Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
@@ -388,8 +398,20 @@ pub fn run_interactive(
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
         application.refresh_plugin_host_events();
+        let before_paste = application.state.window_version();
+        let registers_enabled = application.state.policy.registers_enabled;
+        if let Some(invocation) = application.clipboard.finish_pull(
+            &mut application.state.registers,
+            registers_enabled,
+            &before_paste,
+        ) {
+            application.invoke(invocation);
+            application
+                .clipboard
+                .continue_pastes(&before_paste, &application.state.window_version());
+        }
         if application.clipboard_shared()
-            && let Some(text) = application.clipboard.push(&application.state.registers)
+            && let Some(text) = application.clipboard.push(&mut application.state.registers)
         {
             terminal.copy_to_clipboard(&text)?;
         }
@@ -424,9 +446,23 @@ pub fn run_interactive(
         input_arrived = false;
         application.queue_startup_reads();
         application.schedule_recovery_work();
-        still_polls = if painted { 0 } else { still_polls.saturating_add(1) };
+        still_polls = if painted {
+            0
+        } else {
+            still_polls.saturating_add(1)
+        };
         let poll = Duration::from_millis(EVENT_POLL_MS);
-        let poll = if still_polls < IDLE_AFTER { poll } else { poll.max(IDLE_POLL) };
+        let poll = if still_polls < IDLE_AFTER {
+            poll
+        } else {
+            poll.max(IDLE_POLL)
+        };
+        let poll = application
+            .terminal_session
+            .sync_deadline()
+            .map_or(poll, |deadline| {
+                poll.min(deadline.saturating_duration_since(std::time::Instant::now()))
+            });
         if let Some(event) = terminal.poll_event(poll)? {
             still_polls = 0;
             input_arrived = true;

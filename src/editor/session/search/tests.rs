@@ -89,7 +89,13 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
         1
     ));
     assert_eq!(
-        owner.preview().as_ref().unwrap().as_text().expect("text preview").lines,
+        owner
+            .preview()
+            .as_ref()
+            .unwrap()
+            .as_text()
+            .expect("text preview")
+            .lines,
         ["preview exceeds admitted byte limit"]
     );
     assert!(!owner.accept_preview(
@@ -116,7 +122,13 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
         1
     ));
     assert_eq!(
-        owner.preview().as_ref().unwrap().as_text().expect("text preview").lines,
+        owner
+            .preview()
+            .as_ref()
+            .unwrap()
+            .as_text()
+            .expect("text preview")
+            .lines,
         ["valid"]
     );
     let ticket = owner
@@ -317,8 +329,8 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
             .map(|n| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("row-{n:02}")),
                         label: format!("jk {n:02}"),
                         detail: String::new(),
@@ -395,8 +407,8 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
             .map(|id| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId((*id).into()),
                         label: (*id).into(),
                         detail: String::new(),
@@ -476,8 +488,8 @@ fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     let row = |id: &str, value: &str| {
         (
             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                badge: String::new(),
+                kind: crate::workspace::PickerItemKind::Entry,
                 id: PickerItemId(id.into()),
                 label: value.into(),
                 detail: String::new(),
@@ -525,4 +537,41 @@ fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     owner.close_picker();
     assert!(owner.take_picker_payload().is_none());
     assert!(owner.selected_picker_payload().is_none());
+}
+
+impl SearchSession {
+    pub(in crate::editor::session) fn fixture_search_completion(
+        &mut self,
+        matches: Vec<WorkspaceSearchMatch>,
+        truncated: bool,
+    ) {
+        let generation = self.generation.expect("admitted search");
+        self.grep = WorkspaceSearchService::events_for_test(vec![
+            WorkspaceSearchEvent::Batch {
+                generation,
+                matches,
+            },
+            WorkspaceSearchEvent::Complete {
+                generation,
+                summary: crate::files::WorkspaceSearchSummary {
+                    truncated,
+                    ..Default::default()
+                },
+            },
+        ]);
+    }
+}
+
+#[test]
+fn crlf_previews_use_the_normalized_match_offset() {
+    let mut source = b"a\r\n".repeat(300_000);
+    source.extend_from_slice(b"needle\r\n");
+    let mut found = found();
+    found.snapshot = Arc::from(source);
+    found.range = 600_000..600_006;
+    found.line = 300_000;
+    let preview = super::preview::search_picker_preview(&found, 1024);
+    let text = preview.as_text().unwrap();
+    assert!(text.lines.iter().any(|line| line == "needle"));
+    assert_eq!(text.highlight_line, Some(300_000));
 }

@@ -53,6 +53,7 @@ pub struct PluginSnapshot {
 
 #[derive(Debug)]
 pub struct PluginExecutionRequest {
+    pub runtime_epoch: u64,
     pub plugin: String,
     pub command: String,
     pub arguments: Vec<String>,
@@ -481,13 +482,38 @@ impl PluginHostEventQueue {
             .iter_mut()
             .find(|event| event.kind == kind)
         {
+            existing.id = registration.next_id;
+            registration.next_id = registration
+                .next_id
+                .checked_add(1)
+                .ok_or(PluginError::InvalidInvocation)?;
+            existing.sequence = registration.next_sequence;
+            registration.next_sequence = registration
+                .next_sequence
+                .checked_add(1)
+                .ok_or(PluginError::InvalidInvocation)?;
             existing.revision = revision;
             existing.payload = payload;
             existing.coalesced = existing.coalesced.saturating_add(1);
             return Ok(true);
         }
         let capacity = usize::from(maximum).min(MAXIMUM_PLUGIN_EVENT_QUEUE);
-        let dropped = if registration.events.len() >= capacity {
+        let dropped = if registration
+            .events
+            .iter()
+            .filter(|event| event.kind == kind)
+            .count()
+            >= capacity
+        {
+            if let Some(index) = registration
+                .events
+                .iter()
+                .position(|event| event.kind == kind)
+            {
+                registration.events.remove(index);
+            }
+            1
+        } else if registration.events.len() >= MAXIMUM_PLUGIN_EVENT_QUEUE {
             registration.events.pop_front();
             1
         } else {

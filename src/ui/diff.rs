@@ -4,6 +4,8 @@
 //! printer and what the session layer already hands to the hunk preview, so there is one
 //! patch producer and this module only reads its output.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::{DiffHunk, DiffLayout, DiffLine, DiffLineKind, DiffPreview, DiffSpan};
 
 /// Parse unified diff text into a `DiffPreview`.
@@ -187,8 +189,8 @@ pub fn emphasise_changed_spans(lines: &mut [DiffLine]) {
 /// common suffix. A line wholly contained in the other yields no range, so nothing is
 /// emphasised rather than the whole line being marked.
 fn changed_spans(old: &str, new: &str) -> (Vec<DiffSpan>, Vec<DiffSpan>) {
-    let old_chars: Vec<char> = old.chars().collect();
-    let new_chars: Vec<char> = new.chars().collect();
+    let old_chars: Vec<&str> = old.graphemes(true).collect();
+    let new_chars: Vec<&str> = new.graphemes(true).collect();
     let mut prefix = 0;
     while prefix < old_chars.len()
         && prefix < new_chars.len()
@@ -203,7 +205,7 @@ fn changed_spans(old: &str, new: &str) -> (Vec<DiffSpan>, Vec<DiffSpan>) {
     {
         suffix += 1;
     }
-    let span = |chars: &[char], text: &str| -> Vec<DiffSpan> {
+    let span = |chars: &[&str], text: &str| -> Vec<DiffSpan> {
         let end = chars.len().saturating_sub(suffix);
         if end <= prefix {
             return Vec::new();
@@ -217,7 +219,7 @@ fn changed_spans(old: &str, new: &str) -> (Vec<DiffSpan>, Vec<DiffSpan>) {
 }
 
 fn byte_of(text: &str, char_index: usize) -> usize {
-    text.char_indices()
+    text.grapheme_indices(true)
         .nth(char_index)
         .map_or(text.len(), |(byte, _)| byte)
 }
@@ -225,6 +227,13 @@ fn byte_of(text: &str, char_index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_accents_emphasise_the_whole_grapheme() {
+        let (old, new) = changed_spans("áx", "àx");
+        assert_eq!((old[0].start, old[0].end), (0, "á".len()));
+        assert_eq!((new[0].start, new[0].end), (0, "à".len()));
+    }
 
     /// Verbatim `git diff` output, captured by hand from a scratch repository so the parser is
     /// tested against real patch text rather than a structure someone hand-built. Two hunks
@@ -259,24 +268,43 @@ index 9792656..89d6f9e 100644
         assert_eq!(diff.hunks.len(), 2, "two hunks");
         let first = &diff.hunks[0];
         assert_eq!(first.header, "@@ -1,6 +1,6 @@");
-        assert_eq!(first.lines.len(), 7, "two context, a removal, an addition, three context");
+        assert_eq!(
+            first.lines.len(),
+            7,
+            "two context, a removal, an addition, three context"
+        );
         // The file headers are not diff lines.
         assert!(
-            !first.lines.iter().any(|line| line.text.contains("diff --git")),
+            !first
+                .lines
+                .iter()
+                .any(|line| line.text.contains("diff --git")),
             "a file header must not become a diff line"
         );
         assert_eq!(
-            (first.lines[2].kind, first.lines[2].old_number, first.lines[2].new_number),
+            (
+                first.lines[2].kind,
+                first.lines[2].old_number,
+                first.lines[2].new_number
+            ),
             (DiffLineKind::Removed, Some(3), None),
             "a removed line has an old number and no new number"
         );
         assert_eq!(
-            (first.lines[3].kind, first.lines[3].old_number, first.lines[3].new_number),
+            (
+                first.lines[3].kind,
+                first.lines[3].old_number,
+                first.lines[3].new_number
+            ),
             (DiffLineKind::Added, None, Some(3)),
             "an added line has a new number and no old number"
         );
         assert_eq!(
-            (first.lines[0].kind, first.lines[0].old_number, first.lines[0].new_number),
+            (
+                first.lines[0].kind,
+                first.lines[0].old_number,
+                first.lines[0].new_number
+            ),
             (DiffLineKind::Context, Some(1), Some(1)),
             "a context line has both numbers"
         );
@@ -318,7 +346,11 @@ index 9792656..89d6f9e 100644
             removed.spans.is_empty(),
             "a removed line whose whole text is a prefix of the added one marks nothing"
         );
-        assert_eq!(added.spans.len(), 1, "the added line marks one changed span");
+        assert_eq!(
+            added.spans.len(),
+            1,
+            "the added line marks one changed span"
+        );
         let span = added.spans[0];
         assert_eq!(&added.text[span.start..span.end], " changed");
         let second = &diff.hunks[1];

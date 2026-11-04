@@ -219,22 +219,31 @@ impl InputSession {
         }
         let mut mirrors = session.groups[session.current].clone();
         mirrors.sort_by_key(|range| range.start);
-        let replacement_edits = mirrors
-            .iter()
-            .map(|range| TextEdit::new(*range, replacement.clone()))
-            .collect::<Vec<_>>();
+        let mut replacement_edits: Vec<TextEdit> = Vec::new();
+        for range in &mirrors {
+            if range.is_empty()
+                && let Some(previous) = replacement_edits
+                    .last_mut()
+                    .filter(|edit| edit.range() == *range)
+            {
+                *previous =
+                    TextEdit::new(*range, format!("{}{replacement}", previous.replacement()));
+            } else {
+                replacement_edits.push(TextEdit::new(*range, replacement.clone()));
+            }
+        }
         for operation in &mut transaction.operations {
-            if let EditorOperation::ApplyEdits { buffer, edits } = operation {
-                if *buffer == session.buffer {
-                    *edits = TextEditSet::new(session.revision, replacement_edits.clone());
-                }
+            if let EditorOperation::ApplyEdits { buffer, edits } = operation
+                && *buffer == session.buffer
+            {
+                *edits = TextEditSet::new(session.revision, replacement_edits.clone());
             }
         }
         let growth = |range: &ByteRange| replacement.len() as i128 - range.len() as i128;
-        let shift = |position: ByteOffset| {
+        let shift = |position: ByteOffset, after: bool| {
             let mut value = position.get() as i128;
             for range in &mirrors {
-                if range.end <= position {
+                if range.end < position || (range.end == position && (after || !range.is_empty())) {
                     value += growth(range);
                 }
             }
@@ -243,18 +252,31 @@ impl InputSession {
         let mut groups = Vec::with_capacity(session.groups.len());
         for (index, group) in session.groups.iter().enumerate() {
             let mut updated = Vec::with_capacity(group.len());
-            for range in group {
+            for (occurrence, range) in group.iter().enumerate() {
                 if index == session.current {
                     // Only the mirrors before this one move it: an empty placeholder ends where
                     // it starts, and must not push itself past the text typed into it.
-                    let before = mirrors.iter().take_while(|mirror| *mirror != range);
+                    let before = group[..occurrence]
+                        .iter()
+                        .filter(|mirror| mirror.start <= range.start)
+                        .chain(
+                            group[occurrence + 1..]
+                                .iter()
+                                .filter(|mirror| mirror.start < range.start),
+                        );
                     let start = range.start.get() as i128 + before.map(growth).sum::<i128>();
                     let start = ByteOffset(start.max(0) as usize);
                     updated.push(
                         ByteRange::new(start, ByteOffset(start.get() + replacement.len())).ok()?,
                     );
                 } else {
-                    updated.push(ByteRange::new(shift(range.start), shift(range.end)).ok()?);
+                    updated.push(
+                        ByteRange::new(
+                            shift(range.start, true),
+                            shift(range.end, range.is_empty()),
+                        )
+                        .ok()?,
+                    );
                 }
             }
             groups.push(updated);
@@ -417,5 +439,72 @@ mod tests {
                 .is_none()
         );
         assert!(input.snippet_buffer().is_none());
+    }
+    #[test]
+    fn adjacent_empty_placeholder_does_not_expand_the_previous_one() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), None);
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(
+            document(&state, buffer, &source),
+            ByteOffset(0),
+            [(1, 0, 1), (2, 1, 1), (0, 1, 1)],
+        );
+        input.navigate_snippet(1);
+        let mut transaction =
+            EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    state.buffers[buffer].text.revision(),
+                    vec![TextEdit::new(ByteRange::empty(ByteOffset(1)), "b")],
+                ),
+            });
+        let update = input
+            .prepare_snippet_mirror(Some(document(&state, buffer, &source)), &mut transaction)
+            .unwrap();
+        state.apply_transaction(&transaction).unwrap();
+        let source = state.window_version();
+        assert!(input.accept_snippet_edit(update, Some(document(&state, buffer, &source))));
+        assert_eq!(
+            input.snippet.as_ref().unwrap().groups[0][0],
+            ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap()
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), "ab");
+    }
+
+    #[test]
+    fn coincident_empty_mirrors_insert_once_per_occurrence() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state.open_text(TextBuffer::from_text("[]"), None);
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(
+            document(&state, buffer, &source),
+            ByteOffset(0),
+            [(1, 1, 1), (1, 1, 1)],
+        );
+        let mut transaction =
+            EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    state.buffers[buffer].text.revision(),
+                    vec![TextEdit::new(ByteRange::empty(ByteOffset(1)), "x")],
+                ),
+            });
+        let update = input
+            .prepare_snippet_mirror(Some(document(&state, buffer, &source)), &mut transaction)
+            .unwrap();
+        state.apply_transaction(&transaction).unwrap();
+        let source = state.window_version();
+        assert!(input.accept_snippet_edit(update, Some(document(&state, buffer, &source))));
+        assert_eq!(state.buffers[buffer].text.to_string(), "[xx]");
+        assert_eq!(
+            input.snippet.as_ref().unwrap().groups[0],
+            vec![
+                ByteRange::new(ByteOffset(1), ByteOffset(2)).unwrap(),
+                ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()
+            ]
+        );
     }
 }

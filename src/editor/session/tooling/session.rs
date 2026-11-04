@@ -23,6 +23,7 @@ pub(super) struct ToolingSession {
     managed_versions: BTreeMap<String, String>,
     installer: ToolInstaller,
     version_service: ToolVersionService,
+    probe_directory: RefCell<Option<PathBuf>>,
     version_pending: BTreeSet<String>,
     versions: BTreeMap<String, Result<String, String>>,
 }
@@ -99,7 +100,7 @@ impl ToolingSession {
         definition: &ToolDefinition,
         executable: PathBuf,
     ) {
-        let key = Self::tool_version_key(definition, LspRuntimeSource::Path, Some(&executable));
+        let key = self.tool_version_key(definition, LspRuntimeSource::Path, Some(&executable));
         self.forget_probe(&key);
         self.queue_tool_version_probe(definition, LspRuntimeSource::Path, executable.clone());
         assert!(self.version_pending.contains(&key));
@@ -140,6 +141,7 @@ impl ToolingSession {
             managed_versions: BTreeMap::new(),
             installer: ToolInstaller::start(),
             version_service: ToolVersionService::start(),
+            probe_directory: RefCell::new(None),
             version_pending: BTreeSet::new(),
             versions: BTreeMap::new(),
         }
@@ -198,7 +200,7 @@ impl ToolingSession {
                     .and_then(|entry| {
                         let path = discover_executable(&entry.definition.executable)?;
                         Self::rust_analyzer_is_rustup_proxy(&path).then(|| {
-                            Self::tool_version_key(
+                            self.tool_version_key(
                                 &entry.definition,
                                 LspRuntimeSource::Path,
                                 Some(&path),
@@ -317,7 +319,10 @@ impl ToolingSession {
             return Err("tool source retired".into());
         };
         if matches!(entry.status, ToolStatus::Installing { .. }) {
-            return Err(format!("{} is already being installed", entry.definition.name));
+            return Err(format!(
+                "{} is already being installed",
+                entry.definition.name
+            ));
         }
         let queued = self
             .entries
@@ -378,6 +383,9 @@ impl ToolingSession {
     }
     pub(super) fn poll_install(&mut self) -> Option<(String, ToolInstallResult)> {
         let result = self.installer.try_result().ok()??;
+        // Progress and completion use separate queues. Drain progress sent before this
+        // result so a later poll cannot put the finished row back into Installing.
+        let _ = self.poll_progress();
         let name = self
             .entries
             .iter()
@@ -385,14 +393,13 @@ impl ToolingSession {
             .map_or_else(|| result.id.clone(), |e| e.definition.name.clone());
         self.reinspect(Some(&result.id));
         self.path_lookups.get_mut().clear();
-        if let Err(error) = &result.result {
-            if let Some(entry) = self
+        if let Err(error) = &result.result
+            && let Some(entry) = self
                 .entries
                 .iter_mut()
                 .find(|e| e.definition.id == result.id)
-            {
-                entry.status = ToolStatus::Failed(error.clone());
-            }
+        {
+            entry.status = ToolStatus::Failed(error.clone());
         }
         self.replace_probe_worker();
         let prefix = format!("{}:", result.id);
@@ -499,7 +506,10 @@ impl ToolingSession {
             .flatten()
     }
 
-    pub(in crate::editor::session) fn path_executable(&self, executable: &str) -> Option<(PathBuf, bool)> {
+    pub(in crate::editor::session) fn path_executable(
+        &self,
+        executable: &str,
+    ) -> Option<(PathBuf, bool)> {
         self.path_lookups
             .borrow_mut()
             .entry(executable.to_owned())
@@ -519,14 +529,15 @@ impl ToolingSession {
     ) -> bool {
         match self.selected_lsp_runtime_source(definition, nix_fallback) {
             LspRuntimeSource::Path => {
-                self.path_executable(&definition.executable).is_some_and(|(path, rustup_proxy)| {
-                    if definition.id != "rust-analyzer" || !rustup_proxy {
-                        return true;
-                    }
-                    let key =
-                        Self::tool_version_key(definition, LspRuntimeSource::Path, Some(&path));
-                    !matches!(self.versions.get(&key), Some(Err(_)))
-                })
+                self.path_executable(&definition.executable)
+                    .is_some_and(|(path, rustup_proxy)| {
+                        if definition.id != "rust-analyzer" || !rustup_proxy {
+                            return true;
+                        }
+                        let key =
+                            self.tool_version_key(definition, LspRuntimeSource::Path, Some(&path));
+                        !matches!(self.versions.get(&key), Some(Err(_)))
+                    })
             }
             LspRuntimeSource::Managed => self.selected_managed_executable(definition).is_some(),
             LspRuntimeSource::Nix => {
@@ -536,15 +547,27 @@ impl ToolingSession {
         }
     }
 
+    pub(in crate::editor::session) fn set_probe_directory(&self, directory: Option<PathBuf>) {
+        *self.probe_directory.borrow_mut() = directory;
+    }
+
     pub(in crate::editor::session) fn tool_version_key(
+        &self,
         definition: &ToolDefinition,
         source: LspRuntimeSource,
         executable: Option<&PathBuf>,
     ) -> String {
-        executable.map_or_else(
+        let key = executable.map_or_else(
             || format!("{}:{}", definition.id, source.key()),
             |path| format!("{}:{}:{}", definition.id, source.key(), path.display()),
-        )
+        );
+        if definition.id == "rust-analyzer"
+            && source == LspRuntimeSource::Path
+            && let Some(directory) = self.probe_directory.borrow().as_ref()
+        {
+            return format!("{key}:{}", directory.display());
+        }
+        key
     }
 
     pub(in crate::editor::session) fn compact_tool_version(
@@ -553,11 +576,11 @@ impl ToolingSession {
     ) -> String {
         let mut value = version.trim();
         for prefix in [&definition.name, &definition.executable] {
-            if let Some(rest) = value.strip_prefix(prefix) {
-                if rest.starts_with(char::is_whitespace) {
-                    value = rest.trim_start();
-                    break;
-                }
+            if let Some(rest) = value.strip_prefix(prefix)
+                && rest.starts_with(char::is_whitespace)
+            {
+                value = rest.trim_start();
+                break;
             }
         }
         let module_suffix = format!("/{} ", definition.name);
@@ -622,7 +645,7 @@ impl ToolingSession {
         source: LspRuntimeSource,
         executable: Option<&PathBuf>,
     ) -> (String, Option<String>) {
-        let key = Self::tool_version_key(definition, source, executable);
+        let key = self.tool_version_key(definition, source, executable);
         if self.version_pending.contains(&key) {
             return ("probing…".into(), None);
         }
@@ -659,7 +682,7 @@ impl ToolingSession {
         if definition.probe_args.is_empty() {
             return;
         }
-        let key = Self::tool_version_key(definition, source, Some(&executable));
+        let key = self.tool_version_key(definition, source, Some(&executable));
         if self.version_pending.contains(&key) || self.versions.contains_key(&key) {
             return;
         }
@@ -676,7 +699,7 @@ impl ToolingSession {
                 },
                 LspRuntimeSource::Path => BTreeMap::new(),
             },
-            None,
+            self.probe_directory.borrow().clone(),
             Duration::from_secs(2),
         );
         match self.version_service.probe(ToolVersionRequest {
@@ -732,12 +755,55 @@ impl ToolingSession {
             if definition.kind == ToolKind::Lsp
                 && lsp_runtime_source_allowed_on_host(LspRuntimeSource::Nix, nixos_host)
                 && nix_lsp_tool_installed(&definition)
+                && let Some(executable) = self.selected_managed_executable(&definition)
             {
-                if let Some(executable) = self.selected_managed_executable(&definition) {
-                    let selected = self.selected_managed_definition(&definition);
-                    self.queue_tool_version_probe(&selected, LspRuntimeSource::Nix, executable);
-                }
+                let selected = self.selected_managed_definition(&definition);
+                self.queue_tool_version_probe(&selected, LspRuntimeSource::Nix, executable);
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rustup_probes_use_project_directory_and_separate_cached_results() {
+        use std::{fs, os::unix::fs::PermissionsExt, thread, time::Instant};
+        let root = tempfile::tempdir().unwrap();
+        let one = root.path().join("one");
+        let two = root.path().join("two");
+        fs::create_dir(&one).unwrap();
+        fs::create_dir(&two).unwrap();
+        fs::write(two.join("available"), "").unwrap();
+        let executable = root.path().join("rust-analyzer");
+        fs::write(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .unwrap();
+        definition.probe_args = vec!["--version".into()];
+        let mut tooling = ToolingSession::new(Vec::new());
+        for (directory, success) in [(one, false), (two, true)] {
+            tooling.set_probe_directory(Some(directory));
+            let key =
+                tooling.tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
+            assert!(!tooling.versions.contains_key(&key));
+            tooling.queue_tool_version_probe(
+                &definition,
+                LspRuntimeSource::Path,
+                executable.clone(),
+            );
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !tooling.versions.contains_key(&key) {
+                tooling.poll_versions();
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(tooling.versions[&key].is_ok(), success);
+        }
+        assert_eq!(tooling.versions.len(), 2);
     }
 }

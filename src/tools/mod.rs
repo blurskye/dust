@@ -2,8 +2,8 @@
 mod registry;
 pub use registry::{
     OFFICIAL_REGISTRY, RegistryError, RegistryEvent, RegistryPackageMetadata,
-    RegistryPackageSummary, RegistryRequest, RegistryResult, RegistrySearchResponse,
-    RegistryPolicy, RegistryService,
+    RegistryPackageSummary, RegistryPolicy, RegistryRequest, RegistryResult,
+    RegistrySearchResponse, RegistryService,
 };
 
 use std::sync::OnceLock;
@@ -31,10 +31,10 @@ pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 pub use catalog::{
     DebugProgramPolicy, ToolArchiveFormat, ToolDefinition, ToolEntry, ToolInstall, ToolKind,
     ToolStatus, ToolVersionPin, bundled_tool_catalog, discover_executable, inspect_tools,
-    inspect_tools_at, is_nixos_host, managed_formatter, managed_tool_executable, managed_tool_installed_version,
-    nix_lsp_launch_environment, nix_lsp_profile_installed, nix_lsp_shell, nix_lsp_tool_installed,
-    nix_lsp_workspace_root, rust_analyzer_is_rustup_proxy, tool_launch_environment,
-    tool_store_root,
+    inspect_tools_at, is_nixos_host, managed_formatter, managed_tool_executable,
+    managed_tool_installed_version, nix_lsp_launch_environment, nix_lsp_profile_installed,
+    nix_lsp_shell, nix_lsp_tool_installed, nix_lsp_workspace_root, rust_analyzer_is_rustup_proxy,
+    tool_launch_environment, tool_store_root,
 };
 mod installer_service;
 pub use installer_service::{ToolInstallProgress, ToolInstallResult, ToolInstaller, ToolOperation};

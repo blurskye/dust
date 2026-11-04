@@ -26,7 +26,10 @@ impl Themes {
     /// when `keep_applied` says the configured theme has not changed.
     pub(super) fn reset(&mut self, keep_applied: bool) {
         let applied = self.applied.take().filter(|_| keep_applied);
-        *self = Self { applied, ..Self::default() };
+        *self = Self {
+            applied,
+            ..Self::default()
+        };
     }
 }
 struct ThemeRestore {
@@ -87,6 +90,14 @@ impl ThemeInteraction {
         }
     }
 }
+fn themes_directory(source: &std::path::Path, user_config: &std::path::Path) -> std::path::PathBuf {
+    if source.to_string_lossy().starts_with("<bundled:") {
+        user_config.with_file_name("themes")
+    } else {
+        source.with_file_name("themes")
+    }
+}
+
 impl ConfigurationSession {
     pub(in crate::editor::session) fn begin_theme_restore(&mut self) {
         self.themes.restore = None;
@@ -157,7 +168,7 @@ impl ConfigurationSession {
             .applied
             .as_ref()
             .map(|choice| {
-                let snapshot = serde_json::to_string(&choice.theme).map_err(|e| e.to_string())?;
+                let snapshot = crate::config::theme_snapshot(choice)?;
                 if snapshot.len() > 128 * 1024
                     || choice.theme.name.len() > 96
                     || choice.theme.name.is_empty()
@@ -172,12 +183,10 @@ impl ConfigurationSession {
     pub(in crate::editor::session) fn begin_theme_picker(&mut self) -> Result<ThemeRows, String> {
         let (reply, receiver) = mpsc::sync_channel(1);
         let cancelled = Arc::new(AtomicBool::new(false));
-        let directory = self
-            .accepted
-            .sources
-            .settings
-            .is_absolute()
-            .then(|| self.accepted.sources.settings.with_file_name("themes"));
+        let directory = Some(themes_directory(
+            &self.accepted.sources.settings,
+            &crate::config::user_config_path(),
+        ));
         self.worker
             .request_themes(ThemeRead {
                 source: ThemeReadSource::Directory(directory),
@@ -317,5 +326,27 @@ impl ConfigurationSession {
             source: source.clone(),
             contributors: vec![source],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn installed_themes_do_not_depend_on_config_provenance() {
+        use std::path::{Path, PathBuf};
+        assert_eq!(
+            super::themes_directory(
+                Path::new("<bundled:config>"),
+                Path::new("/config/dust/config.toml")
+            ),
+            PathBuf::from("/config/dust/themes")
+        );
+        assert_eq!(
+            super::themes_directory(
+                Path::new("relative/config.toml"),
+                Path::new("/other/config.toml")
+            ),
+            PathBuf::from("relative/themes")
+        );
     }
 }

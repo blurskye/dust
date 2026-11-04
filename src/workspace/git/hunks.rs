@@ -42,6 +42,8 @@ pub struct GitDiffLine {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitHunk {
     pub id: GitHunkId,
+    pub old_mode: u32,
+    pub new_mode: u32,
     pub old_start: u32,
     pub old_lines: u32,
     pub new_start: u32,
@@ -155,7 +157,10 @@ impl GitHunk {
                     .filter(|index| self.lines[*index as usize].kind == kind)
                     .collect::<Vec<u32>>()
             };
-            let (removed, added) = (of_kind(GitDiffLineKind::Delete), of_kind(GitDiffLineKind::Add));
+            let (removed, added) = (
+                of_kind(GitDiffLineKind::Delete),
+                of_kind(GitDiffLineKind::Add),
+            );
             if added.is_empty() {
                 let lands = run.start.saturating_sub(1).max(1);
                 if (start..=end).contains(&lands) {
@@ -251,7 +256,9 @@ pub fn index_line_in_buffer(line: usize, unstaged: &[GitHunk]) -> Option<usize> 
         let next_old = first_old + hunk.old_lines;
         if line < next_old {
             let kept = hunk.lines.iter().find(|diff| diff.old_line == Some(line));
-            return kept.and_then(|diff| diff.new_line).map(|new| new as usize - 1);
+            return kept
+                .and_then(|diff| diff.new_line)
+                .map(|new| new as usize - 1);
         }
         let first_new = hunk.new_start + u32::from(hunk.new_lines == 0);
         shift = i64::from(first_new + hunk.new_lines) - i64::from(next_old);
@@ -557,6 +564,8 @@ pub(super) fn collect_hunks_from_diff(
             header.hash(&mut hash);
             hunks.push(GitHunk {
                 id: GitHunkId(hash.finish()),
+                old_mode: delta.old_file().mode().into(),
+                new_mode: delta.new_file().mode().into(),
                 old_start: h.old_start(),
                 old_lines: h.old_lines(),
                 new_start: h.new_start(),
@@ -581,11 +590,15 @@ pub(super) fn collect_hunks_from_diff(
                 abort = Some(GitHunkError::Limit);
                 return false;
             }
+            let Ok(text) = std::str::from_utf8(line.content()) else {
+                abort = Some(GitHunkError::BinaryUnsupported);
+                return false;
+            };
             hunks.last_mut().unwrap().lines.push(GitDiffLine {
                 kind,
                 old_line: line.old_lineno(),
                 new_line: line.new_lineno(),
-                text: String::from_utf8_lossy(line.content()).into_owned(),
+                text: text.to_owned(),
             });
         }
         true
@@ -632,13 +645,22 @@ pub(super) fn read_hunks_owned(
     let index_before =
         git_index_fingerprint(&workdir).map_err(|_| GitHunkError::StaleRepository)?;
     let mut options = git2::DiffOptions::new();
-    options.pathspec(&repo_path);
+    options.pathspec(&repo_path).disable_pathspec_match(true);
     let diff = match p.layer {
-        GitDiffLayer::Unstaged => repo.diff_index_to_workdir(None, Some(&mut options)),
+        GitDiffLayer::Unstaged => {
+            options
+                .include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true);
+            repo.diff_index_to_workdir(None, Some(&mut options))
+        }
         GitDiffLayer::Staged => {
             let tree = repo.head().and_then(|h| h.peel_to_tree());
             match tree {
                 Ok(tree) => repo.diff_tree_to_index(Some(&tree), None, Some(&mut options)),
+                Err(error) if error.code() == git2::ErrorCode::UnbornBranch => {
+                    repo.diff_tree_to_index(None, None, Some(&mut options))
+                }
                 Err(error) => Err(error),
             }
         }
@@ -699,6 +721,8 @@ pub(super) fn collect_hunks_from_patch(
         header.hash(&mut hash);
         let mut accepted = GitHunk {
             id: GitHunkId(hash.finish()),
+            old_mode: patch.delta().old_file().mode().into(),
+            new_mode: patch.delta().new_file().mode().into(),
             old_start: hunk.old_start(),
             old_lines: hunk.old_lines(),
             new_start: hunk.new_start(),
@@ -731,11 +755,13 @@ pub(super) fn collect_hunks_from_patch(
                 if lines > p.maximum_lines || bytes > p.maximum_bytes {
                     return Err(GitHunkError::Limit);
                 }
+                let text = std::str::from_utf8(line.content())
+                    .map_err(|_| GitHunkError::BinaryUnsupported)?;
                 accepted.lines.push(GitDiffLine {
                     kind,
                     old_line: line.old_lineno(),
                     new_line: line.new_lineno(),
-                    text: String::from_utf8_lossy(line.content()).into_owned(),
+                    text: text.to_owned(),
                 });
             }
         }
@@ -823,6 +849,8 @@ mod staged_sign_tests {
     fn hunk(old: (u32, u32), new: (u32, u32), lines: Vec<GitDiffLine>) -> GitHunk {
         GitHunk {
             id: GitHunkId(0),
+            old_mode: 0o100644,
+            new_mode: 0o100644,
             old_start: old.0,
             old_lines: old.1,
             new_start: new.0,
@@ -833,7 +861,12 @@ mod staged_sign_tests {
     }
 
     fn line(kind: GitDiffLineKind, old_line: Option<u32>, new_line: Option<u32>) -> GitDiffLine {
-        GitDiffLine { kind, old_line, new_line, text: String::new() }
+        GitDiffLine {
+            kind,
+            old_line,
+            new_line,
+            text: String::new(),
+        }
     }
 
     #[test]
@@ -841,18 +874,26 @@ mod staged_sign_tests {
         let inserted = [hunk((3, 0), (4, 2), Vec::new())];
         assert_eq!(index_line_in_buffer(2, &inserted), Some(2));
         assert_eq!(index_line_in_buffer(3, &inserted), Some(5));
-        let deleted = [hunk((3, 2), (2, 0), vec![
-            line(GitDiffLineKind::Delete, Some(3), None),
-            line(GitDiffLineKind::Delete, Some(4), None),
-        ])];
+        let deleted = [hunk(
+            (3, 2),
+            (2, 0),
+            vec![
+                line(GitDiffLineKind::Delete, Some(3), None),
+                line(GitDiffLineKind::Delete, Some(4), None),
+            ],
+        )];
         assert_eq!(index_line_in_buffer(1, &deleted), Some(1));
         assert_eq!(index_line_in_buffer(2, &deleted), None);
         assert_eq!(index_line_in_buffer(4, &deleted), Some(2));
-        let context = [hunk((5, 2), (5, 3), vec![
-            line(GitDiffLineKind::Context, Some(5), Some(5)),
-            line(GitDiffLineKind::Add, None, Some(6)),
-            line(GitDiffLineKind::Context, Some(6), Some(7)),
-        ])];
+        let context = [hunk(
+            (5, 2),
+            (5, 3),
+            vec![
+                line(GitDiffLineKind::Context, Some(5), Some(5)),
+                line(GitDiffLineKind::Add, None, Some(6)),
+                line(GitDiffLineKind::Context, Some(6), Some(7)),
+            ],
+        )];
         assert_eq!(index_line_in_buffer(5, &context), Some(6));
         assert_eq!(index_line_in_buffer(6, &context), Some(7));
     }

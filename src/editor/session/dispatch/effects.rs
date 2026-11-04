@@ -1,6 +1,12 @@
+use crate::editor::CommandValue;
 use crate::editor::session::diagnostics::MAXIMUM_DIAGNOSTICS;
-use crate::editor::session::dispatch::{FULL_PAGE_PERCENT, HALF_PAGE_PERCENT, MACRO_RECURSION_LIMIT, MACRO_STEP_LIMIT, REPEAT_STEP_LIMIT};
-use crate::editor::session::persistence::{CHANGE_LIMIT, JUMP_LIMIT, MARK_LIMIT, RECENT_FILE_LIMIT, STATE_ENTRY_LIMIT, STATE_MAXIMUM_BYTES};
+use crate::editor::session::dispatch::{
+    FULL_PAGE_PERCENT, HALF_PAGE_PERCENT, MACRO_RECURSION_LIMIT, MACRO_STEP_LIMIT,
+    REPEAT_STEP_LIMIT,
+};
+use crate::editor::session::persistence::{
+    CHANGE_LIMIT, JUMP_LIMIT, MARK_LIMIT, RECENT_FILE_LIMIT, STATE_ENTRY_LIMIT, STATE_MAXIMUM_BYTES,
+};
 use crate::editor::session::search::{
     MAXIMUM_PICKER_ITEMS, SEARCH_BATCH_SIZE, SEARCH_MAXIMUM_FILE_BYTES, SEARCH_MAXIMUM_FILES,
     SEARCH_QUEUE_CAPACITY,
@@ -9,22 +15,20 @@ use crate::ui::render::{COMPLETION_MAX_ROWS, SCRATCH_LABEL};
 
 /// Lines of a recovery journal its preview shows.
 const RECOVERY_PREVIEW_LINES: usize = 500;
-use crate::ui::render::editor::STATUS_DIRTY_MARKER;
-use crate::ui::render::surfaces::{PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT};
 use super::super::configuration::{configured_grapheme_width, configured_text_width};
+use super::commands::SyntaxFoldAction;
 use super::{
     AdapterContext, AppEffect, ArgumentSchema, BTreeMap, BTreeSet, ByteOffset, ByteRange,
-    CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec,
-    ContextRequirement, DapControl, DapEvent, DapResponse, DapSourceBreakpoint, TrustedAction,
-    DiagnosticFilter, DiagnosticOwner, DisplayWidthPolicy, DockEdge, DocumentationPopupKind,
-    EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorMode, EditorOperation, EditorState,
-    EditorTransaction, ExecutionPreflightEvent, ExecutionSource, ExplorerKind, ExplorerMutation,
-    FileSnapshot, FocusDirection, HashSet, InputAction, Instant, InteractiveApplication,
-    LargeFileOverride, LayoutAction, LayoutPlanError, LogLevel,
-    LspAutostartObservation, LspDocument, LspFeature, LspLaunchRequest, LspLaunchSource,
-    LspMarkupContent, LspMarkupKind, LspRuntimeSource, LspWorkspaceEdit, MatcherSource,
-    NativeDescriptions, NativeSurfaceTarget, PackageOperation, Path,
-    PathBuf, PendingLspProjectRoot, PersistedLargeFileOverride, PersistedLocation,
+    CommandId, CommandInvocation, CommandOutcome, CommandSource, CommandSpec, ContextRequirement,
+    DapControl, DapEvent, DapResponse, DapSourceBreakpoint, DiagnosticFilter, DiagnosticOwner,
+    DisplayWidthPolicy, DockEdge, DocumentationPopupKind, EditorCloseSave, EditorCloseStep,
+    EditorCloseTarget, EditorMode, EditorOperation, EditorState, EditorTransaction,
+    ExecutionPreflightEvent, ExecutionSource, ExplorerKind, ExplorerMutation, FileSnapshot,
+    FocusDirection, HashSet, InputAction, Instant, InteractiveApplication, LargeFileOverride,
+    LayoutAction, LayoutPlanError, LogLevel, LspAutostartObservation, LspDocument, LspFeature,
+    LspLaunchRequest, LspLaunchSource, LspMarkupContent, LspMarkupKind, LspRuntimeSource,
+    LspWorkspaceEdit, MatcherSource, NativeDescriptions, NativeSurfaceTarget, PackageOperation,
+    Path, PathBuf, PendingLspProjectRoot, PersistedLargeFileOverride, PersistedLocation,
     PersistedSession, PersistedState, PersistedWindowRule, PersistencePolicy, PickerAction,
     PickerContent, PickerItem, PickerItemId, PickerKind, PickerOrigin, PickerPayload, PickerState,
     PickerSurfaceKind, PluginEvent, PluginLimits, PluginLoadId, PluginUiInteraction, PositionCodec,
@@ -32,25 +36,28 @@ use super::{
     RestoreContext, RestorePrepared, RestoreReady, RestoreWindowPolicy, RunningTask, STATE_VERSION,
     SpatialDirection, TerminalInput, TerminalUpdate, TextBuffer, TextEdit, ToolDefinition,
     ToolInstall, ToolKind, ToolMenuRow, ToolMenuState, ToolOperation, ToolRuntimeOption,
-    ToolRuntimePickerState, ToolStatus, TransactionId, UndoPolicy, VisualRowAnchor, VisualRowModel,
-    WindowCandidate, WindowPlacement, WindowRect, WindowUpdate, WorkspaceEditDraft,
+    ToolRuntimePickerState, ToolStatus, TransactionId, TrustedAction, UndoPolicy, VisualRowAnchor,
+    VisualRowModel, WindowCandidate, WindowPlacement, WindowRect, WindowUpdate, WorkspaceEditDraft,
     WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceTrust,
     active_editor_pane_viewport, builtin_languages, discover_executable, editor_pane_viewport_at,
     editor_state_content_width, editor_state_gutter_width, file_uri, is_nixos_host,
-    language_id_for_path, lsp_runtime_source_allowed_on_host,
-    managed_formatter, managed_tool_executable, mode_name_large,
-    nix_lsp_launch_environment, nix_lsp_profile_installed,
-    nix_workspace_shell_for_host, parse_ex, path_from_file_uri, tool_kind_key,
+    language_id_for_path, lsp_runtime_source_allowed_on_host, managed_formatter,
+    managed_tool_executable, mode_name_large, nix_lsp_launch_environment,
+    nix_lsp_profile_installed, nix_workspace_shell_for_host, parse_ex, path_from_file_uri,
+    tool_kind_key,
 };
 use crate::editor::session::extensions::{VirtualContext, VirtualOpen, VirtualPublication};
 use crate::editor::session::git::GitHunkAction;
+use crate::ui::render::editor::STATUS_DIRTY_MARKER;
+use crate::ui::render::surfaces::{
+    PICKER_MAXIMUM_PREVIEW_BYTES, TOOL_CATEGORY_ORDER, TOOL_MANAGER_MINIMUM_HEIGHT,
+};
+use crate::ui::{CompletionItem, LanguageCompletionState};
 use crate::workspace::search_workflow::{
     ABS_MAX_BYTES, SearchMatcherKind, SearchPresenterKind, SearchRequestId, SearchSourceKind,
     SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk, SearchWorkflowError,
     SearchWorkflowId, SearchWorkflowSpec, picker_item_adapter, plugin_item_adapter,
 };
-use super::commands::SyntaxFoldAction;
-use crate::ui::{CompletionItem, LanguageCompletionState};
 use slotmap::Key;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -138,13 +145,13 @@ fn compose_plugin_picker_items(
         .filter_map(|ranked| {
             source.remove(&ranked.stable_key).map(|item| {
                 let id = PickerItemId(format!(
-                    "plugin-provider:{}:{}:{}",
-                    projection.request, projection.revision, item.id
+                    "plugin-provider:{}:{}",
+                    projection.request, item.id
                 ));
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: item.primary.clone(),
                         detail: item.secondary.clone().unwrap_or_default(),
@@ -287,6 +294,17 @@ impl InteractiveApplication {
                 entry.component.clone(),
                 limits.clone(),
             ) {
+                if self.configuration.deferred_plugin_keymaps() {
+                    let expected = self
+                        .configuration
+                        .expected_plugin_indexes()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    self.extension.reject_expected(expected.into_iter(), None);
+                    self.abort_pending_index_batch(error);
+                    break;
+                }
                 self.show_error(self.message(
                     "plugin_load_failed",
                     &[("id", id.clone()), ("diagnostic", error.to_string())],
@@ -319,10 +337,9 @@ impl InteractiveApplication {
             &self.commands,
             self.extension.contributions(),
             true,
-        ) {
-            if let Err(error) = self.commit_contribution_candidate(candidate) {
-                self.show_error(error);
-            }
+        ) && let Err(error) = self.commit_contribution_candidate(candidate)
+        {
+            self.show_error(error);
         }
         self.notices.record(
             LogLevel::Error,
@@ -340,9 +357,16 @@ impl InteractiveApplication {
         &mut self,
         index: &crate::extensions::PluginContributionIndex,
     ) -> Result<(), String> {
-        let plugin = index.owner.clone();
+        self.register_plugin_commands(&index.owner, &index.commands)
+    }
+    fn register_plugin_commands(
+        &mut self,
+        plugin: &str,
+        declarations: &BTreeMap<String, crate::extensions::PluginCommandDeclaration>,
+    ) -> Result<(), String> {
+        let plugin = plugin.to_owned();
         self.commands.unregister_plugin(&plugin);
-        for (command, declaration) in &index.commands {
+        for (command, declaration) in declarations {
             let id = format!("plugin.{plugin}.{command}");
             let id = CommandId::new(&id).map_err(|error| error.to_string())?;
             let mut arguments = ArgumentSchema::default();
@@ -385,12 +409,21 @@ impl InteractiveApplication {
                 },
                 source: CommandSource::Plugin(plugin.clone()),
             };
-            if let Err(error) = self.commands.register(spec, move |_, _| {
+            if let Err(error) = self.commands.register(spec, move |_, invocation| {
                 Ok(CommandOutcome {
                     transaction: None,
                     effects: vec![AppEffect::PluginExecute {
                         plugin: effect_plugin.clone(),
                         command: effect_command.clone(),
+                        arguments: invocation
+                            .arguments
+                            .values()
+                            .map(|value| match value {
+                                CommandValue::String(value) => value.clone(),
+                                CommandValue::Bool(value) => value.to_string(),
+                                CommandValue::Integer(value) => value.to_string(),
+                            })
+                            .collect(),
                     }],
                     message: None,
                     follow_up: Vec::new(),
@@ -494,7 +527,7 @@ impl InteractiveApplication {
                 VirtualContext {
                     editor: &self.state,
                     windows: &self.window_session,
-                    scratch: &SCRATCH_LABEL,
+                    scratch: SCRATCH_LABEL,
                 },
                 descriptions,
             )
@@ -577,7 +610,7 @@ impl InteractiveApplication {
             .cloned()
             .collect::<Vec<_>>();
         self.extension
-            .reject_expected(expected.into_iter(), (&failed_plugin, failed_load));
+            .reject_expected(expected.into_iter(), Some((&failed_plugin, failed_load)));
         self.abort_pending_index_batch(diagnostic);
     }
 }
@@ -731,6 +764,7 @@ impl InteractiveApplication {
                         self.show_error(error);
                         continue;
                     }
+                    self.configuration.complete_plugin_indexes();
                     self.notices.record(
                         LogLevel::Info,
                         "plugins",
@@ -773,78 +807,23 @@ impl InteractiveApplication {
                             continue;
                         }
                     }
-                    self.commands.unregister_plugin(&plugin);
-                    for command in &component.activated_commands {
-                        let id = format!("plugin.{plugin}.{command}");
-                        let Ok(id) = CommandId::new(&id) else {
-                            continue;
-                        };
-                        let Some(declaration) = component.manifest.commands.get(command) else {
-                            continue;
-                        };
-                        let mut arguments = ArgumentSchema::default();
-                        for (name, field) in &declaration.arguments {
-                            arguments = arguments.field(
-                                name,
-                                match field.kind {
-                                    crate::extensions::PluginArgumentKind::String => {
-                                        crate::editor::ArgumentType::String
-                                    }
-                                    crate::extensions::PluginArgumentKind::Boolean => {
-                                        crate::editor::ArgumentType::Bool
-                                    }
-                                    crate::extensions::PluginArgumentKind::Integer => {
-                                        crate::editor::ArgumentType::Integer
-                                    }
-                                },
-                                field.required,
-                            );
-                        }
-                        let effect_plugin = plugin.clone();
-                        let effect_command = command.clone();
-                        let spec = CommandSpec {
-                            id,
-                            title: declaration.title.clone(),
-                            description: declaration.description.clone(),
-                            arguments,
-                            context: match declaration.context {
-                                crate::extensions::PluginCommandContext::Application => {
-                                    ContextRequirement::Application
-                                }
-                                crate::extensions::PluginCommandContext::Workspace => {
-                                    ContextRequirement::Workspace
-                                }
-                                crate::extensions::PluginCommandContext::View => {
-                                    ContextRequirement::View
-                                }
-                                crate::extensions::PluginCommandContext::Buffer => {
-                                    ContextRequirement::Buffer
-                                }
-                                crate::extensions::PluginCommandContext::Selection => {
-                                    ContextRequirement::Selection
-                                }
-                            },
-                            source: CommandSource::Plugin(plugin.clone()),
-                        };
-                        let _ = self.commands.register(spec, move |_, _| {
-                            Ok(CommandOutcome {
-                                transaction: None,
-                                effects: vec![AppEffect::PluginExecute {
-                                    plugin: effect_plugin.clone(),
-                                    command: effect_command.clone(),
-                                }],
-                                message: None,
-                                follow_up: Vec::new(),
-                            })
-                        });
+                    let declarations = component
+                        .manifest
+                        .commands
+                        .iter()
+                        .filter(|(command, _)| component.activated_commands.contains(command))
+                        .map(|(command, declaration)| (command.clone(), declaration.clone()))
+                        .collect();
+                    if let Err(error) = self.register_plugin_commands(&plugin, &declarations) {
+                        self.show_error(error);
+                        continue;
                     }
-                    if let Some(token) = prepared {
-                        if let Err(error) =
+                    if let Some(token) = prepared
+                        && let Err(error) =
                             self.extension.commit_package(plugin.clone(), load, token)
-                        {
-                            self.remove_plugin_contribution_generation(&plugin, load);
-                            self.show_error(error);
-                        }
+                    {
+                        self.remove_plugin_contribution_generation(&plugin, load);
+                        self.show_error(error);
                     }
                     self.notices.record(
                         LogLevel::Info,
@@ -869,6 +848,7 @@ impl InteractiveApplication {
                         continue;
                     }
                     if self.configuration.deferred_plugin_keymaps()
+                        && !self.extension.is_active_generation(&plugin, load)
                         && self
                             .configuration
                             .expected_plugin_indexes()
@@ -1023,7 +1003,7 @@ impl InteractiveApplication {
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,
-                            scratch: &SCRATCH_LABEL,
+                            scratch: SCRATCH_LABEL,
                         },
                     )
                     .and_then(|staged| {
@@ -1061,26 +1041,27 @@ impl InteractiveApplication {
             self.process_effect(AppEffect::PluginExecute {
                 plugin: plugin.clone(),
                 command,
+                arguments: Vec::new(),
             });
         }
-        if !execution.ui_requests.is_empty() && self.extension.is_active_generation(&plugin, load) {
-            if let Some(index) = self
+        if !execution.ui_requests.is_empty()
+            && self.extension.is_active_generation(&plugin, load)
+            && let Some(index) = self
                 .extension
                 .contributions()
                 .get(&plugin)
                 .filter(|index| index.generation == load.0)
                 .cloned()
-            {
-                let requests = std::mem::take(&mut execution.ui_requests);
-                let events = requests
-                    .into_iter()
-                    .map(|request| self.apply_plugin_ui_request(&index, request))
-                    .collect::<Vec<_>>();
-                self.extension.queue_ui(plugin.clone(), load, events);
-                self.ui.plugin_surfaces = self.extension.window_snapshots();
-                self.window_session.invalidate_native();
-                self.reconcile_editor_windows();
-            }
+        {
+            let requests = std::mem::take(&mut execution.ui_requests);
+            let events = requests
+                .into_iter()
+                .map(|request| self.apply_plugin_ui_request(&index, request))
+                .collect::<Vec<_>>();
+            self.extension.queue_ui(plugin.clone(), load, events);
+            self.ui.plugin_surfaces = self.extension.window_snapshots();
+            self.window_session.invalidate_native();
+            self.reconcile_editor_windows();
         }
         for message in execution.messages {
             self.notify_message(message, false);
@@ -1146,10 +1127,7 @@ impl InteractiveApplication {
                 self.configuration.binding_revision(),
                 prepared.sources,
             )?;
-            let maximum = usize::try_from(
-                SEARCH_MAXIMUM_FILE_BYTES,
-            )
-            .unwrap_or(usize::MAX);
+            let maximum = SEARCH_MAXIMUM_FILE_BYTES;
             let roots = self
                 .workspace
                 .roots()
@@ -1217,7 +1195,11 @@ impl InteractiveApplication {
     fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
         match result {
             Ok(VirtualOpen::Execute { plugin, command }) => {
-                self.process_effect(AppEffect::PluginExecute { plugin, command })
+                self.process_effect(AppEffect::PluginExecute {
+                    plugin,
+                    command,
+                    arguments: Vec::new(),
+                })
             }
             Ok(VirtualOpen::Existing(buffer)) => {
                 let mut draft = self.state.draft();
@@ -1392,7 +1374,11 @@ impl InteractiveApplication {
 
     fn write_persistence(&mut self) {
         let configured = &self.configuration.settings().persistence;
-        if !configured.enabled || self.persistence.pending() {
+        if !configured.enabled {
+            return;
+        }
+        if self.persistence.pending() {
+            self.persistence.request_save();
             return;
         }
         let mut metadata = self.tooling.metadata();
@@ -1484,17 +1470,19 @@ impl InteractiveApplication {
                             .into_iter()
                             .map(|entry| (entry.path, entry.mode)),
                     );
-                    self.input.restore_history(
-                        state.command_history,
-                        state.search_history,
-                    );
+                    self.input
+                        .restore_history(state.command_history, state.search_history);
                     let requested = std::mem::take(&mut self.session_load_requested);
                     let found = session.is_some();
                     if let Some(session) = session {
                         self.restore_session(session);
                     }
                     if requested {
-                        let message = if found { "session_restored" } else { "session_load_none" };
+                        let message = if found {
+                            "session_restored"
+                        } else {
+                            "session_load_none"
+                        };
                         self.notify_message(self.message(message, &[]), false);
                     }
                 }
@@ -1506,6 +1494,9 @@ impl InteractiveApplication {
         }
         if self.persistence.take_save_request() {
             self.save_persistence();
+        }
+        if self.persistence.take_saved_notice() {
+            self.notify_message(self.message("session_saved", &[]), false);
         }
     }
 
@@ -1625,7 +1616,7 @@ impl InteractiveApplication {
                     let transition = self.window_session.prepare_restore_transition(
                         draft,
                         (&current, catalog.clone()),
-                        &SCRATCH_LABEL,
+                        SCRATCH_LABEL,
                         descriptions,
                         &self.extension.window_generations(),
                         RestoreWindowPolicy {
@@ -1674,7 +1665,10 @@ impl InteractiveApplication {
                     .buffers
                     .iter()
                     .filter(|(_, buffer)| {
-                        buffer.path.as_ref().is_some_and(|path| pinned.contains(path))
+                        buffer
+                            .path
+                            .as_ref()
+                            .is_some_and(|path| pinned.contains(path))
                     })
                     .map(|(id, _)| id)
                     .collect();
@@ -1685,8 +1679,7 @@ impl InteractiveApplication {
         }
     }
     pub(super) fn record_recent_file(&mut self, path: PathBuf) {
-        self.persistence
-            .record_recent(path, RECENT_FILE_LIMIT);
+        self.persistence.record_recent(path, RECENT_FILE_LIMIT);
     }
 }
 
@@ -1737,10 +1730,18 @@ impl InteractiveApplication {
         // configured theme replaces the applied one. Without a config file it lives in the
         // editor state instead.
         let saved = self.configuration.user_settings_path().is_some_and(|path| {
-            crate::config::write_user_setting(&path, "ui.theme", Some(toml::Value::String(name.into())))
-                .and_then(|()| self.configuration.request_reload().map_err(|error| error.to_string()))
-                .map_err(|error| self.show_error(error))
-                .is_ok()
+            crate::config::write_user_setting(
+                &path,
+                "ui.theme",
+                Some(toml::Value::String(name.into())),
+            )
+            .and_then(|()| {
+                self.configuration
+                    .request_reload()
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(|error| self.show_error(error))
+            .is_ok()
         });
         let saving = saved || self.configuration.settings().persistence.enabled;
         if saving {
@@ -1766,8 +1767,8 @@ impl InteractiveApplication {
             .map(|(index, (key, name, origin))| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("theme:{index}")),
                         label: name,
                         detail: if index == 0 {
@@ -1894,7 +1895,13 @@ impl InteractiveApplication {
                     .configuration
                     .rejected_keymaps()
                     .into_iter()
-                    .chain(self.configuration.keymaps().conflicts.iter().map(String::as_str))
+                    .chain(
+                        self.configuration
+                            .keymaps()
+                            .conflicts
+                            .iter()
+                            .map(String::as_str),
+                    )
                     .collect::<Vec<_>>();
                 if conflicts.is_empty() {
                     self.notify_message(self.message("no_keymap_conflicts", &[]), false);
@@ -1905,8 +1912,8 @@ impl InteractiveApplication {
             AppEffect::RecoveryInspect => self.open_recovery_picker(),
             AppEffect::SessionSave => {
                 if self.configuration.settings().persistence.enabled {
+                    self.persistence.request_save_notice();
                     self.write_persistence();
-                    self.notify_message(self.message("session_saved", &[]), false);
                 } else {
                     self.show_error(self.message("session_disabled", &[]));
                 }
@@ -1980,11 +1987,17 @@ impl InteractiveApplication {
                             .byte_to_line(view.cursor)
                             .ok()
                     });
-                    let folds = self.ui.syntax_folds.iter_mut().filter(|fold| fold.view == view);
+                    let folds = self
+                        .ui
+                        .syntax_folds
+                        .iter_mut()
+                        .filter(|fold| fold.view == view);
                     match action {
                         SyntaxFoldAction::OpenAll => folds.for_each(|fold| fold.collapsed = false),
                         SyntaxFoldAction::CloseAll => folds.for_each(|fold| fold.collapsed = true),
-                        SyntaxFoldAction::Toggle | SyntaxFoldAction::Open | SyntaxFoldAction::Close => {
+                        SyntaxFoldAction::Toggle
+                        | SyntaxFoldAction::Open
+                        | SyntaxFoldAction::Close => {
                             // The innermost fold around the cursor, the one Vim's `za` acts on.
                             if let Some(fold) = folds
                                 .filter(|fold| {
@@ -2055,8 +2068,8 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("syntax:{index}:{}", info.id)),
                                 label: info.language.name().to_owned(),
                                 detail: self.message(
@@ -2133,14 +2146,11 @@ impl InteractiveApplication {
                 };
                 let buffer = view.buffer;
                 match crate::editor::session::tasks::FormatterSource::capture(&self.state, buffer) {
-                    Ok(source) => self
-                        .run_trusted(TrustedAction::RunFormatter { name, source }),
+                    Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
                     Err(error) => self.show_error(error),
                 }
             }
-            AppEffect::TaskRun(name) => {
-                self.run_trusted(TrustedAction::RunTask(name))
-            }
+            AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
             AppEffect::TaskStop(name) => self.stop_task(&name),
             AppEffect::TaskOutput(name) => self.show_output_picker(&name),
             AppEffect::CrashInspect => {
@@ -2247,8 +2257,8 @@ impl InteractiveApplication {
                     .map(|(index, entry)| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("dap-console:{index}")),
                                 label: entry.text.clone(),
                                 // The origin and the source are both shown, so a REPL result is
@@ -2280,8 +2290,8 @@ impl InteractiveApplication {
                     .unwrap_or_default();
                 let items = vec![(
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId("dap-session:active".into()),
                         label: adapter,
                         detail: configuration,
@@ -2319,7 +2329,10 @@ impl InteractiveApplication {
                     self.show_error(self.message("dap_not_paused", &[]));
                     return Ok(());
                 };
-                if let Err(error) = self.debugger_session.control(DapControl::Scopes { frame_id }) {
+                if let Err(error) = self
+                    .debugger_session
+                    .control(DapControl::Scopes { frame_id })
+                {
                     self.show_error(error)
                 }
             }
@@ -2346,15 +2359,17 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::DapRestart => {
-                if let Some(name) = self.debugger_session.configuration().map(str::to_owned) {
-                    let _ = self.debugger_session.stop();
-                    self.start_dap_configuration(&name)
-                } else if let Some(target) = self.debugger_session.target().cloned() {
-                    // A session started from the active file restarts what it was running.
-                    let _ = self.debugger_session.stop();
-                    self.start_dap(Some(target.adapter), target.program);
-                } else {
-                    self.show_error(self.message("dap_no_configuration", &[]));
+                match self.debugger_session.request_restart(
+                    (
+                        &self.configuration.settings().debug,
+                        &self.configuration.settings().terminals,
+                        self.configuration.binding_revision(),
+                    ),
+                    &self.workspace,
+                    self.tooling.entries(),
+                ) {
+                    Ok(intent) => self.run_trusted(TrustedAction::StartDebug(intent)),
+                    Err(error) => self.show_error(error),
                 }
             }
             AppEffect::DapBreakpointConfigure {
@@ -2428,12 +2443,13 @@ impl InteractiveApplication {
                     .to_owned();
                 // An ATTACHED session names the TARGET it was given: the editor did not start that
                 // process, so it does not describe it as a program it launched.
-                let attached = self.debugger_session.target().and_then(|target| {
-                    match target.request {
-                        crate::config::DebugRequestKind::Attach => target.target.clone(),
-                        crate::config::DebugRequestKind::Launch => None,
-                    }
-                });
+                let attached =
+                    self.debugger_session
+                        .target()
+                        .and_then(|target| match target.request {
+                            crate::config::DebugRequestKind::Attach => target.target.clone(),
+                            crate::config::DebugRequestKind::Launch => None,
+                        });
                 match attached {
                     Some(target) => self.notify_message(
                         self.message(
@@ -2442,10 +2458,8 @@ impl InteractiveApplication {
                         ),
                         false,
                     ),
-                    None => self.notify_message(
-                        self.message("dap_status", &[("adapter", adapter)]),
-                        false,
-                    ),
+                    None => self
+                        .notify_message(self.message("dap_status", &[("adapter", adapter)]), false),
                 }
             }
             effect => return Err(effect),
@@ -2471,8 +2485,8 @@ impl InteractiveApplication {
                     .map(|(index, (id, status))| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("plugin:{index}:{id}")),
                                 label: id.clone(),
                                 detail: format!("{status:?}"),
@@ -2523,7 +2537,7 @@ impl InteractiveApplication {
                         VirtualContext {
                             editor: &self.state,
                             windows: &self.window_session,
-                            scratch: &SCRATCH_LABEL,
+                            scratch: SCRATCH_LABEL,
                         },
                     )
                     .and_then(|staged| {
@@ -2546,51 +2560,14 @@ impl InteractiveApplication {
                     .and_then(|buffer| self.extension.refresh_virtual(buffer, &self.state));
                 self.route_virtual_open(result);
             }
-            AppEffect::PluginExecute { plugin, command } => {
-                let Some(load) = self.extension.load_id(&plugin) else {
-                    self.show_error(crate::extensions::PluginError::NotActive);
-                    return Ok(());
-                };
-                if !self.extension.is_active_generation(&plugin, load) {
-                    self.show_error(crate::extensions::PluginError::NotActive);
-                    return Ok(());
-                }
-                self.refresh_plugin_host_events();
-                self.retire_plugin_edit_sources();
-                let maximum = usize::try_from(
-                    SEARCH_MAXIMUM_FILE_BYTES,
-                )
-                .unwrap_or(usize::MAX);
-                let input_capture = self.input.capture_epoch();
-                let interaction_available = self.input.prompt().is_none()
-                    && self.ui.picker.is_none()
-                    && self.ui.tool_menu.is_none()
-                    && self.ui.settings.is_none()
-                    && self.input.documentation().is_none()
-                    && !self.input.mapping_pending()
-                    && !self.input.grammar_pending();
-                let navigation = self
-                    .window_session
-                    .navigation_stamp(self.state.window_version(), self.state.active_view);
-                let result = self.extension.execute(
-                    &plugin,
-                    &command,
-                    crate::editor::session::extensions::InvocationContext {
-                        editor: &self.state,
-                        workspace: &self.workspace,
-                        configuration: self.configuration.binding_revision_ref(),
-                        generation: self.configuration.generation(),
-                        ui_revision: self.window_session.graph().revision(),
-                        input_capture,
-                        navigation,
-                        interaction_available,
-                        maximum,
-                    },
-                );
-                if let Err(error) = result {
-                    self.show_error(error);
-                }
+            AppEffect::PluginExecute {
+                plugin,
+                command,
+                arguments,
+            } => {
+                self.execute_plugin_command(plugin, command, arguments);
             }
+
             AppEffect::PackageInstall {
                 package_manifest,
                 plugin_manifest,
@@ -2692,8 +2669,8 @@ impl InteractiveApplication {
             .map(|(index, line)| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("lsp-log:{index}")),
                         label: line.clone(),
                         detail: String::new(),
@@ -2723,14 +2700,22 @@ impl InteractiveApplication {
             AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
             // Esc on a filtered list clears the search before it closes the manager.
             AppEffect::CloseToolMenu
-                if self.ui.tool_menu.as_ref().is_some_and(|menu| !menu.query.is_empty()) =>
+                if self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .is_some_and(|menu| !menu.query.is_empty()) =>
             {
                 self.search_tool_menu(None, false);
             }
             AppEffect::CloseToolMenu => self.close_tool_menu(),
             AppEffect::ToolSearch => self.search_tool_menu(None, true),
             AppEffect::ToolSearchInsert(text) => {
-                let query = self.ui.tool_menu.as_ref().map(|menu| format!("{}{text}", menu.query));
+                let query = self
+                    .ui
+                    .tool_menu
+                    .as_ref()
+                    .map(|menu| format!("{}{text}", menu.query));
                 self.search_tool_menu(query, true);
             }
             AppEffect::ToolSearchDelete => {
@@ -2772,6 +2757,7 @@ impl InteractiveApplication {
                         self.language.mark_stopped(&id);
                     }
                     self.language.request_stop(&server);
+                    self.clear_lsp_server_ownership(&server);
                     if let Err(error) = self.language.stop(&server) {
                         self.show_error(error)
                     }
@@ -2817,8 +2803,19 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::LspAttach => {
+                if let Some(buffer) = self.state.active_buffer_id() {
+                    self.language.clear_detached(buffer);
+                }
                 if let Some(server) = self.language.active().cloned() {
                     if let Some((buffer, document)) = self.active_lsp_document() {
+                        if let Some(id) = self
+                            .language
+                            .sessions()
+                            .get(&server)
+                            .map(|session| session.server_id.clone())
+                        {
+                            self.language.set_detached(id, buffer, false);
+                        }
                         let source = self.state.buffers[buffer].text.source_version();
                         if let Err(error) =
                             self.language
@@ -2837,6 +2834,14 @@ impl InteractiveApplication {
                 {
                     let uri = document.uri();
                     let _ = self.language.close(&server, uri.clone());
+                    if let Some(id) = self
+                        .language
+                        .sessions()
+                        .get(&server)
+                        .map(|session| session.server_id.clone())
+                    {
+                        self.language.set_detached(id, buffer, true);
+                    }
                     self.language.detach(&server, buffer);
                     if let Ok(owner) = DiagnosticOwner::new(format!("lsp.{server}")) {
                         self.diagnostics.clear_owner_uri(&owner, &uri);
@@ -2870,11 +2875,20 @@ impl InteractiveApplication {
                     direction,
                     crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
                     self.window_session.content().documentation_rows.max(1),
+                    self.input.documentation().map_or(0, |popup| {
+                        crate::ui::render::overlays::documentation_display_rows(
+                            popup,
+                            self.configuration.settings(),
+                            self.window_session.width(),
+                        )
+                    }),
                 );
                 self.project_input_documentation();
             }
             AppEffect::LspDocumentationClose => self.close_documentation(),
-            AppEffect::LspCompletionDocumentationOpen => self.open_lsp_completion_documentation(true),
+            AppEffect::LspCompletionDocumentationOpen => {
+                self.open_lsp_completion_documentation(true)
+            }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::DiagnosticNavigate { direction, filter } => {
                 self.navigate_diagnostic(direction, filter)
@@ -2928,29 +2942,34 @@ impl InteractiveApplication {
                 }
             }
             AppEffect::LspSelectionExpand => {
-                if let (Some(view), Some(range)) = (
-                    self.state.active_view,
-                    self.language
+                if let Some(view) = self.state.active_view {
+                    let state = &self.state.views[view];
+                    let text = &self.state.buffers[state.buffer].text;
+                    let selection = state.selection.map(|selection| {
+                        let start = selection.anchor.min(selection.head);
+                        let end = crate::editor::text::next_grapheme_boundary(
+                            text,
+                            selection.anchor.max(selection.head),
+                        );
+                        (start, end)
+                    });
+                    let range = self
+                        .language
                         .selection_ranges()
                         .iter()
                         .filter(|range| {
-                            range.contains(self.state.views[self.state.active_view.unwrap()].cursor)
+                            if let Some((start, end)) = selection {
+                                range.start <= start
+                                    && range.end >= end
+                                    && (range.start < start || range.end > end)
+                            } else {
+                                range.contains(state.cursor)
+                            }
                         })
                         .min_by_key(|range| range.len())
-                        .copied(),
-                ) {
-                    let transaction = EditorTransaction::new(self.transaction_id()).with_operation(
-                        EditorOperation::SetSelection {
-                            view,
-                            selection: Some(crate::editor::Selection {
-                                anchor: range.start,
-                                head: range.end,
-                                kind: crate::editor::SelectionKind::Character,
-                            }),
-                        },
-                    );
-                    if let Err(error) = self.state.apply_transaction(&transaction) {
-                        self.show_error(error)
+                        .copied();
+                    if let Some(range) = range {
+                        self.select_text(view, range.start.get(), range.end.get());
                     }
                 }
             }
@@ -2980,11 +2999,7 @@ impl InteractiveApplication {
             }
             AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
-                    self.persistence.set_mark(
-                        name,
-                        location,
-                        MARK_LIMIT,
-                    );
+                    self.persistence.set_mark(name, location, MARK_LIMIT);
                 }
             }
 
@@ -3188,7 +3203,8 @@ impl InteractiveApplication {
             AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
                 Some(PickerPayload::Recovery(journal)) => {
                     if let Err(error) =
-                        self.recovery.discard(&journal, true, self.documents.recovery_io())
+                        self.recovery
+                            .discard(&journal, true, self.documents.recovery_io())
                     {
                         self.show_error(error);
                     }
@@ -3214,10 +3230,10 @@ impl InteractiveApplication {
                         PickerPayload::ProposalFile(index) => Some(*index),
                         _ => None,
                     });
-                if let Some(index) = selected {
-                    if self.workspace_edits.toggle(index).is_ok() {
-                        self.show_workspace_proposal();
-                    }
+                if let Some(index) = selected
+                    && self.workspace_edits.toggle(index).is_ok()
+                {
+                    self.show_workspace_proposal();
                 }
             }
             AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
@@ -3311,6 +3327,9 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn process_workspace_file_events(&mut self) {
+        if self.search.help_is_open() {
+            return;
+        }
         let Some(result) = self.search.poll_files(
             self.workspace.version(),
             self.configuration.binding_revision(),
@@ -3331,8 +3350,8 @@ impl InteractiveApplication {
             .map(|entry| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(entry.id),
                         label: entry.relative_path.display().to_string(),
                         detail: String::new(),
@@ -3435,6 +3454,9 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn process_workspace_search_events(&mut self) {
+        if self.search.help_is_open() {
+            return;
+        }
         for update in self.search.poll(
             self.workspace.version(),
             self.configuration.binding_revision(),
@@ -3454,6 +3476,7 @@ impl InteractiveApplication {
                 SearchUpdate::Complete {
                     intent: Intent::Find,
                     files,
+                    ..
                 } => {
                     if self.search.live() || !self.search.matches().is_empty() {
                         self.open_workspace_search_picker();
@@ -3477,9 +3500,14 @@ impl InteractiveApplication {
                 }
                 SearchUpdate::Complete {
                     intent: Intent::Replace(replacement),
+                    truncated,
                     ..
                 } => {
-                    if self.search.matches().is_empty() {
+                    if truncated {
+                        self.show_error(
+                            "Workspace search was truncated; replacement was not offered",
+                        );
+                    } else if self.search.matches().is_empty() {
                         self.show_error(self.message("workspace_search_empty", &[]));
                     } else {
                         self.begin_workspace_search_replacement(replacement);
@@ -3928,11 +3956,11 @@ impl InteractiveApplication {
     pub(super) fn reveal_terminal(&mut self, id: PtyId) {
         self.terminal_session.select(id);
         self.terminal_session.display(id);
-        if self.terminal_rect(id).is_none() {
-            if let Err(error) = self.show_native_window(NativeSurfaceTarget::Terminal(id.0)) {
-                self.show_error(error);
-                return;
-            }
+        if self.terminal_rect(id).is_none()
+            && let Err(error) = self.show_native_window(NativeSurfaceTarget::Terminal(id.0))
+        {
+            self.show_error(error);
+            return;
         }
         self.set_terminal_focus(true);
         self.resize_active_terminal_to_panel();
@@ -3991,8 +4019,8 @@ impl InteractiveApplication {
                     .map(|(index, (key, label, detail))| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("terminal:{index}")),
                                 label,
                                 detail,
@@ -4027,7 +4055,11 @@ impl InteractiveApplication {
                 let hidden = self.terminal_window_rect().is_none();
                 if !self.terminal_session.cycle(i64::from(direction)) {
                     self.show_error(self.message("terminal_missing", &[]));
-                } else if let Some(id) = self.terminal_session.selected().filter(|_| focused || hidden) {
+                } else if let Some(id) = self
+                    .terminal_session
+                    .selected()
+                    .filter(|_| focused || hidden)
+                {
                     self.reveal_terminal(id);
                 } else {
                     self.resize_active_terminal_to_panel();
@@ -4067,9 +4099,15 @@ impl InteractiveApplication {
             }
             AppEffect::TerminalFloat(rect) => {
                 let rect = rect.unwrap_or_else(|| {
-                    let (columns, rows) = (self.window_session.width(), self.window_session.height());
+                    let (columns, rows) =
+                        (self.window_session.width(), self.window_session.height());
                     let (width, height) = (columns * 4 / 5, rows * 4 / 5);
-                    WindowRect { x: (columns - width) / 2, y: (rows - height) / 2, width, height }
+                    WindowRect {
+                        x: (columns - width) / 2,
+                        y: (rows - height) / 2,
+                        width,
+                        height,
+                    }
                 });
                 self.place_active_terminal(WindowPlacement::Floating(rect));
             }
@@ -4083,13 +4121,24 @@ impl InteractiveApplication {
                 self.ensure_cursor_visible();
             }
             AppEffect::TerminalSend(text) => {
-                if let Some(id) = self.terminal_session.selected() {
-                    if let Err(error) =
-                        self.terminal_session
-                            .send(id, TerminalInput::Text(&text), &self.workspace)
-                    {
-                        self.show_error(error);
-                    }
+                if let Some(id) = self.terminal_session.selected()
+                    && let Err(error) = self.terminal_session.send(
+                        id,
+                        match text.as_str() {
+                            "\x1b[A" => TerminalInput::Key(crate::ui::PtyInputKey::Up),
+                            "\x1b[B" => TerminalInput::Key(crate::ui::PtyInputKey::Down),
+                            "\x1b[C" => TerminalInput::Key(crate::ui::PtyInputKey::Right),
+                            "\x1b[D" => TerminalInput::Key(crate::ui::PtyInputKey::Left),
+                            "\x1b[H" => TerminalInput::Key(crate::ui::PtyInputKey::Home),
+                            "\x1b[F" => TerminalInput::Key(crate::ui::PtyInputKey::End),
+                            "\x1b[5~" => TerminalInput::Key(crate::ui::PtyInputKey::PageUp),
+                            "\x1b[6~" => TerminalInput::Key(crate::ui::PtyInputKey::PageDown),
+                            _ => TerminalInput::Text(&text),
+                        },
+                        &self.workspace,
+                    )
+                {
+                    self.show_error(error);
                 }
             }
             AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
@@ -4193,7 +4242,12 @@ impl InteractiveApplication {
                 }
             }
             Ok(InputAction::Unmapped) => {}
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                if mode == EditorMode::OperatorPending {
+                    self.set_mode(EditorMode::Normal);
+                }
+                self.show_error(error);
+            }
         }
     }
 
@@ -4244,42 +4298,26 @@ impl InteractiveApplication {
         };
         if self
             .input
-            .begin_macro_replay(
-                register,
-                MACRO_RECURSION_LIMIT,
-            )
+            .begin_macro_replay(register, MACRO_RECURSION_LIMIT)
             .is_err()
         {
-            self.show_error(
-                self.message(
-                    "macro_recursion_limit",
-                    &[(
-                        "limit",
-                        MACRO_RECURSION_LIMIT
-                            .to_string(),
-                    )],
-                ),
-            );
+            self.show_error(self.message(
+                "macro_recursion_limit",
+                &[("limit", MACRO_RECURSION_LIMIT.to_string())],
+            ));
             return;
         }
         for invocation in invocations {
-            let Ok(invocation) = self.input.macro_step(
-                invocation,
-                MACRO_STEP_LIMIT,
-            ) else {
-                self.show_error(
-                    self.message(
-                        "macro_step_limit",
-                        &[(
-                            "limit",
-                            MACRO_STEP_LIMIT
-                                .to_string(),
-                        )],
-                    ),
-                );
+            let Ok(invocation) = self.input.macro_step(invocation, MACRO_STEP_LIMIT) else {
+                self.show_error(self.message(
+                    "macro_step_limit",
+                    &[("limit", MACRO_STEP_LIMIT.to_string())],
+                ));
                 break;
             };
-            self.invoke(invocation);
+            if !self.invoke_checked(invocation) {
+                break;
+            }
         }
         self.input.finish_macro_replay();
     }
@@ -4311,6 +4349,7 @@ impl InteractiveApplication {
             .map_or(source.len(), |(relative, _)| cursor + relative);
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
+        self.input.remember_word_search();
         self.perform_search(forward);
     }
 
@@ -4418,7 +4457,7 @@ impl InteractiveApplication {
                 plan,
                 (&current, &catalog),
                 candidate,
-                &SCRATCH_LABEL,
+                SCRATCH_LABEL,
                 descriptions,
             )?
         } else if activate_document {
@@ -4426,7 +4465,7 @@ impl InteractiveApplication {
                 candidate,
                 &current,
                 catalog.clone(),
-                &SCRATCH_LABEL,
+                SCRATCH_LABEL,
                 descriptions,
             )?
         } else {
@@ -4434,13 +4473,15 @@ impl InteractiveApplication {
                 candidate,
                 &current,
                 catalog.clone(),
-                &SCRATCH_LABEL,
+                SCRATCH_LABEL,
                 Some(descriptions),
             )?
         };
+        self.persistence.reconcile_marks(&self.state);
         *self.state = self
             .window_session
             .accept_editor_transition(transition, &current, &catalog)?;
+        self.persistence.reconcile_marks(&self.state);
         self.reconcile_editor_windows();
         Ok(())
     }
@@ -4687,6 +4728,8 @@ impl InteractiveApplication {
         let Some(plan) = plan else {
             return;
         };
+        self.diagnostics.dismiss_expansion();
+        self.ui.expanded_diagnostic = None;
         self.transaction_id();
         let transaction = match self.input.mouse_transaction(&plan, &self.state.version()) {
             Ok(transaction) => transaction,
@@ -4763,6 +4806,15 @@ impl InteractiveApplication {
         };
         let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
         let last_anchor = visual_rows.forward(first_anchor, body.saturating_sub(1));
+        let cursor_anchor = if kind.starts_with("half_") {
+            if kind.ends_with("up") {
+                visual_rows.backward(cursor_anchor, amount)
+            } else {
+                visual_rows.forward(cursor_anchor, amount)
+            }
+        } else {
+            cursor_anchor
+        };
         let target_anchor = cursor_anchor.clamp(first_anchor, last_anchor);
         let current_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
         let old_line_start = buffer
@@ -4839,6 +4891,13 @@ impl InteractiveApplication {
 
 impl InteractiveApplication {
     pub(super) fn open_prompt(&mut self, kind: PromptKind, initial: String) {
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind != kind)
+        {
+            self.close_prompt();
+        }
         if kind != PromptKind::ExplorerRename {
             self.cancel_explorer_rename_prompt();
         }
@@ -4948,6 +5007,13 @@ impl InteractiveApplication {
         {
             self.cancel_agent_permission();
         }
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::GitStageUnsaved)
+        {
+            self.input.clear_pending_stage();
+        }
         self.cancel_explorer_rename_prompt();
         if self
             .input
@@ -4976,10 +5042,10 @@ impl InteractiveApplication {
             .input
             .prompt()
             .is_some_and(|prompt| prompt.kind == PromptKind::SubstituteConfirm);
-        if let Some((view, mode)) = self.input.close_prompt(&self.state.window_version()) {
-            if self.state.views.contains_key(view) {
-                self.set_specific_mode(view, mode);
-            }
+        if let Some((view, mode)) = self.input.close_prompt(&self.state.window_version())
+            && self.state.views.contains_key(view)
+        {
+            self.set_specific_mode(view, mode);
         }
         self.restore_input_focus();
         self.project_input_prompt();
@@ -5070,7 +5136,7 @@ impl InteractiveApplication {
                 let buffer = token.buffer();
                 let retained = token.clone();
                 match self.request_save_buffer(buffer, false, None, false, Some(token)) {
-                    Ok(()) => self.notify_message(self.message("saving", &[]), false),
+                    Ok(_) => self.notify_message(self.message("saving", &[]), false),
                     Err(error) => {
                         self.window_session.fail_editor_close_save(&retained);
                         self.show_document_failure(error);
@@ -5108,6 +5174,15 @@ impl InteractiveApplication {
                 self.close_buffer_target(view, buffer);
             }
             EditorCloseTarget::Layout(_) | EditorCloseTarget::Window { .. } => {
+                let closed = discarded
+                    .iter()
+                    .filter_map(|id| {
+                        self.state
+                            .buffers
+                            .get(*id)
+                            .map(|buffer| (*id, buffer.path.clone()))
+                    })
+                    .collect::<Vec<_>>();
                 let plan = self.window_session.plan_accepted_editor_close(
                     target,
                     discarded,
@@ -5119,6 +5194,9 @@ impl InteractiveApplication {
                         if let Err(error) = self.apply_window_plan(plan) {
                             self.show_error(error);
                         } else {
+                            for (id, path) in closed {
+                                self.retire_closed_buffer(id, path.as_deref());
+                            }
                             self.cancel_pending_mapping();
                             self.input.cancel_pending();
                             self.ensure_cursor_visible();
@@ -5153,7 +5231,10 @@ impl InteractiveApplication {
     pub(super) fn prompt_backspace(&mut self) {
         self.prompt_delete(|input| input.prompt_backspace());
     }
-    pub(super) fn prompt_delete(&mut self, delete: impl FnOnce(&mut super::super::input::InputSession)) {
+    pub(super) fn prompt_delete(
+        &mut self,
+        delete: impl FnOnce(&mut super::super::input::InputSession),
+    ) {
         delete(&mut self.input);
         self.refresh_completions();
         self.preview_search();
@@ -5163,14 +5244,12 @@ impl InteractiveApplication {
         self.project_input_prompt();
     }
     pub(super) fn prompt_history(&mut self, direction: i8) {
-        self.input
-            .prompt_history(direction);
+        self.input.prompt_history(direction);
         self.refresh_completions();
         self.preview_search();
     }
     pub(super) fn prompt_complete(&mut self, direction: i8) {
-        self.input
-            .prompt_complete(direction);
+        self.input.prompt_complete(direction);
         self.project_input_prompt();
     }
     pub(super) fn accept_completion(&mut self) -> bool {
@@ -5181,8 +5260,7 @@ impl InteractiveApplication {
         accepted
     }
     pub(super) fn record_prompt_history(&mut self, kind: PromptKind, input: &str) {
-        self.input
-            .record_prompt_history(kind, input);
+        self.input.record_prompt_history(kind, input);
     }
     pub(super) fn refresh_completions(&mut self) {
         if let Some(request) = self.input.refresh_completions(
@@ -5194,13 +5272,11 @@ impl InteractiveApplication {
                 .filter_map(|buffer| buffer.path.as_deref()),
             self.commands.specs().map(|spec| spec.id.as_str()),
         ) && !self.input.completion_read_pending()
-        {
-            if let Ok(id) = self
+            && let Ok(id) = self
                 .documents
                 .list_directory(request.directory, request.limit)
-            {
-                self.input.register_completion_read(id, request.key);
-            }
+        {
+            self.input.register_completion_read(id, request.key);
         }
         self.project_input_prompt();
     }
@@ -5219,11 +5295,10 @@ impl InteractiveApplication {
         let Some(prompt) = self.input.prompt().cloned() else {
             return;
         };
-        if prompt
-            .confirmation
-            .as_ref()
-            .is_some_and(|confirmation| confirmation.selected == crate::ui::ConfirmationChoice::Yes)
-        {
+        if prompt.confirmation.as_ref().is_some_and(|confirmation| {
+            prompt.kind == PromptKind::DirtyClose
+                || confirmation.selected == crate::ui::ConfirmationChoice::Yes
+        }) {
             let (width, height) = crate::ui::prompt_surface_dimensions(
                 &self.state,
                 &self.ui,
@@ -5307,9 +5382,14 @@ impl InteractiveApplication {
                 let selected = prompt
                     .confirmation
                     .map_or(crate::ui::ConfirmationChoice::No, |state| state.selected);
+                let effect = self.input.take_pending_stage();
                 self.close_prompt();
                 if selected == crate::ui::ConfirmationChoice::Yes {
-                    self.confirm_stage_unsaved();
+                    if let Some((effect, line)) = effect {
+                        self.input.set_pending_stage(effect);
+                        self.input.set_pending_stage_line(line);
+                        self.confirm_stage_unsaved();
+                    }
                 } else {
                     self.input.clear_pending_stage();
                     self.notify_message("Nothing was staged".into(), false);
@@ -5404,7 +5484,10 @@ impl InteractiveApplication {
     /// and it goes back when the prompt closes.
     fn preview_search(&mut self) {
         let Some(prompt) = self.input.prompt().filter(|prompt| {
-            matches!(prompt.kind, PromptKind::SearchForward | PromptKind::SearchBackward)
+            matches!(
+                prompt.kind,
+                PromptKind::SearchForward | PromptKind::SearchBackward
+            )
         }) else {
             return;
         };
@@ -5417,7 +5500,9 @@ impl InteractiveApplication {
         if self.ui.large_file_buffers.contains(&buffer_id) {
             return;
         }
-        let origin = self.input.search_origin(view_id, self.state.views[view_id].cursor);
+        let origin = self
+            .input
+            .search_origin(view_id, self.state.views[view_id].cursor);
         let search = &self.configuration.settings().search;
         let buffer = &self.state.buffers[buffer_id];
         let matches = crate::editor::input::search_matches(
@@ -5458,22 +5543,34 @@ impl InteractiveApplication {
         let buffer = &self.state.buffers[buffer_id];
         let revision = buffer.text.revision();
         let source = buffer.text.to_string();
-        let matches = match crate::editor::input::search_matches(
+        let start = if forward && cursor_offset.get() < buffer.text.len_bytes() {
+            cursor_offset.get()
+                + source[cursor_offset.get()..]
+                    .graphemes(true)
+                    .next()
+                    .map_or(0, str::len)
+        } else {
+            cursor_offset.get()
+        };
+        let found = crate::editor::input::search_match(
             &source,
             &query,
             self.configuration.settings().search.smart_case,
-            false,
-        ) {
-            Ok(matches) => matches,
+            self.input.whole_word_search(),
+            start,
+            forward,
+            self.configuration.settings().search.wrap,
+        );
+        let target = match found {
+            Ok(Some(found)) => found.start,
+            Ok(None) => {
+                self.show_error(self.message("pattern_not_found", &[("query", query)]));
+                return;
+            }
             Err(error) => {
                 self.show_error(error);
                 return;
             }
-        };
-        let wrap = self.configuration.settings().search.wrap;
-        let Some(target) = search_target(&buffer.text, &matches, cursor_offset, forward, wrap) else {
-            self.show_error(self.message("pattern_not_found", &[("query", query)]));
-            return;
         };
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_precondition(Precondition::BufferRevision {
@@ -5533,7 +5630,12 @@ impl InteractiveApplication {
     }
 
     /// Selects `start..end` in character Visual mode, with the cursor on its last character.
-    pub(super) fn select_text(&mut self, view_id: crate::editor::ViewId, start: usize, end: usize) -> bool {
+    pub(super) fn select_text(
+        &mut self,
+        view_id: crate::editor::ViewId,
+        start: usize,
+        end: usize,
+    ) -> bool {
         let Some(text) = self
             .state
             .views
@@ -5653,11 +5755,10 @@ impl InteractiveApplication {
         if let Some(result) = self
             .workspace
             .project_result(crate::editor::session::workspace::DiscoveryKind::Debugger)
+            && let Err(error) = self.debugger_session.debug_root_result(result)
         {
-            if let Err(error) = self.debugger_session.debug_root_result(result) {
-                let _ = self.debugger_session.stop();
-                self.show_error(error);
-            }
+            let _ = self.debugger_session.stop();
+            self.show_error(error);
         }
         self.advance_debug_launch();
     }
@@ -5675,7 +5776,9 @@ impl InteractiveApplication {
             };
             match event {
                 DapEvent::Starting { .. } => {}
-                DapEvent::RequestFailed { command, message, .. } => {
+                DapEvent::RequestFailed {
+                    command, message, ..
+                } => {
                     if !self.debugger_session.watch_request_failed(&command) {
                         self.show_error(message);
                     }
@@ -5689,6 +5792,22 @@ impl InteractiveApplication {
                 }
                 // The panes and the execution sign show these.
                 DapEvent::Running { .. } | DapEvent::Output { .. } => {}
+                DapEvent::Response {
+                    response: DapResponse::Disconnected { .. },
+                    ..
+                } => {
+                    self.notify_message(
+                        if self.debugger_session.end_state()
+                            == Some(crate::debugger::DapSessionEnd::Terminated)
+                        {
+                            "debug session terminated"
+                        } else {
+                            "debug session detached; program left running"
+                        }
+                        .into(),
+                        false,
+                    );
+                }
                 DapEvent::Response { response, .. } => match self
                     .debugger_session
                     .response(response)
@@ -5715,6 +5834,8 @@ impl InteractiveApplication {
                     }
                     crate::editor::session::debugger::DebugResponse::Result(response) => {
                         match response {
+                            DapResponse::Disconnected { .. }
+                            | DapResponse::BreakpointChanged { .. } => {}
                             DapResponse::Evaluate(value) => {
                                 // The answer is recorded as an EVALUATION RESULT, which is a
                                 // different origin from the command that asked for it.
@@ -5765,6 +5886,25 @@ impl InteractiveApplication {
                                     self.show_error(error);
                                     continue;
                                 }
+                                if let Some(view) = self.state.active_view {
+                                    let buffer = self.state.views[view].buffer;
+                                    let text = &self.state.buffers[buffer].text;
+                                    let line = target.line.saturating_sub(1) as usize;
+                                    let line = line.min(text.len_lines().saturating_sub(1));
+                                    let start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
+                                    let column = target.column.saturating_sub(1) as usize;
+                                    let row = text.line(line).unwrap_or_default();
+                                    let column = row
+                                        .trim_end_matches(['\r', '\n'])
+                                        .grapheme_indices(true)
+                                        .take_while(|(offset, _)| *offset <= column)
+                                        .last()
+                                        .map_or(0, |(offset, _)| offset);
+                                    let position = ByteOffset(start.get() + column);
+                                    self.state.views[view].cursor = position;
+                                    self.state.mark_editor_changed();
+                                    self.ensure_cursor_visible();
+                                }
                                 self.notify_message(
                                     self.message(
                                         "dap_source_loaded",
@@ -5795,7 +5935,8 @@ impl InteractiveApplication {
                 } => {
                     let reply = reply.claim();
                     if let Some(program) =
-                        self.debugger_session.adapter_terminal(&cwd, &arguments, &environment)
+                        self.debugger_session
+                            .adapter_terminal(&cwd, &arguments, &environment)
                     {
                         self.open_adapter_terminal(program, reply);
                         continue;
@@ -5828,7 +5969,7 @@ impl InteractiveApplication {
                 }
             }
         }
-    
+
         // The arrangement APPEARS when the session does: the panes are projected on every pump, so
         // starting, stopping and reporting all refresh what the layout shows.
         self.project_debug_panes();
@@ -5843,22 +5984,24 @@ impl InteractiveApplication {
                     self.diagnostics.clear_source(&source);
                     self.sync_ui_diagnostics();
                 }
-                self.notify_message(self.message("task_stopped", &[("name", name.into())]), false);
+                self.notify_message(
+                    self.message("task_stopped", &[("name", name.into())]),
+                    false,
+                );
             }
             Err(error) => self.show_error(error),
         }
     }
 
-    pub(super) fn start_task_plan(
-        &mut self,
-        name: &str,
-        adapter: AdapterContext,
-    ) {
+    pub(super) fn start_task_plan(&mut self, name: &str, adapter: AdapterContext) {
         let managed = match &adapter {
             AdapterContext::Formatter { source }
                 if !self.configuration.settings().tasks.contains_key(name) =>
             {
-                let path = self.state.buffers[source.buffer()].path.clone().unwrap_or_default();
+                let path = self.state.buffers[source.buffer()]
+                    .path
+                    .clone()
+                    .unwrap_or_default();
                 let Some(tool) = managed_formatter(|tool| tool.id == name, &path) else {
                     self.show_error(self.message("formatter_missing", &[("name", name.into())]));
                     return;
@@ -6065,10 +6208,10 @@ impl InteractiveApplication {
             };
             match update {
                 crate::editor::session::tasks::TaskUpdate::Output => {
-                    if let Some(name) = self.tasks.active_output().map(str::to_owned) {
-                        if self.search.picker_surface() == PickerSurfaceKind::Output {
-                            self.show_output_picker(&name);
-                        }
+                    if let Some(name) = self.tasks.active_output().map(str::to_owned)
+                        && self.search.picker_surface() == PickerSurfaceKind::Output
+                    {
+                        self.show_output_picker(&name);
                     }
                 }
                 crate::editor::session::tasks::TaskUpdate::Finished {
@@ -6095,7 +6238,12 @@ impl InteractiveApplication {
                             self.show_error(self.message("formatter_truncated", &[]));
                         }
                         // Whatever the formatter did, the save it was holding back goes on.
-                        if matches!(task.adapter(), AdapterContext::Formatter { .. }) {
+                        if let AdapterContext::Formatter { source } = task.adapter()
+                            && self.format_on_save.as_ref().is_some_and(|pending| {
+                                pending.buffer == source.buffer()
+                                    && pending.formatter.as_ref() == Some(task.requested())
+                            })
+                        {
                             self.finish_format_on_save();
                         }
                         // Linters exit 1 when they have findings; that is not a failure. Other
@@ -6126,20 +6274,19 @@ impl InteractiveApplication {
                         if truncated && matches!(task.adapter(), AdapterContext::Linter { .. }) {
                             self.show_error("linter output truncated; diagnostics not published");
                         }
-                        if matched && (linter_ran || !lint) && !truncated {
-                            if let Err(error) = self.tasks.begin_linter(
+                        if matched
+                            && (linter_ran || !lint)
+                            && !truncated
+                            && let Err(error) = self.tasks.begin_linter(
                                 *task,
                                 &self.state,
                                 &self.workspace,
                                 self.configuration.binding_revision(),
                                 &self.diagnostics,
-                                (
-                                    MAXIMUM_DIAGNOSTICS,
-                                    SEARCH_MAXIMUM_FILE_BYTES as u64,
-                                ),
-                            ) {
-                                self.show_error(error);
-                            }
+                                (MAXIMUM_DIAGNOSTICS, SEARCH_MAXIMUM_FILE_BYTES as u64),
+                            )
+                        {
+                            self.show_error(error);
                         }
                     }
                 }
@@ -6359,7 +6506,10 @@ impl InteractiveApplication {
         let file = self.state.active_view.and_then(|view| {
             let view = &self.state.views[view];
             let buffer = &self.state.buffers[view.buffer];
-            let line = buffer.text.byte_to_line(view.cursor).map_or(1, |line| line + 1);
+            let line = buffer
+                .text
+                .byte_to_line(view.cursor)
+                .map_or(1, |line| line + 1);
             buffer.path.as_deref().map(|path| (path, line))
         });
         match self.terminal_session.request_open(
@@ -6426,8 +6576,7 @@ impl InteractiveApplication {
             return;
         }
         let for_debugger = reply.is_some();
-        match self.terminal_session.prepare(intent, &self.workspace)
-        {
+        match self.terminal_session.prepare(intent, &self.workspace) {
             Ok(open) => {
                 let id = self
                     .terminal_session
@@ -6546,11 +6695,11 @@ impl InteractiveApplication {
                             self.tasks.reject_step(&step);
                         }
                         if let Some(key) = self.terminal_session.take_preflight(id) {
-                            if let Some(id) = self.terminal_session.resolve(&key) {
-                                if let Some(reply) = self.debugger_session.take_terminal(&id) {
-                                    let _ = reply
-                                        .respond(false, Some("terminal workspace retired".into()));
-                                }
+                            if let Some(id) = self.terminal_session.resolve(&key)
+                                && let Some(reply) = self.debugger_session.take_terminal(&id)
+                            {
+                                let _ =
+                                    reply.respond(false, Some("terminal workspace retired".into()));
                             }
                             self.terminal_session.reject(&key);
                             self.sync_terminal_panel();
@@ -6620,10 +6769,10 @@ impl InteractiveApplication {
                         owned = true;
                     }
                     if let Some(key) = self.terminal_session.take_preflight(id) {
-                        if let Some(id) = self.terminal_session.resolve(&key) {
-                            if let Some(reply) = self.debugger_session.take_terminal(&id) {
-                                let _ = reply.respond(false, Some(message.clone()));
-                            }
+                        if let Some(id) = self.terminal_session.resolve(&key)
+                            && let Some(reply) = self.debugger_session.take_terminal(&id)
+                        {
+                            let _ = reply.respond(false, Some(message.clone()));
                         }
                         self.terminal_session.reject(&key);
                         self.sync_terminal_panel();
@@ -6638,6 +6787,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_pty_events(&mut self) {
+        self.terminal_session.set_theme(self.configuration.theme());
         let windows = &self.window_session;
         let updates = self
             .terminal_session
@@ -6647,24 +6797,20 @@ impl InteractiveApplication {
         }
         // What ran there may have committed or switched branch.
         let ended = updates.iter().any(|update| {
-            matches!(update, TerminalUpdate::Exited(..) | TerminalUpdate::IoComplete(_) | TerminalUpdate::Closed(_))
+            matches!(
+                update,
+                TerminalUpdate::Exited(..)
+                    | TerminalUpdate::IoComplete(_)
+                    | TerminalUpdate::Closed(_)
+            )
         });
         for update in updates {
             match update {
                 TerminalUpdate::Started(id) => {
-                    if let Some(reply) = self.debugger_session.take_terminal(&id) {
-                        if let Err(error) = reply.respond(true, None) {
-                            self.show_error(error);
-                        }
-                    }
-                }
-                TerminalUpdate::Exited(id, Some(0)) if self.terminal_session.closes_on_exit(id) => {
-                    let focused = self.window_session.focused_terminal() == Some(id.0);
-                    let float = self.terminal_session.floats(id);
-                    self.retire_terminal(id, false);
-                    // A float such as lazygit returns to the source; a shell tab to its neighbour.
-                    if focused && float {
-                        self.set_terminal_focus(false);
+                    if let Some(reply) = self.debugger_session.take_terminal(&id)
+                        && let Err(error) = reply.respond(true, None)
+                    {
+                        self.show_error(error);
                     }
                 }
                 // Nothing is left to type to; keys go back to the source.
@@ -6768,20 +6914,22 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn move_lsp_completion(&mut self, direction: i8) {
-        let rows = usize::from(
-            COMPLETION_MAX_ROWS
-                .max(1),
-        );
-        if let Some((selected, scroll)) = self.language.move_completion(direction, rows) {
-            if let Some(completion) = self.ui.language_completion.as_mut() {
-                completion.selected = selected;
-                completion.scroll = scroll;
-            }
+        let rows = usize::from(COMPLETION_MAX_ROWS.max(1));
+        if let Some((selected, scroll)) = self.language.move_completion(direction, rows)
+            && let Some(completion) = self.ui.language_completion.as_mut()
+        {
+            completion.selected = selected;
+            completion.scroll = scroll;
         }
         self.refresh_lsp_completion_documentation();
     }
 
     pub(in crate::editor::session) fn accept_lsp_completion(&mut self) {
+        if !self.language.completion_current(&self.state) {
+            self.language.clear_completion();
+            self.ui.language_completion = None;
+            return;
+        }
         let Some(completion) = &self.ui.language_completion else {
             return;
         };
@@ -6826,7 +6974,6 @@ impl InteractiveApplication {
         }
         let encoding = self.language.server_encoding(&server);
         let snippet = item.snippet;
-        let session_allowed = item.additional_edits.is_empty();
         let offset = self
             .state
             .active_view
@@ -6876,9 +7023,35 @@ impl InteractiveApplication {
             }
         }
         let insertion_start = TextBuffer::from_text(&document.text);
-        let insertion_start = PositionCodec::new(&insertion_start)
+        let mut insertion_start = PositionCodec::new(&insertion_start)
             .lsp_to_byte(edit.range.start.line, edit.range.start.character, encoding)
             .ok();
+        if let Some(start) = &mut insertion_start {
+            let original = start.get();
+            let mut shift = 0isize;
+            for additional in &item.additional_edits {
+                if let (Ok(begin), Ok(end)) = (
+                    codec.lsp_to_byte(
+                        additional.range.start.line,
+                        additional.range.start.character,
+                        encoding,
+                    ),
+                    codec.lsp_to_byte(
+                        additional.range.end.line,
+                        additional.range.end.character,
+                        encoding,
+                    ),
+                ) && let Ok(range) = ByteRange::new(begin, end)
+                    && end.get() <= original
+                {
+                    let inserted = TextEdit::new(range, additional.new_text.clone())
+                        .replacement()
+                        .len();
+                    shift += inserted as isize - range.len() as isize;
+                }
+            }
+            *start = ByteOffset(original.saturating_add_signed(shift));
+        }
         let mut edits = vec![edit];
         edits.extend(item.additional_edits);
         let workspace_edit = LspWorkspaceEdit {
@@ -6891,24 +7064,24 @@ impl InteractiveApplication {
         };
         if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit, encoding) {
             self.show_error(error);
-        } else if session_allowed {
-            if let Some(start) = insertion_start {
-                if !tabstops.is_empty() {
-                    let source = self.state.window_version();
-                    self.input.install_snippet(
-                        crate::editor::session::input::SnippetDocument {
-                            editor: &source,
-                            buffer: buffer_id,
-                            text: &self.state.buffers[buffer_id].text,
-                            view: self.state.active_view,
-                        },
-                        start,
-                        tabstops
-                            .into_iter()
-                            .map(|stop| (stop.index, stop.start, stop.end)),
-                    );
-                    self.select_snippet_current();
-                }
+        } else {
+            if let Some(start) = insertion_start
+                && !tabstops.is_empty()
+            {
+                let source = self.state.window_version();
+                self.input.install_snippet(
+                    crate::editor::session::input::SnippetDocument {
+                        editor: &source,
+                        buffer: buffer_id,
+                        text: &self.state.buffers[buffer_id].text,
+                        view: self.state.active_view,
+                    },
+                    start,
+                    tabstops
+                        .into_iter()
+                        .map(|stop| (stop.index, stop.start, stop.end)),
+                );
+                self.select_snippet_current();
             }
         }
         self.language.clear_completion();
@@ -7009,9 +7182,9 @@ impl InteractiveApplication {
             .state
             .active_buffer_id()
             .and_then(|id| self.state.buffers[id].path.as_deref());
-        if let Err(error) = self
-            .git
-            .start_hunks(path, self.workspace.root_revision(), action, layer)
+        if let Err(error) =
+            self.git
+                .start_hunks(path, self.workspace.root_revision(), action, layer)
         {
             self.show_error(error);
         }
@@ -7078,7 +7251,10 @@ impl InteractiveApplication {
         self.git.show_worktrees_after_change();
         self.report_branch_request(result);
     }
-    fn confirm_git_destructive(&mut self, action: Option<crate::editor::session::git::GitDestructiveAction>) {
+    fn confirm_git_destructive(
+        &mut self,
+        action: Option<crate::editor::session::git::GitDestructiveAction>,
+    ) {
         let Some(action) = action else {
             return;
         };
@@ -7141,7 +7317,11 @@ impl InteractiveApplication {
                 if worktree.main {
                     detail.push_str(" · main");
                 }
-                if worktree.path.canonicalize().is_ok_and(|path| path == self.state.workspace_root) {
+                if worktree
+                    .path
+                    .canonicalize()
+                    .is_ok_and(|path| path == self.state.workspace_root)
+                {
                     detail.push_str(" · open here");
                 }
                 if worktree.dirty {
@@ -7155,8 +7335,8 @@ impl InteractiveApplication {
                 }
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("git-worktree:{}", worktree.name)),
                         label: worktree.name.clone(),
                         detail,
@@ -7177,8 +7357,9 @@ impl InteractiveApplication {
         self.sync_picker_ui();
     }
     pub(in crate::editor::session) fn unstage_selected_git_hunk(&mut self) {
+        self.git.reconcile_hunk_path(&self.state);
         use crate::workspace::git::GitDiffLayer;
-        if self.git.hunks().is_none_or(|hunks| hunks.layer != GitDiffLayer::Staged) {
+        if !self.active_git_hunks(GitDiffLayer::Staged) {
             self.start_git_hunks_with_layer(Some(GitHunkAction::Unstage), GitDiffLayer::Staged);
             return;
         }
@@ -7203,10 +7384,49 @@ impl InteractiveApplication {
         match self.git.poll_hunks() {
             Ok(Some(ready)) => {
                 if let Some(action) = ready.action {
+                    if let GitHunkAction::Stage(line) | GitHunkAction::StageLines(line, _) = action
+                    {
+                        let result = if let GitHunkAction::StageLines(start, end) = action {
+                            if let Ok(lines) = self.git.select_lines(start, end) {
+                                let file = self.git.hunks().map(|snapshot| snapshot.file.clone());
+                                self.git.start_plan_for(
+                                    &self.state,
+                                    crate::workspace::git::GitMutationKind::StageLines,
+                                    self.workspace.root_revision(),
+                                    self.workspace.trust() == WorkspaceTrust::Trusted,
+                                    lines,
+                                    file,
+                                )
+                            } else {
+                                Err("no unstaged Git change on those lines".into())
+                            }
+                        } else {
+                            self.git.select_at(line);
+                            self.git.mutate(
+                                &self.state,
+                                false,
+                                self.workspace.trust() == WorkspaceTrust::Trusted,
+                                self.workspace.root_revision(),
+                            )
+                        };
+                        if let Err(error) = result {
+                            self.input.clear_pending_stage();
+                            self.show_error(error);
+                        }
+                        return;
+                    }
+                    if self
+                        .state
+                        .active_buffer_id()
+                        .and_then(|id| self.state.buffers[id].path.as_ref())
+                        != Some(&ready.path)
+                    {
+                        return;
+                    }
                     match action {
                         GitHunkAction::Move(direction) => self.navigate_git_hunk(direction),
                         GitHunkAction::Preview => self.preview_selected_git_hunk(),
-                        GitHunkAction::Stage => self.stage_selected_git_hunk(),
+                        GitHunkAction::Stage(_) => unreachable!("staging handled above"),
                         GitHunkAction::Unstage => self.unstage_selected_git_hunk(),
                         GitHunkAction::StageLines(start, end) => {
                             self.stage_git_lines(i64::from(start), i64::from(end));
@@ -7224,8 +7444,8 @@ impl InteractiveApplication {
                     .map(|hunk| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("git-hunk:{}", hunk.id.0)),
                                 label: hunk.header.trim().to_owned(),
                                 // The layer is part of the identity: a staged hunk must never
@@ -7279,9 +7499,16 @@ impl InteractiveApplication {
             .map(|(index, _)| index)
             .collect();
         let target = if direction > 0 {
-            markers.iter().find(|line| **line > current).or(markers.first())
+            markers
+                .iter()
+                .find(|line| **line > current)
+                .or(markers.first())
         } else {
-            markers.iter().rev().find(|line| **line < current).or(markers.last())
+            markers
+                .iter()
+                .rev()
+                .find(|line| **line < current)
+                .or(markers.last())
         };
         match (target, buffer.path.clone()) {
             (Some(line), Some(path)) => self.navigate_matcher_source(MatcherSource {
@@ -7292,8 +7519,18 @@ impl InteractiveApplication {
             _ => self.notify_message(self.message("conflict_none", &[]), false),
         }
     }
+    fn active_git_hunks(&self, layer: crate::workspace::git::GitDiffLayer) -> bool {
+        self.state
+            .active_buffer_id()
+            .and_then(|id| self.state.buffers[id].path.as_deref())
+            .is_some_and(|path| {
+                self.git
+                    .hunks_match(path, layer, self.workspace.root_revision())
+            })
+    }
     pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
-        if self.git.hunks().is_none() {
+        self.git.reconcile_hunk_path(&self.state);
+        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Move(direction.signum())));
             return;
         }
@@ -7321,7 +7558,8 @@ impl InteractiveApplication {
             + 1
     }
     pub(in crate::editor::session) fn preview_selected_git_hunk(&mut self) {
-        if self.git.hunks().is_none() {
+        self.git.reconcile_hunk_path(&self.state);
+        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Preview));
             return;
         }
@@ -7341,11 +7579,12 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn request_reset_selected_git_hunk(&mut self) {
+        self.git.reconcile_hunk_path(&self.state);
         if self.workspace.trust() != WorkspaceTrust::Trusted {
             self.show_error("Git reset requires a trusted workspace");
             return;
         }
-        if self.git.hunks().is_none() {
+        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Reset));
             return;
         }
@@ -7354,10 +7593,16 @@ impl InteractiveApplication {
             self.show_error("select a current Git hunk first");
             return;
         }
+        self.git.remember_reset_target();
         self.open_prompt(PromptKind::GitReset, String::new());
         self.prompt_help("Discards worktree changes. Type `reset this hunk`.".into());
     }
     pub(in crate::editor::session) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
+        let same_target = self.git.take_reset_target();
+        if !same_target || !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+            self.show_error("Git hunk target changed");
+            return;
+        }
         if phrase != "reset this hunk" {
             self.show_error("Git hunk reset confirmation did not match");
             return;
@@ -7373,6 +7618,7 @@ impl InteractiveApplication {
     }
     /// Stage these one-based file lines. With no lines given, the selection or the cursor's line.
     fn stage_git_lines(&mut self, start: i64, end: i64) {
+        self.git.reconcile_hunk_path(&self.state);
         let (start, end) = if start < 0 && end < 0 {
             let Some((start, end, selecting)) = self.active_selected_lines() else {
                 return;
@@ -7384,23 +7630,29 @@ impl InteractiveApplication {
         } else {
             (start, end)
         };
-        self.input.set_pending_stage(AppEffect::GitLinesStage { start, end });
+        self.input
+            .set_pending_stage(AppEffect::GitLinesStage { start, end });
         let range = u32::try_from(start)
             .ok()
             .zip(u32::try_from(end).ok())
             .filter(|(start, end)| end >= start);
         let Some((start, end)) = range else {
+            self.input.clear_pending_stage();
             self.show_error("line range must be two non-negative integers with end >= start");
             return;
         };
         let unstaged = crate::workspace::git::GitDiffLayer::Unstaged;
-        if self.git.hunks().is_none_or(|hunks| hunks.layer != unstaged) {
+        if !self.active_git_hunks(unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::StageLines(start, end)));
             return;
         }
-        let Some(lines) = self.git.select_lines(start, end) else {
-            self.show_error("no unstaged Git change on those lines");
-            return;
+        let lines = match self.git.select_lines(start, end) {
+            Ok(lines) => lines,
+            Err(error) => {
+                self.input.clear_pending_stage();
+                self.show_error(error);
+                return;
+            }
         };
         if let Err(error) = self.git.start_plan(
             &self.state,
@@ -7409,6 +7661,7 @@ impl InteractiveApplication {
             self.workspace.trust() == WorkspaceTrust::Trusted,
             lines,
         ) {
+            self.input.clear_pending_stage();
             self.show_error(error);
         }
     }
@@ -7418,13 +7671,20 @@ impl InteractiveApplication {
         let text = &self.state.buffers.get(view.buffer)?.text;
         let (anchor, head) = view
             .selection
-            .map_or((view.cursor, view.cursor), |selection| (selection.anchor, selection.head));
+            .map_or((view.cursor, view.cursor), |selection| {
+                (selection.anchor, selection.head)
+            });
         let line = |at| text.byte_to_line(at).ok().map(|line| line as u32 + 1);
-        Some((line(anchor.min(head))?, line(anchor.max(head))?, view.selection.is_some()))
+        Some((
+            line(anchor.min(head))?,
+            line(anchor.max(head))?,
+            view.selection.is_some(),
+        ))
     }
     pub(in crate::editor::session) fn stage_selected_git_hunk(&mut self) {
-        if self.git.hunks().is_none() {
-            self.start_git_hunks_with_action(Some(GitHunkAction::Stage));
+        self.git.reconcile_hunk_path(&self.state);
+        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+            self.start_git_hunks_with_action(Some(GitHunkAction::Stage(self.cursor_line_number())));
             return;
         }
         self.git.select_at(self.cursor_line_number());
@@ -7434,6 +7694,7 @@ impl InteractiveApplication {
             self.workspace.trust() == WorkspaceTrust::Trusted,
             self.workspace.root_revision(),
         ) {
+            self.input.clear_pending_stage();
             self.show_error(error);
         }
     }
@@ -7454,6 +7715,7 @@ impl InteractiveApplication {
             Ok(Some(crate::editor::session::git::GitMutationOutcome::UnsavedDocument)) => {
                 // A refusal, not a failure: the plan never wrote the index, so offer the
                 // explicit choice instead of reporting an error the user cannot act on.
+                self.input.set_pending_stage_line(self.git.selected_line());
                 let path = self
                     .git
                     .unsaved_refusal()
@@ -7476,8 +7738,103 @@ impl InteractiveApplication {
     }
     /// Answer the save-and-stage choice. The staging effect is replayed only after the save
     /// completes, so the plan is rebuilt against the saved bytes.
+    fn retry_saved_stage(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        path: &Path,
+        effect: AppEffect,
+        selected_line: Option<u32>,
+    ) {
+        use crate::workspace::git::{GitDiffLayer, GitMutationKind};
+        self.input.set_pending_stage(effect.clone());
+        let result = match effect {
+            AppEffect::GitFileStage | AppEffect::GitConflictStage | AppEffect::GitFileUnstage => {
+                let kind = if matches!(effect, AppEffect::GitFileUnstage) {
+                    GitMutationKind::UnstageFile
+                } else {
+                    GitMutationKind::StageFile
+                };
+                let file = self
+                    .git
+                    .status()
+                    .and_then(|status| path.strip_prefix(&status.scope_root).ok())
+                    .map(Path::to_owned);
+                if file.is_none() {
+                    self.input.clear_pending_stage();
+                    return;
+                }
+                self.git.start_plan_for(
+                    &self.state,
+                    kind,
+                    self.workspace.root_revision(),
+                    self.workspace.trust() == WorkspaceTrust::Trusted,
+                    Vec::new(),
+                    file,
+                )
+            }
+            AppEffect::GitHunkStage | AppEffect::GitLinesStage { .. } => {
+                let line = selected_line.unwrap_or_else(|| {
+                    self.state
+                        .views
+                        .values()
+                        .find(|view| view.buffer == buffer)
+                        .and_then(|view| {
+                            self.state.buffers[buffer]
+                                .text
+                                .byte_to_line(view.cursor)
+                                .ok()
+                        })
+                        .unwrap_or(0) as u32
+                        + 1
+                });
+                let action = match effect {
+                    AppEffect::GitLinesStage { start, end } => {
+                        GitHunkAction::StageLines(start as u32, end as u32)
+                    }
+                    _ => GitHunkAction::Stage(line),
+                };
+                self.git.start_hunks(
+                    Some(path),
+                    self.workspace.root_revision(),
+                    Some(action),
+                    GitDiffLayer::Unstaged,
+                )
+            }
+            _ => {
+                self.input.clear_pending_stage();
+                return;
+            }
+        };
+        if let Err(error) = result {
+            self.input.clear_pending_stage();
+            self.show_error(error);
+        }
+    }
     pub(in crate::editor::session) fn confirm_stage_unsaved(&mut self) {
-        self.start_save(false, None, false);
+        let path = self
+            .git
+            .unsaved_refusal()
+            .zip(self.git.status())
+            .map(|(relative, status)| status.scope_root.join(relative));
+        let target = path.and_then(|path| {
+            self.state
+                .buffers
+                .iter()
+                .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
+                .map(|(id, _)| (id, path))
+        });
+        let Some((buffer, _path)) = target else {
+            self.input.clear_pending_stage();
+            self.show_error("The unsaved Git document is no longer open");
+            return;
+        };
+        match self.request_save_buffer(buffer, false, None, false, None) {
+            Ok(id) => self.input.bind_stage_save(id),
+            Err(error) => {
+                self.input.clear_pending_stage();
+                self.show_document_failure(error);
+            }
+        }
     }
     pub(in crate::editor::session) fn start_git_status_refresh(&mut self) {
         self.start_git_status_refresh_with_feedback(true);
@@ -7502,15 +7859,12 @@ impl InteractiveApplication {
             .and_then(|id| self.workspace.roots().iter().find(|r| r.id == id))
             .map(|r| r.identity.canonical_path.as_path());
         self.ui.git_signs.clear();
-        if let Err(error) = self
-            .git
-            .refresh(
-                &self.state,
-                root,
-                self.workspace.root_revision(),
-                report_errors,
-            )
-        {
+        if let Err(error) = self.git.refresh(
+            &self.state,
+            root,
+            self.workspace.root_revision(),
+            report_errors,
+        ) {
             self.show_error(error);
         }
     }
@@ -7573,14 +7927,16 @@ impl InteractiveApplication {
             .iter()
             .filter(|entry| {
                 entry.status != crate::workspace::git::GitFileStatus::Conflicted
-                    && (entry.sources.unstaged
-                        || entry.sources.unsaved_document_revision.is_some())
+                    && (entry.sources.unstaged || entry.sources.unsaved_document_revision.is_some())
             })
             .collect();
         let staged: Vec<_> = snapshot
             .entries
             .iter()
-            .filter(|entry| entry.status != crate::workspace::git::GitFileStatus::Conflicted && entry.sources.staged)
+            .filter(|entry| {
+                entry.status != crate::workspace::git::GitFileStatus::Conflicted
+                    && entry.sources.staged
+            })
             .collect();
         let total = conflicted.len() + unstaged.len() + staged.len();
         let mut items: Vec<(PickerItem, PickerPayload)> = Vec::new();
@@ -7611,10 +7967,7 @@ impl InteractiveApplication {
                     PickerItem {
                         // The id names the section as well, because one path can be both
                         // staged and further modified and the two rows are different changes.
-                        id: PickerItemId(format!(
-                            "git:{title}:{}",
-                            entry.relative_path.display()
-                        )),
+                        id: PickerItemId(format!("git:{title}:{}", entry.relative_path.display())),
                         label: entry.relative_path.display().to_string(),
                         // The provenance column names the comparison this row belongs to, so
                         // an unstaged row is never read as unsaved and an unsaved buffer is
@@ -7673,7 +8026,10 @@ impl InteractiveApplication {
         let file = self.state.active_view.and_then(|view| {
             let view = &self.state.views[view];
             let buffer = &self.state.buffers[view.buffer];
-            let line = buffer.text.byte_to_line(view.cursor).map_or(1, |line| line + 1);
+            let line = buffer
+                .text
+                .byte_to_line(view.cursor)
+                .map_or(1, |line| line + 1);
             buffer.path.clone().map(|path| (path, line))
         });
         let Some((path, line)) = file else {
@@ -7701,7 +8057,11 @@ impl InteractiveApplication {
             self.notify_message(format!("copied {url}"), false);
             return;
         }
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
         match std::process::Command::new(opener)
             .arg(&url)
             .stdin(std::process::Stdio::null())
@@ -7768,6 +8128,7 @@ impl InteractiveApplication {
             .collect();
         match self.documents.read_scoped(found.canonical_path, roots) {
             Ok(id) => {
+                self.remember_navigation_read(id);
                 self.search.register_workspace_navigation(id, found.range);
             }
             Err(error) => self.show_error(error),
@@ -7801,21 +8162,16 @@ impl InteractiveApplication {
         }
     }
 
-    pub(in crate::editor::session) fn navigate_lsp_location(
+    pub(in crate::editor::session) fn navigate_lsp_location_encoded(
         &mut self,
         location: &crate::language::lsp::LspLocation,
+        encoding: PositionEncoding,
     ) {
         let Some(path) = path_from_file_uri(&location.uri) else {
             self.show_error(self.message("lsp_invalid_uri", &[("uri", location.uri.clone())]));
             return;
         };
         self.record_jump();
-        let encoding = self
-            .language
-            .capabilities()
-            .map_or(PositionEncoding::Utf16, |capabilities| {
-                capabilities.position_encoding
-            });
         let Some((buffer_id, buffer)) = self
             .state
             .buffers
@@ -7839,8 +8195,14 @@ impl InteractiveApplication {
             }
             match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
-                    self.language
-                        .register_navigation_read(id, location.range.clone(), encoding);
+                    self.language.register_navigation_read(
+                        id,
+                        location.range.clone(),
+                        encoding,
+                        self.window_session
+                            .navigation_stamp(self.state.window_version(), self.state.active_view),
+                        self.workspace.version(),
+                    );
                     self.notify_message(self.message("opening_file", &[]), false);
                 }
                 Err(error) => self.show_error(error),
@@ -7890,11 +8252,8 @@ impl InteractiveApplication {
     /// Remember where the cursor is before it jumps, for `ctrl-o`.
     pub(in crate::editor::session) fn record_jump(&mut self) {
         if let Some(location) = self.current_persisted_location() {
-            self.persistence.record_location(
-                location,
-                false,
-                JUMP_LIMIT,
-            );
+            self.persistence
+                .record_location(location, false, JUMP_LIMIT);
         }
     }
 
@@ -7909,15 +8268,25 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn push_change_location(&mut self) {
         if let Some(location) = self.current_persisted_location() {
-            self.persistence.record_location(
-                location,
-                true,
-                CHANGE_LIMIT,
-            );
+            self.persistence
+                .record_location(location, true, CHANGE_LIMIT);
         }
     }
 
-    pub(in crate::editor::session) fn navigate_matcher_source(&mut self, mut source: MatcherSource) {
+    fn remember_navigation_read(&mut self, id: crate::files::RequestId) {
+        self.navigation_reads.insert(
+            id,
+            (
+                self.window_session
+                    .navigation_stamp(self.state.window_version(), self.state.active_view),
+                self.input.capture_epoch(),
+            ),
+        );
+    }
+    pub(in crate::editor::session) fn navigate_matcher_source(
+        &mut self,
+        mut source: MatcherSource,
+    ) {
         if !source.path.is_absolute() {
             self.show_error(self.message("navigation_outside_workspace", &[]));
             return;
@@ -7937,6 +8306,7 @@ impl InteractiveApplication {
         }
         match self.documents.read_scoped(source.path.clone(), roots) {
             Ok(id) => {
+                self.remember_navigation_read(id);
                 self.search.register_matcher_navigation(id, source);
             }
             Err(error) => self.show_error(error),
@@ -7969,11 +8339,17 @@ impl InteractiveApplication {
             .map(|root| root.identity.canonical_path.clone())
             .collect();
         // An open file was let in already, even when it is outside the project.
-        if self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&location.path)) {
+        if self
+            .state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_ref() == Some(&location.path))
+        {
             roots.extend(location.path.parent().map(Path::to_path_buf));
         }
         match self.documents.read_scoped(location.path.clone(), roots) {
             Ok(id) => {
+                self.remember_navigation_read(id);
                 self.persistence.register_navigation_read(id, location);
             }
             Err(error) => self.show_error(error),
@@ -8049,8 +8425,25 @@ impl InteractiveApplication {
     /// its rows and its selected row exactly as they were.
     fn install_help_page(&mut self, title: String, items: Vec<(PickerItem, PickerPayload)>) {
         self.search.suspend_for_help();
-        self.install_surface_picker(PickerSurfaceKind::Generic, title, items);
+        let result = self.search.install_picker(
+            PickerContent {
+                surface: PickerSurfaceKind::Generic,
+                origin: PickerOrigin::General,
+                title,
+                items,
+                query: String::new(),
+                complete: true,
+            },
+            MAXIMUM_PICKER_ITEMS,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        if let Err(error) = result {
+            self.show_error(error);
+            return;
+        }
         self.search.mark_help_open();
+        self.sync_picker_ui();
     }
 
     pub(in crate::editor::session) fn install_surface_picker(
@@ -8078,11 +8471,11 @@ impl InteractiveApplication {
         complete: bool,
         origin: PickerOrigin,
     ) {
-        if let PickerOrigin::PluginProvider(request) = origin {
-            if !self.extension.provider_presentable(request) {
-                self.show_error("plugin picker source retired");
-                return;
-            }
+        if let PickerOrigin::PluginProvider(request) = origin
+            && !self.extension.provider_presentable(request)
+        {
+            self.show_error("plugin picker source retired");
+            return;
         }
         let retired_preview = self
             .search
@@ -8098,7 +8491,11 @@ impl InteractiveApplication {
                 query,
                 complete,
             },
-            MAXIMUM_PICKER_ITEMS,
+            if matches!(origin, PickerOrigin::Files) {
+                SEARCH_MAXIMUM_FILES
+            } else {
+                MAXIMUM_PICKER_ITEMS
+            },
             self.workspace.version(),
             self.configuration.binding_revision(),
         ) {
@@ -8145,13 +8542,14 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn open_lsp_locations_picker(
         &mut self,
         locations: Vec<crate::language::lsp::LspLocation>,
+        encoding: PositionEncoding,
     ) {
         let mut files = std::collections::HashMap::new();
         let items = locations
             .into_iter()
             .enumerate()
             .map(|(index, location)| {
-                let line = location.range.start.line as usize;
+                let line = location.range.start.line;
                 let path = path_from_file_uri(&location.uri);
                 let code = path
                     .as_deref()
@@ -8164,15 +8562,15 @@ impl InteractiveApplication {
                 let id = PickerItemId(format!("location:{index}:{}", location.uri));
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: format!("{path}:{}", line + 1),
                         detail: code,
                         source: String::new(),
                         action: PickerAction::None,
                     },
-                    PickerPayload::LspLocation(location),
+                    PickerPayload::LspLocation(location, encoding),
                 )
             })
             .collect();
@@ -8193,7 +8591,10 @@ impl InteractiveApplication {
             .iter()
             .find(|(_, buffer)| buffer.path.as_deref() == Some(path))
         {
-            return buffer.text.line(line).map_or_else(|_| String::new(), |line| line.trim().to_owned());
+            return buffer
+                .text
+                .line(line)
+                .map_or_else(|_| String::new(), |line| line.trim().to_owned());
         }
         let contents = files.entry(path.to_owned()).or_insert_with(|| {
             std::fs::metadata(path)
@@ -8220,18 +8621,23 @@ impl InteractiveApplication {
                 let id = PickerItemId(format!("symbol:{index}:{}", symbol.name));
                 let payload = symbol.location.map_or_else(
                     || PickerPayload::Command(String::new()),
-                    PickerPayload::LspLocation,
+                    |location| {
+                        PickerPayload::LspLocation(location, self.language.server_encoding(&server))
+                    },
                 );
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: symbol.name,
                         detail: symbol.kind.map_or_else(String::new, |kind| {
                             self.message(
                                 "picker_symbol_kind",
-                                &[("kind", crate::language::lsp::lsp_symbol_kind_name(kind).to_owned())],
+                                &[(
+                                    "kind",
+                                    crate::language::lsp::lsp_symbol_kind_name(kind).to_owned(),
+                                )],
                             )
                         }),
                         source: server.clone(),
@@ -8244,13 +8650,8 @@ impl InteractiveApplication {
         self.install_picker(self.message("picker_symbols_title", &[]), items);
     }
 
-    pub(in crate::editor::session) fn open_lsp_code_actions_picker(
-        &mut self,
-        server: &str,
-    ) {
-        let choices = match self.language.install_offered_actions(
-            MAXIMUM_PICKER_ITEMS,
-        ) {
+    pub(in crate::editor::session) fn open_lsp_code_actions_picker(&mut self, server: &str) {
+        let choices = match self.language.install_offered_actions(MAXIMUM_PICKER_ITEMS) {
             Ok(choices) => choices,
             Err(error) => {
                 self.show_error(error);
@@ -8267,8 +8668,8 @@ impl InteractiveApplication {
             .map(|(index, choice)| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("code-action:{index}:{}", choice.title)),
                         label: choice.title,
                         detail: choice.detail,
@@ -8301,8 +8702,8 @@ impl InteractiveApplication {
             .map(|(index, row)| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("dap:{kind}:{index}")),
                         label: row.label,
                         detail: row.detail,
@@ -8331,24 +8732,25 @@ impl InteractiveApplication {
                         let id = PickerItemId(format!("diagnostic:{index}:{}", problem.uri));
                         let path = path_from_file_uri(&problem.uri);
                         let line = path.as_ref().and_then(|path| {
-                            let open = self.state.buffers.iter().find(|(_, buffer)| {
-                                buffer.path.as_ref() == Some(path)
-                            });
+                            let open = self
+                                .state
+                                .buffers
+                                .iter()
+                                .find(|(_, buffer)| buffer.path.as_ref() == Some(path));
                             open?.1.text.byte_to_line(problem.range.start).ok()
                         });
                         let place = path.map_or_else(
                             || problem.uri.clone(),
                             |path| self.workspace_relative_label(&path),
                         );
-                        let place = line.map_or(place.clone(), |line| {
-                            format!("{place}:{}", line + 1)
-                        });
+                        let place =
+                            line.map_or(place.clone(), |line| format!("{place}:{}", line + 1));
                         // Where comes first: at any width the row says which file to look at.
                         let message = problem.message.lines().map(str::trim).collect::<Vec<_>>();
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id,
                                 label: format!("{place}  {}", message.join(" ")),
                                 detail: String::new(),
@@ -8393,13 +8795,11 @@ impl InteractiveApplication {
                         let id = PickerItemId(format!("buffer:{index}"));
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id,
                                 label: state.path.as_ref().map_or_else(
-                                    || {
-                                        SCRATCH_LABEL.to_owned()
-                                    },
+                                    || SCRATCH_LABEL.to_owned(),
                                     |path| self.workspace_relative_label(path),
                                 ),
                                 detail: if state.dirty {
@@ -8424,7 +8824,12 @@ impl InteractiveApplication {
                     .workspace
                     .seen_roots()
                     .into_iter()
-                    .chain(self.workspace.roots().iter().map(|root| root.identity.canonical_path.clone()))
+                    .chain(
+                        self.workspace
+                            .roots()
+                            .iter()
+                            .map(|root| root.identity.canonical_path.clone()),
+                    )
                     .filter(|path| path.is_dir())
                     .collect::<Vec<_>>();
                 projects.sort();
@@ -8443,7 +8848,10 @@ impl InteractiveApplication {
                             || path.display().to_string(),
                             |name| name.to_string_lossy().into_owned(),
                         );
-                        let shown = match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+                        let shown = match home
+                            .as_deref()
+                            .and_then(|home| path.strip_prefix(home).ok())
+                        {
                             Some(rest) => format!("~/{}", rest.display()),
                             None => path.display().to_string(),
                         };
@@ -8489,8 +8897,8 @@ impl InteractiveApplication {
                         };
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("recent:{index}")),
                                 label: self.workspace_relative_label(&path),
                                 detail: String::new(),
@@ -8513,8 +8921,8 @@ impl InteractiveApplication {
                     .map(|(index, mark)| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("mark:{index}:{}", mark.name)),
                                 label: mark.name,
                                 detail: self.persisted_location_label(&mark.location),
@@ -8547,8 +8955,8 @@ impl InteractiveApplication {
                     .map(|(index, location)| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("navigation:{index}")),
                                 label: self.persisted_location_label(&location),
                                 detail: String::new(),
@@ -8567,7 +8975,10 @@ impl InteractiveApplication {
 
     /// A saved location as `file:line`; its byte offset means nothing to a person. A file that
     /// isn't open is read only for a nearby offset, because this runs for every row.
-    pub(in crate::editor::session) fn persisted_location_label(&self, location: &PersistedLocation) -> String {
+    pub(in crate::editor::session) fn persisted_location_label(
+        &self,
+        location: &PersistedLocation,
+    ) -> String {
         const READ_CEILING: usize = 1024 * 1024;
         let name = self.workspace_relative_label(&location.path);
         let open = self
@@ -8577,10 +8988,16 @@ impl InteractiveApplication {
             .find(|buffer| buffer.path.as_ref() == Some(&location.path));
         let line = match open {
             Some(buffer) => buffer.text.byte_to_line(ByteOffset(location.byte)).ok(),
-            None if location.byte <= READ_CEILING => std::fs::read(&location.path).ok().map(|bytes| {
-                let end = location.byte.min(bytes.len());
-                bytes[..end].iter().filter(|byte| **byte == b'\n').count()
-            }),
+            None if location.byte <= READ_CEILING => {
+                use std::io::Read;
+                std::fs::File::open(&location.path).ok().and_then(|file| {
+                    let mut bytes = Vec::new();
+                    file.take(location.byte as u64)
+                        .read_to_end(&mut bytes)
+                        .ok()?;
+                    Some(bytes.iter().filter(|byte| **byte == b'\n').count())
+                })
+            }
             None => None,
         };
         match line {
@@ -8663,9 +9080,15 @@ impl InteractiveApplication {
                 format!("{mode} · {hints}")
             };
         }
-        self.sync_picker_preview();
+        if !self.search.help_is_open() {
+            self.sync_picker_preview();
+        }
         if let Some(picker) = &mut self.ui.picker {
-            picker.preview.clone_from(self.search.preview());
+            if self.search.help_is_open() {
+                picker.preview = None;
+            } else {
+                picker.preview.clone_from(self.search.preview());
+            }
         }
         self.refresh_window_content();
     }
@@ -8674,10 +9097,10 @@ impl InteractiveApplication {
         self.retire_stale_picker();
         let query = self.search.picker_insert(text);
         self.sync_picker_ui();
-        if self.search.live() {
-            if let Some(query) = query {
-                self.restart_live_workspace_search(query);
-            }
+        if self.search.live()
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
         }
     }
 
@@ -8685,19 +9108,16 @@ impl InteractiveApplication {
         self.retire_stale_picker();
         let query = self.search.picker_backspace();
         self.sync_picker_ui();
-        if self.search.live() {
-            if let Some(query) = query {
-                self.restart_live_workspace_search(query);
-            }
+        if self.search.live()
+            && let Some(query) = query
+        {
+            self.restart_live_workspace_search(query);
         }
     }
 
     pub(in crate::editor::session) fn picker_move(&mut self, direction: i8) {
         self.retire_stale_picker();
-        self.search.picker_move(
-            direction,
-            true,
-        );
+        self.search.picker_move(direction, true);
         self.sync_picker_ui();
     }
 
@@ -8862,9 +9282,10 @@ impl InteractiveApplication {
                                 .collect(),
                             first_line: 0,
                             highlight_line: None,
-                            language: record.original_path.as_deref().and_then(|path| {
-                                crate::language::syntax::language_for_path(Path::new(path))
-                            }),
+                            language: record
+                                .path()
+                                .as_deref()
+                                .and_then(crate::language::syntax::language_for_path),
                         }),
                     });
                 match preview {
@@ -8877,10 +9298,10 @@ impl InteractiveApplication {
                 }
             }
             PickerPayload::WorkspaceSearch(key) => {
-                if let Some(id) = self.search.preview_match(
-                    &key,
-                    PICKER_MAXIMUM_PREVIEW_BYTES,
-                ) {
+                if let Some(id) = self
+                    .search
+                    .preview_match(&key, PICKER_MAXIMUM_PREVIEW_BYTES)
+                {
                     self.documents.cancel_request(id);
                 }
             }
@@ -8953,10 +9374,55 @@ impl InteractiveApplication {
             self.process_effect(AppEffect::PluginExecute {
                 plugin: invocation.plugin,
                 command: invocation.command,
+                arguments: Vec::new(),
             });
         } else {
             self.extension
                 .discard_unpresented_provider(invocation.request);
+        }
+    }
+
+    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) {
+        let Some(load) = self.extension.load_id(&plugin) else {
+            self.show_error(crate::extensions::PluginError::NotActive);
+            return;
+        };
+        if !self.extension.is_active_generation(&plugin, load) {
+            self.show_error(crate::extensions::PluginError::NotActive);
+            return;
+        }
+        self.refresh_plugin_host_events();
+        self.retire_plugin_edit_sources();
+        let maximum = SEARCH_MAXIMUM_FILE_BYTES;
+        let input_capture = self.input.capture_epoch();
+        let interaction_available = self.input.prompt().is_none()
+            && self.ui.picker.is_none()
+            && self.ui.tool_menu.is_none()
+            && self.ui.settings.is_none()
+            && self.input.documentation().is_none()
+            && !self.input.mapping_pending()
+            && !self.input.grammar_pending();
+        let navigation = self
+            .window_session
+            .navigation_stamp(self.state.window_version(), self.state.active_view);
+        let result = self.extension.execute(
+            &plugin,
+            &command,
+            crate::editor::session::extensions::InvocationContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                configuration: self.configuration.binding_revision_ref(),
+                generation: self.configuration.generation(),
+                ui_revision: self.window_session.graph().revision(),
+                input_capture,
+                navigation,
+                interaction_available,
+                maximum,
+                arguments,
+            },
+        );
+        if let Err(error) = result {
+            self.show_error(error);
         }
     }
 
@@ -8967,6 +9433,9 @@ impl InteractiveApplication {
         let Some(projection) = self.extension.provider_projection(request) else {
             return;
         };
+        if let Some(error) = &projection.error {
+            self.show_error(&error.detail);
+        }
         let items = match compose_plugin_picker_items(&projection) {
             Ok(items) => items,
             Err(error) => {
@@ -8985,6 +9454,14 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn close_picker(&mut self) {
+        if self.search.help_is_open() {
+            self.search.close_picker();
+            if self.search.picker_projection().is_some() {
+                self.sync_picker_ui();
+                self.refresh_window_content();
+                return;
+            }
+        }
         self.configuration.cancel_theme_picker();
         self.debugger_session.dismiss_choices();
         if self.ui.picker.is_some() {
@@ -9001,6 +9478,8 @@ impl InteractiveApplication {
         self.tasks.select_output(None);
         self.ui.picker = None;
         self.refresh_window_content();
+        // Restore graph focus before the accepted row captures a navigation target.
+        self.reconcile_editor_windows();
     }
 
     pub(in crate::editor::session) fn accept_picker(&mut self) {
@@ -9073,7 +9552,9 @@ impl InteractiveApplication {
                     self.navigate_workspace_search_match(found);
                 }
             }
-            Some(PickerPayload::LspLocation(location)) => self.navigate_lsp_location(&location),
+            Some(PickerPayload::LspLocation(location, encoding)) => {
+                self.navigate_lsp_location_encoded(&location, encoding)
+            }
             Some(PickerPayload::Diagnostic(key)) => {
                 if let Some(row) = self.diagnostics.resolve(&key, &self.state) {
                     let (uri, range) = (row.uri.clone(), row.range);
@@ -9092,6 +9573,10 @@ impl InteractiveApplication {
                 };
                 let action = offered.action;
                 if let Some(edit) = action.edit {
+                    if self.workspace_edits.check_begin().is_err() {
+                        self.show_error("another workspace edit is pending");
+                        return;
+                    }
                     self.begin_workspace_proposal_owned(
                         action.title,
                         edit,
@@ -9099,6 +9584,9 @@ impl InteractiveApplication {
                         self.language.server_encoding(&offered.server),
                         offered.context,
                     );
+                    if let Some(command) = action.command {
+                        self.language.set_edit_command(offered.server, command);
+                    }
                 } else if let Some(command) = action.command {
                     self.select_lsp_session(&offered.server);
                     self.request_lsp(LspFeature::ExecuteCommand(command));
@@ -9116,7 +9604,12 @@ impl InteractiveApplication {
                 self.switch_workspace_root(path)
             }
             Some(PickerPayload::Agent(choice)) => self.accept_agent_choice(choice),
-            Some(PickerPayload::PullRequest(number)) => self.checkout_pull_request(number),
+            Some(PickerPayload::PullRequest {
+                root,
+                generation,
+                number,
+                local,
+            }) => self.checkout_pull_request(root, generation, number, local),
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
                     self.terminal_session.select(id);
@@ -9146,6 +9639,8 @@ impl InteractiveApplication {
                     self.workspace.version(),
                 );
                 let target = crate::editor::session::debugger::SourceTarget {
+                    line: 1,
+                    column: 1,
                     navigation: self
                         .window_session
                         .navigation_stamp(self.state.window_version(), self.state.active_view),
@@ -9155,7 +9650,8 @@ impl InteractiveApplication {
                 // A value with nothing inside it opens to the whole of itself, unclipped.
                 if let Some(value) = debug_selection.as_ref().ok().and_then(|s| s.value()) {
                     let value = value.to_owned();
-                    self.debugger_session.record_console_evaluation(value.clone());
+                    self.debugger_session
+                        .record_console_evaluation(value.clone());
                     self.notify_message(value, false);
                 }
                 match debug_selection
@@ -9220,7 +9716,10 @@ impl InteractiveApplication {
             }
             Some(PickerPayload::Recovery(journal)) => self.recover_journal(&journal),
             Some(PickerPayload::Tutor(start)) => self.start_tutor(start),
-            Some(PickerPayload::Notice { title, text: message }) => {
+            Some(PickerPayload::Notice {
+                title,
+                text: message,
+            }) => {
                 self.present_documentation_popup(
                     DocumentationPopupKind::Notice,
                     title,
@@ -9233,8 +9732,8 @@ impl InteractiveApplication {
                 );
             }
             Some(PickerPayload::PluginProviderItem { plugin, .. }) => {
-                if let Some(command) = provider_selection {
-                    self.process_effect(AppEffect::PluginExecute { plugin, command });
+                if let Some((command, arguments)) = provider_selection {
+                    self.execute_plugin_command(plugin, command, arguments);
                 }
             }
             _ => {}
@@ -9405,17 +9904,20 @@ impl InteractiveApplication {
             .iter()
             .map(|(path, _)| path.clone())
             .collect::<Vec<_>>();
-        let plan = match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice)
-        {
-            Ok(plan) => plan,
-            Err(error) => {
-                self.show_error(error.to_string());
-                return;
-            }
-        };
+        let plan =
+            match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    self.show_error(error.to_string());
+                    return;
+                }
+            };
         match crate::workspace::git::apply_replacement(&plan) {
             Ok(written) => self.notify_message(
-                format!("Replaced {} file(s); saving and staging are separate steps", written.len()),
+                format!(
+                    "Replaced {} file(s); saving and staging are separate steps",
+                    written.len()
+                ),
                 false,
             ),
             Err(error) => self.show_error(error.to_string()),
@@ -9465,14 +9967,10 @@ impl InteractiveApplication {
                     .unwrap_or("not requested");
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("breakpoint:{index}")),
-                        label: format!(
-                            "{}:{}",
-                            self.workspace_relative_label(&row.path),
-                            row.line
-                        ),
+                        label: format!("{}:{}", self.workspace_relative_label(&row.path), row.line),
                         detail: match &row.condition {
                             Some(condition) => format!("{state}, if {condition}"),
                             None => state.to_owned(),
@@ -9484,7 +9982,10 @@ impl InteractiveApplication {
                 )
             })
             .collect::<Vec<_>>();
-        let title = format!("Breakpoints · {} (what is true, not what was asked)", items.len());
+        let title = format!(
+            "Breakpoints · {} (what is true, not what was asked)",
+            items.len()
+        );
         self.install_picker(title, items);
     }
     /// Enable or disable the breakpoint on the cursor line. Disabling is SESSION state, so it
@@ -9531,33 +10032,14 @@ impl InteractiveApplication {
     }
     /// TERMINATE: ask for the debuggee to end with the session.
     pub(in crate::editor::session) fn terminate_debug_session(&mut self) {
-        match self.debugger_session.terminate_debuggee() {
-            Ok(()) => {
-                let state = self.debugger_session.end_state();
-                self.notify_message(
-                    format!("debug session terminated ({state:?})"),
-                    false,
-                );
-            }
-            Err(error) => self.show_error(error),
+        if let Err(error) = self.debugger_session.terminate_debuggee() {
+            self.show_error(error);
         }
     }
-    /// DETACH: leave the session without asking the debuggee to stop. The report says the program
-    /// may still be running, because the adapter's side of that contract is not something this
-    /// editor can claim on the adapter's behalf.
+    /// Leave the debuggee running after the adapter accepts disconnect.
     pub(in crate::editor::session) fn detach_debug_session(&mut self) {
-        match self.debugger_session.detach_debuggee() {
-            Ok(()) => {
-                let state = self.debugger_session.end_state();
-                self.notify_message(
-                    format!(
-                        "debug session detached ({state:?}); the editor is no longer attached and \
-                         the program was NOT asked to stop"
-                    ),
-                    false,
-                );
-            }
-            Err(error) => self.show_error(error),
+        if let Err(error) = self.debugger_session.detach_debuggee() {
+            self.show_error(error);
         }
     }
     /// Stage the resolved conflict in the active buffer, through the SAME file-staging plan the
@@ -9571,6 +10053,7 @@ impl InteractiveApplication {
             self.workspace.trust() == WorkspaceTrust::Trusted,
             Vec::new(),
         ) {
+            self.input.clear_pending_stage();
             self.show_error(error);
         }
     }
@@ -9660,6 +10143,9 @@ impl InteractiveApplication {
         let title = format!("Conflicts · {}", state.phase());
         let mut items = Vec::new();
         for (index, conflict) in state.conflicts.iter().enumerate() {
+            if !repository.join(&conflict.path).starts_with(&scope_root) {
+                continue;
+            }
             items.push((
                 PickerItem {
                     badge: String::new(),
@@ -9671,15 +10157,16 @@ impl InteractiveApplication {
                     action: PickerAction::None,
                 },
                 PickerPayload::MatcherSource(MatcherSource {
-                    line: first_conflict_line(&scope_root.join(&conflict.path)),
-                    path: scope_root.join(&conflict.path),
+                    line: first_conflict_line(&repository.join(&conflict.path)),
+                    path: repository.join(&conflict.path),
                     column: 0,
                 }),
             ));
         }
         self.install_picker(title, items);
         self.search.set_picker_footer(
-            "Enter Open · then Space g m o/t/b takes ours, theirs or both · Esc Esc Close".to_owned(),
+            "Enter Open · then Space g m o/t/b takes ours, theirs or both · Esc Esc Close"
+                .to_owned(),
         );
         self.sync_picker_ui();
     }
@@ -9687,9 +10174,11 @@ impl InteractiveApplication {
     /// registry through the dispatcher's own context check, so help can never advertise a
     /// command the dispatcher would refuse and can never drift from a renamed command.
     pub(in crate::editor::session) fn open_contextual_help(&mut self) {
-        let invocation =
-            crate::editor::CommandInvocation::new("overlay.help.contextual", crate::editor::InvocationSource::Keymap)
-                .expect("static command id");
+        let invocation = crate::editor::CommandInvocation::new(
+            "overlay.help.contextual",
+            crate::editor::InvocationSource::Keymap,
+        )
+        .expect("static command id");
         let items = self
             .commands
             .specs()
@@ -9699,8 +10188,8 @@ impl InteractiveApplication {
                 let id = PickerItemId(format!("help:{index}:{}", spec.id.as_str()));
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id,
                         label: spec.id.as_str().to_owned(),
                         detail: spec.title.clone(),
@@ -9723,9 +10212,7 @@ impl InteractiveApplication {
             return;
         };
         let kind = format!("{:?}", prompt.kind);
-        let mut rows = vec![
-            ("surface".to_owned(), kind.clone()),
-        ];
+        let mut rows = vec![("surface".to_owned(), kind.clone())];
         if let Some(confirmation) = prompt.confirmation.as_ref() {
             rows.push(("asks".to_owned(), confirmation.title.clone()));
             rows.push(("detail".to_owned(), confirmation.message.clone()));
@@ -9765,8 +10252,8 @@ impl InteractiveApplication {
             .map(|(index, (kind, value))| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("form-help:{index}:{kind}")),
                         label: value,
                         detail: kind,
@@ -9804,7 +10291,10 @@ impl InteractiveApplication {
         if !spec.description.is_empty() {
             rows.push(("detail".to_owned(), spec.description.clone()));
         }
-        rows.push(("available".to_owned(), format!("{:?}", spec.context).to_lowercase()));
+        rows.push((
+            "available".to_owned(),
+            format!("{:?}", spec.context).to_lowercase(),
+        ));
         // The effective binding, read from the same resolved table the dispatcher uses, so the
         // reference can never show a key the user cannot press: a remapped key is the key shown,
         // an unmapped one is not offered, and a command with none here says so.
@@ -9819,7 +10309,12 @@ impl InteractiveApplication {
         }
         for (name, field) in &spec.arguments.fields {
             rows.push((
-                if field.required { "argument" } else { "optional" }.to_owned(),
+                if field.required {
+                    "argument"
+                } else {
+                    "optional"
+                }
+                .to_owned(),
                 name.clone(),
             ));
         }
@@ -9832,8 +10327,8 @@ impl InteractiveApplication {
             .map(|(index, (kind, value))| {
                 (
                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
                         id: PickerItemId(format!("reference:{index}:{kind}")),
                         label: value,
                         detail: kind,
@@ -9914,7 +10409,7 @@ impl InteractiveApplication {
         }
         // Terminals belong to the folder they were opened in, so switching ends them, as
         // opening another folder does in VS Code; it takes asking twice when any are open.
-        let terminals = self.terminal_session.running_count();
+        let terminals = self.terminal_session.running_in_root(&current_path);
         if terminals > 0 && self.switch_ends_terminals.as_ref() != Some(&target) {
             self.switch_ends_terminals = Some(target);
             self.show_error(format!(
@@ -9934,6 +10429,7 @@ impl InteractiveApplication {
     /// After a worktree switch: close the old root's clean buffers, move the editor's root and
     /// reopen the file that was in front at the same place in the new worktree.
     pub(in crate::editor::session) fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
+        self.terminal_session.close_root(old);
         let leaving = |file: &Path| leaves_root(file, old, &path);
         let reopen = self.current_persisted_location().and_then(|mut location| {
             let relative = location.path.strip_prefix(old).ok()?;
@@ -10015,9 +10511,10 @@ impl InteractiveApplication {
         if let Some(location) = reopen {
             self.navigate_persisted_location(location);
         }
-        let name = path
-            .file_name()
-            .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         self.notify_message(format!("switched to {name}"), false);
     }
     pub(in crate::editor::session) fn root_removal_blocker(
@@ -10037,6 +10534,12 @@ impl InteractiveApplication {
                     .is_some_and(|path| path.starts_with(&root.identity.canonical_path))
         }) {
             return Some(self.message("workspace_root_dirty_blocker", &[]));
+        }
+        if self
+            .terminal_session
+            .belongs_to_root(&root.identity.canonical_path)
+        {
+            return Some("Close the root’s terminals before removing it".into());
         }
         let busy = self.workspace.root_operation_pending()
             || self.language.active().is_some()
@@ -10065,10 +10568,8 @@ impl InteractiveApplication {
         self.documents.retire_startup();
         self.documents.retire_workspace(&self.workspace.version());
         self.clear_git_status();
-        self.terminal_session.reset();
+        self.terminal_session.retain_workspace(&self.workspace);
         self.reject_terminal_responses("workspace changed");
-        self.set_terminal_focus(false);
-        self.ui.terminal_panel = None;
         let roots = self
             .workspace
             .roots()
@@ -10136,6 +10637,14 @@ impl InteractiveApplication {
         }
         match self.workspace.remove_root(id) {
             Ok(root) => {
+                if let Some(active) = self
+                    .workspace
+                    .active_root()
+                    .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
+                {
+                    self.state
+                        .set_workspace_root(active.identity.canonical_path.clone());
+                }
                 self.invalidate_root_scoped_operations();
                 self.notify_message(
                     self.message(
@@ -10171,7 +10680,9 @@ impl InteractiveApplication {
                 if let Some(root) = &root {
                     self.state.set_workspace_root(root.clone());
                 }
-                let path = root.map(|root| root.display().to_string()).unwrap_or_default();
+                let path = root
+                    .map(|root| root.display().to_string())
+                    .unwrap_or_default();
                 self.notify_message(
                     self.message("workspace_root_activated", &[("path", path)]),
                     false,
@@ -10225,10 +10736,24 @@ impl InteractiveApplication {
         self.tooling.selected_managed_executable(definition)
     }
 
+    fn set_tool_probe_directory(&self) {
+        let directory = self
+            .active_lsp_document_without_text()
+            .and_then(|(_, document)| document.path.parent().map(Path::to_path_buf))
+            .or_else(|| {
+                self.workspace
+                    .roots()
+                    .first()
+                    .map(|root| root.identity.canonical_path.clone())
+            });
+        self.tooling.set_probe_directory(directory);
+    }
+
     pub(in crate::editor::session) fn selected_lsp_runtime_available(
         &self,
         definition: &ToolDefinition,
     ) -> bool {
+        self.set_tool_probe_directory();
         self.tooling.selected_lsp_runtime_available(
             definition,
             self.configuration.settings().lsp.nix_workspace_fallback,
@@ -10236,13 +10761,14 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn tool_version_key(
+        &self,
         definition: &ToolDefinition,
         source: LspRuntimeSource,
         executable: Option<&PathBuf>,
     ) -> String {
-        crate::editor::session::tooling::ToolingSession::tool_version_key(
-            definition, source, executable,
-        )
+        self.set_tool_probe_directory();
+        self.tooling
+            .tool_version_key(definition, source, executable)
     }
 
     pub(in crate::editor::session) fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
@@ -10269,6 +10795,7 @@ impl InteractiveApplication {
         source: LspRuntimeSource,
         executable: Option<&PathBuf>,
     ) -> (String, Option<String>) {
+        self.set_tool_probe_directory();
         self.tooling
             .observed_tool_version(definition, source, executable)
     }
@@ -10279,11 +10806,13 @@ impl InteractiveApplication {
         source: LspRuntimeSource,
         executable: PathBuf,
     ) {
+        self.set_tool_probe_directory();
         self.tooling
             .queue_tool_version_probe(definition, source, executable)
     }
 
     pub(in crate::editor::session) fn queue_tool_version_probes(&mut self, category: &str) {
+        self.set_tool_probe_directory();
         self.tooling.queue_tool_version_probes(category)
     }
 }
@@ -10293,10 +10822,13 @@ impl InteractiveApplication {
         let height = (u32::from(self.window_session.height())
             * u32::from(crate::ui::render::surfaces::TOOL_MANAGER_HEIGHT_PERCENT)
             / 100)
-                .try_into()
-                .unwrap_or(self.window_session.height());
+            .try_into()
+            .unwrap_or(self.window_session.height());
         height
-            .max(crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT.min(self.window_session.height()))
+            .max(
+                crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT
+                    .min(self.window_session.height()),
+            )
             .min(self.window_session.height())
     }
 
@@ -10474,10 +11006,9 @@ impl InteractiveApplication {
             } else {
                 "—".into()
             },
-            location: path.as_ref().map_or_else(
-                || "not on PATH".into(),
-                |path| path.display().to_string(),
-            ),
+            location: path
+                .as_ref()
+                .map_or_else(|| "not on PATH".into(), |path| path.display().to_string()),
             status: if path.is_none() {
                 "not installed"
             } else if path_error.is_some() {
@@ -10521,42 +11052,46 @@ impl InteractiveApplication {
                     (String::new(), None)
                 };
                 options.push(ToolRuntimeOption {
-                source: LspRuntimeSource::Managed.key().into(),
-                version_pin: Some(version.clone()),
-                label: LspRuntimeSource::Managed.label().into(),
-                version: version.clone(),
-                release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
-                location: if installed {
-                    managed_path.as_ref().map_or_else(
-                        || "installed path unavailable".into(),
-                        |path| path.display().to_string(),
-                    )
-                } else {
-                    "not installed".into()
-                },
-                status: if installed && selected_source == LspRuntimeSource::Managed
-                    && selected_managed.version.as_deref() == Some(version.as_str())
-                {
-                    "in use"
-                } else if installed {
-                    "installed"
-                } else {
-                    "not installed"
-                }
-                .into(),
-                note: probe_error.unwrap_or_else(|| {
-                    if installed {
-                        format!("{} {version}, installed by Dust.", definition.name)
+                    source: LspRuntimeSource::Managed.key().into(),
+                    version_pin: Some(version.clone()),
+                    label: LspRuntimeSource::Managed.label().into(),
+                    version: version.clone(),
+                    release: variant
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
+                    location: if installed {
+                        managed_path.as_ref().map_or_else(
+                            || "installed path unavailable".into(),
+                            |path| path.display().to_string(),
+                        )
                     } else {
-                        "A verified download from the Dust catalog.".to_owned()
+                        "not installed".into()
+                    },
+                    status: if installed
+                        && selected_source == LspRuntimeSource::Managed
+                        && selected_managed.version.as_deref() == Some(version.as_str())
+                    {
+                        "in use"
+                    } else if installed {
+                        "installed"
+                    } else {
+                        "not installed"
                     }
-                }),
-                selected: selected_source == LspRuntimeSource::Managed
-                    && selected_managed.version.as_deref() == Some(version.as_str()),
-                installed,
-                installable: variant.install.is_some(),
-                uninstallable: installed,
-            });
+                    .into(),
+                    note: probe_error.unwrap_or_else(|| {
+                        if installed {
+                            format!("{} {version}, installed by Dust.", definition.name)
+                        } else {
+                            "A verified download from the Dust catalog.".to_owned()
+                        }
+                    }),
+                    selected: selected_source == LspRuntimeSource::Managed
+                        && selected_managed.version.as_deref() == Some(version.as_str()),
+                    installed,
+                    installable: variant.install.is_some(),
+                    uninstallable: installed,
+                });
             }
 
             if definition.managed_versions().is_empty() {
@@ -10598,7 +11133,10 @@ impl InteractiveApplication {
                     version_pin: Some(version.clone()),
                     label: LspRuntimeSource::Nix.label().into(),
                     version: version.clone(),
-                    release: variant.release.clone().unwrap_or_else(|| "catalog build".into()),
+                    release: variant
+                        .release
+                        .clone()
+                        .unwrap_or_else(|| "catalog build".into()),
                     location: if installed {
                         managed_path
                             .as_ref()
@@ -10621,7 +11159,10 @@ impl InteractiveApplication {
                     .into(),
                     note: probe_error.unwrap_or_else(|| {
                         if installed {
-                            format!("{} {version}, installed by Dust through Nix.", definition.name)
+                            format!(
+                                "{} {version}, installed by Dust through Nix.",
+                                definition.name
+                            )
                         } else {
                             "Built through Nix from the Dust catalog.".to_owned()
                         }
@@ -10666,7 +11207,9 @@ impl InteractiveApplication {
             .ui
             .tool_menu
             .as_ref()
-            .map_or_else(Default::default, |menu| (menu.query.clone(), menu.searching));
+            .map_or_else(Default::default, |menu| {
+                (menu.query.clone(), menu.searching)
+            });
         let needle = query.to_lowercase();
         let category = if configured.categories.contains_key(category) {
             category.to_owned()
@@ -10686,7 +11229,10 @@ impl InteractiveApplication {
                 needle.is_empty()
                     || definition.name.to_lowercase().contains(&needle)
                     || definition.id.to_lowercase().contains(&needle)
-                    || definition.languages.iter().any(|language| language.contains(&needle))
+                    || definition
+                        .languages
+                        .iter()
+                        .any(|language| language.contains(&needle))
             })
             // A search reaches every known server, as Mason lists them all; without one the
             // list keeps to servers that are installed or that Dust can install.
@@ -10729,14 +11275,12 @@ impl InteractiveApplication {
                     LspRuntimeSource::Path => path.as_ref(),
                     LspRuntimeSource::Managed | LspRuntimeSource::Nix => managed.as_ref(),
                 };
-                let observed_definition = if matches!(
-                    source,
-                    LspRuntimeSource::Managed | LspRuntimeSource::Nix
-                ) {
-                    &managed_definition
-                } else {
-                    definition
-                };
+                let observed_definition =
+                    if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+                        &managed_definition
+                    } else {
+                        definition
+                    };
                 let (reported_version, probe_error) =
                     self.observed_tool_version(observed_definition, source, source_executable);
                 let rustup_bundled = source == LspRuntimeSource::Path
@@ -10752,9 +11296,7 @@ impl InteractiveApplication {
                 let path_presentation = (source == LspRuntimeSource::Path
                     && definition.id == "rust-analyzer"
                     && (rustup_bundled || path_version_reported))
-                    .then(|| {
-                        Self::rust_analyzer_path_version(&reported_version, rustup_bundled)
-                    });
+                    .then(|| Self::rust_analyzer_path_version(&reported_version, rustup_bundled));
                 let mut version = match source {
                     LspRuntimeSource::Path => path_presentation
                         .as_ref()
@@ -10799,7 +11341,7 @@ impl InteractiveApplication {
                     LspRuntimeSource::Nix => {
                         nix_lsp_profile_installed(definition)
                             && self.managed_variant_installed(definition, &managed_definition)
-                    },
+                    }
                 };
                 let can_install = if is_lsp && nixos_host {
                     self.nix_workspace_available_for(definition)
@@ -10914,7 +11456,9 @@ impl InteractiveApplication {
                         .get(tool_kind_key(definition.kind))
                         .cloned()
                         .unwrap_or_else(|| definition.kind.label().into()),
-                    languages: definition.languages.join(crate::ui::render::surfaces::TOOL_LANGUAGE_SEPARATOR),
+                    languages: definition
+                        .languages
+                        .join(crate::ui::render::surfaces::TOOL_LANGUAGE_SEPARATOR),
                     version,
                     release,
                     runtime,
@@ -10927,9 +11471,9 @@ impl InteractiveApplication {
                     installed,
                     can_start: installed
                         && (!is_lsp
-                            || active_language.as_ref().is_none_or(|language| {
-                                definition.supports_language(language)
-                            })),
+                            || active_language
+                                .as_ref()
+                                .is_none_or(|language| definition.supports_language(language))),
                     can_install,
                     can_uninstall,
                     update,
@@ -10995,7 +11539,11 @@ impl InteractiveApplication {
     }
 
     /// Set the tool search and whether keys still type into it, then filter the list again.
-    pub(in crate::editor::session) fn search_tool_menu(&mut self, query: Option<String>, searching: bool) {
+    pub(in crate::editor::session) fn search_tool_menu(
+        &mut self,
+        query: Option<String>,
+        searching: bool,
+    ) {
         let Some(menu) = self.ui.tool_menu.as_mut() else {
             return;
         };
@@ -11182,6 +11730,7 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
+        self.language.cancel_launches(&id);
         self.stop_lsp_sessions_for_server(&id);
         self.language.reset_autostart();
         if let Some(menu) = &mut self.ui.tool_menu {
@@ -11227,6 +11776,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn stop_lsp_sessions_for_server(&mut self, id: &str) {
+        self.language.retire_server_launches(id);
         let sessions = self
             .language
             .sessions()
@@ -11307,9 +11857,12 @@ impl InteractiveApplication {
         );
         if definition.kind == ToolKind::Lsp {
             if self.selected_lsp_runtime_available(&definition) {
-                if self.active_lsp_document_without_text().is_some_and(|(_, document)| {
-                    !definition.supports_language(&document.language_id)
-                }) {
+                if self
+                    .active_lsp_document_without_text()
+                    .is_some_and(|(_, document)| {
+                        !definition.supports_language(&document.language_id)
+                    })
+                {
                     self.notify_message(
                         format!(
                             "{} is installed. Open a supported file to start it.",
@@ -11327,15 +11880,15 @@ impl InteractiveApplication {
                 ));
             } else {
                 let source = self.selected_lsp_runtime_source(&definition);
-                if source == LspRuntimeSource::Path && definition.id == "rust-analyzer" {
-                    if let Some(path) = discover_executable(&definition.executable) {
-                        if Self::rust_analyzer_is_rustup_proxy(&path) {
-                            let key = Self::tool_version_key(&definition, source, Some(&path));
-                            if matches!(self.tooling.version(&key), Some(Err(_))) {
-                                self.show_error(Self::unavailable_rust_analyzer_message());
-                                return;
-                            }
-                        }
+                if source == LspRuntimeSource::Path
+                    && definition.id == "rust-analyzer"
+                    && let Some(path) = discover_executable(&definition.executable)
+                    && Self::rust_analyzer_is_rustup_proxy(&path)
+                {
+                    let key = self.tool_version_key(&definition, source, Some(&path));
+                    if matches!(self.tooling.version(&key), Some(Err(_))) {
+                        self.show_error(Self::unavailable_rust_analyzer_message());
+                        return;
                     }
                 }
                 self.install_tool_by_id(id, Some(source));
@@ -11396,13 +11949,12 @@ impl InteractiveApplication {
             .and_then(|menu| menu.rows.iter().find(|row| row.id == id))
             .and_then(|row| row.update.clone());
         let focused = focused.map(|(source, version)| (source, update.or(version)));
-        if let Some((source, Some(version))) = focused {
-            if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
-                if let Err(error) = self.tooling.select_version(&id, version) {
-                    self.show_error(error);
-                    return;
-                }
-            }
+        if let Some((source, Some(version))) = focused
+            && matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+            && let Err(error) = self.tooling.select_version(&id, version)
+        {
+            self.show_error(error);
+            return;
         }
         self.install_tool_by_id(&id, source);
     }
@@ -11452,7 +12004,7 @@ impl InteractiveApplication {
                 if !Self::rust_analyzer_is_rustup_proxy(&proxy) {
                     return None;
                 }
-                let key = Self::tool_version_key(&definition, source, Some(&proxy));
+                let key = self.tool_version_key(&definition, source, Some(&proxy));
                 let rustup = proxy.with_file_name("rustup");
                 (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
                     .then_some((rustup, proxy))
@@ -11635,6 +12187,7 @@ impl InteractiveApplication {
                         ));
                         return;
                     }
+                    self.language.cancel_launches(&id);
                     self.stop_lsp_sessions_for_server(&id);
                     self.tooling
                         .install(ToolInstall::Uninstall(definition.clone(), false))
@@ -11649,6 +12202,7 @@ impl InteractiveApplication {
                         ));
                         return;
                     }
+                    self.language.cancel_launches(&id);
                     self.stop_lsp_sessions_for_server(&id);
                     self.tooling
                         .install(ToolInstall::Uninstall(definition.clone(), true))
@@ -11680,6 +12234,7 @@ impl InteractiveApplication {
         let Some(id) = self.selected_tool_id() else {
             return;
         };
+        self.language.cancel_launches(&id);
         self.stop_lsp_sessions_for_server(&id);
         self.language.mark_stopped(&id);
         let category = self
@@ -11694,6 +12249,7 @@ impl InteractiveApplication {
         let Some(id) = self.selected_tool_id() else {
             return;
         };
+        self.language.cancel_launches(&id);
         self.stop_lsp_sessions_for_server(&id);
         self.launch_lsp(Some(id.clone()), true);
         let category = self
@@ -11843,8 +12399,8 @@ impl InteractiveApplication {
                             .map(|(index, package)| {
                                 (
                                     PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                        badge: String::new(),
+                                        kind: crate::workspace::PickerItemKind::Entry,
                                         id: PickerItemId(format!(
                                             "registry:{index}:{}/{}",
                                             package.publisher, package.name
@@ -11874,8 +12430,8 @@ impl InteractiveApplication {
                             self.message("package_registry_show_title", &[]),
                             vec![(
                                 PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                    badge: String::new(),
+                                    kind: crate::workspace::PickerItemKind::Entry,
                                     id: PickerItemId(format!("registry-show:{label}")),
                                     label,
                                     detail,
@@ -11888,15 +12444,13 @@ impl InteractiveApplication {
                     }
                     RegistryResult::Artifact { .. } => self.show_error("unowned registry artifact"),
                 },
-                RegistryUpdate::ValidateArtifact => {
-                    match self.workspace.execution_allowed() {
-                        Ok(()) => self.run_trusted(TrustedAction::PrepareRegistryArtifact),
-                        Err(failure) => {
-                            self.show_workspace_failure(failure);
-                            self.extension.discard_artifact();
-                        }
+                RegistryUpdate::ValidateArtifact => match self.workspace.execution_allowed() {
+                    Ok(()) => self.run_trusted(TrustedAction::PrepareRegistryArtifact),
+                    Err(failure) => {
+                        self.show_workspace_failure(failure);
+                        self.extension.discard_artifact();
                     }
-                }
+                },
                 RegistryUpdate::Error(error) => self
                     .show_error(self.message("package_registry_failed", &[("diagnostic", error)])),
             }
@@ -11931,8 +12485,8 @@ impl InteractiveApplication {
                         .map(|(index, package)| {
                             (
                                 PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                    badge: String::new(),
+                                    kind: crate::workspace::PickerItemKind::Entry,
                                     id: PickerItemId(format!("package:{index}:{}", package.name)),
                                     label: package.name,
                                     detail: package.version,
@@ -12062,21 +12616,19 @@ impl InteractiveApplication {
             .into_iter()
             .map(|entry| entry.definition.id.clone())
             .collect::<Vec<_>>();
-        if launchable
-            .iter()
-            .any(|id| self.language.launch_pending(id))
-        {
+        if launchable.iter().any(|id| self.language.launch_pending(id)) {
             return;
         }
         let launchable_server = launchable
             .iter()
-            .find(|id| !attached.contains(id) && !self.language.is_stopped(id))
+            .find(|id| {
+                !attached.contains(id)
+                    && !self.language.is_stopped(id)
+                    && !self.language.explicitly_detached(id, buffer)
+            })
             .cloned();
         // Like mason-lspconfig, point at the server to install when none can start.
-        if launchable.is_empty()
-            && !matching_session
-            && self.configuration.settings().lsp.enabled
-        {
+        if launchable.is_empty() && !matching_session && self.configuration.settings().lsp.enabled {
             let installable = self
                 .tooling
                 .entries()
@@ -12092,16 +12644,19 @@ impl InteractiveApplication {
                 // The most specific server: zls for Zig, not a spell checker that covers it.
                 .min_by_key(|entry| entry.definition.languages.len())
                 .map(|entry| entry.definition.name.clone());
-            if let Some(server) = installable {
-                if self.language.hint_install_once(&document.language_id) {
-                    self.notify_message(
-                        self.message(
-                            "lsp_install_hint",
-                            &[("server", server), ("language", document.language_id.clone())],
-                        ),
-                        false,
-                    );
-                }
+            if let Some(server) = installable
+                && self.language.hint_install_once(&document.language_id)
+            {
+                self.notify_message(
+                    self.message(
+                        "lsp_install_hint",
+                        &[
+                            ("server", server),
+                            ("language", document.language_id.clone()),
+                        ],
+                    ),
+                    false,
+                );
             }
         }
         let observation = LspAutostartObservation {
@@ -12115,12 +12670,16 @@ impl InteractiveApplication {
             nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
             launchable_server,
         };
-        if let Some(server) = self.language.observe(observation, self.workspace.safe_mode()) {
+        if let Some(server) = self
+            .language
+            .observe(observation, self.workspace.safe_mode())
+        {
             self.start_lsp(Some(server));
         }
     }
 
     pub(in crate::editor::session) fn sync_lsp_document(&mut self) {
+        self.language.retry_documents(&self.state);
         let Some(buffer) = self.state.active_buffer_id() else {
             self.language.reset_autostart();
             return;
@@ -12155,12 +12714,13 @@ impl InteractiveApplication {
             let owns = state.documents.contains_key(&buffer);
             let supports = state.definition.supports_language(&document.language_id);
             if owns && supports {
-                sessions.push(key.clone());
                 if let Some(previous) = state.documents.get(&buffer) {
                     if previous.path != document.path
                         || previous.language_id != document.language_id
                     {
                         detach.push((key.clone(), previous.uri()));
+                    } else {
+                        sessions.push(key.clone());
                     }
                 }
             } else if let Some(previous) = state.documents.get(&buffer) {
@@ -12234,7 +12794,8 @@ impl InteractiveApplication {
             .language
             .active()
             .is_some_and(|active| sessions.contains(active));
-        let trigger = typed.is_some_and(|typed| self.language.is_completion_trigger(&sessions, typed));
+        let trigger =
+            typed.is_some_and(|typed| self.language.is_completion_trigger(&sessions, typed));
         if completion_open {
             if changed && trigger && active_attached {
                 self.mark_lsp_completion_start(true);
@@ -12289,8 +12850,12 @@ impl InteractiveApplication {
     fn lsp_word_start(&self) -> Option<ByteOffset> {
         let view = &self.state.views[self.state.active_view?];
         let text = &self.state.buffers.get(view.buffer)?.text;
-        let line_start = text.line_to_byte(text.byte_to_line(view.cursor).ok()?).ok()?;
-        let before = text.slice(ByteRange::new(line_start, view.cursor).ok()?).ok()?;
+        let line_start = text
+            .line_to_byte(text.byte_to_line(view.cursor).ok()?)
+            .ok()?;
+        let before = text
+            .slice(ByteRange::new(line_start, view.cursor).ok()?)
+            .ok()?;
         let word = before
             .char_indices()
             .rev()
@@ -12307,18 +12872,18 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn cancel_lsp_completion(&mut self) {
-        let generation = self.language.generation();
-        if let Some(server) = self.language.active().map(String::as_str) {
-            let _ = self.language.cancel(server, generation);
-        }
-        self.language.clear_completion();
+        self.language.cancel_completion();
         self.ui.language_completion = None;
     }
 
     /// Shows the items matching what was typed since the request, best first. The menu closes
     /// when the cursor leaves the word or nothing matches.
     pub(in crate::editor::session) fn narrow_lsp_completion(&mut self) {
-        let Some(view) = self.state.active_view.and_then(|view| self.state.views.get(view)) else {
+        let Some(view) = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+        else {
             return;
         };
         let Some(buffer) = self.state.buffers.get(view.buffer) else {
@@ -12326,14 +12891,13 @@ impl InteractiveApplication {
         };
         let cursor = view.cursor;
         let revision = buffer.text.revision();
-        let automatic_left_insert = self.language.completion_automatic() && view.mode != EditorMode::Insert;
+        let automatic_left_insert =
+            self.language.completion_automatic() && view.mode != EditorMode::Insert;
         let start = self.language.completion_start();
         let same_line = |offset: ByteOffset| {
             buffer.text.byte_to_line(offset).ok() == buffer.text.byte_to_line(cursor).ok()
         };
-        if automatic_left_insert
-            || start.is_some_and(|start| start > cursor || !same_line(start))
-        {
+        if automatic_left_insert || start.is_some_and(|start| start > cursor || !same_line(start)) {
             self.cancel_lsp_completion();
             return;
         }
@@ -12366,7 +12930,12 @@ impl InteractiveApplication {
 
     /// Mirrors the current items into the menu the renderer draws.
     pub(in crate::editor::session) fn project_lsp_completion(&mut self) {
-        let icons = &self.configuration.settings().ui.command_line.completion_kind_icons;
+        let icons = &self
+            .configuration
+            .settings()
+            .ui
+            .command_line
+            .completion_kind_icons;
         let items = self
             .language
             .completion_items()
@@ -12380,7 +12949,9 @@ impl InteractiveApplication {
                     detail: if kind == "Snippet" {
                         kind.to_owned()
                     } else {
-                        self.lsp_server_label(self.language.completion_server(index).unwrap_or_default())
+                        self.lsp_server_label(
+                            self.language.completion_server(index).unwrap_or_default(),
+                        )
                     },
                     color: item.color(),
                 }
@@ -12402,7 +12973,11 @@ impl InteractiveApplication {
 
     /// How much of the word being completed is already on the line.
     fn lsp_completion_typed_columns(&self) -> u16 {
-        let Some(view) = self.state.active_view.and_then(|view| self.state.views.get(view)) else {
+        let Some(view) = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+        else {
             return 0;
         };
         let Some(start) = self.language.completion_start() else {
@@ -12429,26 +13004,32 @@ impl InteractiveApplication {
 
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
     fn word_at_cursor(&self) -> Option<String> {
-        self.state.active_view.and_then(|view| self.state.views.get(view)).and_then(|view| {
-            let source = self.state.buffers.get(view.buffer)?.text.to_string();
-            let cursor = view.cursor.get();
-            let start = source[..cursor]
-                .char_indices()
-                .rev()
-                .take_while(|(_, character)| completion_word_char(*character))
-                .last()
-                .map_or(cursor, |(index, _)| index);
-            let end = source[cursor..]
-                .char_indices()
-                .find(|(_, character)| !completion_word_char(*character))
-                .map_or(source.len(), |(relative, _)| cursor + relative);
-            Some(source[start..end].to_owned())
-        })
+        self.state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+            .and_then(|view| {
+                let source = self.state.buffers.get(view.buffer)?.text.to_string();
+                let cursor = view.cursor.get();
+                let start = source[..cursor]
+                    .char_indices()
+                    .rev()
+                    .take_while(|(_, character)| completion_word_char(*character))
+                    .last()
+                    .map_or(cursor, |(index, _)| index);
+                let end = source[cursor..]
+                    .char_indices()
+                    .find(|(_, character)| !completion_word_char(*character))
+                    .map_or(source.len(), |(relative, _)| cursor + relative);
+                Some(source[start..end].to_owned())
+            })
     }
 
     fn open_rename_prompt(&mut self) {
         let word = self.word_at_cursor();
-        self.open_prompt(PromptKind::Command, format!("rename {}", word.unwrap_or_default()));
+        self.open_prompt(
+            PromptKind::Command,
+            format!("rename {}", word.unwrap_or_default()),
+        );
     }
 
     /// Servers list nothing for an empty query, so `<leader>sS` asks for one.
@@ -12511,7 +13092,9 @@ impl InteractiveApplication {
     }
 
     /// The active document's path, language and version, with empty text.
-    pub(in crate::editor::session) fn active_lsp_document_without_text(&self) -> Option<(crate::editor::BufferId, LspDocument)> {
+    pub(in crate::editor::session) fn active_lsp_document_without_text(
+        &self,
+    ) -> Option<(crate::editor::BufferId, LspDocument)> {
         let buffer_id = self.state.active_buffer_id()?;
         let buffer = self.state.buffers.get(buffer_id)?;
         let path = buffer.path.clone()?;
@@ -12601,7 +13184,7 @@ impl InteractiveApplication {
                 if definition.id == "rust-analyzer"
                     && Self::rust_analyzer_is_rustup_proxy(&executable)
                 {
-                    let key = Self::tool_version_key(
+                    let key = self.tool_version_key(
                         &definition,
                         LspRuntimeSource::Path,
                         Some(&executable),
@@ -12609,7 +13192,11 @@ impl InteractiveApplication {
                     const CHECKING: &str = "checking rust-analyzer in the active rustup toolchain…";
                     match self.tooling.version(&key) {
                         Some(Ok(_)) => {
-                            if self.notices.current().is_some_and(|(_, notice)| notice == CHECKING) {
+                            if self
+                                .notices
+                                .current()
+                                .is_some_and(|(_, notice)| notice == CHECKING)
+                            {
                                 self.clear_notice();
                             }
                         }
@@ -12834,9 +13421,10 @@ impl InteractiveApplication {
                     .find(|root| root.id == session.root)
                     .map(|root| root.identity.canonical_path.clone())
                     .unwrap_or_default();
-                let folder = root
-                    .file_name()
-                    .map_or_else(|| root.display().to_string(), |name| name.to_string_lossy().into_owned());
+                let folder = root.file_name().map_or_else(
+                    || root.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
                 // The folder and state come first so a narrow picker keeps them; the path last.
                 let state = if session.circuit_open {
                     "crashed"
@@ -12856,7 +13444,10 @@ impl InteractiveApplication {
                     1 => detail.push_str(" · 1 restart"),
                     count => detail.push_str(&format!(" · {count} restarts")),
                 }
-                let source = match home.as_deref().and_then(|home| root.strip_prefix(home).ok()) {
+                let source = match home
+                    .as_deref()
+                    .and_then(|home| root.strip_prefix(home).ok())
+                {
                     Some(rest) => format!("~/{}", rest.display()),
                     None => root.display().to_string(),
                 };
@@ -12878,6 +13469,12 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn clear_lsp_server_ownership(&mut self, server: &str) {
+        for prefix in ["lsp.", "lsp-pull:"] {
+            if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
+                self.diagnostics.clear_owner(&owner);
+            }
+        }
+        self.sync_ui_diagnostics();
         self.language.forget_synced(server);
         self.language.retire_projection_server(server);
     }
@@ -12950,9 +13547,16 @@ impl InteractiveApplication {
             }
             // Settings files are optional, so the first open creates an empty one to edit.
             AppEffect::OpenUserFile(path) => {
-                let created = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
-                    std::fs::OpenOptions::new().append(true).create(true).open(&path).map(drop)
-                });
+                let created = path
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| {
+                        std::fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(&path)
+                            .map(drop)
+                    });
                 // A new file starts with a few commented examples rather than nothing.
                 let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
                     include_str!("../../../../assets/defaults/keymaps-starter.toml")
@@ -12972,10 +13576,7 @@ impl InteractiveApplication {
             }
             AppEffect::Reload { force } => self.start_reload(force),
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
-            AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(
-                offset,
-                true,
-            ) {
+            AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(offset, true) {
                 Ok(_) => {
                     self.set_dashboard_visibility(false);
                 }
@@ -13025,6 +13626,7 @@ impl InteractiveApplication {
                     Vec::new(),
                     file,
                 ) {
+                    self.input.clear_pending_stage();
                     self.show_error(error);
                 }
             }
@@ -13039,6 +13641,7 @@ impl InteractiveApplication {
                     Vec::new(),
                     file,
                 ) {
+                    self.input.clear_pending_stage();
                     self.show_error(error);
                 }
             }
@@ -13072,10 +13675,7 @@ impl InteractiveApplication {
             AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
             AppEffect::GitWorktreesOpen => self.start_git_worktrees(),
             AppEffect::GitHunksOpenStaged => {
-                self.start_git_hunks_with_layer(
-                    None,
-                    crate::workspace::git::GitDiffLayer::Staged,
-                );
+                self.start_git_hunks_with_layer(None, crate::workspace::git::GitDiffLayer::Staged);
             }
             AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
@@ -13116,21 +13716,27 @@ impl InteractiveApplication {
             AppEffect::GitHunksOpen => self.start_git_hunks(),
             AppEffect::GitConflictNavigate(direction) => self.navigate_git_conflict(direction),
             AppEffect::MarkdownPreview => {
-                let Some(buffer) = self.state.active_buffer_id().map(|id| &self.state.buffers[id])
+                let Some(buffer) = self
+                    .state
+                    .active_buffer_id()
+                    .map(|id| &self.state.buffers[id])
                 else {
                     return Ok(());
                 };
-                let title = buffer
-                    .path
-                    .as_ref()
-                    .map_or_else(|| "Markdown".to_owned(), |path| self.workspace_relative_label(path));
+                let title = buffer.path.as_ref().map_or_else(
+                    || "Markdown".to_owned(),
+                    |path| self.workspace_relative_label(path),
+                );
                 let value = buffer.text.to_string();
                 self.present_documentation_popup(
                     DocumentationPopupKind::Git,
                     title,
                     "Markdown".into(),
                     None,
-                    vec![LspMarkupContent { kind: LspMarkupKind::Markdown, value }],
+                    vec![LspMarkupContent {
+                        kind: LspMarkupKind::Markdown,
+                        value,
+                    }],
                 );
             }
             AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
@@ -13190,8 +13796,8 @@ impl InteractiveApplication {
                     .map(|(index, (error, message))| {
                         (
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("notification:{index}")),
                                 label: message.clone(),
                                 detail: if *error {
@@ -13283,15 +13889,20 @@ impl InteractiveApplication {
             AppEffect::DashboardSelect(step) => {
                 let last = self.ui.dashboard_actions.len().saturating_sub(1);
                 self.ui.dashboard_selected = if step < 0 {
-                    self.ui.dashboard_selected.saturating_sub(usize::from(step.unsigned_abs()))
+                    self.ui
+                        .dashboard_selected
+                        .saturating_sub(usize::from(step.unsigned_abs()))
                 } else {
-                    self.ui.dashboard_selected.saturating_add(usize::from(step.unsigned_abs()))
+                    self.ui
+                        .dashboard_selected
+                        .saturating_add(usize::from(step.unsigned_abs()))
                 }
                 .min(last);
             }
             AppEffect::DashboardOpen => {
-                if let Some(invocation) =
-                    self.configuration.dashboard_invocation(self.ui.dashboard_selected)
+                if let Some(invocation) = self
+                    .configuration
+                    .dashboard_invocation(self.ui.dashboard_selected)
                 {
                     self.invoke_mapped(invocation);
                 }
@@ -13309,8 +13920,8 @@ impl InteractiveApplication {
                         let content = graph.content_for_window(window.id)?;
                         Some((
                             PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("window:{}", window.id.0)),
                                 label: content.title.clone(),
                                 detail: format!(
@@ -13472,6 +14083,7 @@ impl InteractiveApplication {
             persisted: buffer.persisted_bytes(),
             dirty: buffer.dirty,
             virtual_read_only: buffer.is_virtual_read_only(),
+            read_only: buffer.read_only,
         }
     }
     pub(in crate::editor::session) fn show_document_failure(
@@ -13517,9 +14129,9 @@ impl InteractiveApplication {
             .iter()
             .rev()
             .map(|(journal, record)| {
-                let label = record.original_path.as_deref().map_or_else(
+                let label = record.path().as_deref().map_or_else(
                     || SCRATCH_LABEL.to_owned(),
-                    |path| self.workspace_relative_label(Path::new(path)),
+                    |path| self.workspace_relative_label(path),
                 );
                 let lines = record.content.lines().count();
                 (
@@ -13560,8 +14172,6 @@ impl InteractiveApplication {
         )
     }
 
-    /// Open a journal's text as a new unsaved buffer, which keeps its own journal from then
-    /// on, and delete the old journal.
     /// Recover a journal into its file, as an unsaved change on top of what is on disk, so undo
     /// goes back to the saved version. Work that never had a file, or whose file is already
     /// open, comes back in a new buffer.
@@ -13576,8 +14186,12 @@ impl InteractiveApplication {
             self.show_error(self.message("recovery_none", &[]));
             return;
         };
-        let original = record.original_path.map(PathBuf::from).filter(|path| {
-            !self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(path))
+        let original = record.path().filter(|path| {
+            !self
+                .state
+                .buffers
+                .values()
+                .any(|buffer| buffer.path.as_ref() == Some(path))
         });
         if let Some(original) = original {
             let roots = self
@@ -13588,17 +14202,29 @@ impl InteractiveApplication {
                 .collect();
             match self.documents.read_scoped(original, roots) {
                 Ok(id) => {
-                    self.recovery.register_read(id, journal.to_path_buf(), record.content);
+                    self.recovery.register_read(
+                        id,
+                        journal.to_path_buf(),
+                        record.content,
+                        self.workspace.version(),
+                    );
                 }
                 Err(error) => self.show_error(error),
             }
             return;
         }
-        let (buffer, _) = self.state.open_text(TextBuffer::from_text(&record.content), None);
-        self.state.buffers[buffer].dirty = true;
+        let (buffer, _) = self.state.open_text(TextBuffer::from_text(""), None);
+        if let Err(error) = self.replace_with_recovered(buffer, record.content) {
+            self.show_error(error);
+            return;
+        }
         self.finish_recovery(journal, "recovery_opened");
     }
-    pub(super) fn replace_with_recovered(&mut self, buffer: crate::editor::BufferId, content: String) {
+    pub(super) fn replace_with_recovered(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        content: String,
+    ) -> Result<(), String> {
         let text = &self.state.buffers[buffer].text;
         let revision = text.revision();
         let edits = crate::editor::text::TextEditSet::new(
@@ -13613,16 +14239,17 @@ impl InteractiveApplication {
             .with_precondition(Precondition::BufferRevision { buffer, revision })
             .with_precondition(Precondition::BufferWritable(buffer))
             .with_operation(EditorOperation::ApplyEdits { buffer, edits });
-        if let Err(error) = self.state.apply_transaction(&transaction) {
-            self.show_error(error.to_string());
-        }
+        self.state
+            .apply_transaction(&transaction)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
     pub(super) fn finish_recovery(&mut self, journal: &Path, message: &str) {
         self.set_dashboard_visibility(false);
         self.ensure_cursor_visible();
         self.notify_message(self.message(message, &[]), false);
-        if let Err(error) = self.recovery.discard(journal, false, self.documents.recovery_io()) {
-            self.show_error(error);
+        if let Some(buffer) = self.state.active_buffer_id() {
+            self.recovery.retain_recovered(buffer, journal.to_owned());
         }
     }
 
@@ -13672,19 +14299,31 @@ impl InteractiveApplication {
             return false;
         }
         // An installed formatter runs as a process, which takes longer to start than a request.
-        let managed = self.workspace.execution_allowed().is_ok() && self.active_formatter().is_some();
+        let managed =
+            self.workspace.execution_allowed().is_ok() && self.active_formatter().is_some();
         let buffer = if managed {
             self.state.active_buffer_id()
         } else {
-            self.active_lsp_document_without_text().and_then(|(buffer, document)| {
-                self.language.formatting_server(buffer, &document).map(|_| buffer)
-            })
+            self.active_lsp_document_without_text()
+                .and_then(|(buffer, document)| {
+                    self.language
+                        .formatting_server(buffer, &document)
+                        .map(|_| buffer)
+                })
         };
         let Some(buffer) = buffer else {
             return false;
         };
         self.format_on_save = Some(super::FormatOnSave {
+            request: None,
             buffer,
+            source: self.state.buffers[buffer].text.source_version(),
+            path: self.state.buffers[buffer].path.clone(),
+            formatter: if managed {
+                self.active_formatter()
+            } else {
+                None
+            },
             quit_after,
             // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
             deadline: std::time::Instant::now()
@@ -13698,8 +14337,25 @@ impl InteractiveApplication {
         let Some(pending) = self.format_on_save.take() else {
             return;
         };
-        if self.state.active_buffer_id() == Some(pending.buffer) {
-            self.start_save(pending.quit_after, None, false);
+        if let Some((server, generation)) = pending.request {
+            let _ = self.language.cancel(&server, generation);
+            self.language.retire_request(&server, generation);
+        }
+        if self
+            .state
+            .buffers
+            .get(pending.buffer)
+            .is_some_and(|buffer| {
+                buffer.path == pending.path
+                    && pending
+                        .source
+                        .same_incarnation(&buffer.text.source_version())
+            })
+        {
+            match self.request_save_buffer(pending.buffer, pending.quit_after, None, false, None) {
+                Ok(_) => self.notify_message(self.message("saving", &[]), false),
+                Err(error) => self.show_document_failure(error),
+            }
         } else {
             self.show_error(self.message("format_on_save_skipped", &[]));
         }
@@ -13711,9 +14367,15 @@ impl InteractiveApplication {
             return;
         };
         let stamp = ["index", "HEAD"].map(|name| {
-            std::fs::metadata(status.git_dir.join(name)).and_then(|file| file.modified()).ok()
+            std::fs::metadata(status.git_dir.join(name))
+                .and_then(|file| file.modified())
+                .ok()
         });
-        if self.git_stamp.replace(stamp).is_some_and(|previous| previous != stamp) {
+        if self
+            .git_stamp
+            .replace(stamp)
+            .is_some_and(|previous| previous != stamp)
+        {
             self.start_git_status_refresh_with_feedback(false);
         }
     }
@@ -13722,7 +14384,8 @@ impl InteractiveApplication {
     /// formatter. A clean buffer takes the new text; a changed one keeps its text and says so.
     pub(super) fn process_disk_changes(&mut self) {
         let now = self.clock.monotonic();
-        if self.next_disk_check.is_some_and(|next| now < next) || self.documents.file_work_pending() {
+        if self.next_disk_check.is_some_and(|next| now < next) || self.documents.file_work_pending()
+        {
             return;
         }
         self.next_disk_check = Some(now + std::time::Duration::from_secs(1));
@@ -13734,14 +14397,18 @@ impl InteractiveApplication {
             .filter(|(_, buffer)| buffer.virtual_owner().is_none())
             .filter_map(|(id, buffer)| Some((id, buffer.path.clone()?)))
             .collect();
-        self.disk_stamps.retain(|id, _| open.iter().any(|(open, _)| open == id));
+        self.disk_stamps
+            .retain(|id, _| open.iter().any(|(open, _)| open == id));
         for (id, path) in open {
             let Ok(metadata) = std::fs::metadata(&path) else {
                 continue;
             };
             let stamp = (metadata.modified().ok(), metadata.len());
-            let previous = self.disk_stamps.insert(id, stamp);
-            if previous.is_none_or(|previous| previous == stamp) {
+            let Some(previous) = self.disk_stamps.get(&id).copied() else {
+                self.disk_stamps.insert(id, stamp);
+                continue;
+            };
+            if previous == stamp {
                 continue;
             }
             let view = Self::document_view(id, &self.state.buffers[id]);
@@ -13749,9 +14416,11 @@ impl InteractiveApplication {
             if metadata.len() == view.persisted.len() as u64
                 && std::fs::read(&path).is_ok_and(|disk| disk == view.persisted)
             {
+                self.disk_stamps.insert(id, stamp);
                 continue;
             }
             if view.dirty {
+                self.disk_stamps.insert(id, stamp);
                 let shown = self.workspace_relative_label(&path);
                 self.notify_warning(self.message("file_changed_on_disk", &[("path", shown)]));
                 continue;
@@ -13759,8 +14428,14 @@ impl InteractiveApplication {
             let editor = self.state.window_version();
             let workspace = self.workspace.version();
             let view = Self::document_view(id, &self.state.buffers[id]);
-            if let Err(error) = self.documents.request_reload(Some(view), false, &editor, workspace) {
-                self.show_document_failure(error);
+            match self
+                .documents
+                .request_reload(Some(view), false, &editor, workspace)
+            {
+                Ok(()) => {
+                    self.reload_stamps.insert(id, stamp);
+                }
+                Err(error) => self.show_document_failure(error),
             }
         }
     }
@@ -13789,7 +14464,9 @@ impl InteractiveApplication {
         };
         // Said up front, because the write would only report the temporary file it could not make.
         if let Some(requested) = requested_path.as_deref() {
-            let folder = requested.parent().filter(|folder| !folder.as_os_str().is_empty());
+            let folder = requested
+                .parent()
+                .filter(|folder| !folder.as_os_str().is_empty());
             if let Some(folder) = folder.filter(|f| !self.state.workspace_root.join(f).is_dir()) {
                 let name = requested.file_name().unwrap_or_default().to_string_lossy();
                 self.show_error(format!(
@@ -13800,7 +14477,7 @@ impl InteractiveApplication {
             }
         }
         match self.request_save_buffer(buffer, quit_after, requested_path, force, None) {
-            Ok(()) => self.notify_message(self.message("saving", &[]), false),
+            Ok(_) => self.notify_message(self.message("saving", &[]), false),
             Err(error) => self.show_document_failure(error),
         }
     }
@@ -13839,7 +14516,7 @@ impl InteractiveApplication {
         requested_path: Option<PathBuf>,
         force: bool,
         close: Option<EditorCloseSave>,
-    ) -> Result<(), crate::editor::session::documents::DocumentFailure> {
+    ) -> Result<crate::files::RequestId, crate::editor::session::documents::DocumentFailure> {
         let view = self
             .state
             .buffers
@@ -13885,10 +14562,10 @@ impl InteractiveApplication {
     }
     fn retire_closed_buffer(&mut self, buffer_id: crate::editor::BufferId, path: Option<&Path>) {
         self.documents.retire_buffer(buffer_id, path);
-        if let Some(path) = path {
-            if let Some(id) = self.explorer.retire_buffer_path(path) {
-                self.documents.cancel_request(id);
-            }
+        if let Some(path) = path
+            && let Some(id) = self.explorer.retire_buffer_path(path)
+        {
+            self.documents.cancel_request(id);
         }
         self.extension.close_virtual_buffer(buffer_id);
         let documents = self
@@ -13961,6 +14638,7 @@ impl InteractiveApplication {
         reply: crate::editor::session::documents::FileReply,
     ) {
         use crate::editor::session::documents::DocumentChange;
+        let stage = self.input.take_stage_save(reply.id());
         let close_save = reply.close_save().cloned();
         if let Err(error) = self
             .window_session
@@ -14010,6 +14688,7 @@ impl InteractiveApplication {
             DocumentChange::Open {
                 text,
                 path,
+                line,
                 navigation,
                 activate,
             } => {
@@ -14028,13 +14707,29 @@ impl InteractiveApplication {
                     self.show_error(e);
                     return;
                 }
+                if activate && let (Some(line), Some(view)) = (line, self.state.active_view) {
+                    let text = &self.state.buffers[self.state.views[view].buffer].text;
+                    let position = text
+                        .line_to_byte(line.min(text.visible_lines().saturating_sub(1)))
+                        .unwrap_or(ByteOffset(0));
+                    let transaction = EditorTransaction::new(self.transaction_id())
+                        .with_operation(EditorOperation::SetCursor { view, position })
+                        .with_undo_policy(UndoPolicy::Ignore);
+                    if let Err(error) = self.state.apply_transaction(&transaction) {
+                        self.show_error(error);
+                    }
+                    self.ensure_cursor_visible();
+                }
                 self.record_recent_file(path.clone());
                 // "Opening file…" is done once the file is there.
-                if self.ui.notification.as_deref() == Some(self.message("opening_file", &[]).as_str()) {
+                if self.ui.notification.as_deref()
+                    == Some(self.message("opening_file", &[]).as_str())
+                {
                     self.clear_notice();
                 }
             }
             DocumentChange::Reload { buffer, text, path } => {
+                let stamp = self.reload_stamps.remove(&buffer);
                 if !candidate.reload_document(buffer, text, path.clone()) {
                     self.show_error(self.message("reload_closed", &[]));
                     return;
@@ -14042,6 +14737,9 @@ impl InteractiveApplication {
                 if let Err(e) = self.commit_editor_draft(candidate, None, false) {
                     self.show_error(e);
                     return;
+                }
+                if let Some(stamp) = stamp {
+                    self.disk_stamps.insert(buffer, stamp);
                 }
                 self.git.forget_hunks();
                 self.keep_cursor_off_final_newline();
@@ -14055,11 +14753,13 @@ impl InteractiveApplication {
                 text,
                 revision,
                 bytes,
+                snapshot,
                 target: path,
                 quit: quit_after,
                 close,
             } => {
-                if !candidate.save_document(buffer, &text, revision, bytes, path.clone()) {
+                if !candidate.save_document(buffer, &text, revision, bytes, path.clone(), snapshot)
+                {
                     self.input.clear_pending_stage();
                     if let Some(token) = &close {
                         self.window_session.fail_editor_close_save(token);
@@ -14076,9 +14776,6 @@ impl InteractiveApplication {
                 }
                 // A staged save that was waiting on this completion replays now, against the
                 // saved bytes, using the exact effect that was refused.
-                if let Some(effect) = self.input.take_pending_stage() {
-                    self.process_effect(effect);
-                }
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
                 if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
@@ -14113,15 +14810,29 @@ impl InteractiveApplication {
                     },
                     false,
                 );
-                if let Some(server) = self.language.active().map(String::as_str) {
-                    if let Some(document) = lsp_document {
-                        let _ = self.language.save(server, document);
-                        // An older save snapshot must not leave the worker's document
-                        // identity behind the current editor incarnation/content.
-                        self.language.invalidate_active_document(buffer);
+                if let Some(document) = lsp_document {
+                    let servers = self
+                        .language
+                        .sessions()
+                        .iter()
+                        .filter_map(|(key, state)| {
+                            state
+                                .documents
+                                .get(&buffer)
+                                .filter(|owned| owned.uri() == document.uri())
+                                .map(|_| key.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    for server in servers {
+                        if let Err(error) = self.language.save(&server, document.clone()) {
+                            self.show_error(error);
+                        }
+                        self.language.invalidate_document(&server, buffer);
                     }
                 }
-                if self.ui.explorer.is_some() {
+                if let Some((effect, line)) = stage.filter(|_| !still_dirty) {
+                    self.retry_saved_stage(buffer, &path, effect, line);
+                } else if self.ui.explorer.is_some() {
                     self.start_git_status_refresh_with_feedback(false);
                 }
                 if let Some(token) = close {
@@ -14208,28 +14919,31 @@ impl InteractiveApplication {
             // A task with a matcher reports what it matched in Problems, as a VS Code task does.
             TrustedAction::RunTask(name) => {
                 let adapter = match self.configuration.settings().tasks.get(&name) {
-                    Some(task) => task.matcher.clone().map_or(AdapterContext::Plain, |matcher| {
-                        AdapterContext::Linter {
+                    Some(task) => task
+                        .matcher
+                        .clone()
+                        .map_or(AdapterContext::Plain, |matcher| AdapterContext::Linter {
                             matcher,
                             lint: task.kind == crate::config::TaskKind::Linter,
-                        }
-                    }),
+                        }),
                     None => AdapterContext::Plain,
                 };
                 self.start_task_plan(&name, adapter)
             }
-            TrustedAction::OpenTerminal(intent) => {
-                self.open_terminal_with_response(intent, None)
-            }
+            TrustedAction::OpenTerminal(intent) => self.open_terminal_with_response(intent, None),
             TrustedAction::OpenDapTerminal { intent, reply } => {
                 self.open_terminal_with_response(intent, Some(reply))
             }
             TrustedAction::RunTest { name, matcher } => {
                 self.start_task_plan(&name, AdapterContext::Test { matcher })
             }
-            TrustedAction::RunLinter { name, matcher } => {
-                self.start_task_plan(&name, AdapterContext::Linter { matcher, lint: true })
-            }
+            TrustedAction::RunLinter { name, matcher } => self.start_task_plan(
+                &name,
+                AdapterContext::Linter {
+                    matcher,
+                    lint: true,
+                },
+            ),
             TrustedAction::RunFormatter { name, source } => {
                 self.start_task_plan(&name, AdapterContext::Formatter { source })
             }

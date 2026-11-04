@@ -13,13 +13,12 @@ mod origins;
 pub(crate) use origins::{ApplyEditReply, EditContext, OwnedLspEvent, PendingEditReply};
 mod model;
 pub use model::{
-    lsp_symbol_kind_name,
-    LspCapabilities, LspCodeAction, LspCodeLens, LspCommand, LspCompletionItem, LspDiagnostic, LspDocument,
-    LspDocumentEdit, LspEvent, LspFeature, LspColor, LspFeatureResult, LspHealth, LspHover, LspInlayHint,
-    LspLocation, LspMarkupContent, LspMarkupKind, LspPolicy, LspPosition, LspProgressKind,
-    LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
+    LspCapabilities, LspCodeAction, LspCodeLens, LspColor, LspCommand, LspCompletionItem,
+    LspDiagnostic, LspDocument, LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult, LspHealth,
+    LspHover, LspInlayHint, LspLocation, LspMarkupContent, LspMarkupKind, LspPolicy, LspPosition,
+    LspProgressKind, LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
     LspSemanticTokenEdit, LspSemanticTokens, LspServerConfiguration, LspSessionKey, LspSymbol,
-    LspTextEdit, LspWorkspaceEdit, ServerRequestId, SyncKind,
+    LspTextEdit, LspWorkspaceEdit, ServerRequestId, SyncKind, lsp_symbol_kind_name,
 };
 mod session;
 pub use session::{LspService, LspSessionLaunch};
@@ -39,3 +38,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) use origins::DiagnosticLineage;
+
+#[cfg(test)]
+pub(crate) use origins::EditSourceFixture;

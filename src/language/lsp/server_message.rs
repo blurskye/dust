@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    process::ChildStdin,
     time::Instant,
 };
 
@@ -20,12 +19,13 @@ use super::{
 
 pub(super) struct ServerMessageContext<'a> {
     pub server: &'a str,
-    pub stdin: &'a mut ChildStdin,
+    pub root: &'a std::path::Path,
+    pub stdin: &'a mut dyn std::io::Write,
     pub events: &'a EventSender,
     pub logs: &'a mut VecDeque<String>,
     pub base_capabilities: &'a LspCapabilities,
     pub capabilities: &'a mut LspCapabilities,
-    pub registrations: &'a mut HashMap<String, String>,
+    pub registrations: &'a mut HashMap<String, (String, Value)>,
     pub configuration: &'a LspServerConfiguration,
     pub sources: &'a HashMap<String, (crate::editor::BufferId, crate::editor::text::TextVersion)>,
     pub diagnostic_lineage: &'a super::origins::DiagnosticLineage,
@@ -36,6 +36,7 @@ pub(super) struct ServerMessageContext<'a> {
 pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: &Value) {
     let ServerMessageContext {
         server,
+        root,
         stdin,
         events,
         logs,
@@ -83,9 +84,34 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                         .unwrap_or(&Value::Null),
                 )
             };
+            let disk = (!rejected && !diagnostic_lineage.tracked(uri))
+                .then(|| {
+                    use std::io::Read;
+                    let path = super::paths::path_from_file_uri(uri)?;
+                    let path = std::fs::canonicalize(path).ok()?;
+                    let root = std::fs::canonicalize(root).ok()?;
+                    if !path.starts_with(root) {
+                        return None;
+                    }
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(path)
+                        .ok()?
+                        .take(4 * 1024 * 1024 + 1)
+                        .read_to_end(&mut bytes)
+                        .ok()?;
+                    if bytes.len() > 4 * 1024 * 1024 {
+                        return None;
+                    }
+                    Some((
+                        uri.to_owned(),
+                        crate::editor::text::TextBuffer::from_text(&String::from_utf8(bytes).ok()?),
+                    ))
+                })
+                .flatten();
             let event_source = EventSender {
                 context: EditContext {
                     encoding: capabilities.position_encoding,
+                    disk,
                     diagnostic_ambiguous: ambiguous,
                     sources: std::sync::Arc::new(
                         sources
@@ -147,7 +173,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                         .filter_map(|item| {
                             Some((
                                 item.get("id")?.as_str()?.to_owned(),
-                                item.get("method")?.as_str()?.to_owned(),
+                                (
+                                    item.get("method")?.as_str()?.to_owned(),
+                                    item.get("registerOptions").cloned().unwrap_or(Value::Null),
+                                ),
                             ))
                         })
                         .collect::<Vec<_>>()
@@ -177,8 +206,27 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             let response = if parsed.is_some() {
                 *capabilities = effective_capabilities(
                     base_capabilities,
-                    registrations.values().map(String::as_str),
+                    registrations.values().map(|(method, _)| method.as_str()),
                 );
+                for (method, options) in registrations.values() {
+                    if method == "textDocument/completion" {
+                        capabilities.completion_resolve |=
+                            options.get("resolveProvider").and_then(Value::as_bool) == Some(true);
+                        if let Some(triggers) =
+                            options.get("triggerCharacters").and_then(Value::as_array)
+                        {
+                            for trigger in triggers.iter().filter_map(Value::as_str) {
+                                if !capabilities
+                                    .completion_triggers
+                                    .iter()
+                                    .any(|s| s == trigger)
+                                {
+                                    capabilities.completion_triggers.push(trigger.into());
+                                }
+                            }
+                        }
+                    }
+                }
                 send_event(
                     events,
                     LspEvent::CapabilitiesChanged {
@@ -283,7 +331,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     })
                     .unwrap_or_default(),
             ),
-            "workspace/workspaceFolders" => Value::Null,
+            "workspace/workspaceFolders" => {
+                super::protocol::initialize_message(root, None)["params"]["workspaceFolders"]
+                    .clone()
+            }
             "window/workDoneProgress/create"
             | "client/registerCapability"
             | "client/unregisterCapability" => Value::Null,
@@ -344,7 +395,7 @@ pub(super) fn effective_capabilities<'a>(
 
 pub(super) fn expire_requests(
     server: &str,
-    stdin: &mut ChildStdin,
+    stdin: &mut (impl std::io::Write + ?Sized),
     pending: &mut HashMap<i64, PendingRequest>,
     events: &EventSender,
 ) {

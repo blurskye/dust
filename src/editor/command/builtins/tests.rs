@@ -47,3 +47,324 @@ fn movement_and_edit_commands_apply_through_registry_transactions() {
             .starts_with('\t')
     );
 }
+
+fn apply(state: &mut EditorState, id: &str, arguments: &[(&str, &str)], count: u64) {
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    let mut invocation = CommandInvocation::new(id, InvocationSource::Test).unwrap();
+    invocation.count = std::num::NonZeroU64::new(count);
+    for (name, value) in arguments {
+        invocation = invocation.with_argument(
+            name,
+            match *value {
+                "true" => CommandValue::Bool(true),
+                "false" => CommandValue::Bool(false),
+                value => CommandValue::String(value.into()),
+            },
+        );
+    }
+    let outcome = registry.execute(state, &invocation).unwrap();
+    if let Some(transaction) = outcome.transaction {
+        state.apply_transaction(&transaction).unwrap();
+    }
+}
+
+fn editing(
+    text: &str,
+    cursor: usize,
+) -> (EditorState, crate::editor::BufferId, crate::editor::ViewId) {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text(text), None);
+    state.views[view].cursor = crate::editor::text::ByteOffset(cursor);
+    (state, buffer, view)
+}
+
+#[test]
+fn linewise_put_separates_an_unterminated_last_line() {
+    use crate::editor::{RegisterShape, RegisterValue};
+    let (mut state, buffer, view) = editing("one\ntwo", 4);
+    state.registers.set(
+        '"',
+        RegisterValue {
+            text: "two".into(),
+            shape: RegisterShape::Line,
+        },
+        true,
+        true,
+    );
+    apply(&mut state, "edit.put", &[("before", "false")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "one\ntwo\ntwo\n");
+    assert_eq!(state.views[view].cursor.get(), 8);
+}
+
+#[test]
+fn block_put_extends_eof_and_repeats_rows_horizontally() {
+    use crate::editor::{RegisterShape, RegisterValue};
+    for (text, cursor, expected) in [
+        ("x", 0, "aax\nbb\ncc"),
+        ("xx", 1, "xaax\n bb\n cc"),
+        ("x\nx\nx\nx", 0, "aax\nbbx\nccx\nx"),
+    ] {
+        let (mut state, buffer, _) = editing(text, cursor);
+        state.registers.set(
+            '"',
+            RegisterValue {
+                text: "a\nb\nc".into(),
+                shape: RegisterShape::Block,
+            },
+            true,
+            true,
+        );
+        apply(&mut state, "edit.put", &[("before", "true")], 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn crlf_insert_and_replace_use_normalized_cursor_lengths() {
+    for command in ["edit.insert_text", "edit.replace_text"] {
+        let (mut state, buffer, view) = editing("", 0);
+        state.views[view].mode = crate::editor::EditorMode::Insert;
+        apply(&mut state, command, &[("text", "a\r\nb")], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), "a\nb");
+        assert_eq!(state.views[view].cursor.get(), 3);
+    }
+}
+
+#[test]
+fn normal_horizontal_motion_stays_off_line_endings() {
+    let (mut state, _, view) = editing("ab\ncd\n", 1);
+    apply(&mut state, "view.cursor.move", &[("motion", "right")], 1);
+    assert_eq!(state.views[view].cursor.get(), 1);
+    state.views[view].mode = crate::editor::EditorMode::Insert;
+    apply(&mut state, "view.cursor.move", &[("motion", "right")], 1);
+    assert_eq!(state.views[view].cursor.get(), 2);
+}
+
+#[test]
+fn replace_backspace_does_not_restore_across_cursor_movement() {
+    let (mut state, buffer, view) = editing("abc\ndef", 0);
+    apply(&mut state, "mode.replace", &[], 1);
+    apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
+    apply(&mut state, "view.cursor.move", &[("motion", "down")], 1);
+    let cursor = state.views[view].cursor;
+    apply(&mut state, "edit.replace_backspace", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "Xbc\ndef");
+    assert_eq!(state.views[view].cursor, cursor);
+    assert!(state.views[view].replace_history.is_empty());
+}
+
+#[test]
+fn backward_inclusive_operators_include_the_cursor_character() {
+    for (text, cursor, motion, character) in [
+        ("(abc)", 4, "matching_pair", "("),
+        ("abc", 2, "find_backward", "a"),
+    ] {
+        let (mut state, buffer, _) = editing(text, cursor);
+        apply(
+            &mut state,
+            "edit.operator",
+            &[
+                ("operator", "delete"),
+                ("motion", motion),
+                ("character", character),
+                ("linewise", "false"),
+            ],
+            1,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), "");
+    }
+}
+
+#[test]
+fn word_motions_and_objects_keep_combining_graphemes_whole() {
+    for (motion, cursor, expected) in [
+        ("word_forward", 0, 5),
+        ("word_backward", 5, 0),
+        ("word_end", 0, 3),
+    ] {
+        let (mut state, _, view) = editing("e\u{301}x y", cursor);
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], 1);
+        assert_eq!(state.views[view].cursor.get(), expected, "{motion}");
+    }
+    let (mut state, buffer, _) = editing("e\u{301} test", 0);
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "delete"),
+            ("motion", "inner_word"),
+            ("linewise", "false"),
+        ],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), " test");
+}
+
+#[test]
+fn repeated_word_end_advances_but_change_word_keeps_its_space() {
+    for motion in ["word_end", "big_word_end"] {
+        let (mut state, _, view) = editing("one two", 0);
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], 1);
+        assert_eq!(state.views[view].cursor.get(), 2);
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], 1);
+        assert_eq!(state.views[view].cursor.get(), 6);
+    }
+    let (mut state, buffer, _) = editing("a two", 0);
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "change"),
+            ("motion", "word_forward"),
+            ("linewise", "false"),
+        ],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), " two");
+}
+
+#[test]
+fn counted_word_and_paragraph_objects_extend_the_range() {
+    for (text, motion, expected) in [
+        ("one two three", "a_word", "three"),
+        ("one\n\ntwo\n\nthree", "a_paragraph", "three"),
+    ] {
+        let (mut state, buffer, _) = editing(text, 0);
+        apply(
+            &mut state,
+            "edit.operator",
+            &[
+                ("operator", "delete"),
+                ("motion", motion),
+                ("linewise", "false"),
+            ],
+            2,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn adjacent_multi_changes_keep_one_insertion_at_each_resulting_position() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    let (mut state, buffer, view) = editing("::x", 0);
+    state.views[view].mode = crate::editor::EditorMode::Multi;
+    state.views[view].multi_marks = vec![
+        ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+        ByteRange::new(ByteOffset(1), ByteOffset(2)).unwrap(),
+    ];
+    apply(&mut state, "multi.insert", &[("placement", "change")], 1);
+    apply(&mut state, "edit.insert_text", &[("text", "a")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "ax");
+}
+
+#[test]
+fn multi_append_advances_empty_marks_and_line_cursors_use_display_columns() {
+    let (mut state, buffer, _) = editing("ab\nab", 0);
+    apply(&mut state, "multi.add_below", &[], 1);
+    apply(&mut state, "multi.insert", &[("placement", "end")], 1);
+    apply(&mut state, "edit.insert_text", &[("text", "X")], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "aXb\naXb");
+    let (mut state, _, view) = editing("\tx\n123456789", 1);
+    state.policy.tab_width = 4;
+    apply(&mut state, "multi.add_below", &[], 1);
+    assert_eq!(state.views[view].cursor.get(), 7);
+}
+
+#[test]
+fn escaped_quotes_insert_before_the_autopaired_closer() {
+    let (mut state, buffer, _) = editing("", 0);
+    state.policy.autopairs = true;
+    for text in ["\"", "\\", "\""] {
+        apply(&mut state, "edit.insert_text", &[("text", text)], 1);
+    }
+    assert_eq!(state.buffers[buffer].text.to_string(), "\"\\\"\"");
+}
+
+#[test]
+fn empty_objects_can_be_surrounded_and_symmetric_surrounds_removed() {
+    let (mut state, buffer, _) = editing("()", 0);
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "surround_add"),
+            ("motion", "inner_paren"),
+            ("linewise", "false"),
+            ("character", "]"),
+        ],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), "([])");
+    let (mut state, buffer, _) = editing("*word*", 1);
+    apply(
+        &mut state,
+        "edit.surround",
+        &[("character", "*"), ("action", "delete")],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), "word");
+}
+
+#[test]
+fn indentation_and_joins_accept_multibyte_endpoints() {
+    let (mut state, buffer, _) = editing("é", 0);
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "indent"),
+            ("motion", "line"),
+            ("linewise", "true"),
+        ],
+        1,
+    );
+    assert!(state.buffers[buffer].text.to_string().ends_with('é'));
+    let (mut state, buffer, view) = editing("a   \né\n", 3);
+    apply(&mut state, "edit.join_lines", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "a é\n");
+    assert_eq!(state.views[view].cursor.get(), 1);
+    let (mut state, buffer, view) = editing("a\né\n", 0);
+    state.views[view].mode = crate::editor::EditorMode::VisualChar;
+    state.views[view].selection = Some(crate::editor::Selection {
+        anchor: crate::editor::text::ByteOffset(0),
+        head: crate::editor::text::ByteOffset(2),
+        kind: crate::editor::SelectionKind::Character,
+    });
+    apply(
+        &mut state,
+        "edit.operator",
+        &[
+            ("operator", "join"),
+            ("motion", "visual"),
+            ("linewise", "false"),
+        ],
+        1,
+    );
+    assert_eq!(state.buffers[buffer].text.to_string(), "a é\n");
+}
+
+#[test]
+fn blank_comment_ranges_finish_the_operator_and_visual_modes() {
+    for mode in [
+        crate::editor::EditorMode::OperatorPending,
+        crate::editor::EditorMode::VisualLine,
+    ] {
+        let (mut state, buffer, view) = editing("\n\n", 0);
+        state.views[view].mode = mode;
+        apply(
+            &mut state,
+            "edit.operator",
+            &[
+                ("operator", "comment"),
+                ("motion", "line"),
+                ("linewise", "true"),
+                ("comment", "//"),
+            ],
+            2,
+        );
+        assert_eq!(state.views[view].mode, crate::editor::EditorMode::Normal);
+        assert_eq!(state.buffers[buffer].text.to_string(), "\n\n");
+    }
+}

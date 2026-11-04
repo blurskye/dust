@@ -9,7 +9,6 @@ use std::ops::Range;
 
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
 use crate::{
     config::{AmbiguousWidth, Config},
@@ -97,8 +96,8 @@ pub(super) fn render_agent_panel(
     let mut grid = CellGrid::new_with_policy(
         width,
         height,
-        &CONTROL_CHARACTER_REPLACEMENT,
-        &ZERO_WIDTH_REPLACEMENT,
+        CONTROL_CHARACTER_REPLACEMENT,
+        ZERO_WIDTH_REPLACEMENT,
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     // The last row is left for the status line the caller draws there.
@@ -110,9 +109,16 @@ pub(super) fn render_agent_panel(
 
     let inner = width - 2;
     let chips = u16::from(!panel.context.is_empty());
-    let list = if panel.menu.is_empty() { panel.family.len() } else { panel.menu.len() };
-    let list = u16::try_from(list.min(LIST_ROW_CEILING)).unwrap_or(0).min(height.saturating_sub(8) / 2);
-    let (rows, (cursor_row, cursor_column)) = wrap_input(&panel.input, panel.cursor, usize::from(inner));
+    let list = if panel.menu.is_empty() {
+        panel.family.len()
+    } else {
+        panel.menu.len()
+    };
+    let list = u16::try_from(list.min(LIST_ROW_CEILING))
+        .unwrap_or(0)
+        .min(height.saturating_sub(8) / 2);
+    let (rows, (cursor_row, cursor_column)) =
+        wrap_input(&panel.input, panel.cursor, usize::from(inner), &grid);
     let room = usize::from(height.saturating_sub(6 + chips + list)).max(1);
     let shown = rows.len().min(INPUT_ROW_CEILING).min(room);
     let first = cursor_row.saturating_sub(shown - 1).min(rows.len() - shown);
@@ -120,7 +126,11 @@ pub(super) fn render_agent_panel(
     let bottom = footer - 1;
     let input_top = bottom - u16::try_from(shown).unwrap_or(1);
     let top = input_top - 1;
-    let border = if focused { Style::Accent } else { Style::Border };
+    let border = if focused {
+        Style::Accent
+    } else {
+        Style::Border
+    };
     for column in 0..width {
         grid.set_cell(column, top, "─", border);
         grid.set_cell(column, bottom, "─", border);
@@ -136,7 +146,11 @@ pub(super) fn render_agent_panel(
         // conversation on screen stays listed.
         let room = usize::from(list);
         let hidden = panel.family.len().saturating_sub(room);
-        let take = if hidden > 0 { room.saturating_sub(1) } else { room };
+        let take = if hidden > 0 {
+            room.saturating_sub(1)
+        } else {
+            room
+        };
         let mut rows = panel.family.iter().take(take).collect::<Vec<_>>();
         if hidden > 0 {
             if let Some(shown) = panel.family.iter().skip(take).find(|row| row.shown) {
@@ -149,10 +163,18 @@ pub(super) fn render_agent_panel(
         }
         for (offset, row) in rows.into_iter().enumerate() {
             let y = list_top + u16::try_from(offset).unwrap_or(0);
-            let (mark, style) = if row.shown { ("● ", Style::Syntax(crate::language::syntax::Highlight::STRONG)) } else { ("○ ", Style::Muted) };
+            let (mark, style) = if row.shown {
+                (
+                    "● ",
+                    Style::Syntax(crate::language::syntax::Highlight::STRONG),
+                )
+            } else {
+                ("○ ", Style::Muted)
+            };
             let x = grid.put_text(1, y, mark, style);
             let x = grid.put_text_clipped(x, y, &row.name, style, width - 1);
-            let x = grid.put_text_clipped(x.saturating_add(2), y, &row.task, Style::Muted, width - 1);
+            let x =
+                grid.put_text_clipped(x.saturating_add(2), y, &row.task, Style::Muted, width - 1);
             let status = match row.status.as_str() {
                 "✓" => Style::GitSignAdded,
                 "✗" => Style::Error,
@@ -177,7 +199,8 @@ pub(super) fn render_agent_panel(
             let x = grid.put_text_clipped(1, y, &format!("/{name}"), name_style, width - 1);
             let start = x.saturating_add(2).max(18);
             let room = usize::from((width - 1).saturating_sub(start));
-            let description = super::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
+            let description =
+                super::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
             grid.put_text_clipped(start, y, &description, text_style, width - 1);
         }
     }
@@ -191,19 +214,40 @@ pub(super) fn render_agent_panel(
     if chips > 0 {
         let mut x = 1;
         for label in &panel.context {
-            x = grid.put_text_clipped(x, list_top - 1, &format!("+ {label}"), Style::Accent, width - 1);
+            x = grid.put_text_clipped(
+                x,
+                list_top - 1,
+                &format!("+ {label}"),
+                Style::Accent,
+                width - 1,
+            );
             x = x.saturating_add(2);
         }
     }
     // The folder the session works in keeps at least its last name; the model text shortens first.
     let ambiguous = config.editor.ambiguous_width;
     let folder = panel.status.rsplit('/').next().unwrap_or_default();
-    let status_need = text_width(&panel.status, ambiguous).min(text_width(folder, ambiguous) + 2) + 2;
-    let settings = fitted_settings(&panel.settings, usize::from(width).saturating_sub(2 + status_need), ambiguous);
+    let status_need =
+        text_width(&panel.status, ambiguous).min(text_width(folder, ambiguous) + 2) + 2;
+    let settings = fitted_settings(
+        &panel.settings,
+        usize::from(width).saturating_sub(2 + status_need),
+        ambiguous,
+    );
     let settings_width = u16::try_from(text_width(&settings, ambiguous)).unwrap_or(width);
     let settings_x = width.saturating_sub(settings_width + 1);
-    let status = left_ellipsized(&panel.status, usize::from(settings_x.saturating_sub(2)), ambiguous);
-    grid.put_text_clipped(1, footer, &status, Style::Muted, settings_x.saturating_sub(1));
+    let status = left_ellipsized(
+        &panel.status,
+        usize::from(settings_x.saturating_sub(2)),
+        ambiguous,
+    );
+    grid.put_text_clipped(
+        1,
+        footer,
+        &status,
+        Style::Muted,
+        settings_x.saturating_sub(1),
+    );
     grid.put_text_clipped(settings_x, footer, &settings, Style::Muted, width - 1);
 
     let area = usize::from(list_top - chips - 1);
@@ -216,15 +260,25 @@ pub(super) fn render_agent_panel(
     }
     if scroll > 0 {
         let more = format!(" ↓ {scroll} more ");
-        let more_width = u16::try_from(text_width(&more, config.editor.ambiguous_width)).unwrap_or(0);
+        let more_width =
+            u16::try_from(text_width(&more, config.editor.ambiguous_width)).unwrap_or(0);
         let y = u16::try_from(area).unwrap_or(1);
-        grid.put_text(width.saturating_sub(more_width + 1), y, &more, Style::StatusAccent);
+        grid.put_text(
+            width.saturating_sub(more_width + 1),
+            y,
+            &more,
+            Style::StatusAccent,
+        );
     }
 
     let cursor = focused.then(|| {
         let row = u16::try_from(cursor_row - first).unwrap_or(0);
         let column = u16::try_from(cursor_column).unwrap_or(0).min(inner);
-        let shape = if panel.normal { SetCursorStyle::SteadyBlock } else { SetCursorStyle::SteadyBar };
+        let shape = if panel.normal {
+            SetCursorStyle::SteadyBlock
+        } else {
+            SetCursorStyle::SteadyBar
+        };
         (1 + column, input_top + row, shape)
     });
     Frame { grid, cursor }
@@ -255,14 +309,24 @@ fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> St
     }
     match settings.split_once(" · ") {
         Some((model, rest)) if text_width(rest, ambiguous) + 3 + 6 <= room => {
-            let model = super::surfaces::ellipsized(model, room - text_width(rest, ambiguous) - 3, ambiguous);
+            let model = super::surfaces::ellipsized(
+                model,
+                room - text_width(rest, ambiguous) - 3,
+                ambiguous,
+            );
             format!("{model} · {rest}")
         }
         _ => super::surfaces::ellipsized(settings, room, ambiguous),
     }
 }
 
-fn draw_line(grid: &mut CellGrid, y: u16, transcript: &Styled, bands: &[Range<usize>], line: Range<usize>) {
+fn draw_line(
+    grid: &mut CellGrid,
+    y: u16,
+    transcript: &Styled,
+    bands: &[Range<usize>],
+    line: Range<usize>,
+) {
     let banded = bands.iter().any(|band| band.contains(&line.start));
     if banded {
         grid.fill_row(y, Style::Selection);
@@ -286,13 +350,18 @@ fn draw_line(grid: &mut CellGrid, y: u16, transcript: &Styled, bands: &[Range<us
 }
 
 /// The input split into rows of `width` cells, and the cursor's row and column.
-fn wrap_input(input: &str, cursor: usize, width: usize) -> (Vec<String>, (usize, usize)) {
+fn wrap_input(
+    input: &str,
+    cursor: usize,
+    width: usize,
+    grid: &CellGrid,
+) -> (Vec<String>, (usize, usize)) {
     let width = width.max(1);
     let mut rows = vec![String::new()];
     let mut column = 0;
     let mut at = None;
-    for (index, character) in input.char_indices() {
-        if character == '\n' {
+    for (index, grapheme) in input.grapheme_indices(true) {
+        if grapheme == "\n" {
             if index == cursor {
                 at = Some((rows.len() - 1, column));
             }
@@ -300,7 +369,12 @@ fn wrap_input(input: &str, cursor: usize, width: usize) -> (Vec<String>, (usize,
             column = 0;
             continue;
         }
-        let character_width = character.width().unwrap_or(0);
+        let safe = if grapheme == "\t" {
+            " ".to_owned()
+        } else {
+            grid.confirmation_grapheme(grapheme)
+        };
+        let character_width = grid.display_width(&safe).clamp(1, 2);
         if column + character_width > width {
             rows.push(String::new());
             column = 0;
@@ -309,7 +383,7 @@ fn wrap_input(input: &str, cursor: usize, width: usize) -> (Vec<String>, (usize,
             at = Some((rows.len() - 1, column));
         }
         if let Some(row) = rows.last_mut() {
-            row.push(character);
+            row.push_str(if grapheme == "\t" { " " } else { &safe });
         }
         column += character_width;
     }
@@ -322,12 +396,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn input_measurement_matches_grid_substitutions() {
+        let grid = CellGrid::new_with_policy(20, 5, "�", "◌", true);
+        assert_eq!(wrap_input("·x", 3, 10, &grid).1, (0, 3));
+        assert_eq!(
+            wrap_input("a\tx", 3, 2, &grid),
+            (vec!["a ".into(), "x".into()], (1, 1))
+        );
+        assert_eq!(
+            wrap_input("aaaaaaaa👩‍💻z", 19, 10, &grid).0,
+            ["aaaaaaaa👩‍💻", "z"]
+        );
+    }
+
+    #[test]
     fn input_wraps_and_the_cursor_follows() {
-        assert_eq!(wrap_input("", 0, 4), (vec![String::new()], (0, 0)));
-        assert_eq!(wrap_input("abcdef", 6, 4), (vec!["abcd".into(), "ef".into()], (1, 2)));
-        assert_eq!(wrap_input("abcd", 4, 4), (vec!["abcd".into()], (0, 4)));
-        assert_eq!(wrap_input("ab\ncd", 2, 4), (vec!["ab".into(), "cd".into()], (0, 2)));
-        assert_eq!(wrap_input("ab\ncd", 3, 4), (vec!["ab".into(), "cd".into()], (1, 0)));
+        assert_eq!(
+            wrap_input("", 0, 4, &CellGrid::new(20, 10)),
+            (vec![String::new()], (0, 0))
+        );
+        assert_eq!(
+            wrap_input("abcdef", 6, 4, &CellGrid::new(20, 10)),
+            (vec!["abcd".into(), "ef".into()], (1, 2))
+        );
+        assert_eq!(
+            wrap_input("abcd", 4, 4, &CellGrid::new(20, 10)),
+            (vec!["abcd".into()], (0, 4))
+        );
+        assert_eq!(
+            wrap_input("ab\ncd", 2, 4, &CellGrid::new(20, 10)),
+            (vec!["ab".into(), "cd".into()], (0, 2))
+        );
+        assert_eq!(
+            wrap_input("ab\ncd", 3, 4, &CellGrid::new(20, 10)),
+            (vec!["ab".into(), "cd".into()], (1, 0))
+        );
     }
 
     #[test]
@@ -336,14 +439,20 @@ mod tests {
         let fitted = fitted_settings(settings, 44, AmbiguousWidth::Narrow);
         assert!(fitted.ends_with("· Bypass permissions · high"), "{fitted}");
         assert!(text_width(&fitted, AmbiguousWidth::Narrow) <= 44);
-        assert_eq!(fitted_settings(settings, 80, AmbiguousWidth::Narrow), settings);
+        assert_eq!(
+            fitted_settings(settings, 80, AmbiguousWidth::Narrow),
+            settings
+        );
     }
 
     #[test]
     fn a_long_folder_keeps_its_last_name() {
         let shown = left_ellipsized("~/dev/qa/fixtures/agents", 10, AmbiguousWidth::Narrow);
         assert_eq!(shown, "…es/agents");
-        assert_eq!(left_ellipsized("~/agents", 10, AmbiguousWidth::Narrow), "~/agents");
+        assert_eq!(
+            left_ellipsized("~/agents", 10, AmbiguousWidth::Narrow),
+            "~/agents"
+        );
     }
 
     #[test]
@@ -374,17 +483,31 @@ mod tests {
         };
         let frame = render_agent_panel(&panel, true, &Config::default(), 60, 40, false);
         let lines = (0..40)
-            .map(|y| (0..60).filter_map(|x| frame.grid.get(x, y).map(|cell| cell.symbol.to_string())).collect::<String>())
+            .map(|y| {
+                (0..60)
+                    .filter_map(|x| frame.grid.get(x, y).map(|cell| cell.symbol.to_string()))
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>();
         let listed = lines.iter().filter(|line| line.contains("task ")).count();
         assert_eq!(listed, LIST_ROW_CEILING - 1, "{lines:#?}");
-        assert!(lines.iter().any(|line| line.contains("● claude  task 10")), "{lines:#?}");
-        assert!(lines.iter().any(|line| line.contains("+5 more")), "{lines:#?}");
+        assert!(
+            lines.iter().any(|line| line.contains("● claude  task 10")),
+            "{lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("+5 more")),
+            "{lines:#?}"
+        );
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn trailing_empty_lines_are_not_shown() {
         assert_eq!(transcript_lines("a\n\nb\n\n", &[]), [0..1, 2..2, 3..4]);
-        assert_eq!(transcript_lines("a\n\nb\n\n", &[2..6]), [0..1, 2..2, 3..4, 5..5]);
+        assert_eq!(
+            transcript_lines("a\n\nb\n\n", std::slice::from_ref(&(2..6))),
+            [0..1, 2..2, 3..4, 5..5]
+        );
     }
 }

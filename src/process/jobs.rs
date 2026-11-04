@@ -39,6 +39,7 @@ impl Default for JobPolicy {
 #[derive(Clone, Debug)]
 pub struct JobRequest {
     pub program: PathBuf,
+    pub argv0: Option<PathBuf>,
     pub arguments: Vec<String>,
     pub cwd: PathBuf,
     pub environment: BTreeMap<String, String>,
@@ -374,14 +375,18 @@ impl JobEngine {
             cancel,
             slot,
         } = submission;
-        if let Some(expected) = root {
-            if crate::workspace::RootIdentity::capture(&expected.canonical_path)
+        let cwd = request
+            .cwd
+            .canonicalize()
+            .map_err(|_| JobError::InvalidPolicy)?;
+        if let Some(expected) = root
+            && (crate::workspace::RootIdentity::capture(&expected.canonical_path)
                 .ok()
                 .as_ref()
                 != Some(&expected)
-            {
-                return Err(JobError::RootChanged);
-            }
+                || !cwd.starts_with(&expected.canonical_path))
+        {
+            return Err(JobError::RootChanged);
         }
         if !request.cwd.is_dir() {
             return Err(JobError::InvalidPolicy);
@@ -392,7 +397,7 @@ impl JobEngine {
         let mut command = Command::new(&request.program);
         command
             .args(&request.arguments)
-            .current_dir(&request.cwd)
+            .current_dir(&cwd)
             .env_clear()
             .envs(&request.environment)
             .stdin(if request.stdin.is_some() {
@@ -406,24 +411,27 @@ impl JobEngine {
         {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
+            if let Some(argv0) = &request.argv0 {
+                command.arg0(argv0);
+            }
         }
         let mut child = command.spawn().map_err(JobError::Spawn)?;
         let readers = Arc::new(AtomicUsize::new(0));
         let io_failed = Arc::new(AtomicBool::new(false));
-        if let Some(bytes) = request.stdin {
-            if let Some(mut stdin) = child.stdin.take() {
-                let lease = slot.clone();
-                let pending = readers.clone();
-                let failed = io_failed.clone();
-                pending.fetch_add(1, Ordering::AcqRel);
-                thread::spawn(move || {
-                    let _lease = lease;
-                    if stdin.write_all(&bytes).is_err() {
-                        failed.store(true, Ordering::Release);
-                    }
-                    pending.fetch_sub(1, Ordering::AcqRel);
-                });
-            }
+        if let Some(bytes) = request.stdin
+            && let Some(mut stdin) = child.stdin.take()
+        {
+            let lease = slot.clone();
+            let pending = readers.clone();
+            let failed = io_failed.clone();
+            pending.fetch_add(1, Ordering::AcqRel);
+            thread::spawn(move || {
+                let _lease = lease;
+                if stdin.write_all(&bytes).is_err() {
+                    failed.store(true, Ordering::Release);
+                }
+                pending.fetch_sub(1, Ordering::AcqRel);
+            });
         }
         let total = Arc::new(AtomicUsize::new(0));
         if let Some(stdout) = child.stdout.take() {
@@ -469,11 +477,8 @@ impl JobEngine {
     fn expire(&mut self) {
         for running in self.jobs.values_mut() {
             running.timed_out |= running.started.elapsed() >= running.timeout;
-            if running.status.is_none()
-                && !running.killed
-                && (running.timed_out || running.cancel.load(Ordering::Acquire))
-            {
-                terminate_tree(&mut running.child);
+            if !running.killed && (running.timed_out || running.cancel.load(Ordering::Acquire)) {
+                terminate_tree(&mut running.child, running.status.is_some());
                 running.killed = true;
             }
         }
@@ -504,28 +509,22 @@ impl JobEngine {
                     }
                 }
             }
-            if let Some(code) = running.status {
-                if running.readers.load(Ordering::Acquire) == 0 {
-                    terminals.push(if running.io_failed.load(Ordering::Acquire) {
-                        JobEvent::Failed {
-                            job: *id,
-                            message: "job input/output transfer failed".into(),
-                        }
-                    } else {
-                        JobEvent::Exited {
-                            job: *id,
-                            code,
-                            timed_out: running.timed_out,
-                        }
-                    });
-                    done.push(*id);
-                } else if running.timed_out || running.cancel.load(Ordering::Acquire) {
-                    events.push(JobEvent::Failed {
+            if let Some(code) = running.status
+                && running.readers.load(Ordering::Acquire) == 0
+            {
+                terminals.push(if running.io_failed.load(Ordering::Acquire) {
+                    JobEvent::Failed {
                         job: *id,
-                        message: "process exited but output collection did not finish".into(),
-                    });
-                    done.push(*id);
-                }
+                        message: "job input/output transfer failed".into(),
+                    }
+                } else {
+                    JobEvent::Exited {
+                        job: *id,
+                        code,
+                        timed_out: running.timed_out,
+                    }
+                });
+                done.push(*id);
             }
         }
         // Every selected terminal's readers had finished before this bounded drain.
@@ -548,8 +547,10 @@ impl JobEngine {
 impl Drop for JobEngine {
     fn drop(&mut self) {
         for job in self.jobs.values_mut() {
+            if !job.killed {
+                terminate_tree(&mut job.child, job.status.is_some());
+            }
             if job.status.is_none() {
-                terminate_tree(&mut job.child);
                 let _ = job.child.wait();
             }
         }
@@ -631,15 +632,14 @@ fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usiz
     }
 }
 
-fn terminate_tree(child: &mut Child) {
+fn terminate_tree(child: &mut Child, reaped: bool) {
     #[cfg(unix)]
     {
-        let _ = nix::sys::signal::killpg(
-            nix::unistd::Pid::from_raw(child.id() as i32),
-            nix::sys::signal::Signal::SIGTERM,
-        );
+        super::terminate_process_group(child.id());
     }
-    let _ = child.kill();
+    if !reaped {
+        let _ = child.kill();
+    }
 }
 #[derive(Debug, Error)]
 pub enum JobError {
@@ -667,6 +667,7 @@ mod tests {
     fn request(root: &std::path::Path, command: &str) -> JobRequest {
         JobRequest {
             program: PathBuf::from("/bin/sh"),
+            argv0: None,
             arguments: vec!["-c".into(), command.into()],
             cwd: root.into(),
             environment: BTreeMap::new(),
@@ -780,5 +781,117 @@ mod tests {
         let start = Instant::now();
         drop(jobs);
         assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    fn submission(root: &std::path::Path, script: &str) -> (Submission, Arc<AtomicUsize>) {
+        let residents = Arc::new(AtomicUsize::new(1));
+        let mut request = request(root, script);
+        request
+            .environment
+            .insert("PATH".into(), std::env::var("PATH").unwrap());
+        (
+            Submission {
+                root: None,
+                id: JobId(1),
+                request,
+                cancel: Arc::new(AtomicBool::new(false)),
+                slot: Arc::new(JobSlot(residents.clone())),
+            },
+            residents,
+        )
+    }
+
+    #[test]
+    fn queued_job_rechecks_cwd_symlink_containment() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let cwd = root.path().join("sub");
+        std::fs::create_dir(&cwd).unwrap();
+        let (mut queued, _) = submission(&cwd, "printf forbidden > marker");
+        queued.root = Some(crate::workspace::RootIdentity::capture(root.path()).unwrap());
+        std::fs::remove_dir(&cwd).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &cwd).unwrap();
+        let mut engine = JobEngine::new(16);
+        assert!(matches!(engine.start(queued), Err(JobError::RootChanged)));
+        assert!(!outside.path().join("marker").exists());
+    }
+
+    #[test]
+    fn job_cancellation_releases_descendants_after_parent_exit() {
+        let root = tempfile::tempdir().unwrap();
+        let (queued, residents) = submission(root.path(), "sleep 30 & printf spawned");
+        let cancel = queued.cancel.clone();
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while engine.jobs[&JobId(1)].status.is_none() {
+            engine.poll();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_ne!(engine.jobs[&JobId(1)].readers.load(Ordering::Acquire), 0);
+        cancel.store(true, Ordering::Release);
+        while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
+            engine.poll();
+            assert!(Instant::now() < deadline, "descendant retained job readers");
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn job_cancellation_kills_descendants_ignoring_sigterm() {
+        let root = tempfile::tempdir().unwrap();
+        let (queued, residents) = submission(
+            root.path(),
+            "(trap '' TERM; printf 'ready\\n'; exec sleep 30) & wait",
+        );
+        let cancel = queued.cancel.clone();
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !engine
+            .poll()
+            .iter()
+            .any(|event| matches!(event, JobEvent::Output { bytes, .. } if bytes == b"ready\n"))
+        {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        cancel.store(true, Ordering::Release);
+        while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
+            engine.poll();
+            assert!(
+                Instant::now() < deadline,
+                "SIGTERM-resistant descendant retained job readers"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn job_launch_preserves_original_executable_invocation() {
+        let root = tempfile::tempdir().unwrap();
+        let invocation = root.path().join("custom-sh");
+        std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
+        let (mut queued, _) = submission(root.path(), "printf '%s' \"$0\"");
+        queued.request.program = invocation.canonicalize().unwrap();
+        queued.request.argv0 = Some(invocation.clone());
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let mut output = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !engine.jobs.is_empty() {
+            for event in engine.poll() {
+                if let JobEvent::Output { bytes, .. } = event {
+                    output.extend(bytes);
+                }
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            invocation.to_str().unwrap()
+        );
     }
 }

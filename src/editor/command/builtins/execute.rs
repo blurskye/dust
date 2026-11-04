@@ -12,11 +12,15 @@ use crate::editor::{
 use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
     comment::build_comment_toggle,
-    multi,
     motion::{
-        block_start_column, cursor_display_column, motion_target, on_last_character, operator_range, repeat_visual_ranges, visual_ranges,
+        block_start_column, cursor_display_column, motion_target, on_last_character,
+        operator_range, repeat_visual_ranges, visual_ranges,
     },
-    pairs::{AutoPair, auto_pair, auto_pair_over, build_surround_add, build_surround_change, empty_pair_end},
+    multi,
+    pairs::{
+        AutoPair, auto_pair, auto_pair_over, build_surround_add, build_surround_change,
+        empty_pair_end,
+    },
     text_object::text_object,
     transaction::{
         bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
@@ -57,37 +61,45 @@ pub(super) fn execute_builtin<E>(
                     UndoPolicy::Ignore
                 };
             // In Visual mode a text object selects its range.
-            if let Some(mut selection) = view.selection {
-                if let Some(range) = text_object(&buffer.text, buffer.current_syntax_objects(), view.cursor, motion, count)? {
-                    let head = if range.is_empty() {
-                        range.start
-                    } else {
-                        previous_grapheme_boundary(&buffer.text, range.end)
-                    };
-                    selection.anchor = range.start;
-                    transaction.operations.push(EditorOperation::SetSelection {
-                        view: view_id,
-                        selection: Some(selection),
-                    });
-                    transaction.operations.push(EditorOperation::SetCursor {
-                        view: view_id,
-                        position: head,
-                    });
-                    return Ok(CommandOutcome {
-                        transaction: Some(transaction),
-                        effects: Vec::new(),
-                        message: None,
-                        follow_up: Vec::new(),
-                    });
-                }
+            if let Some(mut selection) = view.selection
+                && let Some(range) = text_object(
+                    &buffer.text,
+                    buffer.current_syntax_objects(),
+                    view.cursor,
+                    motion,
+                    count,
+                )?
+            {
+                let head = if range.is_empty() {
+                    range.start
+                } else {
+                    previous_grapheme_boundary(&buffer.text, range.end)
+                };
+                selection.anchor = range.start;
+                transaction.operations.push(EditorOperation::SetSelection {
+                    view: view_id,
+                    selection: Some(selection),
+                });
+                transaction.operations.push(EditorOperation::SetCursor {
+                    view: view_id,
+                    position: head,
+                });
+                return Ok(CommandOutcome {
+                    transaction: Some(transaction),
+                    effects: Vec::new(),
+                    message: None,
+                    follow_up: Vec::new(),
+                });
             }
             let character = character_argument(invocation, "character")?;
             // Like Vim, `j` and `k` keep the column they started from across shorter lines.
             let wanted_column = match (motion, view.preferred_column) {
                 ("up" | "down", Some(column)) => Some(column),
-                ("up" | "down", None) => {
-                    Some(cursor_display_column(&buffer.text, view.cursor, state.policy)?)
-                }
+                ("up" | "down", None) => Some(cursor_display_column(
+                    &buffer.text,
+                    view.cursor,
+                    state.policy,
+                )?),
                 _ => None,
             };
             let target = motion_target(
@@ -99,8 +111,9 @@ pub(super) fn execute_builtin<E>(
                 state.policy,
                 wanted_column,
             )?;
-            let target = if wanted_column.is_some()
-                && !matches!(view.mode, EditorMode::Insert | EditorMode::Replace)
+            let target = if matches!(view.mode, EditorMode::Normal | EditorMode::OperatorPending)
+                || (wanted_column.is_some()
+                    && !matches!(view.mode, EditorMode::Insert | EditorMode::Replace))
             {
                 on_last_character(&buffer.text, target)?
             } else {
@@ -111,10 +124,12 @@ pub(super) fn execute_builtin<E>(
                 position: target,
             });
             if let Some(column) = wanted_column {
-                transaction.operations.push(EditorOperation::SetPreferredColumn {
-                    view: view_id,
-                    column,
-                });
+                transaction
+                    .operations
+                    .push(EditorOperation::SetPreferredColumn {
+                        view: view_id,
+                        column,
+                    });
             }
         }
         "mode.normal" => {
@@ -154,6 +169,7 @@ pub(super) fn execute_builtin<E>(
             view,
             &buffer.text,
             invocation.id.as_str() == "multi.add_below",
+            state.policy,
         )?,
         "multi.insert" => {
             // Visual block `I` and `A` type at every row of the block.
@@ -175,7 +191,12 @@ pub(super) fn execute_builtin<E>(
         "multi.delete" => multi::delete(&mut transaction, view_id, buffer_id, view, &buffer.text),
         "multi.add_all" => multi::add_all(&mut transaction, view_id, view, &buffer.text)?,
         "multi.next" | "multi.previous" => {
-            multi::cycle(&mut transaction, view_id, view, invocation.id.as_str() == "multi.next");
+            multi::cycle(
+                &mut transaction,
+                view_id,
+                view,
+                invocation.id.as_str() == "multi.next",
+            );
         }
         "multi.skip" => multi::skip(&mut transaction, view_id, view, &buffer.text)?,
         "multi.remove" => multi::remove(&mut transaction, view_id, view),
@@ -220,7 +241,11 @@ pub(super) fn execute_builtin<E>(
             } else {
                 UndoPolicy::Merge
             };
-            let text = string_argument(invocation, "text")?;
+            let normalized = TextEdit::new(
+                ByteRange::empty(view.cursor),
+                string_argument(invocation, "text")?,
+            );
+            let text = normalized.replacement();
             if let Some(range) = insert_selection(view) {
                 let pair = state
                     .policy
@@ -302,7 +327,11 @@ pub(super) fn execute_builtin<E>(
             } else {
                 UndoPolicy::Merge
             };
-            let replacement = string_argument(invocation, "text")?;
+            let normalized = TextEdit::new(
+                ByteRange::empty(view.cursor),
+                string_argument(invocation, "text")?,
+            );
+            let replacement = normalized.replacement();
             let mut end = view.cursor;
             for grapheme in replacement.graphemes(true) {
                 if grapheme == "\n" {
@@ -350,7 +379,9 @@ pub(super) fn execute_builtin<E>(
             } else {
                 UndoPolicy::Merge
             };
-            let Some(record) = view.replace_history.last() else {
+            let Some(record) = view.replace_history.last().filter(|record| {
+                record.start.get().saturating_add(record.inserted_len) == view.cursor.get()
+            }) else {
                 return Ok(CommandOutcome {
                     transaction: None,
                     effects: Vec::new(),
@@ -599,6 +630,7 @@ pub(super) fn execute_builtin<E>(
                 repeat_visual_ranges(&buffer.text, view, invocation, state.policy)?
             } else {
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
+                let original_motion = motion;
                 let motion = change_word_motion(operator, motion, &buffer.text, view.cursor);
                 let requested_linewise = bool_argument(invocation, "linewise")?;
                 if motion == "visual" {
@@ -611,6 +643,7 @@ pub(super) fn execute_builtin<E>(
                             view.cursor,
                             motion,
                             count,
+                            motion != original_motion,
                             requested_linewise,
                             character_argument(invocation, "character")?,
                             state.policy,
@@ -743,10 +776,17 @@ pub(super) fn execute_builtin<E>(
             }
             if operator == "join" {
                 // Visual `J` joins every selected line, and at least two.
-                let first = buffer.text.byte_to_line(whole_range.start).map_err(failed)?;
+                let first = buffer
+                    .text
+                    .byte_to_line(whole_range.start)
+                    .map_err(failed)?;
                 let last = buffer
                     .text
-                    .byte_to_line(ByteOffset(whole_range.end.get().saturating_sub(1).max(whole_range.start.get())))
+                    .byte_to_line(if whole_range.is_empty() {
+                        whole_range.start
+                    } else {
+                        previous_grapheme_boundary(&buffer.text, whole_range.end)
+                    })
                     .map_err(failed)?;
                 build_join_lines(
                     &mut transaction,
@@ -780,8 +820,12 @@ pub(super) fn execute_builtin<E>(
                     ));
                 }
                 let put = match (shape, register.shape) {
-                    (RegisterShape::Line, RegisterShape::Character) => format!("{}\n", register.text),
-                    (RegisterShape::Character, RegisterShape::Line) => format!("\n{}", register.text),
+                    (RegisterShape::Line, RegisterShape::Character) => {
+                        format!("{}\n", register.text)
+                    }
+                    (RegisterShape::Character, RegisterShape::Line) => {
+                        format!("\n{}", register.text)
+                    }
                     _ => register.text.clone(),
                 };
                 let replaced = buffer.text.slice(whole_range).map_err(failed)?;
@@ -946,24 +990,38 @@ pub(super) fn execute_builtin<E>(
                 let column = display_column_at(source_content, cursor_relative, width_policy);
                 let rows = register.text.split('\n').collect::<Vec<_>>();
                 let mut edits = Vec::new();
-                for repetition in 0..count {
-                    for (row, text) in rows.iter().enumerate() {
-                        let target_line = cursor_line
-                            .saturating_add(repetition.saturating_mul(rows.len()))
-                            .saturating_add(row);
-                        if target_line >= buffer.text.len_lines() {
-                            break;
-                        }
-                        let start = buffer.text.line_to_byte(target_line).map_err(failed)?;
-                        let line = buffer.text.line(target_line).map_err(failed)?;
-                        let content = line.strip_suffix('\n').unwrap_or(&line);
-                        let (relative, padding_cells) =
-                            insertion_at_display_column(content, column, width_policy);
-                        let padding = " ".repeat(padding_cells);
-                        edits.push(TextEdit::new(
-                            ByteRange::empty(ByteOffset(start.get().saturating_add(relative))),
-                            format!("{padding}{text}"),
-                        ));
+                let mut extra = String::new();
+                for (row, text) in rows.iter().enumerate() {
+                    let target_line = cursor_line.saturating_add(row);
+                    let repeated = text.repeat(count);
+                    if target_line >= buffer.text.len_lines() {
+                        extra.push('\n');
+                        extra.push_str(&" ".repeat(column));
+                        extra.push_str(&repeated);
+                        continue;
+                    }
+                    let start = buffer.text.line_to_byte(target_line).map_err(failed)?;
+                    let line = buffer.text.line(target_line).map_err(failed)?;
+                    let content = line.strip_suffix('\n').unwrap_or(&line);
+                    let (relative, padding_cells) =
+                        insertion_at_display_column(content, column, width_policy);
+                    edits.push(TextEdit::new(
+                        ByteRange::empty(ByteOffset(start.get().saturating_add(relative))),
+                        format!("{}{repeated}", " ".repeat(padding_cells)),
+                    ));
+                }
+                if !extra.is_empty() {
+                    let end = ByteOffset(buffer.text.len_bytes());
+                    if let Some(last) = edits
+                        .last_mut()
+                        .filter(|edit| edit.range() == ByteRange::empty(end))
+                    {
+                        *last = TextEdit::new(
+                            ByteRange::empty(end),
+                            format!("{}{extra}", last.replacement()),
+                        );
+                    } else {
+                        edits.push(TextEdit::new(ByteRange::empty(end), extra));
                     }
                 }
                 transaction.operations.push(EditorOperation::ApplyEdits {
@@ -1000,7 +1058,24 @@ pub(super) fn execute_builtin<E>(
                 }
                 (RegisterShape::Block, _) => unreachable!("block registers handled above"),
             };
-            let text = register.text.repeat(count);
+            let mut text = register.text.clone();
+            let mut cursor = at;
+            if register.shape == RegisterShape::Line {
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text = text.repeat(count);
+                if !before
+                    && at.get() == buffer.text.len_bytes()
+                    && at.get() > 0
+                    && !buffer.text.to_string().ends_with('\n')
+                {
+                    text.insert(0, '\n');
+                    cursor = ByteOffset(at.get() + 1);
+                }
+            } else {
+                text = text.repeat(count);
+            }
             transaction.operations.push(EditorOperation::ApplyEdits {
                 buffer: buffer_id,
                 edits: TextEditSet::new(
@@ -1010,7 +1085,7 @@ pub(super) fn execute_builtin<E>(
             });
             transaction.operations.push(EditorOperation::SetCursor {
                 view: view_id,
-                position: at,
+                position: cursor,
             });
         }
         "history.undo" => {
@@ -1046,7 +1121,9 @@ fn insert_selection(view: &crate::editor::state::View) -> Option<ByteRange> {
     } else {
         (selection.head, selection.anchor)
     };
-    ByteRange::new(start, end).ok().filter(|range| !range.is_empty())
+    ByteRange::new(start, end)
+        .ok()
+        .filter(|range| !range.is_empty())
 }
 
 /// Typing over a selection replaces it, as a placeholder expects.
@@ -1063,7 +1140,10 @@ fn push_selection_replacement(
         buffer: buffer_id,
         edits: TextEditSet::new(revision, vec![TextEdit::new(range, text)]),
     });
-    transaction.operations.push(EditorOperation::SetSelection { view, selection: None });
+    transaction.operations.push(EditorOperation::SetSelection {
+        view,
+        selection: None,
+    });
     transaction.operations.push(EditorOperation::SetCursor {
         view,
         position: ByteOffset(range.start.get() + cursor_step),

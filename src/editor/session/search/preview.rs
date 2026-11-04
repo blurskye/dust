@@ -147,10 +147,10 @@ impl SearchSession {
         ticket: PreviewTicket,
         error: String,
     ) {
-        if Arc::ptr_eq(&ticket.0, &self.preview_epoch) {
-            if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
-                text.lines = vec![format!("preview unavailable: {error}")];
-            }
+        if Arc::ptr_eq(&ticket.0, &self.preview_epoch)
+            && let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut)
+        {
+            text.lines = vec![format!("preview unavailable: {error}")];
         }
     }
     pub(in crate::editor::session) fn accept_preview(
@@ -196,7 +196,10 @@ pub(super) fn search_picker_preview(
     found: &crate::files::WorkspaceSearchMatch,
     maximum_bytes: usize,
 ) -> PickerPreview {
-    let bytes = found.snapshot.as_ref();
+    let normalized = crate::editor::text::TextBuffer::from_bytes(&found.snapshot)
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    let bytes = normalized.as_bytes();
     let maximum_bytes = maximum_bytes.max(1);
     let match_start = found.range.start.min(bytes.len());
     let mut start = match_start.saturating_sub(maximum_bytes / 3);
@@ -207,13 +210,12 @@ pub(super) fn search_picker_preview(
     {
         start = start.saturating_add(1);
     }
-    if start > 0 {
-        if let Some(line_break) = bytes[start..match_start]
+    if start > 0
+        && let Some(line_break) = bytes[start..match_start]
             .iter()
             .position(|byte| *byte == b'\n')
-        {
-            start = start.saturating_add(line_break).saturating_add(1);
-        }
+    {
+        start = start.saturating_add(line_break).saturating_add(1);
     }
     let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
     while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {

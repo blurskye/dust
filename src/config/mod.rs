@@ -15,7 +15,8 @@ pub use load::{
     user_keymaps_path, user_state_directory, user_theme_path,
 };
 pub(crate) use themes::{
-    ThemeCatalog, ThemeChoice, ThemeRead, ThemeReadSource, theme_display_name,
+    ThemeCatalog, ThemeChoice, ThemeRead, ThemeReadSource, snapshot as theme_snapshot,
+    theme_display_name,
 };
 
 use std::{
@@ -26,7 +27,18 @@ use std::{
 use serde::{Deserialize, Serialize};
 mod settings;
 pub use settings::{
-    AmbiguousWidth, BorderStyle, BufferLineConfig, ColorMode, CommandLineConfig, CursorConfig, CursorShape, DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig, DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet, ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig, LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig, PersistenceConfig, PluginEntryConfig, PluginsConfig, ProblemMatcherConfig, PromptTextConfig, RecoveryConfig, RegisterConfig, ClipboardSync, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig, TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig, TerminalsConfig, HighlightDefinition, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles, AgentConnection, AgentProfileConfig, AgentsConfig, ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
+    AgentConnection, AgentProfileConfig, AgentsConfig, AmbiguousWidth, BorderStyle,
+    BufferLineConfig, ClipboardSync, ColorMode, CommandLineConfig, CursorConfig, CursorShape,
+    DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig,
+    DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet,
+    ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, HighlightDefinition,
+    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig,
+    LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig,
+    PersistenceConfig, PluginEntryConfig, PluginsConfig, ProblemMatcherConfig, PromptTextConfig,
+    RecoveryConfig, RegisterConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,
+    TaskConfig, TaskKind, TerminalPanelConfig, TerminalProfileConfig, TerminalsConfig,
+    ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle, ThemeStyles, ToolManagerConfig, UiConfig,
+    WindowPlacementConfig, WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
 };
 mod validation;
 
@@ -147,6 +159,26 @@ pub fn migrate_config_source(source: &str) -> Result<(String, bool), String> {
     Ok((document.to_string(), changed))
 }
 
+/// Apply a migration to the same file that was read, preserving configuration symlinks.
+pub fn apply_config_migration(
+    path: &std::path::Path,
+    source: &str,
+    migrated: &str,
+) -> Result<(), crate::files::VfsError> {
+    let target = path
+        .canonicalize()
+        .map_err(|source| crate::files::VfsError::Io {
+            operation: "resolve migration destination",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    crate::files::checked_atomic_write(
+        &target,
+        migrated.as_bytes(),
+        &crate::files::WriteExpectation::Exact(source.as_bytes().to_vec()),
+    )
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -245,6 +277,7 @@ pub struct LoadedKeymaps {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedConfig {
+    pub installed_plugins: BTreeSet<String>,
     pub user_configuration: bool,
     pub user_setting_keys: BTreeSet<String>,
     pub user_setting_spans: BTreeMap<String, std::ops::Range<usize>>,

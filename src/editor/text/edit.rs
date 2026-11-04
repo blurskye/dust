@@ -126,13 +126,33 @@ impl TextBuffer {
                 .collect(),
         );
         let previous = self.rope.clone();
+        self.format.line_endings.resize(
+            self.len_lines().saturating_sub(1),
+            self.format.preferred_line_ending,
+        );
         for edit in edits.iter().rev() {
             let start = self.byte_to_char(edit.range.start)?;
             let end = self.byte_to_char(edit.range.end)?;
+            let first_line = self.byte_to_line(edit.range.start)?;
+            let last_line = self.byte_to_line(edit.range.end)?;
+            let inserted = edit
+                .replacement
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count();
+            self.format.line_endings.splice(
+                first_line..last_line,
+                std::iter::repeat_n(self.format.preferred_line_ending, inserted),
+            );
             self.rope.remove(start..end);
             self.rope.insert(start, &edit.replacement);
         }
         if !edits.is_empty() {
+            self.format.had_final_newline = self
+                .rope
+                .len_chars()
+                .checked_sub(1)
+                .is_some_and(|last| self.rope.char(last) == '\n');
             let before = self.revision();
             self.bump_revision()?;
             self.remember_edit(before, delta.clone(), previous);

@@ -6,7 +6,9 @@ use crate::{
     ui::window::{ContentAdapterKind, ContentTypeId, WindowError, WindowGraph, WindowPlacement},
 };
 
-use super::{EditorWindowBridge, NativeSurfaceBridge};
+use super::{EditorWindowBridge, NativeSurfaceBridge, NativeSurfaceSignature};
+use crate::ui::window::{ContentLifecycle, WindowRect};
+use std::sync::Arc;
 
 fn reconcile(bridge: &mut EditorWindowBridge, graph: &mut WindowGraph, state: &EditorState) {
     bridge
@@ -223,5 +225,156 @@ fn native_reset_reconstructs_runtime_ids_but_retains_semantic_policy() {
     assert_eq!(
         bridge.set_semantic_default("builtin.terminal", WindowPlacement::Fullscreen),
         Err(WindowError::MultipleFullscreenWindows)
+    );
+}
+
+#[test]
+fn plugin_focus_survives_metadata_reconciliation_and_tab_close() {
+    let mut state = crate::editor::EditorState::new("/workspace".into());
+    let (buffer, _) = state.open_text(crate::editor::text::TextBuffer::from_text("a"), None);
+    state.new_tab().unwrap();
+    let mut bridge = EditorWindowBridge::default();
+    let mut graph = WindowGraph::default();
+    bridge
+        .reconcile(&(&state).into(), &mut graph, "scratch")
+        .unwrap();
+    let tab = graph.active_tab().unwrap();
+    let content = graph
+        .create_content(
+            ContentTypeId::new("plugin.demo.panel").unwrap(),
+            ContentAdapterKind::DeclarativeUi,
+            "Panel".into(),
+            false,
+            "plugin.demo",
+            1,
+        )
+        .unwrap();
+    let view = graph.create_view(content, "plugin.demo", 1).unwrap();
+    let panel = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Floating(WindowRect {
+                x: 1,
+                y: 1,
+                width: 20,
+                height: 5,
+            }),
+            true,
+            "plugin.demo",
+            1,
+        )
+        .unwrap();
+    state.set_buffer_dirty(buffer, true);
+    bridge
+        .reconcile(&(&state).into(), &mut graph, "scratch")
+        .unwrap();
+    assert_eq!(graph.focused(), Some(panel));
+    state.close_active_tab().unwrap();
+    bridge
+        .reconcile(&(&state).into(), &mut graph, "scratch")
+        .unwrap();
+    assert_ne!(graph.window(panel).unwrap().tab, tab);
+    graph.validate().unwrap();
+}
+
+#[test]
+fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("builtin.editor", 1).unwrap();
+    let mut native = NativeSurfaceBridge::default();
+    let mut signature = NativeSurfaceSignature {
+        editor_tab: Some(tab),
+        editor_window: None,
+        explorer_visible: true,
+        explorer_views: Arc::from([1, 2]),
+        focused_explorer: Some(1),
+        explorer_size: 20,
+        active_terminal: Some(1),
+        shown_terminals: Arc::from([1]),
+        terminal_focused: false,
+        terminal_size: 12,
+        terminal_shrunk: false,
+        terminal_set_revision: Some(1),
+        terminal_width: 80,
+        terminal_height: 24,
+        dashboard_visible: false,
+        picker_rect: None,
+        picker_surface: None,
+        protected_prompt_height: 0,
+        configuration_generation: 0,
+        screen_bottom: 0,
+    };
+    let terminals = [(1, "shell".into(), ContentLifecycle::Running)];
+    native
+        .reconcile(
+            &mut graph,
+            signature.clone(),
+            "Explorer",
+            "Dashboard",
+            "Picker",
+            &terminals,
+        )
+        .unwrap();
+    native.explorer_placement = Some(WindowPlacement::Hidden);
+    signature.configuration_generation += 1;
+    native
+        .reconcile(
+            &mut graph,
+            signature.clone(),
+            "Explorer",
+            "Dashboard",
+            "Picker",
+            &terminals,
+        )
+        .unwrap();
+    assert_ne!(
+        graph
+            .window(native.explorer.unwrap().window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
+    signature.explorer_visible = false;
+    signature.focused_explorer = None;
+    native.terminal_placements.insert(
+        1,
+        WindowPlacement::Docked {
+            edge: crate::ui::window::DockEdge::Bottom,
+            size: 12,
+        },
+    );
+    signature.terminal_shrunk = true;
+    signature.terminal_size = 5;
+    native
+        .reconcile(
+            &mut graph,
+            signature,
+            "Explorer",
+            "Dashboard",
+            "Picker",
+            &terminals,
+        )
+        .unwrap();
+    assert_eq!(
+        graph
+            .window(native.explorer_views[&2].window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
+    assert_eq!(
+        graph.window(native.terminals[&1].window).unwrap().placement,
+        WindowPlacement::Docked {
+            edge: crate::ui::window::DockEdge::Bottom,
+            size: 5
+        }
+    );
+    assert_eq!(
+        native.terminal_placements[&1],
+        WindowPlacement::Docked {
+            edge: crate::ui::window::DockEdge::Bottom,
+            size: 12
+        }
     );
 }

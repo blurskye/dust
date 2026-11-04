@@ -4,7 +4,8 @@
 
 use std::ops::Range;
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use crate::{config::AmbiguousWidth, ui::geometry::text_width};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::language::syntax::{self, Highlight};
 
@@ -16,9 +17,16 @@ const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
 pub struct Styled {
     pub text: String,
     pub spans: Vec<(Range<usize>, Highlight)>,
+    pub ambiguous_width: AmbiguousWidth,
 }
 
 impl Styled {
+    fn width(&self, text: &str) -> usize {
+        text.graphemes(true)
+            .map(|g| text_width(g, self.ambiguous_width).clamp(1, 2))
+            .sum()
+    }
+
     pub fn push(&mut self, text: &str, role: Option<Highlight>) {
         let start = self.text.len();
         self.text.push_str(text);
@@ -26,23 +34,41 @@ impl Styled {
             return;
         };
         match self.spans.last_mut() {
-            Some((range, last)) if range.end == start && *last == role => range.end = self.text.len(),
+            Some((range, last)) if range.end == start && *last == role => {
+                range.end = self.text.len()
+            }
             _ => self.spans.push((start..self.text.len(), role)),
         }
     }
 
     /// A line of `width` rule characters.
     pub fn rule(&mut self, width: usize) {
-        self.push(&"─".repeat(width), Some(Highlight::COMMENT));
+        self.push(
+            &"─".repeat(width / self.width("─")),
+            Some(Highlight::COMMENT),
+        );
         self.push("\n", None);
     }
 
     /// Plain `text` wrapped at words to `width` cells. Its first line starts with `first`
     /// and every other line with `rest`.
-    pub fn wrapped(&mut self, text: &str, role: Option<Highlight>, first: Prefix, rest: Prefix, width: usize) {
+    pub fn wrapped(
+        &mut self,
+        text: &str,
+        role: Option<Highlight>,
+        first: Prefix,
+        rest: Prefix,
+        width: usize,
+    ) {
         for (index, line) in text.lines().enumerate() {
             let segments = [(line.to_owned(), role)];
-            wrap(self, &segments, width, if index == 0 { first } else { rest }, rest);
+            wrap(
+                self,
+                &segments,
+                width,
+                if index == 0 { first } else { rest },
+                rest,
+            );
         }
     }
 
@@ -68,7 +94,7 @@ pub fn render_compact(out: &mut Styled, source: &str, width: usize) {
 }
 
 fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
-    let width = width.max(8);
+    let width = width.max(1);
     let lines = source.lines().collect::<Vec<_>>();
     let mut index = 0;
     while index < lines.len() {
@@ -86,16 +112,30 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
                 body.push(*candidate);
             }
             code_block(out, info, &body, width, framed);
-        } else if trimmed.starts_with('|') && lines.get(index).is_some_and(|next| is_table_separator(next)) {
+        } else if trimmed.starts_with('|')
+            && lines
+                .get(index)
+                .is_some_and(|next| is_table_separator(next))
+        {
             let mut rows = vec![trimmed];
             index += 1;
-            while let Some(row) = lines.get(index).map(|row| row.trim()).filter(|row| row.starts_with('|')) {
+            while let Some(row) = lines
+                .get(index)
+                .map(|row| row.trim())
+                .filter(|row| row.starts_with('|'))
+            {
                 rows.push(row);
                 index += 1;
             }
             table(out, &rows, width);
         } else if let Some(title) = heading(trimmed) {
-            wrap(out, &inline(title, Some(Highlight::HEADING)), width, ("", None), ("", None));
+            wrap(
+                out,
+                &inline(title, Some(Highlight::HEADING)),
+                width,
+                ("", None),
+                ("", None),
+            );
         } else if is_rule(trimmed) {
             out.rule(width);
         } else if trimmed.starts_with('>') {
@@ -103,7 +143,7 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
             let bar = ("▎ ", Some(Highlight::QUOTE));
             wrap(out, &inline(text, Some(Highlight::QUOTE)), width, bar, bar);
         } else if let Some((marker, text)) = list_item(trimmed, indent) {
-            let continuation = " ".repeat(UnicodeWidthStr::width(marker.as_str()));
+            let continuation = " ".repeat(out.width(marker.as_str()));
             wrap(
                 out,
                 &inline(text, None),
@@ -113,18 +153,36 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
             );
         } else if trimmed.is_empty() {
             out.push("\n", None);
-        } else if lines.get(index).is_some_and(|next| is_setext_underline(next.trim())) {
+        } else if lines
+            .get(index)
+            .is_some_and(|next| is_setext_underline(next.trim()))
+        {
             index += 1;
-            wrap(out, &inline(trimmed, Some(Highlight::HEADING)), width, ("", None), ("", None));
+            wrap(
+                out,
+                &inline(trimmed, Some(Highlight::HEADING)),
+                width,
+                ("", None),
+                ("", None),
+            );
         } else {
-            wrap(out, &inline(trimmed, None), width, (indent, None), (indent, None));
+            wrap(
+                out,
+                &inline(trimmed, None),
+                width,
+                (indent, None),
+                (indent, None),
+            );
         }
     }
 }
 
 /// The fence and the info string after it, for a line that opens a code block.
 fn fence_open(line: &str) -> Option<(&str, &str)> {
-    let marker = line.chars().next().filter(|marker| matches!(*marker, '`' | '~'))?;
+    let marker = line
+        .chars()
+        .next()
+        .filter(|marker| matches!(*marker, '`' | '~'))?;
     let length = line.len() - line.trim_start_matches(marker).len();
     let info = line[length..].trim();
     (length >= 3 && !(marker == '`' && info.contains('`'))).then(|| (&line[..length], info))
@@ -149,7 +207,10 @@ fn is_setext_underline(line: &str) -> bool {
 
 fn is_rule(line: &str) -> bool {
     let mut marks = line.chars().filter(|character| *character != ' ');
-    let Some(first) = marks.next().filter(|first| matches!(*first, '-' | '*' | '_')) else {
+    let Some(first) = marks
+        .next()
+        .filter(|first| matches!(*first, '-' | '*' | '_'))
+    else {
         return false;
     };
     let mut count = 1;
@@ -166,16 +227,28 @@ fn is_table_separator(line: &str) -> bool {
     let line = line.trim();
     line.starts_with('|')
         && line.contains('-')
-        && line.chars().all(|character| matches!(character, '|' | '-' | ':' | ' '))
+        && line
+            .chars()
+            .all(|character| matches!(character, '|' | '-' | ':' | ' '))
 }
 
 /// The bullet or number that starts a list item, as shown, and the item's text.
 fn list_item<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
-    let depth = indent.chars().map(|character| if character == '\t' { 4 } else { 1 }).sum::<usize>() / 2;
-    let (marker, text) = if let Some(text) = ["- ", "* ", "+ "].iter().find_map(|bullet| line.strip_prefix(*bullet)) {
+    let depth = indent
+        .chars()
+        .map(|character| if character == '\t' { 4 } else { 1 })
+        .sum::<usize>()
+        / 2;
+    let (marker, text) = if let Some(text) = ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|bullet| line.strip_prefix(*bullet))
+    {
         (["•", "◦", "▪"][depth % 3].to_owned(), text)
     } else {
-        let digits = line.len() - line.trim_start_matches(|character: char| character.is_ascii_digit()).len();
+        let digits = line.len()
+            - line
+                .trim_start_matches(|character: char| character.is_ascii_digit())
+                .len();
         let rest = &line[digits..];
         let text = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "));
         ((1..=9).contains(&digits)).then_some(())?;
@@ -193,28 +266,58 @@ fn list_item<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
 fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed: bool) {
     let name = info.split_whitespace().next().unwrap_or("");
     if framed {
-        let label = if name.is_empty() { String::new() } else { format!(" {name} ") };
-        let rest = width.saturating_sub(2 + UnicodeWidthStr::width(label.as_str()));
-        out.push(&format!("──{label}{}", "─".repeat(rest)), Some(Highlight::COMMENT));
+        let label = if name.is_empty() {
+            String::new()
+        } else {
+            format!(" {name} ")
+        };
+        let rest = width.saturating_sub(out.width("──") + out.width(label.as_str()));
+        out.push(
+            &format!("──{label}{}", "─".repeat(rest / out.width("─"))),
+            Some(Highlight::COMMENT),
+        );
         out.push("\n", None);
     }
     let mut code = body.join("\n");
     code.push('\n');
-    let start = out.text.len();
-    out.push(&code, None);
-    let language = syntax::language_for_fence(name).filter(|_| code.len() <= HIGHLIGHT_BYTE_CEILING);
-    if let Some(language) = language {
-        let mut spans = syntax::highlight(language, &code);
-        // Captures can nest; the renderer takes the first span that covers a byte.
-        spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
-        let mut end = 0;
-        for span in spans {
-            if span.start >= end && span.start < span.end {
-                out.spans.push((start + span.start..start + span.end, span.role));
-                end = span.end;
-            }
+    let language =
+        syntax::language_for_fence(name).filter(|_| code.len() <= HIGHLIGHT_BYTE_CEILING);
+    let mut spans = language
+        .map(|language| syntax::highlight(language, &code))
+        .unwrap_or_default();
+    spans.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
+    let mut end = 0;
+    spans.retain(|span| {
+        if span.start < end || span.start >= span.end {
+            return false;
         }
+        end = span.end;
+        true
+    });
+    let mut span_index = 0;
+    let mut column = 0;
+    for (at, grapheme) in code.grapheme_indices(true) {
+        if grapheme == "\n" {
+            out.push("\n", None);
+            column = 0;
+            continue;
+        }
+        let cells = out.width(grapheme);
+        if column > 0 && column + cells > width {
+            out.push("\n", None);
+            column = 0;
+        }
+        while spans.get(span_index).is_some_and(|span| span.end <= at) {
+            span_index += 1;
+        }
+        let role = spans
+            .get(span_index)
+            .filter(|span| span.start <= at)
+            .map(|span| span.role);
+        out.push(grapheme, role);
+        column += cells;
     }
+
     if framed {
         out.rule(width);
     }
@@ -228,18 +331,20 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
             let row = row.trim().trim_start_matches('|');
             let row = row.strip_suffix('|').unwrap_or(row);
             let role = (index == 0).then_some(Highlight::STRONG);
-            row.split('|').map(|cell| inline(cell.trim(), role)).collect::<Vec<_>>()
+            row.split('|')
+                .map(|cell| inline(cell.trim(), role))
+                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
     let columns = cells.iter().map(Vec::len).max().unwrap_or(0);
     let mut widths = vec![0; columns];
     for row in &cells {
         for (column, cell) in row.iter().enumerate() {
-            widths[column] = widths[column].max(segments_width(cell));
+            widths[column] = widths[column].max(segments_width(out, cell));
         }
     }
     let separator = (" │ ", Some(Highlight::COMMENT));
-    if widths.iter().sum::<usize>() + 3 * columns.saturating_sub(1) > width {
+    if widths.iter().sum::<usize>() + out.width(separator.0) * columns.saturating_sub(1) > width {
         // Too wide to line up: one wrapped line per row.
         for row in cells {
             let mut line = Vec::new();
@@ -254,7 +359,7 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         return;
     }
     for (index, row) in cells.iter().enumerate() {
-        for column in 0..columns {
+        for (column, width) in widths.iter().enumerate().take(columns) {
             if column > 0 {
                 out.push(separator.0, separator.1);
             }
@@ -263,25 +368,39 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
                 out.push(text, *role);
             }
             if column + 1 < columns {
-                out.push(&" ".repeat(widths[column] - segments_width(cell)), None);
+                out.push(&" ".repeat(width - segments_width(out, cell)), None);
             }
         }
         out.push("\n", None);
         if index == 0 {
-            let line = widths.iter().map(|width| "─".repeat(*width)).collect::<Vec<_>>().join("─┼─");
+            let line = widths
+                .iter()
+                .map(|width| "─".repeat(*width / out.width("─")))
+                .collect::<Vec<_>>()
+                .join("─┼─");
             out.push(&line, Some(Highlight::COMMENT));
             out.push("\n", None);
         }
     }
 }
 
-fn segments_width(segments: &[Segment]) -> usize {
-    segments.iter().map(|(text, _)| UnicodeWidthStr::width(text.as_str())).sum()
+fn segments_width(out: &Styled, segments: &[Segment]) -> usize {
+    segments
+        .iter()
+        .map(|(text, _)| out.width(text.as_str()))
+        .sum()
 }
 
 /// Inline Markdown as styled runs: code spans, bold, italic, links and escapes. Text
 /// outside any of them gets `base`.
 fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
+    inline_at_depth(text, base, 0)
+}
+
+fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Segment> {
+    if depth >= 16 {
+        return vec![(text.to_owned(), base)];
+    }
     let mut segments = Vec::new();
     let mut plain = String::new();
     let flush = |segments: &mut Vec<Segment>, plain: &mut String| {
@@ -324,7 +443,10 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
                 let length = if character == '~' { 2 } else { run.min(2) };
                 let marker = &rest[..length.min(run)];
                 let opens = run >= length
-                    && rest[length..].chars().next().is_some_and(|next| !next.is_whitespace())
+                    && rest[length..]
+                        .chars()
+                        .next()
+                        .is_some_and(|next| !next.is_whitespace())
                     && (character != '_' || before.is_none_or(|before| !before.is_alphanumeric()));
                 if let Some(close) = opens.then(|| closing(text, at + length, marker)).flatten() {
                     flush(&mut segments, &mut plain);
@@ -333,7 +455,7 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
                         (_, 2) => Some(Highlight::STRONG),
                         _ => Some(Highlight::ITALIC),
                     };
-                    segments.extend(inline(&text[at + length..close], role));
+                    segments.extend(inline_at_depth(&text[at + length..close], role, depth + 1));
                     at = close + length;
                 } else {
                     plain.push_str(&rest[..run]);
@@ -347,7 +469,7 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
                     && let Some((label, length)) = link(&rest[label_start - 1..])
                 {
                     flush(&mut segments, &mut plain);
-                    segments.extend(inline(label, Some(Highlight::LINK)));
+                    segments.extend(inline_at_depth(label, Some(Highlight::LINK), depth + 1));
                     at += label_start - 1 + length;
                     continue;
                 }
@@ -375,9 +497,16 @@ fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
             }
             '&' => {
                 // The entities language servers write in hover text.
-                let entity = [("&lt;", '<'), ("&gt;", '>'), ("&quot;", '"'), ("&#39;", '\''), ("&nbsp;", ' '), ("&amp;", '&')]
-                    .into_iter()
-                    .find(|(name, _)| rest.starts_with(name));
+                let entity = [
+                    ("&lt;", '<'),
+                    ("&gt;", '>'),
+                    ("&quot;", '"'),
+                    ("&#39;", '\''),
+                    ("&nbsp;", ' '),
+                    ("&amp;", '&'),
+                ]
+                .into_iter()
+                .find(|(name, _)| rest.starts_with(name));
                 if let Some((name, decoded)) = entity {
                     plain.push(decoded);
                     at += name.len();
@@ -404,7 +533,11 @@ fn closing(text: &str, from: usize, marker: &str) -> Option<usize> {
         let inside_word = marker.starts_with('_') && after.is_some_and(char::is_alphanumeric);
         // `**` must not be read as two single `*`.
         let doubled = marker.len() == 1 && after == marker.chars().next();
-        if close > from && before.is_some_and(|before| !before.is_whitespace()) && !inside_word && !doubled {
+        if close > from
+            && before.is_some_and(|before| !before.is_whitespace())
+            && !inside_word
+            && !doubled
+        {
             return Some(close);
         }
         search = close + marker.len().max(1);
@@ -436,7 +569,11 @@ fn link(text: &str) -> Option<(&str, usize)> {
     let target = text[label_end + 1..].strip_prefix('(')?;
     let target_end = target.find(')')?;
     let label = &text[1..label_end];
-    let label = if label.is_empty() { &target[..target_end] } else { label };
+    let label = if label.is_empty() {
+        &target[..target_end]
+    } else {
+        label
+    };
     Some((label, label_end + 2 + target_end + 1))
 }
 
@@ -450,20 +587,23 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
                 words.push(Vec::new());
             }
             if !part.is_empty() {
-                words.last_mut().expect("starts with one word").push((part, *role));
+                words
+                    .last_mut()
+                    .expect("starts with one word")
+                    .push((part, *role));
             }
         }
     }
     let start_line = |out: &mut Styled, prefix: Prefix| {
         out.push(prefix.0, prefix.1);
-        UnicodeWidthStr::width(prefix.0)
+        out.width(prefix.0)
     };
     let mut column = start_line(out, first);
     let mut line_start = true;
     let mut broken = false;
     let mut previous_role = None;
     for word in &words {
-        let word_width = word.iter().map(|(text, _)| UnicodeWidthStr::width(*text)).sum::<usize>();
+        let word_width = word.iter().map(|(text, _)| out.width(text)).sum::<usize>();
         // Runs of spaces where a line was broken are not carried to the next line.
         if word.is_empty() && line_start && broken {
             continue;
@@ -479,20 +619,20 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
             out.push(" ", previous_role.filter(|role| Some(*role) == next_role));
             column += 1;
         }
-        let line_width = width.saturating_sub(UnicodeWidthStr::width(rest.0)).max(1);
+        let line_width = width.saturating_sub(out.width(rest.0)).max(1);
         for (text, role) in word {
             if word_width <= line_width {
                 out.push(text, *role);
-                column += UnicodeWidthStr::width(*text);
+                column += out.width(text);
                 continue;
             }
-            for character in text.chars() {
-                let cells = character.width().unwrap_or(0);
-                if column + cells > width && column > UnicodeWidthStr::width(rest.0) {
+            for grapheme in text.graphemes(true) {
+                let cells = out.width(grapheme);
+                if column + cells > width && column > out.width(rest.0) {
                     out.push("\n", None);
                     column = start_line(out, rest);
                 }
-                out.push(character.encode_utf8(&mut [0; 4]), *role);
+                out.push(grapheme, *role);
                 column += cells;
             }
         }
@@ -512,12 +652,44 @@ mod tests {
         out
     }
 
-    fn styled<'a>(out: &'a Styled, role: Highlight) -> Vec<&'a str> {
+    fn styled(out: &Styled, role: Highlight) -> Vec<&str> {
         out.spans
             .iter()
             .filter(|(_, candidate)| *candidate == role)
             .map(|(range, _)| &out.text[range.clone()])
             .collect()
+    }
+
+    #[test]
+    fn code_lines_wrap_without_losing_text_or_highlights() {
+        let out = rendered("```rust\n    let identifier = 1234567890;\n```", 12);
+        assert!(out.text.lines().all(|line| line.chars().count() <= 12));
+        assert!(
+            out.text
+                .replace('\n', "")
+                .contains("    let identifier = 1234567890;")
+        );
+        assert!(styled(&out, Highlight::KEYWORD).contains(&"let"));
+    }
+
+    #[test]
+    fn wrapping_uses_ambiguous_width_and_joined_graphemes() {
+        let mut out = Styled {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..Default::default()
+        };
+        render(&mut out, "······", 10);
+        assert_eq!(out.text, "·····\n·\n");
+        let out = rendered("aaaaaaaa👩‍💻zzz", 10);
+        assert_eq!(out.text, "aaaaaaaa👩‍💻\nzzz\n");
+    }
+
+    #[test]
+    fn deeply_nested_links_are_bounded() {
+        let source = format!("{}x{}", "[".repeat(50_000), "](x)".repeat(50_000));
+        let runs = inline(&source, None);
+        assert!(runs.iter().any(|(text, _)| text.contains('x')));
+        assert!(runs.len() <= 17);
     }
 
     #[test]

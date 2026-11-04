@@ -16,6 +16,10 @@ use thiserror::Error;
 use super::workspace_search::{ABSOLUTE_WORKSPACE_SEARCH_FILES, owner_root};
 
 pub(super) const ABSOLUTE_WORKSPACE_FILE_PATH_BYTES: usize = 16 * 1024 * 1024;
+
+pub(super) fn file_id(path: &Path) -> String {
+    format!("{:?}", path.as_os_str())
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceFilePolicy {
     pub roots: Vec<PathBuf>,
@@ -192,7 +196,10 @@ pub(super) fn run_workspace_files(
     for root in roots.iter().skip(1) {
         builder.add(root);
     }
-    for worktree in roots.iter().flat_map(|root| super::directory::root_worktrees(root)) {
+    for worktree in roots
+        .iter()
+        .flat_map(|root| super::directory::root_worktrees(root))
+    {
         builder.add(worktree);
     }
     builder
@@ -245,7 +252,7 @@ pub(super) fn run_workspace_files(
         }
         bytes += cost;
         accepted.push(WorkspaceFileEntry {
-            id: format!("{}:{}", root.display(), relative.display()),
+            id: file_id(&path),
             canonical_path: path,
             relative_path: relative,
             root,

@@ -1,5 +1,5 @@
-use crate::editor::input::ABSOLUTE_MAX_COUNT;
 use super::InputSession;
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
 use crate::{
     config::load_bundled_config,
     editor::{CommandRegistry, PromptMove, register_app_commands, register_builtin_commands},
@@ -138,7 +138,7 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
 #[test]
 fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_content_rows() {
     let mut input = InputSession::new(100);
-    let policy = load_bundled_config().config.ui.documentation_popup;
+    let policy = load_bundled_config().config;
     input.present_documentation(
         DocumentationPopupKind::Hover,
         "Hover".into(),
@@ -165,10 +165,21 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     let bytes = lines.iter().map(String::len).sum::<usize>();
     assert!(bytes <= super::documentation::DOCUMENTATION_MAXIMUM_BYTES && bytes > 60_000);
     assert!(lines.iter().all(|line| line.chars().all(|c| c == 'é')));
-    input.scroll_documentation(1, 100, 1);
+    let total = input.documentation().unwrap().line_count();
+    input.scroll_documentation(
+        1,
+        super::documentation::DOCUMENTATION_MAXIMUM_LINES,
+        1,
+        total,
+    );
     let popup = input.documentation().unwrap();
     assert_eq!(popup.scroll, popup.line_count() - 1);
-    input.scroll_documentation(-1, 100, 1);
+    input.scroll_documentation(
+        -1,
+        super::documentation::DOCUMENTATION_MAXIMUM_LINES,
+        1,
+        total,
+    );
     assert_eq!(input.documentation().unwrap().scroll, 0);
     input.close_documentation();
     assert!(input.documentation().is_none());
@@ -196,4 +207,17 @@ fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
         Some(EditorMode::CommandLine)
     );
     assert!(input.close_prompt(&other.window_version()).is_none());
+}
+
+#[test]
+fn delayed_history_restore_preserves_new_entries_and_explicit_clear() {
+    let mut input = InputSession::new(100);
+    input.record_prompt_history(PromptKind::Command, "new");
+    input.restore_history(vec!["old".into()], vec!["saved search".into()]);
+    assert_eq!(input.command_history(), ["old", "new"]);
+    input.clear_history();
+    input.record_prompt_history(PromptKind::Command, "after clear");
+    input.restore_history(vec!["old".into()], vec!["saved search".into()]);
+    assert_eq!(input.command_history(), ["after clear"]);
+    assert!(input.search_history().is_empty());
 }

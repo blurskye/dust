@@ -18,16 +18,24 @@ impl InputSession {
         repeat_override: Option<&CommandInvocation>,
         suppress_repeat: bool,
     ) {
-        if !invocation.id.as_str().starts_with("macro.")
+        if invocation.source != InvocationSource::Macro
+            && (!invocation.id.as_str().starts_with("macro.")
+                || invocation.id.as_str() == "macro.replay")
             && !invocation.id.as_str().starts_with("input.")
+            && let Some((_, recorded)) = &mut self.recording_macro
         {
-            if let Some((_, recorded)) = &mut self.recording_macro {
-                let mut invocation = invocation.clone();
-                invocation.target = Default::default();
-                recorded.push(invocation);
-            }
+            let mut invocation = invocation.clone();
+            invocation.target = Default::default();
+            recorded.push(invocation);
         }
-        if invocation.source == InvocationSource::Macro || suppress_repeat {
+        if invocation.source == InvocationSource::Macro
+            || suppress_repeat
+            || (matches!(
+                invocation.id.as_str(),
+                "edit.operator" | "edit.repeat_visual"
+            ) && invocation.arguments.get("operator")
+                == Some(&CommandValue::String("yank".into())))
+        {
             return;
         }
         let mut semantic = repeat_override.unwrap_or(invocation).clone();
@@ -55,6 +63,12 @@ impl InputSession {
                     pending.push(semantic);
                     self.last_change = pending;
                 }
+            }
+            "edit.delete_char" if self.pending_change.is_some() => {
+                self.pending_change
+                    .as_mut()
+                    .expect("pending insert")
+                    .push(semantic);
             }
             "edit.delete_char"
             | "edit.delete_backward"
@@ -293,5 +307,50 @@ mod tests {
         input.begin_macro_replay('a', 2).unwrap();
         assert!(input.macro_step(invocation("edit.put"), 2).is_ok());
         input.finish_macro_replay();
+    }
+    #[test]
+    fn macro_recording_keeps_repeat_commands_without_their_expansion() {
+        let mut input = InputSession::new(100);
+        input.start_macro_recording('a');
+        input.record_successful_invocation(&invocation("edit.repeat_last"), None, false);
+        let mut expanded = invocation("edit.delete_char");
+        expanded.source = InvocationSource::Macro;
+        input.record_successful_invocation(&expanded, None, false);
+        let (_, recorded) = input.finish_macro_recording().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].id.as_str(), "edit.repeat_last");
+    }
+
+    #[test]
+    fn insert_delete_joins_the_change_and_yanks_leave_it_alone() {
+        let mut input = InputSession::new(100);
+        for id in [
+            "mode.insert",
+            "edit.insert_text",
+            "edit.delete_char",
+            "mode.normal",
+        ] {
+            input.record_successful_invocation(&invocation(id), None, false);
+        }
+        let plan = input.repeat_plan(10).unwrap();
+        assert_eq!(
+            plan.iter()
+                .map(|invocation| invocation.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "mode.insert",
+                "edit.insert_text",
+                "edit.delete_char",
+                "mode.normal"
+            ]
+        );
+        let yank = invocation("edit.operator").with_argument(
+            "operator",
+            crate::editor::CommandValue::String("yank".into()),
+        );
+        input.start_macro_recording('a');
+        input.record_successful_invocation(&yank, None, false);
+        assert_eq!(input.repeat_plan(10).unwrap(), plan);
+        assert_eq!(input.finish_macro_recording().unwrap().1.len(), 1);
     }
 }

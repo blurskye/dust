@@ -38,8 +38,13 @@ impl InteractiveApplication {
         self.terminal_session.begin_shutdown();
         self.reject_terminal_responses("terminal shutdown requested");
         self.drain_linter_sources();
-        self.documents.close_admission();
-        while (self.documents.has_work()
+        self.documents.retire_startup();
+        self.queue_dirty_recovery_before_exit();
+        while (self
+            .recovery
+            .unwritten(&self.state, &self.configuration.settings().recovery)
+            != 0
+            || self.documents.has_work()
             || self.language.preparation_pending()
             || self.language.pending_replies()
             || self.tasks.running_count() != 0
@@ -53,10 +58,18 @@ impl InteractiveApplication {
             self.drain_job_events(Some(deadline));
             self.process_pty_events();
             self.process_vfs_results();
+            self.queue_dirty_recovery_before_exit();
             for error in self.language.flush_edit_replies() {
                 self.show_error(error);
             }
             std::thread::sleep(Duration::from_millis(2));
+        }
+        self.documents.close_admission();
+        let unwritten = self
+            .recovery
+            .unwritten(&self.state, &self.configuration.settings().recovery);
+        if unwritten != 0 {
+            self.show_error(format!("{unwritten} dirty buffer revisions could not be journaled before the shared shutdown deadline"));
         }
         if self.language.preparation_pending() {
             self.show_error("Nix workspace preparation remains at shared shutdown deadline; filesystem outcome unknown");
@@ -85,14 +98,13 @@ impl InteractiveApplication {
         if self.debugger_session.pending() != 0 {
             self.show_error(format!("{} DAP worker groups/reply receipts remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));
         }
-        let incomplete = self.documents.has_work();
+        let incomplete = self.documents.has_work() || unwritten != 0;
         // Keep admitted resource outcomes owned through the drain; only retire
         // unfinished publication after the existing deadline, never claim rollback.
         self.finish_workspace_resource_obligations("shared shutdown deadline");
         self.documents.stop_worker();
-        self.persistence.begin_shutdown(
-            self.configuration.settings().persistence.enabled,
-        );
+        self.persistence
+            .begin_shutdown(self.configuration.settings().persistence.enabled);
         // Drain an earlier load/save without applying a late restore at exit.
         while self.persistence.pending() && Instant::now() < deadline {
             self.process_persistence_events();
@@ -124,6 +136,16 @@ impl InteractiveApplication {
                 source: std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     "filesystem work did not quiesce; an already-running operation may still complete",
+                ),
+            }));
+        }
+        if !self.finish_agent_history(deadline) {
+            return Err(InteractiveError::Vfs(VfsError::Io {
+                operation: "finish agent history shutdown",
+                path: self.state.workspace_root.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "agent history writes did not finish",
                 ),
             }));
         }

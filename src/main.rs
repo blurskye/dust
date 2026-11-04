@@ -128,7 +128,11 @@ fn main() -> ExitCode {
     {
         let mut arguments = std::env::args_os().skip(1);
         let first = arguments.next();
-        if first.as_deref() == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_BRIDGE_ARGUMENT)) {
+        if first.as_deref()
+            == Some(std::ffi::OsStr::new(
+                dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
+            ))
+        {
             let Some(program) = arguments.next() else {
                 return ExitCode::FAILURE;
             };
@@ -141,7 +145,10 @@ fn main() -> ExitCode {
                 }
             };
         }
-        if first.as_deref() == Some(std::ffi::OsStr::new(dust::debugger::ADAPTER_SESSION_ARGUMENT))
+        if first.as_deref()
+            == Some(std::ffi::OsStr::new(
+                dust::debugger::ADAPTER_SESSION_ARGUMENT,
+            ))
         {
             let Some(program) = arguments.next() else {
                 return ExitCode::FAILURE;
@@ -170,7 +177,12 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(tab) = cli.agent_tools {
-        let tab = tab.or_else(|| std::env::var(dust::agent::mcp::TAB_VARIABLE).ok()?.parse().ok());
+        let tab = tab.or_else(|| {
+            std::env::var(dust::agent::mcp::TAB_VARIABLE)
+                .ok()?
+                .parse()
+                .ok()
+        });
         let server = std::env::var_os(dust::remote::SERVER_VARIABLE).map(Into::into);
         let profiles = std::env::var(dust::agent::mcp::PROFILES_VARIABLE).unwrap_or_default();
         dust::agent::mcp::serve(server.zip(tab), &profiles)?;
@@ -218,26 +230,16 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if let Some(path) = &cli.migrate_config {
-        let metadata = fs::metadata(path)?;
+        let path = fs::canonicalize(path)?;
+        let metadata = fs::metadata(&path)?;
         if metadata.len() > 16 * 1024 * 1024 {
             return Err("configuration exceeds migration ceiling".into());
         }
-        let source = fs::read_to_string(path)?;
+        let source = fs::read_to_string(&path)?;
         let (migrated, changed) = dust::config::migrate_config_source(&source)
             .map_err(|error| format!("migration failed: {error}"))?;
         if cli.apply_migration && changed {
-            let temp = path.with_extension(format!("migrate.{}.tmp", std::process::id()));
-            let mut options = fs::OpenOptions::new();
-            options.create_new(true).write(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&temp)?;
-            file.write_all(migrated.as_bytes())?;
-            file.sync_all()?;
-            fs::rename(temp, path)?;
+            dust::config::apply_config_migration(&path, &source, &migrated)?;
         } else {
             print!("{migrated}");
         }

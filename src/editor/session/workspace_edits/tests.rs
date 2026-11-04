@@ -459,9 +459,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         resources
             .resource_finished(reply, &version, 2)
             .unwrap()
-            .err()
-            .unwrap()
-            .contains("completed on disk")
+            .is_ok()
     );
     assert!(resources.finish_resources("duplicate shutdown").is_empty());
 
@@ -573,4 +571,152 @@ fn stage_resource(
     owner.stage_approval(&draft, vec![change]).unwrap();
     let published = draft.accept(&editor.version()).unwrap();
     owner.accepted(published.publication()).unwrap();
+}
+
+#[test]
+fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
+    let root = tempfile::tempdir().unwrap();
+    let scope = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+        scope.clone(),
+        root.path().join("trust"),
+        1,
+        false,
+        false,
+        1,
+    );
+    let editor = EditorState::new(root.path().into());
+    let path = root.path().join("new.rs");
+    let mut documents = crate::editor::session::documents::DocumentSession::new(
+        crate::files::VfsWorker::start(2),
+        &crate::editor::StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        editor.window_version(),
+        1,
+        2,
+    );
+    let mut owner = WorkspaceEditSession::default();
+    let ticket = owner
+        .begin(
+            workspace.version(),
+            1,
+            editor.workspace_edit_sources().unwrap(),
+        )
+        .unwrap();
+    owner
+        .start_files(
+            ticket,
+            "create".into(),
+            None,
+            false,
+            vec![
+                InputFile::Read(path.clone()),
+                InputFile::Create(path.clone()),
+            ],
+            (vec![root.path().into()], 1024),
+        )
+        .unwrap();
+    let (index, file) = owner.next_file().unwrap();
+    assert!(matches!(file, InputFile::Create(_)));
+    let permit = owner.prepare_io(index, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(permit).unwrap();
+    let crate::editor::session::documents::DocumentEvent::WorkspaceIo(reply) =
+        wait_workspace_document(&mut documents, &editor)
+    else {
+        panic!("creation reply");
+    };
+    owner
+        .accept_preparation_reply(reply, &workspace.version(), 1)
+        .unwrap();
+    owner
+        .finish_preparation(
+            vec![WorkspaceEditDraft {
+                canonical_path: path,
+                expected_revision: None,
+                edits: vec![TextEdit::new(
+                    ByteRange::empty(ByteOffset(0)),
+                    "fn main() {}\n",
+                )],
+            }],
+            &scope,
+            &workspace.version(),
+            1,
+        )
+        .unwrap();
+    assert_eq!(owner.proposal().unwrap().files.len(), 1);
+}
+
+#[test]
+fn combined_text_and_rename_is_rejected_before_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let scope = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+        scope.clone(),
+        root.path().join("trust"),
+        1,
+        false,
+        false,
+        1,
+    );
+    let mut editor = EditorState::new(root.path().into());
+    let path = root.path().join("old");
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    let mut owner = WorkspaceEditSession::default();
+    let ticket = owner
+        .begin(
+            workspace.version(),
+            1,
+            editor.workspace_edit_sources().unwrap(),
+        )
+        .unwrap();
+    let prepared = PreparedEdits {
+        ticket,
+        label: "combined".into(),
+        drafts: vec![WorkspaceEditDraft {
+            canonical_path: path.clone(),
+            expected_revision: Some(editor.buffers[buffer].text.revision()),
+            edits: vec![TextEdit::new(
+                ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+                "new",
+            )],
+        }],
+        snapshots: vec![FileSnapshot {
+            canonical_path: path.clone(),
+            revision: Some(editor.buffers[buffer].text.revision()),
+            bytes: b"old".to_vec(),
+        }],
+        resources: vec![CheckedResourceIntent {
+            source: path,
+            source_device: 1,
+            source_inode: 1,
+            source_bytes: b"old".to_vec(),
+            kind: ResourceIntentKind::Rename {
+                target: root.path().join("new"),
+                parent_device: 1,
+                parent_inode: 1,
+            },
+        }],
+    };
+    assert!(
+        owner
+            .build(prepared, &scope, &workspace.version(), 1)
+            .is_err()
+    );
+    assert_eq!(editor.buffers[buffer].text.to_string(), "old");
+    assert!(owner.proposal().is_none());
 }
