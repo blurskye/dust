@@ -24,6 +24,13 @@ struct ExplorerViewState {
     tree: ExplorerState,
     scroll: usize,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::editor::session) struct DirectoryLoad {
+    view: ExplorerViewId,
+    node: ExplorerNodeId,
+    expand: bool,
+}
+
 type PendingDirectoryLoad = (
     ExplorerViewId,
     ExplorerNodeId,
@@ -74,8 +81,8 @@ pub(in crate::editor::session) struct ExplorerSession {
     searching: bool,
     /// The row under the last pointer press, read before focus moved the tree.
     clicked: Option<ExplorerNodeId>,
-    follow: Option<PathBuf>,
-    next_load: Option<ExplorerNodeId>,
+    follow: Option<(ExplorerViewId, PathBuf)>,
+    next_loads: VecDeque<DirectoryLoad>,
     watch: ExplorerWatchService,
     watch_generation: Option<ExplorerWatchGeneration>,
     watch_observation: Option<(u64, u64)>,
@@ -110,7 +117,7 @@ impl ExplorerSession {
             searching: false,
             clicked: None,
             follow: None,
-            next_load: None,
+            next_loads: VecDeque::new(),
             watch,
             watch_generation: None,
             watch_observation: None,
@@ -223,6 +230,11 @@ impl ExplorerSession {
         }
         if self.active_view == view {
             self.active_view = PRIMARY_EXPLORER_VIEW;
+            self.searching = false;
+        }
+        self.next_loads.retain(|load| load.view != view);
+        if self.follow.as_ref().is_some_and(|(source, _)| *source == view) {
+            self.follow = None;
         }
         self.mark_view_changed();
         Ok(())
@@ -236,6 +248,7 @@ impl ExplorerSession {
         }
         if self.active_view != view {
             self.active_view = view;
+            self.searching = false;
             self.mark_view_changed();
         }
         Ok(())
@@ -294,6 +307,7 @@ impl ExplorerSession {
         self.cloned_views.insert(candidate.id, candidate.view);
         self.next_view = candidate.id.0;
         self.active_view = candidate.id;
+        self.searching = false;
         self.mark_view_changed();
         Ok(candidate.id)
     }
@@ -313,7 +327,7 @@ impl ExplorerSession {
     ) {
         self.epoch = Arc::new(());
         self.observed_roots.clear();
-        self.next_load = None;
+        self.next_loads.clear();
         self.follow = None;
         self.root_count = roots.len();
         self.roots = roots
@@ -410,6 +424,26 @@ impl ExplorerSession {
         self.ignored = !self.ignored;
         self.mark_view_changed();
     }
+    fn load_request_for(&self, view: ExplorerViewId, node: ExplorerNodeId) -> Option<DirectoryLoad> {
+        let tree = self.tree_for(view)?;
+        let entry = tree.node(node)?;
+        Some(DirectoryLoad {
+            view,
+            node,
+            expand: tree.filter().is_empty()
+                && !tree.is_expanded(node)
+                && entry.load != ExplorerLoadState::Loaded,
+        })
+    }
+    fn queue_load(&mut self, request: DirectoryLoad) {
+        if let Some(queued) = self.next_loads.iter_mut().find(|queued| {
+            queued.view == request.view && queued.node == request.node
+        }) {
+            queued.expand |= request.expand;
+        } else {
+            self.next_loads.push_back(request);
+        }
+    }
     pub(in crate::editor::session) fn load(
         &mut self,
         node: ExplorerNodeId,
@@ -417,34 +451,56 @@ impl ExplorerSession {
         configuration: u64,
         maximum: usize,
     ) -> Result<(), String> {
-        if self.pending.is_some() {
-            self.next_load = Some(node);
-            return Ok(());
-        }
-        let source_view = self.active_view;
-        let Some(path) = self.tree().node(node).map(|node| node.path.clone()) else {
+        let Some(request) = self.load_request_for(self.active_view, node) else {
             return Ok(());
         };
+        self.load_request(request, scope, configuration, maximum)
+    }
+    pub(in crate::editor::session) fn load_request(
+        &mut self,
+        request: DirectoryLoad,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        maximum: usize,
+    ) -> Result<(), String> {
+        if self.pending.is_some() {
+            self.queue_load(request);
+            return Ok(());
+        }
+        let source_view = request.view;
+        let node = request.node;
+        let Some(tree) = self.tree_for(source_view) else {
+            return Ok(());
+        };
+        let Some(path) = tree.node(node).map(|node| node.path.clone()) else {
+            return Ok(());
+        };
+        let revision = tree.root_revision();
         let maximum = self.maximum_entries.get(&node).copied().unwrap_or(maximum);
         let generation = self
             .directory
             .list(
                 path,
                 self.roots.clone(),
-                self.tree().root_revision(),
+                revision,
                 self.hidden,
                 self.ignored,
                 maximum,
             )
             .map_err(|e| e.to_string())?;
-        self.tree_mut().begin_load(node, generation);
+        if let Some(tree) = self.tree_for_mut(source_view) {
+            tree.begin_load(node, generation);
+            if request.expand && !tree.is_expanded(node) {
+                tree.toggle_loaded(node);
+            }
+        }
         self.synchronize_tree_data(source_view);
         self.mark_view_changed();
         self.pending = Some((
             source_view,
             node,
             generation,
-            self.tree().root_revision(),
+            revision,
             scope,
             configuration,
             self.epoch.clone(),
@@ -522,7 +578,7 @@ impl ExplorerSession {
                 if truncated && count < 100_000 {
                     self.maximum_entries
                         .insert(node, count.saturating_mul(2).clamp(1, 100_000));
-                    self.next_load = Some(node);
+                    self.queue_load(DirectoryLoad { view: source_view, node, expand: false });
                 }
                 self.synchronize_tree_data(source_view);
                 self.mark_view_changed();
@@ -557,31 +613,35 @@ impl ExplorerSession {
         }
     }
     pub(in crate::editor::session) fn follow(&mut self, path: PathBuf) {
-        self.follow = Some(path);
+        self.follow = Some((self.active_view, path));
         self.mark_view_changed();
     }
     pub(in crate::editor::session) fn continue_follow(
         &mut self,
-    ) -> Result<Option<ExplorerNodeId>, String> {
-        if self.pending() || self.next_load.is_some() {
+    ) -> Result<Option<DirectoryLoad>, String> {
+        if self.pending() || !self.next_loads.is_empty() {
             return Ok(None);
         }
-        let Some(target) = self.follow.clone() else {
+        let Some((view, target)) = self.follow.clone() else {
             return Ok(None);
         };
-        if let Some(id) = self.tree().id_for_path(&target) {
+        let Some(tree) = self.tree_for_mut(view) else {
+            self.follow = None;
+            return Ok(None);
+        };
+        if let Some(id) = tree.id_for_path(&target) {
             let ancestors = target
                 .ancestors()
                 .skip(1)
-                .filter_map(|path| self.tree().id_for_path(path))
+                .filter_map(|path| tree.id_for_path(path))
                 .collect::<Vec<_>>();
-            self.tree_mut().set_filter("");
+            tree.set_filter("");
             for ancestor in ancestors {
-                if !self.tree().is_expanded(ancestor) {
-                    self.tree_mut().toggle_loaded(ancestor);
+                if !tree.is_expanded(ancestor) {
+                    tree.toggle_loaded(ancestor);
                 }
             }
-            self.tree_mut().select(id);
+            tree.select(id);
             self.mark_view_changed();
             self.follow = None;
             return Ok(None);
@@ -589,22 +649,25 @@ impl ExplorerSession {
         let id = target
             .ancestors()
             .skip(1)
-            .find_map(|path| self.tree().id_for_path(path));
+            .find_map(|path| tree.id_for_path(path));
         let Some(id) = id else {
             self.follow = None;
             return Err("active file has no explorer root".into());
         };
-        self.tree_mut().select(id);
+        let load = tree.node(id).map(|node| node.load);
+        tree.select(id);
         self.mark_view_changed();
-        if self
-            .tree()
-            .node(id)
-            .is_some_and(|node| node.load == ExplorerLoadState::Loaded)
-        {
-            self.follow = None;
-            return Err("active file is absent from the current explorer projection".into());
+        match load {
+            Some(ExplorerLoadState::Loaded) => {
+                self.follow = None;
+                Err("active file is absent from the current explorer projection".into())
+            }
+            Some(ExplorerLoadState::Error) => {
+                self.follow = None;
+                Err("active file's explorer directory could not be loaded".into())
+            }
+            _ => Ok(self.load_request_for(view, id)),
         }
-        Ok(Some(id))
     }
     pub(in crate::editor::session) fn reconcile_watch(
         &mut self,
@@ -613,7 +676,7 @@ impl ExplorerSession {
         if self.watch_visible && !visible {
             self.epoch = Arc::new(());
             self.follow = None;
-            self.next_load = None;
+            self.next_loads.clear();
         }
         self.watch_visible = visible;
         if !visible {
@@ -683,12 +746,14 @@ impl ExplorerSession {
         }
         Ok(())
     }
-    pub(in crate::editor::session) fn next_reload(&mut self) -> Option<ExplorerNodeId> {
+    pub(in crate::editor::session) fn next_reload(&mut self) -> Option<DirectoryLoad> {
         if self.pending() {
             return None;
         }
-        if let Some(node) = self.next_load.take() {
-            return Some(node);
+        while let Some(request) = self.next_loads.pop_front() {
+            if self.tree_for(request.view).and_then(|tree| tree.node(request.node)).is_some() {
+                return Some(request);
+            }
         }
         while let Some(path) = self.watch_reload.pop_front() {
             let Some(id) = self.tree().id_for_path(&path) else {
@@ -699,14 +764,17 @@ impl ExplorerSession {
                     && self.any_view_expanded(id)
                     && node.load == ExplorerLoadState::Loaded
             }) {
-                return Some(id);
+                return self.load_request_for(self.active_view, id);
             }
         }
-        // A search reads the folders not read yet, one at a time.
-        if self.tree().filter().is_empty() {
-            return None;
-        }
-        self.tree().unloaded_directory(SEARCH_ENTRY_LIMIT)
+        // Retained searches keep reading even while an unfiltered clone has focus.
+        self.view_ids().find_map(|view| {
+            let tree = self.tree_for(view)?;
+            if tree.filter().is_empty() {
+                return None;
+            }
+            self.load_request_for(view, tree.unloaded_directory(SEARCH_ENTRY_LIMIT)?)
+        })
     }
     pub(in crate::editor::session) fn reset_watch_observation(&mut self) {
         self.watch_observation = None;
@@ -725,7 +793,8 @@ impl ExplorerSession {
         }
         let active = self.active_view;
         self.active_view = view;
-        let projection = self.projection(config, body, git_status, title, root_label);
+        let mut projection = self.projection(config, body, git_status, title, root_label);
+        projection.searching &= view == active;
         self.active_view = active;
         Ok(projection)
     }
@@ -965,8 +1034,9 @@ mod tests {
         owner.toggle_loaded(node);
         std::fs::write(root.path().join("new.txt"), "new").unwrap();
         owner.toggle_loaded(node);
-        assert_eq!(owner.next_reload(), Some(node));
-        owner.load(node, source.clone(), 1, 100).unwrap();
+        let request = owner.next_reload().unwrap();
+        assert_eq!(request.node, node);
+        owner.load_request(request, source.clone(), 1, 100).unwrap();
         drain(&mut owner, source);
         assert!(
             owner
@@ -974,6 +1044,70 @@ mod tests {
                 .id_for_path(&root.path().join("new.txt"))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn queued_directory_loads_are_deduplicated_and_survive_continuations() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["a", "b", "c"] {
+            std::fs::create_dir(root.path().join(name)).unwrap();
+        }
+        for name in ["one", "two", "three"] {
+            std::fs::write(root.path().join("b").join(name), "text").unwrap();
+        }
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let [a, b, c] = ["a", "b", "c"].map(|name| owner.tree().id_for_path(&root.path().join(name)).unwrap());
+        owner.load(a, scope.clone(), 1, 2).unwrap();
+        owner.load(b, scope.clone(), 1, 2).unwrap();
+        owner.load(b, scope.clone(), 1, 2).unwrap();
+        owner.load(c, scope.clone(), 1, 2).unwrap();
+        drain(&mut owner, scope.clone());
+        for expected in [b, c, b] {
+            let request = owner.next_reload().unwrap();
+            assert_eq!(request.node, expected);
+            owner.load_request(request, scope.clone(), 1, 2).unwrap();
+            drain(&mut owner, scope.clone());
+        }
+        assert!(owner.next_reload().is_none());
+        for node in [a, b, c] {
+            assert_eq!(owner.tree().node(node).unwrap().load, ExplorerLoadState::Loaded);
+            assert!(owner.tree().is_expanded(node));
+        }
+        assert_eq!(owner.tree().node(b).unwrap().children.len(), 3);
+    }
+
+    #[test]
+    fn queued_expansions_stay_with_each_requesting_view() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("dir")).unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let dir = owner.tree().id_for_path(&root.path().join("dir")).unwrap();
+        let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        let clone = owner.accept_clone(candidate).unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        owner.load(dir, scope.clone(), 1, 100).unwrap();
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        owner.load(dir, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let request = owner.next_reload().unwrap();
+        assert_eq!(request.view, clone);
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        assert!(owner.tree_for(clone).unwrap().is_expanded(dir));
+        assert!(!owner.tree().is_expanded(dir));
+        let request = owner.next_reload().unwrap();
+        assert_eq!(request.view, PRIMARY_EXPLORER_VIEW);
+        owner.activate_view(clone).unwrap();
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope);
+        assert!(owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap().is_expanded(dir));
+        assert!(owner.next_reload().is_none());
     }
 
     #[test]
@@ -986,8 +1120,8 @@ mod tests {
         let node = owner.tree().selected_id().unwrap();
         owner.load(node, scope.clone(), 1, 2).unwrap();
         drain(&mut owner, scope.clone());
-        while let Some(node) = owner.next_reload() {
-            owner.load(node, scope.clone(), 1, 2).unwrap();
+        while let Some(request) = owner.next_reload() {
+            owner.load_request(request, scope.clone(), 1, 2).unwrap();
             drain(&mut owner, scope.clone());
         }
         assert!(
@@ -1023,6 +1157,103 @@ mod tests {
         let attempts = owner.watch.reconcile_count();
         owner.reconcile_watch(true).unwrap();
         assert!(owner.watch.reconcile_count() > attempts);
+    }
+
+    #[test]
+    fn follow_stays_in_its_view_across_directory_completions() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("a/b");
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("file");
+        std::fs::write(&file, "text").unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        owner.set_search("primary".into());
+        let primary_selection = owner.tree().selected_id();
+        let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        let clone = owner.accept_clone(candidate).unwrap();
+        owner.set_search("file".into());
+        owner.follow(file.clone());
+        let request = owner.continue_follow().unwrap().unwrap();
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        drain(&mut owner, scope.clone());
+        let request = owner.continue_follow().unwrap().unwrap();
+        assert_eq!(request.view, clone);
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        assert!(owner.continue_follow().unwrap().is_none());
+        assert!(!owner.following());
+        assert_eq!(owner.tree().filter(), "primary");
+        assert_eq!(owner.tree().selected_id(), primary_selection);
+        let tree = owner.tree_for(clone).unwrap();
+        assert_eq!(tree.filter(), "");
+        assert_eq!(tree.selected_id(), tree.id_for_path(&file));
+        for ancestor in [root.path().join("a"), directory] {
+            let id = tree.id_for_path(&ancestor).unwrap();
+            assert!(tree.is_expanded(id));
+            assert!(!owner.tree().is_expanded(id));
+        }
+
+        owner.activate_view(clone).unwrap();
+        owner.follow(root.path().join("a/missing/file"));
+        owner.remove_view(clone).unwrap();
+        assert!(!owner.following());
+        assert!(owner.continue_follow().unwrap().is_none());
+    }
+
+    #[test]
+    fn follow_stops_after_an_ancestor_directory_load_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("gone");
+        std::fs::create_dir(&directory).unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        std::fs::remove_dir(&directory).unwrap();
+        owner.follow(directory.join("file"));
+        let request = owner.continue_follow().unwrap().unwrap();
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope);
+        assert_eq!(owner.tree().node(request.node).unwrap().load, ExplorerLoadState::Error);
+        assert!(owner.continue_follow().is_err());
+        assert!(!owner.following());
+        assert!(owner.continue_follow().unwrap().is_none());
+        assert!(owner.next_reload().is_none());
+    }
+
+    #[test]
+    fn retained_search_keeps_loading_when_an_unfiltered_clone_is_active() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("a/b");
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("needle");
+        std::fs::write(&file, "text").unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        let clone = owner.accept_clone(candidate).unwrap();
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        owner.set_search("needle".into());
+        let request = owner.next_reload().unwrap();
+        owner.load_request(request, scope.clone(), 1, 100).unwrap();
+        owner.activate_view(clone).unwrap();
+        drain(&mut owner, scope.clone());
+        let mut loads = 0;
+        while let Some(request) = owner.next_reload() {
+            assert_eq!(request.view, PRIMARY_EXPLORER_VIEW);
+            owner.load_request(request, scope.clone(), 1, 100).unwrap();
+            drain(&mut owner, scope.clone());
+            loads += 1;
+            assert!(loads <= 2);
+        }
+        assert_eq!(loads, 2);
+        assert_eq!(owner.tree().filter(), "");
+        let tree = owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap();
+        assert_eq!(tree.filter(), "needle");
+        assert!(tree.visible_ids().contains(&tree.id_for_path(&file).unwrap()));
     }
 
     #[test]
@@ -1108,6 +1339,25 @@ mod tests {
             ExplorerLoadState::Loaded
         );
     }
+    #[test]
+    fn changing_explorer_views_stops_search_input_without_changing_queries() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut owner, _) = fixture(root.path());
+        let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
+        let clone = owner.accept_clone(candidate).unwrap();
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        owner.set_search("primary".into());
+        owner.start_search();
+        owner.activate_view(clone).unwrap();
+        assert!(!owner.searching());
+        assert_eq!(owner.tree().filter(), "");
+        assert_eq!(owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap().filter(), "primary");
+        owner.start_search();
+        owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
+        assert!(!owner.searching());
+        assert_eq!(owner.tree().filter(), "primary");
+    }
+
     #[test]
     fn cloned_explorer_views_share_tree_data_but_own_projection_state() {
         let root = tempfile::tempdir().unwrap();

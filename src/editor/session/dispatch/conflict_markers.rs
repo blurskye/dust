@@ -21,8 +21,9 @@ fn conflict_block_at(lines: &[&str], line: usize) -> Option<ConflictBlock> {
     let mut found = None;
     let mut index = 0;
     while index < lines.len() {
-        if marker_width(lines[index], '<').is_some() {
-            let block = read_block(lines, index)?;
+        if marker_width(lines[index], '<').is_some()
+            && let Some(block) = read_block(lines, index)
+        {
             if line <= block.end {
                 return Some(block);
             }
@@ -37,7 +38,8 @@ fn conflict_block_at(lines: &[&str], line: usize) -> Option<ConflictBlock> {
 
 fn marker_width(line: &str, marker: char) -> Option<usize> {
     let width = line.chars().take_while(|ch| *ch == marker).count();
-    (width >= 7 && (line.len() == width || line.as_bytes().get(width) == Some(&b' ')))
+    // Git's conflict-marker-size attribute can use any positive width.
+    (width > 0 && (line.len() == width || line.as_bytes().get(width) == Some(&b' ')))
         .then_some(width)
 }
 
@@ -46,6 +48,9 @@ fn read_block(lines: &[&str], start: usize) -> Option<ConflictBlock> {
     let mut base = None;
     let mut separator = None;
     for (index, line) in lines.iter().enumerate().skip(start + 1) {
+        if marker_width(line, '<').is_some() {
+            return None;
+        }
         if marker_width(line, '|') == Some(width) && separator.is_none() {
             base = Some(index);
         } else if line.len() == width
@@ -65,16 +70,32 @@ fn read_block(lines: &[&str], start: usize) -> Option<ConflictBlock> {
     None
 }
 
+fn conflict_block_count(lines: &[&str]) -> usize {
+    let mut count = 0;
+    let mut index = 0;
+    while index < lines.len() {
+        if marker_width(lines[index], '<').is_some()
+            && let Some(block) = read_block(lines, index)
+        {
+            count += 1;
+            index = block.end;
+        }
+        index += 1;
+    }
+    count
+}
+
 /// What a block becomes for `side`: `ours`, `theirs` or `both`.
-fn resolved_text(lines: &[&str], block: ConflictBlock, side: &str) -> String {
+fn resolved_text(lines: &[&str], block: ConflictBlock, side: &str) -> Result<String, &'static str> {
     let ours = &lines[block.start + 1..block.base.unwrap_or(block.separator)];
     let theirs = &lines[block.separator + 1..block.end];
     let kept = match side {
         "ours" => ours.to_vec(),
         "theirs" => theirs.to_vec(),
-        _ => [ours, theirs].concat(),
+        "both" => [ours, theirs].concat(),
+        _ => return Err("conflict side must be ours, theirs or both"),
     };
-    kept.iter().map(|line| format!("{line}\n")).collect()
+    Ok(kept.iter().map(|line| format!("{line}\n")).collect())
 }
 
 impl InteractiveApplication {
@@ -93,7 +114,13 @@ impl InteractiveApplication {
             self.show_error("no conflict markers in this file");
             return;
         };
-        let replacement = resolved_text(&lines, block, side);
+        let replacement = match resolved_text(&lines, block, side) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
         let range = text.line_to_byte(block.start).map(|start| {
             let end = text
                 .line_to_byte(block.end + 1)
@@ -127,12 +154,8 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        let left = self.state.buffers[buffer_id]
-            .text
-            .to_string()
-            .lines()
-            .filter(|line| line.starts_with("<<<<<<<"))
-            .count();
+        let remaining = self.state.buffers[buffer_id].text.to_string();
+        let left = conflict_block_count(&remaining.lines().collect::<Vec<_>>());
         self.ensure_cursor_visible();
         self.notify_message(
             if left == 0 {
@@ -157,7 +180,7 @@ mod tests {
         let lines = text.lines().collect::<Vec<_>>();
         let block = conflict_block_at(&lines, 0).unwrap();
         assert_eq!(
-            resolved_text(&lines, block, "ours"),
+            resolved_text(&lines, block, "ours").unwrap(),
             "ours\n======= section\nmore\n=======\nstill ours\n"
         );
         assert_eq!(block.end, 9);
@@ -165,13 +188,53 @@ mod tests {
     }
 
     #[test]
+    fn malformed_candidates_do_not_consume_later_conflicts() {
+        for prefix in [
+            "<<<<<<< orphan\nunrelated\n",
+            "<<<<<<< orphan\n>>>>>>> early\nunrelated\n",
+            "<<<<<<< orphan\n=======\nunrelated\n",
+        ] {
+            let text = format!("{prefix}{TEXT}");
+            let lines = text.lines().collect::<Vec<_>>();
+            let block = conflict_block_at(&lines, 0).unwrap();
+            assert_eq!(block.start, prefix.lines().count() + 1);
+            assert_eq!(resolved_text(&lines, block, "theirs").unwrap(), "theirs\n");
+            assert_eq!(conflict_block_count(&lines), 1);
+        }
+    }
+
+    #[test]
+    fn git_marker_sizes_are_inferred_and_must_match() {
+        for width in [1, 5, 7, 12] {
+            let text = format!(
+                "{} HEAD\nours\n{} base\nold\n{}\ntheirs\n{} other\n",
+                "<".repeat(width), "|".repeat(width), "=".repeat(width), ">".repeat(width),
+            );
+            let lines = text.lines().collect::<Vec<_>>();
+            let block = conflict_block_at(&lines, 0).unwrap();
+            assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "ours\n");
+            assert_eq!(conflict_block_count(&lines), 1);
+        }
+        assert!(conflict_block_at(&["<<<<< HEAD", "ours", "=======", "theirs", ">>>>> other"], 0).is_none());
+        assert!(conflict_block_at(&["<<<<< HEAD", "ours", "=====", "theirs", ">>>>>>> other"], 0).is_none());
+    }
+
+    #[test]
+    fn remaining_count_ignores_literal_markers_and_incomplete_blocks() {
+        let text = format!("<<<<<<<content\n{TEXT}<<<<<<< orphan\n");
+        assert_eq!(conflict_block_count(&text.lines().collect::<Vec<_>>()), 1);
+        assert_eq!(conflict_block_count(&["<<<<<<<content", "<<<<<<< orphan"]), 0);
+    }
+
+    #[test]
     fn a_block_resolves_to_either_side_or_both() {
         let lines = TEXT.lines().collect::<Vec<_>>();
         let block = conflict_block_at(&lines, 0).unwrap();
         assert_eq!((block.start, block.separator, block.end), (1, 3, 5));
-        assert_eq!(resolved_text(&lines, block, "ours"), "ours\n");
-        assert_eq!(resolved_text(&lines, block, "theirs"), "theirs\n");
-        assert_eq!(resolved_text(&lines, block, "both"), "ours\ntheirs\n");
+        assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "ours\n");
+        assert_eq!(resolved_text(&lines, block, "theirs").unwrap(), "theirs\n");
+        assert_eq!(resolved_text(&lines, block, "both").unwrap(), "ours\ntheirs\n");
+        assert!(resolved_text(&lines, block, "our").is_err());
     }
 
     #[test]
@@ -179,7 +242,7 @@ mod tests {
         let text = "<<<<<<< HEAD\nours\n||||||| base\nold\n=======\ntheirs\n>>>>>>> other\n";
         let lines = text.lines().collect::<Vec<_>>();
         let block = conflict_block_at(&lines, 0).unwrap();
-        assert_eq!(resolved_text(&lines, block, "ours"), "ours\n");
+        assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "ours\n");
     }
 
     #[test]

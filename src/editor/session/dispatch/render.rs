@@ -821,8 +821,8 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn start_next_explorer_watch_reload(&mut self) {
-        if let Some(node) = self.explorer.next_reload() {
-            self.load_explorer_node(node);
+        if let Some(request) = self.explorer.next_reload() {
+            self.load_explorer_request(request);
         }
     }
 
@@ -953,6 +953,18 @@ impl InteractiveApplication {
         }
     }
 
+    fn load_explorer_request(&mut self, request: super::super::explorer::DirectoryLoad) {
+        match self.explorer.load_request(
+            request,
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+            MAXIMUM_PICKER_ITEMS,
+        ) {
+            Ok(()) => self.sync_explorer_ui(),
+            Err(error) => self.show_error(error),
+        }
+    }
+
     pub(in crate::editor::session) fn follow_active_file_in_explorer(&mut self) {
         let Some(path) = self
             .state
@@ -975,7 +987,7 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn continue_explorer_follow(&mut self) {
         match self.explorer.continue_follow() {
-            Ok(Some(node)) => self.load_explorer_node(node),
+            Ok(Some(request)) => self.load_explorer_request(request),
             Ok(None) => {}
             Err(error) => self.show_error(error),
         }

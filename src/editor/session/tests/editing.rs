@@ -1225,6 +1225,24 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
 }
 
 #[test]
+fn conflict_accept_rejects_unknown_sides_and_preserves_malformed_blocks() {
+    let mut app = app();
+    let source = "<<<<<<< orphan\n>>>>>>> early\nunrelated\n<<<<<<<content\n<<<<< ours\nours\n=====\ntheirs\n>>>>> other\n";
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), None);
+    let revision = app.state.buffers[buffer].text.revision();
+    app.process_effect(AppEffect::GitConflictAccept { side: "our".into() });
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+    assert_eq!(app.state.buffers[buffer].text.revision(), revision);
+    assert!(app.ui.notification.as_ref().is_some_and(|message| message.contains("conflict side")));
+    app.process_effect(AppEffect::GitConflictAccept { side: "theirs".into() });
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "<<<<<<< orphan\n>>>>>>> early\nunrelated\n<<<<<<<content\ntheirs\n",
+    );
+    assert!(app.ui.notification.as_ref().is_some_and(|message| message.contains("no conflicts left")));
+}
+
+#[test]
 fn conflict_keys_move_between_markers_and_wrap() {
     let mut app = app();
     let path = app.state.workspace_root.join("merged.txt");
