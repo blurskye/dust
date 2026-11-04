@@ -757,4 +757,20 @@ fn character_columns_use_the_existing_position_codec() {
     )
     .unwrap();
     assert_eq!(diagnostics[0].range.start.get(), 2);
+    for line in [text.len_lines(), 999, usize::MAX] {
+        let result = convert(
+            std::path::Path::new("/tmp/file"),
+            vec![Raw {
+                line,
+                column: 0,
+                encoding: crate::editor::text::PositionEncoding::Utf32,
+                severity: DiagnosticSeverity::Error,
+                message: "invalid line".into(),
+            }],
+            &text,
+            None,
+            "test",
+        );
+        assert_eq!(result.unwrap_err(), "linter line is outside its source");
+    }
 }
