@@ -26,6 +26,9 @@ pub(super) struct DiagnosticDocument {
     text: TextVersion,
 }
 impl DiagnosticDocument {
+    pub(super) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
     pub(super) fn capture(editor: &EditorState, id: BufferId) -> Option<Self> {
         let buffer = editor.buffers.get(id)?;
         Some(Self {

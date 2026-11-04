@@ -204,17 +204,8 @@ impl TaskSession {
                 } else {
                     task.cwd.join(reported)
                 };
-                // New open buffers need not exist yet, but their parent must resolve.
-                let resolved = std::fs::canonicalize(&joined).or_else(|error| {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        return Err(error);
-                    }
-                    let parent = joined.parent().ok_or(error)?;
-                    let parent = std::fs::canonicalize(parent)?;
-                    Ok(parent.join(joined.file_name().ok_or_else(|| {
-                        std::io::Error::other("linter source has no filename")
-                    })?))
-                }).map_err(|error| format!("cannot resolve linter source: {error}"))?;
+                let resolved = super::sources::resolve_source_path(&joined)
+                    .map_err(|error| format!("cannot resolve linter source: {error}"))?;
                 if !resolved.starts_with(&task.root) {
                     return Err("linter path is outside its task root".into());
                 }
@@ -482,11 +473,20 @@ impl TaskSession {
         let result = build
             .grouped
             .into_iter()
-            .map(|(path, items)| {
+            .map(|(path, mut items)| {
+                let document = build.source.document(&path, editor)?;
+                // Reads share a canonical identity, but open-buffer diagnostics use the
+                // buffer's own path, as required by the diagnostic publisher and gutter.
+                let uri = crate::language::lsp::file_uri(
+                    document.as_ref().map_or(path.as_path(), |document| document.path()),
+                );
+                for item in &mut items {
+                    item.uri = uri.clone();
+                }
                 Ok(DiagnosticBatch {
-                    document: build.source.document(&path, editor)?,
+                    document,
                     producer: build.source.producer().clone(),
-                    uri: crate::language::lsp::file_uri(&path),
+                    uri,
                     validity: DiagnosticValidity::DiskReport,
                     items,
                 })

@@ -322,11 +322,35 @@ fn linter_symlinks_share_canonical_reads_and_respect_open_buffers() {
     let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
         "first", b"real:1:1:open\n");
     tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
-    assert!(matches!(tasks.next_linter_update(&editor, &workspace, 1, &diagnostics), Some(LinterUpdate::Publish { .. })));
+    let Some(LinterUpdate::Publish { producer, batches }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
+        panic!("open symlink diagnostics were not published");
+    };
+    let uri = crate::language::lsp::file_uri(&root.path().join("link"));
+    assert_eq!(batches[0].uri, uri);
+    assert_eq!(batches[0].items[0].uri, uri);
+    diagnostics.replace_source(&producer, batches, &editor).unwrap();
+    assert_eq!(diagnostics.choices().count(), 1);
     editor.buffers[id].dirty = true;
     let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
         "first", b"real:1:1:dirty\n");
     assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).is_err());
+
+    std::fs::create_dir(root.path().join("sources")).unwrap();
+    std::os::unix::fs::symlink(root.path().join("sources"), root.path().join("alias")).unwrap();
+    let new_path = root.path().join("alias/new");
+    editor.open_text(TextBuffer::from_text("new text"), Some(new_path.clone()));
+    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
+        "first", b"sources/new:1:1:new buffer\n");
+    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
+    let Some(LinterUpdate::Publish { producer, batches }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
+        panic!("new buffer under a symlinked directory was not published");
+    };
+    assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&new_path));
+    diagnostics.replace_source(&producer, batches, &editor).unwrap();
 
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("source"), "text").unwrap();
