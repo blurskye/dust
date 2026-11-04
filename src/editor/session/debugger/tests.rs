@@ -1585,6 +1585,58 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
 }
 
 #[test]
+fn selecting_the_same_frame_retires_previous_automatic_inspector_requests() {
+    for (step, request, response) in [
+        (StopFollow::Threads(Some(1)), DapControl::Threads, DapResponse::Threads(Vec::new())),
+        (StopFollow::Stack, DapControl::StackTrace { thread_id: 1, start: 0, levels: 256 },
+            DapResponse::Stack(Vec::new())),
+        (StopFollow::Scopes, DapControl::Scopes { frame_id: 1 },
+            DapResponse::Scopes(Vec::new())),
+        (StopFollow::Variables, DapControl::Variables { reference: 10, start: 0, count: 10 },
+            DapResponse::Variables(leaf_variables(1))),
+    ] {
+        let (mut owner, adapter) = request_fixture();
+        owner.console_frame = Some(1);
+        owner.stop_follow = step;
+        if matches!(step, StopFollow::Threads(_)) {
+            owner.follow_request = Some(0);
+        } else {
+            owner.follow_control(request.clone());
+            assert!(adapter.control().is_some());
+        }
+        let old_id = owner.follow_request.unwrap();
+        let rows = owner.frames(vec![DapStackFrame {
+            id: 1, name: "current".into(), path: Some("/source.rs".into()),
+            line: 10, column: 1, source_reference: None,
+        }]);
+        let selection = owner.take_selection(&rows[0].key).unwrap();
+        owner.dismiss_choices();
+        let editor = EditorState::new("/fixture".into());
+        let windows = super::super::windows::WindowSession::new(false, 10);
+        owner.activate(selection, SourceTarget {
+            navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+            capture: Arc::new(()), line: 1, column: 1,
+        }).unwrap();
+        let scopes_id = owner.follow_request.unwrap();
+        let scopes = adapter.control().unwrap();
+        adapter.event(0, DapEvent::Response {
+            adapter: "same-name".into(), stop_generation: 0,
+            request_id: old_id, request: Some(request), response,
+        });
+        assert!(owner.try_event().is_none(), "superseded automatic response became a picker");
+        assert_eq!(owner.follow_request, Some(scopes_id));
+        assert!(matches!(answer(&mut owner, &adapter, scopes_id, scopes, DapResponse::Scopes(vec![
+            crate::debugger::DapScope { name: "locals".into(), variables_reference: 20, expensive: false },
+        ])), DebugResponse::Absorbed));
+        let variables_id = owner.follow_request.unwrap();
+        let variables = adapter.control().unwrap();
+        assert!(matches!(answer(&mut owner, &adapter, variables_id, variables,
+            DapResponse::Variables(leaf_variables(2))), DebugResponse::Absorbed));
+        assert_eq!(owner.variables(), ["v0 = 0", "v1 = 1"]);
+    }
+}
+
+#[test]
 fn automatic_stop_navigation_fetches_generated_source_and_locals() {
     let (mut owner, adapter) = request_fixture();
     owner.begin_stop();

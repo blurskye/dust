@@ -93,6 +93,12 @@ struct Source {
     context: DapContext,
     target: SourceTarget,
 }
+struct PendingRequest {
+    epoch: u64,
+    submission: Option<u64>,
+    frame: Option<i64>,
+    automatic: bool,
+}
 pub(in crate::editor::session) struct DebugLocation {
     pub path: PathBuf,
     pub line: u64,
@@ -158,7 +164,7 @@ pub(super) struct DebugSession {
     /// current. A request with no record is presented as before: the session cannot prove it
     /// belongs to another stop, so it does not pretend to know.
     issued_stack: VecDeque<u64>,
-    requests: HashMap<u64, (u64, Option<u64>, Option<i64>)>,
+    requests: HashMap<u64, PendingRequest>,
     watch_refresh: VecDeque<String>,
     issued_scopes: VecDeque<(i64, u64)>,
     /// Pages of variables asked for and not yet answered, oldest first: the protocol's variables
@@ -452,8 +458,12 @@ impl DebugSession {
                 let submission = repl
                     .then(|| self.pending_submissions.back().map(|p| p.0))
                     .flatten();
-                self.requests
-                    .insert(id, (self.stop_epoch, submission, self.console_frame));
+                self.requests.insert(id, PendingRequest {
+                    epoch: self.stop_epoch,
+                    submission,
+                    frame: self.console_frame,
+                    automatic: false,
+                });
                 Ok(id)
             }
             Err(error) => {
@@ -465,9 +475,9 @@ impl DebugSession {
         }
     }
     fn prepare_answer(&mut self, id: u64, request: &DapControl, failed: bool) {
-        let (epoch, submission, _) = self.requests
-            .remove(&id)
-            .unwrap_or((self.stop_epoch, None, None));
+        let pending = self.requests.remove(&id);
+        let epoch = pending.as_ref().map_or(self.stop_epoch, |pending| pending.epoch);
+        let submission = pending.and_then(|pending| pending.submission);
         match request {
             DapControl::Evaluate {
                 expression,
@@ -568,8 +578,14 @@ impl DebugSession {
             if let Some((id, request)) = answer {
                 let frame_dependent = matches!(request, DapControl::Scopes { .. } | DapControl::Variables { .. })
                     || matches!(request, DapControl::Evaluate { context, .. } if context == "watch");
-                if frame_dependent && self.requests.get(&id).is_some_and(|(epoch, _, frame)| {
-                    *epoch != self.stop_epoch || *frame != self.console_frame
+                // The transport owns the initial automatic threads request (ID zero);
+                // subsequent follow requests are recorded when we send them.
+                let retired_threads = id == 0 && matches!(request, DapControl::Threads)
+                    && self.follow_request != Some(0);
+                if retired_threads || self.requests.get(&id).is_some_and(|pending| {
+                    (pending.automatic && self.follow_request != Some(id))
+                        || (frame_dependent && (pending.epoch != self.stop_epoch
+                            || pending.frame != self.console_frame))
                 }) {
                     self.requests.remove(&id);
                     if let DapControl::Evaluate { expression, context, .. } = request {
@@ -1520,7 +1536,10 @@ impl DebugSession {
     }
     fn follow_control(&mut self, control: DapControl) {
         match self.control_request(control) {
-            Ok(Some(id)) => self.follow_request = Some(id),
+            Ok(Some(id)) => {
+                self.requests.get_mut(&id).expect("issued follow request").automatic = true;
+                self.follow_request = Some(id);
+            }
             Ok(None) => {
                 self.follow_request = None;
                 self.stop_follow = StopFollow::Idle;
