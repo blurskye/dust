@@ -10,7 +10,7 @@ use crate::files::{
 use crate::workspace::search_workflow::{
     ABS_MAX_BYTES, SearchHostAction, SearchMatcherKind, SearchPresenterKind, SearchRequestId,
     SearchSourceKind, SearchStreamGeneration, SearchWorkflowBroker, SearchWorkflowChunk,
-    SearchWorkflowId, SearchWorkflowItem, SearchWorkflowSpec,
+    SearchWorkflowError, SearchWorkflowId, SearchWorkflowItem, SearchWorkflowSpec,
 };
 
 pub(crate) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
@@ -48,7 +48,7 @@ pub(in crate::editor::session) struct SearchSession {
     query: String,
     matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
     workspace_navigation:
-        std::collections::HashMap<crate::files::RequestId, std::ops::Range<usize>>,
+        std::collections::HashMap<crate::files::RequestId, WorkspaceSearchMatch>,
 }
 pub(in crate::editor::session) enum Intent {
     Find,
@@ -80,14 +80,14 @@ impl SearchSession {
     pub(in crate::editor::session) fn register_workspace_navigation(
         &mut self,
         id: crate::files::RequestId,
-        range: std::ops::Range<usize>,
+        found: WorkspaceSearchMatch,
     ) {
-        self.workspace_navigation.insert(id, range);
+        self.workspace_navigation.insert(id, found);
     }
     pub(in crate::editor::session) fn take_workspace_navigation(
         &mut self,
         id: crate::files::RequestId,
-    ) -> Option<std::ops::Range<usize>> {
+    ) -> Option<WorkspaceSearchMatch> {
         self.workspace_navigation.remove(&id)
     }
     pub(in crate::editor::session) fn retire_document_request(
@@ -98,7 +98,7 @@ impl SearchSession {
         self.workspace_navigation.remove(&id);
     }
     pub(in crate::editor::session) fn live(&self) -> bool {
-        self.live
+        self.live && !self.help_is_open()
     }
     pub(in crate::editor::session) fn query(&self) -> &str {
         &self.query
@@ -167,7 +167,7 @@ impl SearchSession {
         }
         self.retire_picker();
         self.cancel_files();
-        if self.live {
+        if self.live || !self.pending() {
             self.cancel_grep();
             self.live = false;
             self.query.clear();
@@ -330,7 +330,7 @@ impl SearchSession {
         }
         match event {
             WorkspaceSearchEvent::Batch { matches, .. } => {
-                let items = matches
+                let items: Vec<_> = matches
                     .iter()
                     .map(|found| SearchWorkflowItem {
                         stable_key: found.id.clone(),
@@ -346,13 +346,35 @@ impl SearchSession {
                         },
                     })
                     .collect();
-                if self.accept_chunk(generation, items, false).is_err() {
-                    self.cancel_grep();
-                    return Some(SearchUpdate::Failed(
-                        "workspace search workflow rejected a result batch".into(),
-                    ));
+                match self.accept_chunk(generation, items.clone(), false) {
+                    Ok(()) => self.matches.extend(matches),
+                    Err(SearchWorkflowError::Limit) => {
+                        // A batch is atomic. Keep the prefix that still fits before ending
+                        // the search as truncated, just like the worker's own limits.
+                        for (found, item) in matches.into_iter().zip(items) {
+                            match self.accept_chunk(generation, vec![item], false) {
+                                Ok(()) => self.matches.push(found),
+                                Err(SearchWorkflowError::Limit) => {
+                                    return self.accept(WorkspaceSearchEvent::Complete {
+                                        generation,
+                                        summary: crate::files::WorkspaceSearchSummary {
+                                            truncated: true,
+                                            ..Default::default()
+                                        },
+                                    });
+                                }
+                                Err(error) => {
+                                    self.cancel_grep();
+                                    return Some(SearchUpdate::Failed(error.to_string()));
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.cancel_grep();
+                        return Some(SearchUpdate::Failed(error.to_string()));
+                    }
                 }
-                self.matches.extend(matches);
                 Some(SearchUpdate::Batch)
             }
             WorkspaceSearchEvent::Complete { summary, .. } => {
@@ -385,19 +407,18 @@ impl SearchSession {
         generation: u64,
         items: Vec<SearchWorkflowItem>,
         complete: bool,
-    ) -> Result<(), ()> {
-        let next = self.sequence.checked_add(1).ok_or(())?;
+    ) -> Result<(), SearchWorkflowError> {
+        let next = self.sequence.checked_add(1).ok_or(SearchWorkflowError::Limit)?;
         self.workflow
             .as_mut()
-            .ok_or(())?
+            .ok_or(SearchWorkflowError::Stale)?
             .accept(SearchWorkflowChunk {
                 request: SearchRequestId(generation),
                 generation: SearchStreamGeneration(generation),
                 sequence: self.sequence,
                 items,
                 complete,
-            })
-            .map_err(|_| ())?;
+            })?;
         if !complete {
             self.sequence = next;
         }

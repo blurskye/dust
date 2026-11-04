@@ -3477,11 +3477,16 @@ impl InteractiveApplication {
                 SearchUpdate::Complete {
                     intent: Intent::Find,
                     files,
-                    ..
+                    truncated,
                 } => {
                     if self.search.live() || !self.search.matches().is_empty() {
                         self.open_workspace_search_picker();
-                        if self.search.live() {
+                        if truncated {
+                            self.notify_message(
+                                format!("Workspace search was truncated; showing {} matches", self.search.matches().len()),
+                                false,
+                            );
+                        } else if self.search.live() {
                             self.clear_notice();
                         } else {
                             self.notify_message(
@@ -8115,12 +8120,16 @@ impl InteractiveApplication {
         &mut self,
         found: WorkspaceSearchMatch,
     ) {
-        if self
+        if let Some((_, buffer)) = self
             .state
             .buffers
             .iter()
-            .any(|(_, buffer)| buffer.path.as_ref() == Some(&found.canonical_path))
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(&found.canonical_path))
         {
+            if !buffer.text.matches_encoded_text(&found.snapshot) {
+                self.show_error(self.message("workspace_search_stale_result", &[]));
+                return;
+            }
             if let Ok(range) =
                 ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end))
             {
@@ -8134,10 +8143,10 @@ impl InteractiveApplication {
             .iter()
             .map(|root| root.identity.canonical_path.clone())
             .collect();
-        match self.documents.read_scoped(found.canonical_path, roots) {
+        match self.documents.read_scoped(found.canonical_path.clone(), roots) {
             Ok(id) => {
                 self.remember_navigation_read(id);
-                self.search.register_workspace_navigation(id, found.range);
+                self.search.register_workspace_navigation(id, found);
             }
             Err(error) => self.show_error(error),
         }

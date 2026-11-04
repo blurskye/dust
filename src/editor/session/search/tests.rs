@@ -307,6 +307,11 @@ fn bounded_drain_publishes_only_the_final_accepted_store_disposition() {
         } else {
             assert!(matches!(&updates[0], SearchUpdate::Complete { .. }));
             assert_eq!(owner.matches().len(), 1);
+            let snapshot = owner.matches()[0].snapshot.clone();
+            owner.close_picker();
+            assert!(owner.matches().is_empty());
+            assert!(owner.workflow().is_none());
+            assert_eq!(Arc::strong_count(&snapshot), 1);
         }
         assert!(owner.poll(source.clone(), 1).is_empty());
     }

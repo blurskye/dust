@@ -733,10 +733,17 @@ fn a_failing_dependency_publishes_its_matched_diagnostics() {
     tasks
         .begin_linter(*task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
-    assert!(matches!(
-        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
-        Some(LinterUpdate::Publish { .. })
-    ));
+    let Some(LinterUpdate::Publish { producer, batches }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
+        panic!("missing dependency diagnostic publication")
+    };
+    diagnostics.replace_source(&producer, batches, &editor).unwrap();
+    let rows = diagnostics.choices().map(|(_, row, _)| row).collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].uri, crate::language::lsp::file_uri(&root.path().join("source")));
+    assert_eq!(rows[0].range.start.get(), 0);
+    assert_eq!(rows[0].message, "compile failed");
 }
 
 #[test]

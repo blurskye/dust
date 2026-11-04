@@ -1599,7 +1599,7 @@ enum NavigationRead {
         crate::editor::session::windows::NavigationStamp,
         crate::editor::session::workspace::WorkspaceVersion,
     ),
-    WorkspaceSearch(std::ops::Range<usize>),
+    WorkspaceSearch(crate::files::WorkspaceSearchMatch),
     /// A recovery journal's path and text, to put into the file once it is open.
     Recovered(std::path::PathBuf, String),
 }
@@ -1971,10 +1971,11 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(NavigationRead::WorkspaceSearch(range)) => {
-                                let start = ByteOffset(range.start);
-                                let end = ByteOffset(range.end);
-                                if text.validate_offset(start).is_err()
+                            Some(NavigationRead::WorkspaceSearch(found)) => {
+                                let start = ByteOffset(found.range.start);
+                                let end = ByteOffset(found.range.end);
+                                if !text.matches_encoded_text(&found.snapshot)
+                                    || text.validate_offset(start).is_err()
                                     || text.validate_offset(end).is_err()
                                 {
                                     self.show_error(

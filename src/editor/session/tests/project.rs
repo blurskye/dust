@@ -1864,6 +1864,51 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 }
 
 #[test]
+fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        assert_eq!(app.search.matches().len(), 1);
+        if open {
+            app.state.open_text(TextBuffer::from_text("prefix needle\n"), Some(path.clone()));
+        } else {
+            fs::write(&path, "prefix needle\n").unwrap();
+        }
+        let before = app.state.active_buffer_id();
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), before);
+        assert!(app.ui.notification_error);
+        assert_eq!(app.ui.notification.as_deref(), Some(app.message("workspace_search_stale_result", &[]).as_str()));
+        assert!(app.search.matches().is_empty());
+        assert!(app.search.workflow().is_none());
+    }
+}
+
+#[test]
+fn workspace_search_accepts_unchanged_encoded_snapshots() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("match.txt");
+        let bytes = b"\xef\xbb\xbfhead\r\nneedle\r\n";
+        fs::write(&path, bytes).unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        if open {
+            app.state.open_text(TextBuffer::from_bytes(bytes).unwrap(), Some(path.clone()));
+        }
+        app.accept_picker();
+        wait_vfs(&mut app);
+        let buffer = app.state.active_buffer_id().unwrap();
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+        assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
+    }
+}
+
+#[test]
 fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     let mut app = app();
     fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
@@ -5760,6 +5805,31 @@ fn location_labels_read_only_the_required_prefix_of_a_large_file() {
 }
 
 #[test]
+fn help_filters_do_not_restart_the_suspended_live_grep() {
+    let mut app = app();
+    fs::write(app.state.workspace_root.join("match.txt"), "needle\n").unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    assert!(app.search.live());
+    let sequence = app.search.sequence();
+    app.open_contextual_help();
+    assert!(!app.search.live());
+    app.picker_insert("help");
+    app.picker_backspace();
+    assert!(app.search.help_is_open());
+    assert_eq!(app.search.query(), "needle");
+    assert_eq!(app.search.sequence(), sequence);
+    assert_eq!(app.search.matches().len(), 1);
+    app.close_picker();
+    assert!(app.search.live());
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "needle");
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(0));
+}
+
+#[test]
 fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
     let mut app = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
@@ -5976,6 +6046,30 @@ fn file_picker_can_filter_an_entry_after_the_display_limit() {
     );
     app.picker_insert("file-10000");
     assert_eq!(app.ui.picker.as_ref().unwrap().rows[0].label, "file-10000");
+}
+
+#[test]
+fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
+    for replacement in [None, Some("changed".into())] {
+        let replacing = replacement.is_some();
+        let mut app = app();
+        fs::write(app.state.workspace_root.join("many.txt"), "needle".repeat(2500)).unwrap();
+        app.start_workspace_search("needle".into(), replacement);
+        wait_workspace_search(&mut app);
+        assert!(!app.search.matches().is_empty());
+        assert!(app.search.matches().len() < 2500);
+        let snapshot = app.search.workflow().unwrap().snapshot_if_changed(0).unwrap();
+        assert!(snapshot.complete);
+        assert_eq!(snapshot.items.len(), app.search.matches().len());
+        assert!(app.workspace_edits.proposal().is_none());
+        assert!(app.ui.notification.as_ref().unwrap().contains("truncated"));
+        if !replacing {
+            assert!(app.ui.picker.is_some());
+            app.accept_picker();
+            wait_vfs(&mut app);
+            assert!(app.state.buffers[app.state.active_buffer_id().unwrap()].path.as_ref().unwrap().ends_with("many.txt"));
+        }
+    }
 }
 
 #[test]

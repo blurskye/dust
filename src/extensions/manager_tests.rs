@@ -772,6 +772,43 @@ fn static_events_providers_and_storage_are_capability_gated_and_bounded() {
 }
 
 #[test]
+fn coalesced_host_events_keep_observation_order() {
+    let mut candidate = manifest();
+    candidate.capabilities.insert(PluginCapability::EventSubscriptions);
+    candidate.contributions.subscriptions = [
+        ("workspace", PluginSubscriptionKind::WorkspaceMetadataChanged),
+        ("surface", PluginSubscriptionKind::ActiveSurfaceChanged),
+    ]
+    .into_iter()
+    .map(|(name, kind)| PluginSubscriptionContribution {
+        id: format!("plugin.demo.subscription.{name}"),
+        kind,
+        maximum_queued: 1,
+        maximum_rate_per_second: 30,
+        coalesce: true,
+        provenance: None,
+    })
+    .collect();
+    let index = index_manifest_contributions(&candidate, 9, "manifest.toml".into()).unwrap();
+    let mut queue = PluginHostEventQueue::default();
+    queue.install(&index).unwrap();
+    for (kind, revision) in [
+        (PluginSubscriptionKind::WorkspaceMetadataChanged, 1),
+        (PluginSubscriptionKind::ActiveSurfaceChanged, 1),
+        (PluginSubscriptionKind::WorkspaceMetadataChanged, 2),
+    ] {
+        queue.observe("demo", PluginLoadId(9), kind, revision, "changed").unwrap();
+    }
+    let events = queue.deliver("demo", PluginLoadId(9));
+    assert_eq!(events.iter().map(|event| event.sequence).collect::<Vec<_>>(), [2, 3]);
+    assert_eq!(events[0].kind, PluginSubscriptionKind::ActiveSurfaceChanged);
+    assert_eq!(events[1].kind, PluginSubscriptionKind::WorkspaceMetadataChanged);
+    assert_eq!(events[1].coalesced, 1);
+    queue.acknowledge("demo", PluginLoadId(9), &events.iter().map(|event| event.id).collect::<Vec<_>>());
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 0);
+}
+
+#[test]
 fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
     let mut candidate = manifest();
     candidate
