@@ -332,7 +332,18 @@ pub(super) fn render_editor_view(
     };
     let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
     let mut diagnostic_ranges = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
-    let last_visible_line = visual_rows.forward(start_anchor, usize::from(body_height)).line;
+    let mut visible_lines = Vec::new();
+    let mut anchor = start_anchor;
+    for _ in 0..body_height {
+        if visible_lines.last() != Some(&anchor.line) {
+            visible_lines.push(anchor.line);
+        }
+        let next = visual_rows.next(anchor);
+        if next == anchor {
+            break;
+        }
+        anchor = next;
+    }
     if !large_file && let Some(path) = &buffer.path {
         for diagnostic in ui
             .diagnostics
@@ -342,9 +353,13 @@ pub(super) fn render_editor_view(
         {
             if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
                 diagnostic_lines.entry(line).or_default().push(diagnostic);
-                let end = ByteOffset(diagnostic.range.end.get().saturating_sub(1).max(diagnostic.range.start.get()));
-                let end_line = buffer.text.byte_to_line(end).unwrap_or(line);
-                for row in line.max(start_anchor.line)..=end_line.min(last_visible_line) {
+                let mut end_line = buffer.text.byte_to_line(diagnostic.range.end).unwrap_or(line);
+                if !diagnostic.range.is_empty()
+                    && buffer.text.line_to_byte(end_line).ok() == Some(diagnostic.range.end)
+                {
+                    end_line = end_line.saturating_sub(1);
+                }
+                for &row in visible_lines.iter().filter(|&&row| row >= line && row <= end_line) {
                     diagnostic_ranges.entry(row).or_default().push(diagnostic);
                 }
             }
@@ -1397,7 +1412,7 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
         let hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
         let virtual_cells = hints
             .into_iter()
-            .filter(|hint| hint.position >= line_start && hint.position < ByteOffset(line_start.get() + line.len()))
+            .filter(|hint| hint.position >= line_start && hint.position <= ByteOffset(line_start.get() + content.len()))
             .take(32)
             .filter(|hint| hint.position >= visible_start && hint.position <= view.cursor)
             .map(|hint| text_width(&hint.label, config.editor.ambiguous_width))

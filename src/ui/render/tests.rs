@@ -1563,6 +1563,32 @@ fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
 }
 
 #[test]
+fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    for text in ["", "a", "a\n"] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (buffer, view) = state.open_text(TextBuffer::from_text(text), None);
+        state.views[view].cursor = ByteOffset(text.len());
+        state.views[view].mode = crate::editor::EditorMode::Insert;
+        let mut config = crate::config::load_bundled_config().config;
+        config.editor.line_numbers = crate::config::LineNumbers::Off;
+        config.editor.wrap = false;
+        config.ui.status_line.enabled = false;
+        let ui = UiState {
+            lsp_inlay_hints: vec![super::UiInlayHint {
+                buffer, revision: state.buffers[buffer].text.revision(),
+                position: ByteOffset(text.len()), label: ">".into(),
+            }],
+            ..Default::default()
+        };
+        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 3);
+        let (column, row) = if text == "a" { (2, 0) } else if text.is_empty() { (1, 0) } else { (1, 1) };
+        assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((column, row)), "{text:?}");
+        assert!(frame.grid.row_text(row).contains('>'));
+    }
+}
+
+#[test]
 fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs() {
     let text = "a\t界e\u{301}bcdef";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -2762,6 +2788,43 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
     assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Error);
     assert!(!frame.grid.row_text(0).contains("problem"));
+}
+
+#[test]
+fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::ui::Style;
+    let path = PathBuf::from("/workspace/file.rs");
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("abc\ndef\nghé\njkl"), Some(path.clone()));
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    for end in [12, 13] {
+        let ui = UiState { diagnostics: vec![super::UiDiagnostic {
+            path: path.clone(), range: ByteRange::new(ByteOffset(1), ByteOffset(end)).unwrap(),
+            severity: crate::workspace::DiagnosticSeverity::Error,
+            source: String::new(), code: None, message: "problem".into(),
+        }], ..Default::default() };
+        let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
+        assert_eq!(frame.grid.get(2, 2).unwrap().style, Style::Error, "end {end}");
+        assert_eq!(frame.grid.get(0, 3).unwrap().style, Style::Default, "end {end}");
+    }
+    let source = format!("start\n{}last", "line\n".repeat(10_000));
+    let buffer = state.views[view].buffer;
+    state.buffers[buffer].text = TextBuffer::from_text(&source);
+    let ui = UiState {
+        diagnostics: vec![super::UiDiagnostic {
+            path, range: ByteRange::new(ByteOffset(0), ByteOffset(source.len())).unwrap(),
+            severity: crate::workspace::DiagnosticSeverity::Error,
+            source: String::new(), code: None, message: "problem".into(),
+        }],
+        syntax_folds: vec![super::UiFold { view, start_line: 0, end_line: 10_000, collapsed: true }],
+        ..Default::default()
+    };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    assert!(frame.grid.row_text(1).starts_with("last"));
+    assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::Error);
 }
 
 #[test]

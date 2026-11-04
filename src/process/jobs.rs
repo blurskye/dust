@@ -498,9 +498,13 @@ impl JobEngine {
             {
                 running.status = Some(status.code());
             }
-            running.timed_out |= running.status.is_none() && running.started.elapsed() >= running.timeout;
-            if !running.killed && (running.timed_out || running.cancel.load(Ordering::Acquire)) {
-                running.cancel.store(true, Ordering::Release);
+            let expired = running.started.elapsed() >= running.timeout;
+            running.timed_out |= running.status.is_none() && expired;
+            // The leader may have exited while a descendant still holds its pipes open.
+            if !running.killed && (expired || running.cancel.load(Ordering::Acquire)) {
+                if running.timed_out {
+                    running.cancel.store(true, Ordering::Release);
+                }
                 terminate_tree(&mut running.child, running.status.is_some());
                 running.killed = true;
             }
@@ -950,6 +954,53 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         drop(escaped);
+    }
+
+    #[test]
+    fn cancellation_releases_readers_without_draining_backpressured_output() {
+        let root = tempfile::tempdir().unwrap();
+        let (queued, _) = submission(root.path(), "printf 'one\ntwo\nthree\nfour\n'");
+        let cancel = queued.cancel.clone();
+        let mut engine = JobEngine::new(1);
+        engine.start(queued).unwrap();
+        assert!(matches!(engine.receiver.recv_timeout(Duration::from_secs(5)).unwrap(), JobEvent::Output { .. }));
+        cancel.store(true, Ordering::Release);
+        engine.expire();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while engine.jobs[&JobId(1)].readers.load(Ordering::Acquire) != 0 {
+            assert!(Instant::now() < deadline, "output delivery ignored cancellation");
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn job_deadline_releases_descendant_pipes_after_parent_exit() {
+        let root = tempfile::tempdir().unwrap();
+        let (queued, residents) = submission(root.path(), "sleep 30 & printf spawned");
+        let mut engine = JobEngine::new(16);
+        engine.start(queued).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while engine.jobs[&JobId(1)].status.is_none() {
+            engine.poll();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        let running = engine.jobs.get_mut(&JobId(1)).unwrap();
+        assert_ne!(running.readers.load(Ordering::Acquire), 0);
+        running.started = Instant::now() - running.timeout;
+        let mut exited = false;
+        while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
+            for event in engine.poll() {
+                if let JobEvent::Exited { code, timed_out, .. } = event {
+                    assert_eq!(code, Some(0));
+                    assert!(!timed_out);
+                    exited = true;
+                }
+            }
+            assert!(Instant::now() < deadline, "descendant pipes outlived the job deadline");
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(exited);
     }
 
     #[test]
