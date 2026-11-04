@@ -332,6 +332,11 @@ impl ExplorerSession {
         self.mark_view_changed();
     }
     pub(in crate::editor::session) fn select_first_child(&mut self) {
+        if let Some(id) = self.tree().selected_id()
+            && !self.tree().is_expanded(id)
+        {
+            self.toggle_loaded(id);
+        }
         self.tree_mut().select_first_child();
         self.mark_view_changed();
     }
@@ -508,7 +513,9 @@ impl ExplorerSession {
                         .tree_for(source_view)
                         .and_then(|tree| tree.node(node))
                         .is_some_and(|node| node.kind == ExplorerKind::Root);
-                let select_first_child = root_selected && self.root_count == 1;
+                let select_first_child = root_selected
+                    && self.root_count == 1
+                    && self.tree_for(source_view).is_some_and(|tree| tree.is_expanded(node));
                 if let Some(tree) = self.tree_for_mut(source_view) {
                     tree.apply_load(node, generation, revision, children);
                     if truncated && count >= 100_000 {
@@ -974,6 +981,51 @@ mod tests {
                 .id_for_path(&root.path().join("new.txt"))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn child_navigation_reloads_a_collapsed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("directory");
+        std::fs::create_dir(&directory).unwrap();
+        let old = directory.join("old.txt");
+        let new = directory.join("new.txt");
+        std::fs::write(&old, "old").unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let root_node = owner.tree().selected_id().unwrap();
+        owner.load(root_node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        let node = owner.tree().id_for_path(&directory).unwrap();
+        owner.load(node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope.clone());
+        owner.select(node);
+        owner.toggle_loaded(node);
+        std::fs::remove_file(&old).unwrap();
+        std::fs::write(&new, "new").unwrap();
+
+        owner.select_first_child();
+        assert!(owner.tree().is_expanded(node));
+        assert!(owner.tree().visible_index(owner.tree().selected_id().unwrap()).is_some());
+        assert_eq!(owner.next_reload(), Some(node));
+        owner.load(node, scope.clone(), 1, 100).unwrap();
+        drain(&mut owner, scope);
+        assert!(owner.tree().id_for_path(&old).is_none());
+        assert!(owner.tree().id_for_path(&new).is_some());
+    }
+
+    #[test]
+    fn root_load_completion_preserves_a_later_collapse() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("file.txt"), "text").unwrap();
+        let (mut owner, scope) = fixture(root.path());
+        let node = owner.tree().selected_id().unwrap();
+        owner.load(node, scope.clone(), 1, 100).unwrap();
+        owner.parent();
+        assert!(!owner.tree().is_expanded(node));
+        drain(&mut owner, scope);
+        assert!(!owner.tree().is_expanded(node));
+        assert_eq!(owner.tree().selected_id(), Some(node));
+        assert_eq!(owner.tree().visible_ids(), &[node]);
     }
 
     #[test]
