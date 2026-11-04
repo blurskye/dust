@@ -98,7 +98,7 @@ impl SearchSession {
             title,
             body: PickerPreviewBody::Text(PickerTextPreview {
                 lines: vec![loading],
-                first_line: 0,
+                first_line: line,
                 highlight_line: Some(line),
                 language: crate::language::syntax::language_for_path(&path),
             }),
@@ -117,6 +117,11 @@ impl SearchSession {
         }
         self.preview_read = Some((id, maximum));
         true
+    }
+    pub(in crate::editor::session) fn preview_needs_retry(&self) -> bool {
+        self.preview_path.is_some()
+            && self.preview_scope.is_none()
+            && self.preview_snapshot_key.is_none()
     }
     pub(in crate::editor::session) fn preview_failed(
         &mut self,

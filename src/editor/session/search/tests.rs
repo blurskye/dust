@@ -88,6 +88,29 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
 }
 
 #[test]
+fn location_preview_loading_and_errors_remain_visible() {
+    use crate::files::{RequestId, VfsError};
+    let directory = tempfile::tempdir().unwrap();
+    let source = scope(directory.path());
+    let mut owner = SearchSession::default();
+    let ticket = owner.prepare_preview("file".into(), 999, "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+    let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+    assert_eq!(text.first_line, 999);
+    assert_eq!(text.highlight_line, Some(999));
+    owner.preview_failed(ticket, VfsError::QueueFull);
+    assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().first_line, 999);
+    for result in [Err(VfsError::WorkerStopped), Ok(vec![255]), Ok(vec![0; 65])] {
+        let ticket = owner.prepare_preview("file".into(), 999, "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+        assert!(owner.admit_preview(ticket, RequestId(1), 64));
+        assert!(owner.accept_preview(RequestId(1), &result, source.clone(), 1));
+        let text = owner.preview().as_ref().unwrap().as_text().unwrap();
+        assert_eq!(text.lines.len(), 1);
+        assert_eq!(text.highlight_line, Some(text.first_line));
+        owner.clear_preview();
+    }
+}
+
+#[test]
 fn search_previews_keep_matches_beyond_the_line_character_limit() {
     for prefix in ["a".repeat(4095), "a".repeat(10_000), "é界".repeat(5_000)] {
         let mut item = found();
