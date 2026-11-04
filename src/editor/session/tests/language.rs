@@ -1767,6 +1767,33 @@ pub(super) fn fixture_owned_lsp(
 }
 
 #[test]
+fn active_document_retries_preserve_automatic_completion_after_typing() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), Some(path));
+    app.set_dashboard_visibility(false);
+    let transport = fixture_owned_lsp(&mut app, "server", buffer);
+    app.language.select("server");
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.lsp.auto_completion = true;
+    config.settings.lsp.auto_start = false;
+    app.configuration.install_fixture(config);
+    app.state.views[view].mode = crate::editor::EditorMode::Insert;
+    app.sync_lsp_document();
+    assert!(transport.requested_feature().is_none());
+
+    for typed in ['a', 'b'] {
+        app.handle_key_in_context("editor.insert", KeyEvent::character(typed));
+        app.sync_lsp_document();
+        assert!(matches!(
+            transport.requested_feature(),
+            Some(crate::language::lsp::LspFeature::Completion)
+        ));
+        app.cancel_lsp_completion();
+    }
+}
+
+#[test]
 fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui() {
     use crate::language::lsp::{LspFeature, LspProgressKind, LspRange, LspPosition};
     for display_progress in [true, false] {

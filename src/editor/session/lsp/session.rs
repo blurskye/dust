@@ -579,15 +579,20 @@ impl LspSession {
                 let current = editor.buffers.get(*id)
                     .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path));
                 if !current {
-                    let _ = self.service.close(key, document.uri());
+                    // Keep the registration until a busy worker can accept its close.
+                    if matches!(self.service.close(key, document.uri()), Err(LspError::Busy(_))) {
+                        return true;
+                    }
                     self.synced.remove(&(key.clone(), *id));
                 }
                 current
             });
         }
     }
-    pub(super) fn retry_documents(&mut self, editor: &EditorState) {
+    /// Returns whether the active document changed, so its UI refreshes still run.
+    pub(super) fn retry_documents(&mut self, editor: &EditorState) -> bool {
         self.retire_documents(editor);
+        let mut active_changed = false;
         for (key, session) in &mut self.sessions {
             if !session.desired_running || session.capabilities.is_none() {
                 continue;
@@ -612,9 +617,11 @@ impl LspSession {
                     .is_ok()
                 {
                     self.synced.insert((key.clone(), *id), version);
+                    active_changed |= editor.active_buffer_id() == Some(*id);
                 }
             }
         }
+        active_changed
     }
     pub(super) fn remove(&mut self, key: &str) {
         self.retire_projection_server(key);

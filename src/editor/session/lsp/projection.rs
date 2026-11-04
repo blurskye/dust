@@ -1662,6 +1662,27 @@ mod tests {
     }
 
     #[test]
+    fn document_retirement_retries_a_busy_close_before_forgetting_the_registration() {
+        let (mut editor, buffer, document, mut owner) = fixture();
+        let endpoint = owner.service.replace_edit_source_fixture_for(
+            "owned", document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16, 1,
+        );
+        owner.retry_documents(&editor);
+        assert_eq!(endpoint.take_synced_source(), Some(buffer));
+        editor.buffers.remove(buffer);
+        endpoint.block_responses();
+        owner.retry_documents(&editor);
+        assert!(owner.sessions["owned"].documents.contains_key(&buffer));
+        endpoint.unblock_responses();
+        owner.retry_documents(&editor);
+        assert_eq!(endpoint.closed_uri(), Some(document.uri()));
+        assert!(owner.sessions["owned"].documents.is_empty());
+        assert!(owner.synced.is_empty());
+    }
+
+    #[test]
     fn document_replay_synchronizes_changed_inactive_buffers() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let endpoint = owner.service.replace_edit_source_fixture_for("owned", document.uri(),

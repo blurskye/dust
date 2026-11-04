@@ -12739,7 +12739,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn sync_lsp_document(&mut self) {
-        self.language.retry_documents(&self.state);
+        let mut changed = self.language.retry_documents(&self.state);
         let Some(buffer) = self.state.active_buffer_id() else {
             self.language.reset_autostart();
             return;
@@ -12821,7 +12821,6 @@ impl InteractiveApplication {
                     && owner.uri == document.uri()
             });
         self.refresh_lsp_projection_owner();
-        let mut changed = false;
         for server in &sessions {
             if self.language.synced(server, buffer, &revision) {
                 continue;
@@ -13438,7 +13437,10 @@ impl InteractiveApplication {
             self.show_workspace_failure(failure);
             return;
         }
-        let Some((&buffer, document)) = state.documents.iter().next() else {
+        let Some((&buffer, document)) = state.documents.iter().find(|(id, document)| {
+            self.state.buffers.get(**id)
+                .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path))
+        }) else {
             return;
         };
         let (definition, launch, root, root_path, document) = (
