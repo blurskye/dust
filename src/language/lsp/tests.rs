@@ -959,7 +959,11 @@ fn file_uris_preserve_non_utf8_path_bytes() {
     assert_eq!(path_from_file_uri(&file_uri(&b)), Some(b));
 }
 
-fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, LspDocument) {
+pub(super) fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, LspDocument) {
+    boundary_service_with_policy(script, LspPolicy::default())
+}
+
+fn boundary_service_with_policy(script: &str, policy: LspPolicy) -> (tempfile::TempDir, LspService, LspDocument) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("server.py");
     std::fs::write(&path, script).unwrap();
@@ -984,14 +988,14 @@ fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, LspDocument
             arguments: vec!["-u".into(), path.display().to_string()],
             root: root.path().into(),
             document: Some(document.clone()),
-            policy: LspPolicy::default(),
+            policy,
             configuration: super::LspServerConfiguration::standard(),
             environment: Default::default(),
         })
         .unwrap();
     (root, service, document)
 }
-const BOUNDARY_SERVER: &str = r#"
+pub(super) const BOUNDARY_SERVER: &str = r#"
 import json,sys,pathlib,time,os
 def read():
  length=0
@@ -1079,6 +1083,136 @@ fn server_request_ids_dynamic_options_folders_and_saturated_readers_stay_healthy
     }
     service.stop("boundary").unwrap();
 }
+#[test]
+fn stderr_keeps_logging_after_invalid_utf8_and_the_startup_allowance() {
+    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
+while True:
+ m=read()
+ if m is None: break
+ if m.get('method')=='textDocument/didOpen':
+  sys.stderr.buffer.write(b'invalid \xff\n'+b'startup\n'*201+b'runtime error\n')
+  sys.stderr.buffer.flush()
+"#;
+    let (_root, mut service, _) = boundary_service(&script);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut invalid = false;
+    loop {
+        assert!(Instant::now() < deadline, "recent stderr was not forwarded");
+        match service.try_event() {
+            Some(LspEvent::Log { message, .. }) => {
+                invalid |= message == "invalid \u{fffd}";
+                if message == "runtime error" { break; }
+            }
+            Some(LspEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => thread::sleep(Duration::from_millis(1)),
+        }
+    }
+    assert!(invalid);
+    service.stop("boundary").unwrap();
+}
+
+#[test]
+fn a_server_that_stops_reading_is_failed_and_reaped_without_manual_stop() {
+    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
+pathlib.Path('pid').write_text(str(os.getpid()))
+time.sleep(30)
+"#;
+    let (root, mut service, mut document) = boundary_service_with_policy(&script, LspPolicy {
+        request_timeout: Duration::from_secs(1), ..LspPolicy::default()
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    document.version = 1;
+    document.text = "x".repeat(2 * 1024 * 1024);
+    service.sync("boundary", document).unwrap();
+    loop {
+        assert!(Instant::now() < deadline, "blocked server never failed");
+        if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
+            assert!(message.contains("timed out"), "{message}");
+            break;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let pid = std::fs::read_to_string(root.path().join("pid")).unwrap();
+        while Path::new(&format!("/proc/{pid}")).exists() {
+            assert!(Instant::now() < deadline, "timed-out server was not reaped");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    service.stop("boundary").unwrap();
+}
+
+#[test]
+fn shutdown_waits_for_the_servers_response_before_sending_exit() {
+    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+import select
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
+while True:
+ m=read()
+ if m is None: break
+ if m.get('method')=='shutdown':
+  # No exit may arrive while the server is still completing shutdown.
+  assert not select.select([sys.stdin.buffer],[],[],.05)[0]
+  send({'jsonrpc':'2.0','id':m['id'],'result':None})
+ if m.get('method')=='exit':
+  pathlib.Path('shutdown-ok').write_text('ok')
+  break
+"#;
+    let (root, mut service, _) = boundary_service(&script);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    service.stop("boundary").unwrap();
+    while !root.path().join("shutdown-ok").exists() {
+        assert!(Instant::now() < deadline, "shutdown handshake was interrupted");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stopping_a_server_terminates_its_helpers_even_after_the_server_exits() {
+    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+import subprocess
+helper=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])
+pathlib.Path('helper-pid').write_text(str(helper.pid))
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
+while True:
+ m=read()
+ if m is None: break
+ if m.get('method')=='shutdown':
+  send({'jsonrpc':'2.0','id':m['id'],'result':None})
+ if m.get('method')=='exit': break
+"#;
+    let (root, mut service, _) = boundary_service(&script);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let pid = std::fs::read_to_string(root.path().join("helper-pid")).unwrap();
+    service.stop("boundary").unwrap();
+    loop {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+        if status.is_err() || status.unwrap().split_whitespace().nth(2) == Some("Z") { break; }
+        assert!(Instant::now() < deadline, "language server helper survived shutdown");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
 #[test]
 fn stop_cancels_a_blocked_write_even_with_a_full_command_queue() {
     let script = BOUNDARY_SERVER

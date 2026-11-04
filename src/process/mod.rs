@@ -503,6 +503,7 @@ mod preflight_lifecycle_tests {
 pub(crate) struct CancellablePipe<T> {
     pipe: T,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    write_timeout: Option<std::time::Duration>,
 }
 impl<T> CancellablePipe<T> {
     #[cfg(unix)]
@@ -516,17 +517,28 @@ impl<T> CancellablePipe<T> {
         use nix::fcntl::{FcntlArg, OFlag, fcntl};
         let flags = OFlag::from_bits_truncate(fcntl(&pipe, FcntlArg::F_GETFL)?);
         fcntl(&pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
-        Ok(Self { pipe, cancelled })
+        Ok(Self { pipe, cancelled, write_timeout: None })
     }
     #[cfg(not(unix))]
     pub(crate) fn new(
         pipe: T,
         cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> io::Result<Self> {
-        Ok(Self { pipe, cancelled })
+        Ok(Self { pipe, cancelled, write_timeout: None })
     }
-    fn retry<R>(&mut self, mut operation: impl FnMut(&mut T) -> io::Result<R>) -> io::Result<R> {
+    pub(crate) fn set_write_timeout(&mut self, timeout: std::time::Duration) {
+        self.write_timeout = Some(timeout);
+    }
+    fn retry<R>(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+        mut operation: impl FnMut(&mut T) -> io::Result<R>,
+    ) -> io::Result<R> {
+        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
         loop {
+            if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
             if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
                 return Err(io::ErrorKind::BrokenPipe.into());
             }
@@ -541,21 +553,35 @@ impl<T> CancellablePipe<T> {
 }
 impl<T: io::Read> io::Read for CancellablePipe<T> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.retry(|pipe| pipe.read(bytes))
+        self.retry(None, |pipe| pipe.read(bytes))
     }
 }
 impl<T: Write> Write for CancellablePipe<T> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.retry(|pipe| pipe.write(bytes))
+        self.retry(self.write_timeout, |pipe| pipe.write(bytes))
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.retry(Write::flush)
+        self.retry(self.write_timeout, Write::flush)
     }
 }
 
 #[cfg(all(test, unix))]
 mod cancellable_pipe_tests {
     use super::*;
+    #[test]
+    fn blocked_child_writes_time_out_without_cancellation() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::piped())
+            .spawn().unwrap();
+        let mut input = CancellablePipe::new(child.stdin.take().unwrap(), Default::default()).unwrap();
+        input.set_write_timeout(std::time::Duration::from_millis(30));
+        let result = input.write_all(&vec![0; 1024 * 1024]);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+    }
+
     #[test]
     fn cancellation_releases_blocked_child_reads_and_writes() {
         use std::io::Read;

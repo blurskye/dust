@@ -340,7 +340,7 @@ impl DiagnosticLineage {
         self.first.contains_key(uri)
     }
     pub(crate) fn ambiguous(&self, uri: &str) -> bool {
-        self.exhausted || self.ambiguous.contains(uri)
+        self.ambiguous.contains(uri) || self.exhausted && !self.tracked(uri)
     }
 }
 

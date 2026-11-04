@@ -152,14 +152,17 @@ pub(super) fn capability(capabilities: &Value, key: &str) -> bool {
     }
 }
 
-pub(super) fn send_open(stdin: &mut (impl std::io::Write + ?Sized), document: &LspDocument) {
-    let _ = write_content_length_message(
+pub(super) fn send_open(
+    stdin: &mut (impl std::io::Write + ?Sized),
+    document: &LspDocument,
+) -> Result<(), crate::process::ProtocolError> {
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didOpen",
             "params":{"textDocument":{"uri":document.uri(),"languageId":document.language_id,"version":document.version,"text":document.text}}
         }),
-    );
+    )
 }
 
 pub(super) fn send_change(
@@ -167,9 +170,9 @@ pub(super) fn send_change(
     previous: Option<&LspDocument>,
     document: &LspDocument,
     capabilities: &LspCapabilities,
-) {
+) -> Result<(), crate::process::ProtocolError> {
     if capabilities.sync_kind == SyncKind::None {
-        return;
+        return Ok(());
     }
     let content_changes = if capabilities.sync_kind == SyncKind::Incremental {
         previous
@@ -178,13 +181,13 @@ pub(super) fn send_change(
     } else {
         json!([{"text":document.text}])
     };
-    let _ = write_content_length_message(
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didChange",
             "params":{"textDocument":{"uri":document.uri(),"version":document.version},"contentChanges":content_changes}
         }),
-    );
+    )
 }
 
 pub(super) fn incremental_change(
@@ -242,23 +245,29 @@ pub(super) fn protocol_units(text: &str, encoding: PositionEncoding) -> usize {
     }
 }
 
-pub(super) fn send_save(stdin: &mut (impl std::io::Write + ?Sized), document: &LspDocument) {
-    let _ = write_content_length_message(
+pub(super) fn send_save(
+    stdin: &mut (impl std::io::Write + ?Sized),
+    document: &LspDocument,
+) -> Result<(), crate::process::ProtocolError> {
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didSave",
             "params":{"textDocument":{"uri":document.uri()},"text":document.text}
         }),
-    );
+    )
 }
 
-pub(super) fn send_close(stdin: &mut (impl std::io::Write + ?Sized), uri: &str) {
-    let _ = write_content_length_message(
+pub(super) fn send_close(
+    stdin: &mut (impl std::io::Write + ?Sized),
+    uri: &str,
+) -> Result<(), crate::process::ProtocolError> {
+    write_content_length_message(
         stdin,
         &json!({
             "jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":uri}}
         }),
-    );
+    )
 }
 
 pub(super) fn send_cancel(stdin: &mut (impl std::io::Write + ?Sized), id: i64) {
@@ -1176,6 +1185,12 @@ pub(super) fn fail_child(
             message: message.into(),
         },
     );
+    terminate_server(child);
+}
+
+pub(super) fn terminate_server(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
