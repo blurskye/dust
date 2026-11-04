@@ -303,12 +303,26 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
         fs::read_to_string(root.path().join("config.toml")).unwrap(),
         original_file
     );
+    // A saved-theme read shares discovery's FIFO. Waiting for its rejection establishes
+    // completion without changing the theme or advancing the binding revision.
+    let wait_for_discovery = |app: &mut InteractiveApplication| {
+        app.configuration.begin_theme_restore();
+        app.configuration.restore_theme(Some("invalid JSON")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(result) = app.configuration.poll_theme_restore() {
+                assert!(result.is_err());
+                break;
+            }
+            assert!(Instant::now() < deadline, "theme discovery did not finish");
+            thread::sleep(Duration::from_millis(1));
+        }
+        app.process_theme_results();
+    };
     // Cancellation before worker delivery cannot reopen the surface.
     app.process_effect(AppEffect::SelectTheme);
     app.handle_configured_key("escape".parse().unwrap());
-    for _ in 0..10 {
-        app.process_theme_results();
-    }
+    wait_for_discovery(&mut app);
     assert!(app.ui.picker.is_none());
     assert_eq!(app.configuration.theme().name, "reloaded");
     app.process_effect(AppEffect::SelectTheme);
@@ -316,7 +330,7 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     loaded.theme.name = "newest".into();
     loaded.config.ui.theme = "newest".into();
     app.apply_configuration_candidate(loaded, false).unwrap();
-    app.process_theme_results();
+    wait_for_discovery(&mut app);
     assert!(
         app.ui.picker.is_none(),
         "a retired load must not republish its picker"
@@ -510,6 +524,10 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     app.handle_configured_key(KeyEvent::character('x'));
     let buffer = app.state.active_buffer_id().expect("buffer");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
+    for key in ["i", "!", "escape"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert!(app.state.buffers[buffer].dirty);
     app.handle_configured_key(KeyEvent::character(' '));
     app.handle_configured_key(KeyEvent::character('q'));
     assert!(app.should_quit);
@@ -833,7 +851,22 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
 
 #[test]
 fn invalid_user_keymap_set_is_rejected_transactionally() {
-    let app = app();
+    let mut app = app();
+    let mut current = crate::config::load_bundled_config();
+    current.keymaps.entries.push(crate::config::KeymapEntry {
+        id: "user.test.retained-health".into(),
+        context: Some("editor".into()),
+        mode: "normal".into(),
+        keys: Some("z z".into()),
+        command: Some("health.open".into()),
+        arguments: Default::default(),
+        unmap: false,
+        disable: false,
+        pass_through: false,
+        desc: None,
+    });
+    app.apply_configuration_candidate(current, false).unwrap();
+    assert!(app.configuration.keymaps().inspect_id("user.test.retained-health").is_some());
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.entries.push(crate::config::KeymapEntry {
@@ -868,6 +901,9 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
             .keymaps()
             .binding_for("editor.normal", "edit.delete_char")
     );
+    let retained = reloaded.inspect_id("user.test.retained-health").expect("user mapping survives rejection");
+    assert_eq!(retained.keys, "z z");
+    assert_eq!(retained.command.as_deref(), Some("health.open"));
     assert!(
         reload_diagnostic
             .as_deref()
@@ -1073,12 +1109,24 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     );
     assert!(diagnostic.is_none());
     app.configuration.install_bindings(keymaps, false);
-    app.open_confirmation(
-        crate::ui::PromptKind::PluginConfirmation,
-        "Delete?".into(),
-        "target".into(),
-        crate::ui::ConfirmationChoice::No,
-    );
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let confirm = |app: &mut InteractiveApplication, token| {
+        app.process_effect(AppEffect::PluginExecute {
+            plugin: "demo".into(),
+            command: "run".into(),
+            arguments: Vec::new(),
+        });
+        let invocation = fixture.take();
+        fixture.reply_confirmation_request(&invocation, crate::extensions::PluginConfirmationRequest {
+            token,
+            title: "Delete?".into(),
+            message: "target".into(),
+            default_answer: crate::extensions::PluginConfirmationAnswer::No,
+        });
+        app.process_plugin_events();
+    };
+    confirm(&mut app, 7);
     assert!(
         app.input
             .prompt()
@@ -1094,17 +1142,30 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
         app.input.prompt().is_none(),
         "the remapped cancel key closes it"
     );
-    app.open_confirmation(
-        crate::ui::PromptKind::PluginConfirmation,
-        "Delete?".into(),
-        "target".into(),
-        crate::ui::ConfirmationChoice::No,
-    );
+    app.process_plugin_events();
+    let cancelled = fixture.take();
+    assert_eq!(cancelled.confirmation_results(), [crate::extensions::PluginConfirmationResult {
+        request: 7,
+        outcome: crate::extensions::PluginConfirmationOutcome::Answered(crate::extensions::PluginConfirmationAnswer::Cancelled),
+    }]);
+    fixture.reply(&cancelled, Vec::new());
+    app.process_plugin_events();
+    confirm(&mut app, 8);
     app.handle_configured_key(KeyEvent::character('z'));
     assert!(
         app.input.prompt().is_none(),
         "the remapped yes key answers at once"
     );
+    let yes = fixture.take();
+    assert_eq!(yes.confirmation_results(), [crate::extensions::PluginConfirmationResult {
+        request: 8,
+        outcome: crate::extensions::PluginConfirmationOutcome::Answered(crate::extensions::PluginConfirmationAnswer::Yes),
+    }]);
+    app.submit_prompt();
+    fixture.reply(&yes, Vec::new());
+    app.process_plugin_events();
+    assert_eq!(app.extension.confirmation_count(), 0);
+    assert_eq!(app.extension.fixture_queued(), 0);
 }
 
 /// Compile the bundled keymaps exactly as application construction does.
@@ -1125,7 +1186,7 @@ fn bundled_keymaps(app: &InteractiveApplication) -> crate::editor::session::Reso
 fn documented_key_reaches(
     keymaps: &crate::editor::session::ResolvedKeymaps,
     keys: &str,
-) -> Option<String> {
+) -> Option<crate::editor::CommandInvocation> {
     let mut sequence = crate::editor::input::KeymapSequence::default();
     for token in keys.replace("<leader>", "space").split_whitespace() {
         let character = match token {
@@ -1140,7 +1201,7 @@ fn documented_key_reaches(
             MappingResolution::Pending => {}
             MappingResolution::Ready(invocation)
             | MappingResolution::ReadyAndReplay(invocation, _) => {
-                return Some(invocation.id.as_str().to_owned());
+                return Some(invocation);
             }
             _ => return None,
         }
@@ -1166,7 +1227,7 @@ fn the_agent_keys_each_reach_their_command() {
         ("<leader> a o", "agent.options"),
     ] {
         assert_eq!(
-            documented_key_reaches(&keymaps, keys).as_deref(),
+            documented_key_reaches(&keymaps, keys).map(|invocation| invocation.id.as_str().to_owned()).as_deref(),
             Some(command),
             "{keys}"
         );
@@ -1206,10 +1267,20 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     ];
     for (keys, command) in cases {
         assert_eq!(
-            documented_key_reaches(&keymaps, keys).as_deref(),
+            documented_key_reaches(&keymaps, keys).map(|invocation| invocation.id.as_str().to_owned()).as_deref(),
             Some(command),
             "{keys} must reach {command} through the real input path"
         );
+    }
+    for (keys, profile) in [
+        ("<leader> g g", "lazygit"),
+        ("<leader> g G", "lazygit_cwd"),
+        ("<leader> g c", "lazygit_log"),
+        ("<leader> g f", "lazygit_file"),
+        ("<leader> g l", "lazygit_log"),
+    ] {
+        let invocation = documented_key_reaches(&keymaps, keys).unwrap();
+        assert_eq!(invocation.arguments.get("profile"), Some(&CommandValue::String(profile.into())), "{keys}");
     }
     // `Space d w` names `dap.watch.add`, which requires an expression the user must type. No
     // keymap entry can supply it and no prompting command exists, so the document records it
@@ -1292,17 +1363,12 @@ fn agents_own_subagents_are_off_over_acp_only() {
     let app = app();
     let profiles = &app.configuration.settings().agents.profiles;
     assert_eq!(profiles["codex"].cli, ["codex"]);
-    assert!(
-        profiles["codex"]
-            .acp_environment
-            .contains_key("CODEX_CONFIG")
-    );
+    let codex: serde_json::Value = serde_json::from_str(&profiles["codex"].acp_environment["CODEX_CONFIG"]).unwrap();
+    assert_eq!(codex["features"]["multi_agent"], false);
     assert_eq!(profiles["opencode"].cli, ["opencode"]);
-    assert!(
-        profiles["opencode"]
-            .acp_environment
-            .contains_key("OPENCODE_CONFIG_CONTENT")
-    );
+    let opencode: serde_json::Value = serde_json::from_str(&profiles["opencode"].acp_environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
+    assert_eq!(opencode["tools"]["task"], false);
+    assert_eq!(profiles["claude"].meta.as_ref().unwrap()["claudeCode"]["options"]["disallowedTools"], serde_json::json!(["Task", "Agent", "Workflow"]));
     for profile in profiles.values() {
         assert!(!profile.environment.contains_key("CODEX_CONFIG"));
         assert!(!profile.environment.contains_key("OPENCODE_CONFIG_CONTENT"));
@@ -1333,11 +1399,25 @@ fn the_agent_panel_opens_over_the_dashboard() {
 
 #[test]
 fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
+    // Isolate discovery without changing the environment of parallel tests.
+    if std::env::var_os("DUST_TEST_MISSING_ADAPTER").is_none() {
+        let root = tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "editor::session::dispatch::tests::configuration::asking_an_agent_whose_adapter_is_missing_says_how_to_install_it", "--nocapture"])
+            .env("DUST_TEST_MISSING_ADAPTER", "1")
+            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUST_CONFIG_HOME", root.path().join("config"))
+            .env("PATH", "")
+            .output().unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        return;
+    }
     let mut app = app();
     let mut fixture = app.configuration.fixture_snapshot();
     let agents = &mut fixture.settings.agents;
     agents.connection = crate::config::AgentConnection::Acp;
-    agents.profiles.get_mut(&agents.default).unwrap().program = "dust-test-missing-adapter".into();
+    agents.default = "claude".into();
+    agents.profiles.get_mut("claude").unwrap().program = "claude-agent-acp".into();
     app.configuration.install_fixture(fixture);
     for key in [' ', 'a', 't'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -1352,7 +1432,8 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
         panel
             .transcript
             .text
-            .contains("dust-test-missing-adapter is not installed")
+            .split_whitespace().collect::<Vec<_>>().join(" ")
+            .contains("claude-agent-acp is not installed; install it in the tool manager (<leader>cm, Agent)")
     );
     assert_eq!(
         (
@@ -1362,7 +1443,7 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
         ),
         (
             "hi",
-            Some("dust-test-missing-adapter is not installed"),
+            Some("claude-agent-acp is not installed; install it in the tool manager (<leader>cm, Agent)"),
             true
         )
     );
@@ -1379,6 +1460,10 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
 #[test]
 fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
     let mut app = app();
+    let root = tempdir().unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.path = root.path().join("config.toml");
+    app.apply_configuration_candidate(loaded, false).unwrap();
     let set = |name: &str, app: &mut InteractiveApplication| {
         app.process_effect(AppEffect::SetTheme(name.into()));
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1449,6 +1534,69 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
 }
 
 #[test]
+fn the_settings_page_saves_and_reloads_user_configuration() {
+    use crate::editor::session::dispatch::commands::SettingsAction;
+    use crate::ui::SettingsValue;
+    // The worker resolves the user configuration from the environment, so use a child
+    // process rather than changing those paths underneath other tests.
+    if std::env::var_os("DUST_TEST_SETTINGS_SAVE").is_none() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("config.toml"), "# keep this comment\n[editor]\nwrap = false\n").unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "editor::session::dispatch::tests::configuration::the_settings_page_saves_and_reloads_user_configuration", "--nocapture"])
+            .env("DUST_TEST_SETTINGS_SAVE", "1")
+            .env("DUST_CONFIG_HOME", root.path())
+            .env("DUST_STATE_HOME", root.path().join("state"))
+            .output().unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        return;
+    }
+    let root = tempdir().unwrap();
+    let saved = tempdir().unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard { root: root.path().into() },
+        crate::config::load_user_config(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    ).unwrap();
+    app.window_session.observe_size((80, 24));
+    assert_eq!(app.configuration.settings().editor.tab_width, 4);
+    app.process_effect(AppEffect::Settings(SettingsAction::Open));
+    app.process_effect(AppEffect::Settings(SettingsAction::Search));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert("tab width".into())));
+    assert_eq!(app.ui.settings.as_ref().unwrap().selected_row().unwrap().key, "editor.tab_width");
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    app.process_effect(AppEffect::Settings(SettingsAction::Clear));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert("2".into())));
+    let generation = app.configuration.generation();
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    let page = app.ui.settings.as_ref().unwrap();
+    assert!(page.edit.is_none());
+    assert_eq!(page.status, Some(("Saved".into(), false)));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.configuration.generation() == generation {
+        app.process_configuration_result();
+        assert!(Instant::now() < deadline, "saved setting was not reloaded");
+        thread::sleep(Duration::from_millis(1));
+    }
+    let source = fs::read_to_string(crate::config::user_config_path()).unwrap();
+    assert!(source.contains("# keep this comment"));
+    let disk: toml::Value = toml::from_str(&source).unwrap();
+    assert_eq!(disk["editor"]["tab_width"].as_integer(), Some(2));
+    assert_eq!(disk["editor"]["wrap"].as_bool(), Some(false));
+    assert_eq!(app.configuration.settings().editor.tab_width, 2);
+    assert!(!app.configuration.settings().editor.wrap);
+    let row = app.ui.settings.as_ref().unwrap().selected_row().unwrap();
+    assert_eq!(row.key, "editor.tab_width");
+    assert_eq!(row.value, SettingsValue::Number("2".into()));
+    assert!(row.modified);
+}
+
+#[test]
 fn undo_persistence_policy_changes_with_configuration() {
     let mut app = app();
     let mut loaded = crate::config::load_bundled_config();
@@ -1498,6 +1646,11 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
         .unwrap();
     app.process_effect(AppEffect::Zen);
     assert!(app.ui.explorer.is_some());
+    let command = app.commands.specs().find(|spec| spec.id.as_str() == "plugin.demo.run").expect("plugin command survives reload");
+    assert_eq!(command.title, "Run demo");
+    app.open_builtin_picker(PickerKind::Commands);
+    let row = app.ui.picker.as_ref().unwrap().rows.iter().find(|row| row.detail == "plugin.demo.run").expect("plugin command in palette");
+    assert_eq!(row.label, "Plugins: Run demo");
 }
 
 #[test]
@@ -1529,7 +1682,7 @@ fn reload_preserves_plugin_window_rules() {
     let manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
-    app.extension.fixture_contribution(index).unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
     loaded.config.windows.rules = vec![crate::config::WindowRuleConfig {
@@ -1542,4 +1695,30 @@ fn reload_preserves_plugin_window_rules() {
     app.apply_configuration_candidate(loaded.clone(), false)
         .unwrap();
     assert_eq!(app.configuration.settings().windows, loaded.config.windows);
+    app.process_effect(AppEffect::NewBuffer);
+    app.reconcile_editor_windows();
+    let opened = app.apply_plugin_ui_request(&index, crate::extensions::PluginUiRequest {
+        token: 1,
+        kind: crate::extensions::PluginUiRequestKind::OpenWindow {
+            expected_graph_revision: app.window_session.graph().revision().unwrap(),
+            content_type: "plugin.demo.panel".into(),
+            title: "Demo".into(),
+            placement: crate::extensions::PluginRequestedPlacement::Floating { x: 1, y: 1, width: 20, height: 8 },
+            tree: Some(crate::extensions::PluginUiTree {
+                revision: 1,
+                root: 1,
+                nodes: vec![crate::extensions::PluginUiNode {
+                    id: 1,
+                    kind: crate::extensions::PluginUiNodeKind::Text,
+                    text: "Demo panel".into(),
+                    style: crate::extensions::PluginUiStyle::Default,
+                    action: None,
+                    children: Vec::new(),
+                }],
+            }),
+        },
+    });
+    assert!(opened.error.is_none(), "{:?}", opened.error);
+    let window = app.extension.window_snapshots()[0].window;
+    assert_eq!(app.window_session.graph().window(window).unwrap().placement, WindowPlacement::Docked { edge: DockEdge::Right, size: 20 });
 }
