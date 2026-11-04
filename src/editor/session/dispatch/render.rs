@@ -1328,16 +1328,15 @@ impl InteractiveApplication {
             hints.sort_unstable_by_key(|hint| hint.position);
             let line_text = buffer.text.line(line).unwrap_or_default();
             let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
-            let policy = crate::editor::text::DisplayWidthPolicy {
-                tab_width: self.configuration.settings().editor.tab_width,
-                ambiguous_wide: self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide,
-            };
-            let spans = crate::editor::text::display_spans(line_text, policy);
             // Scrolling hides hints before the visible source range; they must not
             // keep pushing the source scroll position farther to the right.
             let virtual_width = |scroll| {
-                let skipped = spans.iter().find(|span| span.column_end > scroll)
-                    .map_or(line_text.len(), |span| span.byte_start);
+                let skipped = crate::ui::render::editor::byte_offset_at_display_column(
+                    line_text,
+                    scroll,
+                    self.configuration.settings().editor.tab_width,
+                    self.configuration.settings().editor.ambiguous_width,
+                );
                 let visible_start = line_start.get().saturating_add(skipped);
                 hints.iter()
                     .filter(|hint| hint.position.get() >= visible_start)

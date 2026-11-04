@@ -1571,7 +1571,7 @@ pub fn breakpoint_states(
     requested
         .iter()
         .enumerate()
-        .map(|(index, _)| {
+        .map(|(index, requested)| {
             if disabled.get(index).copied().unwrap_or(false) {
                 return DapBreakpointState::Disabled;
             }
@@ -1581,7 +1581,7 @@ pub fn breakpoint_states(
                 Some((true, line, _)) => DapBreakpointState::Verified {
                     // The adapter may move a breakpoint; the VERIFIED line is its line, falling
                     // back to the requested one when it reports none.
-                    line: line.unwrap_or(0),
+                    line: line.unwrap_or(requested.line),
                 },
                 Some((false, _, _)) => DapBreakpointState::Requested { accepted: false },
                 // No answer for this entry: still only a request.
@@ -1748,6 +1748,19 @@ mod breakpoint_state_tests {
         let wrong = breakpoint_states(&asked, &up_to_date, &DapResponse::Threads(Vec::new()));
         assert!(wrong.iter().all(|state| !state.is_verified()));
     }
+    #[test]
+    fn verified_breakpoints_without_lines_keep_the_requested_locations() {
+        let asked = requested(&[10, 20, 30]);
+        let states = breakpoint_states(
+            &asked,
+            &[true, false, false],
+            &DapResponse::Breakpoints(vec![(true, None, None), (true, Some(32), None)]),
+        );
+        assert_eq!(states[0], DapBreakpointState::Disabled);
+        assert_eq!(states[1], DapBreakpointState::Verified { line: 20 });
+        assert_eq!(states[2], DapBreakpointState::Verified { line: 32 });
+    }
+
     #[test]
     fn disabled_rows_do_not_consume_enabled_breakpoint_verdicts() {
         let rows = [10, 20, 30].map(|line| DapSourceBreakpoint {

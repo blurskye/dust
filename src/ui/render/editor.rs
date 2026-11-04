@@ -1422,7 +1422,7 @@ pub fn snap_display_column_forward(
     column
 }
 
-pub(super) fn byte_offset_at_display_column(
+pub(crate) fn byte_offset_at_display_column(
     text: &str,
     target: usize,
     tab_width: usize,
