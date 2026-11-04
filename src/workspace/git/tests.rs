@@ -578,7 +578,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
     symlink(outside.path().join("outside.txt"), root.join("linked.txt")).unwrap();
     let mut symlink_policy = policy.clone();
     symlink_policy.file = "linked.txt".into();
-    let linked_hash = worktree_hash(&root.join("linked.txt")).unwrap().0;
+    let linked_hash = worktree_hash(&outside.path().join("outside.txt")).unwrap().0;
     service
         .start(GitMutationRequest::StageHunk(request_for(
             symlink_policy,
@@ -776,6 +776,29 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
             },
         ]
     );
+}
+
+#[test]
+fn worktree_hash_bounds_reads_and_rejects_non_regular_files() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("large");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(1024 * 1024 * 1024).unwrap();
+    assert_eq!(worktree_hash(&path), Err(GitMutationError::Invalid));
+    file.set_len(8 * 1024 * 1024).unwrap();
+    assert_eq!(worktree_hash(&path).unwrap().1.len(), 8 * 1024 * 1024);
+    file.set_len(8 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(worktree_hash(&path), Err(GitMutationError::Invalid));
+    assert_eq!(worktree_hash(dir.path()), Err(GitMutationError::UnsupportedPath));
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert_eq!(worktree_hash(&link), Err(GitMutationError::UnsupportedPath));
+        let fifo = dir.path().join("fifo");
+        assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        assert_eq!(worktree_hash(&fifo), Err(GitMutationError::UnsupportedPath));
+    }
 }
 
 #[test]
@@ -2588,6 +2611,70 @@ fn nested_hunk_mutations_use_repository_paths() {
 }
 
 #[test]
+fn whole_file_unstage_clears_conflict_entries_without_changing_worktree() {
+    let dir = tempdir().unwrap();
+    conflicted_fixture(dir.path());
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert!(repo.index().unwrap().has_conflicts());
+    let worktree = std::fs::read(dir.path().join("shared.txt")).unwrap();
+    let head_blob = repo.head().unwrap().peel_to_tree().unwrap()
+        .get_path(Path::new("shared.txt")).unwrap().id();
+    let mut plan = plan_template(
+        plan_policy(dir.path(), "shared.txt", GitDiffLayer::Staged),
+        GitMutationKind::UnstageFile,
+    );
+    plan.expected_index = Some(git_index_fingerprint(dir.path()).unwrap());
+    run_plan(plan).unwrap();
+    let index = git2::Repository::open(dir.path()).unwrap().index().unwrap();
+    assert!(!index.has_conflicts());
+    assert_eq!(index.get_path(Path::new("shared.txt"), 0).unwrap().id, head_blob);
+    for stage in 1..=3 {
+        assert!(index.get_path(Path::new("shared.txt"), stage).is_none());
+    }
+    assert_eq!(std::fs::read(dir.path().join("shared.txt")).unwrap(), worktree);
+}
+
+#[test]
+fn index_only_unstage_does_not_read_worktree_content() {
+    for directory in [false, true] {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        commit(&repo, "file", "old\n");
+        let path = dir.path().join("file");
+        std::fs::write(&path, "new\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("file")).unwrap();
+        index.write().unwrap();
+        let policy = plan_policy(dir.path(), "file", GitDiffLayer::Staged);
+        let hunk_plan = captured_plan(dir.path(), policy.clone(), GitMutationKind::UnstageHunk, 0);
+        if directory {
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+        } else {
+            std::fs::File::create(&path).unwrap().set_len(1024 * 1024 * 1024).unwrap();
+        }
+        assert!(read_hunks(&policy).unwrap().worktree_sha256.is_none());
+        run_plan(hunk_plan).unwrap();
+        assert_eq!(index_text(dir.path(), "file"), "old\n");
+        // Re-stage the blob directly, without consulting the unsupported worktree.
+        index.read(true).unwrap();
+        let mut entry = index.get_path(Path::new("file"), 0).unwrap();
+        entry.id = repo.blob(b"new\n").unwrap();
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+        let mut plan = plan_template(policy, GitMutationKind::UnstageFile);
+        plan.expected_index = Some(git_index_fingerprint(dir.path()).unwrap());
+        run_plan(plan).unwrap();
+        assert_eq!(index_text(dir.path(), "file"), "old\n");
+        if directory {
+            assert!(path.is_dir());
+        } else {
+            assert_eq!(path.metadata().unwrap().len(), 1024 * 1024 * 1024);
+        }
+    }
+}
+
+#[test]
 fn whole_file_unstage_treats_wildcards_literally() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -2614,6 +2701,42 @@ fn whole_file_unstage_treats_wildcards_literally() {
             .len(),
         1
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn hunk_mutations_quote_paths_and_leave_similarly_named_files_unchanged() {
+    for name in ["foo ", "foo\t", "foo\"", "foo\\", "café "] {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        commit(&repo, "foo", "old\n");
+        commit_next(&repo, name, "old\n");
+        std::fs::write(dir.path().join("foo"), "new\n").unwrap();
+        std::fs::write(dir.path().join(name), "new\n").unwrap();
+        let policy = plan_policy(dir.path(), name, GitDiffLayer::Unstaged);
+        run_plan(captured_plan(dir.path(), policy.clone(), GitMutationKind::StageHunk, 0)).unwrap();
+        assert_eq!(index_text(dir.path(), name), "new\n");
+        assert_eq!(index_text(dir.path(), "foo"), "old\n");
+        run_plan(captured_plan(
+            dir.path(), plan_policy(dir.path(), name, GitDiffLayer::Staged),
+            GitMutationKind::UnstageHunk, 0,
+        )).unwrap();
+        assert_eq!(index_text(dir.path(), name), "old\n");
+        let snapshot = read_hunks(&policy).unwrap();
+        let hunk = snapshot.hunks[0].clone();
+        super::mutation::reset_hunk(
+            GitMutationGeneration(1),
+            &GitResetHunkRequest {
+                policy, hunk_snapshot_revision: 1, hunk_id: hunk.id, selected: hunk,
+                selected_lines: vec![], expected_index: Some(snapshot.index_fingerprint),
+                expected_worktree: snapshot.worktree_sha256,
+                maximum_patch_bytes: 65536, deadline: Duration::from_secs(2),
+            }, &AtomicBool::new(false),
+        ).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join(name)).unwrap(), "old\n");
+        assert_eq!(std::fs::read_to_string(dir.path().join("foo")).unwrap(), "new\n");
+        assert_eq!(index_text(dir.path(), "foo"), "old\n");
+    }
 }
 
 #[test]
@@ -2710,6 +2833,69 @@ fn untracked_and_unborn_hunks_preserve_file_creation_and_deletion() {
     .unwrap();
     assert_eq!(index_text(dir.path(), "deleted.txt"), "deleted\n");
     assert!(!dir.path().join("deleted.txt").exists());
+}
+
+#[test]
+fn deleted_worktree_files_can_be_staged_and_reset_by_hunk() {
+    for legacy in [false, true] {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        commit(&repo, "deleted.txt", "one\ntwo\n");
+        let file = dir.path().join("deleted.txt");
+        std::fs::remove_file(&file).unwrap();
+        let policy = plan_policy(dir.path(), "deleted.txt", GitDiffLayer::Unstaged);
+        let plan = captured_plan(dir.path(), policy.clone(), GitMutationKind::StageHunk, 0);
+        assert!(plan.expected_worktree.is_none());
+        assert_eq!(plan.selected.as_ref().unwrap().new_mode, 0);
+        // Recreating the path invalidates a captured deletion.
+        std::fs::write(&file, "one\ntwo\n").unwrap();
+        assert_eq!(run_plan(plan.clone()), Err(GitMutationError::StaleWorktree));
+        std::fs::remove_file(&file).unwrap();
+        if legacy {
+            let hunk = plan.selected.clone().unwrap();
+            let request = GitStageHunkRequest {
+                policy: policy.clone(), hunk_snapshot_revision: 1,
+                hunk_id: hunk.id, selected: hunk, expected_index: plan.expected_index,
+                expected_worktree: None, maximum_patch_bytes: 65536,
+                deadline: Duration::from_secs(2),
+            };
+            let mut service = GitMutationService::default();
+            service.start(GitMutationRequest::StageHunk(request)).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if service.poll().unwrap().is_some() { break; }
+                assert!(Instant::now() < deadline);
+                thread::yield_now();
+            }
+        } else {
+            run_plan(plan).unwrap();
+        }
+        assert!(git2::Repository::open(dir.path()).unwrap().index().unwrap()
+            .get_path(Path::new("deleted.txt"), 0).is_none());
+        run_plan(captured_plan(
+            dir.path(), plan_policy(dir.path(), "deleted.txt", GitDiffLayer::Staged),
+            GitMutationKind::UnstageHunk, 0,
+        )).unwrap();
+        assert!(!file.exists());
+        let snapshot = read_hunks(&policy).unwrap();
+        let hunk = snapshot.hunks[0].clone();
+        let request = GitResetHunkRequest {
+            policy, hunk_snapshot_revision: 1, hunk_id: hunk.id, selected: hunk,
+            selected_lines: vec![], expected_index: Some(snapshot.index_fingerprint),
+            expected_worktree: None, maximum_patch_bytes: 65536,
+            deadline: Duration::from_secs(2),
+        };
+        let mut service = GitMutationService::default();
+        service.start(GitMutationRequest::ResetUnstagedHunk(request)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if service.poll().unwrap().is_some() { break; }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\ntwo\n");
+        assert_eq!(index_text(dir.path(), "deleted.txt"), "one\ntwo\n");
+    }
 }
 
 #[test]
@@ -2973,6 +3159,48 @@ fn status_uses_rename_destinations_and_merges_unsaved_paths_once() {
         Some(2)
     );
     assert!(snapshot.entries[1].sources.staged);
+}
+
+#[test]
+fn partial_reset_validates_selections_and_handles_large_selected_runs() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let original = "a\n".repeat(30_000);
+    let changed = "A\n".repeat(30_000);
+    commit(&repo, "partial.txt", &original);
+    let file = dir.path().join("partial.txt");
+    std::fs::write(&file, &changed).unwrap();
+    let mut policy = plan_policy(dir.path(), "partial.txt", GitDiffLayer::Unstaged);
+    policy.maximum_lines = 100_000;
+    policy.maximum_bytes = 1024 * 1024;
+    policy.deadline = Duration::from_secs(5);
+    let snapshot = read_hunks(&policy).unwrap();
+    assert_eq!(snapshot.hunks.len(), 1);
+    let hunk = snapshot.hunks[0].clone();
+    let mut request = GitResetHunkRequest {
+        policy, hunk_snapshot_revision: 1, hunk_id: hunk.id, selected: hunk.clone(),
+        selected_lines: vec![], expected_index: Some(snapshot.index_fingerprint),
+        expected_worktree: snapshot.worktree_sha256,
+        maximum_patch_bytes: 1024 * 1024, deadline: Duration::from_secs(5),
+    };
+    for invalid in [vec![0, 0], vec![1, 0], vec![hunk.lines.len() as u32]] {
+        request.selected_lines = invalid;
+        assert_eq!(super::mutation::reset_hunk(
+            GitMutationGeneration(1), &request, &AtomicBool::new(false),
+        ), Err(GitMutationError::InvalidRange));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+        assert_eq!(git_index_fingerprint(dir.path()).unwrap(), snapshot.index_fingerprint);
+    }
+    request.selected_lines = hunk.lines.iter().enumerate().filter_map(|(index, line)| {
+        line.old_line.or(line.new_line).is_some_and(|line| line <= 15_000)
+            .then_some(index as u32)
+    }).collect();
+    assert_eq!(request.selected_lines.len(), 30_000);
+    super::mutation::reset_hunk(
+        GitMutationGeneration(1), &request, &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{}{}", "a\n".repeat(15_000), "A\n".repeat(15_000)));
+    assert_eq!(index_text(dir.path(), "partial.txt"), original);
 }
 
 #[test]

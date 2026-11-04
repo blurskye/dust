@@ -875,9 +875,7 @@ impl GitSession {
             plan.hunk_snapshot_revision = 1;
             let path = scope_root.join(&relative);
             plan.expected_worktree = match std::fs::symlink_metadata(&path) {
-                Err(error)
-                    if kind == GitMutationKind::StageFile
-                        && error.kind() == std::io::ErrorKind::NotFound =>
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
                 {
                     None
                 }
