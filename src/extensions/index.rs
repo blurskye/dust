@@ -195,6 +195,7 @@ pub(super) fn index_manifest_contributions_with_text(
     let namespace = format!("plugin.{}.", manifest.id);
     if manifest.commands.iter().any(|(id, declaration)| {
         !valid_plugin_segment(id)
+            || crate::editor::CommandId::new(format!("{namespace}{id}")).is_err()
             || declaration.title.trim().is_empty()
             || declaration.title.len() > 256
             || declaration.title.chars().any(char::is_control)
@@ -577,6 +578,7 @@ pub fn activate_candidate(
     manifest: PluginManifest,
     limits: &PluginLimits,
 ) -> Result<Vec<String>, PluginError> {
+    validate_manifest(&manifest, limits)?;
     let outcome = load_component(store, path, manifest, limits)?;
     Ok(outcome.loaded.activated_commands)
 }
@@ -905,7 +907,7 @@ pub(crate) fn execute_component(
         .call_execute_command(&mut runtime.store, &command, &arguments);
     drop(deadline);
     let result = result
-        .map_err(|error| PluginError::Execution(error.to_string()))?
+        .map_err(|error| PluginError::Execution(format!("{error:#}")))?
         .map_err(PluginError::Execution)?;
     if result.len() > 1024 * 1024 {
         return Err(PluginError::InvalidInvocation);
