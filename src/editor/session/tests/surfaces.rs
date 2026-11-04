@@ -4915,6 +4915,15 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         "replacement configuration adopted old preflight"
     );
     driver.debug_start("owned");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while driver.debug_source_text().is_none() {
+        driver.pump_debug();
+        assert!(Instant::now() < deadline, "stopped generated source did not open automatically");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.debug_source_text().as_deref(), Some("original adapter source\n"));
+    driver.new_buffer();
+    assert!(driver.debug_source_text().is_none());
     let picker = |driver: &mut TestSession, needle: &str| {
         let deadline = Instant::now() + Duration::from_secs(4);
         loop {

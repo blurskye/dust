@@ -171,6 +171,22 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
 }
 
 #[test]
+fn retired_debugger_terminal_preflight_keeps_its_rejected_owner() {
+    let (mut owner, adapter) = request_fixture();
+    let id = PtyId(1);
+    assert!(owner.terminal_current(&id), "ordinary terminal has no debugger owner");
+    adapter.with_terminal_reply(|reply| {
+        owner.register_terminal(id, reply.clone());
+        assert!(owner.terminal_current(&id));
+        owner.stop().unwrap();
+        assert!(!owner.terminal_current(&id), "retired preflight must not launch");
+        assert!(!reply.current());
+        assert!(owner.take_terminal(&id).is_some());
+        assert!(owner.terminal_replies.is_empty());
+    });
+}
+
+#[test]
 fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
     use crate::debugger::{DapBreakpointState, DapResponse};
     let root = tempfile::tempdir().unwrap();
@@ -432,10 +448,12 @@ fn a_value_from_a_previous_stop_can_never_be_presented_as_current() {
     let (mut owner, adapter) = request_fixture();
     for value in ["1", "2"] {
         owner.begin_stop();
-        prime_for(&mut owner, &adapter);
         owner.stop_follow = StopFollow::Variables;
+        owner.follow_control(DapControl::Variables { reference: 7, start: 0, count: 10 });
+        let request_id = owner.follow_request.unwrap();
+        let request = adapter.control().unwrap();
         assert!(matches!(
-            owner.response(DapResponse::Variables(vec![crate::debugger::DapVariable {
+            answer(&mut owner, &adapter, request_id, request, DapResponse::Variables(vec![crate::debugger::DapVariable {
                 name: "count".into(),
                 value: value.into(),
                 type_name: None,
@@ -948,6 +966,22 @@ fn request_fixture() -> (DebugSession, crate::debugger::TestAdapter) {
     owner.service = service;
     (owner, adapter)
 }
+fn answer(
+    owner: &mut DebugSession,
+    adapter: &crate::debugger::TestAdapter,
+    request_id: u64,
+    request: DapControl,
+    response: DapResponse,
+) -> DebugResponse {
+    adapter.event(0, DapEvent::Response {
+        adapter: "same-name".into(), stop_generation: 0,
+        request_id, request: Some(request), response,
+    });
+    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+        panic!("expected response");
+    };
+    owner.response(response)
+}
 fn evaluation(value: &str) -> DapResponse {
     DapResponse::Evaluate(crate::debugger::DapVariable {
         name: "result".into(),
@@ -1121,6 +1155,31 @@ fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() 
     assert_eq!(owner.pending_variable_pages.back().unwrap().0, 7);
 }
 #[test]
+fn accepting_a_leaf_does_not_reopen_its_closed_expansion() {
+    let (mut owner, adapter) = request_fixture();
+    let request = DapControl::Variables { reference: 7, start: 0, count: 10 };
+    owner.control(request.clone()).unwrap();
+    assert!(adapter.control().is_some());
+    let DebugResponse::Picker { rows, .. } = answer(
+        &mut owner, &adapter, 1, request.clone(), DapResponse::Variables(leaf_variables(1)),
+    ) else { panic!("variables picker") };
+    let selection = owner.take_selection(&rows[0].key).unwrap();
+    assert!(selection.value().is_some());
+    owner.dismiss_choices();
+    let editor = EditorState::new("/fixture".into());
+    let windows = super::super::windows::WindowSession::new(false, 10);
+    owner.activate(selection, SourceTarget {
+        navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+        capture: Arc::new(()), line: 1, column: 1,
+    }).unwrap();
+    assert!(owner.expansion.is_empty());
+    owner.control(request.clone()).unwrap();
+    assert!(matches!(adapter.control(), Some(DapControl::Variables {
+        reference: 7, start: 0, count: 10,
+    })));
+}
+
+#[test]
 fn breakpoint_rejections_update_only_the_latest_requested_rows() {
     use crate::debugger::DapBreakpointState;
     let (mut owner, adapter) = request_fixture();
@@ -1233,6 +1292,107 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
     );
 }
 #[test]
+fn breakpoint_changes_retry_the_latest_configuration_after_backpressure() {
+    let (mut owner, adapter) = request_fixture();
+    let path = PathBuf::from("/source.rs");
+    let at = |line| DapSourceBreakpoint {
+        path: path.clone(), line, column: None,
+        condition: None, hit_condition: None, log_message: None,
+    };
+    owner.breakpoint(at(10), false).unwrap();
+    adapter.control();
+    while owner.control(DapControl::Threads).is_ok() {}
+    owner.set_breakpoint_disabled(&path, 10, true);
+    owner.breakpoint(at(20), false).unwrap();
+    assert_eq!(owner.breakpoint_refresh.len(), 1);
+    assert!(!owner.latest_breakpoints.contains_key(&path));
+    while adapter.control().is_some() {}
+    owner.try_event();
+    assert!(matches!(adapter.control(), Some(DapControl::SetBreakpoints {
+        path: sent, breakpoints,
+    }) if sent == path && breakpoints == [at(20)]));
+    assert!(owner.breakpoint_refresh.is_empty());
+    assert!(adapter.control().is_none());
+    while owner.control(DapControl::Threads).is_ok() {}
+    owner.breakpoint(at(20), true).unwrap();
+    owner.breakpoint(at(10), true).unwrap();
+    while adapter.control().is_some() {}
+    owner.try_event();
+    assert!(matches!(adapter.control(), Some(DapControl::SetBreakpoints {
+        breakpoints, ..
+    }) if breakpoints.is_empty()));
+}
+
+#[test]
+fn startup_breakpoints_reset_enabled_verdicts_for_the_new_adapter() {
+    use crate::debugger::DapBreakpointState;
+    let (mut owner, adapter) = request_fixture();
+    let path = PathBuf::from("/source.rs");
+    let at = |line| DapSourceBreakpoint {
+        path: path.clone(), line, column: None,
+        condition: None, hit_condition: None, log_message: None,
+    };
+    for line in [10, 20] {
+        owner.breakpoint(at(line), false).unwrap();
+        adapter.control();
+    }
+    owner.set_breakpoint_disabled(&path, 20, true);
+    adapter.control();
+    owner.apply_breakpoints(&path, &[at(10)], &DapResponse::Breakpoints(vec![(true, Some(11), None)]));
+    owner.stop().unwrap();
+    let (service, _adapter) = crate::debugger::test_session();
+    owner.service = service;
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Verified { line: 11 }));
+    assert_eq!(owner.startup_breakpoints(), [(path.clone(), vec![at(10)])]);
+    assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Requested { accepted: true }));
+    assert_eq!(owner.breakpoint_state(&path, 20), Some(DapBreakpointState::Disabled));
+}
+
+#[test]
+fn restoring_breakpoints_clears_removed_adapter_paths_and_old_verdicts() {
+    use crate::debugger::DapBreakpointState;
+    let root = tempfile::tempdir().unwrap();
+    let state = WorkspaceState::new(
+        WorkspaceId(1), [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+    ).unwrap();
+    let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+    let (mut owner, adapter) = request_fixture();
+    let old = root.path().join("old.rs");
+    let kept = root.path().join("kept.rs");
+    for path in [&old, &kept] {
+        owner.breakpoint(DapSourceBreakpoint {
+            path: path.clone(), line: 10, column: None,
+            condition: None, hit_condition: None, log_message: None,
+        }, false).unwrap();
+        adapter.control();
+        owner.set_breakpoint_disabled(path, 10, true);
+        adapter.control();
+    }
+    while owner.control(DapControl::Threads).is_ok() {}
+    owner.restore(vec![PersistedBreakpoint {
+        path: kept.clone(), line: 10, column: None,
+        condition: None, hit_condition: None, log_message: None,
+    }], Vec::new(), &workspace);
+    assert_eq!(owner.breakpoint_state(&old, 10), None);
+    assert_eq!(owner.breakpoint_state(&kept, 10), Some(DapBreakpointState::Requested { accepted: true }));
+    assert!(owner.disabled_breakpoints.is_empty());
+    while adapter.control().is_some() {}
+    owner.try_event();
+    let mut sent = BTreeMap::new();
+    while let Some(DapControl::SetBreakpoints { path, breakpoints }) = adapter.control() {
+        sent.insert(path, breakpoints);
+    }
+    assert!(sent[&old].is_empty());
+    assert_eq!(sent[&kept].len(), 1);
+    assert_eq!(sent.len(), 2);
+    owner.restore(Vec::new(), Vec::new(), &workspace);
+    assert!(matches!(adapter.control(), Some(DapControl::SetBreakpoints {
+        path, breakpoints,
+    }) if path == kept && breakpoints.is_empty()));
+    assert!(owner.breakpoint_states.is_empty());
+}
+
+#[test]
 fn new_watches_without_source_paths_retry_after_backpressure() {
     let (mut owner, adapter) = request_fixture();
     owner.begin_stop();
@@ -1308,6 +1468,162 @@ fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
 }
 
 #[test]
+fn automatic_stop_following_only_consumes_its_own_requests() {
+    let (mut owner, adapter) = request_fixture();
+    adapter.event(0, DapEvent::Stopped {
+        adapter: "same-name".into(), reason: "breakpoint".into(), thread_id: Some(1),
+    });
+    owner.try_event().unwrap();
+    owner.control(DapControl::Threads).unwrap();
+    let user_threads = adapter.control().unwrap();
+    assert!(matches!(answer(&mut owner, &adapter, 1, user_threads, DapResponse::Threads(vec![
+        crate::debugger::DapThread { id: 2, name: "other".into() },
+    ])), DebugResponse::Picker { kind: "threads", .. }));
+    assert_eq!(owner.follow_request, Some(0));
+    assert!(matches!(answer(&mut owner, &adapter, 0, DapControl::Threads, DapResponse::Threads(vec![
+        crate::debugger::DapThread { id: 1, name: "stopped".into() },
+    ])), DebugResponse::Absorbed));
+    let automatic_stack = adapter.control().unwrap();
+    owner.control(DapControl::StackTrace { thread_id: 2, start: 0, levels: 256 }).unwrap();
+    let user_stack = adapter.control().unwrap();
+    let frame = |id, name: &str| DapStackFrame {
+        id, name: name.into(), path: Some(PathBuf::from(format!("/{name}.rs"))),
+        line: 3, column: 1, source_reference: None,
+    };
+    let DebugResponse::Picker { kind, rows } = answer(
+        &mut owner, &adapter, 3, user_stack, DapResponse::Stack(vec![frame(20, "other")]),
+    ) else { panic!("user stack picker") };
+    assert_eq!(kind, "frames");
+    assert_eq!(rows[0].label, "other");
+    assert_eq!(owner.current_frame(), None);
+    assert_eq!(owner.follow_request, Some(2));
+    let DebugResponse::StoppedAt(location) = answer(
+        &mut owner, &adapter, 2, automatic_stack, DapResponse::Stack(vec![frame(10, "stopped")]),
+    ) else { panic!("automatic navigation") };
+    assert_eq!(location.path, PathBuf::from("/stopped.rs"));
+    assert_eq!(owner.current_frame(), Some(10));
+    let automatic_scopes = adapter.control().unwrap();
+    owner.control(DapControl::Scopes { frame_id: 10 }).unwrap();
+    let user_scopes = adapter.control().unwrap();
+    assert!(matches!(answer(&mut owner, &adapter, 5, user_scopes, DapResponse::Scopes(Vec::new())),
+        DebugResponse::Picker { kind: "scopes", .. }));
+    assert_eq!(owner.follow_request, Some(4));
+    assert!(matches!(answer(&mut owner, &adapter, 4, automatic_scopes, DapResponse::Scopes(vec![
+        crate::debugger::DapScope { name: "locals".into(), variables_reference: 7, expensive: false },
+    ])), DebugResponse::Absorbed));
+    let automatic_variables = adapter.control().unwrap();
+    owner.control(DapControl::Variables { reference: 8, start: 0, count: 10 }).unwrap();
+    let user_variables = adapter.control().unwrap();
+    assert!(matches!(answer(&mut owner, &adapter, 7, user_variables, DapResponse::Variables(leaf_variables(1))),
+        DebugResponse::Picker { kind: "variables", .. }));
+    assert_eq!(owner.follow_request, Some(6));
+    assert!(matches!(answer(&mut owner, &adapter, 6, automatic_variables, DapResponse::Variables(leaf_variables(2))),
+        DebugResponse::Absorbed));
+    assert_eq!(owner.variables(), ["v0 = 0", "v1 = 1"]);
+}
+
+#[test]
+fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers() {
+    for source_reference in [None, Some(7)] {
+        let (mut owner, adapter) = request_fixture();
+        owner.console_frame = Some(1);
+        owner.add_watch("x".into());
+        let old_watch = adapter.control().unwrap();
+        owner.control(DapControl::Variables { reference: 10, start: 0, count: 10 }).unwrap();
+        let old_variables = adapter.control().unwrap();
+        owner.control(DapControl::Scopes { frame_id: 1 }).unwrap();
+        let old_scopes = adapter.control().unwrap();
+        owner.variables = vec!["x = 1".into()];
+        owner.watch_values.insert("x".into(), "1".into());
+        let rows = owner.frames(vec![DapStackFrame {
+            id: 2, name: "caller".into(), path: Some("/caller.rs".into()),
+            line: 10, column: 2, source_reference,
+        }]);
+        let selection = owner.take_selection(&rows[0].key).unwrap();
+        owner.dismiss_choices();
+        let editor = EditorState::new("/fixture".into());
+        let windows = super::super::windows::WindowSession::new(false, 10);
+        owner.activate(selection, SourceTarget {
+            navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+            capture: Arc::new(()), line: 1, column: 1,
+        }).unwrap();
+        assert!(owner.variables().is_empty());
+        assert_eq!(owner.watch_value("x"), None);
+        assert_eq!(owner.current_frame(), Some(2));
+        if source_reference.is_some() {
+            assert!(matches!(adapter.control(), Some(DapControl::Source { reference: 7 })));
+        }
+        let scopes_id = owner.follow_request.unwrap();
+        let scopes = adapter.control().unwrap();
+        assert!(matches!(scopes, DapControl::Scopes { frame_id: 2 }));
+        let watch = adapter.control().unwrap();
+        assert!(matches!(watch, DapControl::Evaluate { frame_id: Some(2), .. }));
+        for (id, request, response) in [
+            (1, old_watch, evaluation("late 1")),
+            (2, old_variables, DapResponse::Variables(leaf_variables(1))),
+            (3, old_scopes, DapResponse::Scopes(Vec::new())),
+        ] {
+            adapter.event(0, DapEvent::Response {
+                adapter: "same-name".into(), stop_generation: 0,
+                request_id: id, request: Some(request), response,
+            });
+            assert!(owner.try_event().is_none(), "old frame response was not retired");
+        }
+        assert_eq!(owner.watch_value("x"), None);
+        assert!(matches!(answer(&mut owner, &adapter, scopes_id, scopes, DapResponse::Scopes(vec![
+            crate::debugger::DapScope { name: "locals".into(), variables_reference: 20, expensive: false },
+        ])), DebugResponse::Absorbed));
+        let variables_id = owner.follow_request.unwrap();
+        let variables = adapter.control().unwrap();
+        assert!(matches!(answer(&mut owner, &adapter, scopes_id + 1, watch, evaluation("2")), DebugResponse::Absorbed));
+        assert_eq!(owner.watch_value("x"), Some("2"));
+        assert!(matches!(answer(&mut owner, &adapter, variables_id, variables, DapResponse::Variables(vec![
+            crate::debugger::DapVariable { name: "x".into(), value: "2".into(), type_name: None, variables_reference: 0 },
+        ])), DebugResponse::Absorbed));
+        assert_eq!(owner.variables(), ["x = 2"]);
+    }
+}
+
+#[test]
+fn automatic_stop_navigation_fetches_generated_source_and_locals() {
+    let (mut owner, adapter) = request_fixture();
+    owner.begin_stop();
+    owner.stop_follow = StopFollow::Stack;
+    owner.follow_control(DapControl::StackTrace { thread_id: 1, start: 0, levels: 256 });
+    let stack = adapter.control().unwrap();
+    let DebugResponse::StoppedSource(frame) = answer(
+        &mut owner, &adapter, 1, stack, DapResponse::Stack(vec![DapStackFrame {
+            id: 42, name: "generated".into(), path: None, line: 10, column: 2, source_reference: Some(7),
+        }]),
+    ) else { panic!("generated source navigation") };
+    assert_eq!(owner.current_frame(), Some(42));
+    let scopes_id = owner.follow_request.unwrap();
+    let scopes = adapter.control().unwrap();
+    assert!(matches!(scopes, DapControl::Scopes { frame_id: 42 }));
+    let editor = EditorState::new("/fixture".into());
+    let windows = super::super::windows::WindowSession::new(false, 10);
+    owner.request_source(frame.source_reference.unwrap(), SourceTarget {
+        navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+        capture: Arc::new(()), line: frame.line, column: frame.column,
+    }).unwrap();
+    let source_request = adapter.control().unwrap();
+    assert!(matches!(source_request, DapControl::Source { reference: 7 }));
+    assert!(matches!(answer(&mut owner, &adapter, scopes_id, scopes, DapResponse::Scopes(vec![
+        crate::debugger::DapScope { name: "locals".into(), variables_reference: 7, expensive: false },
+    ])), DebugResponse::Absorbed));
+    let variables_id = owner.follow_request.unwrap();
+    let variables = adapter.control().unwrap();
+    assert!(matches!(answer(&mut owner, &adapter, variables_id, variables, DapResponse::Variables(leaf_variables(1))),
+        DebugResponse::Absorbed));
+    assert_eq!(owner.variables(), ["v0 = 0"]);
+    assert!(matches!(answer(&mut owner, &adapter, 3, source_request, DapResponse::Source {
+        name: "generated".into(), content: "generated source".into(), mime_type: None,
+    }), DebugResponse::Result(DapResponse::Source { .. })));
+    let target = owner.take_source().unwrap();
+    assert_eq!((target.line, target.column), (10, 2));
+}
+
+#[test]
 fn virtual_source_requests_retain_the_selected_frame_position() {
     let root = tempfile::tempdir().unwrap();
     let state = WorkspaceState::new(
@@ -1345,6 +1661,8 @@ fn virtual_source_requests_retain_the_selected_frame_position() {
         adapter.control(),
         Some(DapControl::Source { reference: 7 })
     ));
+    assert!(matches!(adapter.control(), Some(DapControl::Scopes { frame_id: 1 })));
+    assert_eq!(owner.stop_follow, StopFollow::Scopes);
     let source = owner.take_source().unwrap();
     assert_eq!((source.line, source.column), (200, 5));
 }

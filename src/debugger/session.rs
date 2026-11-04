@@ -558,6 +558,12 @@ impl TestAdapter {
     pub(crate) fn control(&self) -> Option<DapControl> {
         self.controls.try_recv().ok().map(|c| c.value)
     }
+    pub(crate) fn with_terminal_reply(&self, test: impl FnOnce(super::DapTerminalReply)) {
+        let (_request, reply) = super::reverse::ReverseRequest::reserve(
+            1, self.events.actor.live.clone(),
+        );
+        test(reply);
+    }
 }
 #[cfg(test)]
 pub(crate) fn fixture() -> (DapService, TestAdapter) {

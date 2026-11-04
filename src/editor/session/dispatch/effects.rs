@@ -5829,6 +5829,21 @@ impl InteractiveApplication {
                             });
                         }
                     }
+                    crate::editor::session::debugger::DebugResponse::StoppedSource(frame) => {
+                        let target = crate::editor::session::debugger::SourceTarget {
+                            line: frame.line,
+                            column: frame.column,
+                            navigation: self.window_session.navigation_stamp(
+                                self.state.window_version(), self.state.active_view,
+                            ),
+                            capture: self.input.capture_epoch(),
+                        };
+                        if let Err(error) = self.debugger_session.request_source(
+                            frame.source_reference.expect("stopped source reference"), target,
+                        ) {
+                            self.show_error(error);
+                        }
+                    }
                     crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
                         self.install_debug_rows(kind, rows)
                     }
