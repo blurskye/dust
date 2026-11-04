@@ -110,7 +110,7 @@ impl InteractiveApplication {
             let Ok(line_start) = text.line_to_byte(anchor.line) else { continue };
             lines.insert(anchor.line);
             if width > 0 {
-                visible.extend(model.bytes_at_cells(anchor, horizontal, horizontal + width - 1)
+                visible.extend(model.visible_bytes(anchor, horizontal, width)
                     .into_iter().map(|byte| ByteOffset(line_start.get() + byte)));
             }
         }

@@ -1397,6 +1397,38 @@ fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
 }
 
 #[test]
+fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
+    let mut app = app();
+    app.window_session.observe_size((20, 8));
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.wrap = false;
+    fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    fixture.settings.ui.status_line.enabled = false;
+    app.configuration.install_fixture(fixture);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&"x ".repeat(100)), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.state.views[view].scroll_column = 10;
+    app.state.views[view].cursor = ByteOffset(10);
+    for position in [0, 18] {
+        app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
+            buffer,
+            revision: app.state.buffers[buffer].text.revision(),
+            position: ByteOffset(position),
+            label: "hint".repeat(20),
+        });
+    }
+    app.begin_flash();
+    press_keys(&mut app, &["x"]);
+    let flash = app.flash.as_ref().expect("three visible matches");
+    assert_eq!(flash.targets.iter().map(|target| target.range.start.get()).collect::<Vec<_>>(), vec![12, 14, 16]);
+    let frame = render(&app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 20, 8);
+    for label in flash.targets.iter().filter_map(|target| target.label) {
+        assert!((0..8).any(|row| frame.grid.row_text(row).contains(label)));
+    }
+}
+
+#[test]
 fn flash_cancels_cached_targets_after_a_reload() {
     let mut app = app();
     let (buffer, view) = app
