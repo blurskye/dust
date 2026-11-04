@@ -1,6 +1,6 @@
 use super::InputSession;
 use crate::editor::session::configuration::{
-    configured_byte_offset_at_display_column, configured_grapheme_width, configured_text_width,
+    configured_byte_offset_at_display_column, configured_grapheme_width,
 };
 use crate::editor::text::{BufferRevision, ByteOffset, TextBuffer};
 use crate::editor::{
@@ -139,7 +139,7 @@ impl InputSession {
         let target_anchor = visual_rows.painted_row(start_anchor, usize::from(row))?;
         let line_index = target_anchor.line;
         let line_start = text.line_to_byte(line_index).unwrap_or(ByteOffset(0));
-        let byte = if wrap_enabled {
+        let byte = if wrap_enabled || visual_rows.is_table_line(line_index) {
             visual_rows.byte_at_cell(target_anchor, usize::from(column.saturating_sub(gutter)))
         } else {
             let line = text.line(line_index).unwrap_or_default();
@@ -182,9 +182,8 @@ impl InputSession {
                         .get(hint_cursor)
                         .filter(|hint| hint.position == global)
                     {
-                        let width = configured_text_width(
+                        let width = crate::ui::geometry::cell_text_width(
                             &hint.label,
-                            policy.tab_width,
                             policy.ambiguous_width,
                         );
                         let start = display_column.saturating_add(virtual_cells);

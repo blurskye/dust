@@ -4813,19 +4813,27 @@ impl InteractiveApplication {
             line: view.scroll_line,
             wrap_row: view.scroll_wrap_row,
         });
-        let first_anchor = if kind.ends_with("up") {
-            visual_rows.backward(old_start_anchor, amount)
-        } else {
-            visual_rows.forward(old_start_anchor, amount)
+        // Scroll past an expanded diagnostic block even when it is taller than a page.
+        // Viewport fitting still uses forward/backward's strict screen-row budget.
+        let advance = |anchor| {
+            let target = if kind.ends_with("up") {
+                visual_rows.backward(anchor, amount)
+            } else {
+                visual_rows.forward(anchor, amount)
+            };
+            if target != anchor {
+                target
+            } else if kind.ends_with("up") {
+                visual_rows.previous(anchor)
+            } else {
+                visual_rows.next(anchor)
+            }
         };
+        let first_anchor = advance(old_start_anchor);
         let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
         let last_anchor = visual_rows.forward(first_anchor, body.saturating_sub(1));
         let cursor_anchor = if kind.starts_with("half_") {
-            if kind.ends_with("up") {
-                visual_rows.backward(cursor_anchor, amount)
-            } else {
-                visual_rows.forward(cursor_anchor, amount)
-            }
+            advance(cursor_anchor)
         } else {
             cursor_anchor
         };

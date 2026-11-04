@@ -256,6 +256,11 @@ impl<'a> VisualRowModel<'a> {
         self.markdown.as_ref()?.line(line)
     }
 
+    #[must_use]
+    pub fn is_table_line(&self, line: usize) -> bool {
+        self.markdown_line(line).is_some_and(|markdown| markdown.table.is_some())
+    }
+
     /// The cells a grapheme takes as drawn, with what markdown draws before it.
     fn drawn_width(
         &self,

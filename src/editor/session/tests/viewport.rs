@@ -913,7 +913,7 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
         severity: DiagnosticSeverity::Error,
         source: String::new(),
         code: None,
-        message: "one\ntwo\nthree\nfour".into(),
+        message: "diagnostic ".repeat(40),
     });
     app.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
         path, line: 3, severities: vec![DiagnosticSeverity::Error],
@@ -936,6 +936,58 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
     app.scroll_view("half_down", 1);
     assert_visible(&app);
     assert!(app.ui.expanded_diagnostic.is_some());
+    // A diagnostic block larger than the scroll step must not trap repeated wheel events.
+    app.state.views[view].cursor = cursor;
+    app.state.views[view].scroll_line = 3;
+    app.scroll_view("half_down", 1);
+    assert!(app.state.views[view].scroll_line > 3);
+    assert_visible(&app);
+    let after = app.state.buffers[buffer].text.line_to_byte(4).unwrap();
+    app.state.views[view].cursor = after;
+    app.state.views[view].scroll_line = 4;
+    app.scroll_view("half_up", 1);
+    assert!(app.state.views[view].scroll_line < 4);
+    assert_visible(&app);
+}
+
+#[test]
+fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
+    use crate::language::syntax::MarkdownMark;
+    let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
+    for wrap in [false, true] {
+        let mut app = app();
+        app.window_session.observe_size((20, 14));
+        {
+            let mut fixture = app.configuration.fixture_snapshot();
+            fixture.settings.editor.wrap = wrap;
+            fixture.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+            fixture.settings.editor.git_signs.enabled = false;
+            fixture.settings.ui.status_line.enabled = false;
+            app.configuration.install_fixture(fixture);
+        }
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text(text), None);
+        app.set_dashboard_visibility(false);
+        app.reconcile_editor_windows();
+        let revision = app.state.buffers[buffer].text.revision();
+        let mark = |start, end, mark| crate::ui::UiMarkdownMark {
+            buffer, revision,
+            range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+            mark,
+        };
+        app.ui.markdown_marks = text.match_indices('|')
+            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect();
+        app.ui.markdown_marks.push(mark(1, text.find("\n\nlast").unwrap() + 1, MarkdownMark::Table));
+        app.ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+        let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
+        for (row, word) in [(1, "long"), (2, "here"), (3, "more")] {
+            app.state.views[view].cursor = ByteOffset(text.find("last").unwrap());
+            app.state.views[view].scroll_line = 0;
+            app.state.views[view].scroll_wrap_row = 0;
+            app.input.observe_mouse(viewport.x + 6, viewport.y + row);
+            app.apply_mouse_cursor(false);
+            assert_eq!(app.state.views[view].cursor, ByteOffset(text.find(word).unwrap()), "wrap {wrap}, row {row}");
+        }
+    }
 }
 
 #[test]
@@ -961,6 +1013,39 @@ fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
             .unwrap(),
         30
     );
+}
+
+#[test]
+fn mouse_hits_use_painted_inlay_replacement_widths() {
+    for wrap in [false, true] {
+        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+            let mut app = app();
+            app.window_session.observe_size((40, 12));
+            let mut config = app.configuration.fixture_snapshot();
+            config.settings.editor.wrap = wrap;
+            config.settings.editor.ambiguous_width = ambiguous;
+            config.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+            config.settings.editor.git_signs.enabled = false;
+            app.configuration.install_fixture(config);
+            let (buffer, view) = app.state.open_text(TextBuffer::from_text("xyz"), None);
+            app.set_dashboard_visibility(false);
+            app.reconcile_editor_windows();
+            let label = "a\u{200b}\tb";
+            app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
+                buffer,
+                revision: app.state.buffers[buffer].text.revision(),
+                position: ByteOffset(0),
+                label: label.into(),
+            });
+            let cells = u16::try_from(crate::ui::geometry::cell_text_width(label, ambiguous)).unwrap();
+            let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
+            for column in 0..=cells + 1 {
+                app.input.observe_mouse(viewport.x + column, viewport.y);
+                app.apply_mouse_cursor(false);
+                assert_eq!(app.state.views[view].cursor, ByteOffset(usize::from(column.saturating_sub(cells))));
+            }
+        }
+    }
 }
 
 #[test]
