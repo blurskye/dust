@@ -613,18 +613,30 @@ fn link(text: &str) -> Option<(&str, usize)> {
     let target = text[label_end + 1..].strip_prefix('(')?;
     let mut depth = 0usize;
     let mut escaped = false;
+    let mut angle = target.trim_start().starts_with('<');
+    let mut quote = None;
+    let mut after_space = false;
     let target_end = target.char_indices().find_map(|(index, character)| {
         if escaped {
             escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if angle {
+            angle = character != '>';
+        } else if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            }
         } else {
             match character {
-                '\\' => escaped = true,
+                '\'' | '"' if depth == 0 && after_space => quote = Some(character),
                 '(' => depth += 1,
                 ')' if depth == 0 => return Some(index),
                 ')' => depth -= 1,
                 _ => {}
             }
         }
+        after_space = character.is_whitespace();
         None
     })?;
     let label = &text[1..label_end];
@@ -841,6 +853,16 @@ mod tests {
         let out = rendered(r"[doc](https://example.test/a_(b)) [next](a\)b) [last](a\(b)", 100);
         assert_eq!(out.text, "doc next last\n");
         assert_eq!(styled(&out, Highlight::LINK), ["doc next last"]);
+    }
+
+    #[test]
+    fn link_parentheses_inside_angle_destinations_and_titles_are_literal() {
+        let out = rendered(
+            r#"[angle](<https://example.test/a_(b>) [double](url "a(b") [single](url 'a)b') [apostrophe](https://example.test/it's_(ok))"#,
+            100,
+        );
+        assert_eq!(out.text, "angle double single apostrophe\n");
+        assert_eq!(styled(&out, Highlight::LINK), ["angle double single apostrophe"]);
     }
 
     #[test]
