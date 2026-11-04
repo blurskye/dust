@@ -290,6 +290,7 @@ fn update_trust_database(
     path: &Path,
     previous: &TrustDatabase,
     desired: &TrustDatabase,
+    revoked: &[RootIdentity],
 ) -> Result<(), TrustStateError> {
     validate_trust_database(path, desired)?;
     let parent = path.parent().ok_or_else(|| TrustStateError::Invalid {
@@ -326,6 +327,14 @@ fn update_trust_database(
             entries.push(identity.clone());
         }
     }
+    current.identities.retain(|identity| {
+        !revoked.contains(identity)
+            && !desired.seen.iter().any(|observed| {
+                !previous.seen.contains(observed)
+                    && observed.canonical_path == identity.canonical_path
+                    && observed != identity
+            })
+    });
     // Seen history may be evicted locally; keep every identity another instance still trusts.
     for identity in &current.identities {
         if !current.seen.contains(identity) {
@@ -359,6 +368,7 @@ pub(super) enum TrustRequest {
         generation: u64,
         path: PathBuf,
         database: TrustDatabase,
+        revoked: Vec<RootIdentity>,
     },
 }
 
@@ -382,6 +392,8 @@ pub struct WorkspaceTrustService {
     sender: SyncSender<TrustRequest>,
     receiver: Receiver<TrustEvent>,
     next_generation: u64,
+    pending_writes: usize,
+    write_error: Option<String>,
 }
 
 impl WorkspaceTrustService {
@@ -411,8 +423,9 @@ impl WorkspaceTrustService {
                             generation,
                             path,
                             database,
+                            revoked,
                         } => {
-                            let result = update_trust_database(&path, &previous, &database);
+                            let result = update_trust_database(&path, &previous, &database, &revoked);
                             if result.is_ok() {
                                 previous = database;
                             }
@@ -429,6 +442,8 @@ impl WorkspaceTrustService {
             sender: request_sender,
             receiver: event_receiver,
             next_generation: 0,
+            pending_writes: 0,
+            write_error: None,
         }
     }
 
@@ -464,6 +479,7 @@ impl WorkspaceTrustService {
         path: PathBuf,
         identities: Vec<RootIdentity>,
         seen: Vec<RootIdentity>,
+        revoked: Vec<RootIdentity>,
     ) -> Result<u64, TrustStateError> {
         let generation = self.next_generation()?;
         self.sender
@@ -475,14 +491,35 @@ impl WorkspaceTrustService {
                     identities,
                     seen,
                 },
+                revoked,
             })
             .map_err(map_trust_send_error)?;
+        self.pending_writes += 1;
         Ok(generation)
     }
 
-    pub fn try_event(&self) -> Result<Option<TrustEvent>, TrustStateError> {
+    pub fn pending_writes(&self) -> bool {
+        self.pending_writes != 0
+    }
+
+    pub fn shutdown_result(&self) -> Result<(), String> {
+        if self.pending_writes() {
+            return Err("workspace trust writes did not finish before the shared shutdown deadline".into());
+        }
+        self.write_error.clone().map_or(Ok(()), Err)
+    }
+
+    pub fn try_event(&mut self) -> Result<Option<TrustEvent>, TrustStateError> {
         match self.receiver.try_recv() {
-            Ok(event) => Ok(Some(event)),
+            Ok(event) => {
+                if let TrustEvent::Persisted { result, .. } = &event {
+                    self.pending_writes -= 1;
+                    if let Err(error) = result {
+                        self.write_error = Some(error.to_string());
+                    }
+                }
+                Ok(Some(event))
+            }
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(TrustStateError::WorkerStopped),
         }
@@ -518,6 +555,97 @@ mod generation_tests {
 mod persistence_tests {
     use super::*;
 
+    fn wait_for_event(service: &mut WorkspaceTrustService) -> TrustEvent {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Some(event) = service.try_event().unwrap() {
+                return event;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn non_utf8_trust_paths_round_trip_without_changing_utf8_records() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(std::ffi::OsString::from_vec(b"root-\xff".to_vec()));
+        let utf8 = RootIdentity::capture(dir.path()).unwrap();
+        let identity = RootIdentity {
+            canonical_path: root,
+            filesystem_identity: utf8.filesystem_identity,
+        };
+        let database = TrustDatabase {
+            identities: vec![identity.clone(), utf8.clone()],
+            seen: vec![identity, utf8],
+            ..TrustDatabase::default()
+        };
+        let path = dir.path().join("trust.toml");
+        persist_trust_database(&path, &database).unwrap();
+        assert_eq!(load_trust_database(&path).unwrap(), database);
+        assert!(fs::read_to_string(&path).unwrap().contains(&format!("canonical_path = {:?}", dir.path().to_str().unwrap())));
+    }
+
+    #[test]
+    fn explicit_revocation_removes_a_grant_missing_from_the_loaded_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity = RootIdentity::capture(dir.path()).unwrap();
+        let path = dir.path().join("trust.toml");
+        let mut service = WorkspaceTrustService::start(2);
+        service.load(path.clone()).unwrap();
+        assert!(matches!(wait_for_event(&mut service), TrustEvent::Loaded { result: Ok(_), .. }));
+        persist_trust_database(&path, &TrustDatabase {
+            identities: vec![identity.clone()],
+            seen: vec![identity.clone()],
+            ..TrustDatabase::default()
+        }).unwrap();
+        service.persist(path.clone(), vec![], vec![identity.clone()], vec![identity.clone()]).unwrap();
+        assert!(service.pending_writes());
+        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Ok(()), .. }));
+        assert!(!service.pending_writes());
+        let loaded = load_trust_database(&path).unwrap();
+        assert!(loaded.identities.is_empty());
+        assert_eq!(loaded.seen, vec![identity]);
+    }
+
+    #[test]
+    fn observing_a_replaced_root_invalidates_concurrent_trust_of_the_old_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = RootIdentity::capture(dir.path()).unwrap();
+        let mut replacement = old.clone();
+        replacement.filesystem_identity = Some((123, 456));
+        let path = dir.path().join("trust.toml");
+        persist_trust_database(&path, &TrustDatabase {
+            identities: vec![old.clone()],
+            seen: vec![old],
+            ..TrustDatabase::default()
+        }).unwrap();
+        let desired = TrustDatabase {
+            seen: vec![replacement.clone()],
+            ..TrustDatabase::default()
+        };
+        update_trust_database(&path, &TrustDatabase::default(), &desired, &[]).unwrap();
+        let loaded = load_trust_database(&path).unwrap();
+        assert!(loaded.identities.is_empty());
+        assert_eq!(loaded.seen, vec![replacement]);
+    }
+
+    #[test]
+    fn shutdown_tracks_all_accepted_writes_and_retains_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.toml");
+        let mut service = WorkspaceTrustService::start(2);
+        service.persist(dir.path().to_path_buf(), vec![], vec![], vec![]).unwrap();
+        service.persist(path, vec![], vec![], vec![]).unwrap();
+        assert!(service.shutdown_result().is_err());
+        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Err(_), .. }));
+        assert!(service.pending_writes());
+        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Ok(()), .. }));
+        assert!(!service.pending_writes());
+        assert!(service.shutdown_result().unwrap_err().contains("trust state"));
+    }
+
     #[test]
     fn stale_trust_snapshots_cannot_restore_revocations() {
         let dir = tempfile::tempdir().unwrap();
@@ -535,13 +663,13 @@ mod persistence_tests {
             identities: vec![],
             ..initial.clone()
         };
-        update_trust_database(&path, &initial, &revoked).unwrap();
+        update_trust_database(&path, &initial, &revoked, &[]).unwrap();
         let stale = TrustDatabase {
             identities: vec![a.clone(), b.clone()],
             seen: vec![a.clone(), b.clone()],
             ..TrustDatabase::default()
         };
-        update_trust_database(&path, &initial, &stale).unwrap();
+        update_trust_database(&path, &initial, &stale, &[]).unwrap();
         let loaded = load_trust_database(&path).unwrap();
         assert_eq!(loaded.identities, vec![b]);
         assert!(loaded.seen.contains(&a));

@@ -718,7 +718,12 @@ impl WindowGraph {
             workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
         }
         if placement == WindowPlacement::Fullscreen {
-            self.focus(window)?;
+            if self.eligible_focus(window, tab) {
+                self.focus(window)?;
+            } else if self.focused.is_some_and(|focused| !self.can_focus(focused)) {
+                self.focused = None;
+                self.select_focus_fallback();
+            }
         }
         if placement == WindowPlacement::Hidden && self.focused == Some(window) {
             self.focused = None;
@@ -782,13 +787,11 @@ impl WindowGraph {
                 .get_mut(&second)
                 .ok_or(WindowError::UnknownWindow)?
                 .placement = first_placement;
-            if candidate.focused.is_some_and(|focused| {
-                candidate
-                    .windows
-                    .get(&focused)
-                    .is_some_and(|window| window.placement == WindowPlacement::Hidden)
-            }) {
-                candidate.focused = None;
+            if candidate.focused.is_some_and(|focused| !candidate.can_focus(focused)) {
+                candidate.focused = [first, second].into_iter().find(|window| {
+                    candidate.windows[window].placement == WindowPlacement::Fullscreen
+                        && candidate.can_focus(*window)
+                });
                 candidate.select_focus_fallback();
             }
             Ok(())
@@ -1273,7 +1276,8 @@ impl WindowGraph {
                 && window.focusable
                 && window.placement != WindowPlacement::Hidden
                 && !self.windows.values().any(|other| {
-                    other.tab == tab
+                    !matches!(window.placement, WindowPlacement::Overlay(_))
+                        && other.tab == tab
                         && other.placement == WindowPlacement::Fullscreen
                         && other.id != window.id
                 })
@@ -1288,7 +1292,8 @@ impl WindowGraph {
                     && window.focusable
                     && window.placement != WindowPlacement::Hidden
                     && !windows.values().any(|other| {
-                        other.tab == window.tab
+                        !matches!(window.placement, WindowPlacement::Overlay(_))
+                            && other.tab == window.tab
                             && other.placement == WindowPlacement::Fullscreen
                             && other.id != window.id
                     })

@@ -15,8 +15,8 @@ use std::{
 };
 use thiserror::Error;
 
-// Keep existing UTF-8 JSON paths readable; Unix paths with other bytes use byte arrays.
-mod persisted_path {
+// Keep existing UTF-8 paths readable; Unix paths with other bytes use byte arrays.
+pub(crate) mod persisted_path {
     use super::*;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
 

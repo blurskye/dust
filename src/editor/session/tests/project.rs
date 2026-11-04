@@ -639,6 +639,72 @@ fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
 }
 
 #[test]
+fn shutdown_waits_for_a_queued_workspace_revocation() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let path = app.workspace.state_path().to_path_buf();
+    // Another instance grants trust after this instance loaded its untrusted snapshot.
+    let identity = app.workspace.roots()[0].identity.clone();
+    let mut other = crate::workspace::WorkspaceTrustService::start(1);
+    other.persist(path.clone(), vec![identity.clone()], vec![identity], vec![]).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(crate::workspace::TrustEvent::Persisted { result, .. }) = other.try_event().unwrap() {
+            result.unwrap();
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let lock = crate::files::lock_file(&path.with_extension("lock")).unwrap();
+    app.revoke_workspace_trust();
+    assert!(app.workspace.persist_pending());
+    thread::scope(|scope| {
+        scope.spawn(move || {
+            thread::sleep(Duration::from_millis(30));
+            drop(lock);
+        });
+        app.finish_shutdown_before(Instant::now() + Duration::from_secs(2)).unwrap();
+    });
+    assert!(!app.workspace.persist_pending());
+    assert!(fs::read_to_string(path).unwrap().contains("identities = []"));
+}
+
+#[test]
+fn shutdown_reports_failed_workspace_trust_writes() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let path = app.workspace.state_path().to_path_buf();
+    fs::create_dir_all(&path).unwrap();
+    app.revoke_workspace_trust();
+    assert!(matches!(
+        app.finish_shutdown_before(Instant::now() + Duration::from_secs(2)),
+        Err(super::super::InteractiveError::Vfs(crate::files::VfsError::Io {
+            operation: "finish workspace trust shutdown", ..
+        }))
+    ));
+}
+
+#[test]
+fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
+    let mut app = app();
+    prepare_trust_identity(&mut app);
+    let path = app.workspace.state_path().to_path_buf();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let lock = crate::files::lock_file(&path.with_extension("lock")).unwrap();
+    app.revoke_workspace_trust();
+    assert!(matches!(
+        app.finish_shutdown_before(Instant::now()),
+        Err(super::super::InteractiveError::Vfs(crate::files::VfsError::Io {
+            operation: "finish workspace trust shutdown", ..
+        }))
+    ));
+    assert!(app.workspace.persist_pending());
+    drop(lock);
+    wait_trust(&mut app);
+}
+
+#[test]
 fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
     let mut app = app();
     prepare_trust_identity(&mut app);

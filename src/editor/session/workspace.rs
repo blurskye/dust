@@ -159,7 +159,10 @@ impl WorkspaceSession {
         self.root_operation.is_some()
     }
     pub(in crate::editor::session) fn persist_pending(&self) -> bool {
-        self.persist.is_some()
+        self.service.pending_writes()
+    }
+    pub(in crate::editor::session) fn trust_shutdown_result(&self) -> Result<(), String> {
+        self.service.shutdown_result()
     }
     pub(in crate::editor::session) fn require_path(
         &self,
@@ -356,6 +359,11 @@ impl WorkspaceSession {
             self.state_path.clone(),
             self.store.identities(),
             self.store.seen_identities(),
+            if target == Some(WorkspaceTrust::Untrusted) {
+                self.state.roots().iter().map(|root| root.identity.clone()).collect()
+            } else {
+                Vec::new()
+            },
         ) {
             Ok(generation) => {
                 self.persist = Some(Persist {

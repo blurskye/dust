@@ -1165,6 +1165,64 @@ fn fullscreen_moves_focus_and_rejects_suppressed_windows() {
 }
 
 #[test]
+fn non_focusable_content_can_move_to_fullscreen() {
+    let (mut graph, _, view, tab) = graph_with_content();
+    let tile = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let mut capabilities = ContentCapabilities::for_adapter(ContentAdapterKind::DeclarativeUi);
+    capabilities.focusable = false;
+    let content = graph.create_content_with_contract(
+        ContentTypeId::new("plugin.status").unwrap(),
+        ContentContract::declared(ContentAdapterKind::DeclarativeUi, capabilities),
+        "status".into(), false, "plugin", 1,
+    ).unwrap();
+    let view = graph.create_view(content, "plugin", 1).unwrap();
+    let window = graph.open_window(tab, view, WindowPlacement::Docked {
+        edge: DockEdge::Bottom, size: 5,
+    }, false, "plugin", 1).unwrap();
+    graph.focus(tile).unwrap();
+    graph.place(window, WindowPlacement::Fullscreen).unwrap();
+    assert_eq!(graph.focused(), None);
+    assert!(!graph.can_focus(tile));
+    graph.validate().unwrap();
+    graph.place(window, WindowPlacement::Hidden).unwrap();
+    graph.focus(tile).unwrap();
+}
+
+#[test]
+fn swapping_fullscreen_repairs_suppressed_focus() {
+    for focusable in [true, false] {
+        let (mut graph, content, view, tab) = graph_with_content();
+        let dock = WindowPlacement::Docked { edge: DockEdge::Bottom, size: 5 };
+        let a = graph.open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1).unwrap();
+        let view = graph.create_view(content, "builtin", 1).unwrap();
+        let b = graph.open_window(tab, view, dock, focusable, "builtin", 1).unwrap();
+        graph.swap_non_tiled_placements(a, b).unwrap();
+        assert_eq!(graph.focused(), focusable.then_some(b));
+        assert_eq!(graph.window(a).unwrap().placement, dock);
+        assert_eq!(graph.window(b).unwrap().placement, WindowPlacement::Fullscreen);
+        graph.validate().unwrap();
+    }
+}
+
+#[test]
+fn overlays_above_fullscreen_can_receive_and_remember_focus() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let fullscreen = graph.open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1).unwrap();
+    let view = graph.create_view(content, "builtin", 1).unwrap();
+    let overlay = graph.open_window(tab, view, WindowPlacement::Overlay(WindowRect {
+        x: 1, y: 1, width: 20, height: 10,
+    }), true, "builtin", 1).unwrap();
+    graph.focus(fullscreen).unwrap();
+    graph.focus(overlay).unwrap();
+    let other_tab = graph.create_workspace_tab("builtin", 1).unwrap();
+    let view = graph.create_view(content, "builtin", 1).unwrap();
+    graph.open_window(other_tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    graph.set_active_tab(tab).unwrap();
+    assert_eq!(graph.focused(), Some(overlay));
+    graph.validate().unwrap();
+}
+
+#[test]
 fn hiding_the_last_window_keeps_the_active_tab() {
     let (mut graph, content, view, tab) = graph_with_content();
     let a = graph

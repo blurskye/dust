@@ -17,6 +17,7 @@ pub struct RootId(pub u64);
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootIdentity {
+    #[serde(with = "crate::persistence::persisted_path")]
     pub canonical_path: PathBuf,
     pub filesystem_identity: Option<(u64, u64)>,
 }

@@ -49,7 +49,8 @@ impl InteractiveApplication {
             || self.language.pending_replies()
             || self.tasks.running_count() != 0
             || self.terminal_session.pending() != 0
-            || self.debugger_session.pending() != 0)
+            || self.debugger_session.pending() != 0
+            || self.workspace.persist_pending())
             && Instant::now() < deadline
         {
             for error in self.debugger_session.reply_failures() {
@@ -58,6 +59,7 @@ impl InteractiveApplication {
             self.drain_job_events(Some(deadline));
             self.process_pty_events();
             self.process_vfs_results();
+            self.process_trust_events();
             self.queue_dirty_recovery_before_exit();
             for error in self.language.flush_edit_replies() {
                 self.show_error(error);
@@ -119,6 +121,14 @@ impl InteractiveApplication {
             self.process_persistence_events();
             std::thread::sleep(Duration::from_millis(2));
         }
+        self.process_trust_events();
+        self.workspace.trust_shutdown_result().map_err(|message| {
+            InteractiveError::Vfs(VfsError::Io {
+                operation: "finish workspace trust shutdown",
+                path: self.state.workspace_root.clone(),
+                source: std::io::Error::other(message),
+            })
+        })?;
         if self.language.pending_replies() {
             return Err(InteractiveError::Vfs(VfsError::Io {
                 operation: "finish requesting-server edit responses",
