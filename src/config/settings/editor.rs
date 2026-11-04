@@ -123,6 +123,55 @@ impl Default for GitSignsConfig {
     }
 }
 
+/// Markdown drawn in place, as render-markdown.nvim does: the cursor's line shows its source.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkdownConfig {
+    pub render: bool,
+    pub glyphs: MarkdownGlyphs,
+}
+
+impl Default for MarkdownConfig {
+    fn default() -> Self {
+        Self {
+            render: true,
+            glyphs: MarkdownGlyphs::default(),
+        }
+    }
+}
+
+/// What markdown draws in place of its markup.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkdownGlyphs {
+    /// Drawn in place of `#` to `######` and the space after them.
+    pub headings: Vec<String>,
+    /// Drawn in place of a list's `-`, `+` or `*`, one per nesting depth, repeating.
+    pub bullets: Vec<String>,
+    pub unchecked: String,
+    pub checked: String,
+    pub quote: String,
+    pub link: String,
+    pub image: String,
+    /// Repeated across the window for a `---` break.
+    pub rule: String,
+}
+
+impl Default for MarkdownGlyphs {
+    fn default() -> Self {
+        Self {
+            headings: ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "].map(String::from).into(),
+            bullets: ["●", "○", "◆", "◇"].map(String::from).into(),
+            unchecked: "󰄱".into(),
+            checked: "󰱒".into(),
+            quote: "▋".into(),
+            link: "󰌹 ".into(),
+            image: "󰥶 ".into(),
+            rule: "─".into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndentGuideConfig {
@@ -151,6 +200,7 @@ pub struct EditorConfig {
     pub viewport: EditorViewportConfig,
     pub git_signs: GitSignsConfig,
     pub indent_guides: IndentGuideConfig,
+    pub markdown: MarkdownConfig,
     pub registers: RegisterConfig,
     pub large_file: LargeFileConfig,
     /// Line comment string per file extension, used by `gc`.
@@ -172,6 +222,7 @@ impl Default for EditorConfig {
             viewport: EditorViewportConfig::default(),
             git_signs: GitSignsConfig::default(),
             indent_guides: IndentGuideConfig::default(),
+            markdown: MarkdownConfig::default(),
             registers: RegisterConfig::default(),
             large_file: LargeFileConfig::default(),
             comments: BTreeMap::new(),

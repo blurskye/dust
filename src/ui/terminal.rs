@@ -498,6 +498,14 @@ fn queue_style(
         Style::TerminalStatusAccent => &theme.styles.terminal_status_accent,
         Style::Terminal(_) => unreachable!("terminal cells are handled above"),
         Style::Syntax(group) => theme.highlight(group).unwrap_or(&theme.styles.default),
+        Style::MarkdownHeading(group) => {
+            derived = theme.markdown_heading(group);
+            &derived
+        }
+        Style::MarkdownCode(group) => {
+            derived = theme.markdown_code(group);
+            &derived
+        }
         Style::DocumentationSyntax(group) => {
             let popup = &theme.styles.documentation_text;
             derived = theme.highlight(group).map_or_else(

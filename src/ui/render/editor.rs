@@ -375,6 +375,14 @@ pub(super) fn render_editor_view(
         .filter(|span| span.buffer == view.buffer && span.revision == buffer.text.revision())
         .collect::<Vec<_>>();
     let mut color_cursor = 0usize;
+    let mut markdown = super::markdown::MarkdownMarks::new(
+        ui,
+        view.buffer,
+        buffer.text.revision(),
+        view.mode,
+        current_line,
+        &config.editor.markdown,
+    );
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
     // The empty line after a final newline is drawn only while the cursor is on it.
@@ -513,6 +521,9 @@ pub(super) fn render_editor_view(
             .unwrap_or(ByteOffset(0));
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
+        let markdown_line = markdown
+            .as_mut()
+            .and_then(|marks| marks.line(line_index, line_start, full_content.len()));
         let leading_indentation = leading_indentation_width(full_content, config.editor.tab_width);
         let can_wrap = wrap_enabled;
         let skipped_bytes = if can_wrap {
@@ -588,6 +599,14 @@ pub(super) fn render_editor_view(
                     rendered_inlays = rendered_inlays.saturating_add(1);
                 }
                 inlay_cursor = inlay_cursor.saturating_add(1);
+            }
+            match markdown_line.as_ref().and_then(|markdown| markdown.at(global)) {
+                Some(super::markdown::Drawn::Hidden) => continue,
+                Some(super::markdown::Drawn::Glyph(glyph, style)) => {
+                    x = grid.put_text_clipped(x, screen_row, glyph, style, width);
+                    continue;
+                }
+                None => {}
             }
             let style = if is_selected(
                 view.selection,
@@ -678,6 +697,9 @@ pub(super) fn render_editor_view(
             } else {
                 Style::Default
             };
+            let style = markdown_line
+                .as_ref()
+                .map_or(style, |markdown| markdown.restyle(style));
             let grapheme_column = source_column;
             let cells = if grapheme == "\t" {
                 config.editor.tab_width - (source_column % config.editor.tab_width)
@@ -771,6 +793,23 @@ pub(super) fn render_editor_view(
                     grid.set_cell(x, screen_row, grapheme, style);
                 }
                 x = x.saturating_add(advance);
+            }
+        }
+        if let Some(markdown) = &markdown_line {
+            if let Some(rule) = markdown.rule {
+                while x < width {
+                    let next = grid.put_text_clipped(x, screen_row, rule, Style::Muted, width);
+                    if next == x {
+                        break;
+                    }
+                    x = next;
+                }
+            }
+            if let Some(fill) = markdown.fill {
+                while x < width {
+                    grid.set_cell(x, screen_row, " ", fill);
+                    x = x.saturating_add(1);
+                }
             }
         }
         if let Some(fold) = ui

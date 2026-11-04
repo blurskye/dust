@@ -288,6 +288,28 @@ impl ThemeConfig {
             .as_ref()
     }
 
+    /// A markdown heading's bar: the theme's background for its group, or the heading's colour
+    /// faded into the editor's background when the theme gives none, as render-markdown.nvim
+    /// draws it.
+    #[must_use]
+    pub fn markdown_heading(&self, group: Highlight) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = self.highlight(group).unwrap_or(base).clone();
+        if style.background == base.background {
+            style.fill(blend(style.foreground, base.background, 20));
+        }
+        style
+    }
+
+    /// Text in a markdown code block, on a background a little off the editor's.
+    #[must_use]
+    pub fn markdown_code(&self, group: Option<Highlight>) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = group.and_then(|group| self.highlight(group)).unwrap_or(base).clone();
+        style.fill(blend(base.foreground, base.background, 8));
+        style
+    }
+
     fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
         // Links can loop in a hand-written theme.
         for _ in 0..32 {
@@ -482,6 +504,29 @@ impl ThemeConfig {
 }
 
 const XTERM_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+
+impl ThemeStyle {
+    fn fill(&mut self, background: Option<ThemeColor>) {
+        if let Some(background) = background {
+            self.background = background;
+            self.background_256 = nearest_256(background);
+        }
+    }
+}
+
+/// `percent` of `colour` over `background`, when both are RGB.
+fn blend(colour: ThemeColor, background: ThemeColor, percent: u16) -> Option<ThemeColor> {
+    let (ThemeColor::Rgb(red, green, blue), ThemeColor::Rgb(under_red, under_green, under_blue)) =
+        (colour, background)
+    else {
+        return None;
+    };
+    let mix = |over: u8, under: u8| {
+        let mixed = (u16::from(over) * percent + u16::from(under) * (100 - percent)) / 100;
+        u8::try_from(mixed).unwrap_or(u8::MAX)
+    };
+    Some(ThemeColor::Rgb(mix(red, under_red), mix(green, under_green), mix(blue, under_blue)))
+}
 
 /// The nearest xterm-256 colour, for terminals without truecolor.
 fn nearest_256(colour: ThemeColor) -> Option<ThemeColor> {

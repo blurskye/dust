@@ -9,6 +9,7 @@ collections = [
   "input.command_aliases", "input.text_commands", "input.paste_commands",
   "input.character_fallback_commands", "input.unmatched_commands",
   "ui.command_line.completion_kind_icons", "ui.command_line.text", "ui.explorer.glyphs",
+  "editor.markdown.glyphs",
   "ui.status_line.mode_labels", "ui.buffer_line.extension_icons", "ui.tool_manager.categories",
   "terminals.profiles", "agents.profiles", "windows", "plugins", "tasks",
 ]
@@ -38,6 +39,7 @@ settings = [
   { key = "editor.ambiguous_width", about = "How wide characters of ambiguous width are drawn; match your terminal.", choices = ["narrow", "wide"] },
   { key = "editor.registers.clipboard", title = "System Clipboard", about = "unnamedplus shares yank and paste with the system clipboard; off keeps them inside Dust.", choices = ["unnamedplus", "off"] },
   { key = "editor.indent_guides.enabled", about = "Draw a line at each indentation level." },
+  { key = "editor.markdown.render", title = "Render Markdown", about = "Draw markdown headings, lists, code and links in place; the cursor's line shows the source." },
   { key = "editor.git_signs.enabled", about = "Mark added, changed and deleted lines in the gutter." },
   { key = "editor.large_file.enabled", about = "Open big files in a lighter mode that stays fast." },
 ]

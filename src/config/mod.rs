@@ -32,7 +32,7 @@ pub use settings::{
     DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig,
     DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet,
     ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, HighlightDefinition,
-    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig,
+    IndentGuideConfig, InlayHintLevel, InputConfig, MarkdownConfig, KeyHintConfig, KeymapPolicyConfig,
     LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig,
     PersistenceConfig, PluginEntryConfig, PluginsConfig, ProblemMatcherConfig, PromptTextConfig,
     RecoveryConfig, RegisterConfig, SearchConfig, StartupConfig, StatusLineConfig, SyntaxConfig,

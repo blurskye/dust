@@ -74,6 +74,10 @@ pub enum Style {
     Syntax(crate::language::syntax::Highlight),
     /// A syntax group drawn on the documentation popup's background.
     DocumentationSyntax(crate::language::syntax::Highlight),
+    /// A markdown heading's group drawn on its bar.
+    MarkdownHeading(crate::language::syntax::Highlight),
+    /// A syntax group, or plain text, drawn on a markdown code block's background.
+    MarkdownCode(Option<crate::language::syntax::Highlight>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

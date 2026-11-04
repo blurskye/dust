@@ -4939,3 +4939,55 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
     let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
     assert!((0..40).any(|row| frame.grid.row_text(row).contains("Console")));
 }
+
+#[test]
+fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::MarkdownMark;
+    let text = "# Title\n- item [x](u)\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None);
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: &str, length: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: {
+            let start = text.find(start).expect(start);
+            ByteRange::new(ByteOffset(start), ByteOffset(start + length)).expect("mark range")
+        },
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = vec![
+        mark("# ", 2, MarkdownMark::Heading(1)),
+        mark("# ", 7, MarkdownMark::HeadingLine(1)),
+        mark("- ", 1, MarkdownMark::Bullet(0)),
+        mark("[x]", 1, MarkdownMark::Link),
+        mark("](u)", 4, MarkdownMark::Hide),
+    ];
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "󰲡 Title");
+    assert!(matches!(
+        frame.grid.get(19, 0).expect("heading bar").style,
+        crate::ui::Style::MarkdownHeading(_)
+    ));
+    assert_eq!(frame.grid.row_text(1).trim_end(), "● item 󰌹 x");
+    assert_eq!(frame.grid.row_text(2).trim_end(), "last");
+
+    // The cursor's line shows its source.
+    state.views[view].cursor = ByteOffset(0);
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "# Title");
+    assert_eq!(frame.grid.row_text(1).trim_end(), "● item 󰌹 x");
+
+    // So does every line in Insert mode.
+    state.views[view].mode = crate::editor::EditorMode::Insert;
+    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
+    assert_eq!(frame.grid.row_text(1).trim_end(), "- item [x](u)");
+}

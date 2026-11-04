@@ -2534,6 +2534,21 @@ impl InteractiveApplication {
         self.ui
             .syntax_spans
             .sort_unstable_by_key(|span| (span.range.start, span.range.end));
+        self.ui.markdown_marks = self
+            .syntax
+            .results()
+            .flat_map(|(buffer, result)| {
+                result.markdown.iter().filter_map(|span| {
+                    Some(crate::ui::UiMarkdownMark {
+                        buffer: *buffer,
+                        revision: BufferRevision(result.revision),
+                        range: ByteRange::new(ByteOffset(span.start), ByteOffset(span.end)).ok()?,
+                        mark: span.mark,
+                    })
+                })
+            })
+            .collect();
+        self.ui.markdown_marks.sort_unstable_by_key(|mark| mark.range.start);
     }
 }
 

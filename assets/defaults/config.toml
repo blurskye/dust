@@ -21,6 +21,22 @@ enabled = true
 [editor.indent_guides]
 enabled = true
 
+# Markdown drawn in place, as render-markdown.nvim does: heading bars, bullets, checkboxes,
+# quotes, rules, code blocks and links without their markup. The cursor's line, and every
+# line outside Normal mode, shows its source.
+[editor.markdown]
+render = true
+
+[editor.markdown.glyphs]
+headings = ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "]
+bullets = ["●", "○", "◆", "◇"]
+unchecked = "󰄱"
+checked = "󰱒"
+quote = "▋"
+link = "󰌹 "
+image = "󰥶 "
+rule = "─"
+
 [editor.large_file]
 enabled = true
 

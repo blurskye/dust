@@ -13,8 +13,10 @@ use thiserror::Error;
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 mod highlight;
+mod markdown;
 mod objects;
 pub use highlight::Highlight;
+pub use markdown::{MarkdownMark, MarkdownSpan};
 pub use objects::{SyntaxObject, SyntaxObjectKind};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -576,6 +578,8 @@ pub struct SyntaxResult {
     pub indents: Vec<SyntaxIndent>,
     /// Functions, classes and arguments for the tree-sitter text objects.
     pub objects: Arc<Vec<SyntaxObject>>,
+    /// What a markdown file draws in place of its markup; empty for other languages.
+    pub markdown: Vec<MarkdownSpan>,
     pub highlights_truncated: bool,
     pub folds_truncated: bool,
     pub indents_truncated: bool,
@@ -764,6 +768,7 @@ fn markdown_inline_spans(
     tree: &tree_sitter::Tree,
     source: &str,
     maximum: usize,
+    marks: &mut Vec<MarkdownSpan>,
 ) -> Vec<SyntaxSpan> {
     thread_local! {
         static QUERY: Option<Query> = Query::new(
@@ -827,6 +832,7 @@ fn markdown_inline_spans(
             if room == 0 {
                 break;
             }
+            markdown::inline_marks(&tree, source, maximum, marks);
             spans.extend(highlight_spans(
                 query,
                 &tree,
@@ -947,7 +953,7 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
     });
     // Fences highlight their own language through this function, so outside the borrow.
     if language == SyntaxLanguage::Markdown {
-        spans.extend(markdown_inline_spans(&tree, source, usize::MAX));
+        spans.extend(markdown_inline_spans(&tree, source, usize::MAX, &mut Vec::new()));
         spans.extend(markdown_fence_spans(&tree, source, usize::MAX));
     }
     flatten_spans(spans)
@@ -1090,6 +1096,7 @@ fn parse(request: Request) -> SyntaxEvent {
     thread_local! {
         static QUERIES: std::cell::RefCell<HashMap<SyntaxLanguage, Query>> = Default::default();
     }
+    let mut marks = Vec::new();
     let spans = QUERIES.with_borrow_mut(|queries| {
         let query = match queries.entry(request.language) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -1106,8 +1113,9 @@ fn parse(request: Request) -> SyntaxEvent {
             request.language.id(),
         );
         if request.language == SyntaxLanguage::Markdown {
+            markdown::block_marks(&tree, &request.source, maximum, &mut marks);
             let room = maximum.saturating_sub(spans.len());
-            spans.extend(markdown_inline_spans(&tree, &request.source, room));
+            spans.extend(markdown_inline_spans(&tree, &request.source, room, &mut marks));
             let room = maximum.saturating_sub(spans.len());
             spans.extend(markdown_fence_spans(&tree, &request.source, room));
         }
@@ -1173,6 +1181,7 @@ fn parse(request: Request) -> SyntaxEvent {
         folds,
         indents,
         objects,
+        markdown: marks,
     })
 }
 fn query_rows(
@@ -1430,6 +1439,49 @@ mod tests {
         assert_eq!(group("link"), Some("@markup.link.label.markdown_inline"));
         assert_eq!(group("https"), Some("@markup.link.url"));
         assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
+    }
+    #[test]
+    fn markdown_marks_what_it_draws_in_place_of_its_markup() {
+        let source = "## Sub\n\n- one\n  * two\n- [x] done\n\n> quote **bold** `code` [link](https://x.y) ![alt](a.png)\n\n---\n\n```rust\nfn main() {}\n```\n";
+        let request = Request {
+            document: SyntaxDocumentId(1),
+            generation: 1,
+            revision: 1,
+            language: SyntaxLanguage::Markdown,
+            source: source.into(),
+            policy: SyntaxPolicy::default(),
+        };
+        let SyntaxEvent::Parsed(result) = parse(request) else {
+            panic!("parse markdown")
+        };
+        let marked = |text: &str| {
+            let mut marks = result
+                .markdown
+                .iter()
+                .filter(|span| &source[span.start..span.end] == text)
+                .map(|span| span.mark)
+                .collect::<Vec<_>>();
+            marks.sort_by_key(|mark| format!("{mark:?}"));
+            marks
+        };
+        assert_eq!(marked("## "), [MarkdownMark::Heading(2)]);
+        assert_eq!(marked("## Sub"), [MarkdownMark::HeadingLine(2)]);
+        assert_eq!(marked("-"), [MarkdownMark::Bullet(0)]);
+        // Each `*` of `**bold**` is a delimiter of its own.
+        assert_eq!(marked("*"), [MarkdownMark::Bullet(1), MarkdownMark::Hide, MarkdownMark::Hide, MarkdownMark::Hide, MarkdownMark::Hide]);
+        assert_eq!(marked("[x]"), [MarkdownMark::Checkbox { checked: true }]);
+        assert_eq!(marked("- "), [MarkdownMark::Hide]);
+        assert_eq!(marked(">"), [MarkdownMark::Quote]);
+        assert_eq!(marked("`"), [MarkdownMark::Hide, MarkdownMark::Hide]);
+        assert_eq!(marked("["), [MarkdownMark::Link]);
+        assert_eq!(marked("](https://x.y)"), [MarkdownMark::Hide]);
+        assert_eq!(marked("!["), [MarkdownMark::Image]);
+        assert_eq!(marked("---"), [MarkdownMark::Rule]);
+        assert_eq!(marked("```"), [MarkdownMark::Hide, MarkdownMark::Hide]);
+        let code = source.find("```rust").expect("fence");
+        assert!(result.markdown.iter().any(|span| span.mark == MarkdownMark::Code
+            && span.start == code
+            && source[span.start..span.end].contains("fn main")));
     }
     #[test]
     fn a_fenced_block_is_coloured_as_the_language_it_names() {

@@ -18,6 +18,7 @@ use workspace::{
 };
 mod agent;
 pub(crate) mod editor;
+mod markdown;
 mod settings;
 pub(crate) mod surfaces;
 mod visual_rows;
@@ -263,6 +264,14 @@ pub struct UiSyntaxSpan {
     pub revision: crate::editor::text::BufferRevision,
     pub range: ByteRange,
     pub role: crate::language::syntax::Highlight,
+}
+/// What a markdown buffer draws in place of its markup, for one parse of its text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiMarkdownMark {
+    pub buffer: crate::editor::BufferId,
+    pub revision: crate::editor::text::BufferRevision,
+    pub range: ByteRange,
+    pub mark: crate::language::syntax::MarkdownMark,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiInlayHint {
@@ -1466,6 +1475,8 @@ pub struct UiState {
     /// Final application-supplied universal compositor projection.
     pub compositor_layout: Option<CompositorLayoutState>,
     pub syntax_spans: Vec<UiSyntaxSpan>,
+    /// Sorted by start.
+    pub markdown_marks: Vec<UiMarkdownMark>,
     pub lsp_semantic_spans: Vec<UiSyntaxSpan>,
     pub lsp_highlight_spans: Vec<UiSyntaxSpan>,
     pub lsp_inlay_hints: Vec<UiInlayHint>,

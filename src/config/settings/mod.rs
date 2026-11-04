@@ -5,7 +5,7 @@ pub use theme::{
 mod editor;
 pub use editor::{
     AmbiguousWidth, ClipboardSync, ColorMode, CursorShape, EditorConfig, EditorViewportConfig,
-    FinalNewlinePolicy, GitSignsConfig, IndentGuideConfig, LargeFileConfig, LineEndingPolicy,
+    FinalNewlinePolicy, GitSignsConfig, IndentGuideConfig, LargeFileConfig, LineEndingPolicy, MarkdownConfig,
     LineNumbers, RegisterConfig,
 };
 mod ui;
