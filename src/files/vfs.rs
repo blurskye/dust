@@ -1509,16 +1509,9 @@ pub(super) fn canonical_path(path: &Path) -> Result<PathBuf, VfsError> {
 }
 
 fn rename_noreplace(source: &Path, target: &Path) -> Result<(), VfsError> {
-    use nix::fcntl::{AT_FDCWD, RenameFlags, renameat2};
-    renameat2(
-        AT_FDCWD,
-        source,
-        AT_FDCWD,
-        target,
-        RenameFlags::RENAME_NOREPLACE,
-    )
-    .map_err(|error| {
-        if error == nix::errno::Errno::EEXIST {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE).map_err(|error| {
+        if error == rustix::io::Errno::EXIST {
             VfsError::DestinationExists(target.to_path_buf())
         } else {
             VfsError::Io {
@@ -1647,20 +1640,15 @@ fn persist_missing(path: &Path, temporary: NamedTempFile) -> Result<(), VfsError
 }
 
 fn replace_exact(path: &Path, temporary: NamedTempFile, expected: &[u8]) -> Result<(), VfsError> {
-    use nix::fcntl::{AT_FDCWD, RenameFlags, renameat2};
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
     // Keep the displaced entry until its bytes have been checked as well: another
     // writer can replace the destination between final validation and this exchange.
-    renameat2(
-        AT_FDCWD,
-        temporary.path(),
-        AT_FDCWD,
-        path,
-        RenameFlags::RENAME_EXCHANGE,
-    )
-    .map_err(|source| VfsError::Io {
-        operation: "replace destination",
-        path: path.to_path_buf(),
-        source: source.into(),
+    renameat_with(CWD, temporary.path(), CWD, path, RenameFlags::EXCHANGE).map_err(|source| {
+        VfsError::Io {
+            operation: "replace destination",
+            path: path.to_path_buf(),
+            source: source.into(),
+        }
     })?;
     if read_file(temporary.path()).is_ok_and(|bytes| bytes == expected) {
         return Ok(());

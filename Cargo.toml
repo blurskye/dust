@@ -29,6 +29,9 @@ portable-pty = "0.9.0"
 regex = "1.11.1"
 reqwest = { version = "=0.12.15", default-features = false, features = ["blocking", "rustls-tls", "http2"] }
 ropey = { version = "1.6.1", default-features = false, features = ["simd"] }
+# renameat2 for renames that never overwrite and saves that swap files atomically; nix has it
+# only on glibc, and the release binary is built for musl.
+rustix = { version = "1.1.4", features = ["fs"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 sha2 = "0.10.8"
