@@ -578,6 +578,14 @@ impl InteractiveApplication {
             Stage::Entering => self.tutor.practice = None,
             Stage::Leaving if self.state.workspace_root == practice.home => self.tutor_restore(),
             Stage::Leaving => {
+                // A refused or failed switch keeps the practice buffers alive, so their
+                // unsaved edits must still be marked dirty.
+                for buffer in self.state.buffers.values_mut() {
+                    if buffer.path.as_ref().is_some_and(|path| path.starts_with(&practice.root)) {
+                        buffer.refresh_dirty();
+                    }
+                }
+                self.state.mark_window_changed();
                 practice.stage = Stage::Running;
                 self.sync_tutor_card();
                 self.show_error("could not leave the practice project: :TutorQuit tries again");
@@ -1228,9 +1236,20 @@ mod tests {
         });
         enter(&mut app);
         assert_eq!(app.tutor.current, Some(2));
+        let path = app.tutor.practice.as_ref().unwrap().root.join("practice.rs");
+        let text = crate::editor::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
+        let (buffer, _) = app.state.open_text(text, Some(path));
+        app.tutor_command("mode.insert");
+        app.handle_key_in_context("editor.insert", crate::editor::input::KeyEvent::plain(
+            crate::editor::input::KeyCode::Char('x'),
+        ));
+        let edited = app.state.buffers[buffer].text.to_string();
+        assert!(app.state.buffers[buffer].dirty);
         running_terminal(&mut app);
         app.tutor_leave();
         app.tutor_tick();
+        assert_eq!(app.state.buffers[buffer].text.to_string(), edited);
+        assert!(app.state.buffers[buffer].dirty);
         assert_eq!(app.tutor.current, Some(2));
         assert!(app.ui.tutor.is_some());
         assert_eq!(app.tutor.practice.as_ref().unwrap().stage, Stage::Running);
