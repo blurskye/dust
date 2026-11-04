@@ -360,6 +360,7 @@ impl PackageManager {
             &self.lock_path(),
             &self.root.join("store"),
             self.maximum_lock_bytes,
+            self.maximum_object_bytes,
         )
     }
 }

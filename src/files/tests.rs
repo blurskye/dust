@@ -551,6 +551,54 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
 }
 
 #[test]
+fn recovery_replacement_waits_for_the_directory_lock() {
+    let root = tempdir().unwrap();
+    let journal = root.path().join("buffer.toml");
+    let lock = super::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
+    let (started, starting) = std::sync::mpsc::channel();
+    let (finished, completion) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        finished.send(write_recovery(&journal, &RecoveryRecord::new(None, 2, "fresh".into()))).unwrap();
+    });
+    starting.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(matches!(completion.recv_timeout(Duration::from_millis(50)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+    assert!(!root.path().join("buffer.toml").exists());
+    drop(lock);
+    completion.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+    worker.join().unwrap();
+    assert_eq!(discover_recovery(root.path()).records[0].1.content, "fresh");
+}
+
+#[test]
+fn recovery_cleanup_waits_for_replacement_before_deciding_retention() {
+    let root = tempdir().unwrap();
+    let journal = root.path().join("buffer.toml");
+    write_recovery(&journal, &RecoveryRecord::new(None, 1, "old".into())).unwrap();
+    let now = crate::clock::system_time();
+    fs::File::open(&journal).unwrap().set_modified(now - Duration::from_secs(2 * 86_400)).unwrap();
+    let lock = super::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
+    let directory = root.path().to_path_buf();
+    let (started, starting) = std::sync::mpsc::channel();
+    let (finished, completion) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        finished.send(cleanup_recovery(&directory, 10, 1, now)).unwrap();
+    });
+    starting.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(matches!(completion.recv_timeout(Duration::from_millis(50)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+    // Finish the replacement while owning the directory lock, as write_recovery does.
+    let fresh = RecoveryRecord::new(None, 2, "fresh".into());
+    atomic_write(&journal, toml::to_string(&fresh).unwrap().as_bytes()).unwrap();
+    drop(lock);
+    let cleanup = completion.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.join().unwrap();
+    assert!(cleanup.deleted.is_empty());
+    assert!(cleanup.diagnostics.is_empty());
+    assert_eq!(discover_recovery(root.path()).records, vec![(journal, fresh)]);
+}
+
+#[test]
 fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
     let root = tempdir().expect("tempdir");
     let journal = root.path().join("buffer.toml");

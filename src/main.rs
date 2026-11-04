@@ -225,7 +225,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             .package_store
             .as_ref()
             .ok_or("--package-store is required")?;
-        let count = dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024)?;
+        let count = dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         println!("verified {count} package(s)");
         return Ok(());
     }

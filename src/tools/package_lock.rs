@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::Write,
+    io::{Read, Write},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -77,7 +78,22 @@ pub(super) fn read_bounded_regular(path: &Path, maximum: u64) -> Result<Vec<u8>,
     {
         return Err(PackageError::InvalidManifest);
     }
-    fs::read(path).map_err(PackageError::Io)
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .map_err(PackageError::Io)?;
+    if !file.metadata().map_err(PackageError::Io)?.is_file() {
+        return Err(PackageError::InvalidManifest);
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(PackageError::Io)?;
+    if bytes.len() as u64 > maximum {
+        return Err(PackageError::InvalidManifest);
+    }
+    Ok(bytes)
 }
 static NEXT_PACKAGE_TEMP: AtomicU64 = AtomicU64::new(1);
 
@@ -230,9 +246,9 @@ pub fn verify_lock_store(
     lock_path: &Path,
     store: &Path,
     maximum_bytes: usize,
+    maximum_object_bytes: usize,
 ) -> Result<usize, PackageError> {
     use sha2::{Digest, Sha256};
-    use std::io::Read;
     let metadata = fs::metadata(lock_path).map_err(PackageError::Io)?;
     if metadata.len() > maximum_bytes as u64 {
         return Err(PackageError::LockTooLarge);
@@ -264,7 +280,7 @@ pub fn verify_lock_store(
             return Err(PackageError::ChecksumMismatch);
         }
         let object = store.join(package.content_sha256.to_ascii_lowercase());
-        let data = fs::read(&object).map_err(PackageError::Io)?;
+        let data = read_bounded_regular(&object, maximum_object_bytes as u64)?;
         if format!("{:x}", Sha256::digest(&data)) != package.content_sha256.to_ascii_lowercase() {
             return Err(PackageError::ChecksumMismatch);
         }

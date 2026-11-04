@@ -1104,12 +1104,57 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
         super::commit_store_bytes(&store, &digest, &bytes, 1024).unwrap();
         let path = root.path().join("lock.json");
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert_eq!(super::verify_lock_store(&path, &store, 4096).unwrap(), 1);
+        assert_eq!(super::verify_lock_store(&path, &store, 4096, 1024).unwrap(), 1);
         // Supplied locks may still use uppercase, even though generated locks do not.
         lock.packages[0].content_sha256.make_ascii_uppercase();
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert_eq!(super::verify_lock_store(&path, &store, 4096).unwrap(), 1);
+        assert_eq!(super::verify_lock_store(&path, &store, 4096, 1024).unwrap(), 1);
     }
+}
+
+#[test]
+fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
+    use super::package_lock::read_bounded_regular;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("object");
+    std::fs::write(&path, b"1234").unwrap();
+    assert_eq!(read_bounded_regular(&path, 4).unwrap(), b"1234");
+    assert!(matches!(read_bounded_regular(&path, 3), Err(super::PackageError::InvalidManifest)));
+    assert!(read_bounded_regular(root.path(), 4).is_err());
+    let link = root.path().join("link");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert!(read_bounded_regular(&link, 4).is_err());
+    let fifo = root.path().join("fifo");
+    nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    assert!(matches!(read_bounded_regular(&fifo, 4), Err(super::PackageError::InvalidManifest)));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn package_reader_bounds_streams_whose_metadata_understates_their_size() {
+    let path = std::path::Path::new("/proc/self/status");
+    assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
+    assert!(matches!(super::package_lock::read_bounded_regular(path, 8), Err(super::PackageError::InvalidManifest)));
+}
+
+#[test]
+fn package_verification_bounds_objects_and_rejects_non_regular_entries() {
+    let root = tempfile::tempdir().unwrap();
+    let (manifest, _, bytes) = package_fixture("demo");
+    let store = root.path().join("store");
+    let object = super::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
+    let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
+    let lock = super::resolve_manifests(&manifests).unwrap();
+    let path = root.path().join("lock.json");
+    super::write_lock_atomic(&path, &lock, 4096).unwrap();
+    assert_eq!(super::verify_lock_store(&path, &store, 4096, bytes.len()).unwrap(), 1);
+    assert!(matches!(super::verify_lock_store(&path, &store, 4096, bytes.len() - 1), Err(super::PackageError::InvalidManifest)));
+    // Sparse objects must be rejected before allocating their contents.
+    std::fs::File::create(&object).unwrap().set_len(1024 * 1024 * 1024).unwrap();
+    assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::InvalidManifest)));
+    std::fs::remove_file(&object).unwrap();
+    nix::unistd::mkfifo(&object, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::InvalidManifest)));
 }
 
 #[test]
@@ -1135,7 +1180,7 @@ fn package_verification_rejects_content_that_differs_from_its_source_pin() {
         lock.packages[0].source = source;
         let path = root.path().join("lock.json");
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert!(matches!(super::verify_lock_store(&path, &store, 4096), Err(super::PackageError::ChecksumMismatch)));
+        assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::ChecksumMismatch)));
     }
 }
 

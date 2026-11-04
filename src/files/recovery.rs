@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{error::VfsError, vfs::atomic_write};
+use super::{error::VfsError, vfs::{atomic_write, lock_file}};
 
 pub const RECOVERY_VERSION: u32 = 2;
 pub const DOCUMENT_BYTE_CEILING: u64 = 256 * 1024 * 1024;
@@ -157,6 +157,12 @@ pub fn write_recovery(path: &Path, record: &RecoveryRecord) -> Result<(), VfsErr
             ),
         });
     }
+    let directory = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let _lock = lock_file(&directory.join(".recovery.lock")).map_err(|source| VfsError::Io {
+        operation: "lock recovery directory",
+        path: directory.to_path_buf(),
+        source,
+    })?;
     atomic_write(path, source.as_bytes())
 }
 
@@ -285,6 +291,15 @@ pub fn cleanup_recovery(
     maximum_age_days: u64,
     now: SystemTime,
 ) -> RecoveryCleanup {
+    // Keep retention decisions and deletion under the same lock as journal replacement.
+    let _lock = match lock_file(&directory.join(".recovery.lock")) {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return RecoveryCleanup::default(),
+        Err(error) => return RecoveryCleanup {
+            diagnostics: vec![format!("cannot lock recovery directory {}: {error}", directory.display())],
+            ..RecoveryCleanup::default()
+        },
+    };
     let mut records = Vec::new();
     // Retention needs only paths and timestamps; drop each payload before reading the next.
     let diagnostics = visit_recovery(directory, |path, _, modified| {
