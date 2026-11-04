@@ -171,12 +171,13 @@ fn a_server_can_register_formatting_after_it_starts() {
     assert!(!registered.rename);
 }
 
-fn server_message_reply(
+fn server_message_replies(
     message: Value,
     base: &super::LspCapabilities,
     capabilities: &mut super::LspCapabilities,
     registrations: &mut std::collections::HashMap<String, (String, Value)>,
-) -> Value {
+    documents: &std::collections::HashMap<String, LspDocument>,
+) -> Vec<Value> {
     use std::sync::{Arc, mpsc};
     let (channel, _events) = mpsc::sync_channel(8);
     let (commands, _requests) = mpsc::sync_channel(1);
@@ -207,10 +208,11 @@ fn server_message_reply(
         configuration: &super::LspServerConfiguration::standard(),
         sources: &Default::default(),
         diagnostic_lineage: &Default::default(),
-        documents: &Default::default(),
+        documents,
         apply_requests: &mut Default::default(),
     }, &message);
-    crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap()
+    let mut input = std::io::Cursor::new(output);
+    std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap()).collect()
 }
 
 #[test]
@@ -227,7 +229,7 @@ fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
         ("client/unregisterCapability", "unregistrations"),
     ] {
         let items = (0..257).map(|_| json!({"id":"keep","method":"textDocument/formatting"})).collect::<Vec<_>>();
-        let reply = server_message_reply(json!({"id":1,"method":method,"params":{key:items}}), &base, &mut capabilities, &mut registrations);
+        let reply = server_message_replies(json!({"id":1,"method":method,"params":{key:items}}), &base, &mut capabilities, &mut registrations, &Default::default()).remove(0);
         assert_eq!(reply["error"]["code"], -32602);
         assert_eq!(registrations, original);
         assert_eq!(capabilities, base);
@@ -238,7 +240,7 @@ fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
 fn configuration_replies_preserve_every_requested_position() {
     let base = super::LspCapabilities::default();
     let items = (0..257).map(|_| json!({"section":"missing"})).collect::<Vec<_>>();
-    let reply = server_message_reply(json!({"id":1,"method":"workspace/configuration","params":{"items":items}}), &base, &mut base.clone(), &mut Default::default());
+    let reply = server_message_replies(json!({"id":1,"method":"workspace/configuration","params":{"items":items}}), &base, &mut base.clone(), &mut Default::default(), &Default::default()).remove(0);
     let values = reply["result"].as_array().unwrap();
     assert_eq!(values.len(), 257);
     assert!(values.iter().all(Value::is_object));
@@ -257,6 +259,13 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
     let static_base = super::LspCapabilities { formatting: true, ..base.clone() };
     let capabilities = super::server_message::effective_capabilities(&static_base, [("textDocument/formatting", &options)].into_iter());
     assert!(LspFeature::Formatting.capability_for_document(&capabilities, &ts));
+    for base_uri in [json!("file:///fixture"), json!({"uri":"file:///fixture","name":"fixture"})] {
+        let options = json!({"documentSelector":[{"pattern":{"baseUri":base_uri,"pattern":"*.js"}}]});
+        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+        assert!(LspFeature::Formatting.capability_for_document(&capabilities, &js));
+        assert!(!LspFeature::Formatting.capability_for_document(&capabilities, &ts));
+        assert!(!LspFeature::Formatting.capability_for_document(&capabilities, &LspDocument { path: "/elsewhere/a.js".into(), ..js.clone() }));
+    }
     for selector in [json!([]), json!([{"scheme":"untitled"}])] {
         let options = json!({"documentSelector":selector});
         let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
@@ -269,12 +278,19 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
     let base = super::LspCapabilities { sync_kind: SyncKind::None, ..Default::default() };
     let mut capabilities = base.clone();
     let mut registrations = Default::default();
-    let reply = server_message_reply(json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
+    let old = LspDocument { path: "/fixture/main.rs".into(), language_id: "rust".into(), version: 3, text: "abc".into() };
+    let documents = std::collections::HashMap::from([
+        (old.uri(), old.clone()),
+        ("file:///fixture/main.py".into(), LspDocument { path: "/fixture/main.py".into(), language_id: "python".into(), ..old.clone() }),
+    ]);
+    let replies = server_message_replies(json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
         "id":"changes","method":"textDocument/didChange","registerOptions":{"documentSelector":[{"language":"rust"}],"syncKind":2}
-    }]}}), &base, &mut capabilities, &mut registrations);
+    }]}}), &base, &mut capabilities, &mut registrations, &documents);
+    // Registration itself must not emit a change with an unchanged document version.
+    assert_eq!(replies.len(), 1);
+    let reply = &replies[0];
     assert!(reply.get("result").is_some());
-    let old = LspDocument { path: "/fixture/main.rs".into(), language_id: "rust".into(), version: 1, text: "abc".into() };
-    let new = LspDocument { version: 2, text: "abcd".into(), ..old.clone() };
+    let new = LspDocument { version: 4, text: "abcd".into(), ..old.clone() };
     let mut output = Vec::new();
     super::protocol::send_change(&mut output, Some(&old), &new, &capabilities);
     let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap();
@@ -283,7 +299,9 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
     let mut output = Vec::new();
     super::protocol::send_change(&mut output, None, &LspDocument { language_id: "python".into(), ..new.clone() }, &capabilities);
     assert!(output.is_empty());
-    let reply = server_message_reply(json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}), &base, &mut capabilities, &mut registrations);
+    let replies = server_message_replies(json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}), &base, &mut capabilities, &mut registrations, &documents);
+    assert_eq!(replies.len(), 1);
+    let reply = &replies[0];
     assert!(reply.get("result").is_some());
     super::protocol::send_change(&mut output, Some(&old), &new, &capabilities);
     assert!(output.is_empty());

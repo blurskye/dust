@@ -787,8 +787,14 @@ fn highlight_spans(
     (spans, false)
 }
 
-/// Definitions and their lexical scopes for queries using `#is-not? local`.
-fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &str) -> HashMap<&'a str, Vec<std::ops::Range<usize>>> {
+#[derive(Default)]
+struct LocalScope<'a> {
+    inherits: bool,
+    definitions: HashSet<&'a str>,
+}
+
+/// Definitions and scope boundaries for queries using `#is-not? local`.
+fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &str) -> HashMap<usize, LocalScope<'a>> {
     let (grammar, query) = match language {
         "javascript" => (descriptor(SyntaxLanguage::JavaScript).language, tree_sitter_javascript::LOCALS_QUERY),
         "typescript" | "tsx" => (descriptor(if language == "tsx" { SyntaxLanguage::Tsx } else { SyntaxLanguage::TypeScript }).language, tree_sitter_typescript::LOCALS_QUERY),
@@ -811,29 +817,34 @@ fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &s
         });
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
-        let mut scopes = HashSet::from([tree.root_node().id()]);
+        let mut scopes = HashMap::from([(tree.root_node().id(), LocalScope::default())]);
         let mut definitions = Vec::new();
         while let Some(item) = matches.next() {
             for capture in item.captures {
                 match query.capture_names()[capture.index as usize] {
-                    "local.scope" => { scopes.insert(capture.node.id()); }
+                    "local.scope" => {
+                        let inherits = !query.property_settings(item.pattern_index).iter().any(|property| {
+                            property.key.as_ref() == "local.scope-inherits"
+                                && property.value.as_deref() == Some("false")
+                        });
+                        scopes.insert(capture.node.id(), LocalScope { inherits, ..Default::default() });
+                    }
                     "local.definition" => definitions.push(capture.node),
                     _ => {}
                 }
             }
         }
-        let mut locals = HashMap::<&str, Vec<std::ops::Range<usize>>>::new();
         for node in definitions {
             let mut scope = node;
-            while !scopes.contains(&scope.id()) {
+            while !scopes.contains_key(&scope.id()) {
                 let Some(parent) = scope.parent() else { break };
                 scope = parent;
             }
             if let Some(name) = source.get(node.byte_range()) {
-                locals.entry(name).or_default().push(scope.byte_range());
+                scopes.get_mut(&scope.id()).expect("enclosing local scope").definitions.insert(name);
             }
         }
-        locals
+        scopes
     })
 }
 
@@ -842,15 +853,29 @@ fn highlight_predicates_match(
     pattern: usize,
     captures: &[tree_sitter::QueryCapture<'_>],
     source: &str,
-    locals: &HashMap<&str, Vec<std::ops::Range<usize>>>,
+    locals: &HashMap<usize, LocalScope<'_>>,
 ) -> bool {
     for (property, positive) in query.property_predicates(pattern) {
         if property.key.as_ref() != "local" {
             return false;
         }
         let local = captures.iter().filter(|capture| property.capture_id.is_none_or(|id| id == capture.index as usize))
-            .any(|capture| source.get(capture.node.byte_range()).and_then(|name| locals.get(name))
-                .is_some_and(|scopes| scopes.iter().any(|scope| scope.contains(&capture.node.start_byte()))));
+            .any(|capture| {
+                let Some(name) = source.get(capture.node.byte_range()) else { return false };
+                let mut node = Some(capture.node);
+                while let Some(current) = node {
+                    if let Some(scope) = locals.get(&current.id()) {
+                        if scope.definitions.contains(name) {
+                            return true;
+                        }
+                        if !scope.inherits {
+                            break;
+                        }
+                    }
+                    node = current.parent();
+                }
+                false
+            });
         if local != *positive {
             return false;
         }
@@ -1097,7 +1122,7 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
         };
         highlight_spans(query, &tree, source, usize::MAX, language.id())
     });
-    // Fences highlight their own language through this function, so outside the borrow.
+    // Inline and fenced languages use their own query caches.
     if language == SyntaxLanguage::Markdown {
         spans.extend(markdown_inline_spans(
             &tree,
@@ -1670,6 +1695,16 @@ mod tests {
             assert_eq!(spans.len(), 1, "{language:?}: {spans:?}");
             assert_eq!(spans[0].start, source.find(word).unwrap());
         }
+        let ruby = descriptor(SyntaxLanguage::Ruby);
+        let mut parser = Parser::new();
+        parser.set_language(&ruby.language).unwrap();
+        let source = "value = 1\nvalue\ndef f\n  value\nend\n";
+        let tree = parser.parse(source, None).unwrap();
+        let query = Query::new(&ruby.language, "((identifier) @function.method (#eq? @function.method \"value\") (#is-not? local))").unwrap();
+        let (spans, _) = highlight_spans(&query, &tree, source, 100, "ruby");
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        assert_eq!(spans[0].start, source.rfind("value").unwrap());
+
         let descriptor = descriptor(SyntaxLanguage::Rust);
         let mut parser = Parser::new();
         parser.set_language(&descriptor.language).unwrap();

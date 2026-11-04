@@ -323,9 +323,19 @@ fn registration_matches(options: &Value, document: &LspDocument) -> bool {
             && filter.get("language").is_none_or(|language| language.as_str() == Some(&document.language_id))
             && filter.get("scheme").is_none_or(|scheme| scheme.as_str() == Some("file"))
             && filter.get("pattern").is_none_or(|pattern| {
-                pattern.as_str().and_then(|pattern| globset::GlobBuilder::new(pattern)
-                    .literal_separator(true).build().ok())
-                    .is_some_and(|glob| glob.compile_matcher().is_match(&document.path))
+                let (pattern, path) = if let Some(pattern) = pattern.as_str() {
+                    (pattern, document.path.as_path())
+                } else {
+                    let Some(base) = pattern.get("baseUri") else { return false };
+                    let Some(base) = base.as_str().or_else(|| base.get("uri").and_then(Value::as_str))
+                        .and_then(super::paths::path_from_file_uri) else { return false };
+                    let (Some(pattern), Ok(path)) = (
+                        pattern.get("pattern").and_then(Value::as_str), document.path.strip_prefix(base),
+                    ) else { return false };
+                    (pattern, path)
+                };
+                globset::GlobBuilder::new(pattern).literal_separator(true).build().ok()
+                    .is_some_and(|glob| glob.compile_matcher().is_match(path))
             })
     }))
 }

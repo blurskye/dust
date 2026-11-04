@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -571,7 +571,7 @@ pub(super) fn run_session(
         documents.insert(document.uri(), document);
     }
     let mut apply_requests = HashMap::<ServerRequestId, std::sync::Arc<()>>::new();
-    let mut opened_documents = HashSet::new();
+    let mut opened_documents = HashMap::new();
     let mut pending = HashMap::<i64, PendingRequest>::new();
     let mut next_request_id = 2_i64;
     let mut logs = VecDeque::<String>::with_capacity(MAX_LOG_LINES);
@@ -666,7 +666,7 @@ pub(super) fn run_session(
                     );
                     for document in documents.values() {
                         send_open(&mut stdin, document);
-                        opened_documents.insert(document.uri());
+                        opened_documents.insert(document.uri(), document.version);
                     }
                     send_event(
                         &events,
@@ -768,7 +768,7 @@ pub(super) fn run_session(
         }
     }
     if initialized && !cancelled.load(std::sync::atomic::Ordering::Acquire) {
-        for uri in opened_documents {
+        for (uri, _) in opened_documents {
             send_close(&mut stdin, &uri);
         }
         let _ = write_content_length_message(
@@ -814,7 +814,7 @@ pub(super) fn handle_command(
     >,
     diagnostic_lineage: &mut super::origins::DiagnosticLineage,
     apply_requests: &mut HashMap<ServerRequestId, std::sync::Arc<()>>,
-    opened_documents: &mut HashSet<String>,
+    opened_documents: &mut HashMap<String, u64>,
     pending: &mut HashMap<i64, PendingRequest>,
     next_request_id: &mut i64,
     request_timeout: Duration,
@@ -859,10 +859,16 @@ pub(super) fn handle_command(
             let uri = document.uri();
             let previous = documents.insert(uri.clone(), document.clone());
             if initialized {
-                if opened_documents.insert(uri) {
-                    send_open(stdin, &document);
+                if let Some(version) = opened_documents.get(&uri) {
+                    // A disabled sync policy may have skipped the local previous snapshot.
+                    let previous = previous.as_ref().filter(|old| old.version == *version);
+                    send_change(stdin, previous, &document, capabilities);
+                    if capabilities.sync_kind_for_document(&document) != super::model::SyncKind::None {
+                        opened_documents.insert(uri, document.version);
+                    }
                 } else {
-                    send_change(stdin, previous.as_ref(), &document, capabilities);
+                    send_open(stdin, &document);
+                    opened_documents.insert(uri, document.version);
                 }
             }
         }
@@ -876,13 +882,17 @@ pub(super) fn handle_command(
             }
             let previous = documents.insert(uri.clone(), document.clone());
             if initialized {
-                if opened_documents.insert(uri) {
+                if let Some(version) = opened_documents.get(&uri) {
+                    if *version != document.version {
+                        let previous = previous.as_ref().filter(|old| old.version == *version);
+                        send_change(stdin, previous, &document, capabilities);
+                        if capabilities.sync_kind_for_document(&document) != super::model::SyncKind::None {
+                            opened_documents.insert(uri, document.version);
+                        }
+                    }
+                } else {
                     send_open(stdin, &document);
-                } else if previous
-                    .as_ref()
-                    .is_some_and(|old| old.version != document.version)
-                {
-                    send_change(stdin, previous.as_ref(), &document, capabilities);
+                    opened_documents.insert(uri, document.version);
                 }
                 send_save(stdin, &document);
             }
@@ -890,7 +900,7 @@ pub(super) fn handle_command(
         SessionCommand::Close(uri) => {
             document_sources.remove(&uri);
             documents.remove(&uri);
-            if initialized && opened_documents.remove(&uri) {
+            if initialized && opened_documents.remove(&uri).is_some() {
                 send_close(stdin, &uri);
             }
         }
@@ -1165,6 +1175,62 @@ impl LspService {
 #[cfg(test)]
 mod lineage_tests {
     use super::*;
+
+    #[test]
+    fn resumed_incremental_sync_replaces_snapshots_skipped_while_disabled() {
+        use crate::editor::EditorState;
+        for save in [false, true] {
+            let mut editor = EditorState::new("/fixture".into());
+            let text = TextBuffer::from_text("a");
+            let (buffer, _) = editor.open_text(text.clone(), None);
+            let mut service = LspService::new();
+            let endpoint = service.replace_edit_source_fixture(
+                "file:///fixture/main.rs".into(), (buffer, text.source_version()), PositionEncoding::Utf16,
+            );
+            let base = LspCapabilities { sync_kind: super::super::model::SyncKind::None, ..Default::default() };
+            let options = json!({"documentSelector":[{"language":"rust"}],"syncKind":2});
+            let active = super::super::server_message::effective_capabilities(
+                &base, [("textDocument/didChange", &options)].into_iter(),
+            );
+            let mut documents = HashMap::new();
+            let mut sources = HashMap::new();
+            let mut lineage = super::super::origins::DiagnosticLineage::default();
+            let mut apply = HashMap::new();
+            let mut opened = HashMap::new();
+            let mut pending = HashMap::new();
+            let mut next = 2;
+            let mut stopping = false;
+            let mut config = LspServerConfiguration::standard();
+            let mut output = Vec::new();
+            for (version, text) in ["a", "longer", "longer!", "longer!!"].into_iter().enumerate() {
+                let document = LspDocument {
+                    path: "/fixture/main.rs".into(), language_id: "rust".into(),
+                    version: version as u64, text: text.into(),
+                };
+                let command = if save && version >= 2 {
+                    SessionCommand::Save(document)
+                } else {
+                    SessionCommand::Sync(document)
+                };
+                handle_command(
+                    command, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"),
+                    &mut output, true, if version >= 2 { &active } else { &base },
+                    &mut documents, &mut sources, &mut lineage, &mut apply, &mut opened,
+                    &mut pending, &mut next, Duration::from_secs(1), 0,
+                    &endpoint.events, &mut stopping, &mut config,
+                );
+            }
+            let mut input = std::io::Cursor::new(output);
+            let changes = std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap())
+                .filter(|message| message["method"] == "textDocument/didChange").collect::<Vec<_>>();
+            assert_eq!(changes.len(), 2);
+            assert_eq!(changes[0]["params"]["textDocument"]["version"], 2);
+            assert_eq!(changes[0]["params"]["contentChanges"], json!([{"text":"longer!"}]));
+            assert_eq!(changes[1]["params"]["contentChanges"][0]["text"], "!");
+            assert!(changes[1]["params"]["contentChanges"][0]["range"].is_object());
+        }
+    }
+
     #[test]
     fn reopening_a_document_retires_the_old_diagnostic_transport() {
         use crate::editor::{EditorState, text::TextBuffer};
@@ -1186,7 +1252,7 @@ mod lineage_tests {
         let mut lineage = super::super::origins::DiagnosticLineage::default();
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
         let mut stopping = false;
