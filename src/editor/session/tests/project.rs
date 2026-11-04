@@ -5789,26 +5789,50 @@ fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
     app.open_contextual_help();
     app.close_picker();
     assert_eq!(app.ui.picker.as_ref().unwrap().query, before);
+    let path = app.state.workspace_root.join("surviving-search.txt");
+    fs::write(&path, "found after help\n").unwrap();
     app.start_workspace_file_picker();
     app.open_contextual_help();
     app.process_workspace_file_events();
     assert!(app.search.help_is_open());
     app.close_picker();
-    assert!(!app.search.picker_is_stale(
-        app.workspace.version(),
-        app.configuration.binding_revision()
-    ));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.search.files_pending() {
+        app.process_workspace_file_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.picker_insert("surviving-search");
+    let picker = app.ui.picker.as_ref().expect("restored file picker");
+    assert_eq!(picker.title, "Files");
+    assert!(picker.rows.iter().any(|row| row.label == "surviving-search.txt"));
+    app.reconcile_editor_windows();
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().expect("opened search result");
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "found after help\n");
 }
 
 #[test]
 fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
     let (mut app, _repo, path) = near_changes_fixture();
+    let index_before = index_bytes(&app.state.workspace_root, "near.txt");
     app.process_effect(AppEffect::GitLinesStage {
         start: 999,
         end: 999,
     });
     settle_git_work(&mut app);
+    assert!(app.input.take_pending_stage().is_none());
     let buffer = app.state.active_buffer_id().unwrap();
+    app.replace_with_recovered(buffer, "ordinary save after failure\n".into())
+        .unwrap();
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    settle_git_work(&mut app);
+    assert!(!app.git.mutation_pending());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "ordinary save after failure\n");
+    assert_eq!(index_bytes(&app.state.workspace_root, "near.txt"), index_before);
     app.replace_with_recovered(buffer, "changed unsaved\n".into())
         .unwrap();
     app.process_effect(AppEffect::GitFileStage);
@@ -5822,6 +5846,7 @@ fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
     wait_vfs(&mut app);
     assert!(!app.git.mutation_pending());
     assert_eq!(fs::read_to_string(path).unwrap(), "changed unsaved\n");
+    assert_eq!(index_bytes(&app.state.workspace_root, "near.txt"), index_before);
     assert!(app.input.take_pending_stage().is_none());
 }
 
@@ -5879,12 +5904,9 @@ fn save_and_stage_writes_the_refused_file_and_refreshes_its_hunks() {
                 .id,
         )
         .unwrap();
-    assert_eq!(
-        blob.content(),
-        fs::read(path).unwrap(),
-        "{:?}",
-        app.ui.notification
-    );
+    let expected = b"one\nNEW\nthree\nFOUR\nfive\n";
+    assert_eq!(fs::read(path).unwrap(), expected);
+    assert_eq!(blob.content(), expected, "{:?}", app.ui.notification);
 }
 
 #[test]

@@ -1488,6 +1488,7 @@ impl InteractiveApplication {
             dashboard_visible: self.window_session.dashboard_visible()
                 || self.state.active_view.is_none(),
             picker_rect,
+            picker_title: self.ui.picker.as_ref().map_or_else(String::new, |picker| picker.title.clone()),
             picker_surface: self
                 .ui
                 .picker

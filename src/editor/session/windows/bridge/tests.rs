@@ -301,6 +301,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
         dashboard_visible: false,
         picker_rect: None,
         picker_surface: None,
+        picker_title: "Picker".into(),
         protected_prompt_height: 0,
         configuration_generation: 0,
         screen_bottom: 0,

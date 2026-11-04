@@ -219,7 +219,9 @@ impl WindowSession {
             .map_err(|error| error.to_string())?;
         let mut transition = self.stage_editor_transition(proposal, candidate, source.1)?;
         validate_window_rules(policy.rules).map_err(|error| error.to_string())?;
-        for rule in policy.rules {
+        let mut rules = policy.rules.iter().collect::<Vec<_>>();
+        rules.sort_by_key(|rule| matches!(rule.placement, PersistedWindowPlacement::Fullscreen));
+        for rule in rules {
             transition
                 .candidate
                 .core
@@ -535,7 +537,9 @@ impl WindowSession {
         }
         if matches!(target, NativeSurfaceTarget::Terminal(_)) {
             match placement {
-                WindowPlacement::Docked { size, .. } => self.terminal_height = size,
+                WindowPlacement::Docked { edge: DockEdge::Top | DockEdge::Bottom, size } => {
+                    self.terminal_height = size;
+                }
                 WindowPlacement::Floating(rect) => self.terminal_height = rect.height,
                 _ => {}
             }
@@ -594,6 +598,12 @@ impl WindowSession {
         core.graph
             .swap_non_tiled_placements(a.window, b.window)
             .map_err(|e| e.to_string())?;
+        if bp == WindowPlacement::Hidden && ap != WindowPlacement::Hidden {
+            core.native.place_target(first, ap).map_err(|e| e.to_string())?;
+        }
+        if ap == WindowPlacement::Hidden && bp != WindowPlacement::Hidden {
+            core.native.place_target(second, bp).map_err(|e| e.to_string())?;
+        }
         core.native
             .place_target(first, bp)
             .map_err(|e| e.to_string())?;
@@ -622,11 +632,13 @@ impl WindowSession {
         descriptions: NativeDescriptions<'_>,
     ) -> Result<WindowCandidate, String> {
         let mut candidate = self.candidate()?;
+        let mut rules = rules.to_vec();
+        rules.sort_by_key(|(_, placement)| *placement == WindowPlacement::Fullscreen);
         for (kind, placement) in rules {
             candidate
                 .core
                 .native
-                .set_semantic_default(kind, *placement)
+                .set_semantic_default(kind, placement)
                 .map_err(|e| e.to_string())?;
         }
         Self::reconcile_rules(&mut candidate, descriptions)?;

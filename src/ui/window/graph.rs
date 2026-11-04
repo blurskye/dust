@@ -782,6 +782,11 @@ impl WindowGraph {
                 .get_mut(&second)
                 .ok_or(WindowError::UnknownWindow)?
                 .placement = first_placement;
+            if first_placement == WindowPlacement::Fullscreen {
+                candidate.focus(second)?;
+            } else if second_placement == WindowPlacement::Fullscreen {
+                candidate.focus(first)?;
+            }
             if candidate.focused.is_some_and(|focused| {
                 candidate
                     .windows

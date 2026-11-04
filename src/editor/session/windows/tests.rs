@@ -46,6 +46,19 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
             1,
         )
         .unwrap();
+    windows.core.native.set_configured_placements(std::collections::BTreeMap::from([
+        ("builtin.terminal".into(), WindowPlacement::Fullscreen),
+    ])).unwrap();
+    let rules = [
+        crate::persistence::PersistedWindowRule {
+            content_type: "builtin.explorer".into(),
+            placement: crate::persistence::PersistedWindowPlacement::Fullscreen,
+        },
+        crate::persistence::PersistedWindowRule {
+            content_type: "builtin.terminal".into(),
+            placement: crate::persistence::PersistedWindowPlacement::Hidden,
+        },
+    ];
     let path = std::path::PathBuf::from("/workspace/restored.rs");
     let session = PersistedSession {
         roots: vec!["/workspace".into()],
@@ -89,7 +102,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                 signature: super::NativeSurfaceSignature {
                     editor_tab: Some(tab),
                     editor_window: None,
-                    explorer_visible: false,
+                    explorer_visible: true,
                     explorer_views: std::sync::Arc::from([1]),
                     focused_explorer: None,
                     explorer_size: 24,
@@ -104,6 +117,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                     dashboard_visible: false,
                     picker_rect: None,
                     picker_surface: None,
+                    picker_title: "Picker".into(),
                     protected_prompt_height: 0,
                     configuration_generation: 0,
                     screen_bottom: 0,
@@ -115,7 +129,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
             },
             &[("demo".into(), 1)],
             super::RestoreWindowPolicy {
-                rules: &[],
+                rules: &rules,
                 descriptors: &[],
             },
         )
@@ -135,6 +149,12 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
     );
     assert!(windows.graph().window(panel).is_none());
     assert!(windows.graph().workspace_tab(tab).is_none());
+    let explorer = windows.native_ids().explorer().unwrap();
+    assert_eq!(windows.graph().window(explorer.window).unwrap().placement, WindowPlacement::Fullscreen);
+    assert_eq!(windows.native_ids().semantic_defaults(None), vec![
+        ("builtin.explorer", WindowPlacement::Fullscreen),
+        ("builtin.terminal", WindowPlacement::Hidden),
+    ]);
     windows.graph().validate().unwrap();
 }
 
@@ -185,6 +205,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         dashboard_visible: false,
         picker_rect: None,
         picker_surface: None,
+        picker_title: "Picker".into(),
         protected_prompt_height: 0,
         configuration_generation: 0,
         screen_bottom: 0,
@@ -897,6 +918,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             dashboard_visible: true,
             picker_rect: None,
             picker_surface: None,
+            picker_title: "Picker".into(),
             protected_prompt_height: 0,
             configuration_generation: 0,
             screen_bottom: 0,

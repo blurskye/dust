@@ -571,6 +571,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub dashboard_visible: bool,
     pub picker_rect: Option<crate::ui::window::WindowRect>,
     pub picker_surface: Option<PickerSurfaceKind>,
+    pub picker_title: String,
     pub protected_prompt_height: u16,
     pub configuration_generation: u64,
     pub screen_bottom: u16,
@@ -1259,7 +1260,8 @@ impl NativeSurfaceBridge {
                 .terminal_restore_placements
                 .get(&id)
                 .copied()
-                .or(self.terminal_default_placement)
+                .filter(|placement| *placement != WindowPlacement::Hidden)
+                .or(self.terminal_default_placement.filter(|placement| *placement != WindowPlacement::Hidden))
                 .unwrap_or(terminal_fallback),
             NativeSurfaceTarget::Dashboard => self
                 .dashboard_restore_placement

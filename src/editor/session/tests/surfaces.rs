@@ -2922,6 +2922,90 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
 }
 
 #[test]
+fn picker_title_changes_update_the_retained_window_content() {
+    let mut app = app();
+    app.start_workspace_file_picker();
+    app.reconcile_editor_windows();
+    let files = app.window_session.native_ids().picker().unwrap();
+    assert_eq!(app.window_session.graph().content(files.content).unwrap().title, "Files");
+    app.open_builtin_picker(PickerKind::Commands);
+    app.reconcile_editor_windows();
+    assert_eq!(app.window_session.native_ids().picker(), Some(files));
+    assert_eq!(app.window_session.graph().content(files.content).unwrap().title, "Commands");
+    app.process_effect(AppEffect::WindowList);
+    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label.contains("Commands")));
+}
+
+#[test]
+fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.apply_persisted_window_rules(&[PersistedWindowRule {
+        content_type: "builtin.terminal".into(),
+        placement: PersistedWindowPlacement::Hidden,
+    }]).unwrap();
+    app.terminal_session.fixture(
+        PtyId(7),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(7));
+    app.sync_terminal_panel();
+    let terminal = app.window_session.native_ids().terminal(7).unwrap();
+    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
+    app.show_graph_window("terminal").unwrap();
+    assert!(matches!(app.window_session.graph().window(terminal.window).unwrap().placement,
+        WindowPlacement::Docked { edge: DockEdge::Bottom, .. }));
+    app.reconcile_editor_windows();
+    assert_ne!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
+}
+
+#[test]
+fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let placement = WindowPlacement::Docked { edge: DockEdge::Right, size: 31 };
+    let candidate = app.prepare_configured_window_rules(&crate::config::WindowsConfig {
+        rules: vec![crate::config::WindowRuleConfig {
+            content_type: "builtin.explorer".into(),
+            placement: crate::config::WindowPlacementConfig::Docked { edge: "right".into(), size: 31 },
+        }],
+    }).unwrap();
+    app.window_session.accept_current(candidate, &app.state.window_version()).unwrap();
+    app.open_explorer();
+    let explorer = app.window_session.native_ids().explorer().unwrap();
+    app.terminal_session.fixture(
+        PtyId(7),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(7));
+    app.sync_terminal_panel();
+    app.place_graph_window("terminal", WindowPlacement::Hidden).unwrap();
+    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, placement);
+    app.swap_graph_windows("explorer", "terminal").unwrap();
+    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, WindowPlacement::Hidden);
+    app.show_graph_window("explorer").unwrap();
+    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, placement);
+}
+
+#[test]
 fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None);
@@ -3030,6 +3114,26 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
         terminal_before
     );
     assert!(app.ui.notification_error);
+
+    let floating = WindowPlacement::Floating(WindowRect { x: 5, y: 4, width: 30, height: 8 });
+    app.place_graph_window("terminal", floating).unwrap();
+    assert_eq!(app.window_session.graph().focused(), Some(explorer.window));
+    app.swap_graph_windows("explorer", "terminal").unwrap();
+    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Fullscreen);
+    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, floating);
+    assert_eq!(app.window_session.graph().focused(), Some(terminal.window));
+    app.swap_graph_windows("terminal", "explorer").unwrap();
+    assert_eq!(app.window_session.graph().focused(), Some(explorer.window));
+    app.place_graph_window("terminal", original_terminal).unwrap();
+
+    let bottom_height = app.window_session.terminal_height();
+    app.place_graph_window("terminal", WindowPlacement::Docked { edge: DockEdge::Right, size: 62 }).unwrap();
+    assert_eq!(app.window_session.terminal_height(), bottom_height);
+    app.resize_graph_window("terminal", 2).unwrap();
+    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement,
+        WindowPlacement::Docked { edge: DockEdge::Right, size: 64 });
+    assert_eq!(app.window_session.terminal_height(), bottom_height);
+    app.place_graph_window("terminal", original_terminal).unwrap();
 
     app.process_effect(crate::editor::AppEffect::WindowDock {
         target: "explorer".into(),
@@ -3141,6 +3245,31 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     assert!(app.window_session.native_ids().explorer().is_none());
     assert!(app.ui.explorer.is_none());
     assert!(app.terminal_session.contains(PtyId(7)));
+}
+
+#[test]
+fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None);
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    let candidate = app.prepare_configured_window_rules(&crate::config::WindowsConfig {
+        rules: vec![crate::config::WindowRuleConfig {
+            content_type: "builtin.terminal".into(),
+            placement: crate::config::WindowPlacementConfig::Fullscreen,
+        }],
+    }).unwrap();
+    app.window_session.accept_current(candidate, &app.state.window_version()).unwrap();
+    app.apply_persisted_window_rules(&[
+        PersistedWindowRule { content_type: "builtin.explorer".into(), placement: PersistedWindowPlacement::Fullscreen },
+        PersistedWindowRule { content_type: "builtin.terminal".into(), placement: PersistedWindowPlacement::Hidden },
+    ]).unwrap();
+    let explorer = app.window_session.native_ids().explorer().unwrap();
+    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, WindowPlacement::Fullscreen);
+    assert_eq!(app.window_session.native_ids().semantic_defaults(None), vec![
+        ("builtin.explorer", WindowPlacement::Fullscreen),
+        ("builtin.terminal", WindowPlacement::Hidden),
+    ]);
 }
 
 #[test]
