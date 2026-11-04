@@ -26,6 +26,7 @@ pub(super) struct Actor {
     pub(super) generation: AtomicU64,
     pub(super) live: Arc<AtomicBool>,
     failure: Mutex<Option<String>>,
+    pub(super) stderr: Mutex<Vec<u8>>,
     #[cfg(test)]
     pub(super) writer_paused: AtomicBool,
     #[cfg(test)]
@@ -222,6 +223,7 @@ impl DapService {
             generation: AtomicU64::new(0),
             live: Arc::new(AtomicBool::new(true)),
             failure: Mutex::new(None),
+            stderr: Mutex::new(Vec::new()),
             #[cfg(test)]
             writer_paused: AtomicBool::new(false),
             #[cfg(test)]
@@ -349,7 +351,7 @@ impl DapService {
                 result
             };
             match result {
-                Ok((mut source, event)) => {
+                Ok((mut source, mut event)) => {
                     let session_scoped = matches!(
                         &event,
                         DapEvent::Response {
@@ -371,14 +373,18 @@ impl DapService {
                     {
                         continue;
                     }
-                    if matches!(event, DapEvent::Terminated { .. } | DapEvent::Failed { .. }) {
+                    if let DapEvent::Failed { message, .. } = &mut event {
+                        append_stderr(message, &session.actor);
+                    }
+                    if matches!(event, DapEvent::Terminated { .. } | DapEvent::Failed { .. }
+                        | DapEvent::Response { response: super::DapResponse::Disconnected { .. }, .. }) {
                         session.reported = true;
                     }
                     return Some((source, event));
                 }
                 Err(_) if session.actor.done.load(Ordering::Acquire) && !session.reported => {
                     session.reported = true;
-                    let message = session
+                    let mut message = session
                         .actor
                         .failure
                         .lock()
@@ -387,6 +393,7 @@ impl DapService {
                         .unwrap_or_else(|| {
                             "DAP worker stopped; outstanding request/write outcomes unknown".into()
                         });
+                    append_stderr(&mut message, &session.actor);
                     return Some((
                         DapContext {
                             actor: session.actor.clone(),
@@ -404,6 +411,16 @@ impl DapService {
         None
     }
 }
+fn append_stderr(message: &mut String, actor: &Actor) {
+    if let Ok(stderr) = actor.stderr.lock() {
+        let detail = super::sanitize_output(&String::from_utf8_lossy(&stderr));
+        if !detail.trim().is_empty() {
+            message.push_str("\nadapter stderr: ");
+            message.push_str(detail.trim());
+        }
+    }
+}
+
 impl Default for DapService {
     fn default() -> Self {
         Self::new()
@@ -571,6 +588,7 @@ pub(crate) fn fixture() -> (DapService, TestAdapter) {
         generation: AtomicU64::new(0),
         live: Arc::new(AtomicBool::new(true)),
         failure: Mutex::new(None),
+        stderr: Mutex::new(Vec::new()),
         writer_paused: AtomicBool::new(false),
         writer_waiting: AtomicBool::new(false),
         writes_queued: std::sync::atomic::AtomicUsize::new(0),
@@ -725,6 +743,70 @@ mod request_tests {
             })
         ));
     }
+    #[test]
+    fn queued_session_controls_survive_new_stop_generations() {
+        use crate::debugger::transport_tests::{ADAPTER, python};
+        use serde_json::json;
+        use std::{collections::{BTreeMap, HashMap}, time::Instant};
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("queued.py");
+        let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+        let body = r#"
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={}
+ if c=='initialize': body={'supportsConfigurationDoneRequest':True}
+ if c=='setBreakpoints': body={'breakpoints':[]}
+ if c=='threads': body={'threads':[]}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='launch': send({'type':'event','event':'initialized','body':{}})
+ if c=='configurationDone': send({'type':'event','event':'stopped','body':{'reason':'entry','threadId':2}})
+ if c=='disconnect': break
+"#;
+        std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+        let mut service = DapService::new();
+        service.start_absolute(DapLaunch {
+            adapter: "queued".into(), executable: python(),
+            arguments: vec!["-u".into(), script.display().to_string()],
+            environment: HashMap::new(), path_maps: BTreeMap::new(), root: root.path().into(),
+            request: "launch".into(), request_arguments: json!({}), breakpoints: vec![],
+        }).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if matches!(service.try_event(), Some(DapEvent::Stopped { .. })) { break; }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        // These controls were admitted before the stop advanced, unlike stopped-data queries.
+        for (request_id, value) in [
+            (100, DapControl::SetBreakpoints { path: root.path().join("main.rs"), breakpoints: vec![] }),
+            (101, DapControl::Disconnect { terminate_debuggee: true }),
+        ] {
+            service.session.as_ref().unwrap().sender.try_send(Control {
+                request_id, value, generation: 0,
+            }).unwrap();
+        }
+        let mut breakpoint_answer = false;
+        let mut disconnected = false;
+        while !breakpoint_answer || !disconnected {
+            match service.try_event() {
+                Some(DapEvent::Response { request_id: 100, response: DapResponse::Breakpoints(_), .. }) => breakpoint_answer = true,
+                Some(DapEvent::Response { request_id: 101, response: DapResponse::Disconnected { .. }, .. }) => disconnected = true,
+                Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        while !service.session.as_ref().unwrap().actor.done.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(service.try_event().is_none());
+        service.stop().unwrap();
+    }
+
     #[test]
     fn queued_breakpoint_answers_survive_new_stop_generations() {
         let (mut service, adapter) = fixture();

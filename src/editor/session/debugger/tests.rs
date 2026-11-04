@@ -305,6 +305,7 @@ fn detaching_and_terminating_are_different_session_facts() {
         },
     );
     detached.try_event().unwrap();
+    assert!(detached.active_adapter().is_none(), "disconnect retires the service");
     assert_eq!(
         detached.end_state(),
         Some(DapSessionEnd::Detached),
@@ -334,6 +335,7 @@ fn detaching_and_terminating_are_different_session_facts() {
         },
     );
     terminated.try_event().unwrap();
+    assert!(terminated.active_adapter().is_none(), "disconnect retires the service");
     assert_eq!(
         terminated.end_state(),
         Some(DapSessionEnd::Terminated),

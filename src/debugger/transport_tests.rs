@@ -77,6 +77,8 @@ while True:
  c=m['command']
  log.write(c+'\n')
  body={'supportsConfigurationDoneRequest':True} if c=='initialize' else {'breakpoints':[{'verified':True}]} if c=='setBreakpoints' else {}
+ if c=='setBreakpoints':
+  while not pathlib.Path('breakpoints-go').exists(): time.sleep(.002)
  send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
  if c=='launch': send({'type':'event','event':'initialized','body':{}})
 "#;
@@ -85,24 +87,29 @@ while True:
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut configuration = launch(root.path(), &script);
     let source = root.path().join("program.py");
-    configuration.breakpoints = vec![(
-        source.clone(),
-        vec![DapSourceBreakpoint {
-            path: source,
+    configuration.breakpoints = (0..70).map(|index| {
+        let path = source.with_extension(format!("{index}.py"));
+        (path.clone(), vec![DapSourceBreakpoint {
+            path,
             line: 2,
             column: None,
             condition: None,
             hit_condition: None,
             log_message: None,
-        }],
-    )];
+        }])
+    }).collect();
     let mut service = DapService::new();
     service.start_absolute(configuration).unwrap();
+    wait(|| request_log(root.path()).iter().any(|line| line == "setBreakpoints"));
+    assert!(!request_log(root.path()).iter().any(|line| line == "configurationDone"));
+    std::fs::write(root.path().join("breakpoints-go"), "go").unwrap();
     wait(|| {
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
         request_log(root.path())
             .iter()
             .any(|line| line == "configurationDone")
     });
+    assert_eq!(request_log(root.path()).iter().filter(|line| *line == "setBreakpoints").count(), 70);
     let log = request_log(root.path());
     let position = |name: &str| log.iter().position(|line| line == name).expect(name);
     assert!(
@@ -111,6 +118,92 @@ while True:
     );
     service.stop().unwrap();
 }
+#[test]
+fn startup_breakpoint_edits_replace_the_launch_snapshot() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={}
+ if c=='initialize': body={'supportsConfigurationDoneRequest':True}
+ if c=='threads':
+  body={'threads':[]}
+  send({'type':'event','event':'initialized','body':{}})
+ if c=='setBreakpoints':
+  assert m['arguments']['breakpoints']==[], 'removed startup breakpoint came back'
+  body={'breakpoints':[]}
+ if c=='configurationDone': pathlib.Path('configured').write_text('done')
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("coalesce.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let path = root.path().join("program.py");
+    let mut configuration = launch(root.path(), &script);
+    configuration.breakpoints = vec![(path.clone(), vec![DapSourceBreakpoint {
+        path: path.clone(), line: 2, column: None, condition: None,
+        hit_condition: None, log_message: None,
+    }])];
+    let mut service = DapService::new();
+    service.start_absolute(configuration).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
+    service.control(DapControl::SetBreakpoints { path, breakpoints: vec![] }).unwrap();
+    service.control(DapControl::Threads).unwrap();
+    wait(|| {
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
+        root.path().join("configured").exists()
+    });
+    service.stop().unwrap();
+}
+
+#[test]
+fn adapter_startup_failures_include_bounded_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("failure.py");
+    std::fs::write(&script, "import sys\nsys.stderr.write('x'*20000+' missing library libadapter.so\\n')\nsys.stderr.flush()\n").unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| match service.try_event() {
+        Some(DapEvent::Failed { message, .. }) => {
+            assert!(message.contains("missing library libadapter.so"), "{message}");
+            assert!(message.len() < 9000);
+            true
+        }
+        _ => false,
+    });
+    service.stop().unwrap();
+}
+
+#[test]
+fn slow_launches_do_not_reuse_the_initialize_deadline() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']
+ if c=='launch': time.sleep(16)
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':{}})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("slow-launch.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match service.try_event() {
+            Some(DapEvent::Running { .. }) => break,
+            Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    service.stop().unwrap();
+}
+
 #[test]
 fn a_rejection_says_why_rather_than_only_that_it_failed() {
     let delve = json!({"message":"Failed to launch","body":{"error":{"format":"Failed to launch: {why}","variables":{"why":"Build error"}}}});
@@ -733,6 +826,142 @@ fn the_bridge_reads_one_whole_message_at_a_time() {
 }
 
 #[test]
+fn rejected_resumes_preserve_stopped_requests_and_the_selected_thread() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+evaluation=None
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={}
+ if c=='threads': body={'threads':[{'id':1,'name':'other'},{'id':2,'name':'stopped'}]}
+ if c=='evaluate': evaluation=m;continue
+ if c in ('stepIn','next'):
+  assert m['arguments']['threadId']==2, 'lost the stopped thread'
+  send({'type':'response','request_seq':m['seq'],'command':c,'success':False,'message':'still paused'})
+  if evaluation:
+   send({'type':'response','request_seq':evaluation['seq'],'command':'evaluate','success':True,'body':{'result':'retained','variablesReference':0}})
+   evaluation=None
+  continue
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='launch': send({'type':'event','event':'stopped','body':{'reason':'entry','threadId':2}})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("resume.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
+    let stopped = service.context().unwrap();
+    service.control(DapControl::Evaluate { expression: "value".into(), frame_id: Some(2), context: "watch".into() }).unwrap();
+    service.control(DapControl::StepIn).unwrap();
+    let mut rejected = false;
+    let mut evaluated = false;
+    wait(|| {
+        match service.try_event() {
+            Some(DapEvent::RequestFailed { command, .. }) => { assert_eq!(command, "stepIn"); rejected = true; }
+            Some(DapEvent::Response { response: DapResponse::Evaluate(value), .. }) => { assert_eq!(value.value, "retained"); evaluated = true; }
+            Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => {}
+        }
+        rejected && evaluated
+    });
+    assert!(service.current(&stopped));
+    service.control_owned(&stopped, DapControl::Next).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::RequestFailed { command, .. }) if command == "next"));
+    service.stop().unwrap();
+}
+
+#[test]
+fn failed_pause_thread_lookup_cannot_pause_a_later_thread_list() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+threads=0
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={}
+ assert c!='pause', 'a failed pause survived its lookup'
+ if c=='threads':
+  threads+=1
+  if threads==1:
+   send({'type':'response','request_seq':m['seq'],'command':c,'success':False,'message':'no threads yet'});continue
+  body={'threads':[{'id':2,'name':'later'}]}
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='disconnect': pathlib.Path('no-stale-pause').write_text('done');break
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("pause.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
+    let source = service.context().unwrap();
+    let id = service.control_tracked(&source, DapControl::Pause).unwrap();
+    wait(|| match service.try_event() {
+        Some(DapEvent::RequestFailed { request_id, request: Some(DapControl::Pause), command, .. }) => {
+            assert_eq!(request_id, id); assert_eq!(command, "pause"); true
+        }
+        Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+        _ => false,
+    });
+    service.control(DapControl::Threads).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
+    service.control(DapControl::Disconnect { terminate_debuggee: true }).unwrap();
+    wait(|| {
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
+        root.path().join("no-stale-pause").exists()
+    });
+    service.stop().unwrap();
+}
+
+#[test]
+fn obsolete_breakpoint_responses_do_not_replace_current_adapter_ids() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+requests=[]
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={}
+ if c=='initialize': body={'supportsConfigurationDoneRequest':True}
+ if c=='setBreakpoints':
+  requests.append(m)
+  if len(requests)<2: continue
+  for item in reversed(requests):
+   line=item['arguments']['breakpoints'][0]['line']
+   send({'type':'response','request_seq':item['seq'],'command':c,'success':True,'body':{'breakpoints':[{'id':line,'verified':True,'line':line}]}})
+  for line in [20,10]: send({'type':'event','event':'breakpoint','body':{'reason':'changed','breakpoint':{'id':line,'verified':True,'line':line}}})
+  send({'type':'event','event':'output','body':{'output':'done'}})
+  continue
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='launch': send({'type':'event','event':'initialized','body':{}})
+ if c=='configurationDone': send({'type':'event','event':'output','body':{'output':'ready'}})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("breakpoint-order.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    wait(|| matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "ready"));
+    let path = root.path().join("main.rs");
+    for line in [10,20] {
+        service.control(DapControl::SetBreakpoints { path: path.clone(), breakpoints: vec![DapSourceBreakpoint {
+            path: path.clone(), line, column: None, condition: None, hit_condition: None, log_message: None,
+        }] }).unwrap();
+    }
+    let mut changed = Vec::new();
+    wait(|| match service.try_event() {
+        Some(DapEvent::Response { response: DapResponse::BreakpointChanged { requested, .. }, .. }) => { changed.push(requested); false }
+        Some(DapEvent::Output { output, .. }) => output == "done",
+        Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+        _ => false,
+    });
+    assert_eq!(changed, vec![20]);
+    service.stop().unwrap();
+}
+
+#[test]
 fn responses_keep_request_context_and_breakpoints_survive_execution_changes() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("correlation.py");
@@ -761,6 +990,7 @@ while True:
   body={'breakpoints':[{'id':7,'verified':False,'line':20}]}
  if c=='variables': body={'variables':[{'name':'child','value':'current','variablesReference':7}]}
  send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+ if c=='launch': send({'type':'event','event':'initialized','body':{}})
  if c=='setBreakpoints': send({'type':'event','event':'breakpoint','body':{'reason':'changed','breakpoint':{'id':7,'verified':True,'line':21}}})
  if c=='disconnect': break
 "#;
@@ -895,8 +1125,9 @@ while True:
             })
         )
     });
-    service.stop().unwrap();
     wait(|| service.pending() == 0);
+    assert!(service.try_event().is_none(), "disconnect must not synthesize a worker failure");
+    service.stop().unwrap();
 }
 #[test]
 fn configuration_done_rejection_is_a_startup_failure() {

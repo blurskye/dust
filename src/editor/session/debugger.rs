@@ -573,6 +573,7 @@ impl DebugSession {
                 } else {
                     crate::debugger::DapSessionEnd::Detached
                 });
+                let _ = self.service.stop();
             }
             DapEvent::Response {
                 response:

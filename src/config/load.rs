@@ -1267,8 +1267,15 @@ const GLOBAL_KEYMAP_TARGETS: &[(&str, &str)] = &[
 ];
 
 fn normalized_keys(keys: &Option<String>) -> Option<String> {
-    keys.as_ref()
-        .map(|keys| keys.split_whitespace().collect::<Vec<_>>().join(" "))
+    keys.as_ref().map(|keys| {
+        keys.split_whitespace()
+            .map(|token| {
+                token.parse::<crate::editor::input::KeyEvent>()
+                    .map_or_else(|_| token.to_owned(), |key| key.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
 }
 
 /// A user entry that names a bundled global binding by id alone (to rebind or disable it)

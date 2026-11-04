@@ -1045,6 +1045,20 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
 }
 
 #[test]
+fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
+    for (global, local) in [("z esc", "z escape"), ("<leader> control-a", "<leader> ctrl-a")] {
+        let loaded = super::load::parse_keymaps(
+            &format!("[[keymap]]\nid='user.global.alias'\ncontext='global'\nkeys='{global}'\ncommand='explorer.refresh'\n\n[[keymap]]\nid='user.explorer.alias'\ncontext='explorer'\nkeys='{local}'\ncommand='explorer.refresh'\n"),
+            PathBuf::from("keymaps.toml"),
+        );
+        assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+        assert!(!loaded.entries.iter().any(|entry| entry.id == "user.global.alias.explorer"));
+        assert!(loaded.entries.iter().any(|entry| entry.id == "user.explorer.alias"));
+        assert!(loaded.entries.iter().any(|entry| entry.id == "user.global.alias.editor-normal"));
+    }
+}
+
+#[test]
 fn global_keymaps_expand_to_every_command_surface_unless_the_surface_declares_the_keys() {
     let loaded = super::load::parse_keymaps(
         r#"

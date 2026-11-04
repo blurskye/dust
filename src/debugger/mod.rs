@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    io::BufReader,
+    io::{BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -466,7 +466,7 @@ fn run_adapter(
         root,
         request,
         request_arguments,
-        breakpoints: mut initial_breakpoints,
+        breakpoints: initial_breakpoints,
     } = launch;
     if let Some(scope) = &scope
         && let Err(message) = scope.check()
@@ -481,7 +481,7 @@ fn run_adapter(
         .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     if events.actor.cancel.load(Ordering::Acquire) {
         return;
     }
@@ -521,6 +521,23 @@ fn run_adapter(
             .ok();
         return;
     };
+    let stderr_events = events.clone();
+    let stderr = child.stderr.take().and_then(|stderr| {
+        thread::Builder::new().name("dust-dap-stderr".into()).spawn(move || {
+            let Ok(mut stderr) = crate::process::CancellablePipe::new(
+                stderr, stderr_events.actor.cancel.clone(),
+            ) else { return; };
+            let mut bytes = [0; 4096];
+            while let Ok(count) = stderr.read(&mut bytes) {
+                if count == 0 { break; }
+                if let Ok(mut captured) = stderr_events.actor.stderr.lock() {
+                    captured.extend_from_slice(&bytes[..count]);
+                    let discard = captured.len().saturating_sub(4096);
+                    captured.drain(..discard);
+                }
+            }
+        }).ok()
+    });
     let (messages, receiver) = mpsc::sync_channel(32);
     let reader_events = events.clone();
     let reader = thread::Builder::new()
@@ -584,15 +601,19 @@ fn run_adapter(
     let mut launched = false;
     let started = Instant::now();
     let mut launch_accepted = false;
-    let mut configured = false;
+    let mut initialized = false;
+    let mut configuration_sent = false;
+    let mut initial_breakpoints = initial_breakpoints.into_iter()
+        .map(|(path, rows)| (path, (0, rows)))
+        .collect::<BTreeMap<_, _>>();
     let mut paused = false;
     let mut supports_configuration_done = false;
     let mut thread_id = None;
-    let mut pending_pause = None;
     let mut stopping = false;
     let mut stop_generation = 0_u64;
     let mut pending: HashMap<i64, (String, u64, u64, Option<DapControl>)> = HashMap::new();
     let mut breakpoint_ids = HashMap::<i64, (PathBuf, u64)>::new();
+    let mut applied_breakpoints = HashMap::<PathBuf, i64>::new();
     let mut reverse = Vec::<reverse::ReverseRequest>::new();
     let mut last_reverse_sequence = 0;
     while !stopping && !events.actor.cancel.load(Ordering::Acquire) {
@@ -607,7 +628,11 @@ fn run_adapter(
             let Ok(control) = controls.try_recv() else {
                 break;
             };
-            if control.generation != events.actor.generation.load(Ordering::Acquire) {
+            if control.generation != events.actor.generation.load(Ordering::Acquire)
+                && !matches!(control.value, DapControl::SetBreakpoints { .. }
+                    | DapControl::Disconnect { .. } | DapControl::ReverseResponse { .. }
+                    | DapControl::Stop)
+            {
                 continue;
             }
             let request_id = control.request_id;
@@ -619,16 +644,21 @@ fn run_adapter(
                 }
                 continue;
             }
+            if let DapControl::SetBreakpoints { path, breakpoints } = &control
+                && !configuration_sent
+            {
+                initial_breakpoints.insert(path.clone(), (request_id, breakpoints.clone()));
+                continue;
+            }
             if matches!(control, DapControl::Pause) && thread_id.is_none() {
-                pending_pause = Some((request_id, original));
                 send_request(&mut stdin, sequence, "threads", json!({}));
                 pending.insert(
                     sequence,
                     (
                         "threads".into(),
                         stop_generation,
-                        0,
-                        Some(DapControl::Threads),
+                        request_id,
+                        Some(original),
                     ),
                 );
                 sequence += 1;
@@ -643,18 +673,6 @@ fn run_adapter(
                     .ok();
                 stopping = true;
                 break;
-            }
-            if matches!(
-                control,
-                DapControl::Continue | DapControl::Next | DapControl::StepIn | DapControl::StepOut
-            ) {
-                let Some(next) = stop_generation.checked_add(1) else {
-                    stopping = true;
-                    break;
-                };
-                stop_generation = next;
-                events.actor.generation.store(next, Ordering::Release);
-                pending.retain(|_, (command, _, _, _)| is_session_request(command));
             }
             let (command, arguments) = match control {
                 DapControl::Continue => (
@@ -730,8 +748,28 @@ fn run_adapter(
                 sequence += 1;
             }
         }
-        if (!launch_accepted || (supports_configuration_done && !configured))
-            && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT
+        // Keep startup writes incremental and wait for breakpoint acknowledgements before
+        // configurationDone; adapters may process requests asynchronously.
+        if initialized && !configuration_sent
+            && !pending.values().any(|(command, _, _, _)| command == "setBreakpoints")
+            && pending.len() < 128
+        {
+            if let Some((path, (request_id, rows))) = initial_breakpoints.pop_first() {
+                let original = DapControl::SetBreakpoints { path: path.clone(), breakpoints: rows.clone() };
+                send_request(&mut stdin, sequence, "setBreakpoints",
+                    set_breakpoints_arguments(&path, rows, &path_maps));
+                pending.insert(sequence, ("setBreakpoints".into(), stop_generation, request_id, Some(original)));
+                sequence += 1;
+            } else {
+                if supports_configuration_done {
+                    send_request(&mut stdin, sequence, "configurationDone", json!({}));
+                    pending.insert(sequence, ("configurationDone".into(), stop_generation, 0, None));
+                    sequence += 1;
+                }
+                configuration_sent = true;
+            }
+        }
+        if !launched && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT
         {
             events
                 .send(DapEvent::Failed {
@@ -813,13 +851,10 @@ fn run_adapter(
                                     request_id,
                                     request: original.clone(),
                                     message: format!("DAP {command} request rejected: {detail}"),
-                                    command,
+                                    command: if matches!(original, Some(DapControl::Pause)) { "pause".into() } else { command },
                                 })
                                 .ok();
                             continue;
-                        }
-                        if command == "configurationDone" {
-                            configured = true;
                         }
                         if matches!(command.as_str(), "launch" | "attach") {
                             launch_accepted = true;
@@ -835,6 +870,14 @@ fn run_adapter(
                             command.as_str(),
                             "continue" | "next" | "stepIn" | "stepOut"
                         ) {
+                            // Do not retire stopped data until the adapter accepts the resume.
+                            // A preceding continued event has already retired it.
+                            if paused {
+                                let Some(next) = stop_generation.checked_add(1) else { break; };
+                                stop_generation = next;
+                                events.actor.generation.store(next, Ordering::Release);
+                                pending.retain(|_, (command, _, _, _)| is_session_request(command));
+                            }
                             paused = false;
                             if launch_accepted {
                                 events
@@ -846,7 +889,9 @@ fn run_adapter(
                         }
                         if let Some(DapControl::SetBreakpoints { path, breakpoints }) =
                             original.as_ref()
+                            && applied_breakpoints.get(path).is_none_or(|applied| request_seq > *applied)
                         {
+                            applied_breakpoints.insert(path.clone(), request_seq);
                             breakpoint_ids.retain(|_, (old, _)| old != path);
                             if let Some(rows) = message
                                 .pointer("/body/breakpoints")
@@ -860,14 +905,11 @@ fn run_adapter(
                             }
                         }
                         if command == "threads" {
-                            thread_id = message
-                                .pointer("/body/threads")
-                                .and_then(Value::as_array)
-                                .and_then(|rows| rows.first())
-                                .and_then(|row| row.get("id"))
-                                .and_then(Value::as_i64)
-                                .or(thread_id);
-                            if let Some((id, pause)) = pending_pause.take() {
+                            let threads = message.pointer("/body/threads").and_then(Value::as_array);
+                            thread_id = thread_id.filter(|id| threads.is_some_and(|rows|
+                                rows.iter().any(|row| row.get("id").and_then(Value::as_i64) == Some(*id))))
+                                .or_else(|| threads?.first()?.get("id")?.as_i64());
+                            if matches!(original, Some(DapControl::Pause)) {
                                 if let Some(thread_id) = thread_id {
                                     send_request(
                                         &mut stdin,
@@ -877,7 +919,7 @@ fn run_adapter(
                                     );
                                     pending.insert(
                                         sequence,
-                                        ("pause".into(), stop_generation, id, Some(pause)),
+                                        ("pause".into(), stop_generation, request_id, original.clone()),
                                     );
                                     sequence += 1;
                                 } else {
@@ -886,8 +928,8 @@ fn run_adapter(
                                             adapter: adapter.clone(),
                                             stop_generation,
                                             request_seq,
-                                            request_id: id,
-                                            request: Some(pause),
+                                            request_id,
+                                            request: original.clone(),
                                             command: "pause".into(),
                                             message: "adapter reported no threads to pause".into(),
                                         })
@@ -986,29 +1028,7 @@ fn run_adapter(
                                     .ok();
                             }
                         }
-                        "initialized" => {
-                            for (path, rows) in std::mem::take(&mut initial_breakpoints) {
-                                let original = DapControl::SetBreakpoints {
-                                    path: path.clone(),
-                                    breakpoints: rows.clone(),
-                                };
-                                let arguments = set_breakpoints_arguments(&path, rows, &path_maps);
-                                send_request(&mut stdin, sequence, "setBreakpoints", arguments);
-                                pending.insert(
-                                    sequence,
-                                    ("setBreakpoints".into(), stop_generation, 0, Some(original)),
-                                );
-                                sequence += 1;
-                            }
-                            if supports_configuration_done {
-                                send_request(&mut stdin, sequence, "configurationDone", json!({}));
-                                pending.insert(
-                                    sequence,
-                                    ("configurationDone".into(), stop_generation, 0, None),
-                                );
-                                sequence += 1;
-                            }
-                        }
+                        "initialized" => initialized = true,
                         "stopped" => {
                             let Some(next) = stop_generation.checked_add(1) else {
                                 break;
@@ -1169,6 +1189,9 @@ fn run_adapter(
     drop(stdin);
     drop(reader);
     drop(writer);
+    if let Some(stderr) = stderr {
+        let _ = stderr.join();
+    }
 }
 
 /// The arguments a `disconnect` request carries. Extracted so the value that distinguishes a
