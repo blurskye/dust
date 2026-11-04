@@ -271,17 +271,14 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
         elf_interpreter(&installed).expect("ELF interpreter"),
         Some(runtime.loader.display().to_string())
     );
-    let version = probe_tool_version(
-        ToolVersionRequest {
-            id: definition.id,
-            executable: installed,
-            arguments: vec!["--version".into()],
-            environment: runtime.environment(),
-            current_directory: Some(directory.path().into()),
-            timeout: std::time::Duration::from_secs(10),
-        },
-        &std::sync::atomic::AtomicBool::new(false),
-    )
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: definition.id,
+        executable: installed,
+        arguments: vec!["--version".into()],
+        environment: runtime.environment(),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    })
     .expect("launch patched upstream executable");
     assert!(version.contains("0.3.3016"), "{version}");
 }
@@ -372,6 +369,36 @@ fn managed_lsp_definitions() -> Vec<super::catalog::ToolDefinition> {
 #[test]
 fn managed_lsp_protocol_fixtures_cover_the_exact_catalog_inventory() {
     managed_lsp_definitions();
+}
+
+// Keep qualification launches independent of the developer's environment while
+// using the same bounded version probe as the tool manager. `env` execs the tool.
+fn probe_isolated_tool_version(mut request: ToolVersionRequest) -> Result<String, String> {
+    let env = discover_executable("env").ok_or("env executable unavailable")?;
+    let env = std::path::absolute(env).map_err(|error| error.to_string())?;
+    let mut arguments = vec!["-i".into()];
+    arguments.extend(request.environment.iter().map(|(key, value)| format!("{key}={value}")));
+    arguments.push(request.executable.to_str().ok_or("non-UTF-8 tool path")?.into());
+    arguments.append(&mut request.arguments);
+    request.executable = env;
+    request.arguments = arguments;
+    request.environment.clear();
+    probe_tool_version(request, &std::sync::atomic::AtomicBool::new(false))
+}
+
+#[cfg(unix)]
+#[test]
+fn isolated_version_probe_does_not_inherit_the_developer_environment() {
+    let directory = tempfile::tempdir().unwrap();
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: "isolated".into(),
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), "test -z \"${HOME+x}\" && printf '%s' \"$DUST_PROBE_FIXTURE\"".into()],
+        environment: std::collections::BTreeMap::from([("DUST_PROBE_FIXTURE".into(), "isolated".into())]),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    }).unwrap();
+    assert_eq!(version, "isolated");
 }
 
 fn write_lsp_message(
@@ -787,20 +814,17 @@ fn managed_bun_installs_and_launches_an_exact_javascript_tool_without_node_or_np
     .expect("tool executable");
     let bin = installed.parent().expect("tool bin");
     assert!(bin.join("node").is_file());
-    let version = probe_tool_version(
-        ToolVersionRequest {
-            id: definition.id.clone(),
-            executable: installed.clone(),
-            arguments: vec!["--version".into()],
-            environment: std::collections::BTreeMap::from([
-                ("HOME".into(), directory.path().to_str().unwrap().into()),
-                ("PATH".into(), bin.to_str().unwrap().into()),
-            ]),
-            current_directory: Some(directory.path().into()),
-            timeout: std::time::Duration::from_secs(10),
-        },
-        &std::sync::atomic::AtomicBool::new(false),
-    )
+    let version = probe_isolated_tool_version(ToolVersionRequest {
+        id: definition.id.clone(),
+        executable: installed.clone(),
+        arguments: vec!["--version".into()],
+        environment: std::collections::BTreeMap::from([
+            ("HOME".into(), directory.path().to_str().unwrap().into()),
+            ("PATH".into(), bin.to_str().unwrap().into()),
+        ]),
+        current_directory: Some(directory.path().into()),
+        timeout: std::time::Duration::from_secs(10),
+    })
     .expect("launch Bun-backed JavaScript executable");
     assert_eq!(Some(version.as_str()), definition.version.as_deref());
 }
