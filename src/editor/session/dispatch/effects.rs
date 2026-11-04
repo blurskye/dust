@@ -994,6 +994,7 @@ impl InteractiveApplication {
                 .and_then(|buffer| self.state.buffers.get(buffer))
                 .map(|buffer| buffer.text.revision().0);
             for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
+                let closing = matches!(proposal.kind, crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged);
                 let result = self
                     .extension
                     .prepare_virtual(
@@ -1012,7 +1013,9 @@ impl InteractiveApplication {
                 match result {
                     Ok(state) => {
                         *self.state = state;
-                        self.set_dashboard_visibility(false);
+                        if !closing {
+                            self.set_dashboard_visibility(false);
+                        }
                         self.reconcile_editor_windows();
                     }
                     Err(error) => self.show_error(error),

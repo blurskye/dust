@@ -64,7 +64,7 @@ pub(super) struct ExtensionSession {
     virtual_editor: documents::VirtualDocumentEditorBridge,
     confirmations: confirmations::PluginConfirmations,
     active_picker: Option<u64>,
-    provider_source: Option<(u64, Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>)>,
+    provider_sources: HashMap<u64, Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>>,
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
@@ -106,7 +106,7 @@ impl ExtensionSession {
             virtual_editor: documents::VirtualDocumentEditorBridge::default(),
             confirmations: confirmations::PluginConfirmations::default(),
             active_picker: None,
-            provider_source: None,
+            provider_sources: HashMap::new(),
             plugin_contributions: PluginContributionCatalog::default(),
             pending_index_activation: BTreeMap::new(),
             rejected_plugin_loads: BTreeSet::new(),
@@ -445,7 +445,7 @@ impl ExtensionSession {
         self.virtual_documents.reset_runtime();
         self.virtual_editor = documents::VirtualDocumentEditorBridge::default();
         self.active_picker = None;
-        self.provider_source = None;
+        self.provider_sources.clear();
         self.ui.clear();
         self.results.clear();
         self.events.reset_runtime();

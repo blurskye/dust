@@ -105,9 +105,9 @@ impl ExtensionSession {
                 self.active_picker,
             )
             .map_err(|error| error.detail)?;
-        self.provider_source = Some((request, editor.active_buffer_id().map(|buffer| {
+        self.provider_sources.insert(request, editor.active_buffer_id().map(|buffer| {
             (buffer, editor.buffers[buffer].text.source_version())
-        })));
+        }));
         Ok(ProviderInvocation {
             request,
             plugin,
@@ -120,6 +120,7 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn discard_unpresented_provider(&mut self, request: u64) {
         if !self.provider_visible(request) {
             self.providers.cancel(request);
+            self.provider_sources.remove(&request);
         }
     }
     pub(in crate::editor::session) fn picker_installed(&mut self, provider: Option<u64>) {
@@ -130,6 +131,7 @@ impl ExtensionSession {
             && let Some(previous) = self.active_picker.take()
         {
             self.providers.cancel(previous);
+            self.provider_sources.remove(&previous);
         }
         self.active_picker = provider;
     }
@@ -171,8 +173,8 @@ impl ExtensionSession {
         command: &str,
         editor: &EditorState,
     ) -> Option<(String, Vec<String>)> {
-        let (source_request, source) = self.provider_source.as_ref()?;
-        if *source_request != request || match source {
+        let source = self.provider_sources.get(&request)?;
+        if match source {
             Some((buffer, text)) => editor.active_buffer_id() != Some(*buffer)
                 || editor.buffers.get(*buffer).is_none_or(|buffer| buffer.text.source_version() != *text),
             None => editor.active_buffer_id().is_some(),
@@ -479,6 +481,7 @@ impl ExtensionSession {
         load: PluginLoadId,
     ) -> bool {
         self.providers.remove_generation(plugin, load);
+        self.provider_sources.retain(|request, _| self.providers.presentable(*request));
         if self
             .active_picker
             .is_some_and(|request| !self.providers.presentable(request))
@@ -504,9 +507,9 @@ impl ExtensionSession {
         editor: &EditorState,
     ) -> Result<u64, PluginProviderError> {
         let request = self.providers.start(start)?;
-        self.provider_source = Some((request, editor.active_buffer_id().map(|buffer| {
+        self.provider_sources.insert(request, editor.active_buffer_id().map(|buffer| {
             (buffer, editor.buffers[buffer].text.source_version())
-        })));
+        }));
         Ok(request)
     }
     pub(in crate::editor::session) fn fixture_virtual_request(

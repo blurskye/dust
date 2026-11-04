@@ -1142,6 +1142,32 @@ impl ExecutionFixture {
             })
             .unwrap();
     }
+    pub(crate) fn reply_virtual(
+        &self,
+        captured: &CapturedExecution,
+        proposal: super::PluginVirtualDocumentProposal,
+    ) {
+        self.events
+            .try_send(WorkerEvent::Executed {
+                load: captured.load,
+                origin: captured.origin.clone(),
+                execution: PluginExecution {
+                    plugin: captured.request.plugin.clone(),
+                    command: captured.request.command.clone(),
+                    generation: captured.request.generation,
+                    result: String::new(),
+                    messages: Vec::new(),
+                    proposals: Vec::new(),
+                    ui_requests: Vec::new(),
+                    confirmation_requests: Vec::new(),
+                    host_event_acknowledgements: Vec::new(),
+                    storage_requests: Vec::new(),
+                    provider_chunks: Vec::new(),
+                    virtual_document_proposals: vec![proposal],
+                },
+            })
+            .unwrap();
+    }
     pub(crate) fn fail(&self, captured: &CapturedExecution) {
         self.events
             .try_send(WorkerEvent::Failed {

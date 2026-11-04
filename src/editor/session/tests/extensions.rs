@@ -2508,6 +2508,26 @@ fn provider_selection_delivers_request_item_and_action_data() {
 }
 
 #[test]
+fn provider_selection_survives_a_discarded_replacement() {
+    let (mut app, fixture, request) = provider_selection_fixture();
+    let replacement = app.extension.start_provider(
+        "plugin.demo.provider.files",
+        String::new(),
+        app.workspace.root_revision(),
+        &app.state,
+    ).unwrap();
+    assert_ne!(replacement.request, request);
+    app.extension.discard_unpresented_provider(replacement.request);
+    assert!(app.extension.provider_projection(replacement.request).is_none());
+    assert!(app.extension.provider_visible(request));
+    app.accept_picker();
+    assert_eq!(
+        fixture.take().arguments(),
+        &[request.to_string(), "selected".into(), "[0,255]".into()]
+    );
+}
+
+#[test]
 fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
     let (mut app, fixture, _) = provider_selection_fixture();
     let buffer = app.state.active_buffer_id().unwrap();
@@ -2761,22 +2781,19 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
     let close = &execution.virtual_documents()[0];
     assert_eq!(close.kind, crate::extensions::PluginVirtualDocumentRequestKind::CloseNotice);
     assert_eq!(close.current_revision, Some(1));
-    let (publication, candidate) = app.extension.prepare_virtual(
-        "demo", PluginLoadId(1),
+    assert!(app.window_session.dashboard_visible());
+    fixture.reply_virtual(
+        &execution,
         crate::extensions::PluginVirtualDocumentProposal {
             request: close.request, document: close.document,
             cancellation_generation: close.cancellation_generation,
             kind: crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged,
         },
-        crate::editor::session::extensions::VirtualContext {
-            editor: &app.state, windows: &app.window_session, scratch: "scratch",
-        },
-    ).unwrap();
-    let accepted = app.window_session.accept_editor_transition(
-        candidate, publication.before(), publication.catalog(),
-    ).unwrap();
-    *app.state = publication.finish(accepted).unwrap();
+    );
+    app.process_plugin_events();
     assert!(!app.state.buffers.contains_key(buffer));
+    assert!(app.window_session.dashboard_visible());
+    assert!(app.ui.dashboard);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(), key: "help".into(),
     });

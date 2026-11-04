@@ -526,6 +526,7 @@ impl PluginVirtualDocumentBroker {
             && !matches!(
                 proposal.kind,
                 PluginVirtualDocumentProposalKind::CloseAcknowledged
+                    | PluginVirtualDocumentProposalKind::Error(_)
             )
         {
             return Err(err(
@@ -574,6 +575,7 @@ impl PluginVirtualDocumentBroker {
             && !matches!(
                 proposal.kind,
                 PluginVirtualDocumentProposalKind::CloseAcknowledged
+                    | PluginVirtualDocumentProposalKind::Error(_)
             )
         {
             return Err(err(
@@ -1199,7 +1201,36 @@ mod tests {
         }
         broker.refresh("demo", load, document).unwrap();
         assert_eq!(broker.pending.len(), 1);
-        broker.cancel("demo", load, document);
+        assert!(broker.cancel_pending("demo", load, document));
+        broker.close("demo", load, document).unwrap();
+        let close = broker
+            .requests_for_command("demo", load, "plugin.demo.run")
+            .pop()
+            .unwrap();
+        let proposal = PluginVirtualDocumentProposal {
+            request: close.request,
+            document,
+            cancellation_generation: close.cancellation_generation,
+            kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
+                expected_revision: Some(1),
+                revision: 2,
+                title: "Help".into(),
+                language: "markdown".into(),
+                text: "must not reopen".into(),
+            }),
+        };
+        assert_eq!(
+            broker.apply("demo", load, proposal.clone()).unwrap_err().code,
+            PluginVirtualDocumentErrorCode::Cancelled
+        );
+        let error = err(PluginVirtualDocumentErrorCode::Internal, "close failed");
+        assert_eq!(
+            broker.apply("demo", load, PluginVirtualDocumentProposal {
+                kind: PluginVirtualDocumentProposalKind::Error(error.clone()),
+                ..proposal
+            }).unwrap_err(),
+            error
+        );
         assert!(broker.documents.is_empty() && broker.pending.is_empty());
         for _ in 0..100 {
             let document = broker.start("demo", load, source, "key".into()).unwrap();
