@@ -118,6 +118,7 @@ struct AgentFileRequest {
     method: String,
     params: Value,
     buffers: Vec<(BufferId, PathBuf)>,
+    written: Option<PathBuf>,
 }
 
 impl AgentPanel {
@@ -739,6 +740,19 @@ impl InteractiveApplication {
     }
 
     fn cancel_agent_permissions(&mut self, numbers: &[u64]) {
+        // Permissions waiting for path resolution must be cancelled too, or their
+        // completion would reopen the prompt after the turn was stopped.
+        let pending: Vec<_> = self.agent.files.iter()
+            .filter(|(_, request)| request.method == "session/request_permission" && numbers.contains(&request.session))
+            .map(|(id, _)| *id).collect();
+        for id in pending {
+            self.documents.cancel_request(id);
+            if let Some(request) = self.agent.files.remove(&id)
+                && let Some(index) = self.agent.sessions.iter().position(|session| session.number == request.session)
+            {
+                self.respond_to_agent(index, request.id, Ok(agent::permission_cancelled()));
+            }
+        }
         let (cancelled, kept): (Vec<_>, Vec<_>) = self
             .agent
             .permissions
@@ -1368,6 +1382,15 @@ impl InteractiveApplication {
         let (name, root, tab) = (session.name.clone(), session.root.clone(), session.number);
         let tab = session.parent.is_none().then_some(tab);
         let spawned = self.spawn_agent(&name, &root, tab)?;
+        // A restarted process can reuse JSON-RPC IDs, but must not receive replies
+        // to filesystem requests made by the previous process in this tab.
+        let pending: Vec<_> = self.agent.files.iter()
+            .filter(|(_, request)| request.session == self.agent.sessions[self.agent.active].number)
+            .map(|(id, _)| *id).collect();
+        for id in pending {
+            self.agent.files.remove(&id);
+            self.documents.cancel_request(id);
+        }
         self.agent.sessions[self.agent.active].attach(spawned);
         Ok(())
     }
@@ -1654,7 +1677,7 @@ impl InteractiveApplication {
                 "session/request_permission" | "fs/read_text_file" | "fs/write_text_file" => {
                     let number = session.number;
                     self.queue_agent_file(AgentFileRequest {
-                        session: number, id, method, params, buffers: Vec::new(),
+                        session: number, id, method, params, buffers: Vec::new(), written: None,
                     });
                 }
                 _ => self.respond_to_agent(index, id, Err(format!("{method} is not supported by Dust"))),
@@ -1814,7 +1837,7 @@ impl InteractiveApplication {
                 self.respond_to_agent(index, request.id, Err("content is missing".into()));
                 return;
             }
-            paths.push(path);
+            paths.push(request.written.clone().unwrap_or(path));
             paths.push(root);
         }
         match self.documents.resolve_agent_paths(paths) {
@@ -1857,7 +1880,9 @@ impl InteractiveApplication {
                 }
                 let path = targets[0].clone();
                 let open: Vec<_> = resolved.iter().filter(|(_, resolved)| *resolved == path).map(|(id, _)| *id).collect();
-                if request.method == "fs/read_text_file" {
+                if request.written.is_some() {
+                    self.finish_agent_write(&request, &open)
+                } else if request.method == "fs/read_text_file" {
                     let open = open.iter().find(|id| self.state.buffers[**id].dirty).or_else(|| open.first());
                     if let Some(id) = open {
                         let text = self.state.buffers[*id].text.to_string();
@@ -1873,7 +1898,6 @@ impl InteractiveApplication {
                 } else if open.iter().any(|id| self.state.buffers[*id].dirty) {
                     Err(format!("{} has unsaved changes in Dust", path.display()))
                 } else {
-                    request.buffers.retain(|(id, _)| open.contains(id));
                     let bytes = request.params["content"].as_str().expect("validated content").as_bytes().to_vec();
                     match self.documents.write_agent_file(path, targets[1].clone(), bytes) {
                         Ok(id) => { self.agent.files.insert(id, request); return None; }
@@ -1884,23 +1908,36 @@ impl InteractiveApplication {
             VfsResult::Read { result, .. } => result.map_err(|e| e.to_string()).and_then(|bytes| {
                 String::from_utf8(bytes).map_err(|e| e.to_string()).map(|text| json!({"content": agent::slice_lines(&text, request.params["line"].as_u64(), request.params["limit"].as_u64())}))
             }),
-            VfsResult::Write { result, .. } => result.map_err(|e| e.to_string()).and_then(|()| {
-                let mut candidate = self.state.draft();
-                for (id, path) in &request.buffers {
-                    if let Some(buffer) = self.state.buffers.get(*id) {
-                        if buffer.path.as_ref() != Some(path) { continue; }
-                        if buffer.dirty { return Err("file written, but newer unsaved changes in Dust were preserved".into()); }
-                        candidate.reload_document(*id, TextBuffer::from_text(request.params["content"].as_str().expect("validated content")), path.clone());
-                    }
+            VfsResult::Write { path, result, .. } => match result {
+                Ok(()) => {
+                    // Buffers may have opened or changed paths while the write ran.
+                    // Resolve the current set before publishing and acknowledging it.
+                    request.written = Some(path);
+                    self.queue_agent_file(request);
+                    return None;
                 }
-                self.commit_editor_draft(candidate, None, false).map_err(|e| e.to_string())?;
-                self.git.forget_hunks();
-                Ok(Value::Null)
-            }),
+                Err(error) => Err(error.to_string()),
+            },
             _ => Err("unexpected agent file result".into()),
         };
         self.respond_to_agent(index, request.id, response);
         None
+    }
+
+    fn finish_agent_write(&mut self, request: &AgentFileRequest, open: &[BufferId]) -> Result<Value, String> {
+        let mut candidate = self.state.draft();
+        let text = TextBuffer::from_bytes(request.params["content"].as_str().expect("validated content").as_bytes()).map_err(|error| error.to_string())?;
+        for id in open {
+            let buffer = &self.state.buffers[*id];
+            if buffer.dirty {
+                return Err("file written, but newer unsaved changes in Dust were preserved".into());
+            }
+            candidate.reload_document(*id, text.clone(), buffer.path.clone().expect("resolved buffer path"));
+        }
+        self.commit_editor_draft(candidate, None, false).map_err(|e| e.to_string())?;
+        self.git.forget_hunks();
+        self.keep_cursor_off_final_newline();
+        Ok(Value::Null)
     }
 
     pub(super) fn fail_agent_files(&mut self, error: &str) {
@@ -3653,6 +3690,70 @@ mod tests {
         app.handle_agent_message(index, AgentMessage::Request { id: json!(105), method: "fs/write_text_file".into(), params: json!({"path": outside.path().join("escape"), "content": "bad"}) });
         assert!(file_response(&mut app, index).unwrap_err().contains("outside"));
         assert!(!outside.path().join("escape").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_write_refreshes_buffers_opened_during_io_and_preserves_file_format() {
+        use crate::editor::session::documents::DocumentEvent;
+        let mut app = test_app();
+        let index = echo_agent(&mut app);
+        let path = app.state.workspace_root.join("written.txt");
+        std::fs::write(&path, "old").unwrap();
+        let content = "\u{feff}new\r\n";
+        app.handle_agent_message(index, AgentMessage::Request {
+            id: json!(100), method: "fs/write_text_file".into(),
+            params: json!({"path": path, "content": content}),
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let completed = loop {
+            if let Some(DocumentEvent::Legacy(result)) = app.documents.poll(&app.state.window_version(), app.workspace.root_revision()).unwrap() {
+                if matches!(result, crate::files::VfsResult::Write { .. }) { break result; }
+                app.accept_agent_file(result);
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        // This open raced with the worker's write and still carries the old text.
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+        app.accept_agent_file(completed);
+        file_response(&mut app, index).unwrap();
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "new\n");
+        assert_eq!(app.state.buffers[buffer].text.to_bytes(), content.as_bytes());
+        assert_eq!(std::fs::read(&path).unwrap(), content.as_bytes());
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_a_turn_retires_permissions_still_resolving_paths() {
+        let mut app = test_app();
+        let index = echo_agent(&mut app);
+        app.agent.active = index;
+        app.agent.sessions[index].phase = Phase::Prompting(1);
+        app.handle_agent_message(index, AgentMessage::Request {
+            id: json!(100), method: "session/request_permission".into(),
+            params: json!({"toolCall": {"kind": "edit"}}),
+        });
+        assert_eq!(app.agent.files.len(), 1);
+        app.cancel_agent_turn();
+        assert!(app.agent.files.is_empty());
+        assert_eq!(file_response(&mut app, index).unwrap(), agent::permission_cancelled());
+        // A later worker completion must be discarded, not presented as a new prompt.
+        let id = app.documents.resolve_agent_paths(Vec::new()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(crate::editor::session::documents::DocumentEvent::Legacy(crate::files::VfsResult::PathsResolved { id: received, .. })) = app.documents.poll(&app.state.window_version(), app.workspace.root_revision()).unwrap() {
+                assert_eq!(received, id);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.process_agent_events();
+        assert!(app.agent.permissions.is_empty());
+        assert!(app.agent.asking.is_none());
+        assert!(app.ui.prompt.is_none());
     }
 
     #[cfg(unix)]
