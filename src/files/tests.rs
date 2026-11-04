@@ -781,6 +781,31 @@ fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
 }
 
 #[test]
+fn worktree_search_preserves_relative_root_paths() {
+    if !isolated_git_test() { return; }
+    let cwd = std::env::current_dir().unwrap();
+    let repository = tempfile::tempdir_in(&cwd).unwrap();
+    let root = repository.path().strip_prefix(&cwd).unwrap();
+    fs::create_dir_all(root.join(".git/info")).unwrap();
+    fs::write(root.join(".git/info/exclude"), "/.worktree/\n").unwrap();
+    let worktree = root.join(".worktree/feat");
+    fs::create_dir_all(&worktree).unwrap();
+    fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
+    fs::write(worktree.join("feat.txt"), "needle\n").unwrap();
+    assert_eq!(
+        super::directory::root_worktrees(root, || true).collect::<Vec<_>>(),
+        std::slice::from_ref(&worktree)
+    );
+    let mut search = WorkspaceSearchService::default();
+    search.start(search_policy(root, "needle")).unwrap();
+    let (matches, summary) = collect_search(&search);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].canonical_path, worktree.join("feat.txt"));
+    assert_eq!(matches[0].relative_path, Path::new(".worktree/feat/feat.txt"));
+    assert_eq!(summary.walk_errors, 0);
+}
+
+#[test]
 fn worktree_discovery_and_special_directory_respect_caller_limits() {
     if !isolated_git_test() { return; }
     let repository = repository_with_worktree();
