@@ -7,6 +7,7 @@
 use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
+    os::fd::AsFd,
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::PermissionsExt,
@@ -19,6 +20,7 @@ use std::{
     time::Duration,
 };
 
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use serde_json::{Value, json};
 
 /// The variable terminals started by Dust find the socket in.
@@ -82,6 +84,8 @@ pub struct RemoteServer {
     requests: mpsc::Receiver<RemoteRequest>,
     stopping: Arc<AtomicBool>,
     reading: Arc<Mutex<Option<UnixStream>>>,
+    writing: Arc<Mutex<Option<UnixStream>>>,
+    wake: UnixStream,
     workers: Vec<thread::JoinHandle<()>>,
 }
 
@@ -93,10 +97,14 @@ impl RemoteServer {
         let _ = fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        listener.set_nonblocking(true)?;
+        let (wake, wake_reader) = UnixStream::pair()?;
         let (sender, requests) = mpsc::channel();
-        let (replies, pending) = mpsc::sync_channel(8);
+        let (replies, pending) = mpsc::sync_channel::<(UnixStream, Result<String, String>)>(8);
         let stopping = Arc::new(AtomicBool::new(false));
         let reading = Arc::new(Mutex::new(None));
+        let writing = Arc::new(Mutex::new(None));
+        let reply_writing = writing.clone();
         let reply_stop = stopping.clone();
         let reply_worker = thread::Builder::new()
             .name("dust-remote-replies".into())
@@ -104,8 +112,16 @@ impl RemoteServer {
                 while !reply_stop.load(Ordering::Acquire) {
                     match pending.recv_timeout(Duration::from_millis(100)) {
                         Ok((stream, answer)) => {
+                            {
+                                let mut writing = reply_writing.lock().unwrap();
+                                if reply_stop.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                *writing = stream.try_clone().ok();
+                            }
                             // Failed delivery closes the socket and lets the next answer proceed.
                             let _ = send_reply(stream, answer);
+                            *reply_writing.lock().unwrap() = None;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -117,7 +133,24 @@ impl RemoteServer {
         let listener_worker = thread::Builder::new()
             .name("dust-remote".into())
             .spawn(move || {
-                for stream in listener.incoming().flatten() {
+                loop {
+                    let mut ready = [
+                        PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                        PollFd::new(wake_reader.as_fd(), PollFlags::POLLIN),
+                    ];
+                    match poll(&mut ready, PollTimeout::NONE) {
+                        Err(nix::errno::Errno::EINTR) => continue,
+                        Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    if listener_stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let stream = match listener.accept() {
+                        Ok((stream, _)) => stream,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                        Err(_) => break,
+                    };
                     {
                         let mut reading = listener_reading.lock().unwrap();
                         if listener_stop.load(Ordering::Acquire) {
@@ -167,7 +200,7 @@ impl RemoteServer {
                 return Err(error);
             }
         };
-        Ok(Self { path, requests, stopping, reading, workers: vec![listener_worker, reply_worker] })
+        Ok(Self { path, requests, stopping, reading, writing, wake, workers: vec![listener_worker, reply_worker] })
     }
 
     #[must_use]
@@ -184,11 +217,13 @@ impl RemoteServer {
 impl Drop for RemoteServer {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
-        if let Some(stream) = self.reading.lock().unwrap().as_ref() {
-            let _ = stream.shutdown(Shutdown::Both);
+        for active in [&self.reading, &self.writing] {
+            if let Some(stream) = active.lock().unwrap().as_ref() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
         }
-        // Wake an idle accept; an active read is interrupted by shutdown above.
-        let _ = UnixStream::connect(&self.path);
+        // Wake the listener even if its socket path has already been removed.
+        let _ = self.wake.shutdown(Shutdown::Both);
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
@@ -358,6 +393,40 @@ mod tests {
             assert!(workers.upgrade().is_none(), "both workers released their stop flag");
             assert!(!path.exists());
         }
+    }
+
+    #[test]
+    fn dropping_the_server_after_its_socket_is_removed_still_stops_workers() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let workers = Arc::downgrade(&server.stopping);
+        fs::remove_file(server.path()).unwrap();
+        drop(server);
+        assert!(workers.upgrade().is_none());
+    }
+
+    #[test]
+    fn dropping_the_server_interrupts_a_stalled_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        writeln!(client, "agent\t{}", json!({"parent": 1, "prompt": "task"})).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let request = loop {
+            if let Some(RemoteRequest::Agent(request)) = server.try_request() {
+                break request;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        };
+        request.reply.send(Ok("x".repeat(4 * 1024 * 1024)));
+        while server.writing.lock().unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        let started = std::time::Instant::now();
+        drop(server);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

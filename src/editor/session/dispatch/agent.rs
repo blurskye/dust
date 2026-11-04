@@ -3078,7 +3078,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn subagent_reply() -> (Reply, std::io::BufReader<std::os::unix::net::UnixStream>) {
+    fn subagent_reply() -> (crate::remote::RemoteServer, Reply, std::io::BufReader<std::os::unix::net::UnixStream>) {
         use std::io::Write;
         let directory = tempfile::tempdir().unwrap();
         let server = crate::remote::RemoteServer::start(directory.path()).unwrap();
@@ -3090,7 +3090,7 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             if let Some(crate::remote::RemoteRequest::Agent(request)) = server.try_request() {
-                return (request.reply, std::io::BufReader::new(stream));
+                return (server, request.reply, std::io::BufReader::new(stream));
             }
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -3348,7 +3348,7 @@ mod tests {
     fn agent_cancel_rejects_late_subagent_requests() {
         use std::io::BufRead;
         for cancel in [false, true] {
-            let (reply, mut answer) = subagent_reply();
+            let (_server, reply, mut answer) = subagent_reply();
             let (_directories, mut app) = test_app();
             let index = echo_agent(&mut app);
             app.agent.active = index;
@@ -3371,7 +3371,7 @@ mod tests {
     fn agent_subagent_partial_answers_do_not_hide_failed_turns() {
         use std::io::BufRead;
         for outcome in ["error", "exit", "success"] {
-            let (reply, mut answer) = subagent_reply();
+            let (_server, reply, mut answer) = subagent_reply();
             let (_directories, mut app) = test_app();
             let index = echo_agent(&mut app);
             let session = &mut app.agent.sessions[index];
@@ -3418,7 +3418,7 @@ mod tests {
     #[test]
     fn agent_cancel_stops_starting_children_and_their_permissions() {
         use std::io::BufRead;
-        let (reply, mut answer) = subagent_reply();
+        let (_server, reply, mut answer) = subagent_reply();
         let (_directories, mut app) = test_app();
         let parent = tab(&mut app);
         let number = app.agent.sessions[parent].number;
@@ -3466,7 +3466,7 @@ mod tests {
     fn agent_close_and_exit_stop_children() {
         use std::io::BufRead;
         for close in [true, false] {
-            let (reply, mut answer) = subagent_reply();
+            let (_server, reply, mut answer) = subagent_reply();
             let (_directories, mut app) = test_app();
             let parent = tab(&mut app);
             let number = app.agent.sessions[parent].number;
