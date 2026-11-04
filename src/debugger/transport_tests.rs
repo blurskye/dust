@@ -213,6 +213,62 @@ while True:
 }
 
 #[test]
+fn debuggee_exit_preserves_final_output_until_termination_or_eof() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    for explicit_termination in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("exit.py");
+        let termination = if explicit_termination {
+            "  send({'type':'event','event':'terminated','body':{}})\n"
+        } else { "" };
+        std::fs::write(&script, format!("{prefix}\nwhile True:\n m=read()\n if m is None: break\n c=m['command']\n send({{'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':{{}}}})\n if c=='launch':\n  send({{'type':'event','event':'exited','body':{{'exitCode':0}}}})\n  send({{'type':'event','event':'output','body':{{'output':'final output'}}}})\n{termination}  break\n")).unwrap();
+        let mut service = DapService::new();
+        service.start_absolute(launch(root.path(), &script)).unwrap();
+        let mut output = String::new();
+        wait(|| match service.try_event() {
+            Some(DapEvent::Output { output: text, .. }) => { output.push_str(&text); false }
+            Some(DapEvent::Terminated { .. }) => { assert_eq!(output, "final output"); true }
+            Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => false,
+        });
+        service.stop().unwrap();
+    }
+}
+
+#[test]
+fn adapter_exit_drains_buffered_launch_rejection_after_output() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    let body = r#"
+import os
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']
+ if c=='launch':
+  for n in range(200): send({'type':'event','event':'output','body':{'output':str(n)}})
+  send({'type':'response','request_seq':m['seq'],'command':c,'success':False,'message':'buffered launch rejection'})
+  os._exit(1)
+ send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':{}})
+"#;
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("buffered-exit.py");
+    std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+    let mut service = DapService::new();
+    service.start_absolute(launch(root.path(), &script)).unwrap();
+    let mut outputs = 0;
+    wait(|| match service.try_event() {
+        Some(DapEvent::Output { .. }) => { outputs += 1; false }
+        Some(DapEvent::Failed { message, .. }) => {
+            assert!(message.contains("buffered launch rejection"), "{message}");
+            assert_eq!(outputs, 200);
+            true
+        }
+        _ => false,
+    });
+    service.stop().unwrap();
+}
+
+#[test]
 fn a_rejection_says_why_rather_than_only_that_it_failed() {
     let delve = json!({"message":"Failed to launch","body":{"error":{"format":"Failed to launch: {why}","variables":{"why":"Build error"}}}});
     assert_eq!(rejection_detail(&delve), "Failed to launch: Build error");
@@ -834,6 +890,53 @@ fn the_bridge_reads_one_whole_message_at_a_time() {
 }
 
 #[test]
+fn continued_events_only_retire_the_affected_stopped_thread() {
+    let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
+    for (continued, preserved) in [
+        (json!({"threadId":1,"allThreadsContinued":false}), true),
+        (json!({"threadId":2,"allThreadsContinued":false}), false),
+        (json!({"threadId":1,"allThreadsContinued":true}), false),
+        (json!({"threadId":1}), false),
+    ] {
+        let body = format!(r#"
+continued=json.loads('{continued}')
+while True:
+ m=read()
+ if m is None: break
+ c=m['command']; body={{}}
+ if c=='threads': body={{'threads':[{{'id':2,'name':'stopped'}},{{'id':1,'name':'other'}}]}}
+ if c=='evaluate':
+  send({{'type':'event','event':'continued','body':continued}})
+  body={{'result':'retained'}}
+ send({{'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body}})
+ if c=='launch': send({{'type':'event','event':'stopped','body':{{'reason':'entry','threadId':2}}}})
+ if c=='evaluate': send({{'type':'event','event':'output','body':{{'output':'done'}}}})
+"#);
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("continued.py");
+        std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
+        let mut service = DapService::new();
+        service.start_absolute(launch(root.path(), &script)).unwrap();
+        wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
+        let stopped = service.context().unwrap();
+        service.control_owned(&stopped, DapControl::Evaluate { expression: "value".into(), frame_id: Some(2), context: "watch".into() }).unwrap();
+        let mut evaluated = false;
+        let mut running = false;
+        wait(|| match service.try_event() {
+            Some(DapEvent::Response { response: DapResponse::Evaluate(_), .. }) => { evaluated = true; false }
+            Some(DapEvent::Running { .. }) => { running = true; false }
+            Some(DapEvent::Output { output, .. }) => { assert_eq!(output, "done"); true }
+            Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => false,
+        });
+        assert_eq!(service.current(&stopped), preserved);
+        assert_eq!(evaluated, preserved);
+        assert_eq!(running, !preserved);
+        service.stop().unwrap();
+    }
+}
+
+#[test]
 fn rejected_resumes_preserve_stopped_requests_and_the_selected_thread() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     let body = r#"
@@ -1171,14 +1274,14 @@ while True:
 }
 #[cfg(target_os = "linux")]
 #[test]
-fn abnormal_adapter_exit_releases_inherited_pipes_and_resident_leases() {
+fn abnormal_adapter_exit_kills_term_ignoring_descendants_and_releases_pipes() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("descendant.py");
     let prefix = LOGGING_ADAPTER
         .split("while True:\n m=read()")
         .next()
         .unwrap();
-    std::fs::write(&script, format!("{prefix}\nimport subprocess,os\np=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])\npathlib.Path('helper-pid').write_text(str(p.pid))\nos._exit(1)\n")).unwrap();
+    std::fs::write(&script, format!("{prefix}\nimport subprocess,os\np=subprocess.Popen([sys.executable,'-c',\"import signal,time,pathlib; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path('helper-ready').touch(); time.sleep(30)\"])\npathlib.Path('helper-pid').write_text(str(p.pid))\nwhile not pathlib.Path('helper-ready').exists(): time.sleep(.002)\nos._exit(1)\n")).unwrap();
     let mut service = DapService::new();
     service
         .start_absolute(launch(root.path(), &script))

@@ -610,6 +610,7 @@ fn run_adapter(
     let mut supports_configuration_done = false;
     let mut thread_id = None;
     let mut stopping = false;
+    let mut debuggee_exited = false;
     let mut stop_generation = 0_u64;
     let mut pending: HashMap<i64, (String, u64, u64, Option<DapControl>)> = HashMap::new();
     let mut breakpoint_ids = HashMap::<i64, (PathBuf, u64)>::new();
@@ -1039,6 +1040,15 @@ fn run_adapter(
                                 .ok();
                         }
                         "continued" => {
+                            if message.pointer("/body/allThreadsContinued").and_then(Value::as_bool) == Some(false)
+                                && let (Some(stopped), Some(resumed)) = (
+                                    thread_id,
+                                    message.pointer("/body/threadId").and_then(Value::as_i64),
+                                )
+                                && stopped != resumed
+                            {
+                                continue;
+                            }
                             let Some(next) = stop_generation.checked_add(1) else {
                                 break;
                             };
@@ -1069,7 +1079,8 @@ fn run_adapter(
                                 })
                                 .ok();
                         }
-                        "terminated" | "exited" => {
+                        "exited" => debuggee_exited = true,
+                        "terminated" => {
                             events
                                 .send(DapEvent::Terminated {
                                     adapter: adapter.clone(),
@@ -1128,11 +1139,16 @@ fn run_adapter(
                 events.fail(message);
                 stopping = true;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => stopping = true,
-        }
-        if adapter_has_exited(child) {
-            stopping = true;
+            Err(error) => {
+                // Drain protocol messages before reacting to child exit. A descendant may
+                // retain stdout, so an exited adapter with an idle reader must also finish.
+                if error == mpsc::RecvTimeoutError::Disconnected || adapter_has_exited(child) {
+                    if debuggee_exited {
+                        events.send(DapEvent::Terminated { adapter: adapter.clone() }).ok();
+                    }
+                    stopping = true;
+                }
+            }
         }
         if writer.is_finished() && !events.actor.cancel.load(Ordering::Acquire) {
             live.store(false, Ordering::Release);
@@ -1365,7 +1381,7 @@ fn normalize_response(
         )),
         "evaluate" => Some(DapResponse::Evaluate(DapVariable {
             name: "result".into(),
-            value: bounded(body.get("result")),
+            value: sanitize_output(body.get("result")?.as_str()?),
             type_name: body
                 .get("type")
                 .and_then(Value::as_str)
@@ -1382,10 +1398,7 @@ fn normalize_response(
             }
             Some(DapResponse::Source {
                 name: bounded(body.get("name")),
-                content: content
-                    .chars()
-                    .filter(|character| !matches!(*character, '\u{1b}' | '\0'))
-                    .collect(),
+                content: content.to_owned(),
                 mime_type: body
                     .get("mimeType")
                     .and_then(Value::as_str)
@@ -1414,16 +1427,20 @@ fn normalize_response(
     }
 }
 fn terminate_adapter(child: &mut std::process::Child, clean: bool) {
-    if adapter_exited_within(child, ADAPTER_EXIT_GRACE) && clean {
+    // Share the shutdown grace between closing stdin and escalating group signals.
+    let grace = if clean { ADAPTER_EXIT_GRACE } else { ADAPTER_EXIT_GRACE / 2 };
+    if adapter_exited_within(child, grace) && clean {
         let _ = child.wait();
         return;
     }
     #[cfg(unix)]
     if !clean {
-        let _ = nix::sys::signal::killpg(
-            nix::unistd::Pid::from_raw(child.id() as i32),
-            nix::sys::signal::Signal::SIGTERM,
-        );
+        let group = nix::unistd::Pid::from_raw(child.id() as i32);
+        if nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGTERM).is_ok() {
+            // The adapter may already be gone while a debuggee still owns the group.
+            thread::sleep(grace);
+            let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
+        }
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -1436,11 +1453,14 @@ fn send_request(writer: &mut Writer, seq: i64, command: &str, arguments: Value) 
 }
 
 fn sanitize_output(output: &str) -> String {
-    output
+    let mut characters = output
         .chars()
-        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
-        .take(4096)
-        .collect()
+        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'));
+    let mut result: String = characters.by_ref().take(4096).collect();
+    if characters.next().is_some() {
+        result.push_str("\n[output truncated]\n");
+    }
+    result
 }
 
 #[derive(Debug, Error)]
@@ -1465,12 +1485,41 @@ pub enum DapError {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_output;
+    use super::{DapResponse, normalize_response, sanitize_output};
+    use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn adapter_output_is_bounded_and_terminal_sanitized() {
         assert_eq!(sanitize_output("ok\u{1b}[31m"), "ok[31m");
-        assert_eq!(sanitize_output(&"x".repeat(5000)).len(), 4096);
+        assert_eq!(sanitize_output(&"x".repeat(4096)), "x".repeat(4096));
+        assert_eq!(
+            sanitize_output(&"x".repeat(8000)),
+            format!("{}\n[output truncated]\n", "x".repeat(4096))
+        );
+        assert_eq!(sanitize_output(&"é".repeat(4097)).chars().count(), 4096 + "\n[output truncated]\n".len());
+    }
+
+    #[test]
+    fn evaluation_requires_a_string_result() {
+        for body in [json!({}), json!({"result":null}), json!({"result":42})] {
+            assert!(normalize_response("evaluate", &body, &BTreeMap::new()).is_none());
+        }
+        for result in ["", "answer"] {
+            let Some(DapResponse::Evaluate(value)) = normalize_response(
+                "evaluate", &json!({"result":result}), &BTreeMap::new(),
+            ) else { panic!("valid evaluation rejected"); };
+            assert_eq!(value.value, result);
+        }
+    }
+
+    #[test]
+    fn source_content_preserves_control_characters_and_locations() {
+        let content = "const text = 'a\u{1b}\0b';\n";
+        let Some(DapResponse::Source { content: actual, .. }) = normalize_response(
+            "source", &json!({"content":content}), &BTreeMap::new(),
+        ) else { panic!("valid source rejected"); };
+        assert_eq!(actual, content);
     }
 }
 
@@ -1553,7 +1602,7 @@ pub fn breakpoint_states(
     requested
         .iter()
         .enumerate()
-        .map(|(index, _)| {
+        .map(|(index, requested)| {
             if disabled.get(index).copied().unwrap_or(false) {
                 return DapBreakpointState::Disabled;
             }
@@ -1563,7 +1612,7 @@ pub fn breakpoint_states(
                 Some((true, line, _)) => DapBreakpointState::Verified {
                     // The adapter may move a breakpoint; the VERIFIED line is its line, falling
                     // back to the requested one when it reports none.
-                    line: line.unwrap_or(0),
+                    line: line.unwrap_or(requested.line),
                 },
                 Some((false, _, _)) => DapBreakpointState::Requested { accepted: false },
                 // No answer for this entry: still only a request.
@@ -1634,6 +1683,20 @@ mod breakpoint_state_tests {
                 log_message: None,
             })
             .collect()
+    }
+
+    #[test]
+    fn verified_breakpoints_without_lines_use_the_requested_enabled_line() {
+        let states = breakpoint_states(
+            &requested(&[10, 20, 30]),
+            &[true, false, false],
+            &DapResponse::Breakpoints(vec![(true, None, None), (true, Some(31), None)]),
+        );
+        assert_eq!(states, vec![
+            DapBreakpointState::Disabled,
+            DapBreakpointState::Verified { line: 20 },
+            DapBreakpointState::Verified { line: 31 },
+        ]);
     }
 
     #[test]
