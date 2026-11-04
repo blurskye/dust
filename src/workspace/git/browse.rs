@@ -35,25 +35,27 @@ pub fn git_browse_url(file: &Path, line: usize) -> Result<String, String> {
             .id()
             .to_string(),
     };
-    let reference = encode_component(&reference);
+    let reference = encode_component(reference.as_bytes());
     let path = relative
         .components()
-        .map(|part| encode_component(&part.as_os_str().to_string_lossy()))
+        .map(|part| encode_component(part.as_os_str().as_encoded_bytes()))
         .collect::<Vec<_>>()
         .join("/");
-    Ok(if base.contains("gitlab") {
+    let host = base.host_str().unwrap_or_default();
+    Ok(if host.contains("gitlab") {
         format!("{base}/-/blob/{reference}/{path}#L{line}")
-    } else if base.contains("github") {
+    } else if host.contains("github") {
         format!("{base}/blob/{reference}/{path}#L{line}")
     } else {
-        // Gitea, Forgejo and Codeberg.
-        format!("{base}/src/branch/{reference}/{path}#L{line}")
+        // Gitea, Forgejo and Codeberg distinguish branch and commit routes.
+        let kind = if head.is_branch() { "branch" } else { "commit" };
+        format!("{base}/src/{kind}/{reference}/{path}#L{line}")
     })
 }
 
-fn encode_component(value: &str) -> String {
+fn encode_component(value: &[u8]) -> String {
     let mut encoded = String::new();
-    for byte in value.bytes() {
+    for &byte in value {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
             encoded.push(char::from(byte));
         } else {
@@ -64,56 +66,60 @@ fn encode_component(value: &str) -> String {
     encoded
 }
 
-/// `git@host:owner/repo.git`, `ssh://git@host/owner/repo` or `https://host/owner/repo.git`
-/// as `https://host/owner/repo`.
-fn web_base(remote: &str) -> Option<String> {
+/// Convert Git transports to HTTPS; keep HTTP(S) schemes and web ports intact.
+fn web_base(remote: &str) -> Option<reqwest::Url> {
     let remote = remote.trim().trim_end_matches('/');
     let remote = remote.strip_suffix(".git").unwrap_or(remote);
-    let (host, path) = if let Some(rest) = remote
-        .strip_prefix("https://")
-        .or_else(|| remote.strip_prefix("http://"))
-        .or_else(|| remote.strip_prefix("ssh://"))
-        .or_else(|| remote.strip_prefix("git://"))
-    {
-        let rest = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
-        rest.split_once('/')?
+    let (scheme, authority, path) = if let Some((scheme, rest)) = remote.split_once("://") {
+        if !matches!(scheme, "http" | "https" | "ssh" | "git") {
+            return None;
+        }
+        let (authority, path) = rest.split_once('/')?;
+        (scheme, authority, path)
     } else {
-        let (user_host, path) = remote.split_once(':')?;
-        (
-            user_host
-                .rsplit_once('@')
-                .map_or(user_host, |(_, host)| host),
-            path,
-        )
+        let (authority, path) = remote.split_once(':')?;
+        ("ssh", authority, path)
     };
-    // An ssh port is not the web port.
-    let host = host.split_once(':').map_or(host, |(host, _)| host);
-    if host.is_empty() || path.is_empty() {
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    if authority.is_empty() || path.is_empty() {
         return None;
     }
-    Some(format!("https://{host}/{path}"))
+    let is_web = matches!(scheme, "http" | "https");
+    let web_scheme = if is_web { scheme } else { "https" };
+    let mut base = reqwest::Url::parse(&format!("{web_scheme}://{authority}/{path}")).ok()?;
+    if !is_web {
+        // A Git transport port is not the web port.
+        base.set_port(None).ok()?;
+    }
+    Some(base)
 }
 
 #[cfg(test)]
 mod tests {
     use super::web_base;
 
-    #[test]
-    fn browse_urls_escape_file_and_branch_components() {
+    fn repository_with_file(name: &std::path::Path) -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(name), "text").unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(name).unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "test", &tree, &[])
+                .unwrap();
+        }
+        (dir, repo)
+    }
+
+    #[test]
+    fn browse_urls_escape_file_and_branch_components() {
         let name = "notes#draft %.rs";
+        let (dir, repo) = repository_with_file(std::path::Path::new(name));
         let file = dir.path().join(name);
-        std::fs::write(&file, "text").unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(std::path::Path::new(name)).unwrap();
-        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
-        let oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "test", &tree, &[])
-            .unwrap();
-        repo.branch("feature/a#b", &repo.find_commit(oid).unwrap(), false)
-            .unwrap();
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature/a#b", &commit, false).unwrap();
         repo.set_head("refs/heads/feature/a#b").unwrap();
         repo.remote("origin", "git@github.com:owner/repo.git")
             .unwrap();
@@ -121,6 +127,62 @@ mod tests {
             super::git_browse_url(&file, 3).unwrap(),
             "https://github.com/owner/repo/blob/feature%2Fa%23b/notes%23draft%20%25.rs#L3"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn browse_urls_preserve_non_utf8_filenames() {
+        use std::os::unix::ffi::OsStrExt;
+
+        // Exercise arbitrary Unix filename bytes without requiring filesystem support.
+        let name = std::ffi::OsStr::from_bytes(b"notes\xFF.rs");
+        assert_eq!(super::encode_component(name.as_encoded_bytes()), "notes%FF.rs");
+    }
+
+    #[test]
+    fn browse_urls_detect_forges_from_the_host_only() {
+        let (dir, repo) = repository_with_file(std::path::Path::new("file.rs"));
+        let oid = repo.head().unwrap().target().unwrap();
+        repo.set_head_detached(oid).unwrap();
+        for (remote, route) in [
+            ("https://github.com/owner/gitlab-tools.git", "blob"),
+            ("https://gitlab.com/github/repo.git", "-/blob"),
+            ("https://codeberg.org/gitlab/github-tools.git", "src/commit"),
+        ] {
+            repo.remote("origin", remote).unwrap();
+            let base = remote.strip_suffix(".git").unwrap();
+            assert_eq!(
+                super::git_browse_url(&dir.path().join("file.rs"), 2).unwrap(),
+                format!("{base}/{route}/{oid}/file.rs#L2")
+            );
+            repo.remote_delete("origin").unwrap();
+        }
+    }
+
+    #[test]
+    fn browse_urls_distinguish_branches_from_detached_commits() {
+        let (dir, repo) = repository_with_file(std::path::Path::new("file.rs"));
+        let oid = repo.head().unwrap().target().unwrap();
+        repo.branch("feature", &repo.find_commit(oid).unwrap(), false).unwrap();
+        for remote in [
+            "https://codeberg.org/owner/repo.git",
+            "http://gitea.example:3000/owner/repo.git",
+            "https://forgejo.example:8443/owner/repo.git",
+        ] {
+            repo.remote("origin", remote).unwrap();
+            let base = remote.strip_suffix(".git").unwrap();
+            repo.set_head("refs/heads/feature").unwrap();
+            assert_eq!(
+                super::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
+                format!("{base}/src/branch/feature/file.rs#L4")
+            );
+            repo.set_head_detached(oid).unwrap();
+            assert_eq!(
+                super::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
+                format!("{base}/src/commit/{oid}/file.rs#L4")
+            );
+            repo.remote_delete("origin").unwrap();
+        }
     }
 
     #[test]
@@ -133,10 +195,21 @@ mod tests {
             "https://user@github.com/owner/repo/",
         ] {
             assert_eq!(
-                web_base(remote).as_deref(),
+                web_base(remote).as_ref().map(reqwest::Url::as_str),
                 Some("https://github.com/owner/repo"),
                 "{remote}"
             );
+        }
+        for (remote, expected) in [
+            ("http://forge.example:3000/owner/repo.git", "http://forge.example:3000/owner/repo"),
+            ("https://forge.example:8443/owner/repo.git", "https://forge.example:8443/owner/repo"),
+            ("http://user:password@forge.example:3000/owner/repo.git", "http://forge.example:3000/owner/repo"),
+            ("ssh://git@forge.example:2222/owner/repo.git", "https://forge.example/owner/repo"),
+            ("git://forge.example:9418/owner/repo.git", "https://forge.example/owner/repo"),
+            ("http://[::1]:3000/owner/repo.git", "http://[::1]:3000/owner/repo"),
+            ("ssh://git@[::1]:2222/owner/repo.git", "https://[::1]/owner/repo"),
+        ] {
+            assert_eq!(web_base(remote).unwrap().as_str(), expected, "{remote}");
         }
         assert_eq!(web_base("/srv/git/repo.git"), None);
     }
