@@ -14324,12 +14324,16 @@ impl InteractiveApplication {
             }
             AppEffect::Reload { force } => self.start_reload(force),
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
-            AppEffect::CycleBuffer(offset) => match self.state.cycle_buffer(offset, true) {
-                Ok(_) => {
-                    self.set_dashboard_visibility(false);
+            AppEffect::CycleBuffer(offset) => {
+                self.project_window_content_tabs();
+                let order = self.window_session.content_tab_buffers();
+                match self.state.cycle_buffer(&order, offset, true) {
+                    Ok(_) => {
+                        self.set_dashboard_visibility(false);
+                    }
+                    Err(error) => self.show_error(error),
                 }
-                Err(error) => self.show_error(error),
-            },
+            }
             AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
             AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
             AppEffect::NewBuffer => {

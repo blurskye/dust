@@ -22,6 +22,14 @@ impl WindowSession {
     pub(in crate::editor::session) fn content_tabs(&self) -> &[ContentTabEntry] {
         &self.content_line.entries
     }
+    /// The buffers on the buffer line, left to right.
+    pub(in crate::editor::session) fn content_tab_buffers(&self) -> Vec<BufferId> {
+        self.content_line
+            .entries
+            .iter()
+            .filter_map(|entry| self.core.editor.buffer_for_content(entry.identity.0))
+            .collect()
+    }
     pub(in crate::editor::session) fn content_current(&self, configuration_revision: u64) -> bool {
         self.core.graph.revision().is_some_and(|revision| {
             self.content_line.signature

@@ -485,10 +485,19 @@ impl EditorState {
         Ok(())
     }
 
-    pub fn cycle_buffer(&mut self, offset: isize, wrap: bool) -> Result<ViewId, &'static str> {
-        let buffers = self
-            .buffers
-            .keys()
+    /// Show the buffer `offset` places from the active one in `order`, the buffer line's order.
+    /// Buffers missing from `order` follow it.
+    pub fn cycle_buffer(
+        &mut self,
+        order: &[BufferId],
+        offset: isize,
+        wrap: bool,
+    ) -> Result<ViewId, &'static str> {
+        let buffers = order
+            .iter()
+            .copied()
+            .filter(|buffer| self.buffers.contains_key(*buffer))
+            .chain(self.buffers.keys().filter(|buffer| !order.contains(buffer)))
             .filter(|buffer| Some(*buffer) != self.kept_buffer)
             .collect::<Vec<_>>();
         if buffers.is_empty() {

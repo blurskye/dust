@@ -1958,7 +1958,7 @@ fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close(
     assert!(app.state.buffers.contains_key(dirty));
     assert!(app.state.buffers[dirty].dirty);
     app.state
-        .cycle_buffer(1, true)
+        .cycle_buffer(&[], 1, true)
         .expect("reopen forced-close buffer");
     assert_eq!(app.state.active_buffer_id(), Some(dirty));
     app.state.validate_layout().expect("reopened layout valid");
@@ -8296,6 +8296,35 @@ fn a_saved_location_reads_as_file_and_line() {
         app.persisted_location_label(&location(5))
             .ends_with("marked-location.txt:2")
     );
+}
+
+#[test]
+fn buffer_cycling_follows_the_buffer_line_order() {
+    let (_app_dirs, mut app) = app();
+    let mut buffers = Vec::new();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        let path = app.state.workspace_root.join(name);
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text(name), Some(path))
+            .unwrap();
+        buffers.push(buffer);
+    }
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.project_window_content_tabs();
+    app.process_effect(AppEffect::MoveBufferLine(-1));
+    app.process_effect(AppEffect::MoveBufferLine(-1));
+    app.project_window_content_tabs();
+    assert_eq!(
+        app.window_session.content_tab_buffers(),
+        [buffers[2], buffers[0], buffers[1]]
+    );
+    // c is first on the line now, so next goes to a, then b, then wraps to c.
+    for (offset, expected) in [(1, 0), (1, 1), (1, 2), (-1, 1)] {
+        app.process_effect(AppEffect::CycleBuffer(offset));
+        assert_eq!(app.state.active_buffer_id(), Some(buffers[expected]));
+    }
 }
 
 #[test]

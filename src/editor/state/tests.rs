@@ -153,7 +153,7 @@ fn replacing_a_pane_keeps_hidden_buffers_without_orphan_views() {
     assert_eq!(state.views.len(), 1);
     assert_eq!(state.active_view, Some(second_view));
     state
-        .cycle_buffer(-1, true)
+        .cycle_buffer(&[], -1, true)
         .expect("reopen hidden dirty buffer");
     assert_eq!(state.active_buffer_id(), Some(first_buffer));
     assert!(state.buffers[first_buffer].dirty);
@@ -452,7 +452,9 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
         .collect::<std::collections::BTreeSet<_>>();
     let mut reachable = std::collections::BTreeSet::new();
     for _ in 0..expected.len() {
-        state.cycle_buffer(1, true).expect("cycle hidden buffer");
+        state
+            .cycle_buffer(&[], 1, true)
+            .expect("cycle hidden buffer");
         reachable.insert(state.active_buffer_id().expect("active buffer"));
         state.validate_layout().expect("cycled layout invariant");
     }
