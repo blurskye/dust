@@ -2775,6 +2775,7 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::Settings(action) => self.settings_action(action),
+            AppEffect::Setup(action) => self.setup_action(action),
             AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
             // Esc on a filtered list clears the search before it closes the manager.
             AppEffect::CloseToolMenu
@@ -14477,35 +14478,11 @@ impl InteractiveApplication {
                     self.edit_path(path);
                 }
             }
-            // Settings files are optional, so the first open creates an empty one to edit.
-            AppEffect::OpenUserFile(path) => {
-                let created = path
-                    .parent()
-                    .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| {
-                        std::fs::OpenOptions::new()
-                            .append(true)
-                            .create(true)
-                            .open(&path)
-                            .map(drop)
-                    });
-                // A new file starts with a few commented examples rather than nothing.
-                let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
-                    include_str!("../../../../assets/defaults/keymaps-starter.toml")
-                } else {
-                    include_str!("../../../../assets/defaults/settings-starter.toml")
-                };
-                let created = created.and_then(|()| {
-                    if std::fs::metadata(&path)?.len() == 0 {
-                        std::fs::write(&path, starter)?;
-                    }
-                    Ok(())
-                });
-                match created {
-                    Ok(()) => self.start_open(path),
-                    Err(error) => self.show_error(format!("{}: {error}", path.display())),
-                }
-            }
+            // Settings files are optional, so the first open creates one to edit.
+            AppEffect::OpenUserFile(path) => match create_user_file(&path) {
+                Ok(()) => self.start_open(path),
+                Err(error) => self.show_error(format!("{}: {error}", path.display())),
+            },
             AppEffect::Reload { force } => self.start_reload(force),
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
             AppEffect::CycleBuffer(offset) => {
@@ -16155,4 +16132,25 @@ impl InteractiveApplication {
             Err(e) => self.show_workspace_failure(e),
         }
     }
+}
+
+/// Create a user settings or keymaps file if it is missing or empty. A new file starts with a
+/// few commented examples rather than nothing.
+pub(super) fn create_user_file(path: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)?;
+    let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
+        include_str!("../../../../assets/defaults/keymaps-starter.toml")
+    } else {
+        include_str!("../../../../assets/defaults/settings-starter.toml")
+    };
+    if std::fs::metadata(path)?.len() == 0 {
+        std::fs::write(path, starter)?;
+    }
+    Ok(())
 }

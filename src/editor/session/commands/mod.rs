@@ -414,6 +414,7 @@ pub enum AppEffect {
     WorkspaceEditReject,
     WorkspaceResourceApply,
     Settings(SettingsAction),
+    Setup(SetupAction),
     OpenToolMenu(String),
     CloseToolMenu,
     MoveToolMenu(i8),
@@ -547,6 +548,19 @@ pub enum SettingsAction {
     Backspace,
     Cursor(PromptMove),
     Clear,
+}
+
+/// What a key on the first-start setup does.
+#[derive(Clone, Copy, Debug)]
+pub enum SetupAction {
+    Open,
+    /// Highlight another choice on the current page.
+    Move(i64),
+    /// Take the highlighted choice and go to the next page, or save on the last one.
+    Next,
+    Back,
+    /// Close without changing anything.
+    Skip,
 }
 
 #[derive(Clone, Copy, Debug)]

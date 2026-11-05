@@ -12,7 +12,7 @@ use super::{
     surfaces::{ellipsized, prompt_viewport},
 };
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsPageState {
     pub sections: Vec<String>,
     /// Every setting the page knows, in catalog order.
@@ -31,6 +31,31 @@ pub struct SettingsPageState {
     pub saving: bool,
     /// What happened to the last change, and whether it failed.
     pub status: Option<(String, bool)>,
+    /// The first-start questions, shown instead of the list while they are open.
+    pub setup: Option<SetupState>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetupState {
+    pub pages: Vec<SetupPage>,
+    pub page: usize,
+    /// The highlighted choice on each page.
+    pub picked: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetupPage {
+    pub title: String,
+    pub question: String,
+    pub choices: Vec<SetupChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetupChoice {
+    pub label: String,
+    pub about: String,
+    pub preview: String,
+    pub settings: Vec<(String, toml::Value)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -328,13 +353,13 @@ fn control_text(value: &SettingsValue) -> (String, Style) {
     }
 }
 
-fn fill(frame: &mut Frame, x: u16, y: u16, width: u16, style: Style) {
+pub(super) fn fill(frame: &mut Frame, x: u16, y: u16, width: u16, style: Style) {
     for column in x..x.saturating_add(width) {
         frame.grid.set_cell(column, y, " ", style);
     }
 }
 
-fn draw_box(frame: &mut Frame, x: u16, y: u16, width: u16, height: u16) {
+pub(super) fn draw_box(frame: &mut Frame, x: u16, y: u16, width: u16, height: u16) {
     if width < 2 || height < 2 {
         return;
     }
@@ -370,6 +395,10 @@ pub(super) fn render_settings(
 ) {
     // The page covers the editor, so its cursor would show through; search and text fields set their own.
     frame.cursor = None;
+    if let Some(setup) = &page.setup {
+        super::setup::render_setup(frame, setup, page.status.as_ref(), config, width, height);
+        return;
+    }
     let Some(layout) = settings_layout(width, height) else {
         for y in 0..height {
             fill(frame, 0, y, width, Style::Default);

@@ -35,6 +35,7 @@ const BUILTIN_SURFACES: &[&str] = &[
     "tool_manager_search",
     "tool_manager_mouse",
     "settings",
+    "setup",
     "settings_search",
     "settings_edit",
     "settings_choice",

@@ -1,7 +1,7 @@
 use super::{
     AppEffect, ArgumentSchema, ArgumentType, CommandError, CommandRegistry, ContextRequirement,
-    PromptKind, PromptMove, SettingsAction, integer_arg, optional_string_arg, register,
-    register_grammar_commands, string_arg,
+    PromptKind, PromptMove, SettingsAction, SetupAction, integer_arg, optional_string_arg,
+    register, register_grammar_commands, string_arg,
 };
 
 pub(super) fn register_commands(
@@ -120,6 +120,41 @@ pub(super) fn register_commands(
         ArgumentSchema::default().field("by", ArgumentType::Integer, true),
         |invocation| {
             Ok(AppEffect::Settings(SettingsAction::Move(integer_arg(
+                invocation, "by",
+            )?)))
+        },
+    )?;
+    for (id, title, action) in [
+        ("settings.setup", "Run First-Start Setup", SetupAction::Open),
+        (
+            "settings.setup.next",
+            "Take the choice and continue",
+            SetupAction::Next,
+        ),
+        (
+            "settings.setup.back",
+            "Back to the previous question",
+            SetupAction::Back,
+        ),
+        ("settings.setup.skip", "Skip setup", SetupAction::Skip),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::Setup(action),
+        )?;
+    }
+    register(
+        registry,
+        "settings.setup.move",
+        "Move through setup choices",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("by", ArgumentType::Integer, true),
+        |invocation| {
+            Ok(AppEffect::Setup(SetupAction::Move(integer_arg(
                 invocation, "by",
             )?)))
         },

@@ -6,6 +6,7 @@ use std::{path::Path, sync::OnceLock};
 use serde::Deserialize;
 
 const CATALOG: &str = include_str!("../../assets/defaults/settings.toml");
+const SETUP: &str = include_str!("../../assets/defaults/setup.toml");
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +97,45 @@ impl SettingsCatalog {
 pub fn settings_catalog() -> &'static SettingsCatalog {
     static PARSED: OnceLock<SettingsCatalog> = OnceLock::new();
     PARSED.get_or_init(|| toml::from_str(CATALOG).expect("the settings catalog must parse"))
+}
+
+/// The questions Dust asks on first start, from `assets/defaults/setup.toml`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetupCatalog {
+    #[serde(rename = "page")]
+    pub pages: Vec<SetupPageInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetupPageInfo {
+    pub title: String,
+    pub question: String,
+    /// A configuration table whose entry names are more choices, each setting `key` to its name.
+    #[serde(default)]
+    pub choices_from: Option<String>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default, rename = "choice")]
+    pub choices: Vec<SetupChoiceInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetupChoiceInfo {
+    pub label: String,
+    pub about: String,
+    pub settings: std::collections::BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    pub preview: String,
+}
+
+/// The bundled setup questions; a test keeps them parsing and their keys real.
+#[must_use]
+pub fn setup_catalog() -> &'static SetupCatalog {
+    static PARSED: OnceLock<SetupCatalog> = OnceLock::new();
+    PARSED.get_or_init(|| toml::from_str(SETUP).expect("the setup questions must parse"))
 }
 
 /// A setting's bundled default.

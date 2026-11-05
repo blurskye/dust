@@ -1437,6 +1437,33 @@ fn a_saved_bundled_theme_restores_from_this_build() {
 }
 
 #[test]
+fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
+    let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());
+    for page in &super::setup_catalog().pages {
+        if let Some(key) = &page.key {
+            assert!(
+                bundled.contains(key),
+                "setup page {} sets unknown {key}",
+                page.title
+            );
+        }
+        assert!(
+            page.choices_from.is_some() || !page.choices.is_empty(),
+            "setup page {} has nothing to choose",
+            page.title
+        );
+        for choice in &page.choices {
+            for (key, value) in &choice.settings {
+                assert!(bundled.contains(key), "{} sets unknown {key}", choice.label);
+                let source = super::catalog::edited_source("", key, Some(value.clone())).unwrap();
+                super::load::settings_from_source(&source)
+                    .unwrap_or_else(|error| panic!("{}: {key}: {error}", choice.label));
+            }
+        }
+    }
+}
+
+#[test]
 fn settings_catalog_lists_every_bundled_setting_once() {
     let catalog = super::settings_catalog();
     let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());

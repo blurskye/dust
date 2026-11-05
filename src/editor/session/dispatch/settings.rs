@@ -365,7 +365,12 @@ impl InteractiveApplication {
         use crate::editor::input::TerminalMouseInput;
         let (width, height) = (self.window_session.width(), self.settings_height());
         let ambiguous = self.configuration.settings().editor.ambiguous_width;
-        let Some(page) = self.ui.settings.as_mut() else {
+        let Some(page) = self
+            .ui
+            .settings
+            .as_mut()
+            .filter(|page| page.setup.is_none())
+        else {
             return;
         };
         match key.terminal_mouse() {
@@ -464,7 +469,7 @@ fn setting_value(info: &SettingInfo, current: Option<&toml::Value>, theme: &str)
     }
 }
 
-fn lookup(value: &toml::Value, key: &str) -> Option<toml::Value> {
+pub(super) fn lookup(value: &toml::Value, key: &str) -> Option<toml::Value> {
     key.split('.')
         .try_fold(value, |value, segment| value.get(segment))
         .cloned()

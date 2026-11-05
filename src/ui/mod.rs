@@ -19,8 +19,8 @@ pub use pty_screen::{
 pub use render::{
     AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind,
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
-    TutorCard, debug_pane_insets, debug_pane_tab_at, settings_hit, settings_layout,
-    settings_lines_height, transcript_lines,
+    SetupChoice, SetupPage, SetupState, TutorCard, debug_pane_insets, debug_pane_tab_at,
+    settings_hit, settings_layout, settings_lines_height, transcript_lines,
 };
 pub use render::{
     CellAlign, CompletionItem, CompositorLayoutState, ConfirmationChoice, ConfirmationState,

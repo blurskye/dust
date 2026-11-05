@@ -34,6 +34,7 @@ mod palette;
 mod pull_requests;
 mod remote;
 mod settings;
+mod setup;
 mod substitute;
 
 #[cfg(test)]
@@ -333,6 +334,7 @@ pub fn run_interactive(
     );
     if !application.workspace.safe_mode() {
         application.load_persistence();
+        application.open_setup_on_first_start();
     }
     if application.documents.has_startup_work() {
         application.notify_message(application.message("opening_file", &[]), false);

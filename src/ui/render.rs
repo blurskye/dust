@@ -20,6 +20,7 @@ mod agent;
 pub(crate) mod editor;
 mod markdown;
 mod settings;
+mod setup;
 pub(crate) mod surfaces;
 mod visual_rows;
 #[cfg(test)]
@@ -39,7 +40,7 @@ pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
 pub use settings::{
     SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
-    settings_hit, settings_layout, settings_lines_height,
+    SetupChoice, SetupPage, SetupState, settings_hit, settings_layout, settings_lines_height,
 };
 pub use surfaces::picker_geometry;
 pub use terminal::terminal_tab_at_column;

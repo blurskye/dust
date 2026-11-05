@@ -1873,6 +1873,85 @@ fn the_settings_page_saves_and_reloads_user_configuration() {
 }
 
 #[test]
+fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
+    use crate::editor::session::dispatch::commands::SetupAction;
+    // As above, a child process so the user configuration paths can point at an empty folder.
+    if std::env::var_os("DUST_TEST_FIRST_START").is_none() {
+        let root = tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "editor::session::dispatch::tests::configuration::the_first_start_setup_saves_the_picked_choices_to_a_new_config", "--nocapture"])
+            .env("DUST_TEST_FIRST_START", "1")
+            .env("DUST_CONFIG_HOME", root.path())
+            .env("DUST_STATE_HOME", root.path().join("state"))
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let root = tempdir().unwrap();
+    let saved = tempdir().unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        crate::config::load_user_config(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((120, 40));
+    let path = crate::config::user_config_path();
+    assert!(!path.exists());
+    app.open_setup_on_first_start();
+    assert_eq!(app.active_input_context(), "setup");
+    // The first page is the layout; its second choice puts the explorer right, agent left.
+    app.process_effect(AppEffect::Setup(SetupAction::Move(1)));
+    app.process_effect(AppEffect::Setup(SetupAction::Next));
+    app.process_effect(AppEffect::Setup(SetupAction::Back));
+    let setup = app.ui.settings.as_ref().unwrap().setup.as_ref().unwrap();
+    assert_eq!((setup.page, setup.picked[0]), (0, 1));
+    let pages = setup.pages.len();
+    for _ in 0..pages {
+        app.process_effect(AppEffect::Setup(SetupAction::Next));
+    }
+    assert!(app.ui.settings.is_none(), "setup should close once saved");
+    let source = fs::read_to_string(&path).unwrap();
+    let disk: toml::Value = toml::from_str(&source).unwrap();
+    assert_eq!(disk["ui"]["explorer"]["side"].as_str(), Some("right"));
+    assert_eq!(disk["agents"]["side"].as_str(), Some("left"));
+    // Choices that match the defaults are left out of the file.
+    assert!(disk["ui"].get("terminal_panel").is_none(), "{source}");
+    let generation = app.configuration.generation();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.configuration.generation() == generation {
+        app.process_configuration_result();
+        assert!(Instant::now() < deadline, "setup was not reloaded");
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        app.configuration.settings().agents.side,
+        crate::config::PanelSide::Left
+    );
+    // Once config.toml exists the questions aren't asked on start.
+    app.open_setup_on_first_start();
+    assert!(app.ui.settings.is_none());
+    // `:setup` asks again, starting from the saved answers, and Skip leaves the file alone.
+    app.process_effect(AppEffect::Setup(SetupAction::Open));
+    let setup = app.ui.settings.as_ref().unwrap().setup.as_ref().unwrap();
+    assert_eq!(setup.picked[0], 1);
+    app.process_effect(AppEffect::Setup(SetupAction::Skip));
+    assert!(app.ui.settings.is_none());
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+}
+
+#[test]
 fn undo_persistence_policy_changes_with_configuration() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();

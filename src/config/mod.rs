@@ -5,8 +5,8 @@ mod load;
 pub(crate) use load::SourceFingerprint;
 mod themes;
 pub use catalog::{
-    SettingInfo, SettingsCatalog, SettingsSection, default_setting, settings_catalog,
-    write_user_setting,
+    SettingInfo, SettingsCatalog, SettingsSection, SetupCatalog, SetupChoiceInfo, SetupPageInfo,
+    default_setting, settings_catalog, setup_catalog, write_user_setting,
 };
 #[cfg(test)]
 pub(crate) use load::setting_spans;

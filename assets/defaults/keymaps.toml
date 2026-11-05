@@ -7153,6 +7153,82 @@ keys = "ctrl-,"
 command = "settings.open"
 
 [[keymap]]
+id = "builtin.setup.move.j"
+context = "setup"
+keys = "j"
+command = "settings.setup.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.setup.move.down"
+context = "setup"
+keys = "down"
+command = "settings.setup.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.setup.move.k"
+context = "setup"
+keys = "k"
+command = "settings.setup.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.setup.move.up"
+context = "setup"
+keys = "up"
+command = "settings.setup.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.setup.next.enter"
+context = "setup"
+keys = "enter"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.next.l"
+context = "setup"
+keys = "l"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.next.right"
+context = "setup"
+keys = "right"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.back.backspace"
+context = "setup"
+keys = "backspace"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.back.h"
+context = "setup"
+keys = "h"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.back.left"
+context = "setup"
+keys = "left"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.skip.escape"
+context = "setup"
+keys = "escape"
+command = "settings.setup.skip"
+
+[[keymap]]
+id = "builtin.setup.skip.q"
+context = "setup"
+keys = "q"
+command = "settings.setup.skip"
+
+[[keymap]]
 id = "builtin.settings.move.j"
 context = "settings"
 keys = "j"

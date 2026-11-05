@@ -945,6 +945,9 @@ impl InteractiveApplication {
             .into();
         }
         if let Some(page) = &self.ui.settings {
+            if page.setup.is_some() {
+                return "setup".into();
+            }
             return match &page.edit {
                 Some(crate::ui::SettingsEdit::Text { .. }) => "settings_edit",
                 Some(crate::ui::SettingsEdit::Choice { .. }) => "settings_choice",
