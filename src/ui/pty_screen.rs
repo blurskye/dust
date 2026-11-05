@@ -142,6 +142,12 @@ impl PtyScreen {
         // OSC queries end at BEL or ST. Answer before later sequences can change the palette.
         for part in bytes.split_inclusive(|byte| matches!(byte, b'\x07' | b'\\' | 0x9c)) {
             self.parser.advance(&mut self.term, part);
+            if self.sync_deadline().is_some() && ends_with_color_query(part) {
+                // A synchronized update holds its bytes until it ends, which would answer this
+                // query with the palette after it. Apply the update so far and keep syncing.
+                self.parser.stop_sync(&mut self.term);
+                self.parser.advance(&mut self.term, b"\x1b[?2026h");
+            }
             self.resolve_replies();
         }
         self.expire_sync(std::time::Instant::now());
@@ -453,6 +459,14 @@ impl PtyScreen {
     pub fn sgr_mouse(&self) -> bool {
         self.term.mode().contains(TermMode::SGR_MOUSE)
     }
+}
+
+/// Whether `part` ends an OSC colour query such as `11;?` or `4;1;?`.
+fn ends_with_color_query(part: &[u8]) -> bool {
+    part.strip_suffix(b"\x07")
+        .or_else(|| part.strip_suffix(b"\x1b\\"))
+        .or_else(|| part.strip_suffix(&[0x9c]))
+        .is_some_and(|body| body.ends_with(b";?"))
 }
 
 fn size(columns: u16, rows: u16) -> Size {
@@ -781,6 +795,29 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn color_queries_inside_synchronized_updates_observe_the_palette_at_the_query() {
+        let mut screen = PtyScreen::new(10, 2, 4);
+        screen.feed_bytes(
+            b"\x1b[?2026h\x1b]11;rgb:12/34/56\x07\x1b]11;?\x07\x1b]11;rgb:ab/cd/ef\x07frame",
+        );
+        assert_eq!(
+            String::from_utf8(screen.take_replies()).unwrap(),
+            "\x1b]11;rgb:1212/3434/5656\x07"
+        );
+        assert!(
+            screen.sync_deadline().is_some(),
+            "the rest of the update stays synchronized"
+        );
+        assert!(!screen.lines().iter().any(|line| line.contains("frame")));
+        screen.feed_bytes(b"\x1b[?2026l\x1b]11;?\x07");
+        assert!(screen.lines().iter().any(|line| line.contains("frame")));
+        assert_eq!(
+            String::from_utf8(screen.take_replies()).unwrap(),
+            "\x1b]11;rgb:abab/cdcd/efef\x07"
+        );
     }
 
     #[test]
