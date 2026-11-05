@@ -2780,13 +2780,24 @@ impl InteractiveApplication {
         }
     }
 
-    /// A file that was just opened is drawn once it has colours, unless parsing takes longer
-    /// than a moment.
-    pub(super) fn awaiting_first_colours(&self) -> bool {
+    /// A file that was just opened is drawn once it has its colours and, when they are on,
+    /// its inlay hints, unless those take longer than a moment.
+    pub(super) fn hold_first_frame(&mut self) -> bool {
         let now = self.clock.monotonic();
-        self.state
-            .active_buffer_id()
-            .is_some_and(|buffer| self.syntax.awaiting_first_colours(buffer, now))
+        let Some(buffer) = self.state.active_buffer_id() else {
+            return false;
+        };
+        if !self.syntax.first_frame_pending(buffer, now) {
+            return false;
+        }
+        let waiting = self.syntax.colours_pending(buffer)
+            || self.configuration.settings().lsp.inlay_hints
+                && self.language.inlays_in_flight(buffer);
+        // Once drawn, later edits and hint refreshes never hold a frame back.
+        if !waiting {
+            self.syntax.first_frame_shown(buffer);
+        }
+        waiting
     }
 
     pub(super) fn process_syntax(&mut self) {

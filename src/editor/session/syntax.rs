@@ -18,8 +18,9 @@ use crate::{
 pub(crate) const SYNTAX_QUEUE_CAPACITY: usize = 8;
 /// How long typing must pause before a buffer is parsed again.
 const SYNTAX_DEBOUNCE_MS: u64 = 75;
-/// How long a newly opened buffer's first frame waits for its colours before it is drawn plain.
-const FIRST_COLOURS_WAIT_MS: u64 = 200;
+/// How long a newly opened buffer's first frame waits for its colours and inlay hints before
+/// it is drawn without them.
+const FIRST_FRAME_WAIT_MS: u64 = 200;
 
 pub(super) struct SyntaxDocument<'a> {
     pub buffer: BufferId,
@@ -311,15 +312,18 @@ impl SyntaxSession {
             .iter()
             .map(|(buffer, (_, result))| (buffer, result))
     }
-    /// Whether a buffer opened moments ago is still waiting for its first parse, so its first
-    /// frame can show colours instead of plain text that colours in a moment later.
-    pub(super) fn awaiting_first_colours(&self, buffer: BufferId, now: Instant) -> bool {
-        !self.accepted.contains_key(&buffer)
-            && !self.failures.contains_key(&buffer)
-            && self
-                .opened
-                .get(&buffer)
-                .is_some_and(|opened| now < *opened + Duration::from_millis(FIRST_COLOURS_WAIT_MS))
+    /// Whether a buffer opened moments ago hasn't had its first frame drawn, so that frame can
+    /// wait for colours and hints instead of showing plain text that fills in a moment later.
+    pub(super) fn first_frame_pending(&self, buffer: BufferId, now: Instant) -> bool {
+        self.opened
+            .get(&buffer)
+            .is_some_and(|opened| now < *opened + Duration::from_millis(FIRST_FRAME_WAIT_MS))
+    }
+    pub(super) fn first_frame_shown(&mut self, buffer: BufferId) {
+        self.opened.remove(&buffer);
+    }
+    pub(super) fn colours_pending(&self, buffer: BufferId) -> bool {
+        !self.accepted.contains_key(&buffer) && !self.failures.contains_key(&buffer)
     }
     pub(super) fn failure(&self, buffer: BufferId) -> Option<&str> {
         self.failures
@@ -593,16 +597,19 @@ mod tests {
         let mut session = SyntaxSession::new(2);
         let start = Instant::now();
         assert_eq!(session.tick(&documents, &config, 4, start, "large"), 1);
-        assert!(session.awaiting_first_colours(buffer, start));
-        let late = start + Duration::from_millis(FIRST_COLOURS_WAIT_MS);
-        assert!(!session.awaiting_first_colours(buffer, late));
+        assert!(session.first_frame_pending(buffer, start));
+        assert!(session.colours_pending(buffer));
+        let late = start + Duration::from_millis(FIRST_FRAME_WAIT_MS);
+        assert!(!session.first_frame_pending(buffer, late));
         let deadline = Instant::now() + Duration::from_secs(5);
         while session.result(buffer).is_none() {
             session.tick(&documents, &config, 4, start, "large");
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }
-        assert!(!session.awaiting_first_colours(buffer, start));
+        assert!(!session.colours_pending(buffer));
+        session.first_frame_shown(buffer);
+        assert!(!session.first_frame_pending(buffer, start));
     }
 
     #[test]

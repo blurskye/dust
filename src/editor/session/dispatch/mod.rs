@@ -435,7 +435,7 @@ pub fn run_interactive(
             application.window_session.width(),
             application.window_session.height(),
         );
-        let holding = application.awaiting_first_colours();
+        let holding = application.hold_first_frame();
         let painted = application.draw_before_startup_reads(|application| {
             if holding {
                 Ok(false)

@@ -750,6 +750,19 @@ impl LspSession {
     pub(in crate::editor::session) fn inlay_pending(&self) -> bool {
         self.projection.inlay_due.is_some()
     }
+    /// Whether inlay hints for `buffer` are scheduled or on their way.
+    pub(in crate::editor::session) fn inlays_in_flight(&self, buffer: BufferId) -> bool {
+        self.projection
+            .inlay_request
+            .as_ref()
+            .is_some_and(|(_, owner)| owner.buffer == buffer)
+            || self.projection.inlay_due.is_some()
+                && self
+                    .projection
+                    .owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.buffer == buffer)
+    }
     pub(in crate::editor::session) fn inlay_ready(
         &mut self,
         config: &LspConfig,
