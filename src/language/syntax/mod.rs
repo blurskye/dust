@@ -1207,7 +1207,7 @@ pub fn language_for_fence(name: &str) -> Option<SyntaxLanguage> {
         "erlang" => Some(SyntaxLanguage::Erlang),
         "julia" => Some(SyntaxLanguage::Julia),
         "makefile" => Some(SyntaxLanguage::Make),
-        other => language_for_path(Path::new(&format!("fence.{other}"))),
+        other => language_for_extension(other),
     }
 }
 
@@ -1264,12 +1264,18 @@ pub fn language_for_path(path: &Path) -> Option<SyntaxLanguage> {
         Some(".gitconfig") | Some(".editorconfig") => return Some(SyntaxLanguage::Ini),
         _ => {}
     }
-    let extension = path.extension()?.to_str()?;
-    if extension == "C" {
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    if extension == Some("C") {
         return Some(SyntaxLanguage::Cpp);
     }
-    let extension = extension.to_ascii_lowercase();
-    match extension.as_str() {
+    // Neovim's filetype table names the rest, such as `flake.lock` as JSON.
+    extension
+        .and_then(language_for_extension)
+        .or_else(|| crate::tools::mason_filetype_for_path(path).and_then(language_for_fence))
+}
+
+fn language_for_extension(extension: &str) -> Option<SyntaxLanguage> {
+    match extension.to_ascii_lowercase().as_str() {
         "rs" => Some(SyntaxLanguage::Rust),
         "ts" | "mts" | "cts" => Some(SyntaxLanguage::TypeScript),
         "tsx" => Some(SyntaxLanguage::Tsx),
@@ -2325,6 +2331,20 @@ mod tests {
             Some(SyntaxLanguage::Python)
         );
     }
+    #[test]
+    fn lock_files_use_the_language_neovim_gives_their_name() {
+        for (path, language) in [
+            ("flake.lock", SyntaxLanguage::Json),
+            ("composer.lock", SyntaxLanguage::Json),
+            ("Cargo.lock", SyntaxLanguage::Toml),
+            ("uv.lock", SyntaxLanguage::Toml),
+            ("yarn.lock", SyntaxLanguage::Yaml),
+        ] {
+            assert_eq!(language_for_path(Path::new(path)), Some(language), "{path}");
+        }
+        assert_eq!(language_for_path(Path::new("notes.lock")), None);
+    }
+
     #[test]
     fn uppercase_c_extension_selects_cpp_before_case_folding() {
         assert_eq!(
