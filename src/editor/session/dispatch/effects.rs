@@ -2849,9 +2849,7 @@ impl InteractiveApplication {
             }
             AppEffect::LspRestart => {
                 if let Some(server) = self.language.active().cloned() {
-                    self.language.request_start(&server, Some(Instant::now()));
-                    let _ = self.language.stop(&server);
-                    self.clear_lsp_progress(&server);
+                    self.restart_lsp(&server);
                 } else {
                     self.start_lsp(None);
                 }
@@ -12657,17 +12655,88 @@ impl InteractiveApplication {
         &self,
         definition: &ToolDefinition,
     ) -> Option<(PathBuf, PathBuf)> {
+        let (rustup, proxy) = self.rustup_toolchain(definition)?;
+        let key = self.tool_version_key(definition, LspRuntimeSource::Path, Some(&proxy));
+        matches!(self.tooling.version(&key), Some(Err(_))).then_some((rustup, proxy))
+    }
+
+    /// rustup and the rust-analyzer proxy on PATH, when rustup manages the toolchain.
+    fn rustup_toolchain(&self, definition: &ToolDefinition) -> Option<(PathBuf, PathBuf)> {
         if definition.id != "rust-analyzer" {
             return None;
         }
         let (proxy, rustup_proxy) = self.tooling.path_executable(&definition.executable)?;
-        if !rustup_proxy {
-            return None;
-        }
-        let key = self.tool_version_key(definition, LspRuntimeSource::Path, Some(&proxy));
         let rustup = proxy.with_file_name("rustup");
-        (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
-            .then_some((rustup, proxy))
+        (rustup_proxy && rustup.is_file()).then_some((rustup, proxy))
+    }
+
+    /// Shows a server's warning. When rust-analyzer can't run build scripts or proc macros
+    /// on a rustup toolchain, the toolchain usually lacks a component, so Dust adds the
+    /// components once and restarts the server instead.
+    pub(in crate::editor::session) fn report_lsp_status(&mut self, key: &str, message: &str) {
+        let Some(definition) = self
+            .language
+            .sessions()
+            .get(key)
+            .map(|state| state.definition.clone())
+        else {
+            return;
+        };
+        let summary = message
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or("the workspace loaded only in part")
+            .to_owned();
+        let label = self.lsp_server_label(key);
+        let lower = message.to_lowercase();
+        let toolchain_failure = ["build script", "proc-macro", "proc macro"]
+            .iter()
+            .any(|needle| lower.contains(needle));
+        if toolchain_failure
+            && self.configuration.settings().lsp.auto_install
+            && let Some((rustup, proxy)) = self.rustup_toolchain(&definition)
+            && let Some(cwd) = self.tool_probe_directory()
+            && self.workspace.execution_allowed().is_ok()
+            && self
+                .workspace
+                .authorize_execution(ExecutionSource::ToolInstall)
+                .is_ok()
+            && self.language.repair_once(&definition.id)
+            && self
+                .tooling
+                .install(ToolInstall::Rustup {
+                    definition,
+                    rustup,
+                    proxy,
+                    cwd,
+                })
+                .is_ok()
+        {
+            self.notify_message(
+                format!("{label}: {summary} Adding the missing toolchain parts with rustup…"),
+                false,
+            );
+            return;
+        }
+        self.notify_message(format!("{label}: {summary}"), true);
+    }
+
+    /// Servers running from this tool, which a toolchain repair restarts.
+    fn lsp_sessions_for_tool(&self, id: &str) -> Vec<String> {
+        self.language
+            .sessions()
+            .iter()
+            .filter(|(_, state)| state.definition.id == id && state.desired_running)
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    fn restart_lsp(&mut self, server: &str) {
+        self.language.request_start(server, Some(Instant::now()));
+        let _ = self.language.stop(server);
+        self.language.forget_status(server);
+        self.clear_lsp_progress(server);
     }
 
     pub(in crate::editor::session) fn install_tool_by_id(
@@ -13005,11 +13074,24 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn process_tool_results(&mut self) {
         while let Some((name, result)) = self.tooling.poll_install() {
+            // With the server already running, rustup was repairing the toolchain, which a
+            // different rust-analyzer build wouldn't fix.
+            let running = if result.operation == ToolOperation::InstallRustup {
+                self.lsp_sessions_for_tool(&result.id)
+            } else {
+                Vec::new()
+            };
             if let Err(diagnostic) = &result.result
                 && result.operation == ToolOperation::InstallRustup
+                && running.is_empty()
                 && self.install_rust_analyzer_download(&result.id, diagnostic)
             {
                 continue;
+            }
+            if result.result.is_ok() {
+                for server in &running {
+                    self.restart_lsp(server);
+                }
             }
             if let Err(diagnostic) = result.result {
                 self.show_error(format!(

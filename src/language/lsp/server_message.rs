@@ -12,7 +12,8 @@ use super::{
     model::{LspCapabilities, LspDocument, LspEvent, LspServerConfiguration, ServerRequestId},
     origins::{EditContext, EventSender},
     protocol::{
-        diagnostics, lsp_progress_event, sanitize_log, send_cancel, send_event, workspace_edit,
+        diagnostics, lsp_progress_event, sanitize_log, send_cancel, send_event,
+        server_status_event, workspace_edit,
     },
     session::PendingRequest,
 };
@@ -128,6 +129,11 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
         }
         "$/progress" => {
             if let Some(event) = lsp_progress_event(server, message) {
+                send_event(events, event);
+            }
+        }
+        "experimental/serverStatus" => {
+            if let Some(event) = server_status_event(server, message) {
                 send_event(events, event);
             }
         }

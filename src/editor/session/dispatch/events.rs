@@ -3566,6 +3566,15 @@ impl InteractiveApplication {
                     let server = self.lsp_server_label(&server);
                     self.append_lsp_log(format!("{server}: {message}"));
                 }
+                LspEvent::ServerStatus {
+                    server,
+                    healthy,
+                    message,
+                } => {
+                    if self.language.status_changed(&server, healthy, &message) {
+                        self.report_lsp_status(&server, &message);
+                    }
+                }
                 LspEvent::Health { server, health } => {
                     let server = self.lsp_server_label(&server);
                     self.notify_message(

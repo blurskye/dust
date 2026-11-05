@@ -903,6 +903,11 @@ pub enum LspEvent {
         server: String,
         message: String,
     },
+    ServerStatus {
+        server: String,
+        healthy: bool,
+        message: String,
+    },
     Health {
         server: String,
         health: LspHealth,

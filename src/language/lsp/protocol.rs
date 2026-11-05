@@ -39,6 +39,7 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
                 "general":{"positionEncodings":["utf-8","utf-16","utf-32"]},
                 "workspace":{"workspaceFolders":true,"configuration":true,"inlayHint":{"refreshSupport":true},"applyEdit":true,"executeCommand":{"dynamicRegistration":false},"symbol":{"dynamicRegistration":true}},
                 "window":{"workDoneProgress":true},
+                "experimental":{"serverStatusNotification":true},
                 "textDocument":{
                     "synchronization":{"didSave":true,"dynamicRegistration":false},
                     "semanticTokens":{
@@ -1203,6 +1204,27 @@ pub(super) fn sanitize_log(text: &str, limit: usize) -> String {
         .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
         .take(limit)
         .collect()
+}
+
+/// rust-analyzer's `experimental/serverStatus`, which says when the workspace loaded only in
+/// part, for example because build scripts or proc macros failed.
+pub(super) fn server_status_event(server: &str, message: &Value) -> Option<LspEvent> {
+    let healthy = match message.pointer("/params/health").and_then(Value::as_str)? {
+        "ok" => true,
+        "warning" | "error" => false,
+        _ => return None,
+    };
+    Some(LspEvent::ServerStatus {
+        server: server.into(),
+        healthy,
+        message: sanitize_log(
+            message
+                .pointer("/params/message")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            MAX_LOG_LINE_BYTES,
+        ),
+    })
 }
 
 pub(super) fn lsp_progress_event(server: &str, message: &Value) -> Option<LspEvent> {

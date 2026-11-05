@@ -143,6 +143,10 @@ pub(super) struct LspSession {
     autostart: Option<LspAutostartObservation>,
     /// Languages already told which server to install, so the hint shows once per run.
     install_hinted: HashSet<String>,
+    /// The last unhealthy status each server reported, so a repeated report isn't shown again.
+    statuses: HashMap<String, String>,
+    /// Servers whose toolchain Dust already tried to repair this run.
+    repaired: HashSet<String>,
     /// Servers a person stopped; opening a file doesn't start them until asked again.
     stopped: HashSet<String>,
     detached: HashSet<(String, BufferId)>,
@@ -771,6 +775,24 @@ impl LspSession {
     }
     pub(super) fn hint_install_once(&mut self, language: &str) -> bool {
         self.install_hinted.insert(language.to_owned())
+    }
+    /// Records a server's status and says whether it is a new problem worth reporting.
+    pub(super) fn status_changed(&mut self, key: &str, healthy: bool, message: &str) -> bool {
+        if healthy {
+            self.statuses.remove(key);
+            return false;
+        }
+        self.statuses
+            .insert(key.to_owned(), message.to_owned())
+            .as_deref()
+            != Some(message)
+    }
+    /// A restarted server reports afresh, so a problem it still has is shown again.
+    pub(super) fn forget_status(&mut self, key: &str) {
+        self.statuses.remove(key);
+    }
+    pub(super) fn repair_once(&mut self, server_id: &str) -> bool {
+        self.repaired.insert(server_id.to_owned())
     }
     pub(super) fn mark_stopped(&mut self, server_id: &str) {
         self.stopped.insert(server_id.to_owned());

@@ -14,7 +14,8 @@ use super::{
     paths::{file_uri, language_id_for_path, path_from_file_uri},
     protocol::{
         completion_items, hover_result, incremental_change, initialize_capabilities,
-        initialize_message, inlay_hints, lsp_progress_event, normalize_result, workspace_edit,
+        initialize_message, inlay_hints, lsp_progress_event, normalize_result, server_status_event,
+        workspace_edit,
     },
     session::{LspService, requested_executable_name},
 };
@@ -527,6 +528,34 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
     super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
     assert!(output.is_empty());
     assert_eq!(capabilities, base);
+}
+
+#[test]
+fn rust_analyzer_status_reports_whether_the_workspace_loaded_fully() {
+    assert_eq!(
+        initialize_message(Path::new("/project"), None)
+            .pointer("/params/capabilities/experimental/serverStatusNotification"),
+        Some(&json!(true))
+    );
+    let status = |health: &str| {
+        server_status_event(
+            "rust-analyzer",
+            &json!({
+                "method":"experimental/serverStatus",
+                "params":{"health":health,"quiescent":true,"message":"Failed to run build scripts of some packages.\n\ndetails"}
+            }),
+        )
+    };
+    assert!(matches!(
+        status("warning"),
+        Some(LspEvent::ServerStatus { healthy: false, message, .. })
+            if message.starts_with("Failed to run build scripts")
+    ));
+    assert!(matches!(
+        status("ok"),
+        Some(LspEvent::ServerStatus { healthy: true, .. })
+    ));
+    assert!(status("unknown").is_none());
 }
 
 #[test]
