@@ -46,7 +46,9 @@ impl StartupTarget {
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Dashboard { root } => format!("dashboard\t{}", root.to_string_lossy().escape_debug()),
+            Self::Dashboard { root } => {
+                format!("dashboard\t{}", root.to_string_lossy().escape_debug())
+            }
             Self::File {
                 workspace_root,
                 path,
@@ -189,8 +191,14 @@ mod tests {
             path: "name\n\t.rs".into(),
             additional_files: Vec::new(),
         };
-        assert_eq!(dashboard.describe(), "dashboard\t/workspace\\u{1b}]0;title\\u{7}");
-        assert_eq!(file.describe(), "file\t/workspace\\u{1b}]0;title\\u{7}\tname\\n\\t.rs\t0");
+        assert_eq!(
+            dashboard.describe(),
+            "dashboard\t/workspace\\u{1b}]0;title\\u{7}"
+        );
+        assert_eq!(
+            file.describe(),
+            "file\t/workspace\\u{1b}]0;title\\u{7}\tname\\n\\t.rs\t0"
+        );
     }
 
     #[test]
@@ -210,20 +218,22 @@ mod tests {
         let root = tempdir().unwrap();
         fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();
         fs::write(root.path().join("other.rs"), "// other\n").unwrap();
-        let target = resolve_startup(
-            &["main.rs".into(), "other.rs".into()],
-            root.path(),
-        ).unwrap();
+        let target = resolve_startup(&["main.rs".into(), "other.rs".into()], root.path()).unwrap();
         let canonical = root.path().canonicalize().unwrap();
-        assert_eq!(target, StartupTarget::File {
-            workspace_root: root.path().to_path_buf(),
-            path: canonical.join("main.rs"),
-            additional_files: vec![canonical.join("other.rs")],
-        });
+        assert_eq!(
+            target,
+            StartupTarget::File {
+                workspace_root: root.path().to_path_buf(),
+                path: canonical.join("main.rs"),
+                additional_files: vec![canonical.join("other.rs")],
+            }
+        );
         fs::create_dir(root.path().join("nested")).unwrap();
         assert_eq!(
             resolve_startup(&["nested".into()], root.path()).unwrap(),
-            StartupTarget::Dashboard { root: canonical.join("nested") },
+            StartupTarget::Dashboard {
+                root: canonical.join("nested")
+            },
         );
     }
 

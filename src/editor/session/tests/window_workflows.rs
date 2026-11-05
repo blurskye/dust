@@ -59,7 +59,11 @@ fn tiny_terminal_projection_clips_safely_and_restores_the_same_sessions() {
     assert_eq!(sessions.len(), 2);
     assert_ne!(sessions[0].0, sessions[1].0);
     for (id, lines) in &sessions {
-        assert!(lines.iter().any(|line| line.contains(&format!("terminal {id} contents"))));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(&format!("terminal {id} contents")))
+        );
     }
     session.resize(0, 0);
     let zero = session.frame();
@@ -220,9 +224,17 @@ fn explorer_clone_paging_uses_its_own_height() {
     let primary = session.explorer_selections()[&1];
     session.clone_explorer();
     let clone = session.explorer_window(2);
-    session.place_window(clone, crate::ui::window::WindowPlacement::Floating(crate::ui::window::WindowRect {
-        x: 25, y: 3, width: 40, height: 8,
-    })).unwrap();
+    session
+        .place_window(
+            clone,
+            crate::ui::window::WindowPlacement::Floating(crate::ui::window::WindowRect {
+                x: 25,
+                y: 3,
+                width: 40,
+                height: 8,
+            }),
+        )
+        .unwrap();
     session.reconcile_windows();
     let rows = usize::from(session.explorer_body(2).height);
     assert!(rows < usize::from(session.explorer_body(1).height));

@@ -95,9 +95,16 @@ pub(super) fn build_comment_toggle(
         let mut edits = Vec::new();
         for (start, bytes, _, _, _, end, _) in &lines {
             let whitespace = text
-                .slice(ByteRange::new(ByteOffset(*start), ByteOffset(start + bytes)).map_err(failed)?)
+                .slice(
+                    ByteRange::new(ByteOffset(*start), ByteOffset(start + bytes))
+                        .map_err(failed)?,
+                )
                 .map_err(failed)?;
-            let offset = whitespace.chars().take(indent).map(char::len_utf8).sum::<usize>();
+            let offset = whitespace
+                .chars()
+                .take(indent)
+                .map(char::len_utf8)
+                .sum::<usize>();
             edits.push(TextEdit::new(
                 ByteRange::empty(ByteOffset(start + offset)),
                 format!("{token} "),

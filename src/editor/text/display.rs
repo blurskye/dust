@@ -181,5 +181,4 @@ mod tests {
         }
         assert_eq!(display_column_at("x", usize::MAX, policy), 1);
     }
-
 }

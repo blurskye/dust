@@ -202,7 +202,10 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
         .inspect_key("editor.normal", "space f b")
         .expect("plugin shadows the bundled buffer picker");
     assert_eq!(collision.command.as_deref(), Some("plugin.demo.run"));
-    assert_eq!(collision.contribution_layer, crate::editor::input::InputContextLayer::Plugin);
+    assert_eq!(
+        collision.contribution_layer,
+        crate::editor::input::InputContextLayer::Plugin
+    );
     loaded.entries.extend([
         crate::config::KeymapEntry {
             id: "plugin.demo.keymap.action".into(),
@@ -401,140 +404,257 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
 fn identity_replacements_shadow_lower_layers_in_precedence_order() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(toml::from_str(r#"
+    loaded.entries.push(
+        toml::from_str(
+            r#"
         id = "builtin.global.explorer.editor-normal"
         context = "editor"
         mode = "normal"
         keys = "<leader> f b"
         command = "health.open"
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (resolved, diagnostic) = compile_keymaps(
-        &app.commands, &loaded, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
-    assert_eq!(resolved.inspect_key("editor.normal", "space f b").unwrap().command.as_deref(), Some("health.open"));
-    assert_eq!(resolved.binding_for("editor.normal", "health.open"), Some("space f b"));
-    assert!(resolved.inspect_id("builtin.global.files-buffers.editor-normal").is_none());
+    assert_eq!(
+        resolved
+            .inspect_key("editor.normal", "space f b")
+            .unwrap()
+            .command
+            .as_deref(),
+        Some("health.open")
+    );
+    assert_eq!(
+        resolved.binding_for("editor.normal", "health.open"),
+        Some("space f b")
+    );
+    assert!(
+        resolved
+            .inspect_id("builtin.global.files-buffers.editor-normal")
+            .is_none()
+    );
     assert!(resolved.conflicts().iter().any(|conflict| conflict.contains(
         "id `builtin.global.explorer.editor-normal` `<leader> f b` (expanded to `space f b`) shadows id `builtin.global.files-buffers.editor-normal`"
     )), "{:?}", resolved.conflicts());
     let mut sequence = crate::editor::input::KeymapSequence::default();
     for key in ["space", "f"] {
-        assert_eq!(resolved.resolve(&mut sequence, "editor.normal", key.parse().unwrap()), crate::editor::input::MappingResolution::Pending);
+        assert_eq!(
+            resolved.resolve(&mut sequence, "editor.normal", key.parse().unwrap()),
+            crate::editor::input::MappingResolution::Pending
+        );
     }
-    assert!(matches!(resolved.resolve(&mut sequence, "editor.normal", "b".parse().unwrap()),
-        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "health.open"));
+    assert!(
+        matches!(resolved.resolve(&mut sequence, "editor.normal", "b".parse().unwrap()),
+        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "health.open")
+    );
 }
 
 #[test]
 fn pass_through_preserves_the_lower_command_binding_metadata() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(toml::from_str(r#"
+    loaded.entries.push(
+        toml::from_str(
+            r#"
         id = "user.test.pass-command"
         context = "dashboard"
         keys = ":"
         pass_through = true
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (resolved, diagnostic) = compile_keymaps(
-        &app.commands, &loaded, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
-    assert!(resolved.effective_binding("dashboard", "command_line.open").keys().contains(&":".to_owned()));
-    assert_eq!(resolved.binding_for_action("dashboard", "command_line.open", &BTreeMap::from([
-        ("kind".into(), toml::Value::String("command".into())),
-    ])), Some(":"));
-    assert_eq!(resolved.inspect_key("dashboard", ":").unwrap().command.as_deref(), Some("command_line.open"));
+    assert!(
+        resolved
+            .effective_binding("dashboard", "command_line.open")
+            .keys()
+            .contains(&":".to_owned())
+    );
+    assert_eq!(
+        resolved.binding_for_action(
+            "dashboard",
+            "command_line.open",
+            &BTreeMap::from([("kind".into(), toml::Value::String("command".into())),])
+        ),
+        Some(":")
+    );
+    assert_eq!(
+        resolved
+            .inspect_key("dashboard", ":")
+            .unwrap()
+            .command
+            .as_deref(),
+        Some("command_line.open")
+    );
     let mut sequence = crate::editor::input::KeymapSequence::default();
-    assert!(matches!(resolved.resolve(&mut sequence, "dashboard", ":".parse().unwrap()),
-        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "command_line.open"));
+    assert!(
+        matches!(resolved.resolve(&mut sequence, "dashboard", ":".parse().unwrap()),
+        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "command_line.open")
+    );
 }
 
 #[test]
 fn reverse_bindings_fall_back_when_the_preferred_shortcut_is_overridden() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(toml::from_str(r#"
+    loaded.entries.push(
+        toml::from_str(
+            r#"
         id = "user.test.replace-explorer"
         context = "editor"
         mode = "normal"
         keys = "<leader> e"
         command = "health.open"
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (resolved, diagnostic) = compile_keymaps(
-        &app.commands, &loaded, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
-    assert_eq!(resolved.binding_for("editor.normal", "explorer.panel.toggle"), Some("space f e"));
-    assert_eq!(resolved.effective_binding("editor.normal", "explorer.panel.toggle").keys(), ["space f e"]);
+    assert_eq!(
+        resolved.binding_for("editor.normal", "explorer.panel.toggle"),
+        Some("space f e")
+    );
+    assert_eq!(
+        resolved
+            .effective_binding("editor.normal", "explorer.panel.toggle")
+            .keys(),
+        ["space f e"]
+    );
     let mut sequence = crate::editor::input::KeymapSequence::default();
     for key in ["space", "f"] {
-        assert_eq!(resolved.resolve(&mut sequence, "editor.normal", key.parse().unwrap()), crate::editor::input::MappingResolution::Pending);
+        assert_eq!(
+            resolved.resolve(&mut sequence, "editor.normal", key.parse().unwrap()),
+            crate::editor::input::MappingResolution::Pending
+        );
     }
-    assert!(matches!(resolved.resolve(&mut sequence, "editor.normal", "e".parse().unwrap()),
-        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "explorer.panel.toggle"));
+    assert!(
+        matches!(resolved.resolve(&mut sequence, "editor.normal", "e".parse().unwrap()),
+        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "explorer.panel.toggle")
+    );
 }
 
 #[test]
 fn exact_prefix_overrides_hide_unreachable_bindings_and_groups() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(toml::from_str(r#"
+    loaded.entries.push(
+        toml::from_str(
+            r#"
         id = "user.test.replace-files-prefix"
         context = "editor"
         mode = "normal"
         keys = "<leader> f"
         command = "health.open"
         desc = "Health"
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (resolved, diagnostic) = compile_keymaps(
-        &app.commands, &loaded, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     assert!(resolved.inspect_key("editor.normal", "space f b").is_none());
-    assert_ne!(resolved.binding_for("editor.normal", "buffer.picker.open"), Some("space f b"));
-    assert!(!resolved.groups().iter().any(|group| group.context == "editor.normal" && group.prefix == "space f"));
+    assert_ne!(
+        resolved.binding_for("editor.normal", "buffer.picker.open"),
+        Some("space f b")
+    );
+    assert!(
+        !resolved
+            .groups()
+            .iter()
+            .any(|group| group.context == "editor.normal" && group.prefix == "space f")
+    );
     let labels = &app.configuration.settings().command_labels;
-    assert!(resolved.hints_for_prefix("editor.normal", "space f", labels).is_none());
-    let leader = resolved.hints_for_prefix("editor.normal", "space", labels).unwrap();
+    assert!(
+        resolved
+            .hints_for_prefix("editor.normal", "space f", labels)
+            .is_none()
+    );
+    let leader = resolved
+        .hints_for_prefix("editor.normal", "space", labels)
+        .unwrap();
     let files = leader.rows.iter().find(|row| row.next_key == "f").unwrap();
     assert_eq!(files.label, "Health");
     assert!(files.direct);
     let mut sequence = crate::editor::input::KeymapSequence::default();
     resolved.resolve(&mut sequence, "editor.normal", "space".parse().unwrap());
-    assert!(matches!(resolved.resolve(&mut sequence, "editor.normal", "f".parse().unwrap()),
-        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "health.open"));
+    assert!(
+        matches!(resolved.resolve(&mut sequence, "editor.normal", "f".parse().unwrap()),
+        crate::editor::input::MappingResolution::Ready(invocation) if invocation.id.as_str() == "health.open")
+    );
 }
 
 #[test]
 fn key_groups_require_a_command_not_an_orphan_pass_through() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    loaded.entries.push(toml::from_str(r#"
+    loaded.entries.push(
+        toml::from_str(
+            r#"
         id = "user.test.orphan-pass"
         context = "dashboard"
         keys = "z x"
         pass_through = true
-    "#).unwrap());
-    loaded.groups.push(toml::from_str(r#"
+    "#,
+        )
+        .unwrap(),
+    );
+    loaded.groups.push(
+        toml::from_str(
+            r#"
         id = "user.test.orphan-group"
         context = "dashboard"
         prefix = "z"
         label = "Empty"
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (_, diagnostic) = compile_keymaps(
-        &app.commands, &loaded, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
     );
     let diagnostic = diagnostic.expect("orphan group must be rejected");
-    assert!(diagnostic.contains("user.test.orphan-group") && diagnostic.contains("reaches no resolved binding"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("user.test.orphan-group")
+            && diagnostic.contains("reaches no resolved binding"),
+        "{diagnostic}"
+    );
 }
 
 #[test]
 fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let (_app_dirs, app) = app();
-    let original = app.configuration.keymaps().hints_for_prefix(
-        "editor.normal", "space f", &app.configuration.settings().command_labels,
-    ).expect("bundled file hints");
+    let original = app
+        .configuration
+        .keymaps()
+        .hints_for_prefix(
+            "editor.normal",
+            "space f",
+            &app.configuration.settings().command_labels,
+        )
+        .expect("bundled file hints");
     assert!(original.rows.iter().any(|row| row.next_key == "e"));
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
@@ -663,24 +783,46 @@ fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
     for disabled in [false, true] {
         let mut loaded = crate::config::load_bundled_config().keymaps;
         loaded.entries.push(crate::config::KeymapEntry {
-            id: "user.files-prefix".into(), context: Some("editor".into()), mode: "normal".into(),
-            keys: Some("<leader> f".into()), command: (!disabled).then(|| "health.open".into()),
-            arguments: BTreeMap::new(), unmap: disabled, disable: false, pass_through: false, desc: None,
+            id: "user.files-prefix".into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            keys: Some("<leader> f".into()),
+            command: (!disabled).then(|| "health.open".into()),
+            arguments: BTreeMap::new(),
+            unmap: disabled,
+            disable: false,
+            pass_through: false,
+            desc: None,
         });
-        let (resolved, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+        let (resolved, diagnostic) = compile_keymaps(
+            &app.commands,
+            &loaded,
+            &app.configuration.settings().input.keymaps,
+        );
         assert!(diagnostic.is_none(), "{diagnostic:?}");
-        let leader = resolved.hints_for_prefix("editor.normal", "space", &BTreeMap::new()).unwrap();
+        let leader = resolved
+            .hints_for_prefix("editor.normal", "space", &BTreeMap::new())
+            .unwrap();
         let files = leader.rows.iter().find(|row| row.next_key == "f").unwrap();
         let descendants = resolved.hints_for_prefix("editor.normal", "space f", &BTreeMap::new());
         let buffer_binding = resolved.effective_binding("editor.normal", "buffer.picker.open");
         if disabled {
             // Unmap disables only the exact sequence; longer bindings still work.
             assert!(!files.direct);
-            assert!(descendants.unwrap().rows.iter().any(|row| row.next_key == "b"));
+            assert!(
+                descendants
+                    .unwrap()
+                    .rows
+                    .iter()
+                    .any(|row| row.next_key == "b")
+            );
             assert!(buffer_binding.keys().contains(&"space f b".into()));
             let mut sequence = crate::editor::input::KeymapSequence::default();
             resolved.resolve(&mut sequence, "editor.normal", "space".parse().unwrap());
-            assert_eq!(resolved.resolve(&mut sequence, "editor.normal", "f".parse().unwrap()), MappingResolution::Ambiguous);
+            assert_eq!(
+                resolved.resolve(&mut sequence, "editor.normal", "f".parse().unwrap()),
+                MappingResolution::Ambiguous
+            );
             assert_eq!(sequence.flush_timeout(), MappingResolution::Disabled);
         } else {
             assert!(descendants.is_none());
@@ -872,22 +1014,34 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     }
 
     let mut valid = crate::config::load_bundled_config().keymaps;
-    valid.entries.push(toml::from_str(r#"
+    valid.entries.push(
+        toml::from_str(
+            r#"
         id = "user.test.retained-binding"
         context = "editor"
         mode = "normal"
         keys = "<leader> j z"
         command = "health.open"
-    "#).unwrap());
-    valid.groups.push(toml::from_str(r#"
+    "#,
+        )
+        .unwrap(),
+    );
+    valid.groups.push(
+        toml::from_str(
+            r#"
         id = "user.test.retained-group"
         context = "editor"
         mode = "normal"
         prefix = "<leader> j"
         label = "Retained"
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     let (current, diagnostic) = compile_keymaps(
-        &app.commands, &valid, &app.configuration.settings().input.keymaps,
+        &app.commands,
+        &valid,
+        &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     let mut invalid = valid;
@@ -919,18 +1073,26 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
         "rejected candidate must retain groups atomically"
     );
     assert_eq!(
-        retained.inspect_key("editor.normal", "space j z").unwrap().command.as_deref(),
+        retained
+            .inspect_key("editor.normal", "space j z")
+            .unwrap()
+            .command
+            .as_deref(),
         Some("health.open"),
         "rejected candidate must retain the user binding too"
     );
-    assert_eq!(retained.binding_for("editor.normal", "health.open"), Some("space j z"));
+    assert_eq!(
+        retained.binding_for("editor.normal", "health.open"),
+        Some("space j z")
+    );
 }
 
 #[test]
 fn macros_record_replay_last_register_and_stop_at_limits() {
     let (_app_dirs, mut app) = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     for key in ['q', 'a', 'x', 'q', '@', 'a', '@', '@'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -1031,23 +1193,48 @@ fn help_is_reachable_from_the_confirmation_and_from_a_form() {
 fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
-    let arguments = |query: &str, replacement: &str| BTreeMap::from([
-        ("query".into(), toml::Value::String(query.into())),
-        ("replacement".into(), toml::Value::String(replacement.into())),
-    ]);
+    let arguments = |query: &str, replacement: &str| {
+        BTreeMap::from([
+            ("query".into(), toml::Value::String(query.into())),
+            (
+                "replacement".into(),
+                toml::Value::String(replacement.into()),
+            ),
+        ])
+    };
     let first = arguments("a|replacement=string:b", "c");
     let second = arguments("a", "b|replacement=string:c");
-    for (id, keys, arguments) in [("user.first", "ctrl-p", first.clone()), ("user.second", "ctrl-y", second.clone())] {
+    for (id, keys, arguments) in [
+        ("user.first", "ctrl-p", first.clone()),
+        ("user.second", "ctrl-y", second.clone()),
+    ] {
         loaded.entries.push(crate::config::KeymapEntry {
-            id: id.into(), context: Some("editor".into()), mode: "normal".into(),
-            keys: Some(keys.into()), command: Some("workspace.replace".into()), arguments,
-            unmap: false, disable: false, pass_through: false, desc: None,
+            id: id.into(),
+            context: Some("editor".into()),
+            mode: "normal".into(),
+            keys: Some(keys.into()),
+            command: Some("workspace.replace".into()),
+            arguments,
+            unmap: false,
+            disable: false,
+            pass_through: false,
+            desc: None,
         });
     }
-    let (resolved, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+    let (resolved, diagnostic) = compile_keymaps(
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
+    );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
-    assert_eq!(resolved.binding_for_action("editor.normal", "workspace.replace", &first), Some("ctrl-p"));
-    assert_eq!(resolved.binding_for_action("editor.normal", "workspace.replace", &second), Some("ctrl-y"));
+    assert_eq!(
+        resolved.binding_for_action("editor.normal", "workspace.replace", &first),
+        Some("ctrl-p")
+    );
+    assert_eq!(
+        resolved.binding_for_action("editor.normal", "workspace.replace", &second),
+        Some("ctrl-y")
+    );
 }
 
 #[test]
@@ -1130,7 +1317,12 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
 
     // The answer belongs to the context that was asked about: unmapping `?` in editor.normal
     // says nothing about a context where the same command is bound elsewhere.
-    assert!(bundled.effective_binding("dashboard", "command_line.open").keys().contains(&"?".to_owned()));
+    assert!(
+        bundled
+            .effective_binding("dashboard", "command_line.open")
+            .keys()
+            .contains(&"?".to_owned())
+    );
     assert_eq!(
         remapped.effective_binding("dashboard", "command_line.open"),
         bundled.effective_binding("dashboard", "command_line.open"),

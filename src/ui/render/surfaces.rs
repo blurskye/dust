@@ -375,7 +375,9 @@ pub(super) fn render_private_surface(
             // Private snapshots use narrow Unicode widths for their fixed coordinates.
             let width = unicode_width::UnicodeWidthStr::width(cell.grapheme.as_str()).clamp(1, 2);
             if usize::from(x) + width <= usize::from(right) {
-                frame.grid.set_cell_with_width(x, y, &cell.grapheme, cell.style, width);
+                frame
+                    .grid
+                    .set_cell_with_width(x, y, &cell.grapheme, cell.style, width);
             }
         }
     }
@@ -965,7 +967,9 @@ pub(super) fn render_tool_menu(
             )
         },
     );
-    frame.grid.put_text_clipped(left + 2, top, &title, Style::Accent, left + width - 1);
+    frame
+        .grid
+        .put_text_clipped(left + 2, top, &title, Style::Accent, left + width - 1);
     let content_left = left + 2;
     let content_width = width.saturating_sub(4);
     let ambiguous = config.editor.ambiguous_width;
@@ -982,7 +986,13 @@ pub(super) fn render_tool_menu(
     if let Some(picker) = &menu.runtime_picker {
         // Keep the help, header, two-row option and details in separate regions.
         if height < 11 {
-            frame.grid.put_text_clipped(content_left, y, "Resize to choose a build", Style::Muted, left + width - 1);
+            frame.grid.put_text_clipped(
+                content_left,
+                y,
+                "Resize to choose a build",
+                Style::Muted,
+                left + width - 1,
+            );
             frame.cursor = None;
             return;
         }
@@ -1871,13 +1881,23 @@ mod tests {
     #[test]
     fn emphasized_diff_stops_at_a_wide_grapheme_that_cannot_fit() {
         let config = crate::config::load_bundled_config().config;
-        let mut frame = Frame { grid: CellGrid::new(4, 1), cursor: None };
+        let mut frame = Frame {
+            grid: CellGrid::new(4, 1),
+            cursor: None,
+        };
         frame.grid.set_cell(3, 0, "|", Style::Border);
-        paint_diff_row(&mut frame, &config, 0, 0, 3, &DiffRow {
-            kind: DiffRowKind::Added,
-            text: "ab界z".into(),
-            spans: vec![super::super::DiffSpan { start: 0, end: 6 }],
-        });
+        paint_diff_row(
+            &mut frame,
+            &config,
+            0,
+            0,
+            3,
+            &DiffRow {
+                kind: DiffRowKind::Added,
+                text: "ab界z".into(),
+                spans: vec![super::super::DiffSpan { start: 0, end: 6 }],
+            },
+        );
         assert_eq!(frame.grid.row_text(0), "ab |");
         assert_eq!(frame.grid.get(0, 0).unwrap().style, Style::Search);
     }
@@ -1894,12 +1914,17 @@ mod tests {
     }
     #[test]
     fn ellipsis_width_is_included_in_the_budget() {
-        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        for ambiguous in [
+            crate::config::AmbiguousWidth::Narrow,
+            crate::config::AmbiguousWidth::Wide,
+        ] {
             for maximum in 0..20 {
                 let shown = ellipsized("abcdefghijklmnopqrst", maximum, ambiguous);
-                assert!(text_width(&shown, ambiguous) <= maximum, "{maximum}: {shown}");
+                assert!(
+                    text_width(&shown, ambiguous) <= maximum,
+                    "{maximum}: {shown}"
+                );
             }
         }
     }
-
 }

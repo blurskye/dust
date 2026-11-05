@@ -75,7 +75,11 @@ fn prompt_word_deletion_keeps_decomposed_accents_and_emoji_whole() {
 #[test]
 fn prompt_history_restores_the_draft_and_its_cursor() {
     let mut input = InputSession::new(100);
-    for kind in [PromptKind::Command, PromptKind::SearchForward, PromptKind::SearchBackward] {
+    for kind in [
+        PromptKind::Command,
+        PromptKind::SearchForward,
+        PromptKind::SearchBackward,
+    ] {
         input.record_prompt_history(kind, "old");
         input.record_prompt_history(kind, "new");
         input.open_prompt(kind, "unfinished e\u{301}".into(), None);
@@ -206,23 +210,38 @@ fn prompt_directory_replies_merge_and_deduplicate_open_buffer_matches() {
     let root = Path::new("/isolated");
     let open = root.join("src/needle.rs");
     input.open_prompt(PromptKind::Command, "e needle".into(), None);
-    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
-    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+    let request = input
+        .refresh_completions(&policy, root, [open.as_path()], [])
+        .unwrap();
+    assert_eq!(
+        input.prompt().unwrap().completions[0].label,
+        "src/needle.rs"
+    );
     assert!(input.accept_prompt_paths(&request.key, vec![], root, &policy));
-    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+    assert_eq!(
+        input.prompt().unwrap().completions[0].label,
+        "src/needle.rs"
+    );
     assert!(input.accept_prompt_paths(&request.key, vec![root.join("needle.txt")], root, &policy));
     assert_eq!(input.prompt().unwrap().completions.len(), 2);
 
     input.open_prompt(PromptKind::Command, "e src/needle".into(), None);
-    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
+    let request = input
+        .refresh_completions(&policy, root, [open.as_path()], [])
+        .unwrap();
     assert!(input.accept_prompt_paths(&request.key, vec![open.clone()], root, &policy));
     assert_eq!(input.prompt().unwrap().completions.len(), 1);
 
     input.open_prompt(PromptKind::Command, format!("e {}", open.display()), None);
-    let request = input.refresh_completions(&policy, root, [open.as_path()], []).unwrap();
+    let request = input
+        .refresh_completions(&policy, root, [open.as_path()], [])
+        .unwrap();
     assert!(input.accept_prompt_paths(&request.key, vec![], root, &policy));
     assert_eq!(input.prompt().unwrap().completions.len(), 1);
-    assert_eq!(input.prompt().unwrap().completions[0].label, "src/needle.rs");
+    assert_eq!(
+        input.prompt().unwrap().completions[0].label,
+        "src/needle.rs"
+    );
 }
 
 #[test]
@@ -250,14 +269,40 @@ fn prompt_path_completion_requests_children_after_a_directory_separator() {
 #[test]
 fn prompt_command_completion_uses_the_id_when_a_plugin_label_is_absent() {
     let mut policy = load_bundled_config().config;
-    policy.input.command_aliases.insert("demo".into(), "plugin.demo".into());
+    policy
+        .input
+        .command_aliases
+        .insert("demo".into(), "plugin.demo".into());
     let mut input = InputSession::new(100);
     for query in ["", "dem", "plugin."] {
         input.open_prompt(PromptKind::Command, query.into(), None);
-        assert!(input.refresh_completions(&policy, Path::new("/isolated"), [], ["plugin.demo", "plugin.other"]).is_none());
-        assert!(input.prompt().unwrap().completions.iter().any(|item| item.label == "demo" && item.detail == "plugin.demo"));
+        assert!(
+            input
+                .refresh_completions(
+                    &policy,
+                    Path::new("/isolated"),
+                    [],
+                    ["plugin.demo", "plugin.other"]
+                )
+                .is_none()
+        );
+        assert!(
+            input
+                .prompt()
+                .unwrap()
+                .completions
+                .iter()
+                .any(|item| item.label == "demo" && item.detail == "plugin.demo")
+        );
     }
-    assert!(input.prompt().unwrap().completions.iter().any(|item| item.label == "plugin.other" && item.detail == "plugin.other"));
+    assert!(
+        input
+            .prompt()
+            .unwrap()
+            .completions
+            .iter()
+            .any(|item| item.label == "plugin.other" && item.detail == "plugin.other")
+    );
 }
 
 #[test]
@@ -321,9 +366,13 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
 fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
     use crate::editor::{EditorMode, EditorState, text::TextBuffer};
     let mut first = EditorState::new(Default::default());
-    first.open_text(TextBuffer::from_text("first"), None).unwrap();
+    first
+        .open_text(TextBuffer::from_text("first"), None)
+        .unwrap();
     let mut other = EditorState::new(Default::default());
-    other.open_text(TextBuffer::from_text("other"), None).unwrap();
+    other
+        .open_text(TextBuffer::from_text("other"), None)
+        .unwrap();
     assert_eq!(first.active_view, other.active_view);
     let mut input = InputSession::new(100);
     assert_eq!(

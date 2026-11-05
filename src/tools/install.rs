@@ -97,14 +97,8 @@ pub(super) fn install_tool(
                 let environment = BTreeMap::from([
                     ("HOME".into(), staging.as_os_str().to_owned()),
                     ("GOBIN".into(), bin.into_os_string()),
-                    (
-                        "GOPATH".into(),
-                        staging.join("gopath").into_os_string(),
-                    ),
-                    (
-                        "GOCACHE".into(),
-                        staging.join("gocache").into_os_string(),
-                    ),
+                    ("GOPATH".into(), staging.join("gopath").into_os_string()),
+                    ("GOCACHE".into(), staging.join("gocache").into_os_string()),
                     ("GOPROXY".into(), "https://proxy.golang.org,direct".into()),
                     ("GOSUMDB".into(), "sum.golang.org".into()),
                 ]);

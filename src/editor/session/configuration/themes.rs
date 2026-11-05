@@ -24,9 +24,10 @@ pub(super) struct Themes {
 impl Themes {
     /// Keep a selection only if it differs from the freshly loaded configured theme.
     pub(super) fn reset(&mut self, keep_applied: bool, configured_name: &str) {
-        let applied = self.applied.take().filter(|choice| {
-            keep_applied && choice.theme.name != configured_name
-        });
+        let applied = self
+            .applied
+            .take()
+            .filter(|choice| keep_applied && choice.theme.name != configured_name);
         *self = Self {
             applied,
             ..Self::default()
@@ -307,8 +308,7 @@ impl ConfigurationSession {
             )?
         };
         let preview = self.themes.interaction.as_ref().is_some_and(|interaction| {
-            interaction.revision == self.binding_revision
-                && interaction.selected.is_some()
+            interaction.revision == self.binding_revision && interaction.selected.is_some()
         });
         let source = format!(
             "{} from {}",

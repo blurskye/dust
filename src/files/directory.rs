@@ -233,7 +233,9 @@ pub fn linked_worktree_repository(root: &Path) -> Option<String> {
     let mut normalized = PathBuf::new();
     for component in git_directory.components() {
         match component {
-            std::path::Component::ParentDir => { normalized.pop(); }
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
             std::path::Component::CurDir => {}
             component => normalized.push(component.as_os_str()),
         }
@@ -288,7 +290,8 @@ pub(super) fn list_scoped_directory(
         });
     }
     let worktrees = directory.join(WORKTREE_DIRECTORY);
-    if !truncated && roots.contains(&directory)
+    if !truncated
+        && roots.contains(&directory)
         && !entries.iter().any(|entry| entry.path == worktrees)
     {
         let mut scanned = 0;
@@ -299,7 +302,9 @@ pub(super) fn list_scoped_directory(
             }
             scanned += 1;
             true
-        }).next().is_some();
+        })
+        .next()
+        .is_some();
         if found {
             if entries.len() >= maximum_entries {
                 truncated = true;

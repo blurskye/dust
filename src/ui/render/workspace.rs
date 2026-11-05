@@ -413,18 +413,21 @@ pub(super) fn render_workspace(
         // Match CellGrid's replacement and per-grapheme width policy, including
         // filenames containing controls or standalone zero-width characters.
         let label_width = |label: &str| {
-            label.graphemes(true).map(|grapheme| {
-                let safe = if grapheme == "\t" {
-                    " "
-                } else if grapheme.chars().any(char::is_control) {
-                    CONTROL_CHARACTER_REPLACEMENT
-                } else if text_width(grapheme, config.editor.ambiguous_width) == 0 {
-                    ZERO_WIDTH_REPLACEMENT
-                } else {
-                    grapheme
-                };
-                text_width(safe, config.editor.ambiguous_width).clamp(1, 2)
-            }).sum::<usize>()
+            label
+                .graphemes(true)
+                .map(|grapheme| {
+                    let safe = if grapheme == "\t" {
+                        " "
+                    } else if grapheme.chars().any(char::is_control) {
+                        CONTROL_CHARACTER_REPLACEMENT
+                    } else if text_width(grapheme, config.editor.ambiguous_width) == 0 {
+                        ZERO_WIDTH_REPLACEMENT
+                    } else {
+                        grapheme
+                    };
+                    text_width(safe, config.editor.ambiguous_width).clamp(1, 2)
+                })
+                .sum::<usize>()
         };
         let mut start = active;
         let mut used = label_width(&labels[active].0);

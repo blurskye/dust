@@ -185,7 +185,9 @@ pub fn resolve_manifests(
             let manifest = &manifests[&name];
             let mut source = manifest.source.clone();
             match &mut source {
-                PackageSource::Registry { archive_sha256, .. } => archive_sha256.make_ascii_lowercase(),
+                PackageSource::Registry { archive_sha256, .. } => {
+                    archive_sha256.make_ascii_lowercase()
+                }
                 PackageSource::Git { tree_sha256, .. } => tree_sha256.make_ascii_lowercase(),
                 PackageSource::Path { .. } => {}
             }
@@ -237,7 +239,8 @@ pub(super) fn write_protected_atomic(
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(PackageError::Io)?;
     file.write_all(bytes).map_err(PackageError::Io)?;
     file.as_file().sync_all().map_err(PackageError::Io)?;
-    file.persist(path).map_err(|error| PackageError::Io(error.error))?;
+    file.persist(path)
+        .map_err(|error| PackageError::Io(error.error))?;
     fs::File::open(parent)
         .and_then(|file| file.sync_all())
         .map_err(PackageError::Io)
@@ -289,7 +292,8 @@ pub fn verify_lock_store(
             PackageSource::Git { tree_sha256, .. } => Some(tree_sha256),
             PackageSource::Path { .. } => None,
         };
-        if source_digest.is_some_and(|digest| !digest.eq_ignore_ascii_case(&package.content_sha256)) {
+        if source_digest.is_some_and(|digest| !digest.eq_ignore_ascii_case(&package.content_sha256))
+        {
             return Err(PackageError::ChecksumMismatch);
         }
         let object = store.join(package.content_sha256.to_ascii_lowercase());
@@ -333,7 +337,8 @@ pub fn commit_store_bytes(
     let mut file = tempfile::NamedTempFile::new_in(store).map_err(PackageError::Io)?;
     file.write_all(bytes).map_err(PackageError::Io)?;
     file.as_file().sync_all().map_err(PackageError::Io)?;
-    file.persist(&target).map_err(|error| PackageError::Io(error.error))?;
+    file.persist(&target)
+        .map_err(|error| PackageError::Io(error.error))?;
     fs::File::open(store)
         .and_then(|file| file.sync_all())
         .map_err(PackageError::Io)?;

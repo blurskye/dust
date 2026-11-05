@@ -64,8 +64,8 @@ fn a_missing_adapter_is_a_failure_rather_than_the_editor_starting() {
 
 #[test]
 fn an_adapter_that_only_speaks_over_a_socket_is_carried_over_stdio() {
-    use std::io::{Read, Write};
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use std::io::{Read, Write};
 
     let script = r#"
 import socket, sys
@@ -79,18 +79,20 @@ with socket.create_connection((host, int(port)), timeout=5) as s:
         request.extend(chunk)
     s.sendall(request.upper())
 "#;
-    let mut bridge = AdapterChild(Command::new(env!("CARGO_BIN_EXE_dust"))
-        .args([
-            dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
-            "python3",
-            "-c",
-            script,
-            "{address}",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("run dust"));
+    let mut bridge = AdapterChild(
+        Command::new(env!("CARGO_BIN_EXE_dust"))
+            .args([
+                dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
+                "python3",
+                "-c",
+                script,
+                "{address}",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("run dust"),
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut stdin = bridge.0.stdin.take().expect("stdin");
     stdin.write_all(b"no newline").expect("write");
@@ -100,7 +102,10 @@ with socket.create_connection((host, int(port)), timeout=5) as s:
     let mut answer = Vec::new();
     let mut buffer = [0; 64];
     loop {
-        assert!(Instant::now() < deadline, "adapter response timed out: {answer:?}");
+        assert!(
+            Instant::now() < deadline,
+            "adapter response timed out: {answer:?}"
+        );
         match stdout.read(&mut buffer) {
             Ok(0) => break,
             Ok(n) => answer.extend_from_slice(&buffer[..n]),

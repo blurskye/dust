@@ -196,16 +196,15 @@ fn is_fence_close(line: &str, fence: &str) -> bool {
 fn heading(line: &str) -> Option<&str> {
     let level = line.len() - line.trim_start_matches('#').len();
     let rest = &line[level..];
-    ((1..=6).contains(&level) && (rest.is_empty() || rest.starts_with(' ')))
-        .then(|| {
-            let title = rest.trim_end();
-            let without_hashes = title.trim_end_matches('#');
-            if without_hashes.ends_with([' ', '\t']) {
-                without_hashes.trim()
-            } else {
-                title.trim_start()
-            }
-        })
+    ((1..=6).contains(&level) && (rest.is_empty() || rest.starts_with(' '))).then(|| {
+        let title = rest.trim_end();
+        let without_hashes = title.trim_end_matches('#');
+        if without_hashes.ends_with([' ', '\t']) {
+            without_hashes.trim()
+        } else {
+            title.trim_start()
+        }
+    })
 }
 
 /// The `===` or `---` line under a heading written the other way.
@@ -359,7 +358,8 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         .enumerate()
         .map(|(index, row)| {
             let role = (index == 0).then_some(Highlight::STRONG);
-            table_cells(row).into_iter()
+            table_cells(row)
+                .into_iter()
                 .map(|cell| inline(cell.trim(), role))
                 .collect::<Vec<_>>()
         })
@@ -405,10 +405,18 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
                 .iter()
                 .map(|width| {
                     let rule_width = out.width("─");
-                    format!("{}{}", "─".repeat(*width / rule_width), " ".repeat(*width % rule_width))
+                    format!(
+                        "{}{}",
+                        "─".repeat(*width / rule_width),
+                        " ".repeat(*width % rule_width)
+                    )
                 })
                 .collect::<Vec<_>>()
-                .join(if out.width("─") == 1 { "─┼─" } else { " ┼ " });
+                .join(if out.width("─") == 1 {
+                    "─┼─"
+                } else {
+                    " ┼ "
+                });
             out.push(&line, Some(Highlight::COMMENT));
             out.push("\n", None);
         }
@@ -529,7 +537,8 @@ fn inline_at_depth(text: &str, base: Option<Highlight>, depth: usize) -> Vec<Seg
                 let label_start = usize::from(character == '!') + 1;
                 if (character == '[' || rest.starts_with("!["))
                     && let Some(end) = label_ends.get(&(at + label_start - 1))
-                    && let Some((label, length)) = link(&rest[label_start - 1..], end - at - label_start + 1)
+                    && let Some((label, length)) =
+                        link(&rest[label_start - 1..], end - at - label_start + 1)
                 {
                     flush(&mut segments, &mut plain);
                     segments.extend(inline_at_depth(label, Some(Highlight::LINK), depth + 1));
@@ -596,7 +605,13 @@ fn closing(text: &str, from: usize, marker: &str) -> Option<usize> {
         let inside_word = marker.starts_with('_') && after.is_some_and(char::is_alphanumeric);
         // `**` must not be read as two single `*`.
         let doubled = marker.len() == 1 && after == marker.chars().next();
-        let escaped = text[..close].bytes().rev().take_while(|byte| *byte == b'\\').count() % 2 == 1;
+        let escaped = text[..close]
+            .bytes()
+            .rev()
+            .take_while(|byte| *byte == b'\\')
+            .count()
+            % 2
+            == 1;
         if close > from
             && !escaped
             && before.is_some_and(|before| !before.is_whitespace())
@@ -789,7 +804,11 @@ mod tests {
         for width in 1..=4 {
             let mut out = Styled::default();
             out.wrapped("界界 abc", None, ("prefix ", None), ("  ", None), width);
-            assert!(out.text.lines().all(|line| out.width(line) <= width), "{width}: {:?}", out.text);
+            assert!(
+                out.text.lines().all(|line| out.width(line) <= width),
+                "{width}: {:?}",
+                out.text
+            );
             assert!(out.text.ends_with("c\n"));
         }
         let mut out = Styled::default();
@@ -804,10 +823,13 @@ mod tests {
             let runs = inline(&source, None);
             assert_eq!(runs, vec![(source, None)]);
         }
-        assert_eq!(inline("[unclosed [ok](url)", None), vec![
-            ("[unclosed ".into(), None),
-            ("ok".into(), Some(Highlight::LINK)),
-        ]);
+        assert_eq!(
+            inline("[unclosed [ok](url)", None),
+            vec![
+                ("[unclosed ".into(), None),
+                ("ok".into(), Some(Highlight::LINK)),
+            ]
+        );
     }
 
     #[test]
@@ -867,7 +889,10 @@ mod tests {
 
     #[test]
     fn link_targets_balance_parentheses_and_skip_escaped_delimiters() {
-        let out = rendered(r"[doc](https://example.test/a_(b)) [next](a\)b) [last](a\(b)", 100);
+        let out = rendered(
+            r"[doc](https://example.test/a_(b)) [next](a\)b) [last](a\(b)",
+            100,
+        );
         assert_eq!(out.text, "doc next last\n");
         assert_eq!(styled(&out, Highlight::LINK), ["doc next last"]);
     }
@@ -879,7 +904,10 @@ mod tests {
             100,
         );
         assert_eq!(out.text, "angle double single apostrophe\n");
-        assert_eq!(styled(&out, Highlight::LINK), ["angle double single apostrophe"]);
+        assert_eq!(
+            styled(&out, Highlight::LINK),
+            ["angle double single apostrophe"]
+        );
     }
 
     #[test]
@@ -907,9 +935,12 @@ mod tests {
         assert_eq!(table_cells(r"|a\|"), [r"a\|"]);
         let out = rendered("||Name|\n|---|---|\n|1|Alice|", 40);
         assert_eq!(out.text, "  │ Name\n──┼──────\n1 │ Alice\n");
-        let out = rendered(r"|a\|b|c|
+        let out = rendered(
+            r"|a\|b|c|
 |---|---|
-|d|e|", 40);
+|d|e|",
+            40,
+        );
         assert_eq!(out.text, "a|b │ c\n────┼──\nd   │ e\n");
     }
 
@@ -930,7 +961,10 @@ mod tests {
         assert!(out.text.lines().all(|line| out.width(line) == 10));
         let header = out.text.lines().next().unwrap();
         let rule = out.text.lines().nth(1).unwrap();
-        assert_eq!(out.width(header.split('│').next().unwrap()), out.width(rule.split('┼').next().unwrap()));
+        assert_eq!(
+            out.width(header.split('│').next().unwrap()),
+            out.width(rule.split('┼').next().unwrap())
+        );
     }
 
     #[test]

@@ -337,12 +337,42 @@ pub(super) fn register_commands(
         },
     )?;
     for (id, title, direction, filter) in [
-        ("diagnostic.next", "Go to next error or warning", 1, DiagnosticFilter::ErrorOrWarning),
-        ("diagnostic.previous", "Go to previous error or warning", -1, DiagnosticFilter::ErrorOrWarning),
-        ("diagnostic.error.next", "Go to next error", 1, DiagnosticFilter::Error),
-        ("diagnostic.error.previous", "Go to previous error", -1, DiagnosticFilter::Error),
-        ("diagnostic.warning.next", "Go to next warning", 1, DiagnosticFilter::Warning),
-        ("diagnostic.warning.previous", "Go to previous warning", -1, DiagnosticFilter::Warning),
+        (
+            "diagnostic.next",
+            "Go to next error or warning",
+            1,
+            DiagnosticFilter::ErrorOrWarning,
+        ),
+        (
+            "diagnostic.previous",
+            "Go to previous error or warning",
+            -1,
+            DiagnosticFilter::ErrorOrWarning,
+        ),
+        (
+            "diagnostic.error.next",
+            "Go to next error",
+            1,
+            DiagnosticFilter::Error,
+        ),
+        (
+            "diagnostic.error.previous",
+            "Go to previous error",
+            -1,
+            DiagnosticFilter::Error,
+        ),
+        (
+            "diagnostic.warning.next",
+            "Go to next warning",
+            1,
+            DiagnosticFilter::Warning,
+        ),
+        (
+            "diagnostic.warning.previous",
+            "Go to previous warning",
+            -1,
+            DiagnosticFilter::Warning,
+        ),
     ] {
         register(
             registry,

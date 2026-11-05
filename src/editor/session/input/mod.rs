@@ -44,7 +44,13 @@ pub(super) struct InputSession {
     last_search_forward: bool,
     whole_word_search: bool,
     /// Cursor and viewport before incremental search moved them.
-    search_origin: Option<(crate::editor::ViewId, crate::editor::text::ByteOffset, usize, usize, usize)>,
+    search_origin: Option<(
+        crate::editor::ViewId,
+        crate::editor::text::ByteOffset,
+        usize,
+        usize,
+        usize,
+    )>,
     pending_breakpoint: Option<crate::debugger::DapSourceBreakpoint>,
     modal: ModalResolver,
     sequence: KeymapSequence,
@@ -331,7 +337,9 @@ impl InputSession {
         result
     }
     pub(super) fn mapping_context(&self) -> Option<&str> {
-        self.pending.as_ref().map(|pending| pending.context.as_str())
+        self.pending
+            .as_ref()
+            .map(|pending| pending.context.as_str())
     }
     pub(super) fn finish_mapping(&mut self, context: &str, revision: u64) -> MappingResolution {
         let Some(pending) = self.pending.take() else {

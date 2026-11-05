@@ -72,7 +72,11 @@ fn language_mapping_preserves_case_sensitive_cpp_extensions() {
         ("main.CPP", "cpp"),
         ("main.RS", "rust"),
     ] {
-        assert_eq!(language_id_for_path(Path::new(path)), Some(language), "{path}");
+        assert_eq!(
+            language_id_for_path(Path::new(path)),
+            Some(language),
+            "{path}"
+        );
     }
 }
 
@@ -83,7 +87,10 @@ fn file_uris_accept_only_local_authorities() {
         "file://localhost/home/user/a%20b.rs",
         "file://LOCALHOST/home/user/a%20b.rs",
     ] {
-        assert_eq!(path_from_file_uri(uri).as_deref(), Some(Path::new("/home/user/a b.rs")));
+        assert_eq!(
+            path_from_file_uri(uri).as_deref(),
+            Some(Path::new("/home/user/a b.rs"))
+        );
     }
     for uri in [
         "file://remote/home/user/main.rs",
@@ -199,7 +206,9 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
 fn a_server_can_register_formatting_after_it_starts() {
     let registered = super::server_message::effective_capabilities(
         &super::LspCapabilities::default(),
-        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter().map(|method| (method, &Value::Null)),
+        ["textDocument/formatting", "textDocument/rangeFormatting"]
+            .into_iter()
+            .map(|method| (method, &Value::Null)),
     );
     assert!(registered.formatting && registered.range_formatting);
     assert!(!registered.rename);
@@ -230,34 +239,38 @@ fn server_message_replies(
         stop_requested: Arc::new(false.into()),
     };
     let mut output = Vec::new();
-    super::server_message::handle_server_message(super::server_message::ServerMessageContext {
-        server: "fixture",
-        root: Path::new("/fixture"),
-        stdin: &mut output,
-        events: &events,
-        logs: &mut Default::default(),
-        base_capabilities: base,
-        capabilities,
-        registrations,
-        configuration: &super::LspServerConfiguration::standard(),
-        sources: &Default::default(),
-        diagnostic_lineage: &Default::default(),
-        documents,
-        apply_requests: &mut Default::default(),
-    }, &message);
+    super::server_message::handle_server_message(
+        super::server_message::ServerMessageContext {
+            server: "fixture",
+            root: Path::new("/fixture"),
+            stdin: &mut output,
+            events: &events,
+            logs: &mut Default::default(),
+            base_capabilities: base,
+            capabilities,
+            registrations,
+            configuration: &super::LspServerConfiguration::standard(),
+            sources: &Default::default(),
+            diagnostic_lineage: &Default::default(),
+            documents,
+            apply_requests: &mut Default::default(),
+        },
+        &message,
+    );
     let mut input = std::io::Cursor::new(output);
-    std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap()).collect()
+    std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap())
+        .collect()
 }
 
 #[test]
 fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
     use super::{
+        LspServerConfiguration,
         origins::{EditContext, EventSender},
         server_message::{ServerMessageContext, handle_server_message},
-        LspServerConfiguration,
     };
-    use std::sync::{Arc, mpsc};
     use nix::{sys::stat::Mode, unistd::mkfifo};
+    use std::sync::{Arc, mpsc};
     let root = tempfile::tempdir().unwrap();
     mkfifo(&root.path().join("fifo"), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
     std::fs::create_dir(root.path().join("directory")).unwrap();
@@ -266,35 +279,53 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
     let (channel, receiver) = mpsc::sync_channel(1);
     let (commands, _requests) = mpsc::sync_channel(1);
     let events = EventSender {
-        channel, commands,
-        cancelled: Default::default(), stop_requested: Default::default(),
+        channel,
+        commands,
+        cancelled: Default::default(),
+        stop_requested: Default::default(),
         context: EditContext {
-            session: Arc::new(()), server: "fixture".into(),
-            encoding: Default::default(), diagnostic_ambiguous: false,
-            sources: Arc::new(Default::default()), disk: None,
+            session: Arc::new(()),
+            server: "fixture".into(),
+            encoding: Default::default(),
+            diagnostic_ambiguous: false,
+            sources: Arc::new(Default::default()),
+            disk: None,
         },
     };
     let worker_root = root.path().to_path_buf();
     let worker = std::thread::spawn(move || {
         for name in ["fifo", "directory", "large", "regular"] {
             let uri = file_uri(&worker_root.join(name));
-            handle_server_message(ServerMessageContext {
-                server: "fixture", root: &worker_root, stdin: &mut Vec::new(),
-                events: &events, logs: &mut Default::default(),
-                base_capabilities: &Default::default(), capabilities: &mut Default::default(),
-                registrations: &mut Default::default(), configuration: &LspServerConfiguration::standard(),
-                sources: &Default::default(), diagnostic_lineage: &Default::default(),
-                documents: &Default::default(), apply_requests: &mut Default::default(),
-            }, &json!({"method":"textDocument/publishDiagnostics", "params":{"uri":uri,"diagnostics":[]}}));
+            handle_server_message(
+                ServerMessageContext {
+                    server: "fixture",
+                    root: &worker_root,
+                    stdin: &mut Vec::new(),
+                    events: &events,
+                    logs: &mut Default::default(),
+                    base_capabilities: &Default::default(),
+                    capabilities: &mut Default::default(),
+                    registrations: &mut Default::default(),
+                    configuration: &LspServerConfiguration::standard(),
+                    sources: &Default::default(),
+                    diagnostic_lineage: &Default::default(),
+                    documents: &Default::default(),
+                    apply_requests: &mut Default::default(),
+                },
+                &json!({"method":"textDocument/publishDiagnostics", "params":{"uri":uri,"diagnostics":[]}}),
+            );
         }
     });
     for name in ["fifo", "directory", "large", "regular"] {
-        let packet = receiver.recv_timeout(Duration::from_secs(3))
+        let packet = receiver
+            .recv_timeout(Duration::from_secs(3))
             .expect("diagnostic snapshot read blocked");
         let uri = file_uri(&root.path().join(name));
         assert!(matches!(packet.event, LspEvent::Diagnostics { .. }));
-        assert_eq!(packet.context.disk_document(&uri).map(ToString::to_string),
-            (name == "regular").then(|| "source".to_owned()));
+        assert_eq!(
+            packet.context.disk_document(&uri).map(ToString::to_string),
+            (name == "regular").then(|| "source".to_owned())
+        );
     }
     worker.join().unwrap();
 }
@@ -303,17 +334,27 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
 fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
     let base = super::LspCapabilities::default();
     let mut capabilities = base.clone();
-    let mut registrations = std::collections::HashMap::from([
-        ("keep".into(), ("textDocument/hover".into(), Value::Null)),
-    ]);
+    let mut registrations = std::collections::HashMap::from([(
+        "keep".into(),
+        ("textDocument/hover".into(), Value::Null),
+    )]);
     let original = registrations.clone();
     for (method, key) in [
         ("client/registerCapability", "registrations"),
         ("client/unregisterCapability", "unregisterations"),
         ("client/unregisterCapability", "unregistrations"),
     ] {
-        let items = (0..257).map(|_| json!({"id":"keep","method":"textDocument/formatting"})).collect::<Vec<_>>();
-        let reply = server_message_replies(json!({"id":1,"method":method,"params":{key:items}}), &base, &mut capabilities, &mut registrations, &Default::default()).remove(0);
+        let items = (0..257)
+            .map(|_| json!({"id":"keep","method":"textDocument/formatting"}))
+            .collect::<Vec<_>>();
+        let reply = server_message_replies(
+            json!({"id":1,"method":method,"params":{key:items}}),
+            &base,
+            &mut capabilities,
+            &mut registrations,
+            &Default::default(),
+        )
+        .remove(0);
         assert_eq!(reply["error"]["code"], -32602);
         assert_eq!(registrations, original);
         assert_eq!(capabilities, base);
@@ -323,8 +364,17 @@ fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
 #[test]
 fn configuration_replies_preserve_every_requested_position() {
     let base = super::LspCapabilities::default();
-    let items = (0..257).map(|_| json!({"section":"missing"})).collect::<Vec<_>>();
-    let reply = server_message_replies(json!({"id":1,"method":"workspace/configuration","params":{"items":items}}), &base, &mut base.clone(), &mut Default::default(), &Default::default()).remove(0);
+    let items = (0..257)
+        .map(|_| json!({"section":"missing"}))
+        .collect::<Vec<_>>();
+    let reply = server_message_replies(
+        json!({"id":1,"method":"workspace/configuration","params":{"items":items}}),
+        &base,
+        &mut base.clone(),
+        &mut Default::default(),
+        &Default::default(),
+    )
+    .remove(0);
     let values = reply["result"].as_array().unwrap();
     assert_eq!(values.len(), 257);
     assert!(values.iter().all(Value::is_object));
@@ -332,59 +382,145 @@ fn configuration_replies_preserve_every_requested_position() {
 
 #[test]
 fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
-    let formatting = LspFeature::Formatting { tab_size: 2, insert_spaces: true };
+    let formatting = LspFeature::Formatting {
+        tab_size: 2,
+        insert_spaces: true,
+    };
     let base = super::LspCapabilities::default();
-    let options = json!({"documentSelector":[{"language":"javascript","scheme":"file","pattern":"**/*.js"}]});
-    let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
-    let js = LspDocument { path: "/fixture/a.js".into(), language_id: "javascript".into(), version: 0, text: String::new() };
+    let options =
+        json!({"documentSelector":[{"language":"javascript","scheme":"file","pattern":"**/*.js"}]});
+    let capabilities = super::server_message::effective_capabilities(
+        &base,
+        [("textDocument/formatting", &options)].into_iter(),
+    );
+    let js = LspDocument {
+        path: "/fixture/a.js".into(),
+        language_id: "javascript".into(),
+        version: 0,
+        text: String::new(),
+    };
     assert!(formatting.capability_for_document(&capabilities, &js));
-    let ts = LspDocument { path: "/fixture/a.ts".into(), language_id: "typescript".into(), ..js.clone() };
+    let ts = LspDocument {
+        path: "/fixture/a.ts".into(),
+        language_id: "typescript".into(),
+        ..js.clone()
+    };
     assert!(!formatting.capability_for_document(&capabilities, &ts));
-    assert!(!formatting.capability_for_document(&capabilities, &LspDocument { path: "/fixture/a.jsx".into(), ..js.clone() }));
-    let static_base = super::LspCapabilities { formatting: true, ..base.clone() };
-    let capabilities = super::server_message::effective_capabilities(&static_base, [("textDocument/formatting", &options)].into_iter());
+    assert!(!formatting.capability_for_document(
+        &capabilities,
+        &LspDocument {
+            path: "/fixture/a.jsx".into(),
+            ..js.clone()
+        }
+    ));
+    let static_base = super::LspCapabilities {
+        formatting: true,
+        ..base.clone()
+    };
+    let capabilities = super::server_message::effective_capabilities(
+        &static_base,
+        [("textDocument/formatting", &options)].into_iter(),
+    );
     assert!(formatting.capability_for_document(&capabilities, &ts));
-    for base_uri in [json!("file:///fixture"), json!({"uri":"file:///fixture","name":"fixture"})] {
-        let options = json!({"documentSelector":[{"pattern":{"baseUri":base_uri,"pattern":"*.js"}}]});
-        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+    for base_uri in [
+        json!("file:///fixture"),
+        json!({"uri":"file:///fixture","name":"fixture"}),
+    ] {
+        let options =
+            json!({"documentSelector":[{"pattern":{"baseUri":base_uri,"pattern":"*.js"}}]});
+        let capabilities = super::server_message::effective_capabilities(
+            &base,
+            [("textDocument/formatting", &options)].into_iter(),
+        );
         assert!(formatting.capability_for_document(&capabilities, &js));
         assert!(!formatting.capability_for_document(&capabilities, &ts));
-        assert!(!formatting.capability_for_document(&capabilities, &LspDocument { path: "/elsewhere/a.js".into(), ..js.clone() }));
+        assert!(!formatting.capability_for_document(
+            &capabilities,
+            &LspDocument {
+                path: "/elsewhere/a.js".into(),
+                ..js.clone()
+            }
+        ));
     }
     for selector in [json!([]), json!([{"scheme":"untitled"}])] {
         let options = json!({"documentSelector":selector});
-        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+        let capabilities = super::server_message::effective_capabilities(
+            &base,
+            [("textDocument/formatting", &options)].into_iter(),
+        );
         assert!(!formatting.capability_for_document(&capabilities, &js));
     }
 }
 
 #[test]
 fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_policy() {
-    let base = super::LspCapabilities { sync_kind: SyncKind::None, ..Default::default() };
+    let base = super::LspCapabilities {
+        sync_kind: SyncKind::None,
+        ..Default::default()
+    };
     let mut capabilities = base.clone();
     let mut registrations = Default::default();
-    let old = LspDocument { path: "/fixture/main.rs".into(), language_id: "rust".into(), version: 3, text: "abc".into() };
+    let old = LspDocument {
+        path: "/fixture/main.rs".into(),
+        language_id: "rust".into(),
+        version: 3,
+        text: "abc".into(),
+    };
     let documents = std::collections::HashMap::from([
         (old.uri(), old.clone()),
-        ("file:///fixture/main.py".into(), LspDocument { path: "/fixture/main.py".into(), language_id: "python".into(), ..old.clone() }),
+        (
+            "file:///fixture/main.py".into(),
+            LspDocument {
+                path: "/fixture/main.py".into(),
+                language_id: "python".into(),
+                ..old.clone()
+            },
+        ),
     ]);
-    let replies = server_message_replies(json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
-        "id":"changes","method":"textDocument/didChange","registerOptions":{"documentSelector":[{"language":"rust"}],"syncKind":2}
-    }]}}), &base, &mut capabilities, &mut registrations, &documents);
+    let replies = server_message_replies(
+        json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
+            "id":"changes","method":"textDocument/didChange","registerOptions":{"documentSelector":[{"language":"rust"}],"syncKind":2}
+        }]}}),
+        &base,
+        &mut capabilities,
+        &mut registrations,
+        &documents,
+    );
     // Registration itself must not emit a change with an unchanged document version.
     assert_eq!(replies.len(), 1);
     let reply = &replies[0];
     assert!(reply.get("result").is_some());
-    let new = LspDocument { version: 4, text: "abcd".into(), ..old.clone() };
+    let new = LspDocument {
+        version: 4,
+        text: "abcd".into(),
+        ..old.clone()
+    };
     let mut output = Vec::new();
     super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
-    let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap();
+    let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output))
+        .unwrap()
+        .unwrap();
     assert_eq!(change["params"]["contentChanges"][0]["text"], "d");
     assert!(change["params"]["contentChanges"][0]["range"].is_object());
     let mut output = Vec::new();
-    super::protocol::send_change(&mut output, None, &LspDocument { language_id: "python".into(), ..new.clone() }, &capabilities).unwrap();
+    super::protocol::send_change(
+        &mut output,
+        None,
+        &LspDocument {
+            language_id: "python".into(),
+            ..new.clone()
+        },
+        &capabilities,
+    )
+    .unwrap();
     assert!(output.is_empty());
-    let replies = server_message_replies(json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}), &base, &mut capabilities, &mut registrations, &documents);
+    let replies = server_message_replies(
+        json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}),
+        &base,
+        &mut capabilities,
+        &mut registrations,
+        &documents,
+    );
     assert_eq!(replies.len(), 1);
     let reply = &replies[0];
     assert!(reply.get("result").is_some());
@@ -611,78 +747,162 @@ fn initialization_advertises_supported_semantic_tokens_and_pull_diagnostics() {
     let initialize = initialize_message(Path::new("/workspace"), None);
     let document = &initialize["params"]["capabilities"]["textDocument"];
     let semantic = &document["semanticTokens"];
-    assert_eq!(semantic["requests"], json!({"full":{"delta":true},"range":false}));
+    assert_eq!(
+        semantic["requests"],
+        json!({"full":{"delta":true},"range":false})
+    );
     assert_eq!(semantic["formats"], json!(["relative"]));
-    assert!(semantic["tokenTypes"].as_array().unwrap().contains(&json!("function")));
+    assert!(
+        semantic["tokenTypes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("function"))
+    );
     assert!(semantic["tokenModifiers"].is_array());
     assert_eq!(semantic["overlappingTokenSupport"], false);
     assert_eq!(semantic["multilineTokenSupport"], false);
-    assert_eq!(document["diagnostic"], json!({"dynamicRegistration":false,"relatedDocumentSupport":false}));
+    assert_eq!(
+        document["diagnostic"],
+        json!({"dynamicRegistration":false,"relatedDocumentSupport":false})
+    );
     assert_eq!(document["synchronization"]["dynamicRegistration"], false);
 }
 
 #[test]
 fn absent_change_support_does_not_enable_document_changes() {
     for sync in [Value::Null, json!({"openClose":true}), json!(0)] {
-        let capabilities = initialize_capabilities(Some(&json!({"capabilities":{"textDocumentSync":sync}}))).unwrap();
+        let capabilities =
+            initialize_capabilities(Some(&json!({"capabilities":{"textDocumentSync":sync}})))
+                .unwrap();
         assert_eq!(capabilities.sync_kind, SyncKind::None);
         let mut output = Vec::new();
-        super::protocol::send_change(&mut output, None, &LspDocument {
-            path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "changed".into(),
-        }, &capabilities).unwrap();
+        super::protocol::send_change(
+            &mut output,
+            None,
+            &LspDocument {
+                path: "/workspace/main.rs".into(),
+                language_id: "rust".into(),
+                version: 1,
+                text: "changed".into(),
+            },
+            &capabilities,
+        )
+        .unwrap();
         assert!(output.is_empty());
     }
-    assert_eq!(initialize_capabilities(Some(&json!({"capabilities":{}}))).unwrap().sync_kind, SyncKind::None);
+    assert_eq!(
+        initialize_capabilities(Some(&json!({"capabilities":{}})))
+            .unwrap()
+            .sync_kind,
+        SyncKind::None
+    );
 }
 
 #[test]
 fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
     let range = super::LspRange {
-        start: super::LspPosition { line: 0, character: 0 },
-        end: super::LspPosition { line: 2, character: 0 },
+        start: super::LspPosition {
+            line: 0,
+            character: 0,
+        },
+        end: super::LspPosition {
+            line: 2,
+            character: 0,
+        },
     };
     for (tab_size, insert_spaces) in [(2, true), (8, false)] {
         for feature in [
-            LspFeature::Formatting { tab_size, insert_spaces },
-            LspFeature::RangeFormatting { range: range.clone(), tab_size, insert_spaces },
+            LspFeature::Formatting {
+                tab_size,
+                insert_spaces,
+            },
+            LspFeature::RangeFormatting {
+                range: range.clone(),
+                tab_size,
+                insert_spaces,
+            },
         ] {
             let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
-            assert_eq!(params["options"], json!({"tabSize":tab_size,"insertSpaces":insert_spaces}));
+            assert_eq!(
+                params["options"],
+                json!({"tabSize":tab_size,"insertSpaces":insert_spaces})
+            );
         }
     }
 }
 
 #[test]
 fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
-    use std::collections::HashMap;
-    use crate::editor::{EditorState, text::TextBuffer};
     use super::session::{SessionCommand, handle_command};
+    use crate::editor::{EditorState, text::TextBuffer};
+    use std::collections::HashMap;
     let old = LspDocument {
-        path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "old".into(),
+        path: "/workspace/main.rs".into(),
+        language_id: "rust".into(),
+        version: 1,
+        text: "old".into(),
     };
-    let new = LspDocument { version: 2, text: "x".repeat(16 * 1024 * 1024), ..old.clone() };
+    let new = LspDocument {
+        version: 2,
+        text: "x".repeat(16 * 1024 * 1024),
+        ..old.clone()
+    };
     let mut editor = EditorState::new("/workspace".into());
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(old.path.clone())).unwrap();
+    let (buffer, _) = editor
+        .open_text(TextBuffer::from_text("old"), Some(old.path.clone()))
+        .unwrap();
     let mut service = LspService::new();
-    let endpoint = service.replace_edit_source_fixture(old.uri(), (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16);
+    let endpoint = service.replace_edit_source_fixture(
+        old.uri(),
+        (buffer, editor.buffers[buffer].text.source_version()),
+        PositionEncoding::Utf16,
+    );
     for opened in [true, false] {
-        for command in [SessionCommand::Sync(new.clone()), SessionCommand::Save(new.clone())] {
+        for command in [
+            SessionCommand::Sync(new.clone()),
+            SessionCommand::Save(new.clone()),
+        ] {
             let mut documents = HashMap::from([(old.uri(), old.clone())]);
-            let mut opened_documents = if opened { HashMap::from([(old.uri(), old.version)]) } else { HashMap::new() };
+            let mut opened_documents = if opened {
+                HashMap::from([(old.uri(), old.version)])
+            } else {
+                HashMap::new()
+            };
             let mut stopping = false;
             handle_command(
-                command, "fixture", Path::new("/workspace"), Path::new("/server"),
-                &mut std::io::sink(), true,
-                &super::LspCapabilities { sync_kind: SyncKind::Incremental, ..Default::default() },
-                &mut documents, &mut HashMap::new(), &mut Default::default(),
-                &mut HashMap::new(), &mut opened_documents, &mut HashMap::new(), &mut 2,
-                Duration::from_secs(5), 0, &endpoint.events, &mut stopping,
+                command,
+                "fixture",
+                Path::new("/workspace"),
+                Path::new("/server"),
+                &mut std::io::sink(),
+                true,
+                &super::LspCapabilities {
+                    sync_kind: SyncKind::Incremental,
+                    ..Default::default()
+                },
+                &mut documents,
+                &mut HashMap::new(),
+                &mut Default::default(),
+                &mut HashMap::new(),
+                &mut opened_documents,
+                &mut HashMap::new(),
+                &mut 2,
+                Duration::from_secs(5),
+                0,
+                &endpoint.events,
+                &mut stopping,
                 &mut super::LspServerConfiguration::standard(),
-            ).unwrap_err();
+            )
+            .unwrap_err();
             assert!(stopping);
             assert_eq!(documents.get(&old.uri()), Some(&old));
-            assert_eq!(opened_documents.get(&old.uri()).copied(), opened.then_some(old.version));
-            assert!(matches!(service.try_event(), Some(LspEvent::Failed { message, .. }) if message.contains("synchronization write failed")));
+            assert_eq!(
+                opened_documents.get(&old.uri()).copied(),
+                opened.then_some(old.version)
+            );
+            assert!(
+                matches!(service.try_event(), Some(LspEvent::Failed { message, .. }) if message.contains("synchronization write failed"))
+            );
         }
     }
 }
@@ -729,7 +949,10 @@ fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
         assert_eq!(diagnostics[0].code, Some(code.clone()));
         assert_eq!(diagnostics[0].related[0].0.uri, "file:///other.rs");
         assert_eq!(diagnostics[0].related[0].1, "other declaration");
-        let feature = LspFeature::CodeAction { range: diagnostics[0].range.clone(), diagnostics };
+        let feature = LspFeature::CodeAction {
+            range: diagnostics[0].range.clone(),
+            diagnostics,
+        };
         let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
         assert_eq!(params["context"]["diagnostics"][0]["code"], code);
     }
@@ -737,22 +960,49 @@ fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
 
 #[test]
 fn signature_help_selects_the_active_overload_with_a_safe_fallback() {
-    for (active, expected) in [(json!(1), "second"), (json!(99), "first"), (Value::Null, "first"), (json!(-1), "first")] {
-        let result = normalize_result(&LspFeature::SignatureHelp, &json!({
-            "signatures":[{"label":"first"},{"label":"second"}],"activeSignature":active,
-        })).unwrap();
-        assert!(matches!(result, LspFeatureResult::Signature(content) if content.value == expected));
+    for (active, expected) in [
+        (json!(1), "second"),
+        (json!(99), "first"),
+        (Value::Null, "first"),
+        (json!(-1), "first"),
+    ] {
+        let result = normalize_result(
+            &LspFeature::SignatureHelp,
+            &json!({
+                "signatures":[{"label":"first"},{"label":"second"}],"activeSignature":active,
+            }),
+        )
+        .unwrap();
+        assert!(
+            matches!(result, LspFeatureResult::Signature(content) if content.value == expected)
+        );
     }
-    assert_eq!(super::protocol::signature_text(&json!({"signatures":[]})), "no signature information");
+    assert_eq!(
+        super::protocol::signature_text(&json!({"signatures":[]})),
+        "no signature information"
+    );
 }
 
 #[test]
 fn null_results_clear_persistent_document_projections() {
-    for feature in [LspFeature::DocumentHighlights, LspFeature::FoldingRanges, LspFeature::SelectionRanges] {
-        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::Ranges(items) if items.is_empty()));
+    for feature in [
+        LspFeature::DocumentHighlights,
+        LspFeature::FoldingRanges,
+        LspFeature::SelectionRanges,
+    ] {
+        assert!(
+            matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::Ranges(items) if items.is_empty())
+        );
     }
-    for feature in [LspFeature::SemanticTokensFull, LspFeature::SemanticTokensDelta { previous_result_id: "old".into() }] {
-        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::SemanticTokens(tokens) if tokens.data.is_empty() && tokens.result_id.is_none()));
+    for feature in [
+        LspFeature::SemanticTokensFull,
+        LspFeature::SemanticTokensDelta {
+            previous_result_id: "old".into(),
+        },
+    ] {
+        assert!(
+            matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::SemanticTokens(tokens) if tokens.data.is_empty() && tokens.result_id.is_none())
+        );
     }
 }
 
@@ -764,8 +1014,14 @@ fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
     assert!(lenses[0].command.is_none());
     let feature = LspFeature::CodeLensResolve { item: item.clone() };
     assert_eq!(feature.method(), "codeLens/resolve");
-    assert_eq!(super::protocol::feature_params(&feature, "file:///main.rs", 0, 0), item);
-    let caps = initialize_capabilities(Some(&json!({"capabilities":{"codeLensProvider":{"resolveProvider":true}}}))).unwrap();
+    assert_eq!(
+        super::protocol::feature_params(&feature, "file:///main.rs", 0, 0),
+        item
+    );
+    let caps = initialize_capabilities(Some(
+        &json!({"capabilities":{"codeLensProvider":{"resolveProvider":true}}}),
+    ))
+    .unwrap();
     assert!(feature.capability(&caps));
     let mut resolved = item;
     resolved["command"] = json!({"title":"Run test","command":"run.test","arguments":[42]});
@@ -773,7 +1029,10 @@ fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
         panic!("resolved code lens must be presented as an executable choice");
     };
     assert_eq!(lenses[0].title, "Run test");
-    assert_eq!(lenses[0].command.as_ref().unwrap().arguments, vec![json!(42)]);
+    assert_eq!(
+        lenses[0].command.as_ref().unwrap().arguments,
+        vec![json!(42)]
+    );
 }
 
 #[test]
@@ -784,8 +1043,10 @@ fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
         assert_eq!(item.label.chars().count(), 4096);
         assert_eq!(item.insert_text, label);
         let item = super::protocol::completion_item(
-            &json!({"label":label,"insertText":"explicit"}), resolved,
-        ).unwrap();
+            &json!({"label":label,"insertText":"explicit"}),
+            resolved,
+        )
+        .unwrap();
         assert_eq!(item.insert_text, "explicit");
     }
 }
@@ -851,38 +1112,53 @@ fn workspace_edits_reject_malformed_resource_operations_without_partial_results(
         json!({"kind":"unknown","uri":"file:///new"}),
         json!({"uri":"file:///new"}),
     ] {
-        assert!(workspace_edit(&json!({
-            "changes":{"file:///valid":[{
-                "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
-                "newText":"valid"
-            }]},
-            "documentChanges":[operation]
-        })).is_err(), "accepted {operation}");
+        assert!(
+            workspace_edit(&json!({
+                "changes":{"file:///valid":[{
+                    "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                    "newText":"valid"
+                }]},
+                "documentChanges":[operation]
+            }))
+            .is_err(),
+            "accepted {operation}"
+        );
     }
     let edit = workspace_edit(&json!({"documentChanges":[
         {"kind":"create","uri":"file:///new","options":{"overwrite":true}},
         {"kind":"rename","oldUri":"file:///old","newUri":"file:///renamed"},
         {"kind":"delete","uri":"file:///deleted"}
-    ]})).unwrap();
+    ]}))
+    .unwrap();
     assert_eq!(edit.resources.len(), 3);
 }
 
 #[test]
 fn workspace_edits_reject_invalid_non_null_document_versions() {
     for version in [json!(-1), json!(1.5), json!("1"), json!(false), json!({})] {
-        assert!(workspace_edit(&json!({"documentChanges":[{
-            "textDocument":{"uri":"file:///a","version":version},"edits":[]
-        }]})).is_err(), "accepted {version}");
+        assert!(
+            workspace_edit(&json!({"documentChanges":[{
+                "textDocument":{"uri":"file:///a","version":version},"edits":[]
+            }]}))
+            .is_err(),
+            "accepted {version}"
+        );
     }
-    for (version, expected) in [(Value::Null, None), (json!(0), Some(0)), (json!(42), Some(42))] {
+    for (version, expected) in [
+        (Value::Null, None),
+        (json!(0), Some(0)),
+        (json!(42), Some(42)),
+    ] {
         let edit = workspace_edit(&json!({"documentChanges":[{
             "textDocument":{"uri":"file:///a","version":version},"edits":[]
-        }]})).unwrap();
+        }]}))
+        .unwrap();
         assert_eq!(edit.documents[0].version, expected);
     }
     let edit = workspace_edit(&json!({"documentChanges":[{
         "textDocument":{"uri":"file:///a"},"edits":[]
-    }]})).unwrap();
+    }]}))
+    .unwrap();
     assert_eq!(edit.documents[0].version, None);
 }
 
@@ -956,14 +1232,21 @@ fn initialization_timeout_honors_the_one_second_minimum_and_longer_policy() {
             if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
                 break message;
             }
-            assert!(Instant::now() < deadline, "initialize timeout event missing");
+            assert!(
+                Instant::now() < deadline,
+                "initialize timeout event missing"
+            );
             thread::sleep(Duration::from_millis(10));
         };
         assert!(failed.contains("initialize request timed out"));
         let elapsed = started.elapsed();
-        assert!(elapsed >= expected && elapsed < expected + Duration::from_secs(2),
-            "expected initialization timeout near {expected:?}, got {elapsed:?}");
-        service.stop(&definition.id).expect("stop timed-out session");
+        assert!(
+            elapsed >= expected && elapsed < expected + Duration::from_secs(2),
+            "expected initialization timeout near {expected:?}, got {elapsed:?}"
+        );
+        service
+            .stop(&definition.id)
+            .expect("stop timed-out session");
     }
 }
 
@@ -1019,17 +1302,29 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
         thread::sleep(Duration::from_millis(5));
     };
     while !workspace.path().join("daemon-ready").exists() {
-        assert!(Instant::now() < deadline, "daemon did not inherit the pipes");
+        assert!(
+            Instant::now() < deadline,
+            "daemon did not inherit the pipes"
+        );
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(origin.upgrade().is_some(), "session stopped before the test could stop it");
+    assert!(
+        origin.upgrade().is_some(),
+        "session stopped before the test could stop it"
+    );
     let started = Instant::now();
     service.stop("daemonizing").expect("stop");
-    assert!(started.elapsed() < Duration::from_millis(200), "stop admission blocked");
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "stop admission blocked"
+    );
     // The origin is held by the session handle and its workers until cleanup finishes.
     while origin.upgrade().is_some() {
         while service.try_event().is_some() {}
-        assert!(started.elapsed() < Duration::from_secs(3), "session workers did not finish cleanup");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "session workers did not finish cleanup"
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -1047,7 +1342,13 @@ send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'definitionProvider
 while read() is not None: pass
 "#;
     let timeout = Duration::from_millis(100);
-    let (_root, mut service, document) = boundary_service_with_policy(&script, LspPolicy { request_timeout: timeout, ..Default::default() });
+    let (_root, mut service, document) = boundary_service_with_policy(
+        &script,
+        LspPolicy {
+            request_timeout: timeout,
+            ..Default::default()
+        },
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         assert!(Instant::now() < deadline, "server did not initialize");
@@ -1058,12 +1359,27 @@ while read() is not None: pass
         }
     }
     let started = Instant::now();
-    service.request("boundary", LspFeature::Definition, document,
-        crate::editor::text::ByteOffset(0), 13).expect("definition");
+    service
+        .request(
+            "boundary",
+            LspFeature::Definition,
+            document,
+            crate::editor::text::ByteOffset(0),
+            13,
+        )
+        .expect("definition");
     loop {
-        assert!(started.elapsed() < Duration::from_secs(2), "request did not expire");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "request did not expire"
+        );
         match service.try_event() {
-            Some(LspEvent::RequestFailed { generation: 13, method, message, .. }) => {
+            Some(LspEvent::RequestFailed {
+                generation: 13,
+                method,
+                message,
+                ..
+            }) => {
                 assert_eq!(method, "textDocument/definition");
                 assert!(message.contains("timed out"));
                 assert!(started.elapsed() >= timeout, "request expired too early");
@@ -1299,7 +1615,11 @@ while True:
         .request(
             "fake",
             LspFeature::Definition,
-            LspDocument { version: 2, text: "a😀z".into(), ..document.clone() },
+            LspDocument {
+                version: 2,
+                text: "a😀z".into(),
+                ..document.clone()
+            },
             crate::editor::text::ByteOffset(5),
             13,
         )
@@ -1430,13 +1750,16 @@ fn color_completions_find_hex_colors_after_non_color_hashes() {
         {"label":"rgb","kind":16,"documentation":"### Preview\nrgb(14, 165, 233)"},
         {"label":"invalid","kind":16,"documentation":"### Preview\n#12 #12345"}
     ])).unwrap();
-    assert_eq!(items.iter().map(|item| item.color()).collect::<Vec<_>>(), [
-        Some((255, 0, 0)),
-        Some((0, 255, 0)),
-        Some((17, 34, 51)),
-        Some((14, 165, 233)),
-        None,
-    ]);
+    assert_eq!(
+        items.iter().map(|item| item.color()).collect::<Vec<_>>(),
+        [
+            Some((255, 0, 0)),
+            Some((0, 255, 0)),
+            Some((17, 34, 51)),
+            Some((14, 165, 233)),
+            None,
+        ]
+    );
 }
 
 #[test]
@@ -1516,7 +1839,10 @@ pub(super) fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, 
     boundary_service_with_policy(script, LspPolicy::default())
 }
 
-fn boundary_service_with_policy(script: &str, policy: LspPolicy) -> (tempfile::TempDir, LspService, LspDocument) {
+fn boundary_service_with_policy(
+    script: &str,
+    policy: LspPolicy,
+) -> (tempfile::TempDir, LspService, LspDocument) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("server.py");
     std::fs::write(&path, script).unwrap();
@@ -1638,7 +1964,12 @@ fn server_request_ids_dynamic_options_folders_and_saturated_readers_stay_healthy
 }
 #[test]
 fn stderr_keeps_logging_after_invalid_utf8_and_the_startup_allowance() {
-    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
 m=read()
 send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
 while True:
@@ -1656,7 +1987,9 @@ while True:
         match service.try_event() {
             Some(LspEvent::Log { message, .. }) => {
                 invalid |= message == "invalid \u{fffd}";
-                if message == "runtime error" { break; }
+                if message == "runtime error" {
+                    break;
+                }
             }
             Some(LspEvent::Failed { message, .. }) => panic!("{message}"),
             _ => thread::sleep(Duration::from_millis(1)),
@@ -1668,15 +2001,24 @@ while True:
 
 #[test]
 fn a_server_that_stops_reading_is_failed_and_reaped_without_manual_stop() {
-    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
 m=read()
 send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'textDocumentSync':2}}})
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;
-    let (root, mut service, mut document) = boundary_service_with_policy(&script, LspPolicy {
-        request_timeout: Duration::from_secs(1), ..LspPolicy::default()
-    });
+    let (root, mut service, mut document) = boundary_service_with_policy(
+        &script,
+        LspPolicy {
+            request_timeout: Duration::from_secs(1),
+            ..LspPolicy::default()
+        },
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
         assert!(Instant::now() < deadline);
@@ -1706,7 +2048,12 @@ time.sleep(30)
 
 #[test]
 fn shutdown_waits_for_the_servers_response_before_sending_exit() {
-    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
 import select
 m=read()
 send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
@@ -1729,7 +2076,10 @@ while True:
     }
     service.stop("boundary").unwrap();
     while !root.path().join("shutdown-ok").exists() {
-        assert!(Instant::now() < deadline, "shutdown handshake was interrupted");
+        assert!(
+            Instant::now() < deadline,
+            "shutdown handshake was interrupted"
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -1737,7 +2087,12 @@ while True:
 #[cfg(target_os = "linux")]
 #[test]
 fn stopping_a_server_terminates_its_helpers_even_after_the_server_exits() {
-    let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
 import subprocess
 helper=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])
 pathlib.Path('helper-pid').write_text(str(helper.pid))
@@ -1760,8 +2115,13 @@ while True:
     service.stop("boundary").unwrap();
     loop {
         let status = std::fs::read_to_string(format!("/proc/{pid}/stat"));
-        if status.is_err() || status.unwrap().split_whitespace().nth(2) == Some("Z") { break; }
-        assert!(Instant::now() < deadline, "language server helper survived shutdown");
+        if status.is_err() || status.unwrap().split_whitespace().nth(2) == Some("Z") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "language server helper survived shutdown"
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }

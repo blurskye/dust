@@ -316,8 +316,7 @@ impl Config {
         {
             return Err("ui.buffer_line.extension_icons is invalid".into());
         }
-        if !super::themes::valid_theme_name(&self.ui.theme)
-        {
+        if !super::themes::valid_theme_name(&self.ui.theme) {
             return Err("ui.theme must be a safe lowercase theme identifier".into());
         }
         // A comment string is a line prefix like `//`, or a template like `<!-- %s -->`.

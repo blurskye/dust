@@ -1,9 +1,10 @@
 use super::{
-    AppEffect, BTreeSet, CommandRegistry, ConfigurationSources, DashboardAction, KeymapCompilation,
-    LoadedConfig, PathBuf, ResolvedConfiguration, UnicodeSegmentation, UnicodeWidthStr,
-    compile_keymap_entries, compile_keymaps, keymap_entries, plugin_owner_from_id,
-    register_app_commands, register_builtin_commands, validate_configured_commands,
-    configured_context, compile::expanded_key_sequence, literal_key_sequence, InputContextRegistry,
+    AppEffect, BTreeSet, CommandRegistry, ConfigurationSources, DashboardAction,
+    InputContextRegistry, KeymapCompilation, LoadedConfig, PathBuf, ResolvedConfiguration,
+    UnicodeSegmentation, UnicodeWidthStr, compile::expanded_key_sequence, compile_keymap_entries,
+    compile_keymaps, configured_context, keymap_entries, literal_key_sequence,
+    plugin_owner_from_id, register_app_commands, register_builtin_commands,
+    validate_configured_commands,
 };
 
 pub(super) fn enabled_plugin_owners(loaded: &LoadedConfig) -> BTreeSet<String> {
@@ -39,7 +40,11 @@ pub(in crate::editor::session) fn base_safe_keymaps(
     let mut base = loaded.keymaps.clone();
     let mut entries = base.entries[..base.bundled_count].to_vec();
     let mut spans = Vec::new();
-    let mut deferred = loaded.config.input.command_aliases.values()
+    let mut deferred = loaded
+        .config
+        .input
+        .command_aliases
+        .values()
         .chain(loaded.dashboard.action.iter().map(|action| &action.command))
         .any(|id| plugin_owner_from_id(id).is_some_and(|owner| enabled.contains(owner)));
     let mut deferred_entries = Vec::new();
@@ -69,20 +74,27 @@ pub(in crate::editor::session) fn base_safe_keymaps(
         let owner = plugin_owner_from_id(&group.id)
             .or_else(|| group.context.as_deref().and_then(plugin_owner_from_id));
         let deferred_continuation = leaders.as_ref().is_ok_and(|(leader, local_leader)| {
-            let Some(prefix) = group.prefix.as_deref().and_then(|prefix| {
-                expanded_key_sequence(prefix, leader, local_leader).ok()
-            }) else { return false; };
-            let Some(context) = group.context.as_deref().and_then(|context| {
-                configured_context(&contexts, context, &group.mode).ok()
-            }) else { return false; };
+            let Some(prefix) = group
+                .prefix
+                .as_deref()
+                .and_then(|prefix| expanded_key_sequence(prefix, leader, local_leader).ok())
+            else {
+                return false;
+            };
+            let Some(context) = group
+                .context
+                .as_deref()
+                .and_then(|context| configured_context(&contexts, context, &group.mode).ok())
+            else {
+                return false;
+            };
             deferred_entries.iter().any(|entry| {
                 entry.context.as_deref().is_some_and(|entry_context| {
                     configured_context(&contexts, entry_context, &entry.mode)
                         .is_ok_and(|entry_context| entry_context == context)
                 }) && entry.keys.as_deref().is_some_and(|keys| {
-                    expanded_key_sequence(keys, leader, local_leader).is_ok_and(|keys| {
-                        keys.len() > prefix.len() && keys.starts_with(&prefix)
-                    })
+                    expanded_key_sequence(keys, leader, local_leader)
+                        .is_ok_and(|keys| keys.len() > prefix.len() && keys.starts_with(&prefix))
                 })
             })
         });

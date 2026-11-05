@@ -128,8 +128,23 @@ mod tests {
     }
     #[test]
     fn whole_word_search_includes_combining_marks() {
-        assert_eq!(super::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(), Some(4..5));
-        assert_eq!(super::search_match("e\u{301} e e\u{301}", "e\u{301}", true, true, 1, true, false).unwrap(), Some(6..9));
+        assert_eq!(
+            super::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(),
+            Some(4..5)
+        );
+        assert_eq!(
+            super::search_match(
+                "e\u{301} e e\u{301}",
+                "e\u{301}",
+                true,
+                true,
+                1,
+                true,
+                false
+            )
+            .unwrap(),
+            Some(6..9)
+        );
     }
 
     #[test]

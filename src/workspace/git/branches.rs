@@ -390,7 +390,10 @@ fn read_list(
         check_request(cancel, expires)?;
         let opened = git2::Repository::open(&linked.path).ok();
         let (dirty, operation) = match &opened {
-            Some(opened) => (has_changes(opened, cancel, expires)?, operation_name(opened.state())),
+            Some(opened) => (
+                has_changes(opened, cancel, expires)?,
+                operation_name(opened.state()),
+            ),
             None => (false, None),
         };
         worktrees.push(GitWorktreeEntry {
@@ -493,14 +496,20 @@ fn exclude_from_status(
     check_request(cancel, expires)?;
     let mut current = Vec::new();
     file.read_to_end(&mut current).map_err(backend)?;
-    if current.split(|byte| *byte == b'\n').any(|existing| existing == line.as_bytes()) {
+    if current
+        .split(|byte| *byte == b'\n')
+        .any(|existing| existing == line.as_bytes())
+    {
         return Ok(());
     }
-    let addition = format!("{}{line}\n", if current.is_empty() || current.ends_with(b"\n") {
-        ""
-    } else {
-        "\n"
-    });
+    let addition = format!(
+        "{}{line}\n",
+        if current.is_empty() || current.ends_with(b"\n") {
+            ""
+        } else {
+            "\n"
+        }
+    );
     check_request(cancel, expires)?;
     file.write_all(addition.as_bytes()).map_err(backend)
 }
@@ -583,11 +592,15 @@ fn run(
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&starting));
             let created = check_request(cancel, expires).and_then(|()| {
-                repository.worktree(name, path, Some(&options)).map_err(backend)
+                repository
+                    .worktree(name, path, Some(&options))
+                    .map_err(backend)
             });
             drop(starting);
             if let Err(error) = created {
-                if let Ok(mut branch) = repository.find_branch(&temporary_branch, git2::BranchType::Local) {
+                if let Ok(mut branch) =
+                    repository.find_branch(&temporary_branch, git2::BranchType::Local)
+                {
                     let _ = branch.delete();
                 }
                 check_request(cancel, expires)?;
@@ -679,16 +692,17 @@ fn run(
             let reference = branch.into_reference();
             let mut options = git2::WorktreeAddOptions::new();
             options.reference(Some(&reference));
-            let added = check_request(cancel, expires).and_then(|()| path
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .map_err(backend)
-                .and_then(|()| {
-                    check_request(cancel, expires)?;
-                    repository
-                        .worktree(name, path, Some(&options))
-                        .map_err(backend)
-                }));
+            let added = check_request(cancel, expires).and_then(|()| {
+                path.parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .map_err(backend)
+                    .and_then(|()| {
+                        check_request(cancel, expires)?;
+                        repository
+                            .worktree(name, path, Some(&options))
+                            .map_err(backend)
+                    })
+            });
             if let Err(error) = added {
                 if new_branch
                     && let Ok(mut branch) = repository.find_branch(short, git2::BranchType::Local)
@@ -706,9 +720,7 @@ fn run(
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::RemoveWorktree {
-            repository,
-            name,
-            ..
+            repository, name, ..
         } => {
             let repository = open(repository)?;
             let worktree = repository
@@ -774,7 +786,8 @@ mod exclude_tests {
                     let expires = Instant::now() + Duration::from_secs(10);
                     barrier.wait();
                     for name in [format!("child-{index}"), "shared".into()] {
-                        exclude_from_status(&repository, &root.join(name), &cancel, expires).unwrap();
+                        exclude_from_status(&repository, &root.join(name), &cancel, expires)
+                            .unwrap();
                     }
                 });
             }
@@ -782,8 +795,18 @@ mod exclude_tests {
         let bytes = std::fs::read(exclude).unwrap();
         assert!(bytes.starts_with(b"/retained-\xff\n"));
         let lines = bytes.split(|byte| *byte == b'\n').collect::<Vec<_>>();
-        for name in (0..16).map(|index| format!("/child-{index}/")).chain(["/shared/".into()]) {
-            assert_eq!(lines.iter().filter(|line| **line == name.as_bytes()).count(), 1, "{name}");
+        for name in (0..16)
+            .map(|index| format!("/child-{index}/"))
+            .chain(["/shared/".into()])
+        {
+            assert_eq!(
+                lines
+                    .iter()
+                    .filter(|line| **line == name.as_bytes())
+                    .count(),
+                1,
+                "{name}"
+            );
         }
     }
 }

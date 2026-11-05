@@ -352,9 +352,10 @@ fn apply_operation(
                     target.undo.reset();
                 }
             } else {
-                target
-                    .undo
-                    .record(changes, matches!(undo_policy, UndoPolicy::Merge | UndoPolicy::Boundary));
+                target.undo.record(
+                    changes,
+                    matches!(undo_policy, UndoPolicy::Merge | UndoPolicy::Boundary),
+                );
             }
             for (_, view) in state
                 .views
@@ -516,8 +517,15 @@ fn apply_operation(
                 target.clear_editing_state();
             }
         }
-        EditorOperation::SetInsertRepeat { view, count, new_line } => {
-            let target = state.views.get_mut(*view).ok_or(TransactionError::MissingView)?;
+        EditorOperation::SetInsertRepeat {
+            view,
+            count,
+            new_line,
+        } => {
+            let target = state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?;
             target.insert_repeat = Some(crate::editor::state::InsertRepeat {
                 start: target.cursor,
                 count: *count,
@@ -540,7 +548,12 @@ fn apply_operation(
                 .replace_history
                 .pop();
         }
-        EditorOperation::SetMultiMarks { view, marks, whole_word, preferred_columns } => {
+        EditorOperation::SetMultiMarks {
+            view,
+            marks,
+            whole_word,
+            preferred_columns,
+        } => {
             let target = state
                 .views
                 .get_mut(*view)
@@ -661,7 +674,11 @@ fn apply_operation(
         EditorOperation::ResizePaneOnAxis { axis, delta } => state
             .resize_active_pane_on_axis(*axis, *delta)
             .map_err(|error| TransactionError::Layout(error.into()))?,
-        EditorOperation::SetSplitRatio { first, second, ratio } => state
+        EditorOperation::SetSplitRatio {
+            first,
+            second,
+            ratio,
+        } => state
             .set_split_ratio_between(*first, *second, *ratio)
             .map_err(|error| TransactionError::Layout(error.into()))?,
         EditorOperation::SwapPanes { first, second } => state
@@ -801,14 +818,19 @@ impl EditorDraft {
         }
         for (_, view) in self.state.views.iter_mut().filter(|(_, view)| {
             view.mode == EditorMode::Normal
-                && dirty_before.iter().any(|(buffer, _)| *buffer == view.buffer)
+                && dirty_before
+                    .iter()
+                    .any(|(buffer, _)| *buffer == view.buffer)
         }) {
             let text = &self.state.buffers[view.buffer].text;
-            let line = text.byte_to_line(view.cursor)
+            let line = text
+                .byte_to_line(view.cursor)
                 .map_err(|error| TransactionError::Position(error.to_string()))?;
-            let start = text.line_to_byte(line)
+            let start = text
+                .line_to_byte(line)
                 .map_err(|error| TransactionError::Position(error.to_string()))?;
-            let content = text.line(line)
+            let content = text
+                .line(line)
                 .map_err(|error| TransactionError::Position(error.to_string()))?;
             let end = ByteOffset(start.get() + content.trim_end_matches('\n').len());
             if view.cursor >= end && end > start {
@@ -852,9 +874,18 @@ impl EditorDraft {
     ) -> Result<(BufferId, ViewId), &'static str> {
         self.state.open_text(text, Some(path))
     }
-    pub(crate) fn open_new_document(&mut self, path: std::path::PathBuf) -> Result<(BufferId, ViewId), &'static str> {
-        let existing = self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&path));
-        let (buffer, view) = self.state.open_text(TextBuffer::from_text(""), Some(path))?;
+    pub(crate) fn open_new_document(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Result<(BufferId, ViewId), &'static str> {
+        let existing = self
+            .state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_ref() == Some(&path));
+        let (buffer, view) = self
+            .state
+            .open_text(TextBuffer::from_text(""), Some(path))?;
         if !existing {
             self.state.buffers[buffer].new_file = true;
         }
@@ -885,9 +916,12 @@ impl EditorDraft {
         path: std::path::PathBuf,
         snapshot: (std::sync::Arc<str>, crate::editor::text::FileFormat),
     ) -> bool {
-        if self.state.buffers.get(buffer).is_none_or(|b| {
-            !b.text.source_version().same_incarnation(expected)
-        }) {
+        if self
+            .state
+            .buffers
+            .get(buffer)
+            .is_none_or(|b| !b.text.source_version().same_incarnation(expected))
+        {
             return false;
         }
         let changed = self
@@ -908,27 +942,42 @@ impl EditorDraft {
             if !saved_text.starts_with(&snapshot[..start]) {
                 return false;
             }
-            let edits = TextEditSet::new(revision, vec![TextEdit::new(
-                ByteRange::new(ByteOffset(start), ByteOffset(snapshot.len())).expect("save suffix"),
-                &saved_text[start..],
-            )]);
+            let edits = TextEditSet::new(
+                revision,
+                vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(start), ByteOffset(snapshot.len()))
+                        .expect("save suffix"),
+                    &saved_text[start..],
+                )],
+            );
             self.state.buffers[buffer].undo.boundary();
             if apply_operation(
                 &mut self.state,
                 &EditorOperation::ApplyEdits { buffer, edits },
                 UndoPolicy::Boundary,
-            ).is_err() {
+            )
+            .is_err()
+            {
                 return false;
             }
             self.state.buffers[buffer].undo.boundary();
             let text = &self.state.buffers[buffer].text;
             let end = ByteOffset(start);
-            for (_, view) in self.state.views.iter_mut().filter(|(_, view)| view.buffer == buffer) {
+            for (_, view) in self
+                .state
+                .views
+                .iter_mut()
+                .filter(|(_, view)| view.buffer == buffer)
+            {
                 // Writing a final newline must not move an insertion cursor onto a
                 // new blank line, or leave a Normal cursor past the remaining text.
                 view.cursor = view.cursor.min(end);
-                if view.mode == EditorMode::Normal && view.cursor.get() == text.len_bytes() && !text.is_empty() {
-                    view.cursor = crate::editor::text::previous_grapheme_boundary(text, view.cursor);
+                if view.mode == EditorMode::Normal
+                    && view.cursor.get() == text.len_bytes()
+                    && !text.is_empty()
+                {
+                    view.cursor =
+                        crate::editor::text::previous_grapheme_boundary(text, view.cursor);
                 }
                 if let Some(selection) = &mut view.selection {
                     selection.anchor = selection.anchor.min(end);
@@ -1035,7 +1084,12 @@ impl EditorDraft {
         self.state
             .open_virtual_read_only(text, owner, generation, document, revision)
     }
-    pub(crate) fn set_virtual_metadata(&mut self, buffer: BufferId, title: String, language: String) {
+    pub(crate) fn set_virtual_metadata(
+        &mut self,
+        buffer: BufferId,
+        title: String,
+        language: String,
+    ) {
         let target = &mut self.state.buffers[buffer];
         target.virtual_title = Some(title);
         target.virtual_language = Some(language);
@@ -1048,7 +1102,8 @@ impl EditorDraft {
         revision: u64,
         text: TextBuffer,
     ) -> bool {
-        self.state.replace_virtual_read_only(buffer, expected, revision, text)
+        self.state
+            .replace_virtual_read_only(buffer, expected, revision, text)
     }
 }
 
@@ -1133,8 +1188,9 @@ mod tests {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         state.undo_directory = Some(directory.path().to_path_buf());
         state.undo_maximum_bytes = 1 << 20;
-        let (buffer, _) =
-            state.open_text(TextBuffer::from_text("one two three"), Some(path.clone())).unwrap();
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_text("one two three"), Some(path.clone()))
+            .unwrap();
         edit(&mut state, buffer, &[(0, 3, "1"), (8, 13, "3!")]);
         edit(&mut state, buffer, &[(2, 6, "")]);
         assert_eq!(state.buffers[buffer].text.to_string(), "1 3!");
@@ -1172,13 +1228,17 @@ mod tests {
             state
         };
         let mut changed_on_disk = restart();
-        let (changed, _) = changed_on_disk.open_text(
-            TextBuffer::from_text("edited elsewhere"),
-            Some(path.clone()),
-        ).unwrap();
+        let (changed, _) = changed_on_disk
+            .open_text(
+                TextBuffer::from_text("edited elsewhere"),
+                Some(path.clone()),
+            )
+            .unwrap();
         assert!(changed_on_disk.buffers[changed].undo.is_empty());
         let mut restarted = restart();
-        let (reopened, _) = restarted.open_text(TextBuffer::from_text("1 two 3!"), Some(path)).unwrap();
+        let (reopened, _) = restarted
+            .open_text(TextBuffer::from_text("1 two 3!"), Some(path))
+            .unwrap();
         assert_eq!(history(&mut restarted, reopened, true), "one two three");
         assert_eq!(history(&mut restarted, reopened, false), "1 two 3!");
         assert_eq!(history(&mut restarted, reopened, false), "1 3!");
@@ -1197,7 +1257,14 @@ mod tests {
             }
             assert_ne!(state.buffers[buffer].text.source_version(), expected);
             let mut draft = state.draft();
-            assert!(draft.save_document(buffer, &expected, revision, b"abc".to_vec(), "/workspace/file".into(), ("abc".into(), crate::editor::text::FileFormat::default())));
+            assert!(draft.save_document(
+                buffer,
+                &expected,
+                revision,
+                b"abc".to_vec(),
+                "/workspace/file".into(),
+                ("abc".into(), crate::editor::text::FileFormat::default())
+            ));
             state = draft.accept(&state.version()).unwrap();
             assert_eq!(state.buffers[buffer].dirty, !restore);
             assert_eq!(state.buffers[buffer].persisted_bytes(), b"abc");
@@ -1207,12 +1274,16 @@ mod tests {
     #[test]
     fn closing_a_buffer_restores_the_previous_buffers_saved_view() {
         let mut state = EditorState::new("/workspace".into());
-        let (first, view) = state.open_text(TextBuffer::from_text(&"line\n".repeat(120)), None).unwrap();
+        let (first, view) = state
+            .open_text(TextBuffer::from_text(&"line\n".repeat(120)), None)
+            .unwrap();
         state.views[view].cursor = ByteOffset(500);
         state.views[view].scroll_line = 95;
         state.views[view].scroll_wrap_row = 2;
         state.views[view].scroll_column = 3;
-        let (second, view) = state.open_text(TextBuffer::from_text("other"), None).unwrap();
+        let (second, view) = state
+            .open_text(TextBuffer::from_text("other"), None)
+            .unwrap();
         let pane = state.tabs[state.active_tab.unwrap()].focused;
         let mut draft = state.draft();
         assert!(draft.close_document(view, second).unwrap());
@@ -1271,8 +1342,9 @@ mod tests {
     #[test]
     fn virtual_origin_rejects_edits_undo_redo_and_refreshes_only_by_host_revision() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
-        let (buffer, view) =
-            state.open_virtual_read_only(TextBuffer::from_text("héllo"), "demo".into(), 7, 11, 1).unwrap();
+        let (buffer, view) = state
+            .open_virtual_read_only(TextBuffer::from_text("héllo"), "demo".into(), 7, 11, 1)
+            .unwrap();
         let before = state.buffers[buffer].text.to_string();
         let edit =
             EditorTransaction::new(TransactionId(4)).with_operation(EditorOperation::ApplyEdits {
@@ -1323,12 +1395,21 @@ mod tests {
             ("abc\n\n", "abc", EditorMode::Insert, 4, 3),
         ] {
             let mut state = EditorState::new("/workspace".into());
-            let (buffer, view) = state.open_text(TextBuffer::from_text(source), None).unwrap();
+            let (buffer, view) = state
+                .open_text(TextBuffer::from_text(source), None)
+                .unwrap();
             state.views[view].mode = mode;
             state.views[view].cursor = ByteOffset(cursor);
             let text = &state.buffers[buffer].text;
             let mut draft = state.draft();
-            assert!(draft.save_document(buffer, &text.source_version(), text.revision(), saved.as_bytes().to_vec(), "/workspace/file".into(), (source.into(), text.format().clone())));
+            assert!(draft.save_document(
+                buffer,
+                &text.source_version(),
+                text.revision(),
+                saved.as_bytes().to_vec(),
+                "/workspace/file".into(),
+                (source.into(), text.format().clone())
+            ));
             state = draft.accept(&state.version()).unwrap();
             assert_eq!(state.views[view].cursor, ByteOffset(expected_cursor));
         }
@@ -1338,13 +1419,26 @@ mod tests {
     fn unchanged_text_with_changed_line_endings_is_undoable() {
         let mut state = EditorState::new("/workspace".into());
         let original = b"a\r\nb\n";
-        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None).unwrap();
-        state.apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
-            buffer,
-            edits: TextEditSet::new(state.buffers[buffer].text.revision(), vec![TextEdit::new(
-                ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(), "a\nb\n",
-            )]).with_normalized_line_endings(),
-        })).unwrap();
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_bytes(original).unwrap(), None)
+            .unwrap();
+        state
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(1)).with_operation(
+                    EditorOperation::ApplyEdits {
+                        buffer,
+                        edits: TextEditSet::new(
+                            state.buffers[buffer].text.revision(),
+                            vec![TextEdit::new(
+                                ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(),
+                                "a\nb\n",
+                            )],
+                        )
+                        .with_normalized_line_endings(),
+                    },
+                ),
+            )
+            .unwrap();
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"a\nb\n");
         history(&mut state, buffer, true);
         assert_eq!(state.buffers[buffer].text.to_bytes(), original);
@@ -1356,7 +1450,9 @@ mod tests {
     fn mixed_line_endings_follow_surviving_text_through_undo() {
         let mut state = EditorState::new("/tmp".into());
         let original = b"one\r\ntwo\nthree\r";
-        let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None).unwrap();
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_bytes(original).unwrap(), None)
+            .unwrap();
         edit(&mut state, buffer, &[(0, 4, "")]);
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
         history(&mut state, buffer, true);
@@ -1368,7 +1464,9 @@ mod tests {
     #[test]
     fn history_clears_the_preferred_column_at_the_change_location() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\ndef"), None).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text("abc\ndef"), None)
+            .unwrap();
         edit(&mut state, buffer, &[(0, 0, "x")]);
         for undo in [true, false] {
             state.views[view].cursor = ByteOffset(3);
@@ -1395,10 +1493,16 @@ mod tests {
             assert_eq!(state.views[view].block_insert, [ByteOffset(0)]);
             let mut registry = crate::editor::CommandRegistry::<()>::default();
             crate::editor::register_builtin_commands(&mut registry).unwrap();
-            let invocation = crate::editor::CommandInvocation::new("edit.insert_text", crate::editor::InvocationSource::Test)
-                .unwrap().with_argument("text", crate::editor::CommandValue::String("x".into()));
+            let invocation = crate::editor::CommandInvocation::new(
+                "edit.insert_text",
+                crate::editor::InvocationSource::Test,
+            )
+            .unwrap()
+            .with_argument("text", crate::editor::CommandValue::String("x".into()));
             let outcome = registry.execute(&state, &invocation).unwrap();
-            state.apply_transaction(&outcome.transaction.unwrap()).unwrap();
+            state
+                .apply_transaction(&outcome.transaction.unwrap())
+                .unwrap();
             assert_eq!(state.buffers[buffer].text.to_string(), "x");
         }
     }
@@ -1424,8 +1528,12 @@ mod tests {
     #[test]
     fn virtual_refresh_clears_editing_positions_in_every_view() {
         let mut state = EditorState::new("/tmp".into());
-        let (buffer, first) = state.open_virtual_read_only(TextBuffer::from_text("long text"), "demo".into(), 1, 1, 1).unwrap();
-        let second = state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+        let (buffer, first) = state
+            .open_virtual_read_only(TextBuffer::from_text("long text"), "demo".into(), 1, 1, 1)
+            .unwrap();
+        let second = state
+            .split_active(crate::editor::Axis::Horizontal, 500)
+            .unwrap();
         for id in [first, second] {
             let view = &mut state.views[id];
             view.cursor = ByteOffset(8);
@@ -1433,9 +1541,12 @@ mod tests {
             view.multi_marks = vec![ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()];
             view.block_insert = vec![ByteOffset(8)];
             view.preferred_column = Some(8);
-            view.replace_history.push(crate::editor::state::ReplaceRecord {
-                start: ByteOffset(8), original: "t".into(), inserted: "x".into(),
-            });
+            view.replace_history
+                .push(crate::editor::state::ReplaceRecord {
+                    start: ByteOffset(8),
+                    original: "t".into(),
+                    inserted: "x".into(),
+                });
             view.scroll_line = 10;
             view.scroll_wrap_row = 3;
         }
@@ -1458,8 +1569,9 @@ mod tests {
     #[test]
     fn virtual_refresh_drops_selection_inside_a_character() {
         let mut state = EditorState::new("/tmp".into());
-        let (buffer, view) =
-            state.open_virtual_read_only(TextBuffer::from_text("ab"), "demo".into(), 1, 1, 1).unwrap();
+        let (buffer, view) = state
+            .open_virtual_read_only(TextBuffer::from_text("ab"), "demo".into(), 1, 1, 1)
+            .unwrap();
         state.views[view].cursor = ByteOffset(1);
         state.views[view].selection = Some(crate::editor::Selection {
             anchor: ByteOffset(0),

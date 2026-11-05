@@ -3,11 +3,10 @@ use std::{cell::Cell, collections::BTreeSet, fs, path::PathBuf};
 use tempfile::tempdir;
 
 use super::load::{
-    BUNDLED_CONFIG, BUNDLED_THEME, CapturedSource, CapturedText,
-    ConfigurationSourceBundle, SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING,
-    capture_configuration_bundle_with, capture_consistent_configuration_bundle_with,
-    captured_bundle_is_stable, hash_source_bytes, load_consistent_configuration, load_theme,
-    setting_keys, setting_spans, source_fingerprint,
+    BUNDLED_CONFIG, BUNDLED_THEME, CapturedSource, CapturedText, ConfigurationSourceBundle,
+    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING, capture_configuration_bundle_with,
+    capture_consistent_configuration_bundle_with, captured_bundle_is_stable, hash_source_bytes,
+    load_consistent_configuration, load_theme, setting_keys, setting_spans, source_fingerprint,
 };
 use super::{
     AmbiguousWidth, ExplorerIconMode, LineNumbers, load_bundled_config, load_config, load_keymaps,
@@ -294,11 +293,17 @@ fn parser_spans_cover_inline_tables_and_quoted_dotted_keys() {
 #[test]
 fn config_key_segments_decode_toml_quoted_keys() {
     for (key, expected) in [
-        (r#"command_labels."caf\u00e9""#, vec!["command_labels", "café"]),
+        (
+            r#"command_labels."caf\u00e9""#,
+            vec!["command_labels", "café"],
+        ),
         (r#"labels."a\\b\"c""#, vec!["labels", "a\\b\"c"]),
         (r#"labels.'a\b.c'"#, vec!["labels", "a\\b.c"]),
         (r#"labels."""#, vec!["labels", ""]),
-        ("dashboard.action.0.label", vec!["dashboard", "action", "0", "label"]),
+        (
+            "dashboard.action.0.label",
+            vec!["dashboard", "action", "0", "label"],
+        ),
     ] {
         assert_eq!(super::config_key_segments(key).unwrap(), expected, "{key}");
     }
@@ -534,7 +539,10 @@ fn consistent_loader_retries_same_theme_changes_and_theme_source_switches() {
     )
     .expect("eventually stable");
     assert_eq!(loads.get(), 2);
-    assert_eq!(fingerprint, configuration_bundle("dust", 1, true).identity());
+    assert_eq!(
+        fingerprint,
+        configuration_bundle("dust", 1, true).identity()
+    );
     assert!(stable.into_loaded().diagnostic.is_none());
 
     let theme_revision = Cell::new(0_u8);
@@ -553,7 +561,10 @@ fn consistent_loader_retries_same_theme_changes_and_theme_source_switches() {
     .expect("new theme stabilizes");
     assert_eq!(loads.get(), 3);
     assert_eq!(switched.selected_theme, "night");
-    assert_eq!(fingerprint, configuration_bundle("night", 1, true).identity());
+    assert_eq!(
+        fingerprint,
+        configuration_bundle("night", 1, true).identity()
+    );
 }
 
 #[test]
@@ -567,7 +578,10 @@ fn consistent_loader_rejects_transient_captures_even_when_before_and_after_match
         },
         |_| configuration_bundle("dust", 0, true).identity(),
     );
-    assert!(result.is_err(), "a transient capture must never be accepted");
+    assert!(
+        result.is_err(),
+        "a transient capture must never be accepted"
+    );
     assert_eq!(loads.get(), super::load::CONFIGURATION_CONSISTENCY_ATTEMPTS);
 }
 
@@ -592,7 +606,10 @@ fn consistent_loader_never_emits_discarded_malformed_or_stale_attempts() {
         .expect("second complete source set is stable");
         assert_eq!(loads.get(), 2);
         assert_eq!(bundle.into_loaded().diagnostic.is_none(), final_valid);
-        assert_eq!(fingerprint, configuration_bundle("dust", 1, final_valid).identity());
+        assert_eq!(
+            fingerprint,
+            configuration_bundle("dust", 1, final_valid).identity()
+        );
     }
 }
 
@@ -616,19 +633,28 @@ fn accepted_candidate_fingerprint_matches_all_four_loaded_surfaces() {
     .expect("stable complete snapshot");
     assert_eq!(loads.get(), 2);
     assert_eq!(fingerprint, bundle.identity());
-    assert_eq!(fingerprint, configuration_bundle("dust", 1, true).identity());
+    assert_eq!(
+        fingerprint,
+        configuration_bundle("dust", 1, true).identity()
+    );
     let candidate = bundle.into_loaded();
     assert!(candidate.diagnostic.is_none(), "{:?}", candidate.diagnostic);
     assert_eq!(candidate.config.editor.tab_width, 3);
-    assert_eq!(candidate.keymaps.entries.last().unwrap().id, "user.revision-1");
+    assert_eq!(
+        candidate.keymaps.entries.last().unwrap().id,
+        "user.revision-1"
+    );
     assert_eq!(candidate.dashboard.identity, "dashboard-1");
-    assert_eq!(candidate.theme.styles.default.foreground, super::ThemeColor::Rgb(0xc9, 0xd1, 0xd8));
+    assert_eq!(
+        candidate.theme.styles.default.foreground,
+        super::ThemeColor::Rgb(0xc9, 0xd1, 0xd8)
+    );
 }
 
 #[test]
 fn clean_consistent_load_never_fingerprints_user_sources() {
-    let loaded = load_consistent_configuration(false, "unused-user-theme")
-        .expect("bundled candidate");
+    let loaded =
+        load_consistent_configuration(false, "unused-user-theme").expect("bundled candidate");
     assert!(loaded.fingerprint.is_none());
     let candidate = loaded.candidate.expect("valid bundled candidate");
     assert_eq!(candidate.config, load_bundled_config().config);
@@ -656,18 +682,36 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
         let package = crate::tools::LockedPackage {
             name: manifest.id.clone(),
             version: manifest.version.clone(),
-            source: crate::tools::PackageSource::Path { path: root.path().into() },
+            source: crate::tools::PackageSource::Path {
+                path: root.path().into(),
+            },
             content_sha256: manifest.component_sha256.clone(),
             activation_sha256,
             dependencies: vec![],
         };
-        let path = root.path().join("activations").join(format!("{}.toml",
-            package.activation_sha256.as_ref().unwrap_or(&package.content_sha256)));
+        let path = root.path().join("activations").join(format!(
+            "{}.toml",
+            package
+                .activation_sha256
+                .as_ref()
+                .unwrap_or(&package.content_sha256)
+        ));
         let verifies_digest = package.activation_sha256.is_some();
-        let lock = crate::tools::PackageLock { version: 1, packages: vec![package], reproducible: false };
-        fs::write(root.path().join("dust-packages.lock.json"), serde_json::to_vec(&lock).unwrap()).unwrap();
+        let lock = crate::tools::PackageLock {
+            version: 1,
+            packages: vec![package],
+            reproducible: false,
+        };
+        fs::write(
+            root.path().join("dust-packages.lock.json"),
+            serde_json::to_vec(&lock).unwrap(),
+        )
+        .unwrap();
         fs::write(&path, &source).unwrap();
-        assert_eq!(super::load::installed_plugins(root.path()), BTreeSet::from([manifest.id.clone()]));
+        assert_eq!(
+            super::load::installed_plugins(root.path()),
+            BTreeSet::from([manifest.id.clone()])
+        );
         if verifies_digest {
             fs::write(&path, source.replace("1.0.0", "2.0.0")).unwrap();
             assert!(super::load::installed_plugins(root.path()).is_empty());
@@ -677,8 +721,8 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
 
 #[test]
 fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments() {
-    use std::time::{Duration, Instant};
     use super::ConfigurationWorker;
+    use std::time::{Duration, Instant};
 
     if std::env::var_os("DUST_CONFIG_WORKER_TEST_CHILD").is_none() {
         let root = tempdir().unwrap();
@@ -698,7 +742,10 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
             if let Some(result) = worker.try_result().unwrap() {
                 return result;
             }
-            assert!(Instant::now() < deadline, "configuration change was not reloaded");
+            assert!(
+                Instant::now() < deadline,
+                "configuration change was not reloaded"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -714,14 +761,18 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     fs::write(&path, "[editor]\ntab_width=2\n").unwrap();
     let loaded = super::load_user_config();
     let unchanged = ConfigurationWorker::start_with_fingerprint(
-        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+        true,
+        loaded.config.ui.theme.clone(),
+        loaded.source_fingerprint.clone(),
     );
     no_reload(&unchanged);
     drop(unchanged);
 
     fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
     let worker = ConfigurationWorker::start_with_fingerprint(
-        true, loaded.config.ui.theme.clone(), loaded.source_fingerprint.clone(),
+        true,
+        loaded.config.ui.theme.clone(),
+        loaded.source_fingerprint.clone(),
     );
     let initial = next(&worker);
     assert!(initial.automatic);
@@ -740,7 +791,11 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     worker.request_reload().unwrap();
     assert!(next(&worker).candidate.is_err());
     worker.verify_watch().unwrap();
-    fs::write(&theme_path, BUNDLED_THEME.replace("name = \"dust\"", "name = \"night\"")).unwrap();
+    fs::write(
+        &theme_path,
+        BUNDLED_THEME.replace("name = \"dust\"", "name = \"night\""),
+    )
+    .unwrap();
     assert_eq!(next(&worker).candidate.unwrap().theme.name, "night");
 
     fs::write(&path, "[ui]\ntheme='night'\n[editor]\ntab_width=4\n").unwrap();
@@ -753,16 +808,28 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
 #[test]
 fn configuration_reads_reject_fifos_and_devices_without_blocking() {
     let root = tempdir().unwrap();
-    for name in ["config.toml", "keymaps.toml", "dashboard.toml", "theme.toml", "dust-packages.lock.json"] {
+    for name in [
+        "config.toml",
+        "keymaps.toml",
+        "dashboard.toml",
+        "theme.toml",
+        "dust-packages.lock.json",
+    ] {
         let path = root.path().join(name);
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
         assert!(source_fingerprint(path.clone()).content_hash.is_none());
-        assert!(matches!(super::load::capture_source(path).text, CapturedText::Error(_)));
+        assert!(matches!(
+            super::load::capture_source(path).text,
+            CapturedText::Error(_)
+        ));
     }
     assert!(super::load::installed_plugins(root.path()).is_empty());
     let device = PathBuf::from("/dev/zero");
     assert!(source_fingerprint(device.clone()).content_hash.is_none());
-    assert!(matches!(super::load::capture_source(device).text, CapturedText::Error(_)));
+    assert!(matches!(
+        super::load::capture_source(device).text,
+        CapturedText::Error(_)
+    ));
 
     let path = root.path().join("regular.toml");
     fs::write(&path, "[editor]\ntab_width=3\n").unwrap();
@@ -1088,7 +1155,9 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     crate::editor::register_builtin_commands(&mut commands).unwrap();
     crate::editor::register_app_commands(&mut commands).unwrap();
     let (_, diagnostic) = crate::editor::session::compile_keymaps(
-        &commands, &loaded.keymaps, &loaded.config.input.keymaps,
+        &commands,
+        &loaded.keymaps,
+        &loaded.config.input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
 
@@ -1102,15 +1171,35 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
 
 #[test]
 fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
-    for (global, local) in [("z esc", "z escape"), ("<leader> control-a", "<leader> ctrl-a")] {
+    for (global, local) in [
+        ("z esc", "z escape"),
+        ("<leader> control-a", "<leader> ctrl-a"),
+    ] {
         let loaded = super::load::parse_keymaps(
-            &format!("[[keymap]]\nid='user.global.alias'\ncontext='global'\nkeys='{global}'\ncommand='explorer.refresh'\n\n[[keymap]]\nid='user.explorer.alias'\ncontext='explorer'\nkeys='{local}'\ncommand='explorer.refresh'\n"),
+            &format!(
+                "[[keymap]]\nid='user.global.alias'\ncontext='global'\nkeys='{global}'\ncommand='explorer.refresh'\n\n[[keymap]]\nid='user.explorer.alias'\ncontext='explorer'\nkeys='{local}'\ncommand='explorer.refresh'\n"
+            ),
             PathBuf::from("keymaps.toml"),
         );
         assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
-        assert!(!loaded.entries.iter().any(|entry| entry.id == "user.global.alias.explorer"));
-        assert!(loaded.entries.iter().any(|entry| entry.id == "user.explorer.alias"));
-        assert!(loaded.entries.iter().any(|entry| entry.id == "user.global.alias.editor-normal"));
+        assert!(
+            !loaded
+                .entries
+                .iter()
+                .any(|entry| entry.id == "user.global.alias.explorer")
+        );
+        assert!(
+            loaded
+                .entries
+                .iter()
+                .any(|entry| entry.id == "user.explorer.alias")
+        );
+        assert!(
+            loaded
+                .entries
+                .iter()
+                .any(|entry| entry.id == "user.global.alias.editor-normal")
+        );
     }
 }
 
@@ -1155,33 +1244,74 @@ label = "Files"
     let mut expected_bindings = surfaces
         .iter()
         .filter(|(_, context, _)| *context != "explorer")
-        .map(|(suffix, context, mode)| (
-            format!("user.global.files.{suffix}"),
-            Some(*context),
-            *mode,
-            Some("workspace.file.find"),
-        ))
+        .map(|(suffix, context, mode)| {
+            (
+                format!("user.global.files.{suffix}"),
+                Some(*context),
+                *mode,
+                Some("workspace.file.find"),
+            )
+        })
         .collect::<BTreeSet<_>>();
     expected_bindings.insert((
-        "user.explorer.files".into(), Some("explorer"), "", Some("explorer.refresh"),
+        "user.explorer.files".into(),
+        Some("explorer"),
+        "",
+        Some("explorer.refresh"),
     ));
-    let bindings = loaded.entries.iter().filter(|entry| !entry.disable).map(|entry| (
-        entry.id.clone(), entry.context.as_deref(), entry.mode.as_str(), entry.command.as_deref(),
-    )).collect::<BTreeSet<_>>();
+    let bindings = loaded
+        .entries
+        .iter()
+        .filter(|entry| !entry.disable)
+        .map(|entry| {
+            (
+                entry.id.clone(),
+                entry.context.as_deref(),
+                entry.mode.as_str(),
+                entry.command.as_deref(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
     assert_eq!(bindings, expected_bindings);
-    let disables = loaded.entries.iter().filter(|entry| entry.disable)
-        .map(|entry| entry.id.clone()).collect::<BTreeSet<_>>();
-    assert_eq!(disables, surfaces.iter().map(|(suffix, _, _)|
-        format!("builtin.global.quit.{suffix}")
-    ).collect());
-    let groups = loaded.groups.iter().map(|group| (
-        group.id.clone(), group.context.as_deref(), group.mode.as_str(),
-        group.prefix.as_deref(), group.label.as_deref(),
-    )).collect::<BTreeSet<_>>();
-    assert_eq!(groups, surfaces.iter().map(|(suffix, context, mode)| (
-        format!("user.global.group.files.{suffix}"), Some(*context), *mode,
-        Some("<leader> f"), Some("Files"),
-    )).collect());
+    let disables = loaded
+        .entries
+        .iter()
+        .filter(|entry| entry.disable)
+        .map(|entry| entry.id.clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        disables,
+        surfaces
+            .iter()
+            .map(|(suffix, _, _)| format!("builtin.global.quit.{suffix}"))
+            .collect()
+    );
+    let groups = loaded
+        .groups
+        .iter()
+        .map(|group| {
+            (
+                group.id.clone(),
+                group.context.as_deref(),
+                group.mode.as_str(),
+                group.prefix.as_deref(),
+                group.label.as_deref(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        groups,
+        surfaces
+            .iter()
+            .map(|(suffix, context, mode)| (
+                format!("user.global.group.files.{suffix}"),
+                Some(*context),
+                *mode,
+                Some("<leader> f"),
+                Some("Files"),
+            ))
+            .collect()
+    );
     assert_eq!(loaded.entries.len(), 14);
     assert_eq!(loaded.entries.len(), loaded.user_spans.len());
     assert_eq!(loaded.groups.len(), 7);
@@ -1224,7 +1354,10 @@ fn highlight_groups_resolve_like_neovim() {
 
     let mut dust = super::themes::bundled_named("dust").unwrap().theme;
     assert!(dust.resolve("@missing.nonexistent").is_none());
-    assert_eq!(dust.resolve("@function.custom.child"), dust.resolve("@function"));
+    assert_eq!(
+        dust.resolve("@function.custom.child"),
+        dust.resolve("@function")
+    );
     dust.highlights.insert(
         "@test.broken".into(),
         super::HighlightDefinition {
@@ -1275,7 +1408,10 @@ fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
     let theme: super::ThemeConfig = serde_json::from_value(value).unwrap();
     let group = Highlight::named("@function.rust").unwrap();
     assert!(spans.iter().any(|span| span.role == group));
-    assert_eq!(theme.highlight(group).unwrap().foreground, super::ThemeColor::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(
+        theme.highlight(group).unwrap().foreground,
+        super::ThemeColor::Rgb(0x12, 0x34, 0x56)
+    );
     assert_eq!(fallback.highlight(group), Some(&expected));
     // Use a unique group so parallel syntax tests cannot register it before the cache.
     let late = Highlight::register("@function.late_theme_test").unwrap();
@@ -1447,13 +1583,15 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
     let root = tempdir().unwrap();
     let path = root.path().join("config.toml");
     let mut source = "[editor]\ntab_width = 2\n#".to_owned();
-    source.extend(std::iter::repeat_n(' ',
-        super::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1));
+    source.extend(std::iter::repeat_n(
+        ' ',
+        super::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1,
+    ));
     source.push('\n');
     fs::write(&path, &source).unwrap();
-    let error = super::write_user_setting(
-        &path, "editor.tab_width", Some(toml::Value::Integer(32)),
-    ).unwrap_err();
+    let error =
+        super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(32)))
+            .unwrap_err();
     assert!(error.contains("byte ceiling"), "{error}");
     assert_eq!(fs::read_to_string(path).unwrap(), source);
 }
@@ -1503,9 +1641,18 @@ fn settings_save_preserves_a_symlink() {
 #[test]
 fn unknown_fields_in_window_rule_arrays_preserve_valid_settings() {
     for (rules, expected_count) in [
-        ("[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\nmisspelled=true\n", 1),
-        ("[windows]\nrule=[{content_type='builtin.problems',placement={kind='hidden'},misspelled=true}]\n", 1),
-        ("[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='hidden'}\nmisspelled=true\n", 2),
+        (
+            "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\nmisspelled=true\n",
+            1,
+        ),
+        (
+            "[windows]\nrule=[{content_type='builtin.problems',placement={kind='hidden'},misspelled=true}]\n",
+            1,
+        ),
+        (
+            "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='hidden'}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='hidden'}\nmisspelled=true\n",
+            2,
+        ),
     ] {
         let source = format!("[editor]\ntab_width=3\n{rules}");
         let (config, _, _, ignored) = super::load::settings_from_source(&source).unwrap();
@@ -1522,12 +1669,22 @@ fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants
     let source = "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='floating',x=1,y=2,width=30,height=10}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='docked',edge='bottom',size=5,x=99}\n";
     let (config, _, _, ignored) = super::load::settings_from_source(source).unwrap();
     assert_eq!(config.windows.rules.len(), 2);
-    assert_eq!(config.windows.rules[0].placement, super::WindowPlacementConfig::Floating {
-        x: 1, y: 2, width: 30, height: 10,
-    });
-    assert_eq!(config.windows.rules[1].placement, super::WindowPlacementConfig::Docked {
-        edge: "bottom".into(), size: 5,
-    });
+    assert_eq!(
+        config.windows.rules[0].placement,
+        super::WindowPlacementConfig::Floating {
+            x: 1,
+            y: 2,
+            width: 30,
+            height: 10,
+        }
+    );
+    assert_eq!(
+        config.windows.rules[1].placement,
+        super::WindowPlacementConfig::Docked {
+            edge: "bottom".into(),
+            size: 5,
+        }
+    );
     assert_eq!(ignored.len(), 1);
 }
 
@@ -1683,10 +1840,18 @@ fn config_migration_rejects_noninteger_schema_versions() {
         "[schema_version]\n",
     ] {
         let error = super::migrate_config_source(source).unwrap_err();
-        assert!(error.contains("schema_version must be an integer"), "{error}");
+        assert!(
+            error.contains("schema_version must be an integer"),
+            "{error}"
+        );
         fs::write(&path, source).unwrap();
         let loaded = load_config(&path);
-        assert!(loaded.diagnostic.unwrap().contains("schema_version must be an integer"));
+        assert!(
+            loaded
+                .diagnostic
+                .unwrap()
+                .contains("schema_version must be an integer")
+        );
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
     }
     for source in ["", "schema_version = 0\n"] {
@@ -1695,7 +1860,10 @@ fn config_migration_rejects_noninteger_schema_versions() {
         assert!(migrated.contains("schema_version = 1"));
     }
     let current = "schema_version = 1\n";
-    assert_eq!(super::migrate_config_source(current).unwrap(), (current.into(), false));
+    assert_eq!(
+        super::migrate_config_source(current).unwrap(),
+        (current.into(), false)
+    );
     assert!(super::migrate_config_source("schema_version = 999\n").is_err());
 }
 

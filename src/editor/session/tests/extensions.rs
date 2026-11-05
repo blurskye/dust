@@ -148,7 +148,9 @@ fn hidden_confirmation_suffix_cannot_be_submitted() {
 fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
     for (width, height, token) in [(100, 4, 44), (1, 10, 45)] {
         let (_app_dirs, mut app) = app();
-        app.state.open_text(TextBuffer::from_text("x"), None).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("x"), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.handle_event(crate::ui::UiEvent::Resize(width, height));
         app.reconcile_editor_windows();
@@ -210,7 +212,9 @@ fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
 #[test]
 fn docked_layout_render_and_protection_share_confirmation_bounds() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("x"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("x"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.handle_event(crate::ui::UiEvent::Resize(100, 20));
     app.process_effect(AppEffect::ExplorerOpen);
@@ -510,7 +514,9 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
     for keys in [vec!['2'], vec!['d'], vec!['"', 'a'], vec!['r']] {
         for delayed in [false, true] {
             let (_app_dirs, mut app) = app();
-            app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
+            app.state
+                .open_text(TextBuffer::from_text("abc"), None)
+                .unwrap();
             app.set_dashboard_visibility(false);
             app.reconcile_editor_windows();
             let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
@@ -663,7 +669,8 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
     let a_path = app.state.workspace_root.join("a.txt");
     let b_path = app.state.workspace_root.join("b.txt");
     app.state
-        .open_text(TextBuffer::from_text("A"), Some(a_path.clone())).unwrap();
+        .open_text(TextBuffer::from_text("A"), Some(a_path.clone()))
+        .unwrap();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
@@ -684,7 +691,8 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
     );
     app.process_plugin_events();
     app.state
-        .open_text(TextBuffer::from_text("B"), Some(b_path)).unwrap();
+        .open_text(TextBuffer::from_text("B"), Some(b_path))
+        .unwrap();
     app.handle_configured_key("enter".parse().unwrap());
     let answer = fixture.take();
     assert!(answer.snapshot().is_none());
@@ -707,7 +715,8 @@ fn changed_confirmation_document_gets_a_terminal_failure() {
     let path = app.state.workspace_root.join("a.txt");
     let (buffer, _) = app
         .state
-        .open_text(TextBuffer::from_text("A"), Some(path.clone())).unwrap();
+        .open_text(TextBuffer::from_text("A"), Some(path.clone()))
+        .unwrap();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
@@ -863,7 +872,9 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     write_plugin_manifest(store.path(), &manifest);
 
     let (_app_dirs, mut app) = app_with_plugin_queue(64);
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let load = app
@@ -1006,7 +1017,9 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
 
     for (command, private) in [("drive", false), ("private", true)] {
         let (_app_dirs, mut app) = app();
-        app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("editor"), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.reconcile_editor_windows();
         let load = app
@@ -1022,7 +1035,12 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         let deadline = Instant::now() + Duration::from_secs(15);
         while !app.extension.is_active_generation("demo", load) {
             app.process_plugin_events();
-            assert!(Instant::now() < deadline, "fixture activation timed out: {:?}; {:?}", app.ui.notification, app.extension.statuses());
+            assert!(
+                Instant::now() < deadline,
+                "fixture activation timed out: {:?}; {:?}",
+                app.ui.notification,
+                app.extension.statuses()
+            );
             thread::yield_now();
         }
         app.process_effect(AppEffect::PluginExecute {
@@ -1168,7 +1186,9 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     write_plugin_manifest(store.path(), &manifest);
 
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     assert!(app.window_session.graph().revision().is_some());
@@ -1185,7 +1205,12 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     let deadline = Instant::now() + Duration::from_secs(15);
     while !app.extension.is_active_generation("demo", load) {
         app.process_plugin_events();
-        assert!(Instant::now() < deadline, "fixture activation timed out: {:?}; {:?}", app.ui.notification, app.extension.statuses());
+        assert!(
+            Instant::now() < deadline,
+            "fixture activation timed out: {:?}; {:?}",
+            app.ui.notification,
+            app.extension.statuses()
+        );
         thread::yield_now();
     }
     app.process_effect(AppEffect::PluginExecute {
@@ -1298,7 +1323,9 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
 #[test]
 fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1337,9 +1364,14 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             }),
         },
     };
-    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
-        .extension
-        .prepare_window(&index, request.clone(), &app.state, &app.window_session, false)
+    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) =
+        app.extension.prepare_window(
+            &index,
+            request.clone(),
+            &app.state,
+            &app.window_session,
+            false,
+        )
     else {
         panic!("expected staged window");
     };
@@ -1356,9 +1388,14 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             .is_some()
     );
     assert!(app.extension.window_snapshots().is_empty());
-    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) = app
-        .extension
-        .prepare_window(&index, request.clone(), &app.state, &app.window_session, false)
+    let crate::editor::session::extensions::WindowUpdate::Publish(source, transition) =
+        app.extension.prepare_window(
+            &index,
+            request.clone(),
+            &app.state,
+            &app.window_session,
+            false,
+        )
     else {
         panic!("expected fresh window proposal");
     };
@@ -1414,7 +1451,9 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
 #[test]
 fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1457,14 +1496,22 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
         .expect("coalesced buffer event");
     assert_eq!(event.coalesced, 1);
     assert!(event.payload.contains("cursor=1"));
-    app.extension.acknowledge("demo", PluginLoadId(77), &[event.id]);
+    app.extension
+        .acknowledge("demo", PluginLoadId(77), &[event.id]);
     app.state.active_view = None;
     app.refresh_plugin_host_events();
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
     // The earlier delivery is rate-limited, but the disappearance is queued now.
     thread::sleep(Duration::from_millis(10));
-    let empty = app.extension.deliver("demo", PluginLoadId(77)).pop().expect("empty buffer event");
-    assert_eq!(empty.kind, crate::extensions::PluginSubscriptionKind::BufferSummaryChanged);
+    let empty = app
+        .extension
+        .deliver("demo", PluginLoadId(77))
+        .pop()
+        .expect("empty buffer event");
+    assert_eq!(
+        empty.kind,
+        crate::extensions::PluginSubscriptionKind::BufferSummaryChanged
+    );
     assert_eq!(empty.payload, "buffer=none");
     app.refresh_plugin_host_events();
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
@@ -1500,15 +1547,18 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         .expect("provider owner");
     let request = app
         .extension
-        .fixture_provider_start(crate::extensions::PluginProviderStart {
-            plugin: "demo".into(),
-            load: PluginLoadId(77),
-            provider: "plugin.demo.provider.files".into(),
-            query: "be".into(),
-            context: "editor".into(),
-            workspace_revision: Some(app.workspace.root_revision()),
-            buffer_revision: None,
-        }, &app.state)
+        .fixture_provider_start(
+            crate::extensions::PluginProviderStart {
+                plugin: "demo".into(),
+                load: PluginLoadId(77),
+                provider: "plugin.demo.provider.files".into(),
+                query: "be".into(),
+                context: "editor".into(),
+                workspace_revision: Some(app.workspace.root_revision()),
+                buffer_revision: None,
+            },
+            &app.state,
+        )
         .expect("request");
     app.extension
         .provider_chunk(
@@ -1581,12 +1631,23 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         )
         .unwrap();
     app.present_plugin_picker(request);
-    assert!(app.search.help_is_open(), "a stream refresh must not dismiss help");
+    assert!(
+        app.search.help_is_open(),
+        "a stream refresh must not dismiss help"
+    );
     assert_eq!(app.ui.picker, help_ui);
     assert!(app.extension.provider_visible(request));
     app.close_picker();
     assert!(!app.search.help_is_open());
-    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label == "Better"));
+    assert!(
+        app.ui
+            .picker
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .any(|row| row.label == "Better")
+    );
     assert_eq!(app.ui.picker.as_ref().unwrap().query, "e");
     assert_eq!(
         app.search.picker().unwrap().selected_item().unwrap().id,
@@ -1599,7 +1660,10 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         app.present_plugin_picker(request);
         assert_eq!(app.extension.provider_projection(request), stable);
         assert_eq!(app.ui.picker, stable_ui);
-        assert_eq!(app.search.picker().unwrap().selected_item().unwrap().id, selected);
+        assert_eq!(
+            app.search.picker().unwrap().selected_item().unwrap().id,
+            selected
+        );
         assert!(app.input.picker_normal());
     }
     app.install_picker("Another picker".into(), Vec::new());
@@ -1660,7 +1724,9 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
 #[test]
 fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1768,7 +1834,9 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
 #[test]
 fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -1849,7 +1917,11 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     );
     app.invoke_mapped_command("surface.retained.focus.previous");
     assert_eq!(
-        app.ui.plugin_surfaces[0].rows.iter().find(|row| row.focused).map(|row| row.node),
+        app.ui.plugin_surfaces[0]
+            .rows
+            .iter()
+            .find(|row| row.focused)
+            .map(|row| row.node),
         Some(2)
     );
     app.invoke_mapped_command("surface.retained.scroll.down");
@@ -1878,36 +1950,59 @@ fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     let key = ("demo".to_owned(), PluginLoadId(1));
-    app.extension.queue_ui(key.0.clone(), key.1, [crate::extensions::PluginUiEvent {
-        token: 7,
-        handle: None,
-        graph_revision: None,
-        tree_revision: None,
-        surface_revision: None,
-        geometry: None,
-        action: None,
-        error: None,
-    }]);
-    app.extension.queue_storage(crate::extensions::PluginStorageResult {
-        plugin: key.0.clone(),
-        load: key.1,
-        token: 8,
-        value: None,
-        revision: None,
-        entries: Vec::new(),
-        truncated: false,
-        error: None,
-    });
+    app.extension.queue_ui(
+        key.0.clone(),
+        key.1,
+        [crate::extensions::PluginUiEvent {
+            token: 7,
+            handle: None,
+            graph_revision: None,
+            tree_revision: None,
+            surface_revision: None,
+            geometry: None,
+            action: None,
+            error: None,
+        }],
+    );
+    app.extension
+        .queue_storage(crate::extensions::PluginStorageResult {
+            plugin: key.0.clone(),
+            load: key.1,
+            token: 8,
+            value: None,
+            revision: None,
+            entries: Vec::new(),
+            truncated: false,
+            error: None,
+        });
     for arguments in [vec!["x".repeat(65_537)], vec![String::new(); 257]] {
         app.process_effect(AppEffect::PluginExecute {
-            plugin: "demo".into(), command: "run".into(), arguments,
+            plugin: "demo".into(),
+            command: "run".into(),
+            arguments,
         });
-        assert_eq!(app.extension.ui_events().get(&key).and_then(|events| events.first()).map(|event| event.token), Some(7));
-        assert_eq!(app.extension.storage_results().get(&key).and_then(|results| results.first()).map(|result| result.token), Some(8));
+        assert_eq!(
+            app.extension
+                .ui_events()
+                .get(&key)
+                .and_then(|events| events.first())
+                .map(|event| event.token),
+            Some(7)
+        );
+        assert_eq!(
+            app.extension
+                .storage_results()
+                .get(&key)
+                .and_then(|results| results.first())
+                .map(|result| result.token),
+            Some(8)
+        );
         assert_eq!(app.extension.confirmation_count(), 0);
     }
     app.process_effect(AppEffect::PluginExecute {
-        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
     });
     assert!(fixture.take().arguments().is_empty());
     assert!(!app.extension.ui_events().contains_key(&key));
@@ -1921,27 +2016,48 @@ fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
     app.extension.fixture_manager(manager);
     let invoke = |app: &mut InteractiveApplication| {
         app.process_effect(AppEffect::PluginExecute {
-            plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+            plugin: "demo".into(),
+            command: "run".into(),
+            arguments: Vec::new(),
         });
     };
     invoke(&mut app);
     let old = fixture.take();
     app.extension.reset_runtime();
     fixture.reply(&old, Vec::new());
-    let crate::extensions::OwnedPluginEvent::Executed(reply) = app.extension.poll_owned().unwrap().pop().unwrap() else {
+    let crate::extensions::OwnedPluginEvent::Executed(reply) =
+        app.extension.poll_owned().unwrap().pop().unwrap()
+    else {
         panic!("execution reply");
     };
-    let error = app.extension.receive(reply, &app.workspace.version(), app.configuration.binding_revision())
-        .err().expect("pre-reset invocation must be retired");
+    let error = app
+        .extension
+        .receive(
+            reply,
+            &app.workspace.version(),
+            app.configuration.binding_revision(),
+        )
+        .err()
+        .expect("pre-reset invocation must be retired");
     assert!(error.contains("retired"), "{error}");
     assert_eq!(app.extension.confirmation_count(), 0);
     invoke(&mut app);
     let current = fixture.take();
     fixture.reply(&current, Vec::new());
-    let crate::extensions::OwnedPluginEvent::Executed(reply) = app.extension.poll_owned().unwrap().pop().unwrap() else {
+    let crate::extensions::OwnedPluginEvent::Executed(reply) =
+        app.extension.poll_owned().unwrap().pop().unwrap()
+    else {
         panic!("execution reply");
     };
-    assert!(app.extension.receive(reply, &app.workspace.version(), app.configuration.binding_revision()).is_ok());
+    assert!(
+        app.extension
+            .receive(
+                reply,
+                &app.workspace.version(),
+                app.configuration.binding_revision()
+            )
+            .is_ok()
+    );
 }
 
 #[test]
@@ -2420,46 +2536,99 @@ fn provider_chunks_use_the_revision_after_virtual_publication() {
         crate::extensions::PluginCapability::VirtualDocuments,
         crate::extensions::PluginCapability::PickerProviders,
     ]);
-    manifest.contributions.virtual_documents = vec![crate::extensions::PluginVirtualDocumentContribution {
-        id: "plugin.demo.virtual.help".into(), title: "Help".into(), language: "markdown".into(),
-        mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
-        maximum_concurrent_documents: 1, maximum_document_bytes: 4096, maximum_document_lines: 128,
-        maximum_patch_bytes: 256, maximum_patches_per_request: 8, deadline_milliseconds: 30_000,
-        command: "plugin.demo.run".into(), context: "dashboard".into(), provenance: None,
-    }];
+    manifest.contributions.virtual_documents =
+        vec![crate::extensions::PluginVirtualDocumentContribution {
+            id: "plugin.demo.virtual.help".into(),
+            title: "Help".into(),
+            language: "markdown".into(),
+            mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
+            maximum_concurrent_documents: 1,
+            maximum_document_bytes: 4096,
+            maximum_document_lines: 128,
+            maximum_patch_bytes: 256,
+            maximum_patches_per_request: 8,
+            deadline_milliseconds: 30_000,
+            command: "plugin.demo.run".into(),
+            context: "dashboard".into(),
+            provenance: None,
+        }];
     manifest.contributions.providers = vec![crate::extensions::PluginProviderContribution {
-        id: "plugin.demo.provider.files".into(), kind: crate::extensions::PluginProviderKind::PickerSource,
-        command: "plugin.demo.run".into(), maximum_concurrent_requests: 1, maximum_items: 16,
-        maximum_bytes: 8192, deadline_milliseconds: 30_000, provenance: None,
+        id: "plugin.demo.provider.files".into(),
+        kind: crate::extensions::PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(),
+        maximum_concurrent_requests: 1,
+        maximum_items: 16,
+        maximum_bytes: 8192,
+        deadline_milliseconds: 30_000,
+        provenance: None,
     }];
-    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     app.extension.fixture_provider_install(&index).unwrap();
     let virtual_request = app.extension.fixture_virtual_request(&index);
-    let request = app.extension.fixture_provider_start(crate::extensions::PluginProviderStart {
-        plugin: "demo".into(), load: PluginLoadId(1), provider: "plugin.demo.provider.files".into(),
-        query: String::new(), context: "dashboard".into(),
-        workspace_revision: Some(app.workspace.root_revision()), buffer_revision: None,
-    }, &app.state).unwrap();
-    app.process_effect(AppEffect::PluginExecute { plugin: "demo".into(), command: "run".into(), arguments: Vec::new() });
+    let request = app
+        .extension
+        .fixture_provider_start(
+            crate::extensions::PluginProviderStart {
+                plugin: "demo".into(),
+                load: PluginLoadId(1),
+                provider: "plugin.demo.provider.files".into(),
+                query: String::new(),
+                context: "dashboard".into(),
+                workspace_revision: Some(app.workspace.root_revision()),
+                buffer_revision: None,
+            },
+            &app.state,
+        )
+        .unwrap();
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
+    });
     fixture.reply_with(&fixture.take(), |execution| {
-        execution.virtual_document_proposals.push(crate::extensions::PluginVirtualDocumentProposal {
-            request: virtual_request.request, document: virtual_request.document,
-            cancellation_generation: virtual_request.cancellation_generation,
-            kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(crate::extensions::PluginVirtualDocumentFull {
-                expected_revision: None, revision: 1, title: "Help".into(), language: "markdown".into(), text: "new virtual text".into(),
-            }),
-        });
-        execution.provider_chunks.push(crate::extensions::PluginPickerChunk {
-            request, sequence: 1,
-            items: vec![crate::extensions::PluginPickerItem { id: "old".into(), primary: "Stale row".into(), secondary: None, action_data: Vec::new() }],
-            terminal: crate::extensions::PluginProviderTerminal::Complete,
-        });
+        execution.virtual_document_proposals.push(
+            crate::extensions::PluginVirtualDocumentProposal {
+                request: virtual_request.request,
+                document: virtual_request.document,
+                cancellation_generation: virtual_request.cancellation_generation,
+                kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
+                    crate::extensions::PluginVirtualDocumentFull {
+                        expected_revision: None,
+                        revision: 1,
+                        title: "Help".into(),
+                        language: "markdown".into(),
+                        text: "new virtual text".into(),
+                    },
+                ),
+            },
+        );
+        execution
+            .provider_chunks
+            .push(crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 1,
+                items: vec![crate::extensions::PluginPickerItem {
+                    id: "old".into(),
+                    primary: "Stale row".into(),
+                    secondary: None,
+                    action_data: Vec::new(),
+                }],
+                terminal: crate::extensions::PluginProviderTerminal::Complete,
+            });
     });
     app.process_plugin_events();
     let buffer = app.state.active_buffer_id().unwrap();
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "new virtual text");
-    assert!(app.extension.provider_projection(request).is_none_or(|projection| projection.items.is_empty()));
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "new virtual text"
+    );
+    assert!(
+        app.extension
+            .provider_projection(request)
+            .is_none_or(|projection| projection.items.is_empty())
+    );
     assert!(app.ui.notification_error);
 }
 
@@ -2584,7 +2753,10 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
             )
             .is_err()
     );
-    let (ordinary, view) = app.state.open_text(TextBuffer::from_text("ordinary"), None).unwrap();
+    let (ordinary, view) = app
+        .state
+        .open_text(TextBuffer::from_text("ordinary"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let focus = app.window_session.graph().focused();
@@ -2602,12 +2774,21 @@ fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
     let before = app.state.version();
     let mut draft = app.state.draft();
     let mut snapshot = crate::extensions::PluginVirtualDocumentSnapshot {
-        plugin: "demo".into(), load: PluginLoadId(7), document: 3,
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
-        title: "Help".into(), language: "rust".into(),
-        text: "fn help() {}\n".into(), revision: 1, closed: false,
+        plugin: "demo".into(),
+        load: PluginLoadId(7),
+        document: 3,
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
+        title: "Help".into(),
+        language: "rust".into(),
+        text: "fn help() {}\n".into(),
+        revision: 1,
+        closed: false,
     };
-    let buffer = app.extension.fixture_virtual_publish(&mut draft, &snapshot).unwrap();
+    let buffer = app
+        .extension
+        .fixture_virtual_publish(&mut draft, &snapshot)
+        .unwrap();
     *app.state = draft.accept(&before).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
@@ -2615,24 +2796,42 @@ fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.syntax.result(buffer).is_none() {
         app.process_syntax();
-        assert!(Instant::now() < deadline, "declared Rust language was not parsed");
+        assert!(
+            Instant::now() < deadline,
+            "declared Rust language was not parsed"
+        );
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(app.syntax.result(buffer).unwrap().language, crate::language::syntax::SyntaxLanguage::Rust);
+    assert_eq!(
+        app.syntax.result(buffer).unwrap().language,
+        crate::language::syntax::SyntaxLanguage::Rust
+    );
     snapshot.revision = 2;
     snapshot.title = "Updated help".into();
     snapshot.language = "python".into();
     snapshot.text = "def help(): pass\n".into();
     let before = app.state.version();
     let mut draft = app.state.draft();
-    assert_eq!(app.extension.fixture_virtual_publish(&mut draft, &snapshot).unwrap(), buffer);
+    assert_eq!(
+        app.extension
+            .fixture_virtual_publish(&mut draft, &snapshot)
+            .unwrap(),
+        buffer
+    );
     *app.state = draft.accept(&before).unwrap();
     app.reconcile_editor_windows();
-    assert!(app.ui.content_tabs.iter().any(|tab| tab.title == "Updated help"));
+    assert!(
+        app.ui
+            .content_tabs
+            .iter()
+            .any(|tab| tab.title == "Updated help")
+    );
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         app.process_syntax();
-        if app.syntax.result(buffer).is_some_and(|result| result.language == crate::language::syntax::SyntaxLanguage::Python) {
+        if app.syntax.result(buffer).is_some_and(|result| {
+            result.language == crate::language::syntax::SyntaxLanguage::Python
+        }) {
             break;
         }
         assert!(Instant::now() < deadline, "updated language was not parsed");
@@ -2666,15 +2865,18 @@ fn provider_selection_delivers_request_item_and_action_data() {
     app.extension.fixture_provider_install(&index).unwrap();
     let request = app
         .extension
-        .fixture_provider_start(crate::extensions::PluginProviderStart {
-            plugin: "demo".into(),
-            load: PluginLoadId(1),
-            provider: "plugin.demo.provider.files".into(),
-            query: String::new(),
-            context: String::new(),
-            workspace_revision: None,
-            buffer_revision: None,
-        }, &app.state)
+        .fixture_provider_start(
+            crate::extensions::PluginProviderStart {
+                plugin: "demo".into(),
+                load: PluginLoadId(1),
+                provider: "plugin.demo.provider.files".into(),
+                query: String::new(),
+                context: String::new(),
+                workspace_revision: None,
+                buffer_revision: None,
+            },
+            &app.state,
+        )
         .unwrap();
     app.extension
         .provider_chunk(
@@ -2840,10 +3042,14 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
             .unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     let request = app.extension.fixture_virtual_request(&index);
-    app.state.open_text(TextBuffer::from_text("original"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("original"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let navigation = app.window_session.navigation_stamp(app.state.window_version(), app.state.active_view);
+    let navigation = app
+        .window_session
+        .navigation_stamp(app.state.window_version(), app.state.active_view);
     for _ in 0..2 {
         app.process_effect(AppEffect::VirtualDocumentOpen {
             source: "plugin.demo.virtual.help".into(),
@@ -2855,51 +3061,103 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     app.reconcile_editor_windows();
     let before = app.state.version();
     let active = app.state.active_tab;
-    let navigation_current = app.window_session.navigation_current(&navigation, &app.state.window_version(), app.state.active_view);
+    let navigation_current = app.window_session.navigation_current(
+        &navigation,
+        &app.state.window_version(),
+        app.state.active_view,
+    );
     assert!(!navigation_current);
     let proposal = crate::extensions::PluginVirtualDocumentProposal {
-        request: request.request, document: request.document,
+        request: request.request,
+        document: request.document,
         cancellation_generation: request.cancellation_generation,
-        kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(crate::extensions::PluginVirtualDocumentFull {
-            expected_revision: None, revision: 1, title: "Help".into(),
-            language: "rust".into(), text: "fn help() {}".into(),
-        }),
+        kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
+            crate::extensions::PluginVirtualDocumentFull {
+                expected_revision: None,
+                revision: 1,
+                title: "Help".into(),
+                language: "rust".into(),
+                text: "fn help() {}".into(),
+            },
+        ),
     };
-    assert!(app.extension.prepare_virtual("demo", PluginLoadId(1), proposal, navigation_current,
-        crate::editor::session::extensions::VirtualContext {
-            editor: &app.state, windows: &app.window_session, scratch: "scratch",
-        }).is_err());
+    assert!(
+        app.extension
+            .prepare_virtual(
+                "demo",
+                PluginLoadId(1),
+                proposal,
+                navigation_current,
+                crate::editor::session::extensions::VirtualContext {
+                    editor: &app.state,
+                    windows: &app.window_session,
+                    scratch: "scratch",
+                }
+            )
+            .is_err()
+    );
     assert_eq!(app.state.version(), before);
     assert_eq!(app.state.active_tab, active);
-    assert!(app.state.buffers.values().all(|buffer| !buffer.is_virtual_read_only()));
-    assert!(matches!(app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
-        Ok(crate::editor::session::extensions::VirtualOpen::Execute { .. })));
+    assert!(
+        app.state
+            .buffers
+            .values()
+            .all(|buffer| !buffer.is_virtual_read_only())
+    );
+    assert!(matches!(
+        app.extension
+            .open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
+        Ok(crate::editor::session::extensions::VirtualOpen::Execute { .. })
+    ));
 }
 
 #[test]
 fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
     let (_app_dirs, mut app) = app();
     let (mut manager, fixture) = crate::extensions::ExecutionFixture::new(1);
-    manager.execute(crate::extensions::empty_execution_request()).unwrap();
+    manager
+        .execute(crate::extensions::empty_execution_request())
+        .unwrap();
     app.extension.fixture_manager(manager);
     let mut config = app.configuration.fixture_snapshot();
     config.deferred_plugin_keymaps = true;
     config.expected_plugin_indexes = ["demo".into(), "zeta".into()].into_iter().collect();
     app.configuration.install_fixture(config);
     let sibling = crate::extensions::index_manifest_contributions(
-        &plugin_manifest("zeta", "plugin.zeta.test", "z z"), 2, "sibling".into(),
-    ).unwrap();
+        &plugin_manifest("zeta", "plugin.zeta.test", "z z"),
+        2,
+        "sibling".into(),
+    )
+    .unwrap();
     app.register_indexed_plugin_commands(&sibling).unwrap();
     app.extension.fixture_contribution(sibling).unwrap();
-    app.extension.fixture_pending_index("zeta".into(), (PluginLoadId(2), "0".repeat(64)));
-    fixture.indexed(crate::extensions::index_manifest_contributions(
-        &plugin_manifest("demo", "plugin.demo.test", "x y"), 1, "test".into(),
-    ).unwrap());
+    app.extension
+        .fixture_pending_index("zeta".into(), (PluginLoadId(2), "0".repeat(64)));
+    fixture.indexed(
+        crate::extensions::index_manifest_contributions(
+            &plugin_manifest("demo", "plugin.demo.test", "x y"),
+            1,
+            "test".into(),
+        )
+        .unwrap(),
+    );
     app.process_plugin_events();
     assert!(app.extension.pending_indexes().is_empty());
     assert!(app.extension.contributions().get("zeta").is_none());
-    assert!(app.extension.rejected_indexes().contains(&("zeta".into(), PluginLoadId(2))));
-    assert!(app.ui.notification.as_deref().unwrap().contains("queue is full"), "{:?}", app.ui.notification);
+    assert!(
+        app.extension
+            .rejected_indexes()
+            .contains(&("zeta".into(), PluginLoadId(2)))
+    );
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .unwrap()
+            .contains("queue is full"),
+        "{:?}",
+        app.ui.notification
+    );
 }
 
 #[test]
@@ -2908,22 +3166,31 @@ fn rejected_package_commands_schedule_the_installed_version_for_reload() {
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     let manifest = plugin_manifest("demo", "plugin.demo.test", "x y");
-    app.extension.fixture_contribution(crate::extensions::index_manifest_contributions(
-        &manifest, 1, "test".into(),
-    ).unwrap()).unwrap();
+    app.extension
+        .fixture_contribution(
+            crate::extensions::index_manifest_contributions(&manifest, 1, "test".into()).unwrap(),
+        )
+        .unwrap();
     app.extension.fixture_prepared("demo", PluginLoadId(1), 41);
-    fixture.loaded(PluginLoadId(1), crate::extensions::LoadedComponent {
-        canonical_path: "replacement.wasm".into(),
-        bytes: Vec::new(),
-        manifest,
-        instantiated: true,
-        unavailable_host: None,
-        activated_commands: Vec::new(),
-    });
+    fixture.loaded(
+        PluginLoadId(1),
+        crate::extensions::LoadedComponent {
+            canonical_path: "replacement.wasm".into(),
+            bytes: Vec::new(),
+            manifest,
+            instantiated: true,
+            unavailable_host: None,
+            activated_commands: Vec::new(),
+        },
+    );
     app.process_plugin_events();
     app.process_package_events();
     assert!(app.extension.fixture_package_reload_pending());
-    assert!(app.extension.take_prepared("demo", PluginLoadId(1)).is_none());
+    assert!(
+        app.extension
+            .take_prepared("demo", PluginLoadId(1))
+            .is_none()
+    );
     assert!(!app.extension.is_active_generation("demo", PluginLoadId(1)));
     assert!(app.extension.contributions().get("demo").is_none());
 }
@@ -2948,7 +3215,10 @@ fn active_plugin_failure_does_not_abort_a_siblings_index() {
     fixture.fail(&fixture.take());
     app.process_plugin_events();
     assert!(app.extension.pending_indexes().contains_key("sibling"));
-    assert_eq!(app.ui.notification.as_deref(), Some("Plugin demo: plugin is not active"));
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some("Plugin demo: plugin is not active")
+    );
     assert!(app.ui.notification_error);
 }
 
@@ -3083,15 +3353,18 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
         .expect("provider owner");
     let request = app
         .extension
-        .fixture_provider_start(crate::extensions::PluginProviderStart {
-            plugin: "demo".into(),
-            load: PluginLoadId(77),
-            provider: "plugin.demo.provider.files".into(),
-            query: "be".into(),
-            context: "editor".into(),
-            workspace_revision: Some(app.workspace.root_revision()),
-            buffer_revision: None,
-        }, &app.state)
+        .fixture_provider_start(
+            crate::extensions::PluginProviderStart {
+                plugin: "demo".into(),
+                load: PluginLoadId(77),
+                provider: "plugin.demo.provider.files".into(),
+                query: "be".into(),
+                context: "editor".into(),
+                workspace_revision: Some(app.workspace.root_revision()),
+                buffer_revision: None,
+            },
+            &app.state,
+        )
         .expect("request");
     app.extension
         .provider_chunk(
@@ -3225,10 +3498,17 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
     assert!(broker.presentable(next));
 }
 
-fn provider_selection_fixture() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication, crate::extensions::ExecutionFixture, u64) {
+fn provider_selection_fixture() -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+    crate::extensions::ExecutionFixture,
+    u64,
+) {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("provider.txt");
-    app.state.open_text(TextBuffer::from_text("original"), Some(path)).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("original"), Some(path))
+        .unwrap();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -3252,15 +3532,18 @@ fn provider_selection_fixture() -> ((tempfile::TempDir, tempfile::TempDir), Inte
     app.extension.fixture_provider_install(&index).unwrap();
     let request = app
         .extension
-        .fixture_provider_start(crate::extensions::PluginProviderStart {
-            plugin: "demo".into(),
-            load: PluginLoadId(1),
-            provider: "plugin.demo.provider.files".into(),
-            query: String::new(),
-            context: String::new(),
-            workspace_revision: None,
-            buffer_revision: None,
-        }, &app.state)
+        .fixture_provider_start(
+            crate::extensions::PluginProviderStart {
+                plugin: "demo".into(),
+                load: PluginLoadId(1),
+                provider: "plugin.demo.provider.files".into(),
+                query: String::new(),
+                context: String::new(),
+                workspace_revision: None,
+                buffer_revision: None,
+            },
+            &app.state,
+        )
         .unwrap();
     app.extension
         .provider_chunk(
@@ -3299,15 +3582,23 @@ fn provider_selection_delivers_request_item_and_action_data_slot5() {
 #[test]
 fn provider_selection_survives_a_discarded_replacement() {
     let (_app_dirs, mut app, fixture, request) = provider_selection_fixture();
-    let replacement = app.extension.start_provider(
-        "plugin.demo.provider.files",
-        String::new(),
-        app.workspace.root_revision(),
-        &app.state,
-    ).unwrap();
+    let replacement = app
+        .extension
+        .start_provider(
+            "plugin.demo.provider.files",
+            String::new(),
+            app.workspace.root_revision(),
+            &app.state,
+        )
+        .unwrap();
     assert_ne!(replacement.request, request);
-    app.extension.discard_unpresented_provider(replacement.request);
-    assert!(app.extension.provider_projection(replacement.request).is_none());
+    app.extension
+        .discard_unpresented_provider(replacement.request);
+    assert!(
+        app.extension
+            .provider_projection(replacement.request)
+            .is_none()
+    );
     assert!(app.extension.provider_visible(request));
     app.accept_picker();
     assert_eq!(
@@ -3322,21 +3613,39 @@ fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
     let buffer = app.state.active_buffer_id().unwrap();
     let path = app.state.buffers[buffer].path.clone().unwrap();
     assert_eq!(app.state.buffers[buffer].text.revision().0, 0);
-    assert!(app.state.replace_buffer_from_disk(buffer, TextBuffer::from_text("reloaded"), path));
+    assert!(
+        app.state
+            .replace_buffer_from_disk(buffer, TextBuffer::from_text("reloaded"), path)
+    );
     assert_eq!(app.state.buffers[buffer].text.revision().0, 0);
     app.accept_picker();
-    assert!(fixture.is_empty(), "stale action data must not reach the plugin");
+    assert!(
+        fixture.is_empty(),
+        "stale action data must not reach the plugin"
+    );
 }
 
 #[test]
 fn provider_selection_rejects_a_different_buffer_with_the_same_revision() {
     let (_app_dirs, mut app, fixture, _) = provider_selection_fixture();
-    app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("other"), None)
+        .unwrap();
     app.accept_picker();
-    assert!(fixture.is_empty(), "a different buffer cannot use the old provider items");
+    assert!(
+        fixture.is_empty(),
+        "a different buffer cannot use the old provider items"
+    );
 }
 
-fn virtual_document_fixture(capacity: usize) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication, crate::extensions::ExecutionFixture, crate::extensions::PluginContributionIndex) {
+fn virtual_document_fixture(
+    capacity: usize,
+) -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+    crate::extensions::ExecutionFixture,
+    crate::extensions::PluginContributionIndex,
+) {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(capacity);
     app.extension.fixture_manager(manager);
@@ -3371,7 +3680,8 @@ fn virtual_document_fixture(capacity: usize) -> ((tempfile::TempDir, tempfile::T
 fn repeated_virtual_open_does_not_dispatch_an_empty_callback_slot5() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     assert_eq!(fixture.take().virtual_documents().len(), 1);
     for _ in 0..2 {
@@ -3386,27 +3696,37 @@ fn publish_virtual_fixture(
     app: &mut InteractiveApplication,
     request: &crate::extensions::PluginVirtualDocumentRequest,
 ) {
-    let (publication, candidate) = app.extension.prepare_virtual(
-        "demo", PluginLoadId(1),
-        crate::extensions::PluginVirtualDocumentProposal {
-            request: request.request,
-            document: request.document,
-            cancellation_generation: request.cancellation_generation,
-            kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
-                crate::extensions::PluginVirtualDocumentFull {
-                    expected_revision: None, revision: 1, title: "Help".into(),
-                    language: "markdown".into(), text: "# Help".into(),
-                },
-            ),
-        },
-        true,
-        crate::editor::session::extensions::VirtualContext {
-            editor: &app.state, windows: &app.window_session, scratch: "scratch",
-        },
-    ).unwrap();
-    let accepted = app.window_session.accept_editor_transition(
-        candidate, publication.before(), publication.catalog(),
-    ).unwrap();
+    let (publication, candidate) = app
+        .extension
+        .prepare_virtual(
+            "demo",
+            PluginLoadId(1),
+            crate::extensions::PluginVirtualDocumentProposal {
+                request: request.request,
+                document: request.document,
+                cancellation_generation: request.cancellation_generation,
+                kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
+                    crate::extensions::PluginVirtualDocumentFull {
+                        expected_revision: None,
+                        revision: 1,
+                        title: "Help".into(),
+                        language: "markdown".into(),
+                        text: "# Help".into(),
+                    },
+                ),
+            },
+            true,
+            crate::editor::session::extensions::VirtualContext {
+                editor: &app.state,
+                windows: &app.window_session,
+                scratch: "scratch",
+            },
+        )
+        .unwrap();
+    let accepted = app
+        .window_session
+        .accept_editor_transition(candidate, publication.before(), publication.catalog())
+        .unwrap();
     *app.state = publication.finish(accepted).unwrap();
     app.reconcile_editor_windows();
 }
@@ -3415,43 +3735,56 @@ fn publish_virtual_fixture(
 fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::PluginExecute {
-        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
     });
     let open = || AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     };
     app.process_effect(open());
     fixture.take();
     app.process_effect(open());
     let execution = fixture.take();
     assert_eq!(execution.virtual_documents().len(), 1);
-    assert_eq!(execution.virtual_documents()[0].kind, crate::extensions::PluginVirtualDocumentRequestKind::Open);
+    assert_eq!(
+        execution.virtual_documents()[0].kind,
+        crate::extensions::PluginVirtualDocumentRequestKind::Open
+    );
 }
 
 #[test]
 fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     let execution = fixture.take();
     publish_virtual_fixture(&mut app, &execution.virtual_documents()[0]);
     app.process_effect(AppEffect::PluginExecute {
-        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
     });
     app.process_effect(AppEffect::VirtualDocumentRefresh);
     fixture.take();
     app.process_effect(AppEffect::VirtualDocumentRefresh);
     let execution = fixture.take();
     assert_eq!(execution.virtual_documents().len(), 1);
-    assert_eq!(execution.virtual_documents()[0].kind, crate::extensions::PluginVirtualDocumentRequestKind::Refresh);
+    assert_eq!(
+        execution.virtual_documents()[0].kind,
+        crate::extensions::PluginVirtualDocumentRequestKind::Refresh
+    );
 }
 
 #[test]
 fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     let execution = fixture.take();
     publish_virtual_fixture(&mut app, &execution.virtual_documents()[0]);
@@ -3463,13 +3796,17 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
     let execution = fixture.take();
     assert_eq!(execution.virtual_documents().len(), 1);
     let close = &execution.virtual_documents()[0];
-    assert_eq!(close.kind, crate::extensions::PluginVirtualDocumentRequestKind::CloseNotice);
+    assert_eq!(
+        close.kind,
+        crate::extensions::PluginVirtualDocumentRequestKind::CloseNotice
+    );
     assert_eq!(close.current_revision, Some(1));
     assert!(app.window_session.dashboard_visible());
     fixture.reply_virtual(
         &execution,
         crate::extensions::PluginVirtualDocumentProposal {
-            request: close.request, document: close.document,
+            request: close.request,
+            document: close.document,
             cancellation_generation: close.cancellation_generation,
             kind: crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged,
         },
@@ -3479,7 +3816,8 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
     assert!(app.window_session.dashboard_visible());
     assert!(app.ui.dashboard);
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     let reopened = fixture.take();
     assert_ne!(reopened.virtual_documents()[0].document, close.document);
@@ -3489,29 +3827,36 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
 fn virtual_error_returns_the_broker_error_and_releases_the_open_request() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     let execution = fixture.take();
     let request = &execution.virtual_documents()[0];
     let result = app.extension.prepare_virtual(
-        "demo", PluginLoadId(1),
+        "demo",
+        PluginLoadId(1),
         crate::extensions::PluginVirtualDocumentProposal {
-            request: request.request, document: request.document,
+            request: request.request,
+            document: request.document,
             cancellation_generation: request.cancellation_generation,
             kind: crate::extensions::PluginVirtualDocumentProposalKind::Error(
                 crate::extensions::PluginVirtualDocumentError::new(
-                    crate::extensions::PluginVirtualDocumentErrorCode::Internal, "provider failed",
+                    crate::extensions::PluginVirtualDocumentErrorCode::Internal,
+                    "provider failed",
                 ),
             ),
         },
         true,
         crate::editor::session::extensions::VirtualContext {
-            editor: &app.state, windows: &app.window_session, scratch: "scratch",
+            editor: &app.state,
+            windows: &app.window_session,
+            scratch: "scratch",
         },
     );
     assert!(matches!(result, Err(error) if error == "provider failed"));
     app.process_effect(AppEffect::VirtualDocumentOpen {
-        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+        source: "plugin.demo.virtual.help".into(),
+        key: "help".into(),
     });
     assert_eq!(fixture.take().virtual_documents().len(), 1);
 }

@@ -367,7 +367,11 @@ impl EditorState {
         *target = replacement;
         let text = &target.text;
         let len = text.len_bytes();
-        for (_, view) in self.views.iter_mut().filter(|(_, view)| view.buffer == buffer) {
+        for (_, view) in self
+            .views
+            .iter_mut()
+            .filter(|(_, view)| view.buffer == buffer)
+        {
             view.cursor = ByteOffset(view.cursor.get().min(len));
             while !text.is_char_boundary(view.cursor) {
                 view.cursor = ByteOffset(view.cursor.get().saturating_sub(1));
@@ -400,7 +404,11 @@ impl EditorState {
         buffer
     }
 
-    pub fn open_text(&mut self, text: TextBuffer, path: Option<PathBuf>) -> Result<(BufferId, ViewId), &'static str> {
+    pub fn open_text(
+        &mut self,
+        text: TextBuffer,
+        path: Option<PathBuf>,
+    ) -> Result<(BufferId, ViewId), &'static str> {
         if let Some(path) = path.as_ref()
             && let Some((buffer, _)) = self
                 .buffers
@@ -467,7 +475,9 @@ impl EditorState {
             self.buffers
                 .insert(Buffer::new(TextBuffer::from_text(""), None))
         });
-        let view = self.views.insert(self.buffers[buffer].restored_view(buffer));
+        let view = self
+            .views
+            .insert(self.buffers[buffer].restored_view(buffer));
         let old = std::mem::replace(&mut self.panes[pane].view, view);
         self.views.remove(old);
         self.active_view = Some(view);

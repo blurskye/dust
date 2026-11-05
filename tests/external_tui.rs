@@ -82,7 +82,10 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
                     id: event_id,
                     code: c,
                 } if event_id == id => code = Some(c),
-                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                PtyEvent::IoComplete {
+                    id: event_id,
+                    result,
+                } if event_id == id => {
                     result.expect("version probe I/O");
                     io_complete = true;
                 }
@@ -180,14 +183,20 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
                     }
                 }
                 PtyEvent::Resized {
-                    id: event_id, sequence: 0, columns: 120, rows: 40,
+                    id: event_id,
+                    sequence: 0,
+                    columns: 120,
+                    rows: 40,
                 } if event_id == id => {
                     assert!(requested_resize);
                     screen.resize(120, 40);
                     resized = true;
                 }
                 PtyEvent::Exited { id: event_id, code } if event_id == id => exit = Some(code),
-                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                PtyEvent::IoComplete {
+                    id: event_id,
+                    result,
+                } if event_id == id => {
                     result.expect("LazyGit I/O");
                     io_complete = true;
                 }
@@ -203,7 +212,10 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
         }
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(saw_alternate && resized && sent_quit, "LazyGit resize redraw timed out");
+    assert!(
+        saw_alternate && resized && sent_quit,
+        "LazyGit resize redraw timed out"
+    );
     assert!(io_complete, "LazyGit I/O timed out");
     assert_eq!(exit, Some(Some(0)));
     assert!(!screen.alternate_active());
@@ -275,7 +287,11 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
         .open(PtyRequest {
             program: ready.executable,
             argv0: None,
-            arguments: vec!["--exact".into(), "external_tui_fixture".into(), "--nocapture".into()],
+            arguments: vec![
+                "--exact".into(),
+                "external_tui_fixture".into(),
+                "--nocapture".into(),
+            ],
             cwd: ready.cwd,
             environment,
             columns: 40,
@@ -399,7 +415,10 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                     }
                 }
                 PtyEvent::Resized {
-                    id: event_id, sequence: 0, columns: 50, rows: 10,
+                    id: event_id,
+                    sequence: 0,
+                    columns: 50,
+                    rows: 10,
                 } if event_id == id => {
                     assert!(requested_resize);
                     resized = true;
@@ -411,7 +430,10 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                     sent = true;
                 }
                 PtyEvent::Exited { id: event_id, code } if event_id == id => exited = Some(code),
-                PtyEvent::IoComplete { id: event_id, result } if event_id == id => {
+                PtyEvent::IoComplete {
+                    id: event_id,
+                    result,
+                } if event_id == id => {
                     result.expect("fixture I/O");
                     io_complete = true;
                 }
@@ -431,8 +453,14 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     assert!(io_complete, "fixture I/O timed out");
     assert_eq!(exited, Some(Some(0)));
     let raw = String::from_utf8_lossy(&raw);
-    assert!(raw.contains("SIZE:50x10"), "child did not observe resize: {raw}");
-    assert!(raw.contains("INPUT_OK") && raw.contains("PRIMARY_OK"), "{raw}");
+    assert!(
+        raw.contains("SIZE:50x10"),
+        "child did not observe resize: {raw}"
+    );
+    assert!(
+        raw.contains("INPUT_OK") && raw.contains("PRIMARY_OK"),
+        "{raw}"
+    );
     assert!(!screen.alternate_active());
     assert!(!screen.bracketed_paste());
 }

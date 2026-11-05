@@ -53,7 +53,11 @@ impl InteractiveApplication {
 
     pub(super) fn list_pull_requests(&mut self) {
         let generation = self.pull_request_generation();
-        match self.pull_requests.jobs.list(self.state.workspace_root.clone(), generation) {
+        match self
+            .pull_requests
+            .jobs
+            .list(self.state.workspace_root.clone(), generation)
+        {
             Ok(()) => self.notify_message("loading pull requests…".into(), false),
             Err(error) => self.show_error(error),
         }
@@ -197,7 +201,11 @@ impl InteractiveApplication {
                     if self.input.prompt().is_none() {
                         self.open_prompt(PromptKind::ReviewComment, String::new());
                     } else {
-                        self.notify_message("review comment ready; open it again when finished with this prompt".into(), false);
+                        self.notify_message(
+                            "review comment ready; open it again when finished with this prompt"
+                                .into(),
+                            false,
+                        );
                     }
                 }
                 ForgeReply::Commented(Err(error)) => {
@@ -410,7 +418,10 @@ mod tests {
         app.pull_requests.comment_sending = true;
         app.begin_review_comment();
         assert!(app.input.prompt().is_none());
-        assert_eq!(app.pull_requests.comment_body.as_deref(), Some("sending draft"));
+        assert_eq!(
+            app.pull_requests.comment_body.as_deref(),
+            Some("sending draft")
+        );
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
             app.pull_requests.generation,
@@ -431,7 +442,10 @@ mod tests {
             path: app.state.workspace_root.join("file.txt"),
             line: 3,
             text: "source".into(),
-            head: crate::forge::PullRequestHead { number: 7, commit: "abc".into() },
+            head: crate::forge::PullRequestHead {
+                number: 7,
+                commit: "abc".into(),
+            },
         };
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
@@ -445,7 +459,15 @@ mod tests {
         app.close_prompt();
         app.begin_review_comment();
         assert_eq!(app.input.prompt().unwrap().kind, PromptKind::ReviewComment);
-        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().head.number, 7);
+        assert_eq!(
+            app.pull_requests
+                .comment_target
+                .as_ref()
+                .unwrap()
+                .head
+                .number,
+            7
+        );
         assert!(!app.pull_requests.comment_loading);
     }
 
@@ -455,8 +477,13 @@ mod tests {
         app.pull_requests.prepare(app.workspace.version());
         let path = app.state.workspace_root.join("file.txt");
         app.pull_requests.comment_target = Some(ReviewCommentTarget {
-            path: path.clone(), line: 3, text: "source".into(),
-            head: crate::forge::PullRequestHead { number: 7, commit: "abc".into() },
+            path: path.clone(),
+            line: 3,
+            text: "source".into(),
+            head: crate::forge::PullRequestHead {
+                number: 7,
+                commit: "abc".into(),
+            },
         });
         app.pull_requests.comment_body = Some("my draft".into());
         app.pull_requests.jobs.reply_for_test(
@@ -466,7 +493,10 @@ mod tests {
         );
         app.process_pull_request_events();
         assert_eq!(app.input.prompt().unwrap().input, "my draft");
-        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().path, path);
+        assert_eq!(
+            app.pull_requests.comment_target.as_ref().unwrap().path,
+            path
+        );
         assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().line, 3);
     }
     #[test]

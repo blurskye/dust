@@ -68,9 +68,15 @@ impl FixedClock {
                 Some(ticks.saturating_add(1))
             })
             .expect("clock tick update");
-        let nanos = self.step.as_nanos().saturating_mul(u128::from(ticks))
+        let nanos = self
+            .step
+            .as_nanos()
+            .saturating_mul(u128::from(ticks))
             .min(Duration::MAX.as_nanos());
-        Duration::new((nanos / 1_000_000_000) as u64, (nanos % 1_000_000_000) as u32)
+        Duration::new(
+            (nanos / 1_000_000_000) as u64,
+            (nanos % 1_000_000_000) as u32,
+        )
     }
 }
 impl Clock for FixedClock {

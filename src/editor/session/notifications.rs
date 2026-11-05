@@ -49,12 +49,16 @@ impl NoticeSession {
         if self
             .current
             .as_ref()
-            .is_none_or(|(previous_error, previous)| *previous_error != error || previous != &message)
+            .is_none_or(|(previous_error, previous)| {
+                *previous_error != error || previous != &message
+            })
         {
             if self
                 .history
                 .back()
-                .is_none_or(|(previous_error, previous)| *previous_error != error || previous != &message)
+                .is_none_or(|(previous_error, previous)| {
+                    *previous_error != error || previous != &message
+                })
             {
                 self.history.push_back((error, message.clone()));
                 if self.history.len() > 200 {
@@ -221,33 +225,61 @@ mod tests {
         let start = Instant::now();
         let mut notices = NoticeSession::new(false, path.clone(), start);
         let snapshot = LiveCrashSnapshot {
-            timestamp_ms: 0, roots: 1, buffers: 2, dirty_buffers: 1, jobs: 0, ptys: 0,
-            lsp_sessions: 0, dap_running: false, pending_effects: 0,
-            plugins_failed: 0, safe_mode: false,
+            timestamp_ms: 0,
+            roots: 1,
+            buffers: 2,
+            dirty_buffers: 1,
+            jobs: 0,
+            ptys: 0,
+            lsp_sessions: 0,
+            dap_running: false,
+            pending_effects: 0,
+            plugins_failed: 0,
+            safe_mode: false,
         };
         let mut tick = 0;
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            notices.submit_health(snapshot.clone(), start + Duration::from_secs(tick), std::time::UNIX_EPOCH);
+            notices.submit_health(
+                snapshot.clone(),
+                start + Duration::from_secs(tick),
+                std::time::UNIX_EPOCH,
+            );
             tick += 1;
-            if notices.logs.snapshot().iter().any(|record| record.event == "crash_snapshot_failed") {
+            if notices
+                .logs
+                .snapshot()
+                .iter()
+                .any(|record| record.event == "crash_snapshot_failed")
+            {
                 break;
             }
-            assert!(Instant::now() < deadline, "snapshot failure was not reported");
+            assert!(
+                Instant::now() < deadline,
+                "snapshot failure was not reported"
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(notices.written_crash_snapshot.is_none());
         std::fs::remove_dir(&path).unwrap();
         loop {
-            notices.submit_health(snapshot.clone(), start + Duration::from_secs(tick), std::time::UNIX_EPOCH);
+            notices.submit_health(
+                snapshot.clone(),
+                start + Duration::from_secs(tick),
+                std::time::UNIX_EPOCH,
+            );
             tick += 1;
             if notices.written_crash_snapshot.as_ref() == Some(&snapshot) {
                 break;
             }
-            assert!(Instant::now() < deadline, "unchanged health was not retried");
+            assert!(
+                Instant::now() < deadline,
+                "unchanged health was not retried"
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
-        let written: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(written["buffers"], 2);
         assert_eq!(written["dirty_buffers"], 1);
     }
@@ -293,9 +325,10 @@ mod tests {
             Duration::from_secs(1),
         );
         assert_eq!(notices.current(), Some((true, "offline")));
-        assert_eq!(notices.history().cloned().collect::<Vec<_>>(), vec![
-            (false, "offline".into()), (true, "offline".into()),
-        ]);
+        assert_eq!(
+            notices.history().cloned().collect::<Vec<_>>(),
+            vec![(false, "offline".into()), (true, "offline".into()),]
+        );
         assert!(!notices.tick(now + Duration::from_secs(1)));
         assert!(notices.tick(now + Duration::from_millis(1900)));
     }

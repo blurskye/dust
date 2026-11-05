@@ -215,7 +215,10 @@ impl TaskSession {
         self.linters
             .retire("task source configuration/workspace retired");
         for status in self.statuses.values_mut() {
-            if status == "queued" || status.starts_with("starting:") || status.starts_with("running:") {
+            if status == "queued"
+                || status.starts_with("starting:")
+                || status.starts_with("running:")
+            {
                 *status = "cancelled".into();
             }
         }
@@ -240,7 +243,10 @@ impl TaskSession {
             .execution_allowed()
             .map_err(|_| "tasks run only in a trusted workspace".to_owned())?;
         self.plan_checked(name, adapter, config, workspace, configuration)?;
-        self.plans.get_mut(name).expect("admitted task plan").formatter = formatter;
+        self.plans
+            .get_mut(name)
+            .expect("admitted task plan")
+            .formatter = formatter;
         Ok(())
     }
     fn plan_checked(
@@ -358,7 +364,11 @@ impl TaskSession {
         Ok((
             TaskStep {
                 requested: requested.into(),
-                formatter: if name == requested { plan.formatter.take() } else { None },
+                formatter: if name == requested {
+                    plan.formatter.take()
+                } else {
+                    None
+                },
                 name,
                 request: request.clone(),
                 task,
@@ -500,11 +510,18 @@ impl TaskSession {
             // A task runs with what the user's shell gave Dust, as a terminal does, and its own
             // settings win.
             environment: std::env::vars_os()
-                .filter_map(|(key, value)| {
-                    Some((key.into_string().ok()?, value))
-                })
-                .chain(step.task.environment.into_iter().map(|(key, value)| (key, value.into())))
-                .chain(step.formatter.into_iter().flat_map(|formatter| formatter.environment))
+                .filter_map(|(key, value)| Some((key.into_string().ok()?, value)))
+                .chain(
+                    step.task
+                        .environment
+                        .into_iter()
+                        .map(|(key, value)| (key, value.into())),
+                )
+                .chain(
+                    step.formatter
+                        .into_iter()
+                        .flat_map(|formatter| formatter.environment),
+                )
                 .collect(),
             root_revision: result.root_revision,
             stdin,
@@ -595,7 +612,9 @@ impl TaskSession {
         let mut found = pending || producer.is_some();
         let running = current.as_ref().is_some_and(|key| {
             self.running.values().any(|task| {
-                task.requested == name && !task.cancelled && Arc::ptr_eq(&key.epoch, &task.key.epoch)
+                task.requested == name
+                    && !task.cancelled
+                    && Arc::ptr_eq(&key.epoch, &task.key.epoch)
             })
         });
         if !found && !running {
@@ -988,9 +1007,12 @@ impl TaskSession {
             configuration,
         };
         self.keys.insert(name.into(), key.clone());
-        self.adapters.insert(name.into(), AdapterContext::Formatter {
-            source: FormatterSource::capture(editor, buffer).unwrap(),
-        });
+        self.adapters.insert(
+            name.into(),
+            AdapterContext::Formatter {
+                source: FormatterSource::capture(editor, buffer).unwrap(),
+            },
+        );
         let job = JobId(self.running.len() as u64 + 1000);
         self.running.insert(
             job,
@@ -1033,7 +1055,9 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("old"), None)
+            .unwrap();
         let mut tasks = TaskSession::new(&Config::default());
         tasks.fixture_formatter_result("format", buffer, b"formatted", &editor, &workspace, 1);
         tasks.events.push_front(JobEvent::Output {
@@ -1056,15 +1080,23 @@ mod tests {
         };
         assert_eq!(task.output, b"formatted");
     }
-    fn fixture() -> (tempfile::TempDir, EditorState, WorkspaceSession, TaskSession) {
+    fn fixture() -> (
+        tempfile::TempDir,
+        EditorState,
+        WorkspaceSession,
+        TaskSession,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let scope = WorkspaceState::new(
             WorkspaceId(1),
             [("root".into(), RootIdentity::capture(root.path()).unwrap())],
-        ).unwrap();
+        )
+        .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("text"), None)
+            .unwrap();
         let mut tasks = TaskSession::new(&Config::default());
         tasks.fixture_formatter_result("task", buffer, b"text", &editor, &workspace, 1);
         (root, editor, workspace, tasks)
@@ -1074,7 +1106,9 @@ mod tests {
         let (_root, _editor, workspace, mut tasks) = fixture();
         tasks.statuses.insert("task".into(), "running:task".into());
         tasks.statuses.insert("queued".into(), "queued".into());
-        tasks.statuses.insert("starting".into(), "starting:build".into());
+        tasks
+            .statuses
+            .insert("starting".into(), "starting:build".into());
         tasks.statuses.insert("finished".into(), "succeeded".into());
         tasks.configure(&Config::default());
         for name in ["task", "queued", "starting"] {
@@ -1082,7 +1116,14 @@ mod tests {
         }
         assert_eq!(tasks.statuses["finished"], "succeeded");
         assert!(tasks.next_update(&workspace, 1).is_none());
-        assert_eq!(tasks.task_items().iter().filter(|item| item.detail == "cancelled").count(), 3);
+        assert_eq!(
+            tasks
+                .task_items()
+                .iter()
+                .filter(|item| item.detail == "cancelled")
+                .count(),
+            3
+        );
     }
     #[test]
     fn stopping_a_finished_task_keeps_its_test_results_current() {
@@ -1093,14 +1134,25 @@ mod tests {
         tasks.stop("task").unwrap();
         let buffer = editor.buffers.iter().next().unwrap().0;
         tasks.fixture_formatter_result("task", buffer, b"new", &editor, &workspace, 1);
-        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
-        tasks.tests.insert("task".into(), vec![TestCaseResult {
-            name: "test".into(), status: "failed".into(), duration: String::new(),
-            message: "failure".into(), source: Some(crate::editor::session::search::MatcherSource {
-                path: root.path().join("source"), line: 0, column: 0,
-                encoding: crate::editor::text::PositionEncoding::Utf8,
-            }),
-        }]);
+        assert!(matches!(
+            tasks.next_update(&workspace, 1),
+            Some(TaskUpdate::Finished { .. })
+        ));
+        tasks.tests.insert(
+            "task".into(),
+            vec![TestCaseResult {
+                name: "test".into(),
+                status: "failed".into(),
+                duration: String::new(),
+                message: "failure".into(),
+                source: Some(crate::editor::session::search::MatcherSource {
+                    path: root.path().join("source"),
+                    line: 0,
+                    column: 0,
+                    encoding: crate::editor::text::PositionEncoding::Utf8,
+                }),
+            }],
+        );
         let key = tasks.test_items("task")[0].1.clone();
         assert!(tasks.stop("task").is_err());
         assert_eq!(tasks.test_items("task").len(), 1);
@@ -1118,8 +1170,14 @@ mod tests {
         let buffer = editor.buffers.iter().next().unwrap().0;
         tasks.fixture_formatter_result("task", buffer, b"new", &editor, &workspace, 1);
         tasks.statuses.insert("task".into(), "starting:task".into());
-        tasks.events.push_front(JobEvent::Failed { job: JobId(1000), message: "cancelled before launch".into() });
-        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Finished { .. })));
+        tasks.events.push_front(JobEvent::Failed {
+            job: JobId(1000),
+            message: "cancelled before launch".into(),
+        });
+        assert!(matches!(
+            tasks.next_update(&workspace, 1),
+            Some(TaskUpdate::Finished { .. })
+        ));
         assert_eq!(tasks.statuses["task"], "process exited");
     }
     #[test]
@@ -1128,10 +1186,15 @@ mod tests {
         tasks.running.get_mut(&JobId(1000)).unwrap().adapter = AdapterContext::Plain;
         tasks.running.get_mut(&JobId(1000)).unwrap().output.clear();
         tasks.events.push_front(JobEvent::Output {
-            job: JobId(1000), stream: JobStream::Stdout,
-            bytes: b"A\tB".to_vec(), truncated: false,
+            job: JobId(1000),
+            stream: JobStream::Stdout,
+            bytes: b"A\tB".to_vec(),
+            truncated: false,
         });
-        assert!(matches!(tasks.next_update(&workspace, 1), Some(TaskUpdate::Output)));
+        assert!(matches!(
+            tasks.next_update(&workspace, 1),
+            Some(TaskUpdate::Output)
+        ));
         assert_eq!(tasks.output_items("task")[0].label, "A    B");
         assert_eq!(tasks.running[&JobId(1000)].output, b"A\tB\n");
     }
@@ -1145,7 +1208,9 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("text"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("text"), None)
+            .unwrap();
         let mut tasks = TaskSession::new(&Config::default());
         tasks.fixture_formatter_result("format", buffer, b"text", &editor, &workspace, 1);
         assert!(tasks.stop("format").is_ok());
@@ -1163,7 +1228,9 @@ mod tests {
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         for bytes in [b"a\r\n".as_slice(), b"\xef\xbb\xbfa\r\n".as_slice()] {
             let mut editor = EditorState::new(root.path().into());
-            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(bytes).unwrap(), None).unwrap();
+            let (buffer, _) = editor
+                .open_text(TextBuffer::from_bytes(bytes).unwrap(), None)
+                .unwrap();
             let source = FormatterSource::capture(&editor, buffer).unwrap();
             let mut owner = TaskSession::new(&Config::default());
             let key = RunKey {
@@ -1202,10 +1269,12 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(
-            TextBuffer::from_text("abc"),
-            Some(root.path().join("source")),
-        ).unwrap();
+        let (buffer, _) = editor
+            .open_text(
+                TextBuffer::from_text("abc"),
+                Some(root.path().join("source")),
+            )
+            .unwrap();
         let mut config = Config::default();
         config.tasks.insert(
             "task".into(),
@@ -1277,7 +1346,9 @@ mod tests {
                 duration: String::new(),
                 message: String::new(),
                 source: Some(super::super::search::MatcherSource {
-                    path: root.path().join("source"), line: 0, column: 0,
+                    path: root.path().join("source"),
+                    line: 0,
+                    column: 0,
                     encoding: crate::editor::text::PositionEncoding::Utf8,
                 }),
             }],

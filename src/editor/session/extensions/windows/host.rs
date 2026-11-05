@@ -622,7 +622,8 @@ impl PluginWindowHost {
                         "handle is not private cells",
                     )
                 })?;
-                let candidate = apply_private_patch(declaration, private, &patch, self.ambiguous_wide)?;
+                let candidate =
+                    apply_private_patch(declaration, private, &patch, self.ambiguous_wide)?;
                 let revision = candidate.revision;
                 self.instances
                     .get_mut(&handle)

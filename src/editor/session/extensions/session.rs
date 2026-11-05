@@ -64,7 +64,8 @@ pub(super) struct ExtensionSession {
     virtual_editor: documents::VirtualDocumentEditorBridge,
     confirmations: confirmations::PluginConfirmations,
     active_picker: Option<u64>,
-    provider_sources: HashMap<u64, Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>>,
+    provider_sources:
+        HashMap<u64, Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>>,
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
@@ -238,9 +239,13 @@ impl ExtensionSession {
         reservation.enqueue(|| {
             request.ui_events = self.ui.remove(&(plugin.into(), load)).unwrap_or_default();
             request.host_events = self.events.deliver(plugin, load);
-            request.storage_results = self.results.remove(&(plugin.into(), load)).unwrap_or_default();
+            request.storage_results = self
+                .results
+                .remove(&(plugin.into(), load))
+                .unwrap_or_default();
             request.provider_requests =
-                self.providers.requests(plugin, load, &format!("plugin.{plugin}.{command}"));
+                self.providers
+                    .requests(plugin, load, &format!("plugin.{plugin}.{command}"));
             request.virtual_document_requests =
                 virtual_requests.deliver(plugin, load, &format!("plugin.{plugin}.{command}"));
             loan.submit(request)

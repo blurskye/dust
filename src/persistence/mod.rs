@@ -852,7 +852,10 @@ fn merge_shared_state(
     // Keep locally opened files first, then the disk's newest-first order. The
     // unchanged suffix may omit entries evicted by the local history limit.
     let mut previous_order = previous.recent_files.iter().rev();
-    let unchanged = state.recent_files.iter().rev()
+    let unchanged = state
+        .recent_files
+        .iter()
+        .rev()
         .take_while(|path| previous_order.by_ref().any(|old| old == *path))
         .count();
     let mut recent_files = state.recent_files[..state.recent_files.len() - unchanged].to_vec();
@@ -1094,7 +1097,12 @@ mod tests {
                 .env(CHILD, "1")
                 .output()
                 .unwrap();
-            assert!(result.status.success(), "{}{}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
             return;
         }
         let directory = tempdir().unwrap();
@@ -1104,10 +1112,15 @@ mod tests {
         write_state(&path, &state, None, &policy).unwrap();
         let original = fs::read(&path).unwrap();
         state.command_history.push("x".repeat(8192));
-        assert!(matches!(write_state(&path, &state, None, &policy), Err(PersistenceError::Io(_))));
+        assert!(matches!(
+            write_state(&path, &state, None, &policy),
+            Err(PersistenceError::Io(_))
+        ));
         assert_eq!(fs::read(&path).unwrap(), original);
-        let mut files = fs::read_dir(directory.path()).unwrap()
-            .map(|entry| entry.unwrap().file_name()).collect::<Vec<_>>();
+        let mut files = fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
         files.sort();
         assert_eq!(files, ["state.json", "state.json.lock"]);
     }

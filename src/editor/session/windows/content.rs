@@ -220,7 +220,12 @@ impl WindowSession {
                                     .and_then(|value| value.to_str())
                                     .map(str::to_ascii_lowercase)
                                     .and_then(|extension| {
-                                        config.ui.buffer_line.extension_icons.get(&extension).cloned()
+                                        config
+                                            .ui
+                                            .buffer_line
+                                            .extension_icons
+                                            .get(&extension)
+                                            .cloned()
                                     })
                                     .or_else(|| {
                                         let name = path.file_name()?.to_str()?;

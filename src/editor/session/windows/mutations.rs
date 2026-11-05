@@ -537,7 +537,10 @@ impl WindowSession {
         }
         if matches!(target, NativeSurfaceTarget::Terminal(_)) {
             match placement {
-                WindowPlacement::Docked { edge: DockEdge::Top | DockEdge::Bottom, size } => {
+                WindowPlacement::Docked {
+                    edge: DockEdge::Top | DockEdge::Bottom,
+                    size,
+                } => {
                     self.terminal_height = size;
                 }
                 WindowPlacement::Floating(rect) => self.terminal_height = rect.height,
@@ -553,8 +556,17 @@ impl WindowSession {
         terminal: WindowPlacement,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
-        let ids = self.core.native.ids_for_target(target).ok_or("native window is unavailable")?;
-        if self.core.graph.window(ids.window).is_some_and(|window| window.placement != WindowPlacement::Hidden) {
+        let ids = self
+            .core
+            .native
+            .ids_for_target(target)
+            .ok_or("native window is unavailable")?;
+        if self
+            .core
+            .graph
+            .window(ids.window)
+            .is_some_and(|window| window.placement != WindowPlacement::Hidden)
+        {
             return Ok(());
         }
         let mut candidate = self.candidate()?;
@@ -603,10 +615,14 @@ impl WindowSession {
             .swap_non_tiled_placements(a.window, b.window)
             .map_err(|e| e.to_string())?;
         if bp == WindowPlacement::Hidden && ap != WindowPlacement::Hidden {
-            core.native.place_target(first, ap).map_err(|e| e.to_string())?;
+            core.native
+                .place_target(first, ap)
+                .map_err(|e| e.to_string())?;
         }
         if ap == WindowPlacement::Hidden && bp != WindowPlacement::Hidden {
-            core.native.place_target(second, bp).map_err(|e| e.to_string())?;
+            core.native
+                .place_target(second, bp)
+                .map_err(|e| e.to_string())?;
         }
         core.native
             .place_target(first, bp)

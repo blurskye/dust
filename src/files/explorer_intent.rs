@@ -236,23 +236,28 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
     super::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
 }
 fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsError> {
-    use std::os::unix::fs::OpenOptionsExt;
     use rustix::fs::{Mode, OFlags, openat};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::path::Component;
 
-    let root = roots.iter()
+    let root = roots
+        .iter()
         .filter(|root| path.starts_with(&root.canonical_path))
         .max_by_key(|root| root.canonical_path.components().count())
         .ok_or_else(|| error(path, "file is outside the workspace roots"))?;
-    let directory = fs::OpenOptions::new().read(true)
+    let directory = fs::OpenOptions::new()
+        .read(true)
         .custom_flags(nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
         .open(&root.canonical_path)
         .map_err(|e| error(path, e.to_string()))?;
-    let metadata = directory.metadata().map_err(|e| error(path, e.to_string()))?;
+    let metadata = directory
+        .metadata()
+        .map_err(|e| error(path, e.to_string()))?;
     if root.filesystem_identity != Some(identity(&metadata)) {
         return Err(error(path, "workspace directory identity changed"));
     }
-    let relative = path.strip_prefix(&root.canonical_path)
+    let relative = path
+        .strip_prefix(&root.canonical_path)
         .map_err(|e| error(path, e.to_string()))?;
     let mut file = directory;
     let mut components = relative.components().peekable();
@@ -266,13 +271,13 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             OFlags::PATH | OFlags::DIRECTORY
         } else {
             OFlags::RDONLY | OFlags::NONBLOCK
-        } | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        file = fs::File::from(openat(&file, name, flags, Mode::empty())
-            .map_err(|e| error(path, e.to_string()))?);
+        } | OFlags::NOFOLLOW
+            | OFlags::CLOEXEC;
+        file = fs::File::from(
+            openat(&file, name, flags, Mode::empty()).map_err(|e| error(path, e.to_string()))?,
+        );
     }
-    super::vfs::read_open_file_with_ceiling(
-        file, path, super::recovery::DOCUMENT_BYTE_CEILING,
-    )
+    super::vfs::read_open_file_with_ceiling(file, path, super::recovery::DOCUMENT_BYTE_CEILING)
 }
 
 impl ExplorerIo {

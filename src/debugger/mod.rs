@@ -550,40 +550,55 @@ fn run_adapter(
     };
     let stderr_events = events.clone();
     let stderr = child.stderr.take().and_then(|mut stderr| {
-        thread::Builder::new().name("dust-dap-stderr".into()).spawn(move || {
-            #[cfg(unix)]
-            {
-                use nix::fcntl::{FcntlArg, OFlag, fcntl};
-                let Ok(flags) = fcntl(&stderr, FcntlArg::F_GETFL) else { return; };
-                if fcntl(&stderr, FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK)).is_err() {
-                    return;
-                }
-            }
-            let mut bytes = [0; 4096];
-            let mut remaining_after_cancel = 64_usize * 1024;
-            loop {
-                match stderr.read(&mut bytes) {
-                    Ok(0) => break,
-                    Ok(count) => {
-                        if let Ok(mut captured) = stderr_events.actor.stderr.lock() {
-                            captured.extend_from_slice(&bytes[..count]);
-                            let discard = captured.len().saturating_sub(4096);
-                            captured.drain(..discard);
-                        }
-                        if stderr_events.actor.cancel.load(Ordering::Acquire) {
-                            remaining_after_cancel = remaining_after_cancel.saturating_sub(count);
-                            if remaining_after_cancel == 0 { break; }
-                        }
+        thread::Builder::new()
+            .name("dust-dap-stderr".into())
+            .spawn(move || {
+                #[cfg(unix)]
+                {
+                    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+                    let Ok(flags) = fcntl(&stderr, FcntlArg::F_GETFL) else {
+                        return;
+                    };
+                    if fcntl(
+                        &stderr,
+                        FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK),
+                    )
+                    .is_err()
+                    {
+                        return;
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if stderr_events.actor.cancel.load(Ordering::Acquire) { break; }
-                        thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(_) => break,
                 }
-            }
-        }).ok()
+                let mut bytes = [0; 4096];
+                let mut remaining_after_cancel = 64_usize * 1024;
+                loop {
+                    match stderr.read(&mut bytes) {
+                        Ok(0) => break,
+                        Ok(count) => {
+                            if let Ok(mut captured) = stderr_events.actor.stderr.lock() {
+                                captured.extend_from_slice(&bytes[..count]);
+                                let discard = captured.len().saturating_sub(4096);
+                                captured.drain(..discard);
+                            }
+                            if stderr_events.actor.cancel.load(Ordering::Acquire) {
+                                remaining_after_cancel =
+                                    remaining_after_cancel.saturating_sub(count);
+                                if remaining_after_cancel == 0 {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if stderr_events.actor.cancel.load(Ordering::Acquire) {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .ok()
     });
     let mut sequence = 1_i64;
     send_request(
@@ -603,7 +618,8 @@ fn run_adapter(
     let mut launch_accepted = false;
     let mut initialized = false;
     let mut configuration_sent = false;
-    let mut initial_breakpoints = initial_breakpoints.into_iter()
+    let mut initial_breakpoints = initial_breakpoints
+        .into_iter()
         .map(|(path, rows)| (path, (0, rows)))
         .collect::<BTreeMap<_, _>>();
     let mut paused = false;
@@ -633,9 +649,13 @@ fn run_adapter(
                 break;
             };
             if control.generation != events.actor.generation.load(Ordering::Acquire)
-                && !matches!(control.value, DapControl::SetBreakpoints { .. }
-                    | DapControl::Disconnect { .. } | DapControl::ReverseResponse { .. }
-                    | DapControl::Stop)
+                && !matches!(
+                    control.value,
+                    DapControl::SetBreakpoints { .. }
+                        | DapControl::Disconnect { .. }
+                        | DapControl::ReverseResponse { .. }
+                        | DapControl::Stop
+                )
             {
                 continue;
             }
@@ -749,27 +769,47 @@ fn run_adapter(
         }
         // Keep startup writes incremental and wait for breakpoint acknowledgements before
         // configurationDone; adapters may process requests asynchronously.
-        if initialized && !configuration_sent
-            && !pending.values().any(|(command, _, _, _)| command == "setBreakpoints")
+        if initialized
+            && !configuration_sent
+            && !pending
+                .values()
+                .any(|(command, _, _, _)| command == "setBreakpoints")
             && pending.len() < 128
         {
             if let Some((path, (request_id, rows))) = initial_breakpoints.pop_first() {
-                let original = DapControl::SetBreakpoints { path: path.clone(), breakpoints: rows.clone() };
-                send_request(&mut stdin, sequence, "setBreakpoints",
-                    set_breakpoints_arguments(&path, rows, &path_maps));
-                pending.insert(sequence, ("setBreakpoints".into(), stop_generation, request_id, Some(original)));
+                let original = DapControl::SetBreakpoints {
+                    path: path.clone(),
+                    breakpoints: rows.clone(),
+                };
+                send_request(
+                    &mut stdin,
+                    sequence,
+                    "setBreakpoints",
+                    set_breakpoints_arguments(&path, rows, &path_maps),
+                );
+                pending.insert(
+                    sequence,
+                    (
+                        "setBreakpoints".into(),
+                        stop_generation,
+                        request_id,
+                        Some(original),
+                    ),
+                );
                 sequence += 1;
             } else {
                 if supports_configuration_done {
                     send_request(&mut stdin, sequence, "configurationDone", json!({}));
-                    pending.insert(sequence, ("configurationDone".into(), stop_generation, 0, None));
+                    pending.insert(
+                        sequence,
+                        ("configurationDone".into(), stop_generation, 0, None),
+                    );
                     sequence += 1;
                 }
                 configuration_sent = true;
             }
         }
-        if !launched && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT
-        {
+        if !launched && started.elapsed() >= ADAPTER_ANSWER_TIMEOUT {
             events.fail("it did not answer; check that it works from a terminal".into());
             break;
         }
@@ -830,7 +870,11 @@ fn run_adapter(
                                     request_id,
                                     request: original.clone(),
                                     message: format!("DAP {command} request rejected: {detail}"),
-                                    command: if matches!(original, Some(DapControl::Pause)) { "pause".into() } else { command },
+                                    command: if matches!(original, Some(DapControl::Pause)) {
+                                        "pause".into()
+                                    } else {
+                                        command
+                                    },
                                 })
                                 .ok();
                             continue;
@@ -852,7 +896,9 @@ fn run_adapter(
                             // Do not retire stopped data until the adapter accepts the resume.
                             // A preceding continued event has already retired it.
                             if paused {
-                                let Some(next) = stop_generation.checked_add(1) else { break; };
+                                let Some(next) = stop_generation.checked_add(1) else {
+                                    break;
+                                };
                                 stop_generation = next;
                                 events.actor.generation.store(next, Ordering::Release);
                                 pending.retain(|_, (command, _, _, _)| is_session_request(command));
@@ -868,7 +914,9 @@ fn run_adapter(
                         }
                         if let Some(DapControl::SetBreakpoints { path, breakpoints }) =
                             original.as_ref()
-                            && applied_breakpoints.get(path).is_none_or(|applied| request_seq > *applied)
+                            && applied_breakpoints
+                                .get(path)
+                                .is_none_or(|applied| request_seq > *applied)
                         {
                             applied_breakpoints.insert(path.clone(), request_seq);
                             breakpoint_ids.retain(|_, (old, _)| old != path);
@@ -884,9 +932,16 @@ fn run_adapter(
                             }
                         }
                         if command == "threads" {
-                            let threads = message.pointer("/body/threads").and_then(Value::as_array);
-                            thread_id = thread_id.filter(|id| threads.is_some_and(|rows|
-                                rows.iter().any(|row| row.get("id").and_then(Value::as_i64) == Some(*id))))
+                            let threads =
+                                message.pointer("/body/threads").and_then(Value::as_array);
+                            thread_id = thread_id
+                                .filter(|id| {
+                                    threads.is_some_and(|rows| {
+                                        rows.iter().any(|row| {
+                                            row.get("id").and_then(Value::as_i64) == Some(*id)
+                                        })
+                                    })
+                                })
                                 .or_else(|| threads?.first()?.get("id")?.as_i64());
                             if matches!(original, Some(DapControl::Pause)) {
                                 if let Some(thread_id) = thread_id {
@@ -898,7 +953,12 @@ fn run_adapter(
                                     );
                                     pending.insert(
                                         sequence,
-                                        ("pause".into(), stop_generation, request_id, original.clone()),
+                                        (
+                                            "pause".into(),
+                                            stop_generation,
+                                            request_id,
+                                            original.clone(),
+                                        ),
                                     );
                                     sequence += 1;
                                 } else {
@@ -1043,7 +1103,10 @@ fn run_adapter(
                                 .ok();
                         }
                         "continued" => {
-                            if message.pointer("/body/allThreadsContinued").and_then(Value::as_bool) == Some(false)
+                            if message
+                                .pointer("/body/allThreadsContinued")
+                                .and_then(Value::as_bool)
+                                == Some(false)
                                 && let (Some(stopped), Some(resumed)) = (
                                     thread_id,
                                     message.pointer("/body/threadId").and_then(Value::as_i64),
@@ -1147,7 +1210,11 @@ fn run_adapter(
                 // retain stdout, so an exited adapter with an idle reader must also finish.
                 if error == mpsc::RecvTimeoutError::Disconnected || adapter_has_exited(child) {
                     if debuggee_exited {
-                        events.send(DapEvent::Terminated { adapter: adapter.clone() }).ok();
+                        events
+                            .send(DapEvent::Terminated {
+                                adapter: adapter.clone(),
+                            })
+                            .ok();
                     }
                     stopping = true;
                 }
@@ -1273,13 +1340,17 @@ fn rejection_detail(response: &Value) -> String {
                 .pointer("/body/error/variables")
                 .and_then(Value::as_object);
             // Interpret only the original template, never placeholders in variable values.
-            let filled: String = format.split_inclusive('}')
+            let filled: String = format
+                .split_inclusive('}')
                 .flat_map(|part| {
-                    let replacement = part.strip_suffix('}')
+                    let replacement = part
+                        .strip_suffix('}')
                         .and_then(|part| part.rsplit_once('{'))
-                        .and_then(|(prefix, name)| variables?.get(name).map(|value| {
-                            (prefix, value.as_str().unwrap_or_default())
-                        }));
+                        .and_then(|(prefix, name)| {
+                            variables?
+                                .get(name)
+                                .map(|value| (prefix, value.as_str().unwrap_or_default()))
+                        });
                     let (prefix, value) = replacement.unwrap_or(("", part));
                     prefix.chars().chain(value.chars())
                 })
@@ -1438,7 +1509,11 @@ fn normalize_response(
 }
 fn terminate_adapter(child: &mut std::process::Child, clean: bool) {
     // Share the shutdown grace between closing stdin and escalating group signals.
-    let grace = if clean { ADAPTER_EXIT_GRACE } else { ADAPTER_EXIT_GRACE / 2 };
+    let grace = if clean {
+        ADAPTER_EXIT_GRACE
+    } else {
+        ADAPTER_EXIT_GRACE / 2
+    };
     if adapter_exited_within(child, grace) && clean {
         let _ = child.wait();
         return;
@@ -1507,7 +1582,10 @@ mod tests {
             sanitize_output(&"x".repeat(8000)),
             format!("{}\n[output truncated]\n", "x".repeat(4096))
         );
-        assert_eq!(sanitize_output(&"é".repeat(4097)).chars().count(), 4096 + "\n[output truncated]\n".len());
+        assert_eq!(
+            sanitize_output(&"é".repeat(4097)).chars().count(),
+            4096 + "\n[output truncated]\n".len()
+        );
     }
 
     #[test]
@@ -1516,9 +1594,11 @@ mod tests {
             assert!(normalize_response("evaluate", &body, &BTreeMap::new()).is_none());
         }
         for result in ["", "answer"] {
-            let Some(DapResponse::Evaluate(value)) = normalize_response(
-                "evaluate", &json!({"result":result}), &BTreeMap::new(),
-            ) else { panic!("valid evaluation rejected"); };
+            let Some(DapResponse::Evaluate(value)) =
+                normalize_response("evaluate", &json!({"result":result}), &BTreeMap::new())
+            else {
+                panic!("valid evaluation rejected");
+            };
             assert_eq!(value.value, result);
         }
     }
@@ -1526,9 +1606,12 @@ mod tests {
     #[test]
     fn source_content_preserves_control_characters_and_locations() {
         let content = "const text = 'a\u{1b}\0b';\n";
-        let Some(DapResponse::Source { content: actual, .. }) = normalize_response(
-            "source", &json!({"content":content}), &BTreeMap::new(),
-        ) else { panic!("valid source rejected"); };
+        let Some(DapResponse::Source {
+            content: actual, ..
+        }) = normalize_response("source", &json!({"content":content}), &BTreeMap::new())
+        else {
+            panic!("valid source rejected");
+        };
         assert_eq!(actual, content);
     }
 }
@@ -1702,11 +1785,14 @@ mod breakpoint_state_tests {
             &[true, false, false],
             &DapResponse::Breakpoints(vec![(true, None, None), (true, Some(31), None)]),
         );
-        assert_eq!(states, vec![
-            DapBreakpointState::Disabled,
-            DapBreakpointState::Verified { line: 20 },
-            DapBreakpointState::Verified { line: 31 },
-        ]);
+        assert_eq!(
+            states,
+            vec![
+                DapBreakpointState::Disabled,
+                DapBreakpointState::Verified { line: 20 },
+                DapBreakpointState::Verified { line: 31 },
+            ]
+        );
     }
 
     #[test]

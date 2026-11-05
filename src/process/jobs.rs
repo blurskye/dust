@@ -293,7 +293,11 @@ impl JobEvent {
     }
 }
 fn check_request(request: &JobRequest) -> Result<(), JobError> {
-    let argument_bytes = request.arguments.iter().map(|argument| argument.len()).sum::<usize>();
+    let argument_bytes = request
+        .arguments
+        .iter()
+        .map(|argument| argument.len())
+        .sum::<usize>();
     let environment_bytes = request
         .environment
         .iter()
@@ -421,9 +425,21 @@ impl JobEngine {
         // Configure all pipes before starting I/O threads, so setup failure still owns the child.
         let pipes = (|| -> io::Result<_> {
             Ok((
-                child.stdin.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
-                child.stdout.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
-                child.stderr.take().map(|pipe| super::CancellablePipe::new(pipe, cancel.clone())).transpose()?,
+                child
+                    .stdin
+                    .take()
+                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .transpose()?,
+                child
+                    .stdout
+                    .take()
+                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .transpose()?,
+                child
+                    .stderr
+                    .take()
+                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .transpose()?,
             ))
         })();
         let (stdin, stdout, stderr) = match pipes {
@@ -437,46 +453,58 @@ impl JobEngine {
         let readers = Arc::new(AtomicUsize::new(0));
         let io_failed = Arc::new(AtomicBool::new(false));
         let setup_io = (|| -> io::Result<()> {
-        if let Some(bytes) = request.stdin
-            && let Some(mut stdin) = stdin
-        {
-            let lease = slot.clone();
-            let pending = readers.clone();
-            let failed = io_failed.clone();
-            let cancelled = cancel.clone();
-            pending.fetch_add(1, Ordering::AcqRel);
-            thread::Builder::new().name("dust-job-stdin".into()).spawn(move || {
-                let _lease = lease;
-                if stdin.write_all(&bytes).is_err() && !cancelled.load(Ordering::Acquire) {
-                    failed.store(true, Ordering::Release);
-                }
-                pending.fetch_sub(1, Ordering::AcqRel);
-            })?;
-        }
-        let total = Arc::new(AtomicUsize::new(0));
-        if let Some(stdout) = stdout {
-            stream_reader(
-                id,
-                JobStream::Stdout,
-                stdout,
-                self.sender.clone(),
-                total.clone(),
-                request.policy.clone(),
-                (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
-            )?;
-        }
-        if let Some(stderr) = stderr {
-            stream_reader(
-                id,
-                JobStream::Stderr,
-                stderr,
-                self.sender.clone(),
-                total,
-                request.policy.clone(),
-                (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
-            )?;
-        }
-        Ok(())
+            if let Some(bytes) = request.stdin
+                && let Some(mut stdin) = stdin
+            {
+                let lease = slot.clone();
+                let pending = readers.clone();
+                let failed = io_failed.clone();
+                let cancelled = cancel.clone();
+                pending.fetch_add(1, Ordering::AcqRel);
+                thread::Builder::new()
+                    .name("dust-job-stdin".into())
+                    .spawn(move || {
+                        let _lease = lease;
+                        if stdin.write_all(&bytes).is_err() && !cancelled.load(Ordering::Acquire) {
+                            failed.store(true, Ordering::Release);
+                        }
+                        pending.fetch_sub(1, Ordering::AcqRel);
+                    })?;
+            }
+            let total = Arc::new(AtomicUsize::new(0));
+            if let Some(stdout) = stdout {
+                stream_reader(
+                    id,
+                    JobStream::Stdout,
+                    stdout,
+                    self.sender.clone(),
+                    total.clone(),
+                    request.policy.clone(),
+                    (
+                        readers.clone(),
+                        io_failed.clone(),
+                        slot.clone(),
+                        cancel.clone(),
+                    ),
+                )?;
+            }
+            if let Some(stderr) = stderr {
+                stream_reader(
+                    id,
+                    JobStream::Stderr,
+                    stderr,
+                    self.sender.clone(),
+                    total,
+                    request.policy.clone(),
+                    (
+                        readers.clone(),
+                        io_failed.clone(),
+                        slot.clone(),
+                        cancel.clone(),
+                    ),
+                )?;
+            }
+            Ok(())
         })();
         if let Err(error) = setup_io {
             cancel.store(true, Ordering::Release);
@@ -605,90 +633,103 @@ fn stream_reader(
     sender: SyncSender<JobEvent>,
     total: Arc<AtomicUsize>,
     policy: JobPolicy,
-    completion: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<JobSlot>, Arc<AtomicBool>),
+    completion: (
+        Arc<AtomicUsize>,
+        Arc<AtomicBool>,
+        Arc<JobSlot>,
+        Arc<AtomicBool>,
+    ),
 ) -> io::Result<()> {
     let (readers, failed, slot, cancel) = completion;
     readers.fetch_add(1, Ordering::AcqRel);
-    thread::Builder::new().name("dust-job-output".into()).spawn(move || {
-        struct End(Arc<AtomicUsize>);
-        impl Drop for End {
-            fn drop(&mut self) {
-                self.0.fetch_sub(1, Ordering::AcqRel);
+    thread::Builder::new()
+        .name("dust-job-output".into())
+        .spawn(move || {
+            struct End(Arc<AtomicUsize>);
+            impl Drop for End {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::AcqRel);
+                }
             }
-        }
-        let _end = End(readers);
-        let _slot = slot;
-        let mut reader = BufReader::new(reader);
-        loop {
-            if cancel.load(Ordering::Acquire) {
-                break;
-            }
-            let mut bytes = Vec::new();
-            let read = match reader
-                .by_ref()
-                .take(policy.maximum_line_bytes.saturating_add(1) as u64)
-                .read_until(b'\n', &mut bytes)
-            {
-                Ok(read) => read,
-                Err(_) => {
-                    if !cancel.load(Ordering::Acquire) {
-                        failed.store(true, Ordering::Release);
-                    }
+            let _end = End(readers);
+            let _slot = slot;
+            let mut reader = BufReader::new(reader);
+            loop {
+                if cancel.load(Ordering::Acquire) {
                     break;
                 }
-            };
-            if read == 0 {
-                break;
-            }
-            let line_truncated = bytes.len() > policy.maximum_line_bytes;
-            let discard_tail = line_truncated && !bytes.ends_with(b"\n");
-            bytes.truncate(policy.maximum_line_bytes);
-            let allowed = reserve_output(&total, policy.maximum_output_bytes, bytes.len());
-            bytes.truncate(allowed);
-            let truncated = line_truncated || bytes.len() < read || allowed < read;
-            if !bytes.is_empty() || truncated {
-                let mut event = JobEvent::Output { job: id, stream, bytes, truncated };
-                loop {
-                    if cancel.load(Ordering::Acquire) {
-                        return;
-                    }
-                    match sender.try_send(event) {
-                        Ok(()) => break,
-                        Err(mpsc::TrySendError::Disconnected(_)) => return,
-                        Err(mpsc::TrySendError::Full(value)) => {
-                            event = value;
-                            thread::sleep(Duration::from_millis(2));
+                let mut bytes = Vec::new();
+                let read = match reader
+                    .by_ref()
+                    .take(policy.maximum_line_bytes.saturating_add(1) as u64)
+                    .read_until(b'\n', &mut bytes)
+                {
+                    Ok(read) => read,
+                    Err(_) => {
+                        if !cancel.load(Ordering::Acquire) {
+                            failed.store(true, Ordering::Release);
                         }
+                        break;
                     }
+                };
+                if read == 0 {
+                    break;
                 }
-            }
-            if truncated && allowed == 0 {
-                break;
-            }
-            if discard_tail {
-                // Discard the rest of this physical line without allocating for it.
-                loop {
-                    match reader.fill_buf() {
-                        Ok([]) => break,
-                        Ok(tail) => {
-                            let newline = tail.iter().position(|byte| *byte == b'\n');
-                            let consumed = newline.map_or(tail.len(), |at| at + 1);
-                            reader.consume(consumed);
-                            if newline.is_some() || cancel.load(Ordering::Acquire) {
-                                break;
-                            }
-                        }
-                        Err(_) => {
-                            if !cancel.load(Ordering::Acquire) {
-                                failed.store(true, Ordering::Release);
-                            }
+                let line_truncated = bytes.len() > policy.maximum_line_bytes;
+                let discard_tail = line_truncated && !bytes.ends_with(b"\n");
+                bytes.truncate(policy.maximum_line_bytes);
+                let allowed = reserve_output(&total, policy.maximum_output_bytes, bytes.len());
+                bytes.truncate(allowed);
+                let truncated = line_truncated || bytes.len() < read || allowed < read;
+                if !bytes.is_empty() || truncated {
+                    let mut event = JobEvent::Output {
+                        job: id,
+                        stream,
+                        bytes,
+                        truncated,
+                    };
+                    loop {
+                        if cancel.load(Ordering::Acquire) {
                             return;
                         }
+                        match sender.try_send(event) {
+                            Ok(()) => break,
+                            Err(mpsc::TrySendError::Disconnected(_)) => return,
+                            Err(mpsc::TrySendError::Full(value)) => {
+                                event = value;
+                                thread::sleep(Duration::from_millis(2));
+                            }
+                        }
+                    }
+                }
+                if truncated && allowed == 0 {
+                    break;
+                }
+                if discard_tail {
+                    // Discard the rest of this physical line without allocating for it.
+                    loop {
+                        match reader.fill_buf() {
+                            Ok([]) => break,
+                            Ok(tail) => {
+                                let newline = tail.iter().position(|byte| *byte == b'\n');
+                                let consumed = newline.map_or(tail.len(), |at| at + 1);
+                                reader.consume(consumed);
+                                if newline.is_some() || cancel.load(Ordering::Acquire) {
+                                    break;
+                                }
+                            }
+                            Err(_) => {
+                                if !cancel.load(Ordering::Acquire) {
+                                    failed.store(true, Ordering::Release);
+                                }
+                                return;
+                            }
+                        }
                     }
                 }
             }
-        }
-    }).map(|_| ())
+        })
+        .map(|_| ())
 }
 fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usize {
     let mut current = total.load(Ordering::Relaxed);
@@ -714,7 +755,9 @@ fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
         match waitid(
             Id::Pid(nix::unistd::Pid::from_raw(child.id() as i32)),
             WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
-        ).map_err(io::Error::from)? {
+        )
+        .map_err(io::Error::from)?
+        {
             WaitStatus::Exited(_, code) => Ok(Some(Some(code))),
             WaitStatus::Signaled(..) => Ok(Some(None)),
             _ => Ok(None),
@@ -722,7 +765,9 @@ fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
     }
     #[cfg(not(unix))]
     {
-        child.try_wait().map(|status| status.map(|status| status.code()))
+        child
+            .try_wait()
+            .map(|status| status.map(|status| status.code()))
     }
 }
 
@@ -790,7 +835,11 @@ mod tests {
             for event in jobs.poll() {
                 match event {
                     JobEvent::Output { bytes: output, .. } => bytes.extend(output),
-                    JobEvent::Exited { job, code, timed_out } => {
+                    JobEvent::Exited {
+                        job,
+                        code,
+                        timed_out,
+                    } => {
                         assert_eq!(job, id);
                         assert_eq!(code, Some(0));
                         assert!(!timed_out);
@@ -800,7 +849,10 @@ mod tests {
                     JobEvent::Started { .. } => {}
                 }
             }
-            assert!(Instant::now() < deadline, "native argument job did not finish");
+            assert!(
+                Instant::now() < deadline,
+                "native argument job did not finish"
+            );
             thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(bytes, b"path-\xffpath-\xff");
@@ -961,7 +1013,10 @@ mod tests {
         let mut exited = false;
         while !engine.jobs.is_empty() {
             for event in engine.poll() {
-                if let JobEvent::Exited { code, timed_out, .. } = event {
+                if let JobEvent::Exited {
+                    code, timed_out, ..
+                } = event
+                {
                     assert_eq!(code, Some(0));
                     assert!(!timed_out);
                     exited = true;
@@ -984,32 +1039,53 @@ mod tests {
         let mut lines = Vec::new();
         while !engine.jobs.is_empty() {
             for event in engine.poll() {
-                if let JobEvent::Output { bytes, truncated, .. } = event {
+                if let JobEvent::Output {
+                    bytes, truncated, ..
+                } = event
+                {
                     lines.push((bytes, truncated));
                 }
             }
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
-        assert_eq!(lines, vec![(b"1234".to_vec(), true), (b"ok\n".to_vec(), false), (b"abcd".to_vec(), true)]);
+        assert_eq!(
+            lines,
+            vec![
+                (b"1234".to_vec(), true),
+                (b"ok\n".to_vec(), false),
+                (b"abcd".to_vec(), true)
+            ]
+        );
     }
 
     #[test]
     fn job_cancellation_releases_escaped_descendants_pipe_readers() {
         struct Escaped(u32);
         impl Drop for Escaped {
-            fn drop(&mut self) { super::super::terminate_process_group(self.0); }
+            fn drop(&mut self) {
+                super::super::terminate_process_group(self.0);
+            }
         }
         let root = tempfile::tempdir().unwrap();
-        let (queued, residents) = submission(root.path(), "exec python3 -c 'import os,time\nif os.fork() == 0:\n os.setsid()\n print(os.getpid(), flush=True)\n time.sleep(30)\n'");
+        let (queued, residents) = submission(
+            root.path(),
+            "exec python3 -c 'import os,time\nif os.fork() == 0:\n os.setsid()\n print(os.getpid(), flush=True)\n time.sleep(30)\n'",
+        );
         let cancel = queued.cancel.clone();
         let mut engine = JobEngine::new(1);
         engine.start(queued).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let escaped = loop {
             let output = engine.poll().into_iter().find_map(|event| match event {
-                JobEvent::Output { stream: JobStream::Stdout, bytes, .. } => Some(bytes),
-                JobEvent::Output { bytes, .. } => panic!("fixture stderr: {}", String::from_utf8_lossy(&bytes)),
+                JobEvent::Output {
+                    stream: JobStream::Stdout,
+                    bytes,
+                    ..
+                } => Some(bytes),
+                JobEvent::Output { bytes, .. } => {
+                    panic!("fixture stderr: {}", String::from_utf8_lossy(&bytes))
+                }
                 _ => None,
             });
             if let Some(bytes) = output {
@@ -1021,7 +1097,10 @@ mod tests {
         cancel.store(true, Ordering::Release);
         while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
             engine.poll();
-            assert!(Instant::now() < deadline, "escaped descendant retained job readers");
+            assert!(
+                Instant::now() < deadline,
+                "escaped descendant retained job readers"
+            );
             thread::sleep(Duration::from_millis(2));
         }
         drop(escaped);
@@ -1034,12 +1113,21 @@ mod tests {
         let cancel = queued.cancel.clone();
         let mut engine = JobEngine::new(1);
         engine.start(queued).unwrap();
-        assert!(matches!(engine.receiver.recv_timeout(Duration::from_secs(5)).unwrap(), JobEvent::Output { .. }));
+        assert!(matches!(
+            engine
+                .receiver
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+            JobEvent::Output { .. }
+        ));
         cancel.store(true, Ordering::Release);
         engine.expire();
         let deadline = Instant::now() + Duration::from_secs(5);
         while engine.jobs[&JobId(1)].readers.load(Ordering::Acquire) != 0 {
-            assert!(Instant::now() < deadline, "output delivery ignored cancellation");
+            assert!(
+                Instant::now() < deadline,
+                "output delivery ignored cancellation"
+            );
             thread::sleep(Duration::from_millis(2));
         }
     }
@@ -1062,13 +1150,19 @@ mod tests {
         let mut exited = false;
         while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
             for event in engine.poll() {
-                if let JobEvent::Exited { code, timed_out, .. } = event {
+                if let JobEvent::Exited {
+                    code, timed_out, ..
+                } = event
+                {
                     assert_eq!(code, Some(0));
                     assert!(!timed_out);
                     exited = true;
                 }
             }
-            assert!(Instant::now() < deadline, "descendant pipes outlived the job deadline");
+            assert!(
+                Instant::now() < deadline,
+                "descendant pipes outlived the job deadline"
+            );
             thread::sleep(Duration::from_millis(2));
         }
         assert!(exited);
@@ -1099,7 +1193,10 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         use nix::sys::wait::{Id, WaitPidFlag, waitid};
-        assert_eq!(waitid(Id::Pid(pid), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG), Err(nix::errno::Errno::ECHILD));
+        assert_eq!(
+            waitid(Id::Pid(pid), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG),
+            Err(nix::errno::Errno::ECHILD)
+        );
     }
 
     #[test]

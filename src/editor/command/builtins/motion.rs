@@ -88,7 +88,9 @@ pub(super) fn motion_target(
             target = first_nonblank(text, text.byte_to_line(cursor).map_err(failed)?)?;
         }
         "line_end" => {
-            let line = text.byte_to_line(cursor).map_err(failed)?
+            let line = text
+                .byte_to_line(cursor)
+                .map_err(failed)?
                 .saturating_add(count.saturating_sub(1))
                 .min(text.visible_lines().saturating_sub(1));
             let end = line_content_end(text, line)?;
@@ -112,8 +114,13 @@ pub(super) fn motion_target(
             for index in 0..count {
                 let previous = target;
                 if motion.ends_with("_end") && (index > 0 || step(&source, target) == target) {
-                    target = ByteOffset(target.get() + source[target.get()..]
-                        .graphemes(true).next().map_or(0, str::len));
+                    target = ByteOffset(
+                        target.get()
+                            + source[target.get()..]
+                                .graphemes(true)
+                                .next()
+                                .map_or(0, str::len),
+                    );
                 }
                 target = step(&source, target);
                 if target == previous {
@@ -125,9 +132,15 @@ pub(super) fn motion_target(
         "document_start" => target = first_nonblank(text, 0)?,
         "percentage" => {
             if !(1..=100).contains(&count) {
-                return Err(CommandError::InvalidArguments("percentage must be between 1 and 100".into()));
+                return Err(CommandError::InvalidArguments(
+                    "percentage must be between 1 and 100".into(),
+                ));
             }
-            let line = text.visible_lines().saturating_mul(count).div_ceil(100).saturating_sub(1);
+            let line = text
+                .visible_lines()
+                .saturating_mul(count)
+                .div_ceil(100)
+                .saturating_sub(1);
             target = first_nonblank(text, line)?;
         }
         "line_number" => {
@@ -230,7 +243,10 @@ pub(super) fn repeat_visual_ranges(
             let first_line = text.byte_to_line(view.cursor).map_err(failed)?;
             if first_line.saturating_add(height) > text.visible_lines() {
                 return Ok((
-                    vec![ByteRange::new(view.cursor, ByteOffset(text.len_bytes())).map_err(failed)?],
+                    vec![
+                        ByteRange::new(view.cursor, ByteOffset(text.len_bytes()))
+                            .map_err(failed)?,
+                    ],
                     RegisterShape::Character,
                 ));
             }
@@ -243,7 +259,9 @@ pub(super) fn repeat_visual_ranges(
             let line = text.line(last_line).map_err(failed)?;
             let line_start = text.line_to_byte(last_line).map_err(failed)?;
             let relative = start.get() - line_start.get();
-            let extent = line[relative..].grapheme_indices(true).nth(width)
+            let extent = line[relative..]
+                .grapheme_indices(true)
+                .nth(width)
                 .map_or(line.len() - relative, |(index, _)| index);
             let end = ByteOffset(start.get() + extent);
             Ok((
@@ -281,7 +299,9 @@ pub(super) fn repeat_visual_ranges(
             );
             let last_column = first_column.saturating_add(width.saturating_sub(1));
             let mut ranges = Vec::new();
-            for line_index in first_line..first_line.saturating_add(height).min(text.visible_lines()) {
+            for line_index in
+                first_line..first_line.saturating_add(height).min(text.visible_lines())
+            {
                 let start = text.line_to_byte(line_index).map_err(failed)?;
                 let line = text.line(line_index).map_err(failed)?;
                 let content = line.strip_suffix('\n').unwrap_or(&line);
@@ -467,14 +487,30 @@ pub(super) fn operator_range(
         let target_line = text.byte_to_line(target).map_err(failed)?;
         let cursor_line = text.byte_to_line(cursor).map_err(failed)?;
         let line_start = text.line_to_byte(target_line).map_err(failed)?;
-        let prefix = text.slice(ByteRange::new(line_start, target).map_err(failed)?).map_err(failed)?;
+        let prefix = text
+            .slice(ByteRange::new(line_start, target).map_err(failed)?)
+            .map_err(failed)?;
         if target_line > cursor_line && prefix.trim().is_empty() {
-            let last_step = motion_target(text, cursor, motion, count.saturating_sub(1), character, policy, None)?;
+            let last_step = motion_target(
+                text,
+                cursor,
+                motion,
+                count.saturating_sub(1),
+                character,
+                policy,
+                None,
+            )?;
             let last_line = text.byte_to_line(last_step).map_err(failed)?;
             let end = line_content_end(text, last_line)?;
-            if last_step < target && last_line > cursor_line && cursor <= first_nonblank(text, cursor_line)? {
-                return ByteRange::new(text.line_to_byte(cursor_line).map_err(failed)?,
-                    text.line_to_byte(last_line + 1).map_err(failed)?).map_err(failed);
+            if last_step < target
+                && last_line > cursor_line
+                && cursor <= first_nonblank(text, cursor_line)?
+            {
+                return ByteRange::new(
+                    text.line_to_byte(cursor_line).map_err(failed)?,
+                    text.line_to_byte(last_line + 1).map_err(failed)?,
+                )
+                .map_err(failed);
             }
             if last_step < target && (last_line > cursor_line || last_step < end) {
                 end
@@ -504,7 +540,9 @@ pub(super) fn operator_range(
             | "till_forward_again"
             | "till_backward"
             | "till_backward_again"
-    ) && !(motion == "line_end" && end == line_content_end(text, text.byte_to_line(end).map_err(failed)?)?) {
+    ) && !(motion == "line_end"
+        && end == line_content_end(text, text.byte_to_line(end).map_err(failed)?)?)
+    {
         end = next_grapheme_boundary(text, end);
     }
     ByteRange::new(start, end).map_err(failed)
@@ -660,7 +698,10 @@ fn big_word_forward(source: &str, cursor: ByteOffset) -> ByteOffset {
     let mut separator_seen = starts_in_space;
     for (relative, character) in source[cursor.get()..].grapheme_indices(true) {
         let index = cursor.get() + relative;
-        if relative > 0 && character == "\n" && (index == 0 || source.as_bytes()[index - 1] == b'\n') {
+        if relative > 0
+            && character == "\n"
+            && (index == 0 || source.as_bytes()[index - 1] == b'\n')
+        {
             return ByteOffset(index);
         }
         if character.chars().all(char::is_whitespace) {
@@ -677,7 +718,11 @@ fn big_word_backward(source: &str, cursor: ByteOffset) -> ByteOffset {
     let mut seen_nonspace = false;
     for (index, character) in source[..cursor.get()].grapheme_indices(true).rev() {
         if character == "\n" && (index == 0 || source.as_bytes()[index - 1] == b'\n') {
-            return if seen_nonspace { ByteOffset(target) } else { ByteOffset(index) };
+            return if seen_nonspace {
+                ByteOffset(target)
+            } else {
+                ByteOffset(index)
+            };
         }
         if character.chars().all(char::is_whitespace) {
             if seen_nonspace {
@@ -742,7 +787,8 @@ pub(super) fn matching_pair(
     let line_end = line_content_end(text, line)?.get();
     let delimiters = pair_delimiters(&source);
     let mut following = delimiters.clone();
-    let (at, character) = following.by_ref()
+    let (at, character) = following
+        .by_ref()
         .take_while(|(index, _)| *index < line_end)
         .find(|(index, _)| *index >= cursor.get())
         .ok_or_else(|| CommandError::Unavailable("no matching pair on line".into()))?;
@@ -770,8 +816,20 @@ pub(super) fn matching_pair(
     } else {
         // Two forward passes preserve quote handling without storing every delimiter.
         let prefix = delimiters.take_while(|(index, _)| *index < at);
-        let change = |candidate| if candidate == mate { 1_isize } else if candidate == character { -1 } else { 0 };
-        let wanted = prefix.clone().map(|(_, candidate)| change(candidate)).sum::<isize>() - 1;
+        let change = |candidate| {
+            if candidate == mate {
+                1_isize
+            } else if candidate == character {
+                -1
+            } else {
+                0
+            }
+        };
+        let wanted = prefix
+            .clone()
+            .map(|(_, candidate)| change(candidate))
+            .sum::<isize>()
+            - 1;
         let (mut depth, mut opening) = (0, None);
         for (index, candidate) in prefix {
             if candidate == mate && depth == wanted {
@@ -794,7 +852,11 @@ fn pair_delimiters(source: &str) -> impl Iterator<Item = (usize, char)> + Clone 
             if character == '\\' {
                 characters.next();
             } else if matches!(character, '\'' | '"' | '`')
-                && !(character == '\'' && source[..index].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_'))
+                && !(character == '\''
+                    && source[..index]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_'))
             {
                 let mut closing = characters.clone();
                 while let Some((_, next)) = closing.next() {
@@ -806,7 +868,11 @@ fn pair_delimiters(source: &str) -> impl Iterator<Item = (usize, char)> + Clone 
                             break;
                         }
                     } else if next == character {
-                        if !(character == '\'' && closing.peek().is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_')) {
+                        if !(character == '\''
+                            && closing
+                                .peek()
+                                .is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_'))
+                        {
                             characters = closing;
                         }
                         break;

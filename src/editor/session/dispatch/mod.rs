@@ -196,7 +196,10 @@ struct InteractiveApplication {
         std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
     /// When the repository's index and HEAD last changed, as of the last disk check.
-    pub(super) git_stamp: Option<([Option<std::time::SystemTime>; 2], Option<crate::workspace::git::GitHeadId>)>,
+    pub(super) git_stamp: Option<(
+        [Option<std::time::SystemTime>; 2],
+        Option<crate::workspace::git::GitHeadId>,
+    )>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     /// A `:s///c` asking about each match in turn.
@@ -245,9 +248,14 @@ struct InteractiveApplication {
         Vec<(crate::editor::BufferId, u64, u64)>,
         Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
     ),
-    syntax_fold_positions: Vec<Option<(
-        crate::editor::BufferId, crate::editor::text::TextVersion, BufferRevision, ByteRange,
-    )>>,
+    syntax_fold_positions: Vec<
+        Option<(
+            crate::editor::BufferId,
+            crate::editor::text::TextVersion,
+            BufferRevision,
+            ByteRange,
+        )>,
+    >,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,

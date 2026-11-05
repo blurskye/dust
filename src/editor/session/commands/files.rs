@@ -152,10 +152,13 @@ pub(super) fn register_commands(
             title,
             ContextRequirement::Application,
             ArgumentSchema::default(),
-            move |invocation| AppEffect::CycleBuffer(
-                offset * isize::try_from(invocation.count.map_or(1, |count| count.get()))
-                    .unwrap_or(isize::MAX),
-            ),
+            move |invocation| {
+                AppEffect::CycleBuffer(
+                    offset
+                        * isize::try_from(invocation.count.map_or(1, |count| count.get()))
+                            .unwrap_or(isize::MAX),
+                )
+            },
         )?;
     }
     register(

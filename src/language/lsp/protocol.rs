@@ -305,13 +305,18 @@ pub(super) fn feature_params(
     let document = json!({"uri":uri});
     let position = json!({"line":line,"character":character});
     match feature {
-        LspFeature::CompletionResolve { item } | LspFeature::CodeLensResolve { item } => item.clone(),
+        LspFeature::CompletionResolve { item } | LspFeature::CodeLensResolve { item } => {
+            item.clone()
+        }
         LspFeature::WorkspaceSymbols { query } => json!({"query":query}),
         LspFeature::ExecuteCommand(command) => {
             json!({"command":command.command,"arguments":command.arguments})
         }
         LspFeature::DocumentSymbols => json!({"textDocument":document}),
-        LspFeature::Formatting { tab_size, insert_spaces } => json!({
+        LspFeature::Formatting {
+            tab_size,
+            insert_spaces,
+        } => json!({
             "textDocument":document,"options":{"tabSize":tab_size,"insertSpaces":insert_spaces}
         }),
         LspFeature::References => json!({
@@ -320,7 +325,11 @@ pub(super) fn feature_params(
         LspFeature::Rename { new_name } => json!({
             "textDocument":document,"position":position,"newName":new_name
         }),
-        LspFeature::RangeFormatting { range, tab_size, insert_spaces } => json!({
+        LspFeature::RangeFormatting {
+            range,
+            tab_size,
+            insert_spaces,
+        } => json!({
             "textDocument":document,"range":range_json(range),"options":{"tabSize":tab_size,"insertSpaces":insert_spaces}
         }),
         LspFeature::CodeAction { range, diagnostics } => json!({
@@ -429,9 +438,9 @@ pub(super) fn normalize_result(
         return Ok(match feature {
             LspFeature::InlayHints { .. } => LspFeatureResult::InlayHints(Vec::new()),
             LspFeature::DocumentColors => LspFeatureResult::Colors(Vec::new()),
-            LspFeature::DocumentHighlights | LspFeature::FoldingRanges | LspFeature::SelectionRanges => {
-                LspFeatureResult::Ranges(Vec::new())
-            }
+            LspFeature::DocumentHighlights
+            | LspFeature::FoldingRanges
+            | LspFeature::SelectionRanges => LspFeatureResult::Ranges(Vec::new()),
             LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. } => {
                 LspFeatureResult::SemanticTokens(LspSemanticTokens {
                     result_id: None,
@@ -450,9 +459,9 @@ pub(super) fn normalize_result(
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
-        LspFeature::CompletionResolve { .. } => Ok(LspFeatureResult::CompletionResolved(
-            Box::new(completion_item(result, true)?),
-        )),
+        LspFeature::CompletionResolve { .. } => Ok(LspFeatureResult::CompletionResolved(Box::new(
+            completion_item(result, true)?,
+        ))),
         LspFeature::SignatureHelp => Ok(LspFeatureResult::Signature(LspMarkupContent {
             kind: LspMarkupKind::PlainText,
             value: signature_text(result),
@@ -932,16 +941,19 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                 let options = change.get("options").unwrap_or(&Value::Null);
                 let operation = match kind {
                     "create" => LspResourceOperation::Create {
-                            uri: change.get("uri").and_then(Value::as_str)
-                                .ok_or("create has no URI")?.into(),
-                            overwrite: options
-                                .get("overwrite")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false),
-                            ignore_if_exists: options
-                                .get("ignoreIfExists")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false),
+                        uri: change
+                            .get("uri")
+                            .and_then(Value::as_str)
+                            .ok_or("create has no URI")?
+                            .into(),
+                        overwrite: options
+                            .get("overwrite")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        ignore_if_exists: options
+                            .get("ignoreIfExists")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     },
                     "rename" => LspResourceOperation::Rename {
                         old_uri: change
@@ -964,16 +976,19 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                             .unwrap_or(false),
                     },
                     "delete" => LspResourceOperation::Delete {
-                            uri: change.get("uri").and_then(Value::as_str)
-                                .ok_or("delete has no URI")?.into(),
-                            recursive: options
-                                .get("recursive")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false),
-                            ignore_if_not_exists: options
-                                .get("ignoreIfNotExists")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false),
+                        uri: change
+                            .get("uri")
+                            .and_then(Value::as_str)
+                            .ok_or("delete has no URI")?
+                            .into(),
+                        recursive: options
+                            .get("recursive")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        ignore_if_not_exists: options
+                            .get("ignoreIfNotExists")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     },
                     _ => return Err("unknown workspace resource operation".into()),
                 };
@@ -988,8 +1003,11 @@ pub(super) fn workspace_edit(value: &Value) -> Result<LspWorkspaceEdit, String> 
                 uri: uri.into(),
                 version: match text_document.get("version") {
                     None | Some(Value::Null) => None,
-                    Some(version) => Some(version.as_u64()
-                        .ok_or("document edit version must be a nonnegative integer or null")?),
+                    Some(version) => Some(
+                        version
+                            .as_u64()
+                            .ok_or("document edit version must be a nonnegative integer or null")?,
+                    ),
                 },
                 edits: text_edits(change.get("edits").unwrap_or(&Value::Null))?,
             });
@@ -1082,7 +1100,10 @@ pub(super) fn diagnostics(value: &Value) -> Vec<LspDiagnostic> {
                     .get("severity")
                     .and_then(Value::as_u64)
                     .and_then(|v| u8::try_from(v).ok()),
-                code: diagnostic.get("code").filter(|v| v.is_string() || v.is_number()).cloned(),
+                code: diagnostic
+                    .get("code")
+                    .filter(|v| v.is_string() || v.is_number())
+                    .cloned(),
                 related: diagnostic
                     .get("relatedInformation")
                     .and_then(Value::as_array)

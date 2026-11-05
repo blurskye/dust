@@ -116,7 +116,10 @@ impl PtyAdmission<'_> {
                         self.finished.store(true, Ordering::Release);
                     }
                 }
-                let _finished = Finished { finished, cancel: cancel.clone() };
+                let _finished = Finished {
+                    finished,
+                    cancel: cancel.clone(),
+                };
                 if let Err(error) = run(
                     id,
                     request,
@@ -390,15 +393,19 @@ fn open_working_directory(
 ) -> Result<std::fs::File, PtyError> {
     use rustix::fs::OFlags;
     let fail = |error: String| PtyError::Spawn(error);
-    let canonical = path.canonicalize()
+    let canonical = path
+        .canonicalize()
         .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))?;
     if let Some(root) = root {
         let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
             .map_err(|e| fail(e.to_string()))?;
-        if root != &current || !path.starts_with(&root.canonical_path)
+        if root != &current
+            || !path.starts_with(&root.canonical_path)
             || !canonical.starts_with(&root.canonical_path)
         {
-            return Err(fail("PTY execution root filesystem identity changed".into()));
+            return Err(fail(
+                "PTY execution root filesystem identity changed".into(),
+            ));
         }
     }
     crate::files::open_no_symlinks(&canonical, OFlags::PATH | OFlags::DIRECTORY)
@@ -476,9 +483,12 @@ fn run(
     let readiness = {
         use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollOp};
         use std::os::fd::AsRawFd;
-        let readiness = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)
-            .map_err(|e| fail(e.to_string()))?;
-        let fd = pair.master.as_raw_fd().ok_or_else(|| fail("PTY master descriptor unavailable".into()))?;
+        let readiness =
+            Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC).map_err(|e| fail(e.to_string()))?;
+        let fd = pair
+            .master
+            .as_raw_fd()
+            .ok_or_else(|| fail("PTY master descriptor unavailable".into()))?;
         // portable-pty exposes a raw descriptor, not an AsFd implementation.
         // The master and its cloned reader outlive this registration.
         #[expect(deprecated)]
@@ -487,7 +497,8 @@ fn run(
             EpollOp::EpollCtlAdd,
             fd,
             &mut EpollEvent::new(EpollFlags::EPOLLIN, 0),
-        ).map_err(|e| fail(e.to_string()))?;
+        )
+        .map_err(|e| fail(e.to_string()))?;
         readiness
     };
     let mut writer = pair.master.take_writer().map_err(|e| fail(e.to_string()))?;

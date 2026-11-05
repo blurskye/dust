@@ -258,10 +258,12 @@ pub(super) fn register_commands(
                 let count = invocation.count.map_or(1, |count| count.get());
                 let steps = isize::try_from(count).unwrap_or(isize::MAX);
                 let action = match action {
-                    LayoutAction::ResizePane(direction) => LayoutAction::ResizePane(
-                        direction * i8::try_from(count).unwrap_or(i8::MAX),
-                    ),
-                    LayoutAction::FocusPane(direction) => LayoutAction::FocusPane(direction * steps),
+                    LayoutAction::ResizePane(direction) => {
+                        LayoutAction::ResizePane(direction * i8::try_from(count).unwrap_or(i8::MAX))
+                    }
+                    LayoutAction::FocusPane(direction) => {
+                        LayoutAction::FocusPane(direction * steps)
+                    }
                     LayoutAction::FocusTab(1) if invocation.count.is_some() => {
                         LayoutAction::FocusTabNumber(usize::try_from(count).unwrap_or(usize::MAX))
                     }
@@ -344,7 +346,11 @@ pub(super) fn register_commands(
         "Select the next search match",
         ContextRequirement::Buffer,
         ArgumentSchema::default(),
-        |invocation| Ok(AppEffect::SearchSelectNext(invocation.count.map_or(1, |count| count.get()))),
+        |invocation| {
+            Ok(AppEffect::SearchSelectNext(
+                invocation.count.map_or(1, |count| count.get()),
+            ))
+        },
     )?;
     register(
         registry,

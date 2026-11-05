@@ -85,7 +85,9 @@ impl Buffer {
     /// The title of a virtual document, falling back to its owner.
     #[must_use]
     pub fn virtual_title(&self) -> Option<&str> {
-        self.virtual_title.as_deref().or_else(|| self.virtual_owner())
+        self.virtual_title
+            .as_deref()
+            .or_else(|| self.virtual_owner())
     }
 
     /// The tree-sitter text objects, when the last parse matches the current text.
@@ -304,31 +306,30 @@ impl RegisterStore {
         if name.is_ascii_uppercase()
             && let Some(previous) = self.values.get(&lower)
         {
-            let mut text = if previous.shape == RegisterShape::Block
-                && value.shape == RegisterShape::Block
-            {
-                let mut left = previous.text.split('\n');
-                let mut right = value.text.split('\n');
-                let mut rows = Vec::new();
-                loop {
-                    match (left.next(), right.next()) {
-                        (None, None) => break,
-                        (left, right) => rows.push(format!(
-                            "{}{}",
-                            left.unwrap_or_default(),
-                            right.unwrap_or_default()
-                        )),
+            let mut text =
+                if previous.shape == RegisterShape::Block && value.shape == RegisterShape::Block {
+                    let mut left = previous.text.split('\n');
+                    let mut right = value.text.split('\n');
+                    let mut rows = Vec::new();
+                    loop {
+                        match (left.next(), right.next()) {
+                            (None, None) => break,
+                            (left, right) => rows.push(format!(
+                                "{}{}",
+                                left.unwrap_or_default(),
+                                right.unwrap_or_default()
+                            )),
+                        }
                     }
-                }
-                rows.join("\n")
-            } else {
-                let mut text = previous.text.clone();
-                if previous.shape == RegisterShape::Line && !text.ends_with('\n') {
-                    text.push('\n');
-                }
-                text.push_str(&value.text);
-                text
-            };
+                    rows.join("\n")
+                } else {
+                    let mut text = previous.text.clone();
+                    if previous.shape == RegisterShape::Line && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str(&value.text);
+                    text
+                };
             if previous.shape == RegisterShape::Line || value.shape == RegisterShape::Line {
                 value.shape = RegisterShape::Line;
                 if !text.ends_with('\n') {

@@ -5,56 +5,123 @@ use crate::editor::{
 };
 #[test]
 fn workspace_approval_restores_unopened_file_history_on_a_worker() {
-    use crate::editor::{transaction::{EditorOperation, EditorTransaction}, text::TextEditSet};
+    use crate::editor::{
+        text::TextEditSet,
+        transaction::{EditorOperation, EditorTransaction},
+    };
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("file.txt");
     let history = root.path().join("undo");
     let maximum = 1_000_000;
-    let mut recorded = crate::editor::Buffer::new(TextBuffer::from_text("before"), Some(path.clone()));
+    let mut recorded =
+        crate::editor::Buffer::new(TextBuffer::from_text("before"), Some(path.clone()));
     let mut recording_editor = EditorState::new(root.path().into());
-    let (buffer, _) = recording_editor.open_text(recorded.text.clone(), Some(path.clone())).unwrap();
-    recording_editor.apply_transaction(&EditorTransaction::new(TransactionId(1))
-        .with_operation(EditorOperation::ApplyEdits {
-            buffer,
-            edits: TextEditSet::new(recorded.text.revision(), vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(6)).unwrap(), "old")]),
-        })).unwrap();
+    let (buffer, _) = recording_editor
+        .open_text(recorded.text.clone(), Some(path.clone()))
+        .unwrap();
+    recording_editor
+        .apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(
+            EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    recorded.text.revision(),
+                    vec![TextEdit::new(
+                        ByteRange::new(ByteOffset(0), ByteOffset(6)).unwrap(),
+                        "old",
+                    )],
+                ),
+            },
+        ))
+        .unwrap();
     recorded = recording_editor.buffers[buffer].clone();
-    crate::editor::transaction::save_undo_history(history.clone(), path.clone(), recorded.text.clone(), recorded.undo, maximum);
+    crate::editor::transaction::save_undo_history(
+        history.clone(),
+        path.clone(),
+        recorded.text.clone(),
+        recorded.undo,
+        maximum,
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while crate::editor::transaction::load_undo_history(&history, &path, &recorded.text, maximum).is_none() {
-        assert!(std::time::Instant::now() < deadline, "history save did not finish");
+    while crate::editor::transaction::load_undo_history(&history, &path, &recorded.text, maximum)
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "history save did not finish"
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     let scope = WorkspaceState::new(
         crate::workspace::WorkspaceId(1),
-        [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())],
-    ).unwrap();
+        [(
+            "root".into(),
+            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
     let workspace = crate::editor::session::workspace::WorkspaceSession::new(
-        scope.clone(), root.path().join("trust.json"), 1, false, false, 1,
+        scope.clone(),
+        root.path().join("trust.json"),
+        1,
+        false,
+        false,
+        1,
     );
     let version = workspace.version();
     let mut editor = EditorState::new(root.path().into());
     editor.undo_directory = Some(history.clone());
     editor.undo_maximum_bytes = maximum;
     let mut owner = WorkspaceEditSession::default();
-    let ticket = owner.begin(version.clone(), 1, editor.workspace_edit_sources().unwrap()).unwrap();
-    owner.build(PreparedEdits {
-        ticket, label: "replace".into(),
-        drafts: vec![WorkspaceEditDraft {
-            canonical_path: path.clone(), expected_revision: None,
-            edits: vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(), "NEW")],
-        }],
-        snapshots: vec![FileSnapshot { canonical_path: path.clone(), revision: None, bytes: b"old".to_vec() }],
-        resources: Vec::new(),
-    }, &scope, &version, 1).unwrap();
-    assert!(owner.prepare_approval(&editor, TransactionId(2), Vec::new(), &version, 1).unwrap().is_none());
+    let ticket = owner
+        .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+        .unwrap();
+    owner
+        .build(
+            PreparedEdits {
+                ticket,
+                label: "replace".into(),
+                drafts: vec![WorkspaceEditDraft {
+                    canonical_path: path.clone(),
+                    expected_revision: None,
+                    edits: vec![TextEdit::new(
+                        ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+                        "NEW",
+                    )],
+                }],
+                snapshots: vec![FileSnapshot {
+                    canonical_path: path.clone(),
+                    revision: None,
+                    bytes: b"old".to_vec(),
+                }],
+                resources: Vec::new(),
+            },
+            &scope,
+            &version,
+            1,
+        )
+        .unwrap();
+    assert!(
+        owner
+            .prepare_approval(&editor, TransactionId(2), Vec::new(), &version, 1)
+            .unwrap()
+            .is_none()
+    );
     assert!(editor.buffers.is_empty());
     assert!(owner.toggle(0).is_err());
-    assert!(owner.prepare_approval(&editor, TransactionId(3), Vec::new(), &version, 1).is_err());
+    assert!(
+        owner
+            .prepare_approval(&editor, TransactionId(3), Vec::new(), &version, 1)
+            .is_err()
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let (draft, changes) = loop {
-        if let Some(result) = owner.poll_approval(&version, 1) { break result.unwrap(); }
-        assert!(std::time::Instant::now() < deadline, "workspace preparation did not finish");
+        if let Some(result) = owner.poll_approval(&version, 1) {
+            break result.unwrap();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "workspace preparation did not finish"
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
     };
     // Publication needs no further access to the history directory.
@@ -65,8 +132,12 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
     let buffer = editor.buffers.keys().next().unwrap();
     assert_eq!(editor.buffers[buffer].text.to_string(), "NEW");
     for (id, expected) in [(4, "old"), (5, "before")] {
-        editor.apply_transaction(&EditorTransaction::new(TransactionId(id))
-            .with_operation(EditorOperation::Undo { buffer })).unwrap();
+        editor
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(id))
+                    .with_operation(EditorOperation::Undo { buffer }),
+            )
+            .unwrap();
         assert_eq!(editor.buffers[buffer].text.to_string(), expected);
     }
 }
@@ -94,7 +165,9 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let path = root.path().join("open");
     let hidden = root.path().join("hidden");
     let mut editor = EditorState::new(root.path().into());
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let (buffer, _) = editor
+        .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+        .unwrap();
     let prepared = |ticket| PreparedEdits {
         ticket,
         label: "preview".into(),
@@ -728,7 +801,9 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
         .prepare_workspace_edit(sources, proposal, TransactionId(1))
         .unwrap();
     let published = draft.accept(&editor.version()).unwrap();
-    let buffer = published.buffers.iter()
+    let buffer = published
+        .buffers
+        .iter()
         .find_map(|(id, buffer)| (buffer.path.as_ref() == Some(&path)).then_some(id))
         .unwrap();
     assert_eq!(published.buffers[buffer].text.to_string(), "fn main() {}\n");
@@ -756,7 +831,9 @@ fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
     );
     let mut editor = EditorState::new(root.path().into());
     let path = root.path().join("old");
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let (buffer, _) = editor
+        .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+        .unwrap();
     for kind in [
         ResourceIntentKind::Rename {
             target: root.path().join("new"),
@@ -765,47 +842,47 @@ fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
         },
         ResourceIntentKind::Delete,
     ] {
-    let mut owner = WorkspaceEditSession::default();
-    let ticket = owner
-        .begin(
-            workspace.version(),
-            1,
-            editor.workspace_edit_sources().unwrap(),
-        )
-        .unwrap();
-    let prepared = PreparedEdits {
-        ticket,
-        label: "combined".into(),
-        drafts: vec![WorkspaceEditDraft {
-            canonical_path: path.clone(),
-            expected_revision: Some(editor.buffers[buffer].text.revision()),
-            edits: vec![TextEdit::new(
-                ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
-                "new",
-            )],
-        }],
-        snapshots: vec![FileSnapshot {
-            canonical_path: path.clone(),
-            revision: Some(editor.buffers[buffer].text.revision()),
-            bytes: b"old".to_vec(),
-        }],
-        resources: vec![CheckedResourceIntent {
-            source: path.clone(),
-            source_device: 1,
-            source_inode: 1,
-            source_bytes: b"old".to_vec(),
-            canonical_roots: vec![root.path().into()],
-            maximum_bytes: 1024,
-            kind,
-        }],
-    };
-    assert!(
-        owner
-            .build(prepared, &scope, &workspace.version(), 1)
-            .is_err()
-    );
-    assert_eq!(editor.buffers[buffer].text.to_string(), "old");
-    assert!(owner.proposal().is_none());
+        let mut owner = WorkspaceEditSession::default();
+        let ticket = owner
+            .begin(
+                workspace.version(),
+                1,
+                editor.workspace_edit_sources().unwrap(),
+            )
+            .unwrap();
+        let prepared = PreparedEdits {
+            ticket,
+            label: "combined".into(),
+            drafts: vec![WorkspaceEditDraft {
+                canonical_path: path.clone(),
+                expected_revision: Some(editor.buffers[buffer].text.revision()),
+                edits: vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+                    "new",
+                )],
+            }],
+            snapshots: vec![FileSnapshot {
+                canonical_path: path.clone(),
+                revision: Some(editor.buffers[buffer].text.revision()),
+                bytes: b"old".to_vec(),
+            }],
+            resources: vec![CheckedResourceIntent {
+                source: path.clone(),
+                source_device: 1,
+                source_inode: 1,
+                source_bytes: b"old".to_vec(),
+                canonical_roots: vec![root.path().into()],
+                maximum_bytes: 1024,
+                kind,
+            }],
+        };
+        assert!(
+            owner
+                .build(prepared, &scope, &workspace.version(), 1)
+                .is_err()
+        );
+        assert_eq!(editor.buffers[buffer].text.to_string(), "old");
+        assert!(owner.proposal().is_none());
     }
 }
 
@@ -831,7 +908,9 @@ fn combined_text_and_rename_is_rejected_before_publication() {
     );
     let mut editor = EditorState::new(root.path().into());
     let path = root.path().join("old");
-    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let (buffer, _) = editor
+        .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+        .unwrap();
     let mut owner = WorkspaceEditSession::default();
     let ticket = owner
         .begin(

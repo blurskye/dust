@@ -126,11 +126,15 @@ impl KeymapSequence {
         let mut disabled = false;
         for (_, keymap) in bindings.layers.iter().rev() {
             match keymap.lookup(&self.pending) {
-                Lookup::Disabled { prefix: continuation } => {
+                Lookup::Disabled {
+                    prefix: continuation,
+                } => {
                     disabled = true;
                     prefix |= continuation;
                 }
-                Lookup::PassThrough { prefix: continuation } => prefix |= continuation,
+                Lookup::PassThrough {
+                    prefix: continuation,
+                } => prefix |= continuation,
                 Lookup::Exact(_) if disabled => {}
                 Lookup::Ambiguous(_) if disabled => prefix = true,
                 Lookup::Exact(command) if !prefix => {
@@ -266,15 +270,22 @@ mod tests {
             let mut resolver = KeymapResolver::default();
             let command = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
             let keys = [KeyEvent::character('g'), KeyEvent::character('c')];
-            resolver.layer_mut(KeymapLayer::Global).insert(&keys, command.clone());
-            resolver.layer_mut(KeymapLayer::Overlay).insert_disabled(&keys);
+            resolver
+                .layer_mut(KeymapLayer::Global)
+                .insert(&keys, command.clone());
+            resolver
+                .layer_mut(KeymapLayer::Overlay)
+                .insert_disabled(&keys);
             resolver.layer_mut(longer_layer).insert(
                 &[keys[0].clone(), keys[1].clone(), KeyEvent::character('c')],
                 command.clone(),
             );
             assert_eq!(resolver.feed(keys[0].clone()), MappingResolution::Pending);
             assert_eq!(resolver.feed(keys[1].clone()), MappingResolution::Ambiguous);
-            assert_eq!(resolver.feed(KeyEvent::character('c')), MappingResolution::Ready(command));
+            assert_eq!(
+                resolver.feed(KeyEvent::character('c')),
+                MappingResolution::Ready(command)
+            );
             resolver.feed(keys[0].clone());
             assert_eq!(resolver.feed(keys[1].clone()), MappingResolution::Ambiguous);
             assert_eq!(resolver.flush_timeout(), MappingResolution::Disabled);
@@ -288,9 +299,15 @@ mod tests {
             let command = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
             let g = KeyEvent::character('g');
             let c = KeyEvent::character('c');
-            resolver.layer_mut(KeymapLayer::Global).insert(std::slice::from_ref(&g), command.clone());
-            resolver.layer_mut(KeymapLayer::Overlay).insert_disabled(&[g.clone(), c.clone()]);
-            resolver.layer_mut(KeymapLayer::Global).insert(&[g.clone(), c.clone(), c.clone(), c.clone()], command);
+            resolver
+                .layer_mut(KeymapLayer::Global)
+                .insert(std::slice::from_ref(&g), command.clone());
+            resolver
+                .layer_mut(KeymapLayer::Overlay)
+                .insert_disabled(&[g.clone(), c.clone()]);
+            resolver
+                .layer_mut(KeymapLayer::Global)
+                .insert(&[g.clone(), c.clone(), c.clone(), c.clone()], command);
             assert_eq!(resolver.feed(g), MappingResolution::Ambiguous);
             assert_eq!(resolver.feed(c.clone()), MappingResolution::Ambiguous);
             assert_eq!(resolver.feed(c.clone()), MappingResolution::Ambiguous);
@@ -299,7 +316,11 @@ mod tests {
             } else {
                 resolver.feed(KeyEvent::character('x'))
             };
-            let suffix = if timeout { vec![c] } else { vec![c, KeyEvent::character('x')] };
+            let suffix = if timeout {
+                vec![c]
+            } else {
+                vec![c, KeyEvent::character('x')]
+            };
             assert_eq!(result, MappingResolution::DisabledAndReplay(suffix));
         }
     }
@@ -311,9 +332,15 @@ mod tests {
             let short = CommandInvocation::new("editor.quit", InvocationSource::Test).unwrap();
             let long = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
             let g = KeyEvent::character('g');
-            resolver.layer_mut(KeymapLayer::Global).insert(std::slice::from_ref(&g), short.clone());
-            resolver.layer_mut(KeymapLayer::Overlay).insert_pass_through(std::slice::from_ref(&g));
-            resolver.layer_mut(KeymapLayer::Overlay).insert(&[g.clone(), g.clone()], long.clone());
+            resolver
+                .layer_mut(KeymapLayer::Global)
+                .insert(std::slice::from_ref(&g), short.clone());
+            resolver
+                .layer_mut(KeymapLayer::Overlay)
+                .insert_pass_through(std::slice::from_ref(&g));
+            resolver
+                .layer_mut(KeymapLayer::Overlay)
+                .insert(&[g.clone(), g.clone()], long.clone());
             assert_eq!(resolver.feed(g.clone()), MappingResolution::Ambiguous);
             if timeout {
                 assert_eq!(resolver.flush_timeout(), MappingResolution::Ready(short));

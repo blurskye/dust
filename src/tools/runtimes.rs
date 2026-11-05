@@ -1,7 +1,8 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc::Receiver,
@@ -68,7 +69,12 @@ pub(super) fn managed_runtime(
         };
         if !refresh {
             if let Some(compatibility) = compatibility {
-                patch_nix_compatible_executable(&executable, compatibility, &runtime, cancellations)?;
+                patch_nix_compatible_executable(
+                    &executable,
+                    compatibility,
+                    &runtime,
+                    cancellations,
+                )?;
             }
             return Ok(executable);
         }
@@ -156,7 +162,12 @@ pub(super) fn run_managed(
 ) -> Result<(), String> {
     let mut effective_environment = environment.clone();
     if let Some(runtime) = compatibility {
-        effective_environment.extend(runtime.environment().into_iter().map(|(key, value)| (key, value.into())));
+        effective_environment.extend(
+            runtime
+                .environment()
+                .into_iter()
+                .map(|(key, value)| (key, value.into())),
+        );
         effective_environment.insert("DUST_NIX_LD".into(), runtime.nix_ld.as_os_str().to_owned());
         let mut paths = env::split_paths(&runtime.runtime_path).collect::<Vec<_>>();
         if let Some(existing) = effective_environment.get("PATH") {
@@ -201,7 +212,9 @@ pub(super) fn run_managed(
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
-    let output = installer_output.and_then(|output| output.join().ok()).unwrap_or_default();
+    let output = installer_output
+        .and_then(|output| output.join().ok())
+        .unwrap_or_default();
     let status = result?;
     if status.success() {
         Ok(())
@@ -209,7 +222,9 @@ pub(super) fn run_managed(
         Err(format!(
             "managed installer `{}` exited with {}{}",
             program.file_name().unwrap_or_default().to_string_lossy(),
-            status.code().map_or_else(|| "signal".into(), |code| code.to_string()),
+            status
+                .code()
+                .map_or_else(|| "signal".into(), |code| code.to_string()),
             output
         ))
     }
@@ -217,7 +232,9 @@ pub(super) fn run_managed(
 
 /// Read what an installer prints on its own thread, so a full pipe cannot stall it, and hand
 /// back the end of it: that is where installers say what went wrong.
-fn read_installer_output(mut stream: impl std::io::Read + Send + 'static) -> thread::JoinHandle<String> {
+fn read_installer_output(
+    mut stream: impl std::io::Read + Send + 'static,
+) -> thread::JoinHandle<String> {
     const KEPT_BYTES: usize = 4096;
     thread::spawn(move || {
         let mut kept = Vec::new();
@@ -466,12 +483,16 @@ pub(super) fn install_path_rustup_component(
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
-    let output = installer_output.and_then(|output| output.join().ok()).unwrap_or_default();
+    let output = installer_output
+        .and_then(|output| output.join().ok())
+        .unwrap_or_default();
     let status = result?;
     if !status.success() {
         return Err(format!(
             "rustup component installation exited with {}{}",
-            status.code().map_or_else(|| "signal".into(), |code| code.to_string()),
+            status
+                .code()
+                .map_or_else(|| "signal".into(), |code| code.to_string()),
             output
         ));
     }
@@ -607,8 +628,11 @@ fn lock_managed_tool(root: &Path, id: &str) -> Result<nix::fcntl::Flock<fs::File
         .truncate(false)
         .open(root.join(format!(".install-{id}.lock")))
         .map_err(|error| format!("cannot open tool installation lock: {error}"))?;
-    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock)
-        .map_err(|(_, error)| format!("cannot lock tool {id} (another installation may be running): {error}"))
+    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).map_err(
+        |(_, error)| {
+            format!("cannot lock tool {id} (another installation may be running): {error}")
+        },
+    )
 }
 
 pub(super) fn uninstall_managed_tool(

@@ -42,21 +42,39 @@ fn preview_retries_full_admission_but_caches_permanent_failures() {
     let source = scope(directory.path());
     let mut owner = SearchSession::default();
     let prepare = |owner: &mut SearchSession| {
-        owner.prepare_preview("file".into(), Some((0, 0)), "File".into(), "Loading".into(), source.clone(), 1)
+        owner.prepare_preview(
+            "file".into(),
+            Some((0, 0)),
+            "File".into(),
+            "Loading".into(),
+            source.clone(),
+            1,
+        )
     };
     let ticket = prepare(&mut owner).1.unwrap();
     owner.preview_failed(ticket, VfsError::QueueFull);
-    let ticket = prepare(&mut owner).1.expect("retry after temporary refusal");
+    let ticket = prepare(&mut owner)
+        .1
+        .expect("retry after temporary refusal");
     assert!(owner.admit_preview(ticket, RequestId(1), 64));
-    assert!(prepare(&mut owner).1.is_none(), "do not duplicate an admitted read");
+    assert!(
+        prepare(&mut owner).1.is_none(),
+        "do not duplicate an admitted read"
+    );
     assert!(owner.accept_preview(RequestId(1), &Ok(b"ready".to_vec()), source.clone(), 1));
     assert!(prepare(&mut owner).1.is_none());
-    assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().lines(), ["ready"]);
+    assert_eq!(
+        owner.preview().as_ref().unwrap().as_text().unwrap().lines(),
+        ["ready"]
+    );
 
     owner.clear_preview();
     let ticket = prepare(&mut owner).1.unwrap();
     owner.preview_failed(ticket, VfsError::WorkerStopped);
-    assert!(prepare(&mut owner).1.is_none(), "do not retry permanent failures every tick");
+    assert!(
+        prepare(&mut owner).1.is_none(),
+        "do not retry permanent failures every tick"
+    );
 }
 
 #[test]
@@ -65,9 +83,21 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
     let mut owner = SearchSession::default();
-    let bytes = (0..1100).map(|line| format!("line {line}\n")).collect::<String>().into_bytes();
+    let bytes = (0..1100)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>()
+        .into_bytes();
     for (request, line) in [(1, 999), (2, 1050)] {
-        let ticket = owner.prepare_preview("file".into(), Some((line, 0)), "File".into(), "Loading".into(), source.clone(), 1).1
+        let ticket = owner
+            .prepare_preview(
+                "file".into(),
+                Some((line, 0)),
+                "File".into(),
+                "Loading".into(),
+                source.clone(),
+                1,
+            )
+            .1
             .expect("a different location in the same file needs its own preview");
         assert!(owner.admit_preview(ticket, RequestId(request), bytes.len()));
         assert!(owner.accept_preview(RequestId(request), &Ok(bytes.clone()), source.clone(), 1));
@@ -76,14 +106,39 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
         assert_eq!(text.first_line, line - 8);
         assert_eq!(text.lines()[line - text.first_line], format!("line {line}"));
         assert!(text.lines().len() <= 512);
-        assert!(owner.prepare_preview("file".into(), Some((line, 0)), "File".into(), "Loading".into(), source.clone(), 1).1.is_none());
+        assert!(
+            owner
+                .prepare_preview(
+                    "file".into(),
+                    Some((line, 0)),
+                    "File".into(),
+                    "Loading".into(),
+                    source.clone(),
+                    1
+                )
+                .1
+                .is_none()
+        );
     }
     for bytes in [b"a\rb\rc".to_vec(), b"\xef\xbb\xbfa\r\nb\rc".to_vec()] {
         owner.clear_preview();
-        let ticket = owner.prepare_preview("file".into(), Some((0, 0)), "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+        let ticket = owner
+            .prepare_preview(
+                "file".into(),
+                Some((0, 0)),
+                "File".into(),
+                "Loading".into(),
+                source.clone(),
+                1,
+            )
+            .1
+            .unwrap();
         assert!(owner.admit_preview(ticket, RequestId(3), 64));
         assert!(owner.accept_preview(RequestId(3), &Ok(bytes), source.clone(), 1));
-        assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().lines(), ["a", "b", "c"]);
+        assert_eq!(
+            owner.preview().as_ref().unwrap().as_text().unwrap().lines(),
+            ["a", "b", "c"]
+        );
     }
 }
 
@@ -93,14 +148,43 @@ fn location_preview_loading_and_errors_remain_visible() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
     let mut owner = SearchSession::default();
-    let ticket = owner.prepare_preview("file".into(), Some((999, 0)), "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+    let ticket = owner
+        .prepare_preview(
+            "file".into(),
+            Some((999, 0)),
+            "File".into(),
+            "Loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
     let text = owner.preview().as_ref().unwrap().as_text().unwrap();
     assert_eq!(text.first_line, 999);
     assert_eq!(text.highlight_line, Some(999));
     owner.preview_failed(ticket, VfsError::QueueFull);
-    assert_eq!(owner.preview().as_ref().unwrap().as_text().unwrap().first_line, 999);
+    assert_eq!(
+        owner
+            .preview()
+            .as_ref()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .first_line,
+        999
+    );
     for result in [Err(VfsError::WorkerStopped), Ok(vec![255]), Ok(vec![0; 65])] {
-        let ticket = owner.prepare_preview("file".into(), Some((999, 0)), "File".into(), "Loading".into(), source.clone(), 1).1.unwrap();
+        let ticket = owner
+            .prepare_preview(
+                "file".into(),
+                Some((999, 0)),
+                "File".into(),
+                "Loading".into(),
+                source.clone(),
+                1,
+            )
+            .1
+            .unwrap();
         assert!(owner.admit_preview(ticket, RequestId(1), 64));
         assert!(owner.accept_preview(RequestId(1), &result, source.clone(), 1));
         let text = owner.preview().as_ref().unwrap().as_text().unwrap();
@@ -116,13 +200,22 @@ fn search_previews_keep_matches_beyond_the_line_character_limit() {
         let mut item = found();
         item.range = prefix.len()..prefix.len() + 6;
         item.snapshot = Arc::from(format!("{prefix}needle{}\n", "z".repeat(10_000)).into_bytes());
-        let mut owner = SearchSession { matches: vec![item], ..Default::default() };
+        let mut owner = SearchSession {
+            matches: vec![item],
+            ..Default::default()
+        };
         owner.preview_match("one", 256 * 1024);
         let text = owner.preview().as_ref().unwrap().as_text().unwrap();
         assert_eq!(text.highlight_line, Some(0));
         assert_eq!(text.first_line, 0);
         assert!(text.lines()[0].contains("needle"));
-        assert!(text.lines()[0].chars().take(24).collect::<String>().contains("needle"));
+        assert!(
+            text.lines()[0]
+                .chars()
+                .take(24)
+                .collect::<String>()
+                .contains("needle")
+        );
         assert!(text.lines()[0].chars().count() <= 4096);
     }
 }
@@ -247,21 +340,66 @@ fn matcher_previews_follow_the_source_location_within_one_file() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
     let mut owner = SearchSession::default();
-    let ticket = owner.prepare_preview("file.rs".into(), Some((900, 2)), "File".into(),
-        "Loading".into(), source.clone(), 1).1.unwrap();
-    let bytes = (0..1000).map(|line| format!("line {line}\n")).collect::<String>().into_bytes();
+    let ticket = owner
+        .prepare_preview(
+            "file.rs".into(),
+            Some((900, 2)),
+            "File".into(),
+            "Loading".into(),
+            source.clone(),
+            1,
+        )
+        .1
+        .unwrap();
+    let bytes = (0..1000)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>()
+        .into_bytes();
     assert!(owner.admit_preview(ticket, crate::files::RequestId(1), bytes.len()));
     assert!(owner.accept_preview(crate::files::RequestId(1), &Ok(bytes), source.clone(), 1));
     let preview = owner.preview().as_ref().unwrap().as_text().unwrap();
     assert_eq!(preview.first_line, 892);
     assert_eq!(preview.highlight_line, Some(900));
     assert_eq!(preview.lines()[8], "line 900");
-    assert!(owner.prepare_preview("file.rs".into(), Some((900, 2)), "File".into(),
-        "Loading".into(), source.clone(), 1).1.is_none());
-    assert!(owner.prepare_preview("file.rs".into(), Some((950, 0)), "File".into(),
-        "Loading".into(), source.clone(), 1).1.is_some());
-    assert!(owner.prepare_preview("file.rs".into(), Some((950, 3)), "File".into(),
-        "Loading".into(), source, 1).1.is_some());
+    assert!(
+        owner
+            .prepare_preview(
+                "file.rs".into(),
+                Some((900, 2)),
+                "File".into(),
+                "Loading".into(),
+                source.clone(),
+                1
+            )
+            .1
+            .is_none()
+    );
+    assert!(
+        owner
+            .prepare_preview(
+                "file.rs".into(),
+                Some((950, 0)),
+                "File".into(),
+                "Loading".into(),
+                source.clone(),
+                1
+            )
+            .1
+            .is_some()
+    );
+    assert!(
+        owner
+            .prepare_preview(
+                "file.rs".into(),
+                Some((950, 3)),
+                "File".into(),
+                "Loading".into(),
+                source,
+                1
+            )
+            .1
+            .is_some()
+    );
 }
 
 #[test]
@@ -337,8 +475,14 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
         );
     }
     for event in [
-        WorkspaceSearchEvent::Batch { generation: 1, matches: vec![found()] },
-        WorkspaceSearchEvent::Failed { generation: 1, error: "late failure".into() },
+        WorkspaceSearchEvent::Batch {
+            generation: 1,
+            matches: vec![found()],
+        },
+        WorkspaceSearchEvent::Failed {
+            generation: 1,
+            error: "late failure".into(),
+        },
         WorkspaceSearchEvent::Cancelled { generation: 1 },
         WorkspaceSearchEvent::Complete {
             generation: 1,
@@ -366,7 +510,10 @@ fn search_owner_cost_probe() {
     item.range = 69632..69638;
     let mode = std::env::var("DUST_COST_CASE").unwrap_or("unchanged_snapshot".into());
     let max = 65536;
-    let mut owner = SearchSession { matches: vec![item], ..Default::default() };
+    let mut owner = SearchSession {
+        matches: vec![item],
+        ..Default::default()
+    };
     owner.preview_match("one", max);
     let before = (
         crate::ui::window::WindowGraph::test_clone_count(),
@@ -508,8 +655,14 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         .install_picker(content(), 100, source.clone(), 1)
         .unwrap();
     assert!(!owner.owns_picker_epoch(&epoch));
-    let (_, ticket) =
-        owner.prepare_preview("file".into(), None, "File".into(), "Loading".into(), source, 1);
+    let (_, ticket) = owner.prepare_preview(
+        "file".into(),
+        None,
+        "File".into(),
+        "Loading".into(),
+        source,
+        1,
+    );
     assert!(owner.admit_preview(ticket.unwrap(), crate::files::RequestId(9), 64));
     assert_eq!(owner.close_picker(), Some(crate::files::RequestId(9)));
     assert!(!owner.owns_picker_epoch(&next));
@@ -564,7 +717,11 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
         query: query.into(),
         complete: false,
     };
-    for origin in [PickerOrigin::Files, PickerOrigin::Grep, PickerOrigin::PluginProvider(1)] {
+    for origin in [
+        PickerOrigin::Files,
+        PickerOrigin::Grep,
+        PickerOrigin::PluginProvider(1),
+    ] {
         owner.close_picker();
         let epoch = owner
             .install_picker(content(origin, &[], ""), 3, source.clone(), 1)
@@ -601,7 +758,10 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
         assert!(owner.owns_picker_epoch(&epoch));
         assert_eq!(owner.picker().unwrap().query(), "jack");
         assert_eq!(owner.picker_surface(), PickerSurfaceKind::Problems);
-        assert_eq!(owner.picker_projection().unwrap().footer.as_deref(), Some("Retained footer"));
+        assert_eq!(
+            owner.picker_projection().unwrap().footer.as_deref(),
+            Some("Retained footer")
+        );
         assert_eq!(
             owner.picker().unwrap().selected_item().unwrap().id.0,
             "jack-b"
@@ -740,12 +900,22 @@ fn rejected_live_query_retires_previous_results() {
     let query = "a".repeat(65_537);
     owner.set_query(query.clone());
     let policy = WorkspaceSearchPolicy {
-        roots: vec![root.path().into()], query: query.clone(), regex: false,
-        smart_case: true, whole_word: false, include_globs: Vec::new(),
-        exclude_globs: Vec::new(), include_hidden: false, include_ignored: false,
-        maximum_files: 10, maximum_results: 10, maximum_file_bytes: 1024,
-        maximum_total_bytes: 4096, maximum_preview_bytes: 100,
-        batch_size: 10, event_queue_capacity: 8,
+        roots: vec![root.path().into()],
+        query: query.clone(),
+        regex: false,
+        smart_case: true,
+        whole_word: false,
+        include_globs: Vec::new(),
+        exclude_globs: Vec::new(),
+        include_hidden: false,
+        include_ignored: false,
+        maximum_files: 10,
+        maximum_results: 10,
+        maximum_file_bytes: 1024,
+        maximum_total_bytes: 4096,
+        maximum_preview_bytes: 100,
+        batch_size: 10,
+        event_queue_capacity: 8,
     };
     assert!(owner.start(policy, source.clone(), 1, None).is_err());
     assert!(owner.live());

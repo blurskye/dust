@@ -193,10 +193,11 @@ impl ExplorerState {
             .collect::<HashMap<_, _>>();
         let mut ids = Vec::new();
         for child in children {
-            if child.path.parent() != Some(parent_path.as_path()) || data
-                .by_path
-                .get(&child.path)
-                .is_some_and(|id| data.roots.contains(id))
+            if child.path.parent() != Some(parent_path.as_path())
+                || data
+                    .by_path
+                    .get(&child.path)
+                    .is_some_and(|id| data.roots.contains(id))
             {
                 continue;
             }

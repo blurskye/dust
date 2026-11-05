@@ -178,7 +178,9 @@ impl ClipboardSession {
         let primary = invocation.register == Some('*');
         let pending_copy = (!primary)
             .then(|| {
-                self.queued.as_ref().or_else(|| self.copying.as_ref().map(|(_, text)| text))
+                self.queued
+                    .as_ref()
+                    .or_else(|| self.copying.as_ref().map(|(_, text)| text))
                     .cloned()
             })
             .flatten();
@@ -218,14 +220,26 @@ impl ClipboardSession {
             return Ok(None);
         }
         let text = text.ok_or("Could not read the system clipboard; paste cancelled")?;
-        let register = if invocation.register == Some('*') { '*' } else { '+' };
+        let register = if invocation.register == Some('*') {
+            '*'
+        } else {
+            '+'
+        };
         self.import(registers, enabled, register, text);
         self.paste_ready = true;
         Ok(Some(invocation))
     }
 
-    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, register: char, text: String) {
-        let cached = registers.get(register).filter(|value| value.text == text)
+    fn import(
+        &mut self,
+        registers: &mut RegisterStore,
+        enabled: bool,
+        register: char,
+        text: String,
+    ) {
+        let cached = registers
+            .get(register)
+            .filter(|value| value.text == text)
             .or_else(|| registers.get('"').filter(|value| value.text == text));
         let shape = cached.map_or_else(
             || {
@@ -337,7 +351,10 @@ mod tests {
     use super::*;
 
     impl ClipboardSession {
-        pub(in crate::editor::session) fn pending_copy_fixture(generation: u64, text: &str) -> Self {
+        pub(in crate::editor::session) fn pending_copy_fixture(
+            generation: u64,
+            text: &str,
+        ) -> Self {
             let (_, receiver) = mpsc::channel();
             Self {
                 enabled: true,
@@ -354,14 +371,17 @@ mod tests {
             generation: u64,
         ) -> (Self, mpsc::Sender<Option<String>>) {
             let (sender, receiver) = mpsc::channel();
-            (Self {
-                enabled: true,
-                tool: Some(Tool::Xclip),
-                synced_generation: generation,
-                reading: Some(receiver),
-                paste: Some((invocation, source, generation)),
-                ..Default::default()
-            }, sender)
+            (
+                Self {
+                    enabled: true,
+                    tool: Some(Tool::Xclip),
+                    synced_generation: generation,
+                    reading: Some(receiver),
+                    paste: Some((invocation, source, generation)),
+                    ..Default::default()
+                },
+                sender,
+            )
         }
     }
 
@@ -386,7 +406,10 @@ mod tests {
         );
         sender.send(Some("text".into())).unwrap();
         assert_eq!(
-            session.finish_pull(&mut registers, true, &version).unwrap().unwrap(),
+            session
+                .finish_pull(&mut registers, true, &version)
+                .unwrap()
+                .unwrap(),
             invocation
         );
         assert_eq!(registers.get('+').unwrap().text, "text");
@@ -397,12 +420,19 @@ mod tests {
         for tool in [Tool::Wayland, Tool::Xclip, Tool::Xsel] {
             assert_ne!(tool.paste_command(true), tool.paste_command(false));
         }
-        assert_eq!(Tool::Wayland.paste_command(true).1, &["--no-newline", "--primary"]);
-        assert_eq!(Tool::Xclip.paste_command(true).1, &["-o", "-selection", "primary"]);
+        assert_eq!(
+            Tool::Wayland.paste_command(true).1,
+            &["--no-newline", "--primary"]
+        );
+        assert_eq!(
+            Tool::Xclip.paste_command(true).1,
+            &["-o", "-selection", "primary"]
+        );
         assert_eq!(Tool::Xsel.paste_command(true).1, &["-o", "-p"]);
         let state = crate::editor::EditorState::new("/workspace".into());
         let version = state.window_version();
-        let mut invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let mut invocation =
+            CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         invocation.register = Some('*');
         let (sender, receiver) = mpsc::channel();
         let mut session = ClipboardSession {
@@ -414,7 +444,10 @@ mod tests {
         session.import(&mut registers, true, '+', "clipboard".into());
         session.paste = Some((invocation.clone(), version.clone(), registers.generation()));
         sender.send(Some("primary".into())).unwrap();
-        assert_eq!(session.finish_pull(&mut registers, true, &version).unwrap(), Some(invocation));
+        assert_eq!(
+            session.finish_pull(&mut registers, true, &version).unwrap(),
+            Some(invocation)
+        );
         assert_eq!(registers.get('*').unwrap().text, "primary");
         assert_eq!(registers.get('+').unwrap().text, "clipboard");
         assert_eq!(registers.get('"').unwrap().text, "clipboard");
@@ -422,9 +455,20 @@ mod tests {
 
     #[test]
     fn primary_reads_do_not_suppress_a_pending_clipboard_yank() {
-        let mut session = ClipboardSession { enabled: true, ..Default::default() };
+        let mut session = ClipboardSession {
+            enabled: true,
+            ..Default::default()
+        };
         let mut registers = RegisterStore::default();
-        registers.set('"', RegisterValue { text: "new yank".into(), shape: RegisterShape::Character }, true, false);
+        registers.set(
+            '"',
+            RegisterValue {
+                text: "new yank".into(),
+                shape: RegisterShape::Character,
+            },
+            true,
+            false,
+        );
         session.import(&mut registers, true, '*', "primary".into());
         assert_eq!(session.push(&mut registers).as_deref(), Some("new yank"));
         assert_eq!(registers.get('+').unwrap().text, "new yank");
@@ -436,9 +480,12 @@ mod tests {
         let version = state.window_version();
         let mut registers = RegisterStore::default();
         registers.set('"', value("old"), true, false);
-        let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let invocation =
+            CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         let (mut session, sender) = ClipboardSession::pending_read_fixture(
-            invocation, version.clone(), registers.generation(),
+            invocation,
+            version.clone(),
+            registers.generation(),
         );
         sender.send(None).unwrap();
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
@@ -452,9 +499,12 @@ mod tests {
         let state = crate::editor::EditorState::new("/workspace".into());
         let version = state.window_version();
         let mut registers = RegisterStore::default();
-        let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let invocation =
+            CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         let (mut session, sender) = ClipboardSession::pending_read_fixture(
-            invocation, version.clone(), registers.generation(),
+            invocation,
+            version.clone(),
+            registers.generation(),
         );
         drop(sender);
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
@@ -468,9 +518,12 @@ mod tests {
             let version = state.window_version();
             let mut registers = RegisterStore::default();
             registers.set('"', value("before"), true, false);
-            let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+            let invocation =
+                CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
             let (mut session, sender) = ClipboardSession::pending_read_fixture(
-                invocation, version.clone(), registers.generation(),
+                invocation,
+                version.clone(),
+                registers.generation(),
             );
             let current = if changed_register {
                 registers.set('"', value("new yank"), true, false);
@@ -480,7 +533,12 @@ mod tests {
             };
             let expected = registers.get('"').cloned();
             sender.send(Some("stale read".into())).unwrap();
-            assert!(session.finish_pull(&mut registers, true, &current).unwrap().is_none());
+            assert!(
+                session
+                    .finish_pull(&mut registers, true, &current)
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(registers.get('"'), expected.as_ref());
             assert!(registers.get('+').is_none());
             assert!(!session.paste_ready);
@@ -488,7 +546,10 @@ mod tests {
     }
 
     fn value(text: &str) -> RegisterValue {
-        RegisterValue { text: text.into(), shape: RegisterShape::Character }
+        RegisterValue {
+            text: text.into(),
+            shape: RegisterShape::Character,
+        }
     }
 
     #[test]
@@ -507,12 +568,22 @@ mod tests {
             if queued {
                 registers.set('"', value("latest yank"), true, false);
             }
-            let invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+            let invocation =
+                CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
             assert!(session.pull(&invocation, version.clone(), &mut registers, true));
-            assert_eq!(session.finish_pull(&mut registers, true, &version).unwrap(), Some(invocation));
-            assert_eq!(registers.get('"').unwrap().text, if queued { "latest yank" } else { "in flight" });
+            assert_eq!(
+                session.finish_pull(&mut registers, true, &version).unwrap(),
+                Some(invocation)
+            );
+            assert_eq!(
+                registers.get('"').unwrap().text,
+                if queued { "latest yank" } else { "in flight" }
+            );
             assert_eq!(session.queued.as_deref(), queued.then_some("latest yank"));
-            assert!(session.copying.is_some(), "the paste must not discard the pending write");
+            assert!(
+                session.copying.is_some(),
+                "the paste must not discard the pending write"
+            );
         }
     }
 
@@ -520,21 +591,36 @@ mod tests {
     fn primary_selection_reads_populate_star_without_replacing_plus() {
         for tool in [Tool::Wayland, Tool::Xclip, Tool::Xsel] {
             assert_ne!(tool.paste_command(true), tool.paste_command(false));
-            assert!(tool.paste_command(true).1.contains(&if tool == Tool::Xsel { "-p" } else if tool == Tool::Xclip { "primary" } else { "--primary" }));
+            assert!(tool.paste_command(true).1.contains(&if tool == Tool::Xsel {
+                "-p"
+            } else if tool == Tool::Xclip {
+                "primary"
+            } else {
+                "--primary"
+            }));
         }
         let state = crate::editor::EditorState::new("/workspace".into());
         let version = state.window_version();
         let mut registers = RegisterStore::default();
         registers.set('+', value("clipboard"), true, false);
-        let mut invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        let mut invocation =
+            CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         invocation.register = Some('*');
         let (mut session, sender) = ClipboardSession::pending_read_fixture(
-            invocation.clone(), version.clone(), registers.generation(),
+            invocation.clone(),
+            version.clone(),
+            registers.generation(),
         );
         sender.send(Some("primary".into())).unwrap();
-        assert_eq!(session.finish_pull(&mut registers, true, &version).unwrap(), Some(invocation));
+        assert_eq!(
+            session.finish_pull(&mut registers, true, &version).unwrap(),
+            Some(invocation)
+        );
         assert_eq!(registers.get('*').unwrap().text, "primary");
-        assert!(registers.get('"').is_none(), "primary reads leave the unnamed clipboard register alone");
+        assert!(
+            registers.get('"').is_none(),
+            "primary reads leave the unnamed clipboard register alone"
+        );
         assert_eq!(registers.get('+').unwrap().text, "clipboard");
     }
 
@@ -564,10 +650,15 @@ mod tests {
         let mut session = ClipboardSession::default();
         let mut registers = RegisterStore::default();
         registers.set('+', value("old clipboard"), true, false);
-        registers.set('"', RegisterValue {
-            text: "block".into(),
-            shape: RegisterShape::Block,
-        }, true, false);
+        registers.set(
+            '"',
+            RegisterValue {
+                text: "block".into(),
+                shape: RegisterShape::Block,
+            },
+            true,
+            false,
+        );
         session.import(&mut registers, true, '+', "block".into());
         assert_eq!(registers.get('+').unwrap().shape, RegisterShape::Block);
     }
@@ -581,12 +672,19 @@ mod tests {
 
     #[test]
     fn identical_yanks_each_replace_the_external_clipboard() {
-        let mut session = ClipboardSession { enabled: true, ..Default::default() };
+        let mut session = ClipboardSession {
+            enabled: true,
+            ..Default::default()
+        };
         let mut registers = RegisterStore::default();
         for _ in 0..2 {
             registers.set('"', value("A"), true, false);
             assert_eq!(session.push(&mut registers).as_deref(), Some("A"));
-            assert_eq!(session.push(&mut registers), None, "polling alone must not recopy");
+            assert_eq!(
+                session.push(&mut registers),
+                None,
+                "polling alone must not recopy"
+            );
         }
         let (sender, receiver) = mpsc::channel();
         session.copying = Some((receiver, "A".into()));

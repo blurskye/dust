@@ -73,9 +73,15 @@ impl InteractiveApplication {
             .unwritten(&self.state, &self.configuration.settings().recovery);
         if unwritten != 0 {
             diagnostics.push(format!("{unwritten} dirty buffer revisions could not be journaled before the shared shutdown deadline"));
-            let oversized = self.state.buffers.values().filter(|buffer| {
-                buffer.dirty && !crate::files::recovery_size_allowed(buffer.text.len_bytes() as u64)
-            }).count();
+            let oversized = self
+                .state
+                .buffers
+                .values()
+                .filter(|buffer| {
+                    buffer.dirty
+                        && !crate::files::recovery_size_allowed(buffer.text.len_bytes() as u64)
+                })
+                .count();
             if oversized != 0 {
                 diagnostics.push(format!("{oversized} dirty buffers exceed the recovery journal size limit; their unsaved contents cannot be recovered"));
             }
@@ -135,54 +141,54 @@ impl InteractiveApplication {
         }
         self.process_trust_events();
         let result = (|| {
-        self.workspace.trust_shutdown_result().map_err(|message| {
-            InteractiveError::Vfs(VfsError::Io {
-                operation: "finish workspace trust shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::other(message),
+            self.workspace.trust_shutdown_result().map_err(|message| {
+                InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish workspace trust shutdown",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::other(message),
+                })
+            })?;
+            if self.language.pending_replies() {
+                return Err(InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish requesting-server edit responses",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "requesting-server responses were not acknowledged before the shared exit deadline",
+                    ),
+                }));
+            }
+            if incomplete || !self.documents.worker_finished() {
+                return Err(InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish document shutdown",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "filesystem work did not quiesce; an already-running operation may still complete",
+                    ),
+                }));
+            }
+            self.finish_agent_history(deadline).map_err(|message| {
+                InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish agent history shutdown",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::other(message),
+                })
+            })?;
+            self.persistence.undo_shutdown_result().map_err(|message| {
+                InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish undo history shutdown",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::other(message),
+                })
+            })?;
+            self.persistence.shutdown_result().map_err(|message| {
+                InteractiveError::Vfs(VfsError::Io {
+                    operation: "finish persistence shutdown",
+                    path: self.state.workspace_root.clone(),
+                    source: std::io::Error::other(message),
+                })
             })
-        })?;
-        if self.language.pending_replies() {
-            return Err(InteractiveError::Vfs(VfsError::Io {
-                operation: "finish requesting-server edit responses",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "requesting-server responses were not acknowledged before the shared exit deadline",
-                ),
-            }));
-        }
-        if incomplete || !self.documents.worker_finished() {
-            return Err(InteractiveError::Vfs(VfsError::Io {
-                operation: "finish document shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "filesystem work did not quiesce; an already-running operation may still complete",
-                ),
-            }));
-        }
-        self.finish_agent_history(deadline).map_err(|message| {
-            InteractiveError::Vfs(VfsError::Io {
-                operation: "finish agent history shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::other(message),
-            })
-        })?;
-        self.persistence.undo_shutdown_result().map_err(|message| {
-            InteractiveError::Vfs(VfsError::Io {
-                operation: "finish undo history shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::other(message),
-            })
-        })?;
-        self.persistence.shutdown_result().map_err(|message| {
-            InteractiveError::Vfs(VfsError::Io {
-                operation: "finish persistence shutdown",
-                path: self.state.workspace_root.clone(),
-                source: std::io::Error::other(message),
-            })
-        })
         })();
         if diagnostics.is_empty() {
             return result;

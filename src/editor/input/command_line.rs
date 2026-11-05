@@ -193,10 +193,14 @@ pub fn parse_ex(
         return Ok(invocation);
     }
     // Visual mode opens the line with its range; other commands don't use it.
-    let input = raw_input.strip_prefix("'<,'>").map_or(raw_input, str::trim_start);
+    let input = raw_input
+        .strip_prefix("'<,'>")
+        .map_or(raw_input, str::trim_start);
     let (raw_name, raw_arguments) = input
         .split_once(char::is_whitespace)
-        .map_or((input, ""), |(name, arguments)| (name, arguments.trim_start()));
+        .map_or((input, ""), |(name, arguments)| {
+            (name, arguments.trim_start())
+        });
     let arguments = raw_arguments.trim_end();
     let force = raw_name.ends_with('!');
     let name = raw_name.strip_suffix('!').unwrap_or(raw_name);
@@ -475,14 +479,19 @@ fn argument(input: &str) -> Result<(String, bool, &str), ExParseError> {
             if character == delimiter {
                 quote = None;
             } else if character == '\\'
-                && characters.peek().is_some_and(|(_, next)| *next == delimiter || *next == '\\')
+                && characters
+                    .peek()
+                    .is_some_and(|(_, next)| *next == delimiter || *next == '\\')
             {
                 value.push(characters.next().expect("peeked character").1);
             } else {
                 value.push(character);
             }
         } else if matches!(character, '\'' | '"')
-            && (value.is_empty() || value.split_once('=').is_some_and(|(_, value)| value.is_empty()))
+            && (value.is_empty()
+                || value
+                    .split_once('=')
+                    .is_some_and(|(_, value)| value.is_empty()))
         {
             quote = Some(character);
             quoted = true;
@@ -562,7 +571,10 @@ mod tests {
             (r"\\>", r"\\>"),
             (r"\\\<cat", r"\\\b{start}cat"),
         ] {
-            assert_eq!(super::substitute_pattern(&format!("s/{pattern}/x/")), Some(expected.into()));
+            assert_eq!(
+                super::substitute_pattern(&format!("s/{pattern}/x/")),
+                Some(expected.into())
+            );
         }
     }
 
@@ -571,12 +583,24 @@ mod tests {
         for input in [":s/a/b ", "  : s/a/b  ", "s/a/ ", "s/a/b\t"] {
             let invocation = parse_ex(input, &aliases()).unwrap();
             let (_, _, replacement, _) = super::typed_substitution(input).unwrap();
-            assert_eq!(invocation.arguments["replacement"], CommandValue::String(replacement));
+            assert_eq!(
+                invocation.arguments["replacement"],
+                CommandValue::String(replacement)
+            );
         }
-        assert_eq!(parse_ex("  : q!  ", &aliases()).unwrap().id.as_str(), "editor.quit");
-        assert_eq!(parse_ex("s/a/b/g  ", &aliases()).unwrap().arguments["flags"], CommandValue::String("g".into()));
+        assert_eq!(
+            parse_ex("  : q!  ", &aliases()).unwrap().id.as_str(),
+            "editor.quit"
+        );
+        assert_eq!(
+            parse_ex("s/a/b/g  ", &aliases()).unwrap().arguments["flags"],
+            CommandValue::String("g".into())
+        );
         for input in ["", "  ", ":  "] {
-            assert!(matches!(parse_ex(input, &aliases()), Err(super::ExParseError::Empty)));
+            assert!(matches!(
+                parse_ex(input, &aliases()),
+                Err(super::ExParseError::Empty)
+            ));
         }
     }
 
@@ -585,57 +609,123 @@ mod tests {
         for input in ["set editor.tab_width=8", "package list nonsense"] {
             assert!(parse_ex(input, &aliases()).is_err(), "{input}");
         }
-        for (input, expected) in [("set", "config.open"), ("package list", "package.list"), ("package", "package.list")] {
+        for (input, expected) in [
+            ("set", "config.open"),
+            ("package list", "package.list"),
+            ("package", "package.list"),
+        ] {
             assert_eq!(parse_ex(input, &aliases()).unwrap().id.as_str(), expected);
         }
     }
 
     #[test]
     fn keymap_inspection_accepts_quoted_sequences() {
-        for input in [r#"keymap inspect "g g" editor.normal"#, "keymap inspect 'g g' editor.normal"] {
+        for input in [
+            r#"keymap inspect "g g" editor.normal"#,
+            "keymap inspect 'g g' editor.normal",
+        ] {
             let invocation = parse_ex(input, &aliases()).unwrap();
-            assert_eq!(invocation.arguments["key"], CommandValue::String("g g".into()));
-            assert_eq!(invocation.arguments["context"], CommandValue::String("editor.normal".into()));
+            assert_eq!(
+                invocation.arguments["key"],
+                CommandValue::String("g g".into())
+            );
+            assert_eq!(
+                invocation.arguments["context"],
+                CommandValue::String("editor.normal".into())
+            );
         }
-        for input in ["keymap inspect 'g g", "keymap inspect 'g g' editor.normal extra"] {
+        for input in [
+            "keymap inspect 'g g",
+            "keymap inspect 'g g' editor.normal extra",
+        ] {
             assert!(parse_ex(input, &aliases()).is_err(), "{input}");
         }
     }
 
     #[test]
     fn workspace_replacements_accept_empty_and_whitespace_strings() {
-        for (replacement, expected) in [(r#""""#, ""), ("''", ""), (r#""  ""#, "  "), ("two words  ", "two words  ")] {
-            let invocation = parse_ex(&format!("workspace.replace needle {replacement}"), &aliases()).unwrap();
-            assert_eq!(invocation.arguments["query"], CommandValue::String("needle".into()));
-            assert_eq!(invocation.arguments["replacement"], CommandValue::String(expected.into()));
+        for (replacement, expected) in [
+            (r#""""#, ""),
+            ("''", ""),
+            (r#""  ""#, "  "),
+            ("two words  ", "two words  "),
+        ] {
+            let invocation = parse_ex(
+                &format!("workspace.replace needle {replacement}"),
+                &aliases(),
+            )
+            .unwrap();
+            assert_eq!(
+                invocation.arguments["query"],
+                CommandValue::String("needle".into())
+            );
+            assert_eq!(
+                invocation.arguments["replacement"],
+                CommandValue::String(expected.into())
+            );
         }
         let invocation = parse_ex(r#"workspace.replace "two words" """#, &aliases()).unwrap();
-        assert_eq!(invocation.arguments["query"], CommandValue::String("two words".into()));
+        assert_eq!(
+            invocation.arguments["query"],
+            CommandValue::String("two words".into())
+        );
         assert!(parse_ex("workspace.replace needle", &aliases()).is_err());
     }
 
     #[test]
     fn generic_quoted_arguments_remain_strings() {
         for value in [r#""1""#, "'1'"] {
-            let invocation = parse_ex(&format!("navigation.mark.jump name={value}"), &aliases()).unwrap();
-            assert_eq!(invocation.arguments["name"], CommandValue::String("1".into()));
+            let invocation =
+                parse_ex(&format!("navigation.mark.jump name={value}"), &aliases()).unwrap();
+            assert_eq!(
+                invocation.arguments["name"],
+                CommandValue::String("1".into())
+            );
         }
-        let invocation = parse_ex(r#"dap.watch.remove expression="total * 10""#, &aliases()).unwrap();
-        assert_eq!(invocation.arguments["expression"], CommandValue::String("total * 10".into()));
-        let invocation = parse_ex(r#"lint.run name="" label='true' path="a\\b\"c" retries=2 enabled=true"#, &aliases()).unwrap();
-        assert_eq!(invocation.arguments["name"], CommandValue::String(String::new()));
-        assert_eq!(invocation.arguments["label"], CommandValue::String("true".into()));
-        assert_eq!(invocation.arguments["path"], CommandValue::String("a\\b\"c".into()));
+        let invocation =
+            parse_ex(r#"dap.watch.remove expression="total * 10""#, &aliases()).unwrap();
+        assert_eq!(
+            invocation.arguments["expression"],
+            CommandValue::String("total * 10".into())
+        );
+        let invocation = parse_ex(
+            r#"lint.run name="" label='true' path="a\\b\"c" retries=2 enabled=true"#,
+            &aliases(),
+        )
+        .unwrap();
+        assert_eq!(
+            invocation.arguments["name"],
+            CommandValue::String(String::new())
+        );
+        assert_eq!(
+            invocation.arguments["label"],
+            CommandValue::String("true".into())
+        );
+        assert_eq!(
+            invocation.arguments["path"],
+            CommandValue::String("a\\b\"c".into())
+        );
         assert_eq!(invocation.arguments["retries"], CommandValue::Integer(2));
         assert_eq!(invocation.arguments["enabled"], CommandValue::Bool(true));
         for (input, name, expected) in [
             ("lint.run name=don't", "name", "don't"),
-            (r#"dap.watch.remove expression=map["key"]"#, "expression", r#"map["key"]"#),
+            (
+                r#"dap.watch.remove expression=map["key"]"#,
+                "expression",
+                r#"map["key"]"#,
+            ),
         ] {
             let invocation = parse_ex(input, &aliases()).unwrap();
-            assert_eq!(invocation.arguments[name], CommandValue::String(expected.into()));
+            assert_eq!(
+                invocation.arguments[name],
+                CommandValue::String(expected.into())
+            );
         }
-        for input in ["lint.run name=", "lint.run name='unfinished", "lint.run =value"] {
+        for input in [
+            "lint.run name=",
+            "lint.run name='unfinished",
+            "lint.run =value",
+        ] {
             assert!(parse_ex(input, &aliases()).is_err(), "{input}");
         }
     }

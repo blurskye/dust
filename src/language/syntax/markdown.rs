@@ -177,7 +177,10 @@ pub(super) fn references(tree: &Tree, source: &str) -> BTreeMap<String, (usize, 
                 named_child(node, "link_label"),
                 named_child(node, "link_destination"),
             ) {
-                references.entry(reference_label(&source[label.start_byte() + 1..label.end_byte() - 1]))
+                references
+                    .entry(reference_label(
+                        &source[label.start_byte() + 1..label.end_byte() - 1],
+                    ))
                     .or_insert((destination.start_byte(), destination.end_byte()));
             }
         } else {
@@ -191,7 +194,12 @@ pub(super) fn references(tree: &Tree, source: &str) -> BTreeMap<String, (usize, 
 }
 
 fn reference_label(label: &str) -> String {
-    label.split_whitespace().collect::<Vec<_>>().join(" ").to_uppercase().to_lowercase()
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_uppercase()
+        .to_lowercase()
 }
 
 /// Marks from an inline tree: emphasis and code markers, links and escapes.
@@ -222,7 +230,11 @@ pub(super) fn inline_marks(
             "backslash_escape" => {
                 push(node.start_byte(), node.start_byte() + 1, MarkdownMark::Hide)
             }
-            "inline_link" | "full_reference_link" | "collapsed_reference_link" | "shortcut_link" | "image" => {
+            "inline_link"
+            | "full_reference_link"
+            | "collapsed_reference_link"
+            | "shortcut_link"
+            | "image" => {
                 let text = named_child(node, "link_text")
                     .or_else(|| named_child(node, "image_description"));
                 if let Some(text) = text {

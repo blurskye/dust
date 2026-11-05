@@ -233,7 +233,11 @@ impl ExplorerSession {
             self.searching = false;
         }
         self.next_loads.retain(|load| load.view != view);
-        if self.follow.as_ref().is_some_and(|(source, _)| *source == view) {
+        if self
+            .follow
+            .as_ref()
+            .is_some_and(|(source, _)| *source == view)
+        {
             self.follow = None;
         }
         self.mark_view_changed();
@@ -429,7 +433,11 @@ impl ExplorerSession {
         self.ignored = !self.ignored;
         self.mark_view_changed();
     }
-    fn load_request_for(&self, view: ExplorerViewId, node: ExplorerNodeId) -> Option<DirectoryLoad> {
+    fn load_request_for(
+        &self,
+        view: ExplorerViewId,
+        node: ExplorerNodeId,
+    ) -> Option<DirectoryLoad> {
         let tree = self.tree_for(view)?;
         let entry = tree.node(node)?;
         Some(DirectoryLoad {
@@ -441,9 +449,11 @@ impl ExplorerSession {
         })
     }
     fn queue_load(&mut self, request: DirectoryLoad) {
-        if let Some(queued) = self.next_loads.iter_mut().find(|queued| {
-            queued.view == request.view && queued.node == request.node
-        }) {
+        if let Some(queued) = self
+            .next_loads
+            .iter_mut()
+            .find(|queued| queued.view == request.view && queued.node == request.node)
+        {
             queued.expand |= request.expand;
         } else {
             self.next_loads.push_back(request);
@@ -572,7 +582,9 @@ impl ExplorerSession {
                         .is_some_and(|node| node.kind == ExplorerKind::Root);
                 let select_first_child = root_selected
                     && self.root_count == 1
-                    && self.tree_for(source_view).is_some_and(|tree| tree.is_expanded(node));
+                    && self
+                        .tree_for(source_view)
+                        .is_some_and(|tree| tree.is_expanded(node));
                 if let Some(tree) = self.tree_for_mut(source_view) {
                     tree.apply_load(node, generation, revision, children);
                     if truncated && count >= 100_000 {
@@ -586,7 +598,11 @@ impl ExplorerSession {
                 if truncated && count < 100_000 {
                     self.maximum_entries
                         .insert(node, count.saturating_mul(2).clamp(1, 100_000));
-                    self.queue_load(DirectoryLoad { view: source_view, node, expand: false });
+                    self.queue_load(DirectoryLoad {
+                        view: source_view,
+                        node,
+                        expand: false,
+                    });
                 }
                 self.synchronize_tree_data(source_view);
                 self.mark_view_changed();
@@ -759,7 +775,11 @@ impl ExplorerSession {
             return None;
         }
         while let Some(request) = self.next_loads.pop_front() {
-            if self.tree_for(request.view).and_then(|tree| tree.node(request.node)).is_some() {
+            if self
+                .tree_for(request.view)
+                .and_then(|tree| tree.node(request.node))
+                .is_some()
+            {
                 return Some(request);
             }
         }
@@ -1068,7 +1088,8 @@ mod tests {
         let root_node = owner.tree().selected_id().unwrap();
         owner.load(root_node, scope.clone(), 1, 100).unwrap();
         drain(&mut owner, scope.clone());
-        let [a, b, c] = ["a", "b", "c"].map(|name| owner.tree().id_for_path(&root.path().join(name)).unwrap());
+        let [a, b, c] =
+            ["a", "b", "c"].map(|name| owner.tree().id_for_path(&root.path().join(name)).unwrap());
         owner.load(a, scope.clone(), 1, 2).unwrap();
         owner.load(b, scope.clone(), 1, 2).unwrap();
         owner.load(b, scope.clone(), 1, 2).unwrap();
@@ -1082,7 +1103,10 @@ mod tests {
         }
         assert!(owner.next_reload().is_none());
         for node in [a, b, c] {
-            assert_eq!(owner.tree().node(node).unwrap().load, ExplorerLoadState::Loaded);
+            assert_eq!(
+                owner.tree().node(node).unwrap().load,
+                ExplorerLoadState::Loaded
+            );
             assert!(owner.tree().is_expanded(node));
         }
         assert_eq!(owner.tree().node(b).unwrap().children.len(), 3);
@@ -1105,7 +1129,10 @@ mod tests {
         let request = owner.next_reload().unwrap();
         owner.load_request(request, scope.clone(), 1, 100).unwrap();
         drain(&mut owner, scope);
-        assert_eq!(owner.tree().node(dir).unwrap().load, ExplorerLoadState::Loaded);
+        assert_eq!(
+            owner.tree().node(dir).unwrap().load,
+            ExplorerLoadState::Loaded
+        );
         assert!(!owner.tree().is_expanded(dir));
     }
 
@@ -1136,7 +1163,12 @@ mod tests {
         owner.activate_view(clone).unwrap();
         owner.load_request(request, scope.clone(), 1, 100).unwrap();
         drain(&mut owner, scope);
-        assert!(owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap().is_expanded(dir));
+        assert!(
+            owner
+                .tree_for(PRIMARY_EXPLORER_VIEW)
+                .unwrap()
+                .is_expanded(dir)
+        );
         assert!(owner.next_reload().is_none());
     }
 
@@ -1162,7 +1194,12 @@ mod tests {
 
         owner.select_first_child();
         assert!(owner.tree().is_expanded(node));
-        assert!(owner.tree().visible_index(owner.tree().selected_id().unwrap()).is_some());
+        assert!(
+            owner
+                .tree()
+                .visible_index(owner.tree().selected_id().unwrap())
+                .is_some()
+        );
         let request = owner.next_reload().unwrap();
         assert_eq!(request.node, node);
         owner.load_request(request, scope.clone(), 1, 100).unwrap();
@@ -1244,11 +1281,14 @@ mod tests {
 
             std::fs::remove_file(&old).unwrap();
             std::fs::write(&new, "new").unwrap();
-            owner.accept_watch(ExplorerWatchBatch {
-                generation: owner.watch_generation.unwrap(),
-                root_revision: owner.tree().root_revision(),
-                directories: vec![directory.clone()],
-            }, true);
+            owner.accept_watch(
+                ExplorerWatchBatch {
+                    generation: owner.watch_generation.unwrap(),
+                    root_revision: owner.tree().root_revision(),
+                    directories: vec![directory.clone()],
+                },
+                true,
+            );
             let request = owner.next_reload().unwrap();
             assert_eq!(request.node, directory_node);
             owner.load_request(request, scope.clone(), 1, 100).unwrap();
@@ -1351,7 +1391,10 @@ mod tests {
         let request = owner.continue_follow().unwrap().unwrap();
         owner.load_request(request, scope.clone(), 1, 100).unwrap();
         drain(&mut owner, scope);
-        assert_eq!(owner.tree().node(request.node).unwrap().load, ExplorerLoadState::Error);
+        assert_eq!(
+            owner.tree().node(request.node).unwrap().load,
+            ExplorerLoadState::Error
+        );
         assert!(owner.continue_follow().is_err());
         assert!(!owner.following());
         assert!(owner.continue_follow().unwrap().is_none());
@@ -1386,7 +1429,10 @@ mod tests {
         assert_eq!(owner.tree().filter(), "");
         let tree = owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap();
         assert_eq!(tree.filter(), "needle");
-        assert!(tree.visible_ids().contains(&tree.id_for_path(&file).unwrap()));
+        assert!(
+            tree.visible_ids()
+                .contains(&tree.id_for_path(&file).unwrap())
+        );
     }
 
     #[test]
@@ -1484,7 +1530,10 @@ mod tests {
         owner.activate_view(clone).unwrap();
         assert!(!owner.searching());
         assert_eq!(owner.tree().filter(), "");
-        assert_eq!(owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap().filter(), "primary");
+        assert_eq!(
+            owner.tree_for(PRIMARY_EXPLORER_VIEW).unwrap().filter(),
+            "primary"
+        );
         owner.start_search();
         owner.activate_view(PRIMARY_EXPLORER_VIEW).unwrap();
         assert!(!owner.searching());

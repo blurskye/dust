@@ -357,7 +357,11 @@ mod tests {
     fn border_glyphs_fit_one_column_under_both_width_policies() {
         for wide in [false, true] {
             let grid = CellGrid::new_with_policy(8, 1, "�", "◌", wide);
-            for style in [crate::config::BorderStyle::Single, crate::config::BorderStyle::Double, crate::config::BorderStyle::Rounded] {
+            for style in [
+                crate::config::BorderStyle::Single,
+                crate::config::BorderStyle::Double,
+                crate::config::BorderStyle::Rounded,
+            ] {
                 let (h, v, tl, tr, bl, br) = grid.border_glyphs(style);
                 for glyph in [h, v, tl, tr, bl, br] {
                     assert_eq!(grid.display_width(&glyph.to_string()), 1);

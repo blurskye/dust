@@ -190,7 +190,8 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
         Host, OpenWindowRequest, UiNode, UiNodeKind, UiRequest, UiStyle, UiTree, WindowPlacement,
     };
     let mut host = component_host();
-    host.declared_content_types.insert("plugin.demo.chat-panel".into());
+    host.declared_content_types
+        .insert("plugin.demo.chat-panel".into());
     let request = |content_type: &str| {
         UiRequest::OpenWindow(OpenWindowRequest {
             expected_graph_revision: 4,
@@ -287,13 +288,34 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
     );
     host.confirmation_available = true;
     for invalid in [
-        ConfirmationRequest { title: String::new(), ..request() },
-        ConfirmationRequest { message: String::new(), ..request() },
-        ConfirmationRequest { default_answer: ConfirmationAnswer::Cancelled, ..request() },
-        ConfirmationRequest { title: "t".repeat(129), ..request() },
-        ConfirmationRequest { message: "m".repeat(4_097), ..request() },
-        ConfirmationRequest { title: "bad\0title".into(), ..request() },
-        ConfirmationRequest { message: "bad\0message".into(), ..request() },
+        ConfirmationRequest {
+            title: String::new(),
+            ..request()
+        },
+        ConfirmationRequest {
+            message: String::new(),
+            ..request()
+        },
+        ConfirmationRequest {
+            default_answer: ConfirmationAnswer::Cancelled,
+            ..request()
+        },
+        ConfirmationRequest {
+            title: "t".repeat(129),
+            ..request()
+        },
+        ConfirmationRequest {
+            message: "m".repeat(4_097),
+            ..request()
+        },
+        ConfirmationRequest {
+            title: "bad\0title".into(),
+            ..request()
+        },
+        ConfirmationRequest {
+            message: "bad\0message".into(),
+            ..request()
+        },
     ] {
         assert_eq!(
             host.queue_confirmation(invalid).unwrap_err().code,
@@ -303,8 +325,14 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
         assert_eq!(host.next_confirmation_token, 2);
     }
     for valid in [
-        ConfirmationRequest { title: "t".repeat(128), ..request() },
-        ConfirmationRequest { message: "m".repeat(4_096), ..request() },
+        ConfirmationRequest {
+            title: "t".repeat(128),
+            ..request()
+        },
+        ConfirmationRequest {
+            message: "m".repeat(4_096),
+            ..request()
+        },
     ] {
         assert!(host.queue_confirmation(valid).is_ok());
         assert_eq!(host.confirmation_requests.len(), 1);
@@ -334,7 +362,8 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
     assert_eq!(host.next_storage_token, 1);
     host.capabilities.insert(PluginCapability::PluginStorage);
     assert_eq!(
-        host.queue_storage_request(StorageRequest::Get("valid".into())).unwrap(),
+        host.queue_storage_request(StorageRequest::Get("valid".into()))
+            .unwrap(),
         1
     );
     assert_eq!(host.storage_requests.len(), 1);
@@ -379,14 +408,22 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
 #[test]
 fn component_output_queues_enforce_cumulative_byte_budgets() {
     use component_api::dust::plugin::host::{
-        Host, PickerProviderChunk, PickerProviderItem, ProviderTerminal, ProviderTerminalKind,
-        ProviderErrorCode, VirtualDocumentFull, VirtualDocumentPatch, VirtualDocumentPatchSet,
-        VirtualDocumentProposal, VirtualDocumentProposalKind, VirtualDocumentErrorCode,
+        Host, PickerProviderChunk, PickerProviderItem, ProviderErrorCode, ProviderTerminal,
+        ProviderTerminalKind, VirtualDocumentErrorCode, VirtualDocumentFull, VirtualDocumentPatch,
+        VirtualDocumentPatchSet, VirtualDocumentProposal, VirtualDocumentProposalKind,
     };
     let mut host = ComponentHostState {
         runtime_epoch: 0,
-        limits: super::component::ComponentLimits::new(wasmtime::StoreLimitsBuilder::new().build(), 64 * 1024 * 1024),
-        capabilities: [PluginCapability::PickerProviders, PluginCapability::VirtualDocuments].into_iter().collect(),
+        limits: super::component::ComponentLimits::new(
+            wasmtime::StoreLimitsBuilder::new().build(),
+            64 * 1024 * 1024,
+        ),
+        capabilities: [
+            PluginCapability::PickerProviders,
+            PluginCapability::VirtualDocuments,
+        ]
+        .into_iter()
+        .collect(),
         declared_content_types: BTreeSet::new(),
         snapshot: None,
         proposals: Vec::new(),
@@ -419,39 +456,76 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
         virtual_document_proposals: Vec::new(),
     };
     let chunk = || PickerProviderChunk {
-        request: 1, sequence: 1,
-        items: (0..128).map(|id| PickerProviderItem {
-            id: id.to_string(), primary: "p".repeat(1024), secondary: None,
-            action_data: vec![0; 4096],
-        }).collect(),
-        terminal: ProviderTerminal { kind: ProviderTerminalKind::More, error: None },
+        request: 1,
+        sequence: 1,
+        items: (0..128)
+            .map(|id| PickerProviderItem {
+                id: id.to_string(),
+                primary: "p".repeat(1024),
+                secondary: None,
+                action_data: vec![0; 4096],
+            })
+            .collect(),
+        terminal: ProviderTerminal {
+            kind: ProviderTerminalKind::More,
+            error: None,
+        },
     };
     host.queue_picker_provider_chunk(chunk()).unwrap();
-    assert_eq!(host.queue_picker_provider_chunk(chunk()).unwrap_err().code, ProviderErrorCode::ByteCeiling);
+    assert_eq!(
+        host.queue_picker_provider_chunk(chunk()).unwrap_err().code,
+        ProviderErrorCode::ByteCeiling
+    );
     assert_eq!(host.provider_chunks.len(), 1);
     host.provider_chunks.clear();
     host.queue_picker_provider_chunk(chunk()).unwrap();
 
     let full = || VirtualDocumentProposal {
-        request: 1, document: 1, cancellation_generation: 1,
+        request: 1,
+        document: 1,
+        cancellation_generation: 1,
         kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
-            expected_revision: None, revision: 1, title: "Document".into(), language: "text".into(),
+            expected_revision: None,
+            revision: 1,
+            title: "Document".into(),
+            language: "text".into(),
             text: "x".repeat(1024 * 1024),
         }),
     };
-    for _ in 0..3 { host.queue_virtual_document_proposal(full()).unwrap(); }
-    assert_eq!(host.queue_virtual_document_proposal(full()).unwrap_err().code, VirtualDocumentErrorCode::ByteCeiling);
+    for _ in 0..3 {
+        host.queue_virtual_document_proposal(full()).unwrap();
+    }
+    assert_eq!(
+        host.queue_virtual_document_proposal(full())
+            .unwrap_err()
+            .code,
+        VirtualDocumentErrorCode::ByteCeiling
+    );
     assert_eq!(host.virtual_document_proposals.len(), 3);
     host.virtual_document_proposals.clear();
     let patches = || VirtualDocumentProposal {
-        request: 1, document: 1, cancellation_generation: 1,
+        request: 1,
+        document: 1,
+        cancellation_generation: 1,
         kind: VirtualDocumentProposalKind::Patches(VirtualDocumentPatchSet {
-            expected_revision: 1, revision: 2,
-            patches: vec![VirtualDocumentPatch { start: 0, end: 0, replacement: "x".repeat(256 * 1024) }],
+            expected_revision: 1,
+            revision: 2,
+            patches: vec![VirtualDocumentPatch {
+                start: 0,
+                end: 0,
+                replacement: "x".repeat(256 * 1024),
+            }],
         }),
     };
-    for _ in 0..16 { host.queue_virtual_document_proposal(patches()).unwrap(); }
-    assert_eq!(host.queue_virtual_document_proposal(patches()).unwrap_err().code, VirtualDocumentErrorCode::ByteCeiling);
+    for _ in 0..16 {
+        host.queue_virtual_document_proposal(patches()).unwrap();
+    }
+    assert_eq!(
+        host.queue_virtual_document_proposal(patches())
+            .unwrap_err()
+            .code,
+        VirtualDocumentErrorCode::ByteCeiling
+    );
     assert_eq!(host.virtual_document_proposals.len(), 16);
     host.virtual_document_proposals.clear();
     host.queue_virtual_document_proposal(full()).unwrap();
@@ -482,10 +556,14 @@ fn static_manifest_command_ids_fit_the_command_registry() {
     manifest.contributions = PluginContributions::default();
     let declaration = manifest.commands["run"].clone();
     // "plugin." and the separator leave 56 bytes after a 64-byte plugin ID.
-    manifest.commands = [("c".repeat(56), declaration.clone())].into_iter().collect();
+    manifest.commands = [("c".repeat(56), declaration.clone())]
+        .into_iter()
+        .collect();
     assert!(index_manifest_contributions(&manifest, 1, "manifest.toml".into()).is_ok());
     for length in [57, 64] {
-        manifest.commands = [("c".repeat(length), declaration.clone())].into_iter().collect();
+        manifest.commands = [("c".repeat(length), declaration.clone())]
+            .into_iter()
+            .collect();
         assert!(matches!(
             index_manifest_contributions(&manifest, 1, "manifest.toml".into()),
             Err(PluginError::InvalidManifest)
@@ -502,7 +580,9 @@ fn candidate_activation_validates_the_manifest_before_loading() {
     fs::write(&path, loaded.bytes).unwrap();
     let mut manifest = loaded.manifest;
     // The runtime fixture grants events without declaring subscriptions.
-    manifest.capabilities.remove(&PluginCapability::EventSubscriptions);
+    manifest
+        .capabilities
+        .remove(&PluginCapability::EventSubscriptions);
     assert!(activate_candidate(root.path(), &path, manifest.clone(), &limits).is_ok());
     let version = std::mem::take(&mut manifest.version);
     assert!(matches!(
@@ -510,7 +590,10 @@ fn candidate_activation_validates_the_manifest_before_loading() {
         Err(PluginError::InvalidManifest)
     ));
     manifest.version = version;
-    let limits = PluginLimits { maximum_commands: 0, ..limits };
+    let limits = PluginLimits {
+        maximum_commands: 0,
+        ..limits
+    };
     assert!(matches!(
         activate_candidate(root.path(), &path, manifest, &limits),
         Err(PluginError::InvalidManifest)
@@ -607,16 +690,28 @@ fn plugin_manifest_reads_require_regular_bounded_files() {
     let limits = PluginLimits::default();
     let check = |expected: fn(&PluginError) -> bool| {
         let (_, error) = super::index::load_manifest_component(
-            root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
-        ).err().expect("manifest must be rejected before loading the component");
+            root.path(),
+            relative,
+            std::path::Path::new("missing.wasm"),
+            &limits,
+        )
+        .err()
+        .expect("manifest must be rejected before loading the component");
         assert!(expected(&error), "{error}");
         let error = super::index::index_manifest_from_store(
-            root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
-        ).unwrap_err();
+            root.path(),
+            relative,
+            std::path::Path::new("missing.wasm"),
+            PluginLoadId(1),
+            &limits,
+        )
+        .unwrap_err();
         assert!(expected(&error), "{error}");
     };
     nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
-    check(|error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput));
+    check(
+        |error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput),
+    );
     fs::remove_file(&path).unwrap();
     std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
     check(|error| matches!(error, PluginError::OutsideStore));
@@ -625,12 +720,24 @@ fn plugin_manifest_reads_require_regular_bounded_files() {
     let mut source = toml::to_string(&manifest()).unwrap();
     fs::write(&path, &source).unwrap();
     super::index::index_manifest_from_store(
-        root.path(), relative, std::path::Path::new("missing.wasm"), PluginLoadId(1), &limits,
-    ).expect("a regular manifest can be indexed without its component");
+        root.path(),
+        relative,
+        std::path::Path::new("missing.wasm"),
+        PluginLoadId(1),
+        &limits,
+    )
+    .expect("a regular manifest can be indexed without its component");
     let (_, error) = super::index::load_manifest_component(
-        root.path(), relative, std::path::Path::new("missing.wasm"), &limits,
-    ).err().unwrap();
-    assert!(matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::NotFound));
+        root.path(),
+        relative,
+        std::path::Path::new("missing.wasm"),
+        &limits,
+    )
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::NotFound)
+    );
 
     source.extend(std::iter::repeat_n(' ', 1024 * 1024 + 1 - source.len()));
     fs::write(&path, source).unwrap();
@@ -695,28 +802,48 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
 #[test]
 fn execution_before_activation_removes_the_workers_indexed_candidate() {
     let root = tempfile::tempdir().unwrap();
-    fs::write(root.path().join("manifest.toml"), toml::to_string(&manifest()).unwrap()).unwrap();
+    fs::write(
+        root.path().join("manifest.toml"),
+        toml::to_string(&manifest()).unwrap(),
+    )
+    .unwrap();
     let mut manager = PluginManager::start(4);
-    let load = manager.index_from_store(
-        "demo".into(), root.path().into(), "manifest.toml".into(),
-        "missing-component.wasm".into(), PluginLimits::default(),
-    ).unwrap();
+    let load = manager
+        .index_from_store(
+            "demo".into(),
+            root.path().into(),
+            "manifest.toml".into(),
+            "missing-component.wasm".into(),
+            PluginLimits::default(),
+        )
+        .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
-        if manager.poll().unwrap().iter().any(|event| matches!(event, PluginEvent::Indexed { .. })) {
+        if manager
+            .poll()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, PluginEvent::Indexed { .. }))
+        {
             break;
         }
         assert!(std::time::Instant::now() < deadline);
         std::thread::yield_now();
     }
     manager.execute(empty_execution_request()).unwrap();
-    assert!(matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
-        WorkerEvent::Failed { load: failed, error: PluginError::NotActive, .. } if failed == load));
+    assert!(
+        matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+        WorkerEvent::Failed { load: failed, error: PluginError::NotActive, .. } if failed == load)
+    );
     // Foreground has not polled the failure yet. Activation must not find a
     // candidate, rather than trying to load its missing component.
-    manager.activate_indexed("demo", load, "0".repeat(64)).unwrap();
-    assert!(matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
-        WorkerEvent::Failed { load: failed, error: PluginError::IndexNotAccepted, .. } if failed == load));
+    manager
+        .activate_indexed("demo", load, "0".repeat(64))
+        .unwrap();
+    assert!(
+        matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+        WorkerEvent::Failed { load: failed, error: PluginError::IndexNotAccepted, .. } if failed == load)
+    );
 }
 
 #[test]
@@ -921,9 +1048,14 @@ fn static_events_providers_and_storage_are_capability_gated_and_bounded() {
 #[test]
 fn coalesced_host_events_keep_observation_order() {
     let mut candidate = manifest();
-    candidate.capabilities.insert(PluginCapability::EventSubscriptions);
+    candidate
+        .capabilities
+        .insert(PluginCapability::EventSubscriptions);
     candidate.contributions.subscriptions = [
-        ("workspace", PluginSubscriptionKind::WorkspaceMetadataChanged),
+        (
+            "workspace",
+            PluginSubscriptionKind::WorkspaceMetadataChanged,
+        ),
         ("surface", PluginSubscriptionKind::ActiveSurfaceChanged),
     ]
     .into_iter()
@@ -944,14 +1076,29 @@ fn coalesced_host_events_keep_observation_order() {
         (PluginSubscriptionKind::ActiveSurfaceChanged, 1),
         (PluginSubscriptionKind::WorkspaceMetadataChanged, 2),
     ] {
-        queue.observe("demo", PluginLoadId(9), kind, revision, "changed").unwrap();
+        queue
+            .observe("demo", PluginLoadId(9), kind, revision, "changed")
+            .unwrap();
     }
     let events = queue.deliver("demo", PluginLoadId(9));
-    assert_eq!(events.iter().map(|event| event.sequence).collect::<Vec<_>>(), [2, 3]);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [2, 3]
+    );
     assert_eq!(events[0].kind, PluginSubscriptionKind::ActiveSurfaceChanged);
-    assert_eq!(events[1].kind, PluginSubscriptionKind::WorkspaceMetadataChanged);
+    assert_eq!(
+        events[1].kind,
+        PluginSubscriptionKind::WorkspaceMetadataChanged
+    );
     assert_eq!(events[1].coalesced, 1);
-    queue.acknowledge("demo", PluginLoadId(9), &events.iter().map(|event| event.id).collect::<Vec<_>>());
+    queue.acknowledge(
+        "demo",
+        PluginLoadId(9),
+        &events.iter().map(|event| event.id).collect::<Vec<_>>(),
+    );
     assert_eq!(queue.pending("demo", PluginLoadId(9)), 0);
 }
 
@@ -1282,14 +1429,18 @@ impl ExecutionFixture {
         }
     }
     pub(crate) fn indexed(&self, index: PluginContributionIndex) {
-        self.events.try_send(WorkerEvent::Indexed {
-            load: PluginLoadId(index.generation),
-            plugin: index.owner.clone(),
-            index,
-        }).unwrap();
+        self.events
+            .try_send(WorkerEvent::Indexed {
+                load: PluginLoadId(index.generation),
+                plugin: index.owner.clone(),
+                index,
+            })
+            .unwrap();
     }
     pub(crate) fn loaded(&self, load: PluginLoadId, component: LoadedComponent) {
-        self.events.try_send(WorkerEvent::Loaded { load, component }).unwrap();
+        self.events
+            .try_send(WorkerEvent::Loaded { load, component })
+            .unwrap();
     }
     pub(crate) fn reply(&self, captured: &CapturedExecution, proposals: Vec<PluginEditProposal>) {
         self.reply_with(captured, |execution| execution.proposals = proposals);
@@ -1314,11 +1465,13 @@ impl ExecutionFixture {
             virtual_document_proposals: Vec::new(),
         };
         update(&mut execution);
-        self.events.try_send(WorkerEvent::Executed {
-            load: captured.load,
-            origin: captured.origin.clone(),
-            execution,
-        }).unwrap();
+        self.events
+            .try_send(WorkerEvent::Executed {
+                load: captured.load,
+                origin: captured.origin.clone(),
+                execution,
+            })
+            .unwrap();
     }
     pub(crate) fn reply_confirmation_request(
         &self,
@@ -1422,7 +1575,10 @@ fn retained_runtime(
     limits: &PluginLimits,
     looping_activation: bool,
 ) -> Result<super::execution::LoadOutcome, PluginError> {
-    retained_runtime_with_activation(limits, looping_activation.then_some(&[0, 3, 64, 12, 0, 11, 0, 11]))
+    retained_runtime_with_activation(
+        limits,
+        looping_activation.then_some(&[0, 3, 64, 12, 0, 11, 0, 11]),
+    )
 }
 
 fn retained_runtime_with_activation(
@@ -1550,13 +1706,23 @@ fn component_activation_checks_counts_and_strings_before_copying() {
             value >>= 7;
             let done = (value == 0 && byte & 64 == 0) || (value == -1 && byte & 64 != 0);
             body.push(byte | if done { 0 } else { 128 });
-            if done { break; }
+            if done {
+                break;
+            }
         }
     }
     for (count, length, expected) in [(4096, i32::MAX, "count ceiling"), (2, 257, "byte ceiling")] {
         // Replace activate with a result whose list entries alias one guest string.
         let mut body = vec![0]; // no locals
-        for (address, value) in [(0, 0), (4, 32), (8, count), (32, 4096), (36, length), (40, 4096), (44, length)] {
+        for (address, value) in [
+            (0, 0),
+            (4, 32),
+            (8, count),
+            (32, 4096),
+            (36, length),
+            (40, 4096),
+            (44, length),
+        ] {
             constant(address, &mut body);
             constant(value, &mut body);
             body.extend_from_slice(&[0x36, 2, 0]); // i32.store
@@ -1564,7 +1730,8 @@ fn component_activation_checks_counts_and_strings_before_copying() {
         constant(0, &mut body); // result pointer
         body.push(0x0b);
         let error = retained_runtime_with_activation(&PluginLimits::default(), Some(&body))
-            .err().expect("oversized activation must fail");
+            .err()
+            .expect("oversized activation must fail");
         assert!(matches!(error, PluginError::Activation(_)), "{error}");
         assert!(error.to_string().contains(expected), "{error}");
     }
@@ -1572,7 +1739,9 @@ fn component_activation_checks_counts_and_strings_before_copying() {
 
 #[test]
 fn component_execution_errors_include_the_trap_cause() {
-    let mut runtime = retained_runtime(&PluginLimits::default(), false).unwrap().runtime;
+    let mut runtime = retained_runtime(&PluginLimits::default(), false)
+        .unwrap()
+        .runtime;
     runtime.limits.fuel = 1;
     let mut request = empty_execution_request();
     request.command = "spin".into();
@@ -1665,7 +1834,10 @@ fn component_storage_driver_validates_each_reply_before_advancing() {
         wrong.error = if phase == 3 {
             None
         } else {
-            Some(PluginStorageError::new(PluginStorageErrorCode::Unavailable, "failed"))
+            Some(PluginStorageError::new(
+                PluginStorageErrorCode::Unavailable,
+                "failed",
+            ))
         };
         invalid.push(vec![wrong]);
         let mut wrong = result.clone();

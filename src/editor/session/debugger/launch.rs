@@ -299,10 +299,11 @@ impl DebugSession {
         };
         // A configured adapter owns how its target is run; its arbitrary ID says nothing
         // about whether that target needs an execute bit.
-        let source_program = configuration.is_some() || tools.iter().any(|e| {
-            e.definition.id == session.adapter
-                && e.definition.debug_program_policy == DebugProgramPolicy::Source
-        });
+        let source_program = configuration.is_some()
+            || tools.iter().any(|e| {
+                e.definition.id == session.adapter
+                    && e.definition.debug_program_policy == DebugProgramPolicy::Source
+            });
         let terminal = session
             .run_in_terminal_profile
             .as_ref()
@@ -762,24 +763,48 @@ mod tests {
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity)],
-        ).unwrap();
+        )
+        .unwrap();
         let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
         let policy = DebugConfig::default();
         let terminals = crate::config::TerminalsConfig::default();
         let mut owner = DebugSession::new(&policy, workspace.version());
-        let definition = crate::tools::bundled_tool_catalog().into_iter()
-            .find(|d| d.id == "codelldb").unwrap();
-        let tools = [ToolEntry { definition, status: ToolStatus::Installed(std::env::current_exe().unwrap()) }];
+        let definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|d| d.id == "codelldb")
+            .unwrap();
+        let tools = [ToolEntry {
+            definition,
+            status: ToolStatus::Installed(std::env::current_exe().unwrap()),
+        }];
         let source = root_path.join("main.rs");
-        owner.request_debug(
-            (None, Some("codelldb")), Some("target/debug/app".into()), Some((&source, "rust")),
-            (&policy, &terminals, 1), &workspace, &tools,
-        ).unwrap();
-        assert_eq!(owner.launch.as_ref().unwrap().program, Some(root_path.join("target/debug/app")));
-        assert!(owner.request_debug(
-            (None, Some("codelldb")), Some("../outside".into()), Some((&source, "rust")),
-            (&policy, &terminals, 1), &workspace, &tools,
-        ).unwrap_err().contains("outside its original root"));
+        owner
+            .request_debug(
+                (None, Some("codelldb")),
+                Some("target/debug/app".into()),
+                Some((&source, "rust")),
+                (&policy, &terminals, 1),
+                &workspace,
+                &tools,
+            )
+            .unwrap();
+        assert_eq!(
+            owner.launch.as_ref().unwrap().program,
+            Some(root_path.join("target/debug/app"))
+        );
+        assert!(
+            owner
+                .request_debug(
+                    (None, Some("codelldb")),
+                    Some("../outside".into()),
+                    Some((&source, "rust")),
+                    (&policy, &terminals, 1),
+                    &workspace,
+                    &tools,
+                )
+                .unwrap_err()
+                .contains("outside its original root")
+        );
     }
 
     pub(in crate::editor::session::debugger) fn original_launch_fixture() {
@@ -1100,7 +1125,10 @@ mod tests {
             let terminals = crate::config::TerminalsConfig::default();
             let intent = owner
                 .request_debug(
-                    (if automatic { None } else { Some("configured") }, Some(adapter_id)),
+                    (
+                        if automatic { None } else { Some("configured") },
+                        Some(adapter_id),
+                    ),
                     None,
                     Some((&target, "go")),
                     (&policy, &terminals, 1),
@@ -1109,8 +1137,12 @@ mod tests {
                 )
                 .unwrap();
             for run in 0..if automatic { 2 } else { 1 } {
-                let intent = if run == 0 { intent.clone() } else {
-                    owner.request_restart((&policy, &terminals, 1), &workspace, &tools).unwrap()
+                let intent = if run == 0 {
+                    intent.clone()
+                } else {
+                    owner
+                        .request_restart((&policy, &terminals, 1), &workspace, &tools)
+                        .unwrap()
                 };
                 owner.authorize_debug(intent, &workspace).unwrap();
                 let deadline = Instant::now() + Duration::from_secs(5);
@@ -1120,16 +1152,25 @@ mod tests {
                     }
                     for event in workspace.preflight_events() {
                         match event {
-                            WorkspacePreflightEvent::Ready(ready) => owner.debug_preflight(ready).unwrap(),
+                            WorkspacePreflightEvent::Ready(ready) => {
+                                owner.debug_preflight(ready).unwrap()
+                            }
                             _ => panic!("preflight failed"),
                         }
                     }
-                    owner.advance_debug(
-                        workspace.execution_lane(DiscoveryKind::Debugger), &policy, 1, &tools,
-                    ).unwrap();
+                    owner
+                        .advance_debug(
+                            workspace.execution_lane(DiscoveryKind::Debugger),
+                            &policy,
+                            1,
+                            &tools,
+                        )
+                        .unwrap();
                     match owner.try_event() {
                         Some(crate::debugger::DapEvent::Stopped { .. }) => break,
-                        Some(crate::debugger::DapEvent::Failed { message, .. }) => panic!("{message}"),
+                        Some(crate::debugger::DapEvent::Failed { message, .. }) => {
+                            panic!("{message}")
+                        }
                         _ => {}
                     }
                     assert!(Instant::now() < deadline);
@@ -1137,7 +1178,9 @@ mod tests {
                 }
                 assert_eq!(
                     std::fs::read_to_string(root_path.join("launch-program")).unwrap(),
-                    if automatic { &root_path } else { &target }.display().to_string()
+                    if automatic { &root_path } else { &target }
+                        .display()
+                        .to_string()
                 );
                 owner.stop().unwrap();
             }

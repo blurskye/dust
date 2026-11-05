@@ -196,7 +196,11 @@ fn markdown_rows(
     let mut span_index = 0;
     for line in styled.text.split('\n').take(DOCUMENTATION_MAXIMUM_LINES) {
         let range = start..start + line.len();
-        while styled.spans.get(span_index).is_some_and(|(span, _)| span.end <= start) {
+        while styled
+            .spans
+            .get(span_index)
+            .is_some_and(|(span, _)| span.end <= start)
+        {
             span_index += 1;
         }
         let spans = styled.spans[span_index..]
@@ -310,8 +314,16 @@ mod tests {
     fn only_data_images_are_removed_without_consuming_other_links() {
         let line = "![logo](https://example.org/logo.png) Important text [download](data:text/plain;base64,AA==)";
         assert_eq!(super::without_data_images(line), line);
-        assert_eq!(super::without_data_images("before ![badge](data:image/png;base64,AA==) after"), "before  after");
-        assert_eq!(super::without_data_images("[download](data:text/plain,AA) ![badge](data:image/png,AA)"), "[download](data:text/plain,AA) ");
+        assert_eq!(
+            super::without_data_images("before ![badge](data:image/png;base64,AA==) after"),
+            "before  after"
+        );
+        assert_eq!(
+            super::without_data_images(
+                "[download](data:text/plain,AA) ![badge](data:image/png,AA)"
+            ),
+            "[download](data:text/plain,AA) "
+        );
     }
 
     #[test]
@@ -319,16 +331,37 @@ mod tests {
         let mut input = super::InputSession::new(100);
         let config = crate::config::load_bundled_config().config;
         // Rendering would remove these badges and otherwise reveal the text after the source limit.
-        let source = format!("{}outside byte limit", "![badge](data:image/png;base64,AA==)".repeat(3000));
-        input.present_documentation(
-            super::DocumentationPopupKind::Hover, "hover".into(), String::new(), None,
-            [(super::DocumentationMarkupKind::Markdown, source)], &config, 40,
+        let source = format!(
+            "{}outside byte limit",
+            "![badge](data:image/png;base64,AA==)".repeat(3000)
         );
-        assert!(input.documentation().is_none_or(|popup| !popup.sections[0].lines.concat().contains("outside byte limit")));
-        let source = format!("{}outside line limit", "![badge](data:image/png,AA)\n".repeat(super::DOCUMENTATION_MAXIMUM_LINES));
         input.present_documentation(
-            super::DocumentationPopupKind::Hover, "hover".into(), String::new(), None,
-            [(super::DocumentationMarkupKind::Markdown, source)], &config, 40,
+            super::DocumentationPopupKind::Hover,
+            "hover".into(),
+            String::new(),
+            None,
+            [(super::DocumentationMarkupKind::Markdown, source)],
+            &config,
+            40,
+        );
+        assert!(input.documentation().is_none_or(|popup| {
+            !popup.sections[0]
+                .lines
+                .concat()
+                .contains("outside byte limit")
+        }));
+        let source = format!(
+            "{}outside line limit",
+            "![badge](data:image/png,AA)\n".repeat(super::DOCUMENTATION_MAXIMUM_LINES)
+        );
+        input.present_documentation(
+            super::DocumentationPopupKind::Hover,
+            "hover".into(),
+            String::new(),
+            None,
+            [(super::DocumentationMarkupKind::Markdown, source)],
+            &config,
+            40,
         );
         assert!(input.documentation().is_none());
     }
@@ -339,16 +372,29 @@ mod tests {
         let mut config = crate::config::load_bundled_config().config;
         let text = format!("+{}👩‍💻", "x".repeat(65));
         input.present_documentation(
-            super::DocumentationPopupKind::Git, "hunk".into(), String::new(), None,
-            [(super::DocumentationMarkupKind::PlainText, text.clone())], &config, 68,
+            super::DocumentationPopupKind::Git,
+            "hunk".into(),
+            String::new(),
+            None,
+            [(super::DocumentationMarkupKind::PlainText, text.clone())],
+            &config,
+            68,
         );
         assert_eq!(input.documentation().unwrap().sections[0].lines, [text]);
         config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
         input.present_documentation(
-            super::DocumentationPopupKind::Git, "hunk".into(), String::new(), None,
-            [(super::DocumentationMarkupKind::PlainText, "a·b".into())], &config, 3,
+            super::DocumentationPopupKind::Git,
+            "hunk".into(),
+            String::new(),
+            None,
+            [(super::DocumentationMarkupKind::PlainText, "a·b".into())],
+            &config,
+            3,
         );
-        assert_eq!(input.documentation().unwrap().sections[0].lines, ["a·", "b"]);
+        assert_eq!(
+            input.documentation().unwrap().sections[0].lines,
+            ["a·", "b"]
+        );
     }
 
     #[test]

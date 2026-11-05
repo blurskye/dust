@@ -20,7 +20,15 @@ use std::{
     time::Duration,
 };
 
-type SignSource = (u64, u64, GitRepositoryId, PathBuf, BufferId, u64, TextVersion);
+type SignSource = (
+    u64,
+    u64,
+    GitRepositoryId,
+    PathBuf,
+    BufferId,
+    u64,
+    TextVersion,
+);
 
 #[derive(Default)]
 pub(super) struct GitSession {
@@ -160,10 +168,20 @@ impl GitSession {
                 })
         })
     }
-    pub(super) fn hunks_match(&self, editor: &EditorState, path: &Path, layer: GitDiffLayer, revision: u64) -> bool {
+    pub(super) fn hunks_match(
+        &self,
+        editor: &EditorState,
+        path: &Path,
+        layer: GitDiffLayer,
+        revision: u64,
+    ) -> bool {
         self.hunk_source.as_ref().is_none_or(|(id, version)| {
-            editor.buffers.get(*id).is_some_and(|buffer| buffer.text.source_version() == *version)
-        }) && self.hunk_snapshot
+            editor
+                .buffers
+                .get(*id)
+                .is_some_and(|buffer| buffer.text.source_version() == *version)
+        }) && self
+            .hunk_snapshot
             .as_ref()
             .zip(self.status_snapshot.as_ref())
             .is_some_and(|(hunks, status)| {
@@ -534,7 +552,9 @@ impl GitSession {
         action: Option<GitHunkAction>,
         layer: GitDiffLayer,
     ) -> Result<(), String> {
-        let selection_line = self.selected.as_ref()
+        let selection_line = self
+            .selected
+            .as_ref()
             .filter(|(snapshot, _, selected)| {
                 Some(selected.as_path()) == path && snapshot.layer == layer
             })
@@ -551,7 +571,9 @@ impl GitSession {
             .map_err(|_| "active file is outside Git scope")?;
         let policy = Self::policy(status, relative.to_owned(), layer);
         let generation = if layer == GitDiffLayer::Unstaged {
-            let (id, buffer) = editor.buffers.iter()
+            let (id, buffer) = editor
+                .buffers
+                .iter()
                 .find(|(_, buffer)| buffer.path.as_deref() == Some(path))
                 .ok_or("Git hunk buffer is no longer open")?;
             if buffer.text.len_bytes() > policy.maximum_bytes {
@@ -560,13 +582,17 @@ impl GitSession {
             // Clean buffers use the disk snapshot needed by stage/reset. Unsaved buffers
             // use their displayed text, so navigation and previews follow their line numbers.
             let generation = if buffer.dirty {
-                self.hunks.start_buffer(policy, GitHunkBufferInput {
-                    revision: buffer.text.revision().0,
-                    bytes: buffer.text.to_bytes(),
-                })
+                self.hunks.start_buffer(
+                    policy,
+                    GitHunkBufferInput {
+                        revision: buffer.text.revision().0,
+                        bytes: buffer.text.to_bytes(),
+                    },
+                )
             } else {
                 self.hunks.start(policy)
-            }.map_err(|e| e.to_string())?;
+            }
+            .map_err(|e| e.to_string())?;
             self.hunk_source = Some((id, buffer.text.source_version()));
             generation
         } else {
@@ -586,7 +612,10 @@ impl GitSession {
     }
     pub(super) fn poll_hunks(&mut self, editor: &EditorState) -> Result<Option<HunkReady>, String> {
         if self.hunk_source.as_ref().is_some_and(|(id, version)| {
-            editor.buffers.get(*id).is_none_or(|buffer| buffer.text.source_version() != *version)
+            editor
+                .buffers
+                .get(*id)
+                .is_none_or(|buffer| buffer.text.source_version() != *version)
         }) {
             self.clear_hunks();
             return Ok(None);
@@ -982,7 +1011,11 @@ impl GitSession {
         Ok(())
     }
     /// Read the worktree list.
-    pub(super) fn start_branches(&mut self, repository: &Path, revision: u64) -> Result<(), String> {
+    pub(super) fn start_branches(
+        &mut self,
+        repository: &Path,
+        revision: u64,
+    ) -> Result<(), String> {
         // A running list will supply the picker; mutations already reopen it on completion.
         if self.branch_generation.is_some() {
             return Ok(());
@@ -991,7 +1024,10 @@ impl GitSession {
             repository: repository.to_path_buf(),
             deadline: Duration::from_secs(10),
         });
-        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
+        let status = self
+            .status_snapshot
+            .as_ref()
+            .ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((revision, status.scope_root.clone()));
         self.branch_list_scope = Some((repository.to_path_buf(), revision));
@@ -1018,7 +1054,11 @@ impl GitSession {
         let worktree = repo.find_worktree(name).map_err(|e| e.to_string())?;
         let path = worktree.path().canonicalize().map_err(|e| e.to_string())?;
         if editor.buffers.values().any(|buffer| {
-            buffer.dirty && buffer.path.as_ref().is_some_and(|file| file.starts_with(&path))
+            buffer.dirty
+                && buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|file| file.starts_with(&path))
         }) {
             return Err("worktree has unsaved editor changes".into());
         }
@@ -1027,7 +1067,10 @@ impl GitSession {
             name: name.to_owned(),
             deadline: Duration::from_secs(10),
         };
-        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
+        let status = self
+            .status_snapshot
+            .as_ref()
+            .ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
@@ -1057,16 +1100,30 @@ impl GitSession {
             reference: reference.to_owned(),
             deadline: Duration::from_secs(10),
         };
-        let status = self.status_snapshot.as_ref().ok_or("Git status is not ready")?;
+        let status = self
+            .status_snapshot
+            .as_ref()
+            .ok_or("Git status is not ready")?;
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
     /// One poll reporting whichever branch outcome arrived.
-    pub(super) fn poll_branch_outcome(&mut self, root_revision: u64, root: &Path) -> Result<Option<GitBranchOutcome>, String> {
-        if self.branch_list_scope.as_ref().is_some_and(|(repository, expected)| {
-            *expected != root_revision || self.status().is_some_and(|status| status.repository != *repository)
-        }) {
+    pub(super) fn poll_branch_outcome(
+        &mut self,
+        root_revision: u64,
+        root: &Path,
+    ) -> Result<Option<GitBranchOutcome>, String> {
+        if self
+            .branch_list_scope
+            .as_ref()
+            .is_some_and(|(repository, expected)| {
+                *expected != root_revision
+                    || self
+                        .status()
+                        .is_some_and(|status| status.repository != *repository)
+            })
+        {
             self.branches.cancel();
             self.branch_generation = None;
             self.branch_list_scope = None;
@@ -1076,7 +1133,11 @@ impl GitSession {
         if self.branch_generation.is_none() {
             return Ok(None);
         }
-        if !self.branch_root.as_ref().is_some_and(|(revision, path)| *revision == root_revision && path == root) {
+        if !self
+            .branch_root
+            .as_ref()
+            .is_some_and(|(revision, path)| *revision == root_revision && path == root)
+        {
             self.branches.cancel();
             self.branch_generation = None;
             self.branch_root = None;
@@ -1299,7 +1360,10 @@ pub(in crate::editor::session) fn text_diff_preview(
                     _ => continue,
                 };
                 let text = String::from_utf8_lossy(line.content());
-                let text = text.strip_suffix("\r\n").or_else(|| text.strip_suffix('\n')).unwrap_or(&text);
+                let text = text
+                    .strip_suffix("\r\n")
+                    .or_else(|| text.strip_suffix('\n'))
+                    .unwrap_or(&text);
                 lines.push(DiffLine {
                     kind,
                     old_number: line.old_lineno(),
@@ -1391,16 +1455,30 @@ mod regression_tests {
         let preview = text_diff_preview(b"a\0b\n", b"a\0c\n", "proposal");
         assert_eq!(preview.provenance, "proposal");
         let lines = &preview.hunks[0].lines;
-        assert!(lines.iter().any(|line| line.kind == crate::ui::DiffLineKind::Removed && line.text == "a\0b"));
-        assert!(lines.iter().any(|line| line.kind == crate::ui::DiffLineKind::Added && line.text == "a\0c"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.kind == crate::ui::DiffLineKind::Removed && line.text == "a\0b")
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.kind == crate::ui::DiffLineKind::Added && line.text == "a\0c")
+        );
     }
 
     #[test]
     fn proposal_diff_previews_preserve_trailing_whitespace() {
         let preview = text_diff_preview(b"text  \r\n", b"text\r\n", "proposal");
         let lines = &preview.hunks[0].lines;
-        let removed = lines.iter().find(|line| line.kind == crate::ui::DiffLineKind::Removed).unwrap();
-        let added = lines.iter().find(|line| line.kind == crate::ui::DiffLineKind::Added).unwrap();
+        let removed = lines
+            .iter()
+            .find(|line| line.kind == crate::ui::DiffLineKind::Removed)
+            .unwrap();
+        let added = lines
+            .iter()
+            .find(|line| line.kind == crate::ui::DiffLineKind::Added)
+            .unwrap();
         assert_eq!(removed.text, "text  ");
         assert_eq!(added.text, "text");
         assert!(!removed.spans.is_empty());
@@ -1424,10 +1502,12 @@ mod regression_tests {
             .replace("line 30\n", "changed 30\n");
         std::fs::write(dir.path().join("a.txt"), &changed).unwrap();
         let mut editor = EditorState::new(dir.path().to_owned());
-        editor.open_text(
-            TextBuffer::from_text(&changed),
-            Some(dir.path().join("a.txt")),
-        ).unwrap();
+        editor
+            .open_text(
+                TextBuffer::from_text(&changed),
+                Some(dir.path().join("a.txt")),
+            )
+            .unwrap();
         let mut session = GitSession::default();
         refresh(&mut session, &editor, dir.path());
         let status = session.status_snapshot.as_ref().unwrap();
@@ -1468,7 +1548,9 @@ mod regression_tests {
     }
 
     fn read_hunks(session: &mut GitSession, editor: &EditorState, path: &Path) {
-        session.start_hunks(editor, Some(path), 1, None, GitDiffLayer::Unstaged).unwrap();
+        session
+            .start_hunks(editor, Some(path), 1, None, GitDiffLayer::Unstaged)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.hunks_pending() {
             session.poll_hunks(editor).unwrap();
@@ -1484,14 +1566,23 @@ mod regression_tests {
         assert!(before.iter().any(|sign| sign.line == 1));
         let id = editor.active_buffer_id().unwrap();
         assert_eq!(editor.buffers[id].text.revision().0, 0);
-        let replacement = (1..=40).map(|n| format!("line {n}\n")).collect::<String>()
+        let replacement = (1..=40)
+            .map(|n| format!("line {n}\n"))
+            .collect::<String>()
             .replace("line 20\n", "changed 20\n");
         editor.buffers[id].text = TextBuffer::from_text(&replacement);
         assert_eq!(editor.buffers[id].text.revision().0, 0);
         // An old in-flight reply cannot publish against the reloaded buffer either.
         assert!(session.poll_signs(&editor, 1, true).unwrap().is_empty());
         let after = read_signs(&mut session, &editor);
-        assert_eq!(after.iter().filter(|sign| !sign.staged).map(|sign| sign.line).collect::<Vec<_>>(), vec![19]);
+        assert_eq!(
+            after
+                .iter()
+                .filter(|sign| !sign.staged)
+                .map(|sign| sign.line)
+                .collect::<Vec<_>>(),
+            vec![19]
+        );
     }
 
     #[test]
@@ -1519,7 +1610,8 @@ mod regression_tests {
         let id = editor.active_buffer_id().unwrap();
         let path = dir.path().join("a.txt");
         let saved = editor.buffers[id].text.to_string();
-        editor.buffers[id].text = TextBuffer::from_text(&format!("{}{}", "inserted\n".repeat(10), saved));
+        editor.buffers[id].text =
+            TextBuffer::from_text(&format!("{}{}", "inserted\n".repeat(10), saved));
         editor.buffers[id].text.bump_revision().unwrap();
         editor.buffers[id].dirty = true;
         read_hunks(&mut session, &editor, &path);
@@ -1538,7 +1630,9 @@ mod regression_tests {
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
-        session.start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Unstaged).unwrap();
+        session
+            .start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Unstaged)
+            .unwrap();
         editor.buffers[id].text = TextBuffer::from_text("reloaded\n");
         assert!(session.poll_hunks(&editor).unwrap().is_none());
         assert!(!session.hunks_pending());
@@ -1553,7 +1647,9 @@ mod regression_tests {
         let mut index = repo.index().unwrap();
         index.add_path(Path::new("a.txt")).unwrap();
         index.write().unwrap();
-        session.start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Staged).unwrap();
+        session
+            .start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Staged)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.hunks_pending() {
             session.poll_hunks(&editor).unwrap();
@@ -1561,8 +1657,10 @@ mod regression_tests {
             thread::yield_now();
         }
         session.select_at(20);
-        assert!(!session.has_selection(), "an unstaged selection cannot select a staged hunk");
-
+        assert!(
+            !session.has_selection(),
+            "an unstaged selection cannot select a staged hunk"
+        );
     }
 
     #[test]
@@ -1581,7 +1679,10 @@ mod regression_tests {
         assert_eq!(session.selected_change, hunk.change_at(30));
         session.select_at(20); // Outside the destination hunk, keep the navigation selection.
         let preview = session.preview().unwrap().1;
-        assert!(preview.contains("-line 30") && preview.contains("+changed 30"), "{preview}");
+        assert!(
+            preview.contains("-line 30") && preview.contains("+changed 30"),
+            "{preview}"
+        );
     }
 
     #[test]
@@ -1595,7 +1696,9 @@ mod regression_tests {
         session.select_at(1);
         assert!(session.has_selection());
         assert!(session.preview().unwrap().1.contains("-line 1"));
-        session.start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![]).unwrap();
+        session
+            .start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![])
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.mutation_pending() {
             session.poll_mutation().unwrap();
@@ -1603,7 +1706,11 @@ mod regression_tests {
             thread::yield_now();
         }
         let repo = git2::Repository::open(dir.path()).unwrap();
-        let entry = repo.index().unwrap().get_path(Path::new("a.txt"), 0).unwrap();
+        let entry = repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("a.txt"), 0)
+            .unwrap();
         assert!(repo.find_blob(entry.id).unwrap().content().is_empty());
     }
 
@@ -1611,12 +1718,24 @@ mod regression_tests {
     fn stage_requests_reject_special_files_on_the_worker() {
         let (dir, _, editor, mut session) = fixture();
         std::os::unix::fs::symlink("/dev/zero", dir.path().join("device")).unwrap();
-        session.start_plan_for(&editor, GitMutationKind::StageFile, 1, true, vec![], Some("device".into())).unwrap();
+        session
+            .start_plan_for(
+                &editor,
+                GitMutationKind::StageFile,
+                1,
+                true,
+                vec![],
+                Some("device".into()),
+            )
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             match session.poll_mutation() {
                 Err(error) => {
-                    assert!(error.contains("outside the canonical workspace scope"), "{error}");
+                    assert!(
+                        error.contains("outside the canonical workspace scope"),
+                        "{error}"
+                    );
                     break;
                 }
                 Ok(None) => {}
@@ -1625,16 +1744,35 @@ mod regression_tests {
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
-        assert!(git2::Repository::open(dir.path()).unwrap().index().unwrap().get_path(Path::new("device"), 0).is_none());
+        assert!(
+            git2::Repository::open(dir.path())
+                .unwrap()
+                .index()
+                .unwrap()
+                .get_path(Path::new("device"), 0)
+                .is_none()
+        );
     }
 
     #[test]
     fn concurrent_mutations_are_refused_without_losing_the_first_result() {
         let (_dir, _, editor, mut session) = fixture();
-        session.start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![]).unwrap();
+        session
+            .start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![])
+            .unwrap();
         let generation = session.mutation_generation;
-        assert!(session.start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![]).unwrap_err().contains("already running"));
-        assert!(session.mutate(&editor, true, true, 1).unwrap_err().contains("already running"));
+        assert!(
+            session
+                .start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![])
+                .unwrap_err()
+                .contains("already running")
+        );
+        assert!(
+            session
+                .mutate(&editor, true, true, 1)
+                .unwrap_err()
+                .contains("already running")
+        );
         assert_eq!(session.mutation_generation, generation);
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -1655,17 +1793,29 @@ mod regression_tests {
         session.show_worktrees_after_change();
         session.clear();
         // Activating another root does not increment the workspace's root revision.
-        assert!(session.poll_branch_outcome(1, other.path()).unwrap().is_none());
+        assert!(
+            session
+                .poll_branch_outcome(1, other.path())
+                .unwrap()
+                .is_none()
+        );
         assert!(!session.branch_pending());
         assert!(!session.take_show_worktrees());
-        assert!(session.poll_branch_outcome(1, other.path()).unwrap().is_none());
+        assert!(
+            session
+                .poll_branch_outcome(1, other.path())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn failed_worktree_changes_do_not_reopen_the_picker() {
         let (dir, repo, _, mut session) = fixture();
         let branch = repo.head().unwrap().shorthand().unwrap().to_owned();
-        session.start_worktree_create(dir.path(), "review", &dir.path().join("review"), &branch).unwrap();
+        session
+            .start_worktree_create(dir.path(), "review", &dir.path().join("review"), &branch)
+            .unwrap();
         session.show_worktrees_after_change();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -1686,20 +1836,34 @@ mod regression_tests {
         let path = dir.path().join("review");
         let alias = dir.path().join("alias");
         std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
-        session.start_worktree_create(dir.path(), "review", &alias.join("review"), "review").unwrap();
+        session
+            .start_worktree_create(dir.path(), "review", &alias.join("review"), "review")
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.branch_pending() {
             session.poll_branch_outcome(1, dir.path()).unwrap();
             assert!(Instant::now() < deadline);
             thread::yield_now();
         }
-        let (id, _) = editor.open_text(TextBuffer::from_text("unsaved\n"), Some(path.join("new.txt"))).unwrap();
+        let (id, _) = editor
+            .open_text(
+                TextBuffer::from_text("unsaved\n"),
+                Some(path.join("new.txt")),
+            )
+            .unwrap();
         editor.buffers[id].dirty = true;
-        assert!(session.start_worktree_remove(&editor, dir.path(), "review").unwrap_err().contains("unsaved"));
+        assert!(
+            session
+                .start_worktree_remove(&editor, dir.path(), "review")
+                .unwrap_err()
+                .contains("unsaved")
+        );
         assert!(!session.branch_pending());
         assert!(path.join("a.txt").is_file());
         editor.buffers[id].dirty = false;
-        session.start_worktree_remove(&editor, dir.path(), "review").unwrap();
+        session
+            .start_worktree_remove(&editor, dir.path(), "review")
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.branch_pending() {
             session.poll_branch_outcome(1, dir.path()).unwrap();
@@ -1712,10 +1876,12 @@ mod regression_tests {
     #[test]
     fn cached_hunks_cannot_mutate_another_buffers_file() {
         let (dir, _, mut editor, mut session) = fixture();
-        editor.open_text(
-            TextBuffer::from_text("other\n"),
-            Some(dir.path().join("b.txt")),
-        ).unwrap();
+        editor
+            .open_text(
+                TextBuffer::from_text("other\n"),
+                Some(dir.path().join("b.txt")),
+            )
+            .unwrap();
         assert!(
             session
                 .mutate(&editor, true, true, 1)
@@ -1776,8 +1942,11 @@ mod regression_tests {
             refresh(&mut session, &editor, dir.path());
             let status = session.status_snapshot.as_ref().unwrap();
             let mut snapshot = crate::workspace::git::read_hunks(&GitSession::policy(
-                status, "a.txt".into(), GitDiffLayer::Unstaged,
-            )).unwrap();
+                status,
+                "a.txt".into(),
+                GitDiffLayer::Unstaged,
+            ))
+            .unwrap();
             snapshot.revision = 2;
             assert_eq!(snapshot.hunks[0].new_start, 0);
             session.selected = None;
@@ -1787,7 +1956,9 @@ mod regression_tests {
             if reset {
                 session.mutate(&editor, true, true, 1).unwrap();
             } else {
-                session.start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![]).unwrap();
+                session
+                    .start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![])
+                    .unwrap();
             }
             let deadline = Instant::now() + Duration::from_secs(5);
             while session.mutation_pending() {
@@ -1809,26 +1980,41 @@ mod regression_tests {
     fn worktree_lists_are_discarded_after_their_workspace_changes() {
         let (dir, _, _, mut session) = fixture();
         session.start_branches(dir.path(), 1).unwrap();
-        assert!(session.poll_branch_outcome(2, dir.path()).unwrap().is_none());
+        assert!(
+            session
+                .poll_branch_outcome(2, dir.path())
+                .unwrap()
+                .is_none()
+        );
         assert!(!session.branch_pending());
         session.start_branches(dir.path(), 2).unwrap();
         session.clear();
         assert!(!session.branch_pending());
-        assert!(session.poll_branch_outcome(2, dir.path()).unwrap().is_none());
+        assert!(
+            session
+                .poll_branch_outcome(2, dir.path())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn status_refresh_does_not_cancel_a_current_worktree_list() {
         let (dir, _, editor, mut session) = fixture();
         session.start_branches(dir.path(), 1).unwrap();
-        session.refresh(&editor, Some(dir.path()), 1, false).unwrap();
+        session
+            .refresh(&editor, Some(dir.path()), 1, false)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(outcome) = session.poll_branch_outcome(1, dir.path()).unwrap() {
                 assert!(matches!(outcome, GitBranchOutcome::List(_)));
                 break;
             }
-            assert!(session.branch_pending(), "status refresh cancelled the list");
+            assert!(
+                session.branch_pending(),
+                "status refresh cancelled the list"
+            );
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }

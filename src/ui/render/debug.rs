@@ -207,9 +207,17 @@ pub(crate) fn debug_layout(width: u16, height: u16) -> Option<DebugLayout> {
         let tab_rows = DebugPane::ALL
             .into_iter()
             .filter_map(|selected| {
-                pane_tabs(WindowRect { x: 0, y: 0, width, height }, selected)
-                    .last()
-                    .map(|(_, _, _, y)| y + 1)
+                pane_tabs(
+                    WindowRect {
+                        x: 0,
+                        y: 0,
+                        width,
+                        height,
+                    },
+                    selected,
+                )
+                .last()
+                .map(|(_, _, _, y)| y + 1)
             })
             .max()
             .unwrap_or(0);

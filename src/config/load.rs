@@ -351,10 +351,14 @@ pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
         .iter()
         .take(1024)
         .filter_map(|package| {
-            let digest = package.activation_sha256.as_ref().unwrap_or(&package.content_sha256);
-            if [&package.content_sha256, digest].into_iter().any(|digest| {
-                digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit())
-            }) {
+            let digest = package
+                .activation_sha256
+                .as_ref()
+                .unwrap_or(&package.content_sha256);
+            if [&package.content_sha256, digest]
+                .into_iter()
+                .any(|digest| digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()))
+            {
                 return None;
             }
             let bytes = read(&root.join("activations").join(format!("{digest}.toml")))?;
@@ -732,15 +736,19 @@ fn unknown_field(message: &str) -> Option<Vec<String>> {
 fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
     if let Some(array) = value.as_array_mut() {
         if let Some(index) = key.first().and_then(|index| index.parse::<usize>().ok()) {
-            return array.get_mut(index)
+            return array
+                .get_mut(index)
                 .is_some_and(|value| remove_key(value, &key[1..]));
         }
         // TOML's value deserializer omits array indices. Window rules are the only
         // configuration array of tables; locate the rule that actually rejects this
         // field, rather than deleting a valid field from an earlier placement variant.
         return array.iter_mut().any(|value| {
-            let rejected = value.clone().try_into::<super::WindowRuleConfig>()
-                .err().and_then(|error| unknown_field(&error.to_string()));
+            let rejected = value
+                .clone()
+                .try_into::<super::WindowRuleConfig>()
+                .err()
+                .and_then(|error| unknown_field(&error.to_string()));
             rejected.as_deref() == Some(key) && remove_key(value, key)
         });
     }
@@ -887,8 +895,8 @@ impl ConfigurationWorker {
                 // Without a loaded snapshot, verify startup with a reload. Otherwise
                 // compare against what was loaded so unchanged startup doesn't reset
                 // view toggles or cancel work the user has already started.
-                let mut changed_at = (use_user_configuration && initial_fingerprint.is_none())
-                    .then(Instant::now);
+                let mut changed_at =
+                    (use_user_configuration && initial_fingerprint.is_none()).then(Instant::now);
                 let mut fingerprint = if use_user_configuration {
                     initial_fingerprint.unwrap_or_else(|| configuration_fingerprint(&theme))
                 } else {
@@ -1141,12 +1149,14 @@ pub(super) const WATCH_FINGERPRINT_BYTE_CEILING: u64 = 4 * 1024 * 1024;
 
 pub(super) fn source_fingerprint(path: PathBuf) -> SourceFingerprint {
     let metadata = fs::metadata(&path).ok();
-    let content_hash = crate::files::open_regular_file(&path).ok().and_then(|file| {
-        let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING);
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).ok()?;
-        Some(hash_source_bytes(&bytes))
-    });
+    let content_hash = crate::files::open_regular_file(&path)
+        .ok()
+        .and_then(|file| {
+            let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).ok()?;
+            Some(hash_source_bytes(&bytes))
+        });
     SourceFingerprint {
         path,
         modified: metadata
@@ -1241,7 +1251,8 @@ fn normalized_keys(keys: &Option<String>) -> Option<String> {
     keys.as_ref().map(|keys| {
         keys.split_whitespace()
             .map(|token| {
-                token.parse::<crate::editor::input::KeyEvent>()
+                token
+                    .parse::<crate::editor::input::KeyEvent>()
                     .map_or_else(|_| token.to_owned(), |key| key.to_string())
             })
             .collect::<Vec<_>>()
@@ -1258,14 +1269,16 @@ fn names_global_identity(id: &str, context: &Option<String>) -> bool {
     static IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
     IDS.get_or_init(|| {
         let bundled: toml::Value = toml::from_str(BUNDLED_KEYMAPS).expect("bundled keymaps");
-        ["keymap", "key_group"].into_iter()
+        ["keymap", "key_group"]
+            .into_iter()
             .filter_map(|kind| bundled.get(kind).and_then(toml::Value::as_array))
             .flatten()
             .filter(|entry| entry.get("context").and_then(toml::Value::as_str) == Some("global"))
             .filter_map(|entry| entry.get("id").and_then(toml::Value::as_str))
             .map(str::to_owned)
             .collect()
-    }).contains(id)
+    })
+    .contains(id)
 }
 
 fn global_target_id(id: &str, context: &str, mode: &str) -> String {

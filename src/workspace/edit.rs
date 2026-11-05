@@ -97,7 +97,8 @@ impl WorkspaceEditProposal {
             let mut text = TextBuffer::from_bytes(&snapshot.bytes)
                 .map_err(|error| WorkspaceError::InvalidText(error.to_string()))?;
             let base_revision = text.revision();
-            let edit_set = TextEditSet::new(base_revision, draft.edits.clone()).with_normalized_line_endings();
+            let edit_set =
+                TextEditSet::new(base_revision, draft.edits.clone()).with_normalized_line_endings();
             text.validate_edits(&edit_set)
                 .map_err(|error| WorkspaceError::InvalidEdit(error.to_string()))?;
             text.apply_edits(&edit_set)

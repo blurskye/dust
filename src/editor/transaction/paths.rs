@@ -59,9 +59,16 @@ impl EditorState {
         }
         Ok(())
     }
-    pub(crate) fn check_rename_destination(&self, source: &Path, target: &Path) -> Result<(), String> {
+    pub(crate) fn check_rename_destination(
+        &self,
+        source: &Path,
+        target: &Path,
+    ) -> Result<(), String> {
         if self.buffers.values().any(|buffer| {
-            buffer.path.as_ref().is_some_and(|path| path.starts_with(target) && !path.starts_with(source))
+            buffer
+                .path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(target) && !path.starts_with(source))
         }) {
             return Err("rename destination belongs to an open buffer".into());
         }
@@ -159,7 +166,9 @@ mod tests {
     fn deleted_files_remain_unsaved_after_edits_are_undone() {
         let mut state = EditorState::new("/workspace".into());
         let path = std::path::PathBuf::from("/workspace/deleted");
-        let (buffer, _) = state.open_text(TextBuffer::from_text("retained"), Some(path.clone())).unwrap();
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_text("retained"), Some(path.clone()))
+            .unwrap();
         let change = state.capture_path_change(&path).unwrap();
         let (draft, _) = state.reconcile_paths(change, None).unwrap();
         state = draft.unwrap().accept(&state.version()).unwrap();
@@ -174,7 +183,9 @@ mod tests {
         let source = root.path().join("source.txt");
         let target = root.path().join("target.txt");
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("before"), Some(source.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("before"), Some(source.clone()))
+            .unwrap();
         let change = editor.capture_path_change(&source).unwrap();
         editor.buffers[buffer]
             .text
@@ -210,7 +221,9 @@ mod tests {
         assert!(other.reconcile_paths(change, None).is_err());
         let change = editor.capture_path_change(&source).unwrap();
         editor.remove_buffer(buffer);
-        let (new, _) = editor.open_text(TextBuffer::from_text("new owner"), Some(source.clone())).unwrap();
+        let (new, _) = editor
+            .open_text(TextBuffer::from_text("new owner"), Some(source.clone()))
+            .unwrap();
         assert!(editor.reconcile_paths(change, None).is_err());
         assert_eq!(editor.buffers[new].path.as_ref(), Some(&source));
         let change = editor.capture_path_change(&source).unwrap();

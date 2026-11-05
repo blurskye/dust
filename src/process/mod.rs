@@ -536,14 +536,22 @@ impl<T> CancellablePipe<T> {
         use nix::fcntl::{FcntlArg, OFlag, fcntl};
         let flags = OFlag::from_bits_truncate(fcntl(&pipe, FcntlArg::F_GETFL)?);
         fcntl(&pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
-        Ok(Self { pipe, cancelled, write_timeout: None })
+        Ok(Self {
+            pipe,
+            cancelled,
+            write_timeout: None,
+        })
     }
     #[cfg(not(unix))]
     pub(crate) fn new(
         pipe: T,
         cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> io::Result<Self> {
-        Ok(Self { pipe, cancelled, write_timeout: None })
+        Ok(Self {
+            pipe,
+            cancelled,
+            write_timeout: None,
+        })
     }
     pub(crate) fn set_write_timeout(&mut self, timeout: std::time::Duration) {
         self.write_timeout = Some(timeout);
@@ -576,11 +584,15 @@ impl<T: io::Read> io::Read for CancellablePipe<T> {
 }
 impl<T: Write> Write for CancellablePipe<T> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self
+            .write_timeout
+            .map(|timeout| std::time::Instant::now() + timeout);
         self.retry(deadline, |pipe| pipe.write(bytes))
     }
     fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
-        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self
+            .write_timeout
+            .map(|timeout| std::time::Instant::now() + timeout);
         while !bytes.is_empty() {
             match self.retry(deadline, |pipe| pipe.write(bytes)) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -592,7 +604,9 @@ impl<T: Write> Write for CancellablePipe<T> {
         Ok(())
     }
     fn flush(&mut self) -> io::Result<()> {
-        let deadline = self.write_timeout.map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self
+            .write_timeout
+            .map(|timeout| std::time::Instant::now() + timeout);
         self.retry(deadline, Write::flush)
     }
 }
@@ -627,8 +641,10 @@ mod cancellable_pipe_tests {
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .stdin(std::process::Stdio::piped())
-            .spawn().unwrap();
-        let mut input = CancellablePipe::new(child.stdin.take().unwrap(), Default::default()).unwrap();
+            .spawn()
+            .unwrap();
+        let mut input =
+            CancellablePipe::new(child.stdin.take().unwrap(), Default::default()).unwrap();
         input.set_write_timeout(std::time::Duration::from_millis(30));
         let result = input.write_all(&vec![0; 1024 * 1024]);
         child.kill().unwrap();

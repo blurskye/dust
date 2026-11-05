@@ -50,7 +50,9 @@ pub(super) fn flash_targets(
     let mut targets = Vec::new();
     let mut continuations = Vec::new();
     for range in ranges {
-        let Ok(content) = text.slice(*range) else { continue };
+        let Ok(content) = text.slice(*range) else {
+            continue;
+        };
         let start = range.start;
         for (index, _) in content.grapheme_indices(true) {
             let mut rest = content[index..].chars();
@@ -103,11 +105,19 @@ mod tests {
     #[test]
     fn hidden_matches_do_not_consume_labels_or_exclude_continuations() {
         let text = TextBuffer::from_text("xa xs xa");
-        let targets = flash_targets(&text, &[ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()], ByteOffset(99), "x");
-        assert_eq!(targets, vec![FlashTarget {
-            range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
-            label: Some('a'),
-        }]);
+        let targets = flash_targets(
+            &text,
+            &[ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()],
+            ByteOffset(99),
+            "x",
+        );
+        assert_eq!(
+            targets,
+            vec![FlashTarget {
+                range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
+                label: Some('a'),
+            }]
+        );
     }
 
     #[test]

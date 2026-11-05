@@ -299,7 +299,10 @@ impl WorkspaceEditSession {
         }
         p.slots[index] = Slot::Complete;
         match (file, result) {
-            (file @ (InputFile::Read(_) | InputFile::ReadMatchingDisk { .. }), VfsResult::Read { path, result, .. }) => {
+            (
+                file @ (InputFile::Read(_) | InputFile::ReadMatchingDisk { .. }),
+                VfsResult::Read { path, result, .. },
+            ) => {
                 let bytes = result.map_err(|e| e.to_string())?;
                 if bytes.len() > p.maximum {
                     return Err("workspace read exceeds its admitted byte limit".into());

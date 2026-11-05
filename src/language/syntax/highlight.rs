@@ -55,7 +55,14 @@ impl Highlight {
 
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        registry().groups.read().unwrap().ids.get(name).copied().map(Self)
+        registry()
+            .groups
+            .read()
+            .unwrap()
+            .ids
+            .get(name)
+            .copied()
+            .map(Self)
     }
 
     /// The group for a tree-sitter capture: `function.method.call` is `@function.method.call`

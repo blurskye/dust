@@ -126,7 +126,8 @@ impl HeadlessEditor {
                 if let Some(action) = self.type_unmapped(&context, &key)? {
                     return Ok(action);
                 }
-                if let Some(command_id) = self.config.input.unmatched_commands.get(&context).cloned()
+                if let Some(command_id) =
+                    self.config.input.unmatched_commands.get(&context).cloned()
                 {
                     self.execute(CommandInvocation::new(
                         &command_id,
@@ -152,15 +153,20 @@ impl HeadlessEditor {
         let Some(character) = key.text_character() else {
             return Ok(None);
         };
-        let Some(command_id) = self.config.input.character_fallback_commands.get(context)
-            .or_else(|| self.config.input.text_commands.get(context)).cloned()
+        let Some(command_id) = self
+            .config
+            .input
+            .character_fallback_commands
+            .get(context)
+            .or_else(|| self.config.input.text_commands.get(context))
+            .cloned()
         else {
             return Ok(None);
         };
-        self.execute(CommandInvocation::new(
-            &command_id,
-            crate::editor::InvocationSource::Keymap,
-        )?.with_argument("text", CommandValue::String(character.to_string())))?;
+        self.execute(
+            CommandInvocation::new(&command_id, crate::editor::InvocationSource::Keymap)?
+                .with_argument("text", CommandValue::String(character.to_string())),
+        )?;
         Ok(Some(InputAction::Text(character.to_string())))
     }
 
@@ -247,7 +253,9 @@ mod tests {
     fn rejected_normal_mapping_consumes_the_suffix_and_cancels_grammar() {
         let mut editor = HeadlessEditor::with_text("one two");
         for character in "2]q".chars() {
-            editor.feed(KeyEvent::character(character)).expect("rejected mapping");
+            editor
+                .feed(KeyEvent::character(character))
+                .expect("rejected mapping");
         }
         assert_eq!(editor.active_context(), "editor.normal");
         assert!(editor.input.pending_context().is_none());
@@ -259,22 +267,30 @@ mod tests {
     fn rejected_insert_mapping_types_its_prefix_before_replaying_the_suffix() {
         let mut editor = HeadlessEditor::with_text("base");
         let mut loaded = crate::config::load_bundled_config();
-        let mut mapping = loaded.keymaps.entries.iter()
+        let mut mapping = loaded
+            .keymaps
+            .entries
+            .iter()
             .find(|mapping| mapping.command.as_deref() == Some("mode.normal"))
-            .expect("normal mode mapping").clone();
+            .expect("normal mode mapping")
+            .clone();
         mapping.id = "test.insert.jk".into();
         mapping.context = Some("editor".into());
         mapping.mode = "insert".into();
         mapping.keys = Some("j k".into());
         loaded.keymaps.entries.push(mapping);
         let (keymaps, diagnostic) = crate::editor::compile_keymaps(
-            &editor.registry, &loaded.keymaps, &loaded.config.input.keymaps,
+            &editor.registry,
+            &loaded.keymaps,
+            &loaded.config.input.keymaps,
         );
         assert!(diagnostic.is_none());
         editor.keymaps = keymaps;
         editor.feed(KeyEvent::character('i')).expect("insert mode");
         for character in "ja".chars() {
-            editor.feed(KeyEvent::character(character)).expect("insert text");
+            editor
+                .feed(KeyEvent::character(character))
+                .expect("insert text");
         }
         assert_eq!(editor.text(), "jabase");
         assert_eq!(editor.active_context(), "editor.insert");
@@ -285,8 +301,13 @@ mod tests {
         let mut editor = HeadlessEditor::with_text("one two");
         editor.feed(KeyEvent::character('d')).expect("operator");
         editor.feed(KeyEvent::character('g')).expect("prefix");
-        assert_eq!(editor.state.views[editor.active_view()].mode, crate::editor::EditorMode::OperatorPending);
-        editor.feed(KeyEvent::character('x')).expect("cancel and delete");
+        assert_eq!(
+            editor.state.views[editor.active_view()].mode,
+            crate::editor::EditorMode::OperatorPending
+        );
+        editor
+            .feed(KeyEvent::character('x'))
+            .expect("cancel and delete");
         assert_eq!(editor.text(), "ne two");
         assert_eq!(editor.active_context(), "editor.normal");
         assert!(editor.input.pending_context().is_none());
@@ -598,7 +619,10 @@ mod tests {
         assert_eq!(edited("a\n\nb", "jd$"), "a\n\nb");
         assert_eq!(edited("one\ntwo\nthree", "d2w"), "three");
         assert_eq!(edited("one\n  \ntwo", "dw"), "\n  \ntwo");
-        assert_eq!(edited("one\ntwo\nthree\nfour", "50%x"), "one\nwo\nthree\nfour");
+        assert_eq!(
+            edited("one\ntwo\nthree\nfour", "50%x"),
+            "one\nwo\nthree\nfour"
+        );
         assert_eq!(edited("one\ntwo\nthree\nfour", "d50%"), "three\nfour");
         assert_eq!(edited("  one\ntwo", "jggx"), "  ne\ntwo");
     }

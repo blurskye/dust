@@ -419,7 +419,9 @@ impl EditorWindowBridge {
         fn contains(node: &TiledLayoutNode, window: WindowId) -> bool {
             match node {
                 TiledLayoutNode::Window(id) => *id == window,
-                TiledLayoutNode::Split { first, second, .. } => contains(first, window) || contains(second, window),
+                TiledLayoutNode::Split { first, second, .. } => {
+                    contains(first, window) || contains(second, window)
+                }
             }
         }
         fn first_window(node: &TiledLayoutNode) -> WindowId {
@@ -428,31 +430,68 @@ impl EditorWindowBridge {
                 TiledLayoutNode::Split { first, .. } => first_window(first),
             }
         }
-        fn split(node: &TiledLayoutNode, window: WindowId, wanted: TileAxis, delta: i16) -> Option<(WindowId, WindowId, u16)> {
-            let TiledLayoutNode::Split { axis, ratio, first, second } = node else { return None; };
+        fn split(
+            node: &TiledLayoutNode,
+            window: WindowId,
+            wanted: TileAxis,
+            delta: i16,
+        ) -> Option<(WindowId, WindowId, u16)> {
+            let TiledLayoutNode::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } = node
+            else {
+                return None;
+            };
             let in_first = contains(first, window);
-            if !in_first && !contains(second, window) { return None; }
-            if let Some(found) = split(if in_first { first } else { second }, window, wanted, delta) {
+            if !in_first && !contains(second, window) {
+                return None;
+            }
+            if let Some(found) = split(if in_first { first } else { second }, window, wanted, delta)
+            {
                 return Some(found);
             }
-            if *axis != wanted { return None; }
-            let delta = if in_first { i32::from(delta) } else { -i32::from(delta) };
-            Some((first_window(first), first_window(second), (i32::from(*ratio) + delta).clamp(100, 900) as u16))
+            if *axis != wanted {
+                return None;
+            }
+            let delta = if in_first {
+                i32::from(delta)
+            } else {
+                -i32::from(delta)
+            };
+            Some((
+                first_window(first),
+                first_window(second),
+                (i32::from(*ratio) + delta).clamp(100, 900) as u16,
+            ))
         }
-        let Some(tab) = state.active_tab().and_then(|id| state.tabs().get(id)) else { return Ok(None); };
-        let Some(root) = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)? else { return Ok(None); };
+        let Some(tab) = state.active_tab().and_then(|id| state.tabs().get(id)) else {
+            return Ok(None);
+        };
+        let Some(root) = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)?
+        else {
+            return Ok(None);
+        };
         let window = self.window_for(pane).ok_or(WindowError::UnknownWindow)?;
         let axis = match axis {
             crate::editor::Axis::Horizontal => TileAxis::Horizontal,
             crate::editor::Axis::Vertical => TileAxis::Vertical,
         };
-        split(&root, window, axis, delta).map(|(first, second, ratio)| {
-            Ok(crate::editor::EditorOperation::SetSplitRatio {
-                first: self.pane_for_window(first).ok_or(WindowError::UnknownWindow)?,
-                second: self.pane_for_window(second).ok_or(WindowError::UnknownWindow)?,
-                ratio,
+        split(&root, window, axis, delta)
+            .map(|(first, second, ratio)| {
+                Ok(crate::editor::EditorOperation::SetSplitRatio {
+                    first: self
+                        .pane_for_window(first)
+                        .ok_or(WindowError::UnknownWindow)?,
+                    second: self
+                        .pane_for_window(second)
+                        .ok_or(WindowError::UnknownWindow)?,
+                    ratio,
+                })
             })
-        }).transpose()
+            .transpose()
     }
 
     pub(super) fn swap_editors(
@@ -492,7 +531,10 @@ impl EditorWindowBridge {
     }
 
     pub(super) fn restored_placement(&self, pane: PaneId) -> WindowPlacement {
-        self.restore_placements.get(&pane).copied().unwrap_or(WindowPlacement::Tiled)
+        self.restore_placements
+            .get(&pane)
+            .copied()
+            .unwrap_or(WindowPlacement::Tiled)
     }
 
     pub(super) fn show_editor(
@@ -752,16 +794,20 @@ impl NativeSurfaceBridge {
         self.terminals.retain(|_, ids| live_ids(*ids, graph));
 
         let previous_tab = self.workspace_tab;
-        let retained_plugin_focus = signature.focused_plugin.or(graph.focused()).filter(|window| {
-            graph.window(*window).is_some_and(|descriptor| {
-                descriptor.owner.starts_with("plugin.")
-                    && descriptor.focusable
-                    && descriptor.placement != WindowPlacement::Hidden
-            })
-        });
-        let retained_tab = self.workspace_tab.or(graph.active_tab()).filter(|tab| {
-            graph.workspace_tab(*tab).is_some()
-        });
+        let retained_plugin_focus = signature
+            .focused_plugin
+            .or(graph.focused())
+            .filter(|window| {
+                graph.window(*window).is_some_and(|descriptor| {
+                    descriptor.owner.starts_with("plugin.")
+                        && descriptor.focusable
+                        && descriptor.placement != WindowPlacement::Hidden
+                })
+            });
+        let retained_tab = self
+            .workspace_tab
+            .or(graph.active_tab())
+            .filter(|tab| graph.workspace_tab(*tab).is_some());
         let tab = if let Some(tab) = signature.editor_tab.or(retained_tab) {
             tab
         } else {
@@ -775,13 +821,14 @@ impl NativeSurfaceBridge {
             let remains_fullscreen = (signature.active_terminal == Some(*id)
                 || signature.shown_terminals.contains(id))
                 && terminals.iter().any(|(live, ..)| live == id)
-                && self.terminal_placement(*id)
+                && self
+                    .terminal_placement(*id)
                     .or_else(|| self.configured_placements.get("builtin.terminal").copied())
                     == Some(WindowPlacement::Fullscreen);
             if !remains_fullscreen
-                && graph.window(ids.window).is_some_and(|window| {
-                    window.placement == WindowPlacement::Fullscreen
-                })
+                && graph
+                    .window(ids.window)
+                    .is_some_and(|window| window.placement == WindowPlacement::Fullscreen)
             {
                 graph.place(ids.window, WindowPlacement::Hidden)?;
             }
@@ -999,35 +1046,39 @@ impl NativeSurfaceBridge {
             self.terminal_placements.remove(&id);
             self.terminal_restore_placements.remove(&id);
         }
-        let mut placements = terminals.iter().map(|(id, profile, lifecycle)| {
-            let placement = if signature.active_terminal == Some(*id)
-                || signature.shown_terminals.contains(id)
-            {
-                self.terminal_placements
-                    .get(id)
-                    .copied()
-                    .or(self.terminal_default_placement)
-                    .or_else(|| self.configured_placements.get("builtin.terminal").copied())
-                    .unwrap_or(WindowPlacement::Docked {
-                        edge: crate::ui::window::DockEdge::Bottom,
-                        size: signature.terminal_size.max(1),
-                    })
-            } else {
-                WindowPlacement::Hidden
-            };
-            let placement = match placement {
-                WindowPlacement::Docked {
-                    edge:
-                        edge @ (crate::ui::window::DockEdge::Top | crate::ui::window::DockEdge::Bottom),
-                    size,
-                } if signature.terminal_shrunk => WindowPlacement::Docked {
-                    edge,
-                    size: size.min(signature.terminal_size.max(1)),
-                },
-                placement => placement,
-            };
-            (id, profile, lifecycle, placement)
-        }).collect::<Vec<_>>();
+        let mut placements = terminals
+            .iter()
+            .map(|(id, profile, lifecycle)| {
+                let placement = if signature.active_terminal == Some(*id)
+                    || signature.shown_terminals.contains(id)
+                {
+                    self.terminal_placements
+                        .get(id)
+                        .copied()
+                        .or(self.terminal_default_placement)
+                        .or_else(|| self.configured_placements.get("builtin.terminal").copied())
+                        .unwrap_or(WindowPlacement::Docked {
+                            edge: crate::ui::window::DockEdge::Bottom,
+                            size: signature.terminal_size.max(1),
+                        })
+                } else {
+                    WindowPlacement::Hidden
+                };
+                let placement = match placement {
+                    WindowPlacement::Docked {
+                        edge:
+                            edge @ (crate::ui::window::DockEdge::Top
+                            | crate::ui::window::DockEdge::Bottom),
+                        size,
+                    } if signature.terminal_shrunk => WindowPlacement::Docked {
+                        edge,
+                        size: size.min(signature.terminal_size.max(1)),
+                    },
+                    placement => placement,
+                };
+                (id, profile, lifecycle, placement)
+            })
+            .collect::<Vec<_>>();
         // Release the outgoing fullscreen host before showing its replacement.
         placements.sort_by_key(|(_, _, _, placement)| *placement == WindowPlacement::Fullscreen);
         for (id, profile, lifecycle, placement) in placements {
@@ -1334,11 +1385,10 @@ impl NativeSurfaceBridge {
         terminal_fallback: WindowPlacement,
     ) -> Result<NativeSurfaceIds, WindowError> {
         let placement = match target {
-            NativeSurfaceTarget::Explorer => {
-                self.explorer_restore_placement
-                    .or_else(|| self.configured_placements.get("builtin.explorer").copied())
-                    .unwrap_or(explorer_fallback)
-            }
+            NativeSurfaceTarget::Explorer => self
+                .explorer_restore_placement
+                .or_else(|| self.configured_placements.get("builtin.explorer").copied())
+                .unwrap_or(explorer_fallback),
             NativeSurfaceTarget::ExplorerView(view) => self
                 .explorer_view_restore_placements
                 .get(&view)
@@ -1350,7 +1400,9 @@ impl NativeSurfaceBridge {
                 .get(&id)
                 .copied()
                 .filter(|placement| *placement != WindowPlacement::Hidden)
-                .or(self.terminal_default_placement.filter(|placement| *placement != WindowPlacement::Hidden))
+                .or(self
+                    .terminal_default_placement
+                    .filter(|placement| *placement != WindowPlacement::Hidden))
                 .unwrap_or(terminal_fallback),
             NativeSurfaceTarget::Dashboard => self
                 .dashboard_restore_placement

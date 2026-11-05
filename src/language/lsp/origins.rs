@@ -210,7 +210,9 @@ impl EditSourceFixture {
     }
     pub(crate) fn closed_uri(&self) -> Option<String> {
         while let Ok(command) = self.commands.try_recv() {
-            if let SessionCommand::Close(uri) = command { return Some(uri); }
+            if let SessionCommand::Close(uri) = command {
+                return Some(uri);
+            }
         }
         None
     }

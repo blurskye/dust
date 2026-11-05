@@ -336,7 +336,11 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
         id: definition.id,
         executable: installed,
         arguments: vec!["--version".into()],
-        environment: runtime.environment().into_iter().map(|(key, value)| (key, value.into())).collect(),
+        environment: runtime
+            .environment()
+            .into_iter()
+            .map(|(key, value)| (key, value.into()))
+            .collect(),
         current_directory: Some(directory.path().into()),
         timeout: std::time::Duration::from_secs(10),
         cancelled: Default::default(),
@@ -390,29 +394,119 @@ fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
 }
 
 const MANAGED_LSP_FIXTURES: [(&str, &str, &str, &str); 24] = [
-    ("rust-analyzer", "rust", "src/main.rs", "fn main() { let value = 1; value; }\n"),
-    ("typescript-language-server", "typescript", "main.ts", "const value = 1;\nvalue;\n"),
+    (
+        "rust-analyzer",
+        "rust",
+        "src/main.rs",
+        "fn main() { let value = 1; value; }\n",
+    ),
+    (
+        "typescript-language-server",
+        "typescript",
+        "main.ts",
+        "const value = 1;\nvalue;\n",
+    ),
     ("pyright", "python", "main.py", "value = 1\nvalue\n"),
     ("clangd", "c", "main.c", "int main(void) { return 0; }\n"),
-    ("gopls", "go", "main.go", "package main\nfunc main() { var value = 1; _ = value }\n"),
-    ("bash-language-server", "shellscript", "main.sh", "#!/bin/sh\necho value\n"),
-    ("vscode-html-language-server", "html", "index.html", "<main>value</main>\n"),
-    ("tailwindcss-language-server", "html", "index.html", "<main class=\"flex\">value</main>\n"),
+    (
+        "gopls",
+        "go",
+        "main.go",
+        "package main\nfunc main() { var value = 1; _ = value }\n",
+    ),
+    (
+        "bash-language-server",
+        "shellscript",
+        "main.sh",
+        "#!/bin/sh\necho value\n",
+    ),
+    (
+        "vscode-html-language-server",
+        "html",
+        "index.html",
+        "<main>value</main>\n",
+    ),
+    (
+        "tailwindcss-language-server",
+        "html",
+        "index.html",
+        "<main class=\"flex\">value</main>\n",
+    ),
     ("taplo", "toml", "config.toml", "value = 1\n"),
-    ("vscode-css-language-server", "css", "style.css", "main { color: red; }\n"),
-    ("vscode-json-language-server", "json", "config.json", "{\"value\": 1}\n"),
+    (
+        "vscode-css-language-server",
+        "css",
+        "style.css",
+        "main { color: red; }\n",
+    ),
+    (
+        "vscode-json-language-server",
+        "json",
+        "config.json",
+        "{\"value\": 1}\n",
+    ),
     ("yaml-language-server", "yaml", "config.yaml", "value: 1\n"),
     ("marksman", "markdown", "README.md", "# Value\n\ntext\n"),
-    ("emmylua-ls", "lua", "main.lua", "local value = 1\nprint(value)\n"),
-    ("intelephense", "php", "main.php", "<?php\n$value = 1;\necho $value;\n"),
-    ("svelte-language-server", "svelte", "App.svelte", "<script>let value = 1;</script>\n{value}\n"),
-    ("vue-language-server", "vue", "App.vue", "<script setup>const value = 1</script>\n<template>{{ value }}</template>\n"),
-    ("dockerfile-language-server", "dockerfile", "Dockerfile", "FROM scratch\n"),
-    ("astro-language-server", "astro", "index.astro", "---\nconst value = 1;\n---\n<main>{value}</main>\n"),
-    ("biome", "javascript", "main.js", "const value = 1;\nvalue;\n"),
-    ("oxlint", "javascript", "main.js", "const value = 1;\nvalue;\n"),
-    ("oxfmt", "javascript", "main.js", "const value = 1;\nvalue;\n"),
-    ("tsgo", "typescript", "main.ts", "const value = 1;\nvalue;\n"),
+    (
+        "emmylua-ls",
+        "lua",
+        "main.lua",
+        "local value = 1\nprint(value)\n",
+    ),
+    (
+        "intelephense",
+        "php",
+        "main.php",
+        "<?php\n$value = 1;\necho $value;\n",
+    ),
+    (
+        "svelte-language-server",
+        "svelte",
+        "App.svelte",
+        "<script>let value = 1;</script>\n{value}\n",
+    ),
+    (
+        "vue-language-server",
+        "vue",
+        "App.vue",
+        "<script setup>const value = 1</script>\n<template>{{ value }}</template>\n",
+    ),
+    (
+        "dockerfile-language-server",
+        "dockerfile",
+        "Dockerfile",
+        "FROM scratch\n",
+    ),
+    (
+        "astro-language-server",
+        "astro",
+        "index.astro",
+        "---\nconst value = 1;\n---\n<main>{value}</main>\n",
+    ),
+    (
+        "biome",
+        "javascript",
+        "main.js",
+        "const value = 1;\nvalue;\n",
+    ),
+    (
+        "oxlint",
+        "javascript",
+        "main.js",
+        "const value = 1;\nvalue;\n",
+    ),
+    (
+        "oxfmt",
+        "javascript",
+        "main.js",
+        "const value = 1;\nvalue;\n",
+    ),
+    (
+        "tsgo",
+        "typescript",
+        "main.ts",
+        "const value = 1;\nvalue;\n",
+    ),
     ("ruff", "python", "main.py", "value = 1\nvalue\n"),
 ];
 
@@ -421,11 +515,20 @@ fn managed_lsp_definitions() -> Vec<super::catalog::ToolDefinition> {
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
         .collect::<Vec<_>>();
-    let mut actual = definitions.iter().map(|tool| tool.id.as_str()).collect::<Vec<_>>();
-    let mut expected = MANAGED_LSP_FIXTURES.iter().map(|fixture| fixture.0).collect::<Vec<_>>();
+    let mut actual = definitions
+        .iter()
+        .map(|tool| tool.id.as_str())
+        .collect::<Vec<_>>();
+    let mut expected = MANAGED_LSP_FIXTURES
+        .iter()
+        .map(|fixture| fixture.0)
+        .collect::<Vec<_>>();
     actual.sort_unstable();
     expected.sort_unstable();
-    assert_eq!(actual, expected, "managed LSP fixtures must match the catalog before installation");
+    assert_eq!(
+        actual, expected,
+        "managed LSP fixtures must match the catalog before installation"
+    );
     definitions
 }
 
@@ -440,10 +543,25 @@ fn probe_isolated_tool_version(mut request: ToolVersionRequest) -> Result<String
     let env = discover_executable("env").ok_or("env executable unavailable")?;
     let env = std::path::absolute(env).map_err(|error| error.to_string())?;
     let mut arguments = vec!["-i".into()];
-    arguments.extend(request.environment.iter().map(|(key, value)| {
-        value.to_str().map(|value| format!("{key}={value}")).ok_or("non-UTF-8 fixture environment")
-    }).collect::<Result<Vec<_>, _>>()?);
-    arguments.push(request.executable.to_str().ok_or("non-UTF-8 tool path")?.into());
+    arguments.extend(
+        request
+            .environment
+            .iter()
+            .map(|(key, value)| {
+                value
+                    .to_str()
+                    .map(|value| format!("{key}={value}"))
+                    .ok_or("non-UTF-8 fixture environment")
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    arguments.push(
+        request
+            .executable
+            .to_str()
+            .ok_or("non-UTF-8 tool path")?
+            .into(),
+    );
     arguments.append(&mut request.arguments);
     request.executable = env;
     request.arguments = arguments;
@@ -458,12 +576,19 @@ fn isolated_version_probe_does_not_inherit_the_developer_environment() {
     let version = probe_isolated_tool_version(ToolVersionRequest {
         id: "isolated".into(),
         executable: "/bin/sh".into(),
-        arguments: vec!["-c".into(), "test -z \"${HOME+x}\" && printf '%s' \"$DUST_PROBE_FIXTURE\"".into()],
-        environment: std::collections::BTreeMap::from([("DUST_PROBE_FIXTURE".into(), "isolated".into())]),
+        arguments: vec![
+            "-c".into(),
+            "test -z \"${HOME+x}\" && printf '%s' \"$DUST_PROBE_FIXTURE\"".into(),
+        ],
+        environment: std::collections::BTreeMap::from([(
+            "DUST_PROBE_FIXTURE".into(),
+            "isolated".into(),
+        )]),
         current_directory: Some(directory.path().into()),
         timeout: std::time::Duration::from_secs(10),
         cancelled: Default::default(),
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(version, "isolated");
 }
 
@@ -471,8 +596,7 @@ fn write_lsp_message(
     stdin: &mut std::process::ChildStdin,
     message: &serde_json::Value,
 ) -> Result<(), String> {
-    crate::process::write_content_length_message(stdin, message)
-        .map_err(|error| error.to_string())
+    crate::process::write_content_length_message(stdin, message).map_err(|error| error.to_string())
 }
 
 fn lsp_reader(
@@ -503,7 +627,9 @@ struct LspSmokeProcess {
 }
 
 impl LspSmokeProcess {
-    fn spawn(command: &mut std::process::Command) -> (
+    fn spawn(
+        command: &mut std::process::Command,
+    ) -> (
         Self,
         std::sync::mpsc::Receiver<Result<serde_json::Value, String>>,
     ) {
@@ -516,7 +642,8 @@ impl LspSmokeProcess {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .spawn().expect("launch LSP smoke");
+            .spawn()
+            .expect("launch LSP smoke");
         let mut process = Self {
             child,
             cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -525,7 +652,8 @@ impl LspSmokeProcess {
         let stdout = crate::process::CancellablePipe::new(
             process.child.stdout.take().expect("LSP stdout"),
             process.cancelled.clone(),
-        ).expect("cancellable LSP stdout");
+        )
+        .expect("cancellable LSP stdout");
         let (sender, receiver) = std::sync::mpsc::channel();
         process.reader = Some(std::thread::spawn(move || lsp_reader(stdout, sender)));
         (process, receiver)
@@ -534,7 +662,8 @@ impl LspSmokeProcess {
 
 impl Drop for LspSmokeProcess {
     fn drop(&mut self) {
-        self.cancelled.store(true, std::sync::atomic::Ordering::Release);
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
         #[cfg(unix)]
         crate::process::terminate_process_group(self.child.id());
         let _ = self.child.kill();
@@ -571,7 +700,10 @@ fn lsp_smoke_cleans_up_after_an_assertion_failure() {
     }));
     assert!(result.is_err());
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
-    assert_eq!(nix::sys::signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
+    assert_eq!(
+        nix::sys::signal::kill(pid, None),
+        Err(nix::errno::Errno::ESRCH)
+    );
 }
 
 #[cfg(unix)]
@@ -586,7 +718,9 @@ fn lsp_smoke_reader_shutdown_is_bounded_after_the_child_exits() {
         drop(process);
         done.send(()).unwrap();
     });
-    receiver.recv_timeout(std::time::Duration::from_secs(2)).expect("reader shutdown");
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("reader shutdown");
 }
 
 fn await_lsp_response(
@@ -673,187 +807,196 @@ fn lsp_protocol_smoke(
     installed: &std::path::Path,
     store: &std::path::Path,
 ) {
-        let project = store.join("projects").join(&definition.id);
-        std::fs::create_dir_all(project.join("src")).expect("project directory");
-        std::fs::write(
-            project.join("Cargo.toml"),
-            "[package]\nname='dust_protocol_smoke'\nversion='0.1.0'\nedition='2024'\n",
-        )
-        .expect("Cargo marker");
-        std::fs::write(project.join("package.json"), "{}\n").expect("Node marker");
-        std::fs::write(project.join("tsconfig.json"), "{}\n").expect("TS marker");
-        std::fs::write(
-            project.join("pyproject.toml"),
-            "[project]\nname='smoke'\nversion='0.1.0'\n",
-        )
-        .expect("Python marker");
-        std::fs::write(
-            project.join("go.mod"),
-            "module example.com/dust-smoke\ngo 1.24\n",
-        )
-        .expect("Go marker");
-        std::fs::write(project.join(".clangd"), "CompileFlags: {}\n").expect("clangd marker");
-        let &(_, language, source_name, text) = MANAGED_LSP_FIXTURES
-            .iter()
-            .find(|fixture| fixture.0 == definition.id)
-            .expect("catalog LSP fixture");
-        let source = project.join(source_name);
-        if let Some(parent) = source.parent() {
-            std::fs::create_dir_all(parent).expect("source parent");
+    let project = store.join("projects").join(&definition.id);
+    std::fs::create_dir_all(project.join("src")).expect("project directory");
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname='dust_protocol_smoke'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .expect("Cargo marker");
+    std::fs::write(project.join("package.json"), "{}\n").expect("Node marker");
+    std::fs::write(project.join("tsconfig.json"), "{}\n").expect("TS marker");
+    std::fs::write(
+        project.join("pyproject.toml"),
+        "[project]\nname='smoke'\nversion='0.1.0'\n",
+    )
+    .expect("Python marker");
+    std::fs::write(
+        project.join("go.mod"),
+        "module example.com/dust-smoke\ngo 1.24\n",
+    )
+    .expect("Go marker");
+    std::fs::write(project.join(".clangd"), "CompileFlags: {}\n").expect("clangd marker");
+    let &(_, language, source_name, text) = MANAGED_LSP_FIXTURES
+        .iter()
+        .find(|fixture| fixture.0 == definition.id)
+        .expect("catalog LSP fixture");
+    let source = project.join(source_name);
+    if let Some(parent) = source.parent() {
+        std::fs::create_dir_all(parent).expect("source parent");
+    }
+    std::fs::write(&source, text).expect("source fixture");
+    let root_uri = Url::from_file_path(&project).expect("root URI").to_string();
+    let source_uri = Url::from_file_path(&source)
+        .expect("source URI")
+        .to_string();
+    let runtime = nix_lsp_runtime_at(store, definition).expect("private runtime");
+    let mut environment = runtime.environment();
+    let path = std::env::join_paths(
+        std::iter::once(store.join(&definition.id).join("bin"))
+            .chain(std::env::split_paths(&runtime.runtime_path)),
+    )
+    .expect("private runtime PATH");
+    environment.insert("PATH".into(), path.to_str().unwrap().into());
+    for (variable, name) in [
+        ("HOME", "home"),
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_CACHE_HOME", "cache"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_STATE_HOME", "state"),
+        ("TMPDIR", "tmp"),
+    ] {
+        let path = store.join("environment").join(&definition.id).join(name);
+        std::fs::create_dir_all(&path).expect("isolated server directory");
+        environment.insert(variable.into(), path.to_str().unwrap().into());
+    }
+    if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
+        let node = std::fs::canonicalize(store.join(&definition.id).join("bin/node"))
+            .expect("private Node runtime");
+        assert!(
+            node.starts_with("/nix/store") && node.to_string_lossy().contains("nodejs"),
+            "{} did not select pinned Nix Node: {}",
+            definition.id,
+            node.display()
+        );
+    }
+    let mut command = std::process::Command::new(installed);
+    command
+        .args(&definition.launch_args)
+        .current_dir(&project)
+        .env_clear()
+        .envs(environment);
+    let (mut process, messages_rx) = LspSmokeProcess::spawn(&mut command);
+    let mut stdin = process.child.stdin.take().expect("LSP stdin");
+    let configuration =
+        crate::language::lsp::LspServerConfiguration::for_server(&definition.id, installed);
+    let mut initialize_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "processId": null,
+            "rootUri": root_uri,
+            "capabilities": {
+                "general": { "positionEncodings": ["utf-16"] },
+                "textDocument": { "completion": { "completionItem": {} } },
+                "workspace": { "configuration": true, "workspaceFolders": true }
+            },
+            "workspaceFolders": [{ "uri": root_uri, "name": "smoke" }]
         }
-        std::fs::write(&source, text).expect("source fixture");
-        let root_uri = Url::from_file_path(&project).expect("root URI").to_string();
-        let source_uri = Url::from_file_path(&source)
-            .expect("source URI")
-            .to_string();
-        let runtime = nix_lsp_runtime_at(store, definition).expect("private runtime");
-        let mut environment = runtime.environment();
-        let path = std::env::join_paths(
-            std::iter::once(store.join(&definition.id).join("bin"))
-                .chain(std::env::split_paths(&runtime.runtime_path)),
-        ).expect("private runtime PATH");
-        environment.insert("PATH".into(), path.to_str().unwrap().into());
-        for (variable, name) in [
-            ("HOME", "home"),
-            ("XDG_CONFIG_HOME", "config"),
-            ("XDG_CACHE_HOME", "cache"),
-            ("XDG_DATA_HOME", "data"),
-            ("XDG_STATE_HOME", "state"),
-            ("TMPDIR", "tmp"),
-        ] {
-            let path = store.join("environment").join(&definition.id).join(name);
-            std::fs::create_dir_all(&path).expect("isolated server directory");
-            environment.insert(variable.into(), path.to_str().unwrap().into());
-        }
-        if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
-            let node =
-                std::fs::canonicalize(store.join(&definition.id).join("bin/node"))
-                    .expect("private Node runtime");
-            assert!(
-                node.starts_with("/nix/store") && node.to_string_lossy().contains("nodejs"),
-                "{} did not select pinned Nix Node: {}",
-                definition.id,
-                node.display()
-            );
-        }
-        let mut command = std::process::Command::new(installed);
-        command.args(&definition.launch_args).current_dir(&project).env_clear().envs(environment);
-        let (mut process, messages_rx) = LspSmokeProcess::spawn(&mut command);
-        let mut stdin = process.child.stdin.take().expect("LSP stdin");
-        let configuration =
-            crate::language::lsp::LspServerConfiguration::for_server(&definition.id, installed);
-        let mut initialize_request = serde_json::json!({
+    });
+    if let Some(options) = configuration.initialization_options() {
+        initialize_request["params"]["initializationOptions"] = options.clone();
+    }
+    write_lsp_message(&mut stdin, &initialize_request).expect("initialize frame");
+    let initialize = await_lsp_response(1, &mut stdin, &messages_rx)
+        .unwrap_or_else(|error| panic!("initialize {}: {error}", definition.id));
+    assert!(
+        initialize.get("error").is_none(),
+        "{}: {initialize}",
+        definition.id
+    );
+    write_lsp_message(
+        &mut stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
+    )
+    .expect("initialized frame");
+    write_lsp_message(
+        &mut stdin,
+        &serde_json::json!({
             "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "processId": null,
-                "rootUri": root_uri,
-                "capabilities": {
-                    "general": { "positionEncodings": ["utf-16"] },
-                    "textDocument": { "completion": { "completionItem": {} } },
-                    "workspace": { "configuration": true, "workspaceFolders": true }
-                },
-                "workspaceFolders": [{ "uri": root_uri, "name": "smoke" }]
-            }
-        });
-        if let Some(options) = configuration.initialization_options() {
-            initialize_request["params"]["initializationOptions"] = options.clone();
-        }
-        write_lsp_message(&mut stdin, &initialize_request).expect("initialize frame");
-        let initialize = await_lsp_response(1, &mut stdin, &messages_rx)
-            .unwrap_or_else(|error| panic!("initialize {}: {error}", definition.id));
-        assert!(
-            initialize.get("error").is_none(),
-            "{}: {initialize}",
-            definition.id
-        );
-        write_lsp_message(
-            &mut stdin,
-            &serde_json::json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
-        )
-        .expect("initialized frame");
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": {} }
+        }),
+    )
+    .expect("initial configuration frame");
+    write_lsp_message(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": source_uri, "languageId": language, "version": 1, "text": text
+            }}
+        }),
+    )
+    .expect("didOpen frame");
+    assert!(
+        initialize
+            .pointer("/result/capabilities")
+            .is_some_and(serde_json::Value::is_object)
+    );
+    // Linters and formatters need not implement completion.
+    if initialize
+        .pointer("/result/capabilities/completionProvider")
+        .is_some_and(|provider| provider.is_object() || provider == true)
+    {
         write_lsp_message(
             &mut stdin,
             &serde_json::json!({
                 "jsonrpc": "2.0",
-                "method": "workspace/didChangeConfiguration",
-                "params": { "settings": {} }
+                "id": 2,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": source_uri },
+                    "position": { "line": 0, "character": 0 },
+                    "context": { "triggerKind": 1 }
+                }
             }),
         )
-        .expect("initial configuration frame");
-        write_lsp_message(
-            &mut stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "textDocument/didOpen",
-                "params": { "textDocument": {
-                    "uri": source_uri, "languageId": language, "version": 1, "text": text
-                }}
-            }),
-        )
-        .expect("didOpen frame");
-        assert!(initialize.pointer("/result/capabilities").is_some_and(serde_json::Value::is_object));
-        // Linters and formatters need not implement completion.
-        if initialize.pointer("/result/capabilities/completionProvider")
-            .is_some_and(|provider| provider.is_object() || provider == true)
-        {
-            write_lsp_message(
-                &mut stdin,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "textDocument/completion",
-                    "params": {
-                        "textDocument": { "uri": source_uri },
-                        "position": { "line": 0, "character": 0 },
-                        "context": { "triggerKind": 1 }
-                    }
-                }),
-            )
-            .expect("completion frame");
-            let completion = await_lsp_response(2, &mut stdin, &messages_rx)
-                .unwrap_or_else(|error| panic!("completion {}: {error}", definition.id));
-            assert!(
-                completion.get("error").is_none(),
-                "{}: {completion}",
-                definition.id
-            );
-            assert!(
-                completion.get("result").is_some(),
-                "{}: {completion}",
-                definition.id
-            );
-        }
-        write_lsp_message(
-            &mut stdin,
-            &serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": null }),
-        )
-        .expect("shutdown frame");
-        let shutdown = await_lsp_response(3, &mut stdin, &messages_rx)
-            .unwrap_or_else(|error| panic!("shutdown {}: {error}", definition.id));
+        .expect("completion frame");
+        let completion = await_lsp_response(2, &mut stdin, &messages_rx)
+            .unwrap_or_else(|error| panic!("completion {}: {error}", definition.id));
         assert!(
-            shutdown.get("error").is_none(),
-            "{}: {shutdown}",
+            completion.get("error").is_none(),
+            "{}: {completion}",
             definition.id
         );
-        write_lsp_message(
-            &mut stdin,
-            &serde_json::json!({ "jsonrpc": "2.0", "method": "exit", "params": null }),
-        )
-        .expect("exit frame");
-        drop(stdin);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            if process.child.try_wait().expect("LSP status").is_some() {
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                panic!("{} did not exit after shutdown", definition.id);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(
+            completion.get("result").is_some(),
+            "{}: {completion}",
+            definition.id
+        );
+    }
+    write_lsp_message(
+        &mut stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": null }),
+    )
+    .expect("shutdown frame");
+    let shutdown = await_lsp_response(3, &mut stdin, &messages_rx)
+        .unwrap_or_else(|error| panic!("shutdown {}: {error}", definition.id));
+    assert!(
+        shutdown.get("error").is_none(),
+        "{}: {shutdown}",
+        definition.id
+    );
+    write_lsp_message(
+        &mut stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "method": "exit", "params": null }),
+    )
+    .expect("exit frame");
+    drop(stdin);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if process.child.try_wait().expect("LSP status").is_some() {
+            break;
         }
-        drop(process);
+        if std::time::Instant::now() >= deadline {
+            panic!("{} did not exit after shutdown", definition.id);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    drop(process);
 }
 
 #[test]
@@ -961,13 +1104,26 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
     std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755)).unwrap();
     let proxy = directory.path().join("rust-analyzer");
     std::fs::hard_link(&rustup, &proxy).unwrap();
-    let first = catalog.iter().find(|tool| tool.id == "rust-analyzer").unwrap().clone();
-    installer.install_rustup_component(
-        first, rustup, proxy, directory.path().into(), "rust-analyzer".into(),
-    ).expect("queue blocking install");
+    let first = catalog
+        .iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap()
+        .clone();
+    installer
+        .install_rustup_component(
+            first,
+            rustup,
+            proxy,
+            directory.path().into(),
+            "rust-analyzer".into(),
+        )
+        .expect("queue blocking install");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !directory.path().join(".ready").exists() {
-        assert!(std::time::Instant::now() < deadline, "installer did not start");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "installer did not start"
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     let ids = ["claude-agent-acp", "codex-acp"];
@@ -982,7 +1138,10 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
         installer.uninstall(definition).expect("queue uninstall");
     }
 
-    assert!(installer.try_result().unwrap().is_none(), "first operation must still be running");
+    assert!(
+        installer.try_result().unwrap().is_none(),
+        "first operation must still be running"
+    );
     std::fs::write(directory.path().join(".release"), b"release").unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut finished = Vec::new();
@@ -1096,16 +1255,31 @@ fn rustup_cancellation_terminates_its_process_group() {
     use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc, thread};
     let root = tempfile::tempdir().unwrap();
     let rustup = root.path().join("rustup");
-    fs::write(&rustup, "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n").unwrap();
+    fs::write(
+        &rustup,
+        "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n",
+    )
+    .unwrap();
     fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
     let proxy = root.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).unwrap();
-    let definition = bundled_tool_catalog().into_iter().find(|tool| tool.id == "rust-analyzer").unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
-    let worker = thread::spawn(move || super::runtimes::install_path_rustup_component(
-        &definition, &rustup, &proxy, &cwd, "rust-analyzer", &cancellations, &mut |_, _, _| {},
-    ));
+    let worker = thread::spawn(move || {
+        super::runtimes::install_path_rustup_component(
+            &definition,
+            &rustup,
+            &proxy,
+            &cwd,
+            "rust-analyzer",
+            &cancellations,
+            &mut |_, _, _| {},
+        )
+    });
     let pid = wait_for_descendant(&root.path().join("descendant"));
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
@@ -1152,7 +1326,11 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     }
     // More than the old inspection limit, including generations beyond its first page.
     for index in 3..1100 {
-        symlink(&target, profiles.join(format!("rust-analyzer-{index}-link"))).unwrap();
+        symlink(
+            &target,
+            profiles.join(format!("rust-analyzer-{index}-link")),
+        )
+        .unwrap();
     }
     let definition = bundled_tool_catalog()
         .into_iter()
@@ -1176,9 +1354,16 @@ fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
         .find(|tool| tool.id == "rust-analyzer")
         .unwrap();
     uninstall_nix_lsp_profile(&definition, directory.path()).unwrap();
-    std::fs::write(directory.path().join("nix-lsp-workspace"), b"not a directory").unwrap();
+    std::fs::write(
+        directory.path().join("nix-lsp-workspace"),
+        b"not a directory",
+    )
+    .unwrap();
     let error = uninstall_nix_lsp_profile(&definition, directory.path()).unwrap_err();
-    assert!(error.contains("cannot inspect Dust Nix environments"), "{error}");
+    assert!(
+        error.contains("cannot inspect Dust Nix environments"),
+        "{error}"
+    );
 }
 
 #[cfg(unix)]
@@ -1190,10 +1375,17 @@ fn wait_for_descendant(path: &std::path::Path) -> nix::unistd::Pid {
             && pid > 0
         {
             let pid = nix::unistd::Pid::from_raw(pid);
-            assert_eq!(nix::sys::signal::kill(pid, None), Ok(()), "descendant must be observable before cancellation");
+            assert_eq!(
+                nix::sys::signal::kill(pid, None),
+                Ok(()),
+                "descendant must be observable before cancellation"
+            );
             return pid;
         }
-        assert!(std::time::Instant::now() < deadline, "descendant PID was not published");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "descendant PID was not published"
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
@@ -1208,14 +1400,20 @@ fn assert_descendant_stopped(pid: nix::unistd::Pid) {
                 // A killed orphan can remain a zombie until the host's init reaps it.
                 #[cfg(target_os = "linux")]
                 if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                    && stat.rsplit_once(") ").and_then(|(_, state)| state.chars().next()) == Some('Z')
+                    && stat
+                        .rsplit_once(") ")
+                        .and_then(|(_, state)| state.chars().next())
+                        == Some('Z')
                 {
                     return;
                 }
             }
             Err(error) => panic!("cannot inspect descendant {pid}: {error}"),
         }
-        assert!(std::time::Instant::now() < deadline, "descendant {pid} is still running");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "descendant {pid} is still running"
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
@@ -1223,14 +1421,27 @@ fn assert_descendant_stopped(pid: nix::unistd::Pid) {
 #[cfg(unix)]
 #[test]
 fn version_probe_terminates_descendants_on_every_exit_path() {
-    use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time::Duration};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        thread,
+        time::Duration,
+    };
 
     for (action, expected_error) in [
         ("wait", Some("cancelled")),
         ("wait", Some("timed out")),
-        ("while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done", Some("exceeded its limit")),
+        (
+            "while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done",
+            Some("exceeded its limit"),
+        ),
         ("printf version", Some("remained open")),
-        ("printf version; exec 1>&- 2>&-; exit 1", Some("exited with")),
+        (
+            "printf version; exec 1>&- 2>&-; exit 1",
+            Some("exited with"),
+        ),
         ("printf version; exec 1>&- 2>&-", None),
     ] {
         let root = tempfile::tempdir().unwrap();
@@ -1238,10 +1449,17 @@ fn version_probe_terminates_descendants_on_every_exit_path() {
         let request = ToolVersionRequest {
             id: "descendant".into(),
             executable: "/bin/sh".into(),
-            arguments: vec!["-c".into(), format!(
-                "sleep 30 {} & echo $! > descendant; while [ ! -f release ]; do sleep 0.01; done; {action}",
-                if action.contains("exec") { ">/dev/null 2>&1" } else { "" },
-            )],
+            arguments: vec![
+                "-c".into(),
+                format!(
+                    "sleep 30 {} & echo $! > descendant; while [ ! -f release ]; do sleep 0.01; done; {action}",
+                    if action.contains("exec") {
+                        ">/dev/null 2>&1"
+                    } else {
+                        ""
+                    },
+                ),
+            ],
             environment: Default::default(),
             current_directory: Some(root.path().into()),
             timeout: Duration::from_secs(10),
@@ -1257,7 +1475,10 @@ fn version_probe_terminates_descendants_on_every_exit_path() {
         let result = worker.join().unwrap();
         assert_descendant_stopped(pid);
         if let Some(error) = expected_error {
-            assert!(result.as_ref().is_err_and(|result| result.contains(error)), "{result:?}");
+            assert!(
+                result.as_ref().is_err_and(|result| result.contains(error)),
+                "{result:?}"
+            );
         } else {
             assert_eq!(result.unwrap(), "version");
         }
@@ -1267,18 +1488,39 @@ fn version_probe_terminates_descendants_on_every_exit_path() {
 #[cfg(unix)]
 #[test]
 fn cancelled_queued_version_probes_do_not_spawn() {
-    use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{Duration, Instant},
+    };
     let directory = tempfile::tempdir().unwrap();
     let service = super::ToolVersionService::start();
     let request = |id: &str, script: &str, cancelled| ToolVersionRequest {
-        id: id.into(), executable: "/bin/sh".into(),
-        arguments: vec!["-c".into(), script.into()], environment: Default::default(),
+        id: id.into(),
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), script.into()],
+        environment: Default::default(),
         current_directory: Some(directory.path().to_path_buf()),
-        timeout: Duration::from_secs(2), cancelled,
+        timeout: Duration::from_secs(2),
+        cancelled,
     };
-    service.probe(&request("first", "touch started; while [ ! -f release ]; do sleep 0.01; done; echo version", Default::default())).unwrap();
+    service
+        .probe(&request(
+            "first",
+            "touch started; while [ ! -f release ]; do sleep 0.01; done; echo version",
+            Default::default(),
+        ))
+        .unwrap();
     let cancelled = Arc::new(AtomicBool::new(false));
-    service.probe(&request("queued", "touch executed; echo version", cancelled.clone())).unwrap();
+    service
+        .probe(&request(
+            "queued",
+            "touch executed; echo version",
+            cancelled.clone(),
+        ))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     while !directory.path().join("started").exists() {
         assert!(Instant::now() < deadline);
@@ -1287,7 +1529,9 @@ fn cancelled_queued_version_probes_do_not_spawn() {
     cancelled.store(true, Ordering::Release);
     std::fs::write(directory.path().join("release"), "").unwrap();
     loop {
-        if let Some(result) = service.try_result() && result.id == "queued" {
+        if let Some(result) = service.try_result()
+            && result.id == "queued"
+        {
             assert_eq!(result.result.unwrap_err(), "version probe cancelled");
             break;
         }
@@ -1343,12 +1587,15 @@ fn version_service_shutdown_with_full_results_is_bounded() {
         let request = ToolVersionRequest {
             id: id.to_string(),
             executable: "/bin/sh".into(),
-            arguments: vec!["-c".into(), if id == 32 {
-                // This cannot execute until all 32 preceding results have been queued.
-                "printf version; : > full".into()
-            } else {
-                "printf version".into()
-            }],
+            arguments: vec![
+                "-c".into(),
+                if id == 32 {
+                    // This cannot execute until all 32 preceding results have been queued.
+                    "printf version; : > full".into()
+                } else {
+                    "printf version".into()
+                },
+            ],
             environment: Default::default(),
             current_directory: Some(directory.path().into()),
             timeout: Duration::from_secs(1),
@@ -1358,7 +1605,10 @@ fn version_service_shutdown_with_full_results_is_bounded() {
             match service.probe(&request) {
                 Ok(()) => break,
                 Err(std::sync::mpsc::TrySendError::Full(())) => {
-                    assert!(std::time::Instant::now() < deadline, "probe admission timed out");
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "probe admission timed out"
+                    );
                     thread::sleep(Duration::from_millis(2));
                 }
                 Err(error) => panic!("probe worker stopped: {error}"),
@@ -1366,7 +1616,10 @@ fn version_service_shutdown_with_full_results_is_bounded() {
         }
     }
     while !directory.path().join("full").exists() {
-        assert!(std::time::Instant::now() < deadline, "result queue did not fill");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "result queue did not fill"
+        );
         thread::sleep(Duration::from_millis(2));
     }
     let (done, receiver) = mpsc::channel();
@@ -1508,11 +1761,17 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
         super::commit_store_bytes(&store, &digest, &bytes, 1024).unwrap();
         let path = root.path().join("lock.json");
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert_eq!(super::verify_lock_store(&path, &store, 4096, 1024).unwrap(), 1);
+        assert_eq!(
+            super::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
+            1
+        );
         // Supplied locks may still use uppercase, even though generated locks do not.
         lock.packages[0].content_sha256.make_ascii_uppercase();
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert_eq!(super::verify_lock_store(&path, &store, 4096, 1024).unwrap(), 1);
+        assert_eq!(
+            super::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
+            1
+        );
     }
 }
 
@@ -1523,14 +1782,20 @@ fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
     let path = root.path().join("object");
     std::fs::write(&path, b"1234").unwrap();
     assert_eq!(read_bounded_regular(&path, 4).unwrap(), b"1234");
-    assert!(matches!(read_bounded_regular(&path, 3), Err(super::PackageError::InvalidManifest)));
+    assert!(matches!(
+        read_bounded_regular(&path, 3),
+        Err(super::PackageError::InvalidManifest)
+    ));
     assert!(read_bounded_regular(root.path(), 4).is_err());
     let link = root.path().join("link");
     std::os::unix::fs::symlink(&path, &link).unwrap();
     assert!(read_bounded_regular(&link, 4).is_err());
     let fifo = root.path().join("fifo");
     nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
-    assert!(matches!(read_bounded_regular(&fifo, 4), Err(super::PackageError::InvalidManifest)));
+    assert!(matches!(
+        read_bounded_regular(&fifo, 4),
+        Err(super::PackageError::InvalidManifest)
+    ));
 }
 
 #[cfg(target_os = "linux")]
@@ -1538,7 +1803,10 @@ fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
 fn package_reader_bounds_streams_whose_metadata_understates_their_size() {
     let path = std::path::Path::new("/proc/self/status");
     assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
-    assert!(matches!(super::package_lock::read_bounded_regular(path, 8), Err(super::PackageError::InvalidManifest)));
+    assert!(matches!(
+        super::package_lock::read_bounded_regular(path, 8),
+        Err(super::PackageError::InvalidManifest)
+    ));
 }
 
 #[test]
@@ -1551,14 +1819,29 @@ fn package_verification_bounds_objects_and_rejects_non_regular_entries() {
     let lock = super::resolve_manifests(&manifests).unwrap();
     let path = root.path().join("lock.json");
     super::write_lock_atomic(&path, &lock, 4096).unwrap();
-    assert_eq!(super::verify_lock_store(&path, &store, 4096, bytes.len()).unwrap(), 1);
-    assert!(matches!(super::verify_lock_store(&path, &store, 4096, bytes.len() - 1), Err(super::PackageError::InvalidManifest)));
+    assert_eq!(
+        super::verify_lock_store(&path, &store, 4096, bytes.len()).unwrap(),
+        1
+    );
+    assert!(matches!(
+        super::verify_lock_store(&path, &store, 4096, bytes.len() - 1),
+        Err(super::PackageError::InvalidManifest)
+    ));
     // Sparse objects must be rejected before allocating their contents.
-    std::fs::File::create(&object).unwrap().set_len(1024 * 1024 * 1024).unwrap();
-    assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::InvalidManifest)));
+    std::fs::File::create(&object)
+        .unwrap()
+        .set_len(1024 * 1024 * 1024)
+        .unwrap();
+    assert!(matches!(
+        super::verify_lock_store(&path, &store, 4096, 1024),
+        Err(super::PackageError::InvalidManifest)
+    ));
     std::fs::remove_file(&object).unwrap();
     nix::unistd::mkfifo(&object, nix::sys::stat::Mode::S_IRUSR).unwrap();
-    assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::InvalidManifest)));
+    assert!(matches!(
+        super::verify_lock_store(&path, &store, 4096, 1024),
+        Err(super::PackageError::InvalidManifest)
+    ));
 }
 
 #[test]
@@ -1584,7 +1867,10 @@ fn package_verification_rejects_content_that_differs_from_its_source_pin() {
         lock.packages[0].source = source;
         let path = root.path().join("lock.json");
         super::write_lock_atomic(&path, &lock, 4096).unwrap();
-        assert!(matches!(super::verify_lock_store(&path, &store, 4096, 1024), Err(super::PackageError::ChecksumMismatch)));
+        assert!(matches!(
+            super::verify_lock_store(&path, &store, 4096, 1024),
+            Err(super::PackageError::ChecksumMismatch)
+        ));
     }
 }
 
@@ -1592,10 +1878,12 @@ fn package_verification_rejects_content_that_differs_from_its_source_pin() {
 fn package_store_reinstall_repairs_corrupted_objects() {
     let root = tempfile::tempdir().unwrap();
     let (manifest, _, bytes) = package_fixture("demo");
-    let object = super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+    let object =
+        super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
     for corrupt in [vec![b'x'; bytes.len()], vec![b'x'; 2048]] {
         std::fs::write(&object, corrupt).unwrap();
-        let repaired = super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+        let repaired =
+            super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
         assert_eq!(repaired, object);
         assert_eq!(std::fs::read(&object).unwrap(), bytes);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
@@ -1603,14 +1891,19 @@ fn package_store_reinstall_repairs_corrupted_objects() {
     let manager = super::PackageManager::new(root.path().join("manager"), 4096, 1024).unwrap();
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     std::fs::write(&object, b"corrupt").unwrap();
-    assert_eq!(manager.stage_verified_object(&manifest, &bytes).unwrap(), object);
+    assert_eq!(
+        manager.stage_verified_object(&manifest, &bytes).unwrap(),
+        object
+    );
 }
 
 #[test]
 fn package_atomic_writes_remove_staging_files_when_rename_fails() {
     let root = tempfile::tempdir().unwrap();
     let (manifest, _, bytes) = package_fixture("demo");
-    let manifests = [(manifest.name.clone(), manifest.clone())].into_iter().collect();
+    let manifests = [(manifest.name.clone(), manifest.clone())]
+        .into_iter()
+        .collect();
     let lock = super::resolve_manifests(&manifests).unwrap();
     // Staging succeeds in the directory, but the destination name cannot be installed.
     let path = root.path().join("x".repeat(300));
@@ -1619,7 +1912,9 @@ fn package_atomic_writes_remove_staging_files_when_rename_fails() {
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
     let target = root.path().join(manifest.source_digest());
     std::fs::create_dir(&target).unwrap();
-    assert!(super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err());
+    assert!(
+        super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err()
+    );
     assert!(target.is_dir());
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
 }
@@ -1630,16 +1925,27 @@ fn package_commits_preserve_plugin_ownership_and_identity() {
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-    let installed = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let installed = manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     let mut renamed = plugin.clone();
     renamed.id = "other".into();
-    assert!(matches!(manager.commit_prepared(&manifest, &renamed, &object), Err(super::PackageError::Activation(_))));
+    assert!(matches!(
+        manager.commit_prepared(&manifest, &renamed, &object),
+        Err(super::PackageError::Activation(_))
+    ));
     let mut unrelated = manifest.clone();
     unrelated.name = "other".into();
-    assert!(matches!(manager.commit_prepared(&unrelated, &plugin, &object), Err(super::PackageError::Activation(_))));
+    assert!(matches!(
+        manager.commit_prepared(&unrelated, &plugin, &object),
+        Err(super::PackageError::Activation(_))
+    ));
     assert_eq!(manager.read_lock().unwrap(), installed);
     assert_eq!(manager.activations().unwrap()[0].0.id, "demo");
-    assert!(matches!(manager.rollback(), Err(super::PackageError::NoRollback)));
+    assert!(matches!(
+        manager.rollback(),
+        Err(super::PackageError::NoRollback)
+    ));
 }
 
 #[test]
@@ -1807,31 +2113,55 @@ fn registry_service_keeps_every_result_under_backpressure() {
 #[test]
 fn locked_uv_installation_rejects_another_process_and_uninstall() {
     use std::{fs, sync::mpsc};
-    let definition = bundled_tool_catalog().into_iter()
-        .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. }))).unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. })))
+        .unwrap();
     if let Some(root) = std::env::var_os("DUST_TEST_LOCKED_TOOL_ROOT") {
         let root = std::path::Path::new(&root);
         let (_cancel, cancellations) = mpsc::channel();
         let error = super::runtimes::install_uv_tool(
-            &definition, root, &["fixture".into()], &cancellations, &mut |_, _, _| {}, None,
-        ).unwrap_err();
+            &definition,
+            root,
+            &["fixture".into()],
+            &cancellations,
+            &mut |_, _, _| {},
+            None,
+        )
+        .unwrap_err();
         assert!(error.contains("cannot lock tool"), "{error}");
-        assert!(uninstall_managed_tool(&definition, root).unwrap_err().contains("cannot lock tool"));
+        assert!(
+            uninstall_managed_tool(&definition, root)
+                .unwrap_err()
+                .contains("cannot lock tool")
+        );
         return;
     }
     let root = tempfile::tempdir().unwrap();
     let tool = root.path().join(&definition.id);
     fs::create_dir(&tool).unwrap();
     fs::write(tool.join("existing"), "keep this").unwrap();
-    let file = fs::OpenOptions::new().write(true).create_new(true)
-        .open(root.path().join(format!(".install-{}.lock", definition.id))).unwrap();
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(root.path().join(format!(".install-{}.lock", definition.id)))
+        .unwrap();
     let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .arg("locked_uv_installation_rejects_another_process_and_uninstall")
         .env("DUST_TEST_LOCKED_TOOL_ROOT", root.path())
-        .output().unwrap();
-    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    assert_eq!(fs::read_to_string(tool.join("existing")).unwrap(), "keep this");
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(tool.join("existing")).unwrap(),
+        "keep this"
+    );
     drop(lock);
     uninstall_managed_tool(&definition, root.path()).unwrap();
     assert!(!tool.exists());
@@ -1878,17 +2208,25 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
 #[cfg(unix)]
 #[test]
 fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
-    use std::{fs, sync::mpsc, time::{Duration, Instant}};
+    use std::{
+        fs,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
     for exit in [0, 1] {
         let root = tempfile::tempdir().unwrap();
         let (_cancel, cancellations) = mpsc::channel();
         let started = Instant::now();
         let result = super::runtimes::run_managed(
             std::path::Path::new("/bin/sh"),
-            &["-c".into(), format!("sleep 30 & echo $! > descendant; echo diagnostic >&2; exit {exit}")],
+            &[
+                "-c".into(),
+                format!("sleep 30 & echo $! > descendant; echo diagnostic >&2; exit {exit}"),
+            ],
             root.path(),
             &std::collections::BTreeMap::from([("PATH".into(), std::env::var_os("PATH").unwrap())]),
-            &cancellations, None,
+            &cancellations,
+            None,
         );
         assert!(started.elapsed() < Duration::from_secs(5));
         if exit == 0 {
@@ -1944,16 +2282,26 @@ fn package_failed_commit_preserves_rollback() {
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     plugin.version = "2.0.0".into();
-    let current = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let current = manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     let backup_path = root.path().join("dust-packages.lock.previous.json");
     let backup = std::fs::read(&backup_path).unwrap();
     let limited = super::PackageManager::new(
-        root.path().into(), serde_json::to_vec_pretty(&current).unwrap().len(), 1024,
-    ).unwrap();
+        root.path().into(),
+        serde_json::to_vec_pretty(&current).unwrap().len(),
+        1024,
+    )
+    .unwrap();
     let (additional, plugin, _) = package_fixture("extra");
-    assert!(matches!(limited.commit_prepared(&additional, &plugin, &object), Err(super::PackageError::LockTooLarge)));
+    assert!(matches!(
+        limited.commit_prepared(&additional, &plugin, &object),
+        Err(super::PackageError::LockTooLarge)
+    ));
     assert_eq!(std::fs::read(backup_path).unwrap(), backup);
     assert_eq!(manager.activations().unwrap()[0].0.version, "2.0.0");
     manager.rollback().unwrap();
@@ -1966,10 +2314,17 @@ fn package_missing_removal_preserves_rollback() {
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     plugin.version = "2.0.0".into();
-    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
-    assert!(matches!(manager.remove("typo"), Err(super::PackageError::PackageNotFound(_))));
+    manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
+    assert!(matches!(
+        manager.remove("typo"),
+        Err(super::PackageError::PackageNotFound(_))
+    ));
     manager.rollback().unwrap();
     assert_eq!(manager.activations().unwrap()[0].0.version, "1.0.0");
 }
@@ -1980,14 +2335,29 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-    let mut lock = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let mut lock = manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     lock.packages[0].dependencies.push("demo".into());
-    super::write_lock_atomic(&root.path().join("dust-packages.lock.json"), &lock, 1024 * 1024).unwrap();
+    super::write_lock_atomic(
+        &root.path().join("dust-packages.lock.json"),
+        &lock,
+        1024 * 1024,
+    )
+    .unwrap();
     let (other, plugin, _) = package_fixture("dependent");
     let mut lock = manager.commit_prepared(&other, &plugin, &object).unwrap();
     lock.packages[1].dependencies.push("demo".into());
-    super::write_lock_atomic(&root.path().join("dust-packages.lock.json"), &lock, 1024 * 1024).unwrap();
-    assert!(matches!(manager.remove("demo"), Err(super::PackageError::PackageRequired(_))));
+    super::write_lock_atomic(
+        &root.path().join("dust-packages.lock.json"),
+        &lock,
+        1024 * 1024,
+    )
+    .unwrap();
+    assert!(matches!(
+        manager.remove("demo"),
+        Err(super::PackageError::PackageRequired(_))
+    ));
     manager.remove("dependent").unwrap();
     assert!(manager.remove("demo").unwrap().packages.is_empty());
 }
@@ -1998,12 +2368,26 @@ fn package_commit_rejects_changed_or_shared_plugin_ids() {
     let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("alpha");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    manager
+        .commit_prepared(&manifest, &plugin, &object)
+        .unwrap();
     plugin.id = "new-id".into();
-    assert!(manager.commit_prepared(&manifest, &plugin, &object).unwrap_err().to_string().contains("cannot change plugin ID"));
+    assert!(
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot change plugin ID")
+    );
     let (other, mut plugin, _) = package_fixture("beta");
     plugin.id = "alpha".into();
-    assert!(manager.commit_prepared(&other, &plugin, &object).unwrap_err().to_string().contains("already owned"));
+    assert!(
+        manager
+            .commit_prepared(&other, &plugin, &object)
+            .unwrap_err()
+            .to_string()
+            .contains("already owned")
+    );
     let activations = manager.activations().unwrap();
     assert_eq!(activations.len(), 1);
     assert_eq!(activations[0].0.id, "alpha");
@@ -2012,25 +2396,40 @@ fn package_commit_rejects_changed_or_shared_plugin_ids() {
 #[cfg(unix)]
 #[test]
 fn go_install_preserves_non_utf8_environment_paths() {
-    use std::{ffi::OsStr, fs, os::unix::{ffi::OsStrExt, fs::PermissionsExt}, sync::mpsc};
+    use std::{
+        ffi::OsStr,
+        fs,
+        os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+        sync::mpsc,
+    };
     // A ZFS temp directory may require UTF-8 names; tmpfs accepts raw bytes.
     let directory = if cfg!(target_os = "linux") {
         tempfile::tempdir_in("/dev/shm")
     } else {
         tempfile::tempdir()
-    }.unwrap();
+    }
+    .unwrap();
     let root = directory.path().join(OsStr::from_bytes(b"state-\xff"));
     let runtime = root.join(".runtimes/go");
     fs::create_dir_all(runtime.join("bin")).unwrap();
     let go = runtime.join("bin/go");
     fs::write(&go, "#!/bin/sh\nset -eu\n[ \"$GOBIN\" = \"$HOME/bin\" ]\n[ \"$GOPATH\" = \"$HOME/gopath\" ]\n[ \"$GOCACHE\" = \"$HOME/gocache\" ]\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/fixture\"\n").unwrap();
     fs::set_permissions(go, fs::Permissions::from_mode(0o700)).unwrap();
-    fs::write(runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER), runtime_artifact("go").unwrap().sha256).unwrap();
-    let mut definition = bundled_tool_catalog().into_iter().find(|tool| matches!(tool.install, Some(ToolInstall::GoPackage { .. }))).unwrap();
+    fs::write(
+        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime_artifact("go").unwrap().sha256,
+    )
+    .unwrap();
+    let mut definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| matches!(tool.install, Some(ToolInstall::GoPackage { .. })))
+        .unwrap();
     definition.id = "fixture".into();
     definition.executable = "fixture".into();
     let (_cancel, cancellations) = mpsc::channel();
-    let installed = install_tool(&definition, &root, &cancellations, &mut |_, _, _| {}, None).unwrap().unwrap();
+    let installed = install_tool(&definition, &root, &cancellations, &mut |_, _, _| {}, None)
+        .unwrap()
+        .unwrap();
     assert!(installed.is_file());
     assert!(installed.starts_with(&root));
 }
@@ -2061,21 +2460,49 @@ fn npm_install_patches_native_dependencies_before_activation() {
     let bun = runtime.join("bin/bun");
     fs::write(&bun, format!("#!/bin/sh\nset -eu\nmkdir -p \"$BUN_INSTALL/node_modules/native\"\nprintf '{}' > \"$BUN_INSTALL/node_modules/native/fixture\"\nchmod 700 \"$BUN_INSTALL/node_modules/native/fixture\"\nln -s ../node_modules/native/fixture \"$BUN_INSTALL/bin/fixture\"\n", shell_bytes(&elf("/lib64/ld-linux-x86-64.so.2")))).unwrap();
     fs::set_permissions(&bun, fs::Permissions::from_mode(0o700)).unwrap();
-    fs::write(runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER), runtime_artifact("bun").unwrap().sha256).unwrap();
+    fs::write(
+        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime_artifact("bun").unwrap().sha256,
+    )
+    .unwrap();
     let patchelf = root.path().join("patchelf");
     let loader = "/private/ld.so";
-    fs::write(&patchelf, format!("#!/bin/sh\nprintf '{}' > \"$5\"\n", shell_bytes(&elf(loader)))).unwrap();
+    fs::write(
+        &patchelf,
+        format!(
+            "#!/bin/sh\nprintf '{}' > \"$5\"\n",
+            shell_bytes(&elf(loader))
+        ),
+    )
+    .unwrap();
     fs::set_permissions(&patchelf, fs::Permissions::from_mode(0o700)).unwrap();
     let compatibility = super::catalog::NixCompatibilityRuntime {
-        loader: loader.into(), nix_ld: "/private/nix-ld".into(), patchelf,
-        library_path: String::new(), runtime_path: std::env::var("PATH").unwrap(),
+        loader: loader.into(),
+        nix_ld: "/private/nix-ld".into(),
+        patchelf,
+        library_path: String::new(),
+        runtime_path: std::env::var("PATH").unwrap(),
     };
-    let mut definition = bundled_tool_catalog().into_iter().find(|tool| matches!(tool.install, Some(ToolInstall::NpmPackage { .. }))).unwrap();
+    let mut definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| matches!(tool.install, Some(ToolInstall::NpmPackage { .. })))
+        .unwrap();
     definition.id = "fixture".into();
     definition.executable = "fixture".into();
     let (_cancel, cancellations) = mpsc::channel();
-    let installed = install_tool(&definition, root.path(), &cancellations, &mut |_, _, _| {}, Some(&compatibility)).unwrap().unwrap();
-    assert_eq!(elf_interpreter(&installed).unwrap().as_deref(), Some(loader));
+    let installed = install_tool(
+        &definition,
+        root.path(),
+        &cancellations,
+        &mut |_, _, _| {},
+        Some(&compatibility),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        elf_interpreter(&installed).unwrap().as_deref(),
+        Some(loader)
+    );
 }
 
 #[cfg(unix)]

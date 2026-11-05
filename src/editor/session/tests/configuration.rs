@@ -95,35 +95,66 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
 
 #[test]
 fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
-    use crate::persistence::{PersistedBreakpoint, PersistedState, PersistedWatch, PersistenceService};
+    use crate::persistence::{
+        PersistedBreakpoint, PersistedState, PersistedWatch, PersistenceService,
+    };
     let (_app_dirs, mut app) = app();
     let saved = tempdir().unwrap();
     let path = app.state.workspace_root.join("main.rs");
     let mut state = PersistedState::default();
-    state.metadata.insert("lsp.runtime.rust-analyzer".into(), "managed".into());
-    state.metadata.insert("lsp.version.rust-analyzer".into(), "0.3.3008".into());
-    state.breakpoints = [1, 2, 3].into_iter().map(|line| PersistedBreakpoint {
-        path: path.clone(), line, column: None, condition: Some("saved".into()),
-        hit_condition: None, log_message: None,
-    }).collect();
-    state.watches = ["saved", "removed", "untouched"].into_iter().map(|expression| PersistedWatch {
-        expression: expression.into(),
-    }).collect();
+    state
+        .metadata
+        .insert("lsp.runtime.rust-analyzer".into(), "managed".into());
+    state
+        .metadata
+        .insert("lsp.version.rust-analyzer".into(), "0.3.3008".into());
+    state.breakpoints = [1, 2, 3]
+        .into_iter()
+        .map(|line| PersistedBreakpoint {
+            path: path.clone(),
+            line,
+            column: None,
+            condition: Some("saved".into()),
+            hit_condition: None,
+            log_message: None,
+        })
+        .collect();
+    state.watches = ["saved", "removed", "untouched"]
+        .into_iter()
+        .map(|expression| PersistedWatch {
+            expression: expression.into(),
+        })
+        .collect();
     let state_path = saved.path().join("session.json");
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let (worker, release) = PersistenceService::gated_for_test(1);
-    app.persistence = crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
+    app.persistence =
+        crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
     let row = |line, condition: &str| crate::debugger::DapSourceBreakpoint {
-        path: path.clone(), line, column: None, condition: Some(condition.into()),
-        hit_condition: None, log_message: None,
+        path: path.clone(),
+        line,
+        column: None,
+        condition: Some(condition.into()),
+        hit_condition: None,
+        log_message: None,
     };
-    app.debugger_session.breakpoint(row(2, "old"), false).unwrap();
+    app.debugger_session
+        .breakpoint(row(2, "old"), false)
+        .unwrap();
     app.debugger_session.add_watch("removed".into());
     app.load_persistence();
-    app.tooling.select_runtime("rust-analyzer", LspRuntimeSource::Path, None).unwrap();
-    app.tooling.select_version("rust-analyzer", "0.3.3025".into()).unwrap();
-    app.debugger_session.breakpoint(row(1, "new"), false).unwrap();
-    app.debugger_session.breakpoint(row(2, "old"), true).unwrap();
+    app.tooling
+        .select_runtime("rust-analyzer", LspRuntimeSource::Path, None)
+        .unwrap();
+    app.tooling
+        .select_version("rust-analyzer", "0.3.3025".into())
+        .unwrap();
+    app.debugger_session
+        .breakpoint(row(1, "new"), false)
+        .unwrap();
+    app.debugger_session
+        .breakpoint(row(2, "old"), true)
+        .unwrap();
     app.debugger_session.add_watch("live".into());
     app.debugger_session.remove_watch("removed");
     drop(release);
@@ -133,13 +164,33 @@ fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
     }
-    assert!(!app.tooling.metadata().contains_key("lsp.runtime.rust-analyzer"));
-    assert_eq!(app.tooling.managed_version("rust-analyzer").map(String::as_str), Some("0.3.3025"));
+    assert!(
+        !app.tooling
+            .metadata()
+            .contains_key("lsp.runtime.rust-analyzer")
+    );
+    assert_eq!(
+        app.tooling
+            .managed_version("rust-analyzer")
+            .map(String::as_str),
+        Some("0.3.3025")
+    );
     let breakpoints = app.debugger_session.persisted_breakpoints();
     assert_eq!(breakpoints.len(), 2);
-    assert!(breakpoints.iter().any(|row| row.line == 1 && row.condition.as_deref() == Some("new")));
-    assert!(breakpoints.iter().any(|row| row.line == 3 && row.condition.as_deref() == Some("saved")));
-    assert_eq!(app.debugger_session.watches(), ["live", "saved", "untouched"]);
+    assert!(
+        breakpoints
+            .iter()
+            .any(|row| row.line == 1 && row.condition.as_deref() == Some("new"))
+    );
+    assert!(
+        breakpoints
+            .iter()
+            .any(|row| row.line == 3 && row.condition.as_deref() == Some("saved"))
+    );
+    assert_eq!(
+        app.debugger_session.watches(),
+        ["live", "saved", "untouched"]
+    );
 }
 
 #[test]
@@ -152,7 +203,8 @@ fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
     fs::write(
         root.join("themes").join(format!("{}.toml", installed.name)),
         toml::to_string(&installed).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
     let mut configuration = app.configuration.fixture_snapshot();
     configuration.sources.settings = root.join("config.toml");
     app.configuration.install_fixture(configuration);
@@ -388,7 +440,9 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     // completion without changing the theme or advancing the binding revision.
     let wait_for_discovery = |app: &mut InteractiveApplication| {
         app.configuration.begin_theme_restore();
-        app.configuration.restore_theme(Some("invalid JSON")).unwrap();
+        app.configuration
+            .restore_theme(Some("invalid JSON"))
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(result) = app.configuration.poll_theme_restore() {
@@ -502,9 +556,15 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     );
     assert_eq!(setting.contributors[0], "bundled defaults");
     assert_eq!(setting.contributors[1], setting.source);
-    let bullet = resolved.explain("editor.markdown.glyphs.bullets.0").expect("bullet");
+    let bullet = resolved
+        .explain("editor.markdown.glyphs.bullets.0")
+        .expect("bullet");
     assert_eq!(bullet.value, "\"*\"");
-    assert!(bullet.source.starts_with(&config_path.display().to_string()));
+    assert!(
+        bullet
+            .source
+            .starts_with(&config_path.display().to_string())
+    );
     assert_eq!(bullet.contributors, ["bundled defaults", &bullet.source]);
     let inherited = resolved.explain("editor.indent_width").expect("inherited");
     assert_eq!(inherited.source, "bundled defaults");
@@ -550,10 +610,13 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
 fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
-        std::time::SystemTime::now(), Instant::now(),
+        std::time::SystemTime::now(),
+        Instant::now(),
     ));
     app.clock = clock.clone();
-    app.state.open_text(TextBuffer::from_text(""), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text(""), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.handle_configured_key(KeyEvent::character('i'));
     let mut loaded = crate::config::load_bundled_config().keymaps;
@@ -562,18 +625,36 @@ fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
         ("user.long-jk", "j k", Some("edit.insert_text")),
     ] {
         loaded.entries.push(crate::config::KeymapEntry {
-            id: id.into(), context: Some("editor".into()), mode: "insert".into(),
-            keys: Some(keys.into()), command: command.map(Into::into),
-            arguments: command.map(|_| [("text".into(), toml::Value::String("mapped".into()))].into_iter().collect()).unwrap_or_default(),
-            unmap: command.is_none(), disable: false, pass_through: false, desc: None,
+            id: id.into(),
+            context: Some("editor".into()),
+            mode: "insert".into(),
+            keys: Some(keys.into()),
+            command: command.map(Into::into),
+            arguments: command
+                .map(|_| {
+                    [("text".into(), toml::Value::String("mapped".into()))]
+                        .into_iter()
+                        .collect()
+                })
+                .unwrap_or_default(),
+            unmap: command.is_none(),
+            disable: false,
+            pass_through: false,
+            desc: None,
         });
     }
-    let (keymaps, diagnostic) = compile_keymaps(&app.commands, &loaded, &app.configuration.settings().input.keymaps);
+    let (keymaps, diagnostic) = compile_keymaps(
+        &app.commands,
+        &loaded,
+        &app.configuration.settings().input.keymaps,
+    );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     app.configuration.install_bindings(keymaps, false);
     let buffer = app.state.active_buffer_id().unwrap();
     app.handle_configured_key(KeyEvent::character('j'));
-    clock.advance(Duration::from_millis(app.configuration.settings().input.mapping_timeout_ms));
+    clock.advance(Duration::from_millis(
+        app.configuration.settings().input.mapping_timeout_ms,
+    ));
     app.flush_keymap_timeout();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
     app.handle_configured_key(KeyEvent::character('j'));
@@ -588,7 +669,8 @@ fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
 fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let (_app_dirs, mut app) = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
@@ -996,7 +1078,12 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
         desc: None,
     });
     app.apply_configuration_candidate(current, false).unwrap();
-    assert!(app.configuration.keymaps().inspect_id("user.test.retained-health").is_some());
+    assert!(
+        app.configuration
+            .keymaps()
+            .inspect_id("user.test.retained-health")
+            .is_some()
+    );
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     loaded.entries.push(crate::config::KeymapEntry {
@@ -1031,7 +1118,9 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
             .keymaps()
             .binding_for("editor.normal", "edit.delete_char")
     );
-    let retained = reloaded.inspect_id("user.test.retained-health").expect("user mapping survives rejection");
+    let retained = reloaded
+        .inspect_id("user.test.retained-health")
+        .expect("user mapping survives rejection");
     assert_eq!(retained.keys, "z z");
     assert_eq!(retained.command.as_deref(), Some("health.open"));
     assert!(
@@ -1248,12 +1337,15 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
             arguments: Vec::new(),
         });
         let invocation = fixture.take();
-        fixture.reply_confirmation_request(&invocation, crate::extensions::PluginConfirmationRequest {
-            token,
-            title: "Delete?".into(),
-            message: "target".into(),
-            default_answer: crate::extensions::PluginConfirmationAnswer::No,
-        });
+        fixture.reply_confirmation_request(
+            &invocation,
+            crate::extensions::PluginConfirmationRequest {
+                token,
+                title: "Delete?".into(),
+                message: "target".into(),
+                default_answer: crate::extensions::PluginConfirmationAnswer::No,
+            },
+        );
         app.process_plugin_events();
     };
     confirm(&mut app, 7);
@@ -1274,10 +1366,15 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     );
     app.process_plugin_events();
     let cancelled = fixture.take();
-    assert_eq!(cancelled.confirmation_results(), [crate::extensions::PluginConfirmationResult {
-        request: 7,
-        outcome: crate::extensions::PluginConfirmationOutcome::Answered(crate::extensions::PluginConfirmationAnswer::Cancelled),
-    }]);
+    assert_eq!(
+        cancelled.confirmation_results(),
+        [crate::extensions::PluginConfirmationResult {
+            request: 7,
+            outcome: crate::extensions::PluginConfirmationOutcome::Answered(
+                crate::extensions::PluginConfirmationAnswer::Cancelled
+            ),
+        }]
+    );
     fixture.reply(&cancelled, Vec::new());
     app.process_plugin_events();
     confirm(&mut app, 8);
@@ -1287,10 +1384,15 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
         "the remapped yes key answers at once"
     );
     let yes = fixture.take();
-    assert_eq!(yes.confirmation_results(), [crate::extensions::PluginConfirmationResult {
-        request: 8,
-        outcome: crate::extensions::PluginConfirmationOutcome::Answered(crate::extensions::PluginConfirmationAnswer::Yes),
-    }]);
+    assert_eq!(
+        yes.confirmation_results(),
+        [crate::extensions::PluginConfirmationResult {
+            request: 8,
+            outcome: crate::extensions::PluginConfirmationOutcome::Answered(
+                crate::extensions::PluginConfirmationAnswer::Yes
+            ),
+        }]
+    );
     app.submit_prompt();
     fixture.reply(&yes, Vec::new());
     app.process_plugin_events();
@@ -1357,7 +1459,9 @@ fn the_agent_keys_each_reach_their_command() {
         ("<leader> a o", "agent.options"),
     ] {
         assert_eq!(
-            documented_key_reaches(&keymaps, keys).map(|invocation| invocation.id.as_str().to_owned()).as_deref(),
+            documented_key_reaches(&keymaps, keys)
+                .map(|invocation| invocation.id.as_str().to_owned())
+                .as_deref(),
             Some(command),
             "{keys}"
         );
@@ -1397,7 +1501,9 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     ];
     for (keys, command) in cases {
         assert_eq!(
-            documented_key_reaches(&keymaps, keys).map(|invocation| invocation.id.as_str().to_owned()).as_deref(),
+            documented_key_reaches(&keymaps, keys)
+                .map(|invocation| invocation.id.as_str().to_owned())
+                .as_deref(),
             Some(command),
             "{keys} must reach {command} through the real input path"
         );
@@ -1410,7 +1516,11 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
         ("<leader> g l", "lazygit_log"),
     ] {
         let invocation = documented_key_reaches(&keymaps, keys).unwrap();
-        assert_eq!(invocation.arguments.get("profile"), Some(&CommandValue::String(profile.into())), "{keys}");
+        assert_eq!(
+            invocation.arguments.get("profile"),
+            Some(&CommandValue::String(profile.into())),
+            "{keys}"
+        );
     }
     // `Space d w` names `dap.watch.add`, which requires an expression the user must type. No
     // keymap entry can supply it and no prompting command exists, so the document records it
@@ -1493,12 +1603,18 @@ fn agents_own_subagents_are_off_over_acp_only() {
     let (_app_dirs, app) = app();
     let profiles = &app.configuration.settings().agents.profiles;
     assert_eq!(profiles["codex"].cli, ["codex"]);
-    let codex: serde_json::Value = serde_json::from_str(&profiles["codex"].acp_environment["CODEX_CONFIG"]).unwrap();
+    let codex: serde_json::Value =
+        serde_json::from_str(&profiles["codex"].acp_environment["CODEX_CONFIG"]).unwrap();
     assert_eq!(codex["features"]["multi_agent"], false);
     assert_eq!(profiles["opencode"].cli, ["opencode"]);
-    let opencode: serde_json::Value = serde_json::from_str(&profiles["opencode"].acp_environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
+    let opencode: serde_json::Value =
+        serde_json::from_str(&profiles["opencode"].acp_environment["OPENCODE_CONFIG_CONTENT"])
+            .unwrap();
     assert_eq!(opencode["tools"]["task"], false);
-    assert_eq!(profiles["claude"].meta.as_ref().unwrap()["claudeCode"]["options"]["disallowedTools"], serde_json::json!(["Task", "Agent", "Workflow"]));
+    assert_eq!(
+        profiles["claude"].meta.as_ref().unwrap()["claudeCode"]["options"]["disallowedTools"],
+        serde_json::json!(["Task", "Agent", "Workflow"])
+    );
     for profile in profiles.values() {
         assert!(!profile.environment.contains_key("CODEX_CONFIG"));
         assert!(!profile.environment.contains_key("OPENCODE_CONFIG_CONTENT"));
@@ -1539,7 +1655,12 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
             .env("DUST_CONFIG_HOME", root.path().join("config"))
             .env("PATH", "")
             .output().unwrap();
-        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
     let (_app_dirs, mut app) = app();
@@ -1573,7 +1694,9 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
         ),
         (
             "hi",
-            Some("claude-agent-acp is not installed; install it in the tool manager (<leader>cm, Agent)"),
+            Some(
+                "claude-agent-acp is not installed; install it in the tool manager (<leader>cm, Agent)"
+            ),
             true
         )
     );
@@ -1671,33 +1794,56 @@ fn the_settings_page_saves_and_reloads_user_configuration() {
     // process rather than changing those paths underneath other tests.
     if std::env::var_os("DUST_TEST_SETTINGS_SAVE").is_none() {
         let root = tempdir().unwrap();
-        fs::write(root.path().join("config.toml"), "# keep this comment\n[editor]\nwrap = false\n").unwrap();
+        fs::write(
+            root.path().join("config.toml"),
+            "# keep this comment\n[editor]\nwrap = false\n",
+        )
+        .unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "editor::session::dispatch::tests::configuration::the_settings_page_saves_and_reloads_user_configuration", "--nocapture"])
             .env("DUST_TEST_SETTINGS_SAVE", "1")
             .env("DUST_CONFIG_HOME", root.path())
             .env("DUST_STATE_HOME", root.path().join("state"))
             .output().unwrap();
-        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();
     let mut app = InteractiveApplication::new(
-        StartupTarget::Dashboard { root: root.path().into() },
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
         crate::config::load_user_config(),
         false,
         saved.path().into(),
         false,
         false,
         std::sync::Arc::new(crate::clock::SystemClock),
-    ).unwrap();
+    )
+    .unwrap();
     app.window_session.observe_size((80, 24));
     assert_eq!(app.configuration.settings().editor.tab_width, 4);
     app.process_effect(AppEffect::Settings(SettingsAction::Open));
     app.process_effect(AppEffect::Settings(SettingsAction::Search));
-    app.process_effect(AppEffect::Settings(SettingsAction::Insert("tab width".into())));
-    assert_eq!(app.ui.settings.as_ref().unwrap().selected_row().unwrap().key, "editor.tab_width");
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert(
+        "tab width".into(),
+    )));
+    assert_eq!(
+        app.ui
+            .settings
+            .as_ref()
+            .unwrap()
+            .selected_row()
+            .unwrap()
+            .key,
+        "editor.tab_width"
+    );
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
     app.process_effect(AppEffect::Settings(SettingsAction::Clear));
@@ -1762,7 +1908,9 @@ fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
 #[test]
 fn reload_preserves_zen_exit_and_plugin_command_titles() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("a"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("a"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     app.process_effect(AppEffect::Zen);
@@ -1776,10 +1924,22 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
         .unwrap();
     app.process_effect(AppEffect::Zen);
     assert!(app.ui.explorer.is_some());
-    let command = app.commands.specs().find(|spec| spec.id.as_str() == "plugin.demo.run").expect("plugin command survives reload");
+    let command = app
+        .commands
+        .specs()
+        .find(|spec| spec.id.as_str() == "plugin.demo.run")
+        .expect("plugin command survives reload");
     assert_eq!(command.title, "Run demo");
     app.open_builtin_picker(PickerKind::Commands);
-    let row = app.ui.picker.as_ref().unwrap().rows.iter().find(|row| row.detail == "plugin.demo.run").expect("plugin command in palette");
+    let row = app
+        .ui
+        .picker
+        .as_ref()
+        .unwrap()
+        .rows
+        .iter()
+        .find(|row| row.detail == "plugin.demo.run")
+        .expect("plugin command in palette");
     assert_eq!(row.label, "Plugins: Run demo");
 }
 
@@ -1788,49 +1948,103 @@ fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
     let (_app_dirs, mut app) = app();
     let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
     spec.source = crate::editor::CommandSource::Plugin("demo".into());
-    app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
+    app.commands
+        .register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty()))
+        .unwrap();
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
+    loaded
+        .config
+        .input
+        .command_aliases
+        .insert("Demo".into(), "plugin.demo.run".into());
     for label in [None, Some(""), Some("\u{1b}bad")] {
         if let Some(label) = label {
-            loaded.config.command_labels.insert("plugin.demo.run".into(), label.into());
+            loaded
+                .config
+                .command_labels
+                .insert("plugin.demo.run".into(), label.into());
         }
-        let error = app.apply_configuration_candidate(loaded.clone(), false).unwrap_err();
+        let error = app
+            .apply_configuration_candidate(loaded.clone(), false)
+            .unwrap_err();
         assert!(error.contains("label"), "{error}");
     }
-    loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
+    loaded
+        .config
+        .command_labels
+        .insert("plugin.demo.run".into(), "Run demo".into());
     app.apply_configuration_candidate(loaded, false).unwrap();
     app.open_prompt(crate::ui::PromptKind::Command, "Demo".into());
-    assert!(app.ui.prompt.as_ref().unwrap().completions.iter().any(|item| item.label == "Demo" && item.detail == "Run demo"));
+    assert!(
+        app.ui
+            .prompt
+            .as_ref()
+            .unwrap()
+            .completions
+            .iter()
+            .any(|item| item.label == "Demo" && item.detail == "Run demo")
+    );
 }
 
 #[test]
 fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
     let (_app_dirs, mut app) = app();
     let mut manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
-    manifest.commands.get_mut("drive").unwrap().arguments.insert("text".into(), crate::extensions::PluginArgumentDeclaration {
-        kind: crate::extensions::PluginArgumentKind::String,
-        required: true,
-    });
-    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+    manifest
+        .commands
+        .get_mut("drive")
+        .unwrap()
+        .arguments
+        .insert(
+            "text".into(),
+            crate::extensions::PluginArgumentDeclaration {
+                kind: crate::extensions::PluginArgumentKind::String,
+                required: true,
+            },
+        );
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
-    loaded.config.command_labels.insert("plugin.demo.drive".into(), "Drive demo".into());
-    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.drive".into());
+    loaded
+        .config
+        .command_labels
+        .insert("plugin.demo.drive".into(), "Drive demo".into());
+    loaded
+        .config
+        .input
+        .command_aliases
+        .insert("Demo".into(), "plugin.demo.drive".into());
     loaded.dashboard.action[0].command = "plugin.demo.drive".into();
-    loaded.dashboard.action[0].arguments = BTreeMap::from([("text".into(), toml::Value::String("hello".into()))]);
-    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
+    loaded.dashboard.action[0].arguments =
+        BTreeMap::from([("text".into(), toml::Value::String("hello".into()))]);
+    let (resolved, diagnostic) =
+        super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
     assert!(diagnostic.is_none());
     assert!(resolved.deferred_plugin_keymaps);
     let mut invalid_arguments = loaded.clone();
-    invalid_arguments.dashboard.action[0].arguments.insert("text".into(), toml::Value::Boolean(true));
-    let (invalid_arguments, _) = super::resolve_configuration(&app.commands, invalid_arguments, true).unwrap();
+    invalid_arguments.dashboard.action[0]
+        .arguments
+        .insert("text".into(), toml::Value::Boolean(true));
+    let (invalid_arguments, _) =
+        super::resolve_configuration(&app.commands, invalid_arguments, true).unwrap();
     let mut undeclared_alias = loaded.clone();
-    undeclared_alias.config.input.command_aliases.insert("Unknown".into(), "plugin.demo.missing".into());
-    undeclared_alias.config.command_labels.insert("plugin.demo.missing".into(), "Missing".into());
-    let (undeclared_alias, _) = super::resolve_configuration(&app.commands, undeclared_alias, true).unwrap();
+    undeclared_alias
+        .config
+        .input
+        .command_aliases
+        .insert("Unknown".into(), "plugin.demo.missing".into());
+    undeclared_alias
+        .config
+        .command_labels
+        .insert("plugin.demo.missing".into(), "Missing".into());
+    let (undeclared_alias, _) =
+        super::resolve_configuration(&app.commands, undeclared_alias, true).unwrap();
     app.configuration.install_fixture(resolved.clone());
-    assert!(app.recompile_plugin_contributions().is_err(), "unindexed declarations cannot be accepted");
+    assert!(
+        app.recompile_plugin_contributions().is_err(),
+        "unindexed declarations cannot be accepted"
+    );
     app.register_indexed_plugin_commands(&index).unwrap();
     app.extension.fixture_contribution(index).unwrap();
     app.recompile_plugin_contributions().unwrap();
@@ -1840,22 +2054,41 @@ fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
     }
     app.configuration.install_fixture(resolved);
     let mut invalid = loaded.clone();
-    invalid.dashboard.action[0].arguments.insert("text".into(), toml::Value::Boolean(true));
+    invalid.dashboard.action[0]
+        .arguments
+        .insert("text".into(), toml::Value::Boolean(true));
     assert!(app.apply_configuration_candidate(invalid, false).is_err());
     let mut missing = loaded.clone();
-    missing.config.input.command_aliases.insert("Unknown".into(), "plugin.demo.missing".into());
-    missing.config.command_labels.insert("plugin.demo.missing".into(), "Missing".into());
+    missing
+        .config
+        .input
+        .command_aliases
+        .insert("Unknown".into(), "plugin.demo.missing".into());
+    missing
+        .config
+        .command_labels
+        .insert("plugin.demo.missing".into(), "Missing".into());
     assert!(app.apply_configuration_candidate(missing, false).is_err());
     loaded.dashboard.action[0].arguments.clear();
-    assert!(app.apply_configuration_candidate(loaded, false).is_err(), "required arguments are checked after indexing");
+    assert!(
+        app.apply_configuration_candidate(loaded, false).is_err(),
+        "required arguments are checked after indexing"
+    );
 }
 
 #[test]
 fn disabled_plugin_command_references_are_not_deferred() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
-    loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
+    loaded
+        .config
+        .input
+        .command_aliases
+        .insert("Demo".into(), "plugin.demo.run".into());
+    loaded
+        .config
+        .command_labels
+        .insert("plugin.demo.run".into(), "Run demo".into());
     assert!(super::resolve_configuration(&app.commands, loaded, true).is_err());
 }
 
@@ -1863,16 +2096,24 @@ fn disabled_plugin_command_references_are_not_deferred() {
 fn direct_motion_binding_preserves_an_explicit_count_of_one() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
-    loaded.keymaps.entries.push(toml::from_str(r#"
+    loaded.keymaps.entries.push(
+        toml::from_str(
+            r#"
         id = "user.direct-end"
         context = "editor"
         mode = "normal"
         keys = "Z"
         command = "view.cursor.move"
         arguments = { motion = "document_end" }
-    "#).unwrap());
+    "#,
+        )
+        .unwrap(),
+    );
     app.apply_configuration_candidate(loaded, false).unwrap();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\nthird"), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("first\nsecond\nthird"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.handle_configured_key(KeyEvent::character('Z'));
     assert_eq!(app.state.views[view].cursor, ByteOffset(13));
@@ -1887,31 +2128,58 @@ fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
-    loaded.keymaps.entries.push(toml::from_str(r#"
+    loaded.keymaps.entries.push(
+        toml::from_str(
+            r#"
         id = "user.demo"
         context = "editor"
         mode = "normal"
         keys = "<leader> j x"
         command = "plugin.demo.run"
-    "#).unwrap());
-    let group: crate::config::KeyGroupEntry = toml::from_str(r#"
+    "#,
+        )
+        .unwrap(),
+    );
+    let group: crate::config::KeyGroupEntry = toml::from_str(
+        r#"
         id = "user.group"
         context = "editor"
         mode = "normal"
         prefix = "space j"
         label = "Demo"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     loaded.keymaps.groups.push(group.clone());
-    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
+    let (resolved, diagnostic) =
+        super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
     assert!(diagnostic.is_none());
     assert!(resolved.deferred_plugin_keymaps);
-    assert!(resolved.base_keymaps.groups.iter().all(|group| group.id != "user.group"));
-    assert!(resolved.raw_keymaps.groups.iter().any(|group| group.id == "user.group"));
+    assert!(
+        resolved
+            .base_keymaps
+            .groups
+            .iter()
+            .all(|group| group.id != "user.group")
+    );
+    assert!(
+        resolved
+            .raw_keymaps
+            .groups
+            .iter()
+            .any(|group| group.id == "user.group")
+    );
 
     let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
     spec.source = crate::editor::CommandSource::Plugin("demo".into());
-    app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
-    let (compiled, diagnostic) = compile_keymaps(&app.commands, &resolved.raw_keymaps, &resolved.settings.input.keymaps);
+    app.commands
+        .register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty()))
+        .unwrap();
+    let (compiled, diagnostic) = compile_keymaps(
+        &app.commands,
+        &resolved.raw_keymaps,
+        &resolved.settings.input.keymaps,
+    );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
     assert!(compiled.groups.iter().any(|group| group.id == "user.group"));
     assert!(compiled.inspect_id("user.demo").is_some());
@@ -1920,7 +2188,12 @@ fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
     unreachable.id = "user.unreachable".into();
     unreachable.prefix = Some("<leader> j z".into());
     loaded.keymaps.groups.push(unreachable);
-    assert!(super::resolve_configuration(&app.commands, loaded, true).err().expect("unreachable group").contains("user.unreachable"));
+    assert!(
+        super::resolve_configuration(&app.commands, loaded, true)
+            .err()
+            .expect("unreachable group")
+            .contains("user.unreachable")
+    );
 }
 
 #[test]
@@ -1967,30 +2240,44 @@ fn reload_preserves_plugin_window_rules() {
     assert_eq!(app.configuration.settings().windows, loaded.config.windows);
     app.process_effect(AppEffect::NewBuffer);
     app.reconcile_editor_windows();
-    let opened = app.apply_plugin_ui_request(&index, crate::extensions::PluginUiRequest {
-        token: 1,
-        kind: crate::extensions::PluginUiRequestKind::OpenWindow {
-            expected_graph_revision: app.window_session.graph().revision().unwrap(),
-            content_type: "plugin.demo.panel".into(),
-            title: "Demo".into(),
-            placement: crate::extensions::PluginRequestedPlacement::Floating { x: 1, y: 1, width: 20, height: 8 },
-            tree: Some(crate::extensions::PluginUiTree {
-                revision: 1,
-                root: 1,
-                nodes: vec![crate::extensions::PluginUiNode {
-                    id: 1,
-                    kind: crate::extensions::PluginUiNodeKind::Text,
-                    text: "Demo panel".into(),
-                    style: crate::extensions::PluginUiStyle::Default,
-                    action: None,
-                    children: Vec::new(),
-                }],
-            }),
+    let opened = app.apply_plugin_ui_request(
+        &index,
+        crate::extensions::PluginUiRequest {
+            token: 1,
+            kind: crate::extensions::PluginUiRequestKind::OpenWindow {
+                expected_graph_revision: app.window_session.graph().revision().unwrap(),
+                content_type: "plugin.demo.panel".into(),
+                title: "Demo".into(),
+                placement: crate::extensions::PluginRequestedPlacement::Floating {
+                    x: 1,
+                    y: 1,
+                    width: 20,
+                    height: 8,
+                },
+                tree: Some(crate::extensions::PluginUiTree {
+                    revision: 1,
+                    root: 1,
+                    nodes: vec![crate::extensions::PluginUiNode {
+                        id: 1,
+                        kind: crate::extensions::PluginUiNodeKind::Text,
+                        text: "Demo panel".into(),
+                        style: crate::extensions::PluginUiStyle::Default,
+                        action: None,
+                        children: Vec::new(),
+                    }],
+                }),
+            },
         },
-    });
+    );
     assert!(opened.error.is_none(), "{:?}", opened.error);
     let window = app.extension.window_snapshots()[0].window;
-    assert_eq!(app.window_session.graph().window(window).unwrap().placement, WindowPlacement::Docked { edge: DockEdge::Right, size: 20 });
+    assert_eq!(
+        app.window_session.graph().window(window).unwrap().placement,
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 20
+        }
+    );
 }
 
 #[test]

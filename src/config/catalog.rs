@@ -129,7 +129,7 @@ pub fn write_user_setting(
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             (String::new(), crate::files::WriteExpectation::Missing)
-        },
+        }
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     let edited = edited_source(&source, key, value)?;

@@ -19,10 +19,15 @@ impl InputSession {
         suppress_repeat: bool,
         text_changed: bool,
     ) {
-        if !matches!(invocation.source, InvocationSource::Macro | InvocationSource::Repeat)
-            && !(invocation.id.as_str().starts_with("command_line.")
-                && (self.prompt().is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::Command)
-                    || invocation.arguments.get("kind") == Some(&CommandValue::String("command".into()))))
+        if !matches!(
+            invocation.source,
+            InvocationSource::Macro | InvocationSource::Repeat
+        ) && !(invocation.id.as_str().starts_with("command_line.")
+            && (self
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::Command)
+                || invocation.arguments.get("kind")
+                    == Some(&CommandValue::String("command".into()))))
             && (!invocation.id.as_str().starts_with("macro.")
                 || invocation.id.as_str() == "macro.replay")
             && !invocation.id.as_str().starts_with("input.")
@@ -74,11 +79,15 @@ impl InputSession {
                 };
                 if self.pending_change_edited {
                     self.last_change = pending;
-                    self.last_change.push(CommandInvocation::new("mode.normal", invocation.source).expect("builtin"));
+                    self.last_change.push(
+                        CommandInvocation::new("mode.normal", invocation.source).expect("builtin"),
+                    );
                 }
-                let mut transition = CommandInvocation::new(mode, invocation.source).expect("builtin");
+                let mut transition =
+                    CommandInvocation::new(mode, invocation.source).expect("builtin");
                 if mode == "mode.insert" {
-                    transition = transition.with_argument("placement", CommandValue::String("before".into()));
+                    transition = transition
+                        .with_argument("placement", CommandValue::String("before".into()));
                 }
                 self.pending_change = Some(vec![transition]);
                 self.pending_change_edited = false;
@@ -109,7 +118,9 @@ impl InputSession {
             | "edit.put"
             | "edit.surround"
             | "edit.operator"
-            | "edit.repeat_visual" if text_changed => {
+            | "edit.repeat_visual"
+                if text_changed =>
+            {
                 self.last_change = vec![semantic];
             }
             _ => {}
@@ -137,7 +148,9 @@ impl InputSession {
             let opens_line = matches!(change[0].arguments.get("placement"),
                 Some(CommandValue::String(placement)) if matches!(placement.as_str(), "open_above" | "open_below"));
             let body = &change[usize::from(!opens_line)..change.len() - 1];
-            let steps = body.len().checked_mul(repeats)
+            let steps = body
+                .len()
+                .checked_mul(repeats)
                 .and_then(|steps| steps.checked_add(if opens_line { 1 } else { 2 }))
                 .filter(|steps| *steps <= limit)
                 .ok_or(ReplayError::RepeatLimit)?;
@@ -150,7 +163,9 @@ impl InputSession {
             for _ in 0..repeats {
                 plan.extend(body.iter().cloned().map(|invocation| {
                     let mut invocation = repeated(invocation);
-                    if invocation.id.as_str() == "mode.insert" { invocation.count = None; }
+                    if invocation.id.as_str() == "mode.insert" {
+                        invocation.count = None;
+                    }
                     invocation
                 }));
             }
@@ -265,7 +280,11 @@ impl InputSession {
                     text.line_to_byte(last_line).ok()?
                 };
                 let selected = text.slice(ByteRange::new(start, end).ok()?).ok()?;
-                ("character", selected.graphemes(true).count(), last_line - first_line + 1)
+                (
+                    "character",
+                    selected.graphemes(true).count(),
+                    last_line - first_line + 1,
+                )
             }
             crate::editor::SelectionKind::Line => {
                 let anchor = text.byte_to_line(selection.anchor).ok()?;
@@ -335,13 +354,24 @@ mod tests {
 
     #[test]
     fn cancelling_pending_grammar_keeps_macro_recording() {
-        use crate::editor::{EditorMode, input::{GrammarInput, InputAction}};
+        use crate::editor::{
+            EditorMode,
+            input::{GrammarInput, InputAction},
+        };
         let mut input = InputSession::new(100);
-        input.feed(EditorMode::Normal, GrammarInput::MacroRecordSelect("a".into())).unwrap();
+        input
+            .feed(
+                EditorMode::Normal,
+                GrammarInput::MacroRecordSelect("a".into()),
+            )
+            .unwrap();
         input.start_macro_recording('a');
         input.cancel_pending();
         assert!(input.recording_macro.is_some());
-        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+        let InputAction::Invoke(stop) = input
+            .feed(EditorMode::Normal, GrammarInput::MacroRecordToggle)
+            .unwrap()
+        else {
             panic!("stop recording")
         };
         assert_eq!(stop.id.as_str(), "macro.record.stop");
@@ -349,20 +379,34 @@ mod tests {
 
     #[test]
     fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
-        use crate::editor::{EditorMode, input::{GrammarInput, InputAction, PendingInputContext}};
+        use crate::editor::{
+            EditorMode,
+            input::{GrammarInput, InputAction, PendingInputContext},
+        };
         let mut input = InputSession::new(100);
         input.start_macro_recording('a');
         input.record_successful_invocation(&invocation("edit.delete_char"), None, false, true);
         input.cancel_pending();
-        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+        let InputAction::Invoke(stop) = input
+            .feed(EditorMode::Normal, GrammarInput::MacroRecordToggle)
+            .unwrap()
+        else {
             panic!("stop recording");
         };
         assert_eq!(stop.id.as_str(), "macro.record.stop");
         let (register, recorded) = input.finish_macro_recording().unwrap();
         assert_eq!(register, 'a');
         assert_eq!(recorded.len(), 1);
-        assert_eq!(input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap(), InputAction::Pending);
-        assert_eq!(input.pending_context(), Some(PendingInputContext::MacroRecord));
+        assert_eq!(
+            input
+                .feed(EditorMode::Normal, GrammarInput::MacroRecordToggle)
+                .unwrap(),
+            InputAction::Pending
+        );
+        assert_eq!(
+            input.pending_context(),
+            Some(PendingInputContext::MacroRecord)
+        );
     }
 
     #[test]
@@ -371,7 +415,12 @@ mod tests {
         assert_eq!(input.repeat_plan(10, None), Err(ReplayError::NoChange));
         input.start_macro_recording('a');
         for id in ["mode.insert", "edit.insert_text", "mode.normal"] {
-            input.record_successful_invocation(&invocation(id), None, false, id.starts_with("edit."));
+            input.record_successful_invocation(
+                &invocation(id),
+                None,
+                false,
+                id.starts_with("edit."),
+            );
         }
         input.record_successful_invocation(&invocation("macro.record_stop"), None, false, false);
         let (register, recorded) = input.finish_macro_recording().unwrap();
@@ -409,30 +458,44 @@ mod tests {
         ] {
             let mut input = InputSession::new(100);
             let mut state = EditorState::new(Default::default());
-            let (buffer, view) = state.open_text(TextBuffer::from_text("one\ntwo"), None).unwrap();
+            let (buffer, view) = state
+                .open_text(TextBuffer::from_text("one\ntwo"), None)
+                .unwrap();
             let selection = Selection {
-                anchor: ByteOffset(0), head: ByteOffset(2), kind: SelectionKind::Character,
+                anchor: ByteOffset(0),
+                head: ByteOffset(2),
+                kind: SelectionKind::Character,
             };
             state.views[view].mode = EditorMode::VisualChar;
             state.views[view].selection = Some(selection);
-            let invocation = CommandInvocation::new("edit.operator", InvocationSource::Test).unwrap()
+            let invocation = CommandInvocation::new("edit.operator", InvocationSource::Test)
+                .unwrap()
                 .with_argument("operator", CommandValue::String(operator.into()))
                 .with_argument("motion", CommandValue::String("visual".into()))
                 .with_argument("linewise", CommandValue::Bool(false))
                 .with_argument(name, CommandValue::String(value.into()));
-            let repeat = input.normalized_visual_repeat(
-                &invocation, &state.buffers[buffer].text, selection, DisplayWidthPolicy::default(),
-            ).unwrap();
+            let repeat = input
+                .normalized_visual_repeat(
+                    &invocation,
+                    &state.buffers[buffer].text,
+                    selection,
+                    DisplayWidthPolicy::default(),
+                )
+                .unwrap();
             assert_eq!(repeat.arguments.get(name), invocation.arguments.get(name));
             let mut registry = CommandRegistry::<()>::default();
             register_builtin_commands(&mut registry).unwrap();
             let outcome = registry.execute(&state, &invocation).unwrap();
-            state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+            state
+                .apply_transaction(outcome.transaction.as_ref().unwrap())
+                .unwrap();
             input.record_successful_invocation(&invocation, Some(&repeat), false, true);
             state.views[view].cursor = state.buffers[buffer].text.line_to_byte(1).unwrap();
             for step in input.repeat_plan(10, None).unwrap() {
                 let outcome = registry.execute(&state, &step).unwrap();
-                state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+                state
+                    .apply_transaction(outcome.transaction.as_ref().unwrap())
+                    .unwrap();
             }
             assert_eq!(state.buffers[buffer].text.to_string(), expected);
         }
@@ -487,7 +550,12 @@ mod tests {
             "edit.delete_char",
             "mode.normal",
         ] {
-            input.record_successful_invocation(&invocation(id), None, false, id.starts_with("edit."));
+            input.record_successful_invocation(
+                &invocation(id),
+                None,
+                false,
+                id.starts_with("edit."),
+            );
         }
         let plan = input.repeat_plan(10, None).unwrap();
         assert_eq!(

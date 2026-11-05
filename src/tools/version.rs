@@ -98,10 +98,7 @@ impl ToolVersionService {
         }
     }
 
-    pub fn probe(
-        &self,
-        request: &ToolVersionRequest,
-    ) -> Result<(), TrySendError<()>> {
+    pub fn probe(&self, request: &ToolVersionRequest) -> Result<(), TrySendError<()>> {
         self.sender
             .try_send(ToolVersionCommand::Probe(request.clone()))
             .map_err(|error| match error {
@@ -178,94 +175,101 @@ pub(super) fn probe_tool_version(
         .spawn()
         .map_err(|error| format!("cannot start version probe: {error}"))?;
     let result = (|| {
-    let stdout = child.stdout.take().ok_or("version probe stdout was unavailable")?;
-    let stderr = child.stderr.take().ok_or("version probe stderr was unavailable")?;
-    for pipe in [
-        &stdout as &dyn std::os::fd::AsFd,
-        &stderr as &dyn std::os::fd::AsFd,
-    ] {
-        let configured = fcntl(pipe, FcntlArg::F_GETFL)
-            .map(OFlag::from_bits_truncate)
-            .map_err(|error| format!("cannot inspect version probe pipe: {error}"))
-            .and_then(|flags| {
-                fcntl(pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))
-                    .map(|_| ())
-                    .map_err(|error| format!("cannot bound version probe pipe: {error}"))
-            });
-        configured?;
-    }
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("version probe stdout was unavailable")?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("version probe stderr was unavailable")?;
+        for pipe in [
+            &stdout as &dyn std::os::fd::AsFd,
+            &stderr as &dyn std::os::fd::AsFd,
+        ] {
+            let configured = fcntl(pipe, FcntlArg::F_GETFL)
+                .map(OFlag::from_bits_truncate)
+                .map_err(|error| format!("cannot inspect version probe pipe: {error}"))
+                .and_then(|flags| {
+                    fcntl(pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))
+                        .map(|_| ())
+                        .map_err(|error| format!("cannot bound version probe pipe: {error}"))
+                });
+            configured?;
+        }
 
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
-    let mut stdout_closed = false;
-    let mut stderr_closed = false;
-    let mut oversized = false;
-    let deadline = Instant::now() + request.timeout.min(Duration::from_secs(30));
-    let status = loop {
-        if !stdout_closed {
-            stdout_closed = drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized)?;
-        }
-        if !stderr_closed {
-            stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
-        }
-        if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
-            return Err("version probe cancelled".into());
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => return Err("version probe timed out".into()),
-            Err(error) => return Err(format!("version probe failed: {error}")),
-        }
-    };
-    let close_deadline = Instant::now() + Duration::from_millis(125);
-    while !(stdout_closed && stderr_closed) && Instant::now() < close_deadline {
-        if !stdout_closed {
-            stdout_closed = drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized)?;
-        }
-        if !stderr_closed {
-            stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
+        let mut stdout_closed = false;
+        let mut stderr_closed = false;
+        let mut oversized = false;
+        let deadline = Instant::now() + request.timeout.min(Duration::from_secs(30));
+        let status = loop {
+            if !stdout_closed {
+                stdout_closed = drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized)?;
+            }
+            if !stderr_closed {
+                stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
+            }
+            if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
+                return Err("version probe cancelled".into());
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+                Ok(None) => return Err("version probe timed out".into()),
+                Err(error) => return Err(format!("version probe failed: {error}")),
+            }
+        };
+        let close_deadline = Instant::now() + Duration::from_millis(125);
+        while !(stdout_closed && stderr_closed) && Instant::now() < close_deadline {
+            if !stdout_closed {
+                stdout_closed = drain_version_pipe(&stdout, &mut stdout_bytes, &mut oversized)?;
+            }
+            if !stderr_closed {
+                stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
+            }
+            if !(stdout_closed && stderr_closed) {
+                thread::sleep(Duration::from_millis(5));
+            }
         }
         if !(stdout_closed && stderr_closed) {
-            thread::sleep(Duration::from_millis(5));
+            return Err("version probe output remained open after process exit".into());
         }
-    }
-    if !(stdout_closed && stderr_closed) {
-        return Err("version probe output remained open after process exit".into());
-    }
-    let bytes = if stdout_bytes.is_empty() {
-        &stderr_bytes
-    } else {
-        &stdout_bytes
-    };
-    if !status.success() {
-        let diagnostic =
-            String::from_utf8_lossy(&bytes[..bytes.len().min(MAXIMUM_TOOL_VERSION_BYTES as usize)])
-                .split_whitespace()
-                .take(24)
-                .collect::<Vec<_>>()
-                .join(" ");
-        return Err(if diagnostic.is_empty() {
-            format!("version probe exited with {status}")
+        let bytes = if stdout_bytes.is_empty() {
+            &stderr_bytes
         } else {
-            format!(
-                "version probe exited with {status}: {diagnostic}{}",
-                if oversized { " (output truncated)" } else { "" }
+            &stdout_bytes
+        };
+        if !status.success() {
+            let diagnostic = String::from_utf8_lossy(
+                &bytes[..bytes.len().min(MAXIMUM_TOOL_VERSION_BYTES as usize)],
             )
-        });
-    }
-    if oversized {
-        return Err("version probe output exceeded its limit".into());
-    }
-    let version = String::from_utf8_lossy(bytes)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if version.is_empty() {
-        return Err("version probe produced no output".into());
-    }
-    let version = version.strip_prefix("Version: ").unwrap_or(&version);
-    Ok(version.chars().take(MAXIMUM_TOOL_VERSION_CHARS).collect())
+            .split_whitespace()
+            .take(24)
+            .collect::<Vec<_>>()
+            .join(" ");
+            return Err(if diagnostic.is_empty() {
+                format!("version probe exited with {status}")
+            } else {
+                format!(
+                    "version probe exited with {status}: {diagnostic}{}",
+                    if oversized { " (output truncated)" } else { "" }
+                )
+            });
+        }
+        if oversized {
+            return Err("version probe output exceeded its limit".into());
+        }
+        let version = String::from_utf8_lossy(bytes)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if version.is_empty() {
+            return Err("version probe produced no output".into());
+        }
+        let version = version.strip_prefix("Version: ").unwrap_or(&version);
+        Ok(version.chars().take(MAXIMUM_TOOL_VERSION_CHARS).collect())
     })();
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();

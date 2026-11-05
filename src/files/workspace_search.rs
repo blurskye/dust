@@ -15,7 +15,10 @@ use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
-use super::{error::VfsError, vfs::{read_file_with_ceiling, scoped_existing_path}};
+use super::{
+    error::VfsError,
+    vfs::{read_file_with_ceiling, scoped_existing_path},
+};
 
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_FILES: usize = 1_000_000;
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_RESULTS: usize = 100_000;
@@ -317,7 +320,10 @@ pub(super) fn run_workspace_search(
         match fs::canonicalize(root) {
             Ok(root) => roots.push(root),
             Err(error) => {
-                send_failure(format!("cannot resolve search root {}: {error}", root.display()));
+                send_failure(format!(
+                    "cannot resolve search root {}: {error}",
+                    root.display()
+                ));
                 return;
             }
         }
@@ -438,7 +444,9 @@ pub(super) fn run_workspace_search(
             summary.truncated = true;
             break;
         }
-        let remaining_bytes = policy.maximum_total_bytes.saturating_sub(summary.bytes_searched);
+        let remaining_bytes = policy
+            .maximum_total_bytes
+            .saturating_sub(summary.bytes_searched);
         let read_limit = policy.maximum_file_bytes.min(remaining_bytes);
         let bytes = match read_file_with_ceiling(&path, read_limit) {
             Ok(bytes) => bytes,
@@ -534,14 +542,16 @@ pub(super) fn run_workspace_search(
                 return;
             }
         }
-        if !matches.is_empty() && !send_search_event(
-            &sender,
-            &cancellation,
-            WorkspaceSearchEvent::Batch {
-                generation,
-                matches: std::mem::take(&mut matches),
-            },
-        ) {
+        if !matches.is_empty()
+            && !send_search_event(
+                &sender,
+                &cancellation,
+                WorkspaceSearchEvent::Batch {
+                    generation,
+                    matches: std::mem::take(&mut matches),
+                },
+            )
+        {
             return;
         }
         if match_count >= policy.maximum_results && summary.truncated {
@@ -603,6 +613,10 @@ mod tests {
         let (matches, summary) = collect_search(&service);
         assert_eq!(matches.len(), 3);
         assert!(summary.truncated);
-        assert!(matches.windows(2).all(|pair| pair[0].range.start < pair[1].range.start));
+        assert!(
+            matches
+                .windows(2)
+                .all(|pair| pair[0].range.start < pair[1].range.start)
+        );
     }
 }

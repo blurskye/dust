@@ -465,12 +465,15 @@ impl DebugSession {
                 let submission = repl
                     .then(|| self.pending_submissions.back().map(|p| p.0))
                     .flatten();
-                self.requests.insert(id, PendingRequest {
-                    epoch: self.stop_epoch,
-                    submission,
-                    frame: self.console_frame,
-                    automatic: false,
-                });
+                self.requests.insert(
+                    id,
+                    PendingRequest {
+                        epoch: self.stop_epoch,
+                        submission,
+                        frame: self.console_frame,
+                        automatic: false,
+                    },
+                );
                 Ok(id)
             }
             Err(error) => {
@@ -483,7 +486,9 @@ impl DebugSession {
     }
     fn prepare_answer(&mut self, id: u64, request: &DapControl, failed: bool) {
         let pending = self.requests.remove(&id);
-        let epoch = pending.as_ref().map_or(self.stop_epoch, |pending| pending.epoch);
+        let epoch = pending
+            .as_ref()
+            .map_or(self.stop_epoch, |pending| pending.epoch);
         let submission = pending.and_then(|pending| pending.submission);
         match request {
             DapControl::Evaluate {
@@ -576,28 +581,47 @@ impl DebugSession {
         let (context, event) = loop {
             let (context, event) = self.service.try_owned_event()?;
             let answer = match &event {
-                DapEvent::Response { request_id, request: Some(request), .. }
-                | DapEvent::RequestFailed { request_id, request: Some(request), .. } => {
-                    Some((*request_id, request))
+                DapEvent::Response {
+                    request_id,
+                    request: Some(request),
+                    ..
                 }
+                | DapEvent::RequestFailed {
+                    request_id,
+                    request: Some(request),
+                    ..
+                } => Some((*request_id, request)),
                 _ => None,
             };
             if let Some((id, request)) = answer {
-                let frame_dependent = matches!(request, DapControl::Scopes { .. } | DapControl::Variables { .. })
-                    || matches!(request, DapControl::Evaluate { context, .. } if context == "watch");
+                let frame_dependent = matches!(
+                    request,
+                    DapControl::Scopes { .. } | DapControl::Variables { .. }
+                ) || matches!(request, DapControl::Evaluate { context, .. } if context == "watch");
                 // The transport owns the initial automatic threads request (ID zero);
                 // subsequent follow requests are recorded when we send them.
-                let retired_threads = id == 0 && matches!(request, DapControl::Threads)
+                let retired_threads = id == 0
+                    && matches!(request, DapControl::Threads)
                     && self.follow_request != Some(0);
-                if retired_threads || self.requests.get(&id).is_some_and(|pending| {
-                    (pending.automatic && self.follow_request != Some(id))
-                        || (frame_dependent && (pending.epoch != self.stop_epoch
-                            || pending.frame != self.console_frame))
-                }) {
+                if retired_threads
+                    || self.requests.get(&id).is_some_and(|pending| {
+                        (pending.automatic && self.follow_request != Some(id))
+                            || (frame_dependent
+                                && (pending.epoch != self.stop_epoch
+                                    || pending.frame != self.console_frame))
+                    })
+                {
                     self.requests.remove(&id);
-                    if let DapControl::Evaluate { expression, context, .. } = request {
+                    if let DapControl::Evaluate {
+                        expression,
+                        context,
+                        ..
+                    } = request
+                    {
                         let watch = (context == "watch").then(|| expression.clone());
-                        if let Some(position) = self.evaluations.iter().position(|old| old == &watch) {
+                        if let Some(position) =
+                            self.evaluations.iter().position(|old| old == &watch)
+                        {
                             self.evaluations.remove(position);
                         }
                     }
@@ -630,7 +654,8 @@ impl DebugSession {
                 response,
                 ..
             } if !self.breakpoint_refresh.contains(path)
-                && self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id => {
+                && self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id =>
+            {
                 self.apply_breakpoints(path, breakpoints, response);
             }
             DapEvent::RequestFailed {
@@ -638,7 +663,8 @@ impl DebugSession {
                 request_id,
                 ..
             } if !self.breakpoint_refresh.contains(path)
-                && self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id => {
+                && self.latest_breakpoints.get(path).copied().unwrap_or(0) == *request_id =>
+            {
                 self.apply_breakpoints(
                     path,
                     breakpoints,
@@ -798,7 +824,9 @@ impl DebugSession {
                 self.console.len() - 1
             };
             let entry = &mut self.console[line];
-            entry.text.push_str(chunk.strip_suffix('\n').unwrap_or(chunk));
+            entry
+                .text
+                .push_str(chunk.strip_suffix('\n').unwrap_or(chunk));
             if chunk.ends_with('\n') {
                 if entry.text.ends_with('\r') {
                     entry.text.pop();
@@ -895,8 +923,15 @@ impl DebugSession {
         self.watch_refresh.retain(|watch| watch != expression);
         self.watch_values.remove(expression);
     }
-    pub(in crate::editor::session) fn breakpoint_at(&self, path: &std::path::Path, line: u64) -> Option<&DapSourceBreakpoint> {
-        self.breakpoints.get(path)?.iter().find(|row| row.line == line)
+    pub(in crate::editor::session) fn breakpoint_at(
+        &self,
+        path: &std::path::Path,
+        line: u64,
+    ) -> Option<&DapSourceBreakpoint> {
+        self.breakpoints
+            .get(path)?
+            .iter()
+            .find(|row| row.line == line)
     }
 
     pub(in crate::editor::session) fn breakpoint(
@@ -949,7 +984,10 @@ impl DebugSession {
         for sent in rows.iter() {
             self.breakpoint_states.insert(
                 (row.path.clone(), sent.line),
-                if self.disabled_breakpoints.contains(&(row.path.clone(), sent.line)) {
+                if self
+                    .disabled_breakpoints
+                    .contains(&(row.path.clone(), sent.line))
+                {
                     crate::debugger::DapBreakpointState::Disabled
                 } else {
                     crate::debugger::DapBreakpointState::Requested { accepted: true }
@@ -1003,10 +1041,14 @@ impl DebugSession {
         path: &std::path::Path,
         line: u64,
     ) -> Option<bool> {
-        self.breakpoints.get(path)?
+        self.breakpoints
+            .get(path)?
             .iter()
             .any(|row| row.line == line)
-            .then(|| self.disabled_breakpoints.contains(&(path.to_path_buf(), line)))
+            .then(|| {
+                self.disabled_breakpoints
+                    .contains(&(path.to_path_buf(), line))
+            })
     }
     /// Disable or enable a breakpoint. Session state, and independent of the adapter.
     pub(in crate::editor::session) fn set_breakpoint_disabled(
@@ -1228,8 +1270,10 @@ impl DebugSession {
         let old_paths: Vec<_> = self.breakpoints.keys().cloned().collect();
         let changed_breakpoints = self.changed_breakpoints.take().unwrap_or_default();
         let changed_watches = self.changed_watches.take().unwrap_or_default();
-        self.breakpoint_states.retain(|key, _| changed_breakpoints.contains(key));
-        self.disabled_breakpoints.retain(|key| changed_breakpoints.contains(key));
+        self.breakpoint_states
+            .retain(|key, _| changed_breakpoints.contains(key));
+        self.disabled_breakpoints
+            .retain(|key| changed_breakpoints.contains(key));
         self.latest_breakpoints.clear();
         self.breakpoints.retain(|path, rows| {
             rows.retain(|r| changed_breakpoints.contains(&(path.clone(), r.line)));
@@ -1259,8 +1303,10 @@ impl DebugSession {
             }
         }
         self.watches.retain(|watch| changed_watches.contains(watch));
-        self.watch_values.retain(|watch, _| changed_watches.contains(watch));
-        self.watch_refresh.retain(|watch| changed_watches.contains(watch));
+        self.watch_values
+            .retain(|watch, _| changed_watches.contains(watch));
+        self.watch_refresh
+            .retain(|watch| changed_watches.contains(watch));
         for watch in watches.into_iter().take(MAXIMUM_WATCHES) {
             if !changed_watches.contains(&watch.expression) {
                 self.add_watch(watch.expression);
@@ -1406,61 +1452,58 @@ impl DebugSession {
                     ),
                 )
             }
-            DapResponse::Variables(rows) => (
-                "variables",
-                {
-                    // The transport retires responses from earlier stops.
-                    let page = self.pending_variable_pages.pop_front();
-                    let current = rows;
-                    let open: Vec<i64> = self.expansion.clone();
-                    let shown = current.len();
-                    let mut values: Vec<(String, String, Choice)> = current
-                        .into_iter()
-                        .map(|r| {
-                            // A reference already OPEN on this path is shown AS a reference: the
-                            // detail says so, and expanding it is refused.
-                            let detail = if r.variables_reference != 0
-                                && open.contains(&r.variables_reference)
-                            {
-                                format!(
-                                    "{} (already open, not expanded)",
-                                    r.type_name.unwrap_or_default()
-                                )
-                            } else {
+            DapResponse::Variables(rows) => ("variables", {
+                // The transport retires responses from earlier stops.
+                let page = self.pending_variable_pages.pop_front();
+                let current = rows;
+                let open: Vec<i64> = self.expansion.clone();
+                let shown = current.len();
+                let mut values: Vec<(String, String, Choice)> = current
+                    .into_iter()
+                    .map(|r| {
+                        // A reference already OPEN on this path is shown AS a reference: the
+                        // detail says so, and expanding it is refused.
+                        let detail = if r.variables_reference != 0
+                            && open.contains(&r.variables_reference)
+                        {
+                            format!(
+                                "{} (already open, not expanded)",
                                 r.type_name.unwrap_or_default()
-                            };
-                            let label = format!("{} = {}", r.name, r.value);
-                            let choice = if r.variables_reference == 0 {
-                                Choice::Value(label.clone())
-                            } else {
-                                Choice::Control(DapControl::Variables {
-                                    reference: r.variables_reference,
-                                    start: 0,
-                                    count: VARIABLE_PAGE,
-                                })
-                            };
-                            (label, detail, choice)
-                        })
-                        .collect();
-                    // A FULL page means more may follow, so the continuation carries the EXACT
-                    // count shown and asks for the next page by OFFSET rather than guessing.
-                    if let Some((reference, start, count)) = page
-                        && count > 0
-                        && shown as u64 >= count
-                    {
-                        values.push((
-                            format!("load more ({shown} shown)"),
-                            format!("continue from {}", start + shown as u64),
+                            )
+                        } else {
+                            r.type_name.unwrap_or_default()
+                        };
+                        let label = format!("{} = {}", r.name, r.value);
+                        let choice = if r.variables_reference == 0 {
+                            Choice::Value(label.clone())
+                        } else {
                             Choice::Control(DapControl::Variables {
-                                reference,
-                                start: start + shown as u64,
+                                reference: r.variables_reference,
+                                start: 0,
                                 count: VARIABLE_PAGE,
-                            }),
-                        ));
-                    }
-                    self.install(values)
-                },
-            ),
+                            })
+                        };
+                        (label, detail, choice)
+                    })
+                    .collect();
+                // A FULL page means more may follow, so the continuation carries the EXACT
+                // count shown and asks for the next page by OFFSET rather than guessing.
+                if let Some((reference, start, count)) = page
+                    && count > 0
+                    && shown as u64 >= count
+                {
+                    values.push((
+                        format!("load more ({shown} shown)"),
+                        format!("continue from {}", start + shown as u64),
+                        Choice::Control(DapControl::Variables {
+                            reference,
+                            start: start + shown as u64,
+                            count: VARIABLE_PAGE,
+                        }),
+                    ));
+                }
+                self.install(values)
+            }),
             value => return DebugResponse::Result(value),
         };
         DebugResponse::Picker { kind, rows }
@@ -1588,7 +1631,10 @@ impl DebugSession {
     fn follow_control(&mut self, control: DapControl) {
         match self.control_request(control) {
             Ok(Some(id)) => {
-                self.requests.get_mut(&id).expect("issued follow request").automatic = true;
+                self.requests
+                    .get_mut(&id)
+                    .expect("issued follow request")
+                    .automatic = true;
                 self.follow_request = Some(id);
             }
             Ok(None) => {
@@ -1755,7 +1801,8 @@ impl DebugSession {
             return Err(DapError::Full);
         }
         let context = self.service.context().ok_or(DapError::NotRunning)?;
-        self.service.control_owned(&context, DapControl::Source { reference })?;
+        self.service
+            .control_owned(&context, DapControl::Source { reference })?;
         self.source = Some(Source { context, target });
         Ok(())
     }

@@ -264,13 +264,24 @@ fn private_cells_use_the_renderers_ambiguous_width_policy() {
     let mut snapshot = PluginPrivateSnapshot {
         revision: 1,
         dimensions_revision: 1,
-        styles: vec![PluginPrivateStyle { id: 1, style: PluginUiStyle::Default }],
+        styles: vec![PluginPrivateStyle {
+            id: 1,
+            style: PluginUiStyle::Default,
+        }],
         cells: vec![
             crate::extensions::PluginPrivateCell {
-                x: 0, y: 0, grapheme: "·".into(), continuation: false, style: 1,
+                x: 0,
+                y: 0,
+                grapheme: "·".into(),
+                continuation: false,
+                style: 1,
             },
             crate::extensions::PluginPrivateCell {
-                x: 1, y: 0, grapheme: "A".into(), continuation: false, style: 1,
+                x: 1,
+                y: 0,
+                grapheme: "A".into(),
+                continuation: false,
+                style: 1,
             },
         ],
         cursor: None,
@@ -278,12 +289,18 @@ fn private_cells_use_the_renderers_ambiguous_width_policy() {
     };
     assert!(validate_private_snapshot(declaration, &private, &snapshot, None, false).is_ok());
     assert_eq!(
-        validate_private_snapshot(declaration, &private, &snapshot, None, true).unwrap_err().code,
+        validate_private_snapshot(declaration, &private, &snapshot, None, true)
+            .unwrap_err()
+            .code,
         PluginUiErrorCode::SplitWideGrapheme,
     );
     snapshot.cells[1].x = 2;
     snapshot.cells.push(crate::extensions::PluginPrivateCell {
-        x: 1, y: 0, grapheme: String::new(), continuation: true, style: 1,
+        x: 1,
+        y: 0,
+        grapheme: String::new(),
+        continuation: true,
+        style: 1,
     });
     assert!(validate_private_snapshot(declaration, &private, &snapshot, None, true).is_ok());
     assert!(validate_private_snapshot(declaration, &private, &snapshot, None, false).is_err());
@@ -292,13 +309,26 @@ fn private_cells_use_the_renderers_ambiguous_width_policy() {
         revision: 2,
         expected_surface_revision: 1,
         dimensions_revision: 1,
-        dirty: vec![PluginPrivateRect { x: 0, y: 0, width: 2, height: 1 }],
+        dirty: vec![PluginPrivateRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        }],
         cells: vec![
             crate::extensions::PluginPrivateCell {
-                x: 0, y: 0, grapheme: "·".into(), continuation: false, style: 1,
+                x: 0,
+                y: 0,
+                grapheme: "·".into(),
+                continuation: false,
+                style: 1,
             },
             crate::extensions::PluginPrivateCell {
-                x: 1, y: 0, grapheme: "A".into(), continuation: false, style: 1,
+                x: 1,
+                y: 0,
+                grapheme: "A".into(),
+                continuation: false,
+                style: 1,
             },
         ],
         styles: Vec::new(),
@@ -307,8 +337,12 @@ fn private_cells_use_the_renderers_ambiguous_width_policy() {
         replace_hit_regions: false,
         hit_regions: Vec::new(),
     };
-    assert_eq!(apply_private_patch(declaration, &private, &patch, true).unwrap_err().code,
-        PluginUiErrorCode::SplitWideGrapheme);
+    assert_eq!(
+        apply_private_patch(declaration, &private, &patch, true)
+            .unwrap_err()
+            .code,
+        PluginUiErrorCode::SplitWideGrapheme
+    );
     assert!(apply_private_patch(declaration, &private, &patch, false).is_ok());
 }
 
@@ -590,9 +624,11 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
 fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
     use crate::extensions::target03::{TargetAdmission, api::dust::plugin::host as wire};
 
-    let mut admission = TargetAdmission::parse(include_str!(
-        "../../../../../tests/fixtures/target03-clone-guest/manifest.toml"
-    ), 9).unwrap();
+    let mut admission = TargetAdmission::parse(
+        include_str!("../../../../../tests/fixtures/target03-clone-guest/manifest.toml"),
+        9,
+    )
+    .unwrap();
     admission.index = private_index("demo", 9);
     admission.index.content_types[0].maximum_instances = 2;
     let mut catalogue = crate::extensions::PluginContributionCatalog::default();
@@ -603,55 +639,106 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
     let mut handles = Vec::new();
     for token in 1..=2 {
         let revision = graph.revision().unwrap();
-        let opened = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
-            token,
-            kind: PluginUiRequestKind::OpenWindow {
-                expected_graph_revision: revision,
-                content_type: "plugin.demo.panel".into(),
-                title: "Cells".into(),
-                placement: PluginRequestedPlacement::Floating {
-                    x: 2, y: 1, width: 12, height: 4,
+        let opened = process_fixture(
+            &mut host,
+            &mut graph,
+            &admission.index,
+            PluginUiRequest {
+                token,
+                kind: PluginUiRequestKind::OpenWindow {
+                    expected_graph_revision: revision,
+                    content_type: "plugin.demo.panel".into(),
+                    title: "Cells".into(),
+                    placement: PluginRequestedPlacement::Floating {
+                        x: 2,
+                        y: 1,
+                        width: 12,
+                        height: 4,
+                    },
+                    tree: None,
                 },
-                tree: None,
             },
-        });
+        );
         assert!(opened.error.is_none(), "{:?}", opened.error);
         handles.push(opened.handle.unwrap());
     }
-    let projection = |graph: &WindowGraph| graph.compositor_snapshot(tab).unwrap().project(
-        WindowRect { x: 0, y: 0, width: 80, height: 24 }, 1, 1,
+    let projection = |graph: &WindowGraph| {
+        graph.compositor_snapshot(tab).unwrap().project(
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            1,
+            1,
+        )
+    };
+    assert_eq!(
+        host.target03_dimensions(&projection(&graph), &catalogue, &admission, 1)
+            .unwrap()
+            .len(),
+        2
     );
-    assert_eq!(host.target03_dimensions(&projection(&graph), &catalogue, &admission, 1).unwrap().len(), 2);
     for handle in &handles {
-        let revision = host.instances[handle].private.as_ref().unwrap().dimensions_revision;
-        let event = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
-            token: 3,
-            kind: PluginUiRequestKind::ReplacePrivate {
-                handle: *handle,
-                snapshot: PluginPrivateSnapshot {
-                    revision: 1,
-                    dimensions_revision: revision,
-                    styles: Vec::new(), cells: Vec::new(), cursor: None, hit_regions: Vec::new(),
+        let revision = host.instances[handle]
+            .private
+            .as_ref()
+            .unwrap()
+            .dimensions_revision;
+        let event = process_fixture(
+            &mut host,
+            &mut graph,
+            &admission.index,
+            PluginUiRequest {
+                token: 3,
+                kind: PluginUiRequestKind::ReplacePrivate {
+                    handle: *handle,
+                    snapshot: PluginPrivateSnapshot {
+                        revision: 1,
+                        dimensions_revision: revision,
+                        styles: Vec::new(),
+                        cells: Vec::new(),
+                        cursor: None,
+                        hit_regions: Vec::new(),
+                    },
                 },
             },
-        });
+        );
         assert!(event.error.is_none(), "{:?}", event.error);
     }
     assert_eq!(host.private_snapshots(&graph).len(), 2);
     for (handle, placement) in [
         (handles[0], PluginRequestedPlacement::Hidden),
-        (handles[1], PluginRequestedPlacement::Floating { x: 2, y: 1, width: 16, height: 6 }),
+        (
+            handles[1],
+            PluginRequestedPlacement::Floating {
+                x: 2,
+                y: 1,
+                width: 16,
+                height: 6,
+            },
+        ),
     ] {
         let revision = graph.revision().unwrap();
-        let event = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
-            token: 4,
-            kind: PluginUiRequestKind::PlaceWindow {
-                handle, expected_graph_revision: revision, placement,
+        let event = process_fixture(
+            &mut host,
+            &mut graph,
+            &admission.index,
+            PluginUiRequest {
+                token: 4,
+                kind: PluginUiRequestKind::PlaceWindow {
+                    handle,
+                    expected_graph_revision: revision,
+                    placement,
+                },
             },
-        });
+        );
         assert!(event.error.is_none(), "{:?}", event.error);
     }
-    let events = host.target03_dimensions(&projection(&graph), &catalogue, &admission, 10).unwrap();
+    let events = host
+        .target03_dimensions(&projection(&graph), &catalogue, &admission, 10)
+        .unwrap();
     assert_eq!(events.len(), 1);
     let wire::EventValue::Dimensions(dimensions) = &events[0].value else {
         panic!("expected dimensions event");
@@ -665,7 +752,11 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
         assert!(private.snapshot.is_none());
     }
     assert!(host.private_snapshots(&graph).is_empty());
-    assert!(host.target03_dimensions(&projection(&graph), &catalogue, &admission, 11).unwrap().is_empty());
+    assert!(
+        host.target03_dimensions(&projection(&graph), &catalogue, &admission, 11)
+            .unwrap()
+            .is_empty()
+    );
 
     // Even the latest dimensions revision cannot authorize writes while hidden.
     let hidden = &host.instances[&handles[0]];
@@ -676,11 +767,15 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
         &PluginPrivateSnapshot {
             revision: 1,
             dimensions_revision: hidden.private.as_ref().unwrap().dimensions_revision,
-            styles: Vec::new(), cells: Vec::new(), cursor: None, hit_regions: Vec::new(),
+            styles: Vec::new(),
+            cells: Vec::new(),
+            cursor: None,
+            hit_regions: Vec::new(),
         },
         None,
         false,
-    ).unwrap_err();
+    )
+    .unwrap_err();
     assert_eq!(error.code, PluginUiErrorCode::StaleDimensions);
 }
 
@@ -1189,7 +1284,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         Err(crate::extensions::PluginError::Execution(_))
     ));
     let state = trapped_outcome.runtime.store.data();
-    assert!(state.ui_requests.is_empty(), "trapped UI effects are discarded");
+    assert!(
+        state.ui_requests.is_empty(),
+        "trapped UI effects are discarded"
+    );
     assert!(state.proposals.is_empty());
     assert!(state.messages.is_empty());
     assert!(state.confirmation_requests.is_empty());
@@ -1242,7 +1340,10 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         Err(crate::extensions::PluginError::Execution(_))
     ));
     let state = deadline_outcome.runtime.store.data();
-    assert!(state.ui_requests.is_empty(), "interrupted UI effects are discarded");
+    assert!(
+        state.ui_requests.is_empty(),
+        "interrupted UI effects are discarded"
+    );
     assert!(state.proposals.is_empty());
     assert!(state.messages.is_empty());
     assert!(state.confirmation_requests.is_empty());
@@ -4330,7 +4431,8 @@ fn retained_keyboard_focus_scrolls_with_the_projected_height() {
     assert_eq!(snapshot.rows[focused_row].node, 2);
     assert!(focused_row >= snapshot.scroll && focused_row < snapshot.scroll + height);
     assert_eq!(
-        host.interact_focused(&graph, &catalog, PluginUiInteraction::Activate).unwrap(),
+        host.interact_focused(&graph, &catalog, PluginUiInteraction::Activate)
+            .unwrap(),
         Some("plugin.demo.open".into())
     );
 }

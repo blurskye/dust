@@ -349,9 +349,8 @@ impl WindowSession {
                 }
             }
             WindowCommand::Direction(direction, explicit, count) => {
-                let scaled_step = |step: u16| {
-                    u64::from(step).saturating_mul(count).min(i16::MAX as u64) as i16
-                };
+                let scaled_step =
+                    |step: u16| u64::from(step).saturating_mul(count).min(i16::MAX as u64) as i16;
                 let native = if explicit.is_some() {
                     explicit
                 } else if self.terminal_focused() {
@@ -402,9 +401,16 @@ impl WindowSession {
                             };
                             // With no split on that axis the border is a docked terminal's, such
                             // as an agent on the right, so that terminal resizes instead.
-                            let split = self.core.editor.resized_tiled_split(
-                                source, pane, axis, if grow { step } else { -step },
-                            ).map_err(|error| CommandError::Rejected(error.to_string()))?;
+                            let split = self
+                                .core
+                                .editor
+                                .resized_tiled_split(
+                                    source,
+                                    pane,
+                                    axis,
+                                    if grow { step } else { -step },
+                                )
+                                .map_err(|error| CommandError::Rejected(error.to_string()))?;
                             if let Some(split) = split {
                                 plan.operations.push(split);
                             } else if let Some(dock) = self.docked_terminal_on(axis) {
@@ -576,11 +582,13 @@ impl WindowSession {
                                 _ => {
                                     let focused = self.core.graph.focused();
                                     let focus = if first_placement == WindowPlacement::Fullscreen
-                                        || (focused == Some(first) && second_placement == WindowPlacement::Hidden)
+                                        || (focused == Some(first)
+                                            && second_placement == WindowPlacement::Hidden)
                                     {
                                         Some((second_pane, second))
                                     } else if second_placement == WindowPlacement::Fullscreen
-                                        || (focused == Some(second) && first_placement == WindowPlacement::Hidden)
+                                        || (focused == Some(second)
+                                            && first_placement == WindowPlacement::Hidden)
                                     {
                                         Some((first_pane, first))
                                     } else {

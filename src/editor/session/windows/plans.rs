@@ -722,9 +722,13 @@ impl WindowSession {
             LayoutAction::Zoom => EditorOperation::ToggleZoom,
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab { offset, wrap: true },
             LayoutAction::FocusTabNumber(number) => EditorOperation::FocusTabId {
-                tab: source.tabs().keys().nth(number.saturating_sub(1)).ok_or_else(|| {
-                    LayoutPlanError::Rejected("tab number is out of range".into())
-                })?,
+                tab: source
+                    .tabs()
+                    .keys()
+                    .nth(number.saturating_sub(1))
+                    .ok_or_else(|| {
+                        LayoutPlanError::Rejected("tab number is out of range".into())
+                    })?,
             },
         });
         plan.hide_dashboard = true;
@@ -771,10 +775,14 @@ impl WindowSession {
                     }
                 }
                 commands::NativeAction::ShowEditor(pane, window) => {
-                    candidate.core.editor
+                    candidate
+                        .core
+                        .editor
                         .show_editor(&mut candidate.core.graph, pane, window)
                         .map_err(|error| error.to_string())?;
-                    candidate.core.editor
+                    candidate
+                        .core
+                        .editor
                         .rebuild_tiled_layout(&source, &mut candidate.core.graph)
                         .map_err(|error| error.to_string())?;
                 }
@@ -901,7 +909,9 @@ mod tests {
         let (b, _) = state.open_text(TextBuffer::from_text("b"), None).unwrap();
         state.buffers[b].dirty = true;
         state.new_tab().unwrap();
-        state.open_text(TextBuffer::from_text("other"), None).unwrap();
+        state
+            .open_text(TextBuffer::from_text("other"), None)
+            .unwrap();
         state.focus_tab(-1, true).unwrap();
         let mut windows = WindowSession::default();
         windows

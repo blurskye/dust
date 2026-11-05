@@ -243,18 +243,27 @@ mod tests {
 
     #[test]
     fn log_fields_are_limited_by_utf8_bytes() {
-        let mut logs = StructuredLogs::new(LogPolicy {
-            maximum_records: 1,
-            maximum_field_bytes: 5,
-            maximum_file_bytes: 1024,
-            rotations: 1,
-            sensitive_keys: vec!["secret".into()],
-        }, None, 1);
-        logs.record(LogLevel::Info, "test", "bytes", BTreeMap::from([
-            ("emoji".into(), "\n😀😀".into()),
-            ("mixed".into(), "a😀b".into()),
-            ("secret".into(), "password".into()),
-        ]));
+        let mut logs = StructuredLogs::new(
+            LogPolicy {
+                maximum_records: 1,
+                maximum_field_bytes: 5,
+                maximum_file_bytes: 1024,
+                rotations: 1,
+                sensitive_keys: vec!["secret".into()],
+            },
+            None,
+            1,
+        );
+        logs.record(
+            LogLevel::Info,
+            "test",
+            "bytes",
+            BTreeMap::from([
+                ("emoji".into(), "\n😀😀".into()),
+                ("mixed".into(), "a😀b".into()),
+                ("secret".into(), "password".into()),
+            ]),
+        );
         let fields = &logs.snapshot()[0].fields;
         assert_eq!(fields["emoji"], "😀");
         assert_eq!(fields["mixed"], "a😀");
@@ -266,12 +275,18 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("dust.jsonl");
         let record = LogRecord {
-            timestamp_ms: 0, level: LogLevel::Info, subsystem: "test".into(),
-            event: "rotation".into(), fields: BTreeMap::new(),
+            timestamp_ms: 0,
+            level: LogLevel::Info,
+            subsystem: "test".into(),
+            event: "rotation".into(),
+            fields: BTreeMap::new(),
         };
         let policy = LogPolicy {
-            maximum_records: 1, maximum_field_bytes: 1, maximum_file_bytes: 1,
-            rotations: 1, sensitive_keys: Vec::new(),
+            maximum_records: 1,
+            maximum_field_bytes: 1,
+            maximum_file_bytes: 1,
+            rotations: 1,
+            sensitive_keys: Vec::new(),
         };
         fs::write(&path, "full").unwrap();
         fs::create_dir(path.with_extension("jsonl.1")).unwrap();

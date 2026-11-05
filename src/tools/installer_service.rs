@@ -72,14 +72,25 @@ pub(super) enum InstallerRequest {
     Shutdown,
 }
 
-fn lock_tool_store(root: &Path, cancellations: &Receiver<()>) -> Result<nix::fcntl::Flock<File>, String> {
+fn lock_tool_store(
+    root: &Path,
+    cancellations: &Receiver<()>,
+) -> Result<nix::fcntl::Flock<File>, String> {
     ensure_private_directory(root)?;
     let mut file = OpenOptions::new()
-        .read(true).write(true).create(true).truncate(false)
-        .mode(0o600).custom_flags(nix::libc::O_NOFOLLOW)
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
         .open(root.join(".installer.lock"))
         .map_err(|error| format!("cannot open tool store lock: {error}"))?;
-    if !file.metadata().map_err(|error| error.to_string())?.is_file() {
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
         return Err("tool store lock must be a regular file".into());
     }
     loop {
@@ -204,37 +215,37 @@ impl ToolInstaller {
                         // All instances share runtimes and destinations under this store.
                         let _lock = lock_tool_store(&root, &cancellations)?;
                         match operation {
-                        ToolOperation::InstallManaged => {
-                            install_tool(&definition, &root, &cancellations, &mut report, None)
-                        }
-                        ToolOperation::InstallRustup => install_path_rustup_component(
-                            &definition,
-                            executable
-                                .as_deref()
-                                .expect("rustup install request has executable"),
-                            proxy.as_deref().expect("rustup install request has proxy"),
-                            cwd.as_deref().expect("rustup install request has cwd"),
-                            component
-                                .as_deref()
-                                .expect("rustup install request has component"),
-                            &cancellations,
-                            &mut report,
-                        ),
-                        ToolOperation::UninstallManaged => {
-                            uninstall_managed_tool(&definition, &root).map(|()| None)
-                        }
-                        ToolOperation::InstallNix => install_nix_lsp_profile(
-                            &definition,
-                            &root,
-                            executable
-                                .as_deref()
-                                .expect("Nix install request has executable"),
-                            &cancellations,
-                            &mut report,
-                        ),
-                        ToolOperation::UninstallNix => {
-                            uninstall_nix_lsp_tool(&definition, &root).map(|()| None)
-                        }
+                            ToolOperation::InstallManaged => {
+                                install_tool(&definition, &root, &cancellations, &mut report, None)
+                            }
+                            ToolOperation::InstallRustup => install_path_rustup_component(
+                                &definition,
+                                executable
+                                    .as_deref()
+                                    .expect("rustup install request has executable"),
+                                proxy.as_deref().expect("rustup install request has proxy"),
+                                cwd.as_deref().expect("rustup install request has cwd"),
+                                component
+                                    .as_deref()
+                                    .expect("rustup install request has component"),
+                                &cancellations,
+                                &mut report,
+                            ),
+                            ToolOperation::UninstallManaged => {
+                                uninstall_managed_tool(&definition, &root).map(|()| None)
+                            }
+                            ToolOperation::InstallNix => install_nix_lsp_profile(
+                                &definition,
+                                &root,
+                                executable
+                                    .as_deref()
+                                    .expect("Nix install request has executable"),
+                                &cancellations,
+                                &mut report,
+                            ),
+                            ToolOperation::UninstallNix => {
+                                uninstall_nix_lsp_tool(&definition, &root).map(|()| None)
+                            }
                         }
                     })();
                     if results
@@ -358,8 +369,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let (cancel, cancellations) = mpsc::channel();
         let held = lock_tool_store(directory.path(), &cancellations).unwrap();
-        let definition = crate::tools::bundled_tool_catalog().into_iter()
-            .find(|tool| tool.id == "rust-analyzer").unwrap();
+        let definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .unwrap();
         let destination = directory.path().join(&definition.id);
         std::fs::create_dir(&destination).unwrap();
         let installer = ToolInstaller::start_at(directory.path().to_path_buf());
@@ -385,7 +398,10 @@ mod tests {
                 assert!(result.result.is_ok(), "{result:?}");
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "uninstall did not finish");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "uninstall did not finish"
+            );
             thread::yield_now();
         }
         assert!(!destination.exists());
@@ -396,8 +412,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join(".installer.lock"), b"").unwrap();
         let installer = ToolInstaller::start_at(directory.path().to_path_buf());
-        let mut definition = crate::tools::bundled_tool_catalog().into_iter()
-            .find(|tool| tool.id == "rust-analyzer").unwrap();
+        let mut definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .unwrap();
         definition.id = "../invalid".into();
         installer.uninstall(definition).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -406,11 +424,15 @@ mod tests {
                 assert!(result.result.is_err());
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "worker did not finish");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not finish"
+            );
             thread::yield_now();
         }
         let file = File::open(directory.path().join(".installer.lock")).unwrap();
-        let _lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).unwrap();
+        let _lock =
+            nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).unwrap();
     }
 
     #[test]

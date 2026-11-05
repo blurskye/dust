@@ -303,7 +303,11 @@ pub(super) fn resize_parent_on_axis(
     if *axis != requested_axis {
         return false;
     }
-    let signed = if in_first { i32::from(delta) } else { -i32::from(delta) };
+    let signed = if in_first {
+        i32::from(delta)
+    } else {
+        -i32::from(delta)
+    };
     let adjusted = i32::from(*ratio) + signed;
     *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
     true

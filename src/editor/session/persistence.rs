@@ -103,10 +103,12 @@ impl PersistenceSession {
                 Ok(Ok(())) => {
                     self.undo_failures.remove(path);
                     return false;
-                },
+                }
                 Ok(Err(error)) => error,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => "undo history worker stopped".into(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    "undo history worker stopped".into()
+                }
             };
             let message = format!("could not save undo history: {error}");
             self.undo_failures.insert(path.clone(), message.clone());
@@ -119,7 +121,11 @@ impl PersistenceSession {
         if self.undo_pending() {
             return Err("undo history writes did not finish before the exit deadline".into());
         }
-        self.undo_failures.values().next().cloned().map_or(Ok(()), Err)
+        self.undo_failures
+            .values()
+            .next()
+            .cloned()
+            .map_or(Ok(()), Err)
     }
     pub(in crate::editor::session) fn register_navigation_read(
         &mut self,
@@ -278,7 +284,8 @@ mod tests {
     #[test]
     fn successful_undo_retry_clears_only_that_files_failure() {
         let root = tempfile::tempdir().unwrap();
-        let mut owner = PersistenceSession::new(PersistenceService::start(1), root.path().join("state.json"));
+        let mut owner =
+            PersistenceSession::new(PersistenceService::start(1), root.path().join("state.json"));
         for path in ["a", "b"] {
             let (sender, receiver) = std::sync::mpsc::channel();
             sender.send(Err("write failed".into())).unwrap();
@@ -431,10 +438,12 @@ mod tests {
         owner.record_location(location.clone(), false, 10);
         assert_eq!(owner.walk_jumps(None, true, 10).unwrap().byte, 2);
         let mut editor = crate::editor::EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(
-            crate::editor::text::TextBuffer::from_text("abc"),
-            Some(path),
-        ).unwrap();
+        let (buffer, _) = editor
+            .open_text(
+                crate::editor::text::TextBuffer::from_text("abc"),
+                Some(path),
+            )
+            .unwrap();
         owner.set_mark("a".into(), location, 10, &editor);
         let text = &mut editor.buffers[buffer].text;
         text.apply_edits(&crate::editor::text::TextEditSet::new(

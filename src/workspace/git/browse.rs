@@ -80,7 +80,9 @@ fn web_base(remote: &str) -> Option<reqwest::Url> {
         let (authority, path) = remote.split_once(':')?;
         ("ssh", authority, path)
     };
-    let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
     if authority.is_empty() || path.is_empty() {
         return None;
     }
@@ -136,7 +138,10 @@ mod tests {
 
         // Exercise arbitrary Unix filename bytes without requiring filesystem support.
         let name = std::ffi::OsStr::from_bytes(b"notes\xFF.rs");
-        assert_eq!(super::encode_component(name.as_encoded_bytes()), "notes%FF.rs");
+        assert_eq!(
+            super::encode_component(name.as_encoded_bytes()),
+            "notes%FF.rs"
+        );
     }
 
     #[test]
@@ -163,7 +168,8 @@ mod tests {
     fn browse_urls_distinguish_branches_from_detached_commits() {
         let (dir, repo) = repository_with_file(std::path::Path::new("file.rs"));
         let oid = repo.head().unwrap().target().unwrap();
-        repo.branch("feature", &repo.find_commit(oid).unwrap(), false).unwrap();
+        repo.branch("feature", &repo.find_commit(oid).unwrap(), false)
+            .unwrap();
         for remote in [
             "https://codeberg.org/owner/repo.git",
             "http://gitea.example:3000/owner/repo.git",
@@ -201,13 +207,34 @@ mod tests {
             );
         }
         for (remote, expected) in [
-            ("http://forge.example:3000/owner/repo.git", "http://forge.example:3000/owner/repo"),
-            ("https://forge.example:8443/owner/repo.git", "https://forge.example:8443/owner/repo"),
-            ("http://user:password@forge.example:3000/owner/repo.git", "http://forge.example:3000/owner/repo"),
-            ("ssh://git@forge.example:2222/owner/repo.git", "https://forge.example/owner/repo"),
-            ("git://forge.example:9418/owner/repo.git", "https://forge.example/owner/repo"),
-            ("http://[::1]:3000/owner/repo.git", "http://[::1]:3000/owner/repo"),
-            ("ssh://git@[::1]:2222/owner/repo.git", "https://[::1]/owner/repo"),
+            (
+                "http://forge.example:3000/owner/repo.git",
+                "http://forge.example:3000/owner/repo",
+            ),
+            (
+                "https://forge.example:8443/owner/repo.git",
+                "https://forge.example:8443/owner/repo",
+            ),
+            (
+                "http://user:password@forge.example:3000/owner/repo.git",
+                "http://forge.example:3000/owner/repo",
+            ),
+            (
+                "ssh://git@forge.example:2222/owner/repo.git",
+                "https://forge.example/owner/repo",
+            ),
+            (
+                "git://forge.example:9418/owner/repo.git",
+                "https://forge.example/owner/repo",
+            ),
+            (
+                "http://[::1]:3000/owner/repo.git",
+                "http://[::1]:3000/owner/repo",
+            ),
+            (
+                "ssh://git@[::1]:2222/owner/repo.git",
+                "https://[::1]/owner/repo",
+            ),
         ] {
             assert_eq!(web_base(remote).unwrap().as_str(), expected, "{remote}");
         }

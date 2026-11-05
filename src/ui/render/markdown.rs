@@ -349,7 +349,11 @@ impl<'a> MarkdownMarks<'a> {
                 frame.push_str(&" ".repeat(*width));
                 frame.push(' ');
                 frame.push_str(pipe);
-                let border = if column + 1 < table.widths.len() { 1 } else { 2 };
+                let border = if column + 1 < table.widths.len() {
+                    1
+                } else {
+                    2
+                };
                 frame.push_str(&" ".repeat(table.borders[border] - pipe_width));
                 if border == 1 {
                     frame.push(' ');
@@ -429,11 +433,14 @@ impl<'a> MarkdownMarks<'a> {
         let line = self.part(10);
         let indicator = self.glyphs.table_alignment.as_str();
         let mut border = self.part(left).to_owned();
-        border.push_str(&" ".repeat(table.borders[0] - text_width(self.part(left), self.ambiguous)));
+        border
+            .push_str(&" ".repeat(table.borders[0] - text_width(self.part(left), self.ambiguous)));
         for (column, width) in table.widths.iter().enumerate() {
             if column > 0 {
                 border.push_str(self.part(cross));
-                border.push_str(&" ".repeat(table.borders[1] - text_width(self.part(cross), self.ambiguous)));
+                border.push_str(
+                    &" ".repeat(table.borders[1] - text_width(self.part(cross), self.ambiguous)),
+                );
             }
             let alignment = if aligned {
                 table.alignments[column]
@@ -453,14 +460,20 @@ impl<'a> MarkdownMarks<'a> {
             if start && aligned {
                 border.push_str(indicator);
             }
-            let fill = room - if aligned { indicator_width * indicators } else { 0 };
+            let fill = room
+                - if aligned {
+                    indicator_width * indicators
+                } else {
+                    0
+                };
             border.push_str(&table_fill(line, fill, self.ambiguous));
             if end && aligned {
                 border.push_str(indicator);
             }
         }
         border.push_str(self.part(right));
-        border.push_str(&" ".repeat(table.borders[2] - text_width(self.part(right), self.ambiguous)));
+        border
+            .push_str(&" ".repeat(table.borders[2] - text_width(self.part(right), self.ambiguous)));
         border
     }
 
@@ -716,14 +729,15 @@ impl Table {
             }
         }
         let borders = [[0, 3, 6, 9], [1, 4, 7, 9], [2, 5, 8, 9]].map(|parts| {
-            parts.into_iter()
+            parts
+                .into_iter()
                 .map(|index| text_width(table_part(glyphs, index), ambiguous))
                 .max()
                 .unwrap_or(0)
         });
         // Each column draws its text between a border and a space on either side.
-        let overhead = columns * 2 + borders[0] + borders[2]
-            + columns.saturating_sub(1) * borders[1];
+        let overhead =
+            columns * 2 + borders[0] + borders[2] + columns.saturating_sub(1) * borders[1];
         if overhead + columns > fit {
             return None;
         }
@@ -751,7 +765,11 @@ fn table_fill(glyph: &str, cells: usize, ambiguous: AmbiguousWidth) -> String {
     if width == 0 {
         return " ".repeat(cells);
     }
-    format!("{}{}", glyph.repeat(cells / width), " ".repeat(cells % width))
+    format!(
+        "{}{}",
+        glyph.repeat(cells / width),
+        " ".repeat(cells % width)
+    )
 }
 
 /// Narrows columns to fit `room` cells together, the widest first, so narrow columns keep
@@ -793,10 +811,12 @@ fn cell_graphemes(
         ..marks.partition_point(|mark| mark.range.start < cell.end)]
         .iter()
         .copied()
-        .filter(|mark| matches!(
-            mark.mark,
-            MarkdownMark::Hide | MarkdownMark::Link { .. } | MarkdownMark::Image
-        ))
+        .filter(|mark| {
+            matches!(
+                mark.mark,
+                MarkdownMark::Hide | MarkdownMark::Link { .. } | MarkdownMark::Image
+            )
+        })
         .peekable();
     source
         .grapheme_indices(true)

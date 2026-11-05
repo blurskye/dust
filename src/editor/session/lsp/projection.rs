@@ -255,7 +255,9 @@ impl LspSession {
                 state.definition.supports_language(&document.language_id)
                     && state.documents.contains_key(&buffer)
                     && document.path.starts_with(&state.root_path)
-                    && state.capabilities.as_ref().is_some_and(|c| c.formatting && c.supports_document("textDocument/formatting", document))
+                    && state.capabilities.as_ref().is_some_and(|c| {
+                        c.formatting && c.supports_document("textDocument/formatting", document)
+                    })
             })
             .map(|(key, _)| key.clone())
             .min()
@@ -298,15 +300,21 @@ impl LspSession {
         }
         let others: Vec<String> = match feature {
             LspFeature::Completion => self
-                .attached_servers(owner.buffer, &owner.language, |c| LspFeature::Completion.capability_for_document(c, &document))
+                .attached_servers(owner.buffer, &owner.language, |c| {
+                    LspFeature::Completion.capability_for_document(c, &document)
+                })
                 .filter(|key| key != server)
                 .collect(),
             LspFeature::Hover => self
-                .attached_servers(owner.buffer, &owner.language, |c| LspFeature::Hover.capability_for_document(c, &document))
+                .attached_servers(owner.buffer, &owner.language, |c| {
+                    LspFeature::Hover.capability_for_document(c, &document)
+                })
                 .filter(|key| key != server)
                 .collect(),
             LspFeature::CodeAction { .. } => self
-                .attached_servers(owner.buffer, &owner.language, |c| feature.capability_for_document(c, &document))
+                .attached_servers(owner.buffer, &owner.language, |c| {
+                    feature.capability_for_document(c, &document)
+                })
                 .filter(|key| key != server)
                 .collect(),
             _ => Vec::new(),
@@ -326,7 +334,9 @@ impl LspSession {
         // Like VS Code, every attached server answers, e.g. Tailwind classes beside TypeScript.
         for other in others {
             if !self.synced(&other, owner.buffer, &owner.text)
-                && self.sync_owned(&other, document.clone(), (owner.buffer, owner.text.clone())).is_err()
+                && self
+                    .sync_owned(&other, document.clone(), (owner.buffer, owner.text.clone()))
+                    .is_err()
             {
                 continue;
             }
@@ -347,14 +357,23 @@ impl LspSession {
         self.projection
             .requests
             .retain(|_, (_, _, method)| method != feature.method());
-        self.projection.request_cursors.retain(|generation, _| {
-            self.projection.requests.contains_key(generation)
-        });
-        if matches!(feature,
-            LspFeature::Hover | LspFeature::SignatureHelp | LspFeature::Completion
-            | LspFeature::Definition | LspFeature::Declaration | LspFeature::References
-            | LspFeature::Implementation | LspFeature::TypeDefinition | LspFeature::Rename { .. }
-            | LspFeature::CodeAction { .. } | LspFeature::DocumentHighlights | LspFeature::SelectionRanges
+        self.projection
+            .request_cursors
+            .retain(|generation, _| self.projection.requests.contains_key(generation));
+        if matches!(
+            feature,
+            LspFeature::Hover
+                | LspFeature::SignatureHelp
+                | LspFeature::Completion
+                | LspFeature::Definition
+                | LspFeature::Declaration
+                | LspFeature::References
+                | LspFeature::Implementation
+                | LspFeature::TypeDefinition
+                | LspFeature::Rename { .. }
+                | LspFeature::CodeAction { .. }
+                | LspFeature::DocumentHighlights
+                | LspFeature::SelectionRanges
         ) {
             self.projection.request_cursors.insert(generation, offset);
         }
@@ -425,19 +444,21 @@ impl LspSession {
         buffer: BufferId,
         document: &LspDocument,
     ) -> Vec<String> {
-        self.attached_servers(buffer, &document.language_id, |c| LspFeature::DocumentColors.capability_for_document(c, document))
-            .filter(|server| {
-                self.service
-                    .request(
-                        server,
-                        LspFeature::DocumentColors,
-                        document.clone(),
-                        ByteOffset(0),
-                        COLOR_GENERATION,
-                    )
-                    .is_ok()
-            })
-            .collect()
+        self.attached_servers(buffer, &document.language_id, |c| {
+            LspFeature::DocumentColors.capability_for_document(c, document)
+        })
+        .filter(|server| {
+            self.service
+                .request(
+                    server,
+                    LspFeature::DocumentColors,
+                    document.clone(),
+                    ByteOffset(0),
+                    COLOR_GENERATION,
+                )
+                .is_ok()
+        })
+        .collect()
     }
     pub(in crate::editor::session) fn is_breadcrumb_request(&self, generation: u64) -> bool {
         generation == BREADCRUMB_GENERATION
@@ -470,7 +491,9 @@ impl LspSession {
                 self.sessions
                     .get(server)
                     .and_then(|state| state.capabilities.as_ref())
-                    .is_some_and(|capabilities| LspFeature::DocumentSymbols.capability_for_document(capabilities, document))
+                    .is_some_and(|capabilities| {
+                        LspFeature::DocumentSymbols.capability_for_document(capabilities, document)
+                    })
             })
     }
     pub(in crate::editor::session) fn accept_breadcrumbs(
@@ -580,7 +603,10 @@ impl LspSession {
                 end: crate::language::lsp::LspPosition { line, character },
             },
         };
-        match self.service.request(&owner.server, feature, document, ByteOffset(0), generation) {
+        match self
+            .service
+            .request(&owner.server, feature, document, ByteOffset(0), generation)
+        {
             Ok(()) => self.projection.inlay_request = Some((generation, owner)),
             Err(LspError::Busy(_)) => {
                 self.projection.inlay_due = Some(Instant::now() + INLAY_DEBOUNCE);
@@ -597,7 +623,12 @@ impl LspSession {
         version: u64,
         cursor: ByteOffset,
     ) -> bool {
-        if self.projection.request_cursors.get(&generation).is_some_and(|asked| *asked != cursor) {
+        if self
+            .projection
+            .request_cursors
+            .get(&generation)
+            .is_some_and(|asked| *asked != cursor)
+        {
             self.projection.requests.remove(&generation);
             self.projection.request_cursors.remove(&generation);
             self.retire_request(server, generation);
@@ -665,13 +696,24 @@ impl LspSession {
     }
     /// Whether another server still owes an answer to this request.
     pub(in crate::editor::session) fn request_pending(&self, generation: u64) -> bool {
-        self.projection.requests.get(&generation).is_some_and(|(_, servers, _)| !servers.is_empty())
-            || (self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation)
+        self.projection
+            .requests
+            .get(&generation)
+            .is_some_and(|(_, servers, _)| !servers.is_empty())
+            || (self
+                .projection
+                .request
+                .as_ref()
+                .is_some_and(|(current, _)| *current == generation)
                 && !self.projection.request_servers.is_empty())
     }
     pub(in crate::editor::session) fn retire_request(&mut self, server: &str, generation: u64) {
         self.forget_request(server, generation);
-        if self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation)
+        if self
+            .projection
+            .request
+            .as_ref()
+            .is_some_and(|(current, _)| *current == generation)
             && self.projection.request_servers.is_empty()
         {
             self.projection.request = None;
@@ -684,7 +726,12 @@ impl LspSession {
                 self.projection.requests.remove(&generation);
             }
         }
-        if self.projection.request.as_ref().is_some_and(|(current, _)| *current == generation) {
+        if self
+            .projection
+            .request
+            .as_ref()
+            .is_some_and(|(current, _)| *current == generation)
+        {
             self.projection.request_servers.retain(|s| s != server);
         }
     }
@@ -919,13 +966,20 @@ impl LspSession {
     ) {
         let selected = self.projection.completion_selected;
         let identity = |index: usize| {
-            self.projection.completion_servers.get(index).cloned()
+            self.projection
+                .completion_servers
+                .get(index)
+                .cloned()
                 .zip(self.projection.completion_items.get(index).cloned())
         };
         let kept = (selected > 0 || self.projection.resolve.is_some())
             .then(|| identity(selected))
             .flatten();
-        let resolving = self.projection.resolve.as_ref().and_then(|(_, _, index, _)| identity(*index));
+        let resolving = self
+            .projection
+            .resolve
+            .as_ref()
+            .and_then(|(_, _, index, _)| identity(*index));
         let mut order = scores
             .iter()
             .enumerate()
@@ -945,7 +999,10 @@ impl LspSession {
             .map(|(index, _)| self.projection.completion_all[index].clone())
             .unzip();
         let position = |identity: &(String, LspCompletionItem)| {
-            servers.iter().zip(&items).position(|(server, item)| server == &identity.0 && item == &identity.1)
+            servers
+                .iter()
+                .zip(&items)
+                .position(|(server, item)| server == &identity.0 && item == &identity.1)
         };
         if let Some(resolve) = &mut self.projection.resolve {
             if let Some(index) = resolving.as_ref().and_then(&position) {
@@ -993,8 +1050,16 @@ impl LspSession {
             method != "textDocument/completion" && method != "completionItem/resolve"
         });
         if pending_completion
-            || self.projection.completion_owner.as_ref().is_some_and(|(generation, _)| *generation == self.projection.generation)
-            || self.projection.resolve.as_ref().is_some_and(|(generation, _, _, _)| *generation == self.projection.generation)
+            || self
+                .projection
+                .completion_owner
+                .as_ref()
+                .is_some_and(|(generation, _)| *generation == self.projection.generation)
+            || self
+                .projection
+                .resolve
+                .as_ref()
+                .is_some_and(|(generation, _, _, _)| *generation == self.projection.generation)
         {
             for server in &self.projection.request_servers {
                 let _ = self.service.cancel(server, self.projection.generation);
@@ -1171,7 +1236,9 @@ impl LspSession {
         self.projection.selection_ranges = ranges;
     }
     pub(in crate::editor::session) fn selection_ranges_current(&self, cursor: ByteOffset) -> bool {
-        self.projection.selection_cursor.is_none_or(|origin| origin == cursor)
+        self.projection
+            .selection_cursor
+            .is_none_or(|origin| origin == cursor)
     }
     pub(in crate::editor::session) fn expand_requested_selection(&mut self) {
         if let Some((_, _, expand)) = &mut self.projection.selection_request {
@@ -1183,12 +1250,22 @@ impl LspSession {
         generation: u64,
         ranges: Vec<ByteRange>,
     ) -> Option<ByteOffset> {
-        let request = self.projection.selection_request.take()
+        let request = self
+            .projection
+            .selection_request
+            .take()
             .filter(|(pending, _, _)| *pending == generation);
         self.projection.selection_cursor = request.map(|(_, cursor, _)| cursor);
         self.install_selection_ranges(ranges);
-        request.filter(|(_, cursor, expand)| *expand
-            && self.projection.selection_ranges.iter().any(|range| range.contains(*cursor)))
+        request
+            .filter(|(_, cursor, expand)| {
+                *expand
+                    && self
+                        .projection
+                        .selection_ranges
+                        .iter()
+                        .any(|range| range.contains(*cursor))
+            })
             .map(|(_, cursor, _)| cursor)
     }
     pub(in crate::editor::session) fn record_pull(&mut self, server: &str, uri: &str, id: String) {
@@ -1262,8 +1339,17 @@ impl LspSession {
             self.projection.request = None;
         }
         let retained_index = |index: usize| {
-            (self.projection.completion_servers.get(index).is_some_and(|key| key != server))
-                .then(|| self.projection.completion_servers[..index].iter().filter(|key| *key != server).count())
+            (self
+                .projection
+                .completion_servers
+                .get(index)
+                .is_some_and(|key| key != server))
+            .then(|| {
+                self.projection.completion_servers[..index]
+                    .iter()
+                    .filter(|key| *key != server)
+                    .count()
+            })
         };
         if let Some((_, _, index, _)) = &mut self.projection.resolve {
             if let Some(retained) = retained_index(*index) {
@@ -1272,17 +1358,25 @@ impl LspSession {
                 self.projection.resolve = None;
             }
         }
-        self.projection.completion_selected = retained_index(self.projection.completion_selected).unwrap_or(0);
+        self.projection.completion_selected =
+            retained_index(self.projection.completion_selected).unwrap_or(0);
         let mut index = 0;
         self.projection.completion_items.retain(|_| {
             let keep = self.projection.completion_servers[index] != server;
             index += 1;
             keep
         });
-        self.projection.completion_servers.retain(|key| key != server);
-        self.projection.completion_all.retain(|(key, _)| key != server);
+        self.projection
+            .completion_servers
+            .retain(|key| key != server);
+        self.projection
+            .completion_all
+            .retain(|(key, _)| key != server);
         self.projection.completion_narrowed = None;
-        self.projection.completion_scroll = self.projection.completion_scroll.min(self.projection.completion_selected);
+        self.projection.completion_scroll = self
+            .projection
+            .completion_scroll
+            .min(self.projection.completion_selected);
     }
     pub(in crate::editor::session) fn retire_projection_document(
         &mut self,
@@ -1307,7 +1401,10 @@ impl LspSession {
         self.projection.log_start
     }
     pub(in crate::editor::session) fn server_loading(&self, server: &str) -> bool {
-        self.projection.loading.get(server).is_some_and(|tokens| !tokens.is_empty())
+        self.projection
+            .loading
+            .get(server)
+            .is_some_and(|tokens| !tokens.is_empty())
     }
     pub(in crate::editor::session) fn server_label(&self, key: &str) -> String {
         self.sessions
@@ -1341,7 +1438,11 @@ impl LspSession {
                 }
             }
         } else {
-            self.projection.loading.entry(server_key.clone()).or_default().insert(token.clone());
+            self.projection
+                .loading
+                .entry(server_key.clone())
+                .or_default()
+                .insert(token.clone());
         }
         if !policy.enabled {
             self.projection.progress.clear();
@@ -1542,8 +1643,9 @@ mod tests {
     #[test]
     fn cancelled_completion_rejects_a_late_secondary_response() {
         let mut editor = EditorState::new("/root".into());
-        let (buffer, view) =
-            editor.open_text(TextBuffer::from_text("a"), Some("/root/a.rs".into())).unwrap();
+        let (buffer, view) = editor
+            .open_text(TextBuffer::from_text("a"), Some("/root/a.rs".into()))
+            .unwrap();
         let source = LspProjectionOwner {
             server: "first".into(),
             buffer,
@@ -1596,10 +1698,12 @@ mod tests {
         use super::super::{LspLaunch, LspRuntimeState};
         let root = std::path::PathBuf::from("/fixture");
         let mut editor = EditorState::new(root.clone());
-        let (buffer, _) = editor.open_text(
-            TextBuffer::from_text("fooo tail"),
-            Some(root.join("source.rs")),
-        ).unwrap();
+        let (buffer, _) = editor
+            .open_text(
+                TextBuffer::from_text("fooo tail"),
+                Some(root.join("source.rs")),
+            )
+            .unwrap();
         let document = LspDocument {
             path: root.join("source.rs"),
             language_id: "rust".into(),
@@ -1639,21 +1743,32 @@ mod tests {
     fn configuration_updates_retry_busy_queues_and_keep_the_latest_settings() {
         let (editor, buffer, document, mut owner) = fixture();
         let endpoint = owner.service.replace_edit_source_fixture(
-            document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
+            document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
             crate::editor::text::PositionEncoding::Utf16,
         );
         endpoint.block_responses();
         let standard = crate::language::lsp::LspServerConfiguration::standard();
-        assert!(matches!(owner.configure("owned-edit-fixture", standard.clone()), Err(crate::language::lsp::LspError::Busy(_))));
+        assert!(matches!(
+            owner.configure("owned-edit-fixture", standard.clone()),
+            Err(crate::language::lsp::LspError::Busy(_))
+        ));
         assert!(owner.retry_configurations().is_empty());
-        let maximum = crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
-        assert!(owner.configure("owned-edit-fixture", maximum.clone()).is_err());
+        let maximum =
+            crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
+        assert!(
+            owner
+                .configure("owned-edit-fixture", maximum.clone())
+                .is_err()
+        );
         endpoint.unblock_responses();
         assert!(owner.retry_configurations().is_empty());
         assert_eq!(endpoint.configured(), Some(maximum));
         assert!(owner.retry_configurations().is_empty());
         assert!(endpoint.configured().is_none());
-        owner.configure("owned-edit-fixture", standard.clone()).unwrap();
+        owner
+            .configure("owned-edit-fixture", standard.clone())
+            .unwrap();
         assert_eq!(endpoint.configured(), Some(standard));
     }
 
@@ -1668,7 +1783,9 @@ mod tests {
         let mut state = owner.sessions.remove("owned").unwrap();
         for index in 0..70 {
             let path = std::path::PathBuf::from(format!("/fixture/{index}.rs"));
-            let (id, _) = editor.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone())).unwrap();
+            let (id, _) = editor
+                .open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone()))
+                .unwrap();
             state.documents.insert(
                 id,
                 LspDocument {
@@ -1704,33 +1821,73 @@ mod tests {
         );
         let session = owner.sessions.remove("owned").unwrap();
         owner.sessions.insert("owned-edit-fixture".into(), session);
-        editor.open_text(TextBuffer::from_text("other"), Some("/fixture/other.rs".into())).unwrap();
+        editor
+            .open_text(
+                TextBuffer::from_text("other"),
+                Some("/fixture/other.rs".into()),
+            )
+            .unwrap();
         owner.retry_documents(&editor);
         assert!(endpoint.take_synced_source().is_some());
-        editor.buffers[buffer].text.restore_text("edited inactive text").unwrap();
+        editor.buffers[buffer]
+            .text
+            .restore_text("edited inactive text")
+            .unwrap();
         owner.retry_documents(&editor);
         assert_eq!(endpoint.take_synced_source(), Some(buffer));
-        assert!(owner.synced("owned-edit-fixture", buffer, &editor.buffers[buffer].text.source_version()));
-        assert_eq!(owner.sessions["owned-edit-fixture"].documents[&buffer].text, "edited inactive text");
+        assert!(owner.synced(
+            "owned-edit-fixture",
+            buffer,
+            &editor.buffers[buffer].text.source_version()
+        ));
+        assert_eq!(
+            owner.sessions["owned-edit-fixture"].documents[&buffer].text,
+            "edited inactive text"
+        );
         owner.retry_documents(&editor);
         assert!(endpoint.take_synced_source().is_none());
     }
     #[test]
     fn document_replay_retires_missing_and_renamed_buffers_even_when_stopped() {
         let (mut editor, buffer, document, mut owner) = fixture();
-        let (renamed, _) = editor.open_text(TextBuffer::from_text("renamed"), Some("/fixture/old.rs".into())).unwrap();
-        let (kept, _) = editor.open_text(TextBuffer::from_text("kept"), Some("/fixture/kept.rs".into())).unwrap();
+        let (renamed, _) = editor
+            .open_text(
+                TextBuffer::from_text("renamed"),
+                Some("/fixture/old.rs".into()),
+            )
+            .unwrap();
+        let (kept, _) = editor
+            .open_text(
+                TextBuffer::from_text("kept"),
+                Some("/fixture/kept.rs".into()),
+            )
+            .unwrap();
         for id in [buffer, renamed, kept] {
             let mut registered = document.clone();
             registered.path = editor.buffers[id].path.clone().unwrap();
-            owner.sessions.get_mut("owned").unwrap().documents.insert(id, registered);
-            owner.synced.insert(("owned".into(), id), editor.buffers[id].text.source_version());
+            owner
+                .sessions
+                .get_mut("owned")
+                .unwrap()
+                .documents
+                .insert(id, registered);
+            owner.synced.insert(
+                ("owned".into(), id),
+                editor.buffers[id].text.source_version(),
+            );
         }
         editor.buffers.remove(buffer);
         editor.buffers[renamed].path = Some("/fixture/new.rs".into());
         owner.sessions.get_mut("owned").unwrap().capabilities = None;
         owner.retry_documents(&editor);
-        assert_eq!(owner.sessions["owned"].documents.keys().copied().collect::<Vec<_>>(), vec![kept]);
+        assert_eq!(
+            owner.sessions["owned"]
+                .documents
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![kept]
+        );
         assert_eq!(owner.synced.len(), 1);
         assert!(owner.synced.contains_key(&("owned".into(), kept)));
     }
@@ -1739,9 +1896,11 @@ mod tests {
     fn document_retirement_retries_a_busy_close_before_forgetting_the_registration() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let endpoint = owner.service.replace_edit_source_fixture_for(
-            "owned", document.uri(),
+            "owned",
+            document.uri(),
             (buffer, editor.buffers[buffer].text.source_version()),
-            crate::editor::text::PositionEncoding::Utf16, 1,
+            crate::editor::text::PositionEncoding::Utf16,
+            1,
         );
         owner.retry_documents(&editor);
         assert_eq!(endpoint.take_synced_source(), Some(buffer));
@@ -1759,14 +1918,26 @@ mod tests {
     #[test]
     fn document_replay_synchronizes_changed_inactive_buffers() {
         let (mut editor, buffer, document, mut owner) = fixture();
-        let endpoint = owner.service.replace_edit_source_fixture_for("owned", document.uri(),
+        let endpoint = owner.service.replace_edit_source_fixture_for(
+            "owned",
+            document.uri(),
             (buffer, editor.buffers[buffer].text.source_version()),
-            crate::editor::text::PositionEncoding::Utf16, 1);
+            crate::editor::text::PositionEncoding::Utf16,
+            1,
+        );
         owner.retry_documents(&editor);
         assert_eq!(endpoint.take_synced_source(), Some(buffer));
         let old_version = editor.buffers[buffer].text.source_version();
-        editor.open_text(TextBuffer::from_text("active"), Some("/fixture/active.rs".into())).unwrap();
-        editor.buffers[buffer].text.restore_text("new contents").unwrap();
+        editor
+            .open_text(
+                TextBuffer::from_text("active"),
+                Some("/fixture/active.rs".into()),
+            )
+            .unwrap();
+        editor.buffers[buffer]
+            .text
+            .restore_text("new contents")
+            .unwrap();
         let new_version = editor.buffers[buffer].text.source_version();
         assert_ne!(old_version, new_version);
         endpoint.block_responses();
@@ -1776,7 +1947,10 @@ mod tests {
         owner.retry_documents(&editor);
         assert_eq!(endpoint.take_synced_source(), Some(buffer));
         assert!(owner.synced("owned", buffer, &new_version));
-        assert_eq!(owner.sessions["owned"].documents[&buffer].text, "new contents");
+        assert_eq!(
+            owner.sessions["owned"].documents[&buffer].text,
+            "new contents"
+        );
         owner.retry_documents(&editor);
         assert!(endpoint.take_synced_source().is_none());
     }
@@ -1784,16 +1958,36 @@ mod tests {
     #[test]
     fn formatting_server_ignores_dynamic_providers_for_other_documents() {
         let (_, buffer, document, mut owner) = fixture();
-        let capabilities = owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap();
+        let capabilities = owner
+            .sessions
+            .get_mut("owned")
+            .unwrap()
+            .capabilities
+            .as_mut()
+            .unwrap();
         capabilities.formatting = true;
-        capabilities.document_selectors.insert("textDocument/formatting".into(), vec![serde_json::json!({
-            "documentSelector":[{"language":"javascript"}]
-        })]);
+        capabilities.document_selectors.insert(
+            "textDocument/formatting".into(),
+            vec![serde_json::json!({
+                "documentSelector":[{"language":"javascript"}]
+            })],
+        );
         assert!(owner.formatting_server(buffer, &document).is_none());
-        owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap()
-            .document_selectors.get_mut("textDocument/formatting").unwrap()
+        owner
+            .sessions
+            .get_mut("owned")
+            .unwrap()
+            .capabilities
+            .as_mut()
+            .unwrap()
+            .document_selectors
+            .get_mut("textDocument/formatting")
+            .unwrap()
             .push(serde_json::json!({"documentSelector":[{"language":"rust"}]}));
-        assert_eq!(owner.formatting_server(buffer, &document).as_deref(), Some("owned"));
+        assert_eq!(
+            owner.formatting_server(buffer, &document).as_deref(),
+            Some("owned")
+        );
     }
 
     #[test]
@@ -1887,7 +2081,14 @@ mod tests {
             owner.refresh_projection(&editor, Some((buffer, &document))),
             super::ProjectionChange::Moved
         );
-        assert!(!owner.accept_result("owned", 0, "textDocument/hover", &document.uri(), 0, ByteOffset(0)));
+        assert!(!owner.accept_result(
+            "owned",
+            0,
+            "textDocument/hover",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(owner.completion_items().is_empty());
     }
     #[test]
@@ -1898,27 +2099,46 @@ mod tests {
         owner.projection.request_servers = vec!["owned".into(), "second".into()];
         owner.install_completions("owned", vec![item("first")], false, 3);
         owner.clear_completion();
-        assert!(!owner.accept_result("second", 3, "textDocument/completion", &document.uri(), 0, ByteOffset(0)));
+        assert!(!owner.accept_result(
+            "second",
+            3,
+            "textDocument/completion",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
     }
     #[test]
     fn completion_resolve_survives_an_unrelated_request() {
         let (editor, buffer, document, mut owner) = fixture();
         let _endpoint = owner.service.replace_edit_source_fixture_for(
-            "owned", document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
-            crate::editor::text::PositionEncoding::Utf16, 4,
+            "owned",
+            document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16,
+            4,
         );
         let mut unresolved = item("foo");
         unresolved.resolve_item = Some(serde_json::json!({"label": "foo"}));
         unresolved.resolved = false;
         owner.install_completions("owned", vec![unresolved], false, 0);
-        owner.resolve_completion(0, document.clone(), ByteOffset(0)).unwrap();
+        owner
+            .resolve_completion(0, document.clone(), ByteOffset(0))
+            .unwrap();
         let generation = owner.generation();
         assert!(owner.projection.requests.contains_key(&generation));
         owner.next_generation().unwrap();
         let source = owner.projection.owner.clone().unwrap();
         owner.projection.request = Some((owner.generation(), source));
         owner.projection.request_servers = vec!["owned".into()];
-        assert!(owner.accept_result("owned", generation, "completionItem/resolve", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result(
+            "owned",
+            generation,
+            "completionItem/resolve",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(owner.accept_resolved(generation, item("resolved foo"), &editor));
         assert_eq!(owner.completion_items()[0].label, "resolved foo");
     }
@@ -1930,24 +2150,66 @@ mod tests {
         owner.install_completions("owned", vec![item("kept")], false, 0);
         owner.move_completion(1, 10);
         owner.projection.resolve = Some((1, source.clone(), 1, ByteOffset(0)));
-        owner.projection.requests.insert(1, (source.clone(), vec!["owned".into()], "completionItem/resolve".into()));
-        owner.projection.requests.insert(2, (source.clone(), vec!["second".into()], "textDocument/completion".into()));
-        owner.projection.completion_narrowed = Some((ByteOffset(0), editor.buffers[source.buffer].text.revision()));
+        owner.projection.requests.insert(
+            1,
+            (
+                source.clone(),
+                vec!["owned".into()],
+                "completionItem/resolve".into(),
+            ),
+        );
+        owner.projection.requests.insert(
+            2,
+            (
+                source.clone(),
+                vec!["second".into()],
+                "textDocument/completion".into(),
+            ),
+        );
+        owner.projection.completion_narrowed =
+            Some((ByteOffset(0), editor.buffers[source.buffer].text.revision()));
         owner.stopped("second");
-        assert!(owner.completion_needs_narrowing(ByteOffset(0), editor.buffers[source.buffer].text.revision()));
+        assert!(owner.completion_needs_narrowing(
+            ByteOffset(0),
+            editor.buffers[source.buffer].text.revision()
+        ));
         assert_eq!(owner.completion_items(), &[item("kept")]);
-        assert_eq!(owner.projection.completion_all, vec![("owned".into(), item("kept"))]);
-        assert!(!owner.accept_result("second", 2, "textDocument/completion", &document.uri(), 0, ByteOffset(0)));
+        assert_eq!(
+            owner.projection.completion_all,
+            vec![("owned".into(), item("kept"))]
+        );
+        assert!(!owner.accept_result(
+            "second",
+            2,
+            "textDocument/completion",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert_eq!(owner.completion_position().0, 0);
         assert!(owner.accept_resolved(1, item("resolved kept"), &editor));
 
         owner.install_completions("second", vec![item("new process")], false, 0);
         owner.move_completion(1, 10);
         owner.projection.resolve = Some((3, source.clone(), 1, ByteOffset(0)));
-        owner.projection.requests.insert(3, (source, vec!["second".into()], "completionItem/resolve".into()));
+        owner.projection.requests.insert(
+            3,
+            (
+                source,
+                vec!["second".into()],
+                "completionItem/resolve".into(),
+            ),
+        );
         owner.stopped("second");
         assert!(owner.projection.resolve.is_none());
-        assert!(!owner.accept_result("second", 3, "completionItem/resolve", &document.uri(), 0, ByteOffset(0)));
+        assert!(!owner.accept_result(
+            "second",
+            3,
+            "completionItem/resolve",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(!owner.accept_resolved(3, item("stale resolve"), &editor));
         assert_eq!(owner.completion_server(0), Some("owned"));
     }
@@ -1990,7 +2252,8 @@ mod tests {
         let (editor, _, _, mut owner) = fixture();
         owner.projection.generation = 3;
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
-        owner.projection.resolve = Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
+        owner.projection.resolve =
+            Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
         owner.narrow_completions(vec![None, Some(2)], ByteOffset(0), super::BufferRevision(0));
         assert!(!owner.accept_resolved(3, item("resolved abX"), &editor));
         assert_eq!(owner.completion_items()[0].label, "aXb");
@@ -2015,29 +2278,85 @@ mod tests {
         let (_, _, document, mut owner) = fixture();
         let source = owner.projection.owner.clone().unwrap();
         owner.install_completions("owned", vec![item("foo")], false, 1);
-        owner.projection.requests.insert(1, (source.clone(), vec!["second".into()], "textDocument/completion".into()));
+        owner.projection.requests.insert(
+            1,
+            (
+                source.clone(),
+                vec!["second".into()],
+                "textDocument/completion".into(),
+            ),
+        );
         owner.projection.generation = 2;
         owner.projection.request = Some((2, source.clone()));
         owner.projection.request_servers = vec!["owned".into()];
-        owner.projection.requests.insert(2, (source, vec!["owned".into()], "textDocument/formatting".into()));
+        owner.projection.requests.insert(
+            2,
+            (
+                source,
+                vec!["owned".into()],
+                "textDocument/formatting".into(),
+            ),
+        );
         owner.cancel_completion();
         assert!(owner.completion_items().is_empty());
-        assert!(!owner.accept_result("second", 1, "textDocument/completion", &document.uri(), 0, ByteOffset(0)));
+        assert!(!owner.accept_result(
+            "second",
+            1,
+            "textDocument/completion",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(owner.request_pending(2));
-        assert!(owner.accept_result("owned", 2, "textDocument/formatting", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result(
+            "owned",
+            2,
+            "textDocument/formatting",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
     }
     #[test]
     fn pending_servers_belong_to_the_result_generation() {
         let (_, _, document, mut owner) = fixture();
         let source = owner.projection.owner.clone().unwrap();
-        owner.projection.requests.insert(1, (source.clone(), vec!["first".into(), "second".into()], "textDocument/codeAction".into()));
-        owner.projection.requests.insert(2, (source.clone(), vec!["owned".into()], "textDocument/hover".into()));
+        owner.projection.requests.insert(
+            1,
+            (
+                source.clone(),
+                vec!["first".into(), "second".into()],
+                "textDocument/codeAction".into(),
+            ),
+        );
+        owner.projection.requests.insert(
+            2,
+            (
+                source.clone(),
+                vec!["owned".into()],
+                "textDocument/hover".into(),
+            ),
+        );
         owner.projection.generation = 2;
         owner.projection.request = Some((2, source));
         owner.projection.request_servers = vec!["owned".into()];
-        assert!(owner.accept_result("first", 1, "textDocument/codeAction", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result(
+            "first",
+            1,
+            "textDocument/codeAction",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(owner.request_pending(1));
-        assert!(owner.accept_result("second", 1, "textDocument/codeAction", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result(
+            "second",
+            1,
+            "textDocument/codeAction",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
         assert!(!owner.request_pending(1));
         assert!(owner.request_pending(2));
     }
@@ -2058,8 +2377,22 @@ mod tests {
             (source, vec!["owned".into()], "textDocument/hover".into()),
         );
         owner.projection.generation = 2;
-        assert!(owner.accept_result("owned", 2, "textDocument/hover", &document.uri(), 0, ByteOffset(0)));
-        assert!(owner.accept_result("owned", 1, "textDocument/formatting", &document.uri(), 0, ByteOffset(0)));
+        assert!(owner.accept_result(
+            "owned",
+            2,
+            "textDocument/hover",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
+        assert!(owner.accept_result(
+            "owned",
+            1,
+            "textDocument/formatting",
+            &document.uri(),
+            0,
+            ByteOffset(0)
+        ));
     }
     #[test]
     fn semantic_splices_use_the_original_array_and_retire_with_the_server() {
@@ -2100,12 +2433,25 @@ mod tests {
         let uri = document.uri();
         owner.record_pull("owned", &uri, "old-pull".into());
         owner.record_pull("owned", "another-uri", "keep-pull".into());
-        let tokens = LspSemanticTokens { result_id: Some("old-semantic".into()), data: vec![0; 5] };
+        let tokens = LspSemanticTokens {
+            result_id: Some("old-semantic".into()),
+            data: vec![0; 5],
+        };
         assert!(owner.record_semantic("owned", &uri, &tokens));
         assert!(owner.record_semantic("owned", "another-uri", &tokens));
         owner.detach("owned", buffer);
-        assert!(!owner.projection.pull_ids.contains_key(&("owned".into(), uri.clone())));
-        assert!(!owner.projection.semantic.contains_key(&("owned".into(), uri)));
+        assert!(
+            !owner
+                .projection
+                .pull_ids
+                .contains_key(&("owned".into(), uri.clone()))
+        );
+        assert!(
+            !owner
+                .projection
+                .semantic
+                .contains_key(&("owned".into(), uri))
+        );
         assert_eq!(owner.projection.pull_ids.len(), 1);
         assert_eq!(owner.projection.semantic.len(), 1);
     }
@@ -2185,15 +2531,28 @@ mod tests {
         let now = Instant::now();
         assert!(owner.request_breadcrumbs(buffer, &document, now).is_none());
         assert_eq!(owner.projection.breadcrumb_retries, 0);
-        assert_eq!(owner.request_breadcrumbs(buffer, &document, now + Duration::from_secs(1)), Some("owned".into()));
+        assert_eq!(
+            owner.request_breadcrumbs(buffer, &document, now + Duration::from_secs(1)),
+            Some("owned".into())
+        );
     }
     #[test]
     fn inlay_refresh_retries_after_a_full_command_queue() {
         let (editor, buffer, document, mut owner) = fixture();
-        owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap().inlay_hints = true;
+        owner
+            .sessions
+            .get_mut("owned")
+            .unwrap()
+            .capabilities
+            .as_mut()
+            .unwrap()
+            .inlay_hints = true;
         let endpoint = owner.service.replace_edit_source_fixture_for(
-            "owned", document.uri(), (buffer, editor.buffers[buffer].text.source_version()),
-            crate::editor::text::PositionEncoding::Utf16, 1,
+            "owned",
+            document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16,
+            1,
         );
         endpoint.block_responses();
         owner.request_inlays(document.clone());
@@ -2210,10 +2569,12 @@ mod tests {
     fn completion_from_every_server_lands_in_one_list() {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, view) = editor.open_text(
-            TextBuffer::from_text("<div class=\"\">"),
-            Some(root.path().join("index.html")),
-        ).unwrap();
+        let (buffer, view) = editor
+            .open_text(
+                TextBuffer::from_text("<div class=\"\">"),
+                Some(root.path().join("index.html")),
+            )
+            .unwrap();
         let source = LspProjectionOwner {
             server: "html".into(),
             buffer,
@@ -2262,10 +2623,12 @@ mod tests {
     fn projection_resolve_identity_activation_and_delta_bounds() {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, view) = editor.open_text(
-            TextBuffer::from_text("ab"),
-            Some(root.path().join("source.rs")),
-        ).unwrap();
+        let (buffer, view) = editor
+            .open_text(
+                TextBuffer::from_text("ab"),
+                Some(root.path().join("source.rs")),
+            )
+            .unwrap();
         let source = LspProjectionOwner {
             server: "owned".into(),
             buffer,
@@ -2393,7 +2756,9 @@ mod tests {
     fn completion_items_and_resolves_reject_a_reloaded_text_incarnation() {
         let (mut editor, buffer, view) = {
             let mut editor = EditorState::new("/workspace".into());
-            let (buffer, view) = editor.open_text(TextBuffer::from_text("old"), None).unwrap();
+            let (buffer, view) = editor
+                .open_text(TextBuffer::from_text("old"), None)
+                .unwrap();
             (editor, buffer, view)
         };
         let source = LspProjectionOwner {
@@ -2436,7 +2801,9 @@ mod tests {
     #[test]
     fn retiring_a_save_format_request_rejects_its_late_result() {
         let mut editor = EditorState::new("/workspace".into());
-        let (buffer, view) = editor.open_text(TextBuffer::from_text("text"), None).unwrap();
+        let (buffer, view) = editor
+            .open_text(TextBuffer::from_text("text"), None)
+            .unwrap();
         let source = LspProjectionOwner {
             server: "formatter".into(),
             buffer,
@@ -2451,16 +2818,47 @@ mod tests {
         session.projection.generation = 1;
         session.projection.request = Some((1, source.clone()));
         session.projection.request_servers = vec!["formatter".into()];
-        session.projection.requests.insert(1, (source.clone(), vec!["formatter".into()], "textDocument/formatting".into()));
+        session.projection.requests.insert(
+            1,
+            (
+                source.clone(),
+                vec!["formatter".into()],
+                "textDocument/formatting".into(),
+            ),
+        );
         session.retire_request("formatter", 1);
-        assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0, ByteOffset(0)));
-        session.projection.requests.insert(1, (source.clone(), vec!["formatter".into()], "textDocument/formatting".into()));
+        assert!(!session.accept_result(
+            "formatter",
+            1,
+            "textDocument/formatting",
+            "uri",
+            0,
+            ByteOffset(0)
+        ));
+        session.projection.requests.insert(
+            1,
+            (
+                source.clone(),
+                vec!["formatter".into()],
+                "textDocument/formatting".into(),
+            ),
+        );
         session.projection.generation = 2;
         session.projection.request = Some((2, source.clone()));
         session.projection.request_servers = vec!["hover".into()];
-        session.projection.requests.insert(2, (source, vec!["hover".into()], "textDocument/hover".into()));
+        session.projection.requests.insert(
+            2,
+            (source, vec!["hover".into()], "textDocument/hover".into()),
+        );
         session.retire_request("formatter", 1);
-        assert!(!session.accept_result("formatter", 1, "textDocument/formatting", "uri", 0, ByteOffset(0)));
+        assert!(!session.accept_result(
+            "formatter",
+            1,
+            "textDocument/formatting",
+            "uri",
+            0,
+            ByteOffset(0)
+        ));
         assert!(session.accept_result("hover", 2, "textDocument/hover", "uri", 0, ByteOffset(0)));
     }
 }

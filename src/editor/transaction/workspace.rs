@@ -193,12 +193,15 @@ impl EditorState {
                 .push(Precondition::BufferWritable(buffer));
             edits.operations.push(EditorOperation::ApplyEdits {
                 buffer,
-                edits: TextEditSet::new(revision, file.edits.clone()).with_normalized_line_endings(),
+                edits: TextEditSet::new(revision, file.edits.clone())
+                    .with_normalized_line_endings(),
             });
         }
         draft = draft.apply_operations(&edits).map_err(|e| e.to_string())?;
         for (buffer, ending) in preferences {
-            draft.state.buffers[buffer].text.set_preferred_line_ending(ending);
+            draft.state.buffers[buffer]
+                .text
+                .set_preferred_line_ending(ending);
         }
         for buffer in created {
             draft.state.set_buffer_dirty(buffer, true);
@@ -414,33 +417,72 @@ mod tests {
             text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet},
             transaction::{EditorOperation, EditorTransaction},
         },
-        workspace::{FileSnapshot, ProposalId, WorkspaceEditDraft, WorkspaceEditProposal, WorkspaceId, WorkspaceState},
+        workspace::{
+            FileSnapshot, ProposalId, WorkspaceEditDraft, WorkspaceEditProposal, WorkspaceId,
+            WorkspaceState,
+        },
     };
 
     #[test]
     fn workspace_edits_preserve_preview_bytes_and_undo_mixed_endings() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("mixed.txt");
-        let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())]).unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [(
+                "root".into(),
+                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            )],
+        )
+        .unwrap();
         let original = b"\xef\xbb\xbfa\r\nb\n";
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_bytes(original).unwrap(), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(
+                TextBuffer::from_bytes(original).unwrap(),
+                Some(path.clone()),
+            )
+            .unwrap();
         let revision = editor.buffers[buffer].text.revision();
         let proposal = WorkspaceEditProposal::build(
-            ProposalId(1), "replace".into(), &scope,
+            ProposalId(1),
+            "replace".into(),
+            &scope,
             vec![WorkspaceEditDraft {
-                canonical_path: path.clone(), expected_revision: Some(revision),
-                edits: vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(), "A\nb\n")],
+                canonical_path: path.clone(),
+                expected_revision: Some(revision),
+                edits: vec![TextEdit::new(
+                    ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(),
+                    "A\nb\n",
+                )],
             }],
-            vec![FileSnapshot { canonical_path: path, revision: Some(revision), bytes: original.to_vec() }],
-        ).unwrap();
+            vec![FileSnapshot {
+                canonical_path: path,
+                revision: Some(revision),
+                bytes: original.to_vec(),
+            }],
+        )
+        .unwrap();
         let sources = editor.workspace_edit_sources().unwrap();
-        let draft = editor.prepare_workspace_edit(&sources, &proposal, TransactionId(1)).unwrap();
+        let draft = editor
+            .prepare_workspace_edit(&sources, &proposal, TransactionId(1))
+            .unwrap();
         draft.workspace_commit_check(&proposal).unwrap();
         editor = draft.accept(&editor.version()).unwrap();
-        assert_eq!(editor.buffers[buffer].text.to_bytes(), proposal.files[0].proposed_bytes);
-        assert_eq!(editor.buffers[buffer].text.to_bytes(), b"\xef\xbb\xbfA\nb\n");
-        editor.apply_transaction(&EditorTransaction::new(TransactionId(2)).with_operation(EditorOperation::Undo { buffer })).unwrap();
+        assert_eq!(
+            editor.buffers[buffer].text.to_bytes(),
+            proposal.files[0].proposed_bytes
+        );
+        assert_eq!(
+            editor.buffers[buffer].text.to_bytes(),
+            b"\xef\xbb\xbfA\nb\n"
+        );
+        editor
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(2))
+                    .with_operation(EditorOperation::Undo { buffer }),
+            )
+            .unwrap();
         assert_eq!(editor.buffers[buffer].text.to_bytes(), original);
 
         // A draft with the same normalized text but different separators is not the preview.
@@ -453,37 +495,108 @@ mod tests {
     fn workspace_edits_use_preview_separators_and_undo_separator_only_changes() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("endings.txt");
-        let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())]).unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [(
+                "root".into(),
+                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            )],
+        )
+        .unwrap();
         for separator_only in [false, true] {
             let mut editor = EditorState::new(root.path().into());
-            let original: &[u8] = if separator_only { b"a\r\nb\n" } else { b"a\r\nb\r\nc\n" };
-            let (buffer, _) = editor.open_text(TextBuffer::from_bytes(original).unwrap(), Some(path.clone())).unwrap();
+            let original: &[u8] = if separator_only {
+                b"a\r\nb\n"
+            } else {
+                b"a\r\nb\r\nc\n"
+            };
+            let (buffer, _) = editor
+                .open_text(
+                    TextBuffer::from_bytes(original).unwrap(),
+                    Some(path.clone()),
+                )
+                .unwrap();
             if !separator_only {
-                editor.apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
-                    buffer,
-                    edits: TextEditSet::new(editor.buffers[buffer].text.revision(), vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(), "")]),
-                })).unwrap();
+                editor
+                    .apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(
+                        EditorOperation::ApplyEdits {
+                            buffer,
+                            edits: TextEditSet::new(
+                                editor.buffers[buffer].text.revision(),
+                                vec![TextEdit::new(
+                                    ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(),
+                                    "",
+                                )],
+                            ),
+                        },
+                    ))
+                    .unwrap();
             }
             let before = editor.buffers[buffer].text.to_bytes();
             let preference = editor.buffers[buffer].text.format().preferred_line_ending;
             let revision = editor.buffers[buffer].text.revision();
-            let replacement = if separator_only { "a\nb\n" } else { "C\nmore\n" };
-            let proposal = WorkspaceEditProposal::build(ProposalId(1), "replace".into(), &scope,
+            let replacement = if separator_only {
+                "a\nb\n"
+            } else {
+                "C\nmore\n"
+            };
+            let proposal = WorkspaceEditProposal::build(
+                ProposalId(1),
+                "replace".into(),
+                &scope,
                 vec![WorkspaceEditDraft {
-                    canonical_path: path.clone(), expected_revision: Some(revision),
-                    edits: vec![TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(editor.buffers[buffer].text.len_bytes())).unwrap(), replacement)],
+                    canonical_path: path.clone(),
+                    expected_revision: Some(revision),
+                    edits: vec![TextEdit::new(
+                        ByteRange::new(
+                            ByteOffset(0),
+                            ByteOffset(editor.buffers[buffer].text.len_bytes()),
+                        )
+                        .unwrap(),
+                        replacement,
+                    )],
                 }],
-                vec![FileSnapshot { canonical_path: path.clone(), revision: Some(revision), bytes: before.clone() }],
-            ).unwrap();
-            let draft = editor.prepare_workspace_edit(&editor.workspace_edit_sources().unwrap(), &proposal, TransactionId(2)).unwrap();
+                vec![FileSnapshot {
+                    canonical_path: path.clone(),
+                    revision: Some(revision),
+                    bytes: before.clone(),
+                }],
+            )
+            .unwrap();
+            let draft = editor
+                .prepare_workspace_edit(
+                    &editor.workspace_edit_sources().unwrap(),
+                    &proposal,
+                    TransactionId(2),
+                )
+                .unwrap();
             draft.workspace_commit_check(&proposal).unwrap();
             editor = draft.accept(&editor.version()).unwrap();
-            assert_eq!(editor.buffers[buffer].text.to_bytes(), proposal.files[0].proposed_bytes);
-            assert_eq!(editor.buffers[buffer].text.format().preferred_line_ending, preference);
-            editor.apply_transaction(&EditorTransaction::new(TransactionId(3)).with_operation(EditorOperation::Undo { buffer })).unwrap();
+            assert_eq!(
+                editor.buffers[buffer].text.to_bytes(),
+                proposal.files[0].proposed_bytes
+            );
+            assert_eq!(
+                editor.buffers[buffer].text.format().preferred_line_ending,
+                preference
+            );
+            editor
+                .apply_transaction(
+                    &EditorTransaction::new(TransactionId(3))
+                        .with_operation(EditorOperation::Undo { buffer }),
+                )
+                .unwrap();
             assert_eq!(editor.buffers[buffer].text.to_bytes(), before);
-            editor.apply_transaction(&EditorTransaction::new(TransactionId(4)).with_operation(EditorOperation::Redo { buffer })).unwrap();
-            assert_eq!(editor.buffers[buffer].text.to_bytes(), proposal.files[0].proposed_bytes);
+            editor
+                .apply_transaction(
+                    &EditorTransaction::new(TransactionId(4))
+                        .with_operation(EditorOperation::Redo { buffer }),
+                )
+                .unwrap();
+            assert_eq!(
+                editor.buffers[buffer].text.to_bytes(),
+                proposal.files[0].proposed_bytes
+            );
         }
     }
 
@@ -491,26 +604,67 @@ mod tests {
     fn workspace_edits_keep_cursors_between_disjoint_replacements() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("words.txt");
-        let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap())]).unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [(
+                "root".into(),
+                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            )],
+        )
+        .unwrap();
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, view) = editor.open_text(TextBuffer::from_text("x keep x\n"), Some(path.clone())).unwrap();
-        let sibling = editor.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
-        editor.apply_transaction(&EditorTransaction::new(TransactionId(1))
-            .with_operation(EditorOperation::SetCursor { view, position: ByteOffset(3) })
-            .with_operation(EditorOperation::SetCursor { view: sibling, position: ByteOffset(5) })).unwrap();
+        let (buffer, view) = editor
+            .open_text(TextBuffer::from_text("x keep x\n"), Some(path.clone()))
+            .unwrap();
+        let sibling = editor
+            .split_active(crate::editor::Axis::Horizontal, 500)
+            .unwrap();
+        editor
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(1))
+                    .with_operation(EditorOperation::SetCursor {
+                        view,
+                        position: ByteOffset(3),
+                    })
+                    .with_operation(EditorOperation::SetCursor {
+                        view: sibling,
+                        position: ByteOffset(5),
+                    }),
+            )
+            .unwrap();
         let revision = editor.buffers[buffer].text.revision();
         let proposal = WorkspaceEditProposal::build(
-            ProposalId(1), "replace".into(), &scope,
+            ProposalId(1),
+            "replace".into(),
+            &scope,
             vec![WorkspaceEditDraft {
-                canonical_path: path.clone(), expected_revision: Some(revision),
+                canonical_path: path.clone(),
+                expected_revision: Some(revision),
                 edits: vec![
-                    TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(), "name"),
-                    TextEdit::new(ByteRange::new(ByteOffset(7), ByteOffset(8)).unwrap(), "name"),
+                    TextEdit::new(
+                        ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap(),
+                        "name",
+                    ),
+                    TextEdit::new(
+                        ByteRange::new(ByteOffset(7), ByteOffset(8)).unwrap(),
+                        "name",
+                    ),
                 ],
             }],
-            vec![FileSnapshot { canonical_path: path, revision: Some(revision), bytes: b"x keep x\n".to_vec() }],
-        ).unwrap();
-        let draft = editor.prepare_workspace_edit(&editor.workspace_edit_sources().unwrap(), &proposal, TransactionId(2)).unwrap();
+            vec![FileSnapshot {
+                canonical_path: path,
+                revision: Some(revision),
+                bytes: b"x keep x\n".to_vec(),
+            }],
+        )
+        .unwrap();
+        let draft = editor
+            .prepare_workspace_edit(
+                &editor.workspace_edit_sources().unwrap(),
+                &proposal,
+                TransactionId(2),
+            )
+            .unwrap();
         editor = draft.accept(&editor.version()).unwrap();
         assert_eq!(editor.buffers[buffer].text.to_string(), "name keep name\n");
         assert_eq!(editor.views[view].cursor, ByteOffset(6));

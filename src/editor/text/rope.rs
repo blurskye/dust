@@ -64,14 +64,25 @@ impl TextBuffer {
     #[must_use]
     pub(crate) fn matches_encoded_text(&self, bytes: &[u8]) -> bool {
         let mut expected = bytes.iter().copied();
-        if self.format.utf8_bom && ![0xef, 0xbb, 0xbf].into_iter().all(|byte| expected.next() == Some(byte)) {
+        if self.format.utf8_bom
+            && ![0xef, 0xbb, 0xbf]
+                .into_iter()
+                .all(|byte| expected.next() == Some(byte))
+        {
             return false;
         }
         let mut endings = self.format.line_endings.iter();
         for byte in self.rope.chunks().flat_map(str::bytes) {
             if byte == b'\n' {
-                let ending = endings.next().copied().unwrap_or(self.format.preferred_line_ending);
-                if !ending.as_str().bytes().all(|byte| expected.next() == Some(byte)) {
+                let ending = endings
+                    .next()
+                    .copied()
+                    .unwrap_or(self.format.preferred_line_ending);
+                if !ending
+                    .as_str()
+                    .bytes()
+                    .all(|byte| expected.next() == Some(byte))
+                {
                     return false;
                 }
             } else if expected.next() != Some(byte) {

@@ -2,8 +2,7 @@ use super::{
     AppEffect, BTreeMap, CommandInvocation, CommandRegistry, CommandValue, FromStr, HashMap,
     InputContextLayer, InputContextRegistry, InvocationSource, KeyEvent, KeymapInspection,
     KeymapLayer, KeymapOperation, KeymapSequence, MappingResolution, ResolvedKeyGroup,
-    ResolvedKeymaps, ReverseBinding,
-    configured_context, invocation_fingerprint, keymap_entries,
+    ResolvedKeymaps, ReverseBinding, configured_context, invocation_fingerprint, keymap_entries,
 };
 
 pub fn reload_keymaps(
@@ -1104,8 +1103,7 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
                 continue;
             }
             let reachable = result.inspections.iter().any(|inspection| {
-                if inspection.context != context || inspection.command.is_none()
-                {
+                if inspection.context != context || inspection.command.is_none() {
                     return false;
                 }
                 inspection
@@ -1193,10 +1191,13 @@ pub(in crate::editor::session) fn compile_typed_keymap_entries(
         let Some(command) = &inspection.command else {
             continue;
         };
-        let mut invocation = CommandInvocation::new(command, InvocationSource::Keymap)
-            .expect("validated command");
+        let mut invocation =
+            CommandInvocation::new(command, InvocationSource::Keymap).expect("validated command");
         invocation.arguments = inspection.arguments.clone();
-        let key = (inspection.context.clone(), invocation_fingerprint(&invocation));
+        let key = (
+            inspection.context.clone(),
+            invocation_fingerprint(&invocation),
+        );
         let replaces = result.reverse.get(&key).is_none_or(|existing| {
             inspection.contribution_layer > existing.layer
                 || (inspection.contribution_layer == existing.layer

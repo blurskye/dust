@@ -68,8 +68,13 @@ pub struct AgentPanelUi {
 
 impl AgentPanelUi {
     fn list_height(&self, height: u16) -> u16 {
-        let count = if self.menu.is_empty() { self.family.len() } else { self.menu.len() };
-        u16::try_from(count.min(LIST_ROW_CEILING)).unwrap_or(0)
+        let count = if self.menu.is_empty() {
+            self.family.len()
+        } else {
+            self.menu.len()
+        };
+        u16::try_from(count.min(LIST_ROW_CEILING))
+            .unwrap_or(0)
             .min(height.saturating_sub(8) / 2)
     }
 
@@ -87,8 +92,13 @@ impl AgentPanelUi {
         if width < 8 || height < 6 {
             return 0;
         }
-        let grid = CellGrid::new_with_policy(0, 0, CONTROL_CHARACTER_REPLACEMENT,
-            ZERO_WIDTH_REPLACEMENT, config.editor.ambiguous_width == AmbiguousWidth::Wide);
+        let grid = CellGrid::new_with_policy(
+            0,
+            0,
+            CONTROL_CHARACTER_REPLACEMENT,
+            ZERO_WIDTH_REPLACEMENT,
+            config.editor.ambiguous_width == AmbiguousWidth::Wide,
+        );
         let (rows, _) = wrap_input(&self.input, self.cursor, usize::from(width - 2), &grid);
         self.transcript_height_for_input(height, rows.len())
     }
@@ -152,7 +162,11 @@ pub(super) fn render_agent_panel(
     } else {
         Style::Border
     };
-    let horizontal = if grid.display_width("─") == 1 { "─" } else { "-" };
+    let horizontal = if grid.display_width("─") == 1 {
+        "─"
+    } else {
+        "-"
+    };
     for column in 0..width {
         grid.set_cell(column, top, horizontal, border);
         grid.set_cell(column, bottom, horizontal, border);
@@ -599,12 +613,23 @@ mod tests {
             let frame = render_agent_panel(&panel, true, &Config::default(), 40, height, false);
             let top = height - 4;
             assert_eq!(frame.grid.row_text(top), "─".repeat(40));
-            let lines = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
-            assert!(!lines.iter().any(|line| line.contains("claude")), "{lines:#?}");
+            let lines = (0..height)
+                .map(|y| frame.grid.row_text(y))
+                .collect::<Vec<_>>();
+            assert!(
+                !lines.iter().any(|line| line.contains("claude")),
+                "{lines:#?}"
+            );
             if height >= 10 {
-                assert!(lines[usize::from(top - 1)].contains("+12 more"), "{lines:#?}");
+                assert!(
+                    lines[usize::from(top - 1)].contains("+12 more"),
+                    "{lines:#?}"
+                );
             } else {
-                assert!(!lines.iter().any(|line| line.contains("more")), "{lines:#?}");
+                assert!(
+                    !lines.iter().any(|line| line.contains("more")),
+                    "{lines:#?}"
+                );
             }
         }
     }

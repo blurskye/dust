@@ -98,7 +98,12 @@ fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16
     let separator = text_width(TERMINAL_TAB_SEPARATOR, config.editor.ambiguous_width);
     let widths: Vec<_> = terminal.tabs[..=active]
         .iter()
-        .map(|tab| text_width(&terminal_tab_label(&terminal.tabs, tab), config.editor.ambiguous_width))
+        .map(|tab| {
+            text_width(
+                &terminal_tab_label(&terminal.tabs, tab),
+                config.editor.ambiguous_width,
+            )
+        })
         .collect();
     let mut used = widths.iter().sum::<usize>() + separator * active;
     let mut first = 0;
@@ -168,7 +173,15 @@ pub(super) fn dock_terminal_panel(
                 continue;
             };
             if !cell.continuation {
-                let cell_width = if workspace.grid.get(x + 1, y).is_some_and(|next| next.continuation) { 2 } else { 1 };
+                let cell_width = if workspace
+                    .grid
+                    .get(x + 1, y)
+                    .is_some_and(|next| next.continuation)
+                {
+                    2
+                } else {
+                    1
+                };
                 grid.set_cell_with_width(x, y, &cell.symbol, cell.style, cell_width);
             }
         }
@@ -180,7 +193,8 @@ pub(super) fn dock_terminal_panel(
             grid.set_cell(x, y, " ", Style::TerminalBackground);
         }
     }
-    let (horizontal, vertical, top_left, _, _, _) = grid.border_glyphs(crate::config::BorderStyle::Single);
+    let (horizontal, vertical, top_left, _, _, _) =
+        grid.border_glyphs(crate::config::BorderStyle::Single);
     for x in geometry.x..right {
         grid.set_cell(
             x,
@@ -192,7 +206,11 @@ pub(super) fn dock_terminal_panel(
     if geometry.left_border {
         let x = geometry.x.saturating_sub(1);
         for y in geometry.top..bottom {
-            let symbol = if y == geometry.top { top_left } else { vertical };
+            let symbol = if y == geometry.top {
+                top_left
+            } else {
+                vertical
+            };
             grid.set_cell(x, y, &symbol.to_string(), Style::TerminalBorder);
         }
     }
@@ -257,8 +275,14 @@ pub(super) fn dock_terminal_panel(
             if cell.continuation {
                 continue;
             }
-            let cell_width = if row.get(column + 1).is_some_and(|next| next.continuation) { 2 } else { 1 };
-            let x = geometry.x.saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
+            let cell_width = if row.get(column + 1).is_some_and(|next| next.continuation) {
+                2
+            } else {
+                1
+            };
+            let x = geometry
+                .x
+                .saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
             if x.saturating_add(cell_width as u16) > right {
                 break;
             }
@@ -362,7 +386,9 @@ pub(super) fn render_key_hints(
         return;
     }
     let left = editor_left.saturating_add(editor_width.saturating_sub(box_width));
-    let top = bounds.y.saturating_add(available_height.saturating_sub(box_height));
+    let top = bounds
+        .y
+        .saturating_add(available_height.saturating_sub(box_height));
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {
@@ -370,8 +396,9 @@ pub(super) fn render_key_hints(
             frame.grid.set_cell(x, y, " ", Style::KeyHintBackground);
         }
     }
-    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        frame.grid.border_glyphs(crate::config::BorderStyle::Rounded);
+    let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) = frame
+        .grid
+        .border_glyphs(crate::config::BorderStyle::Rounded);
     for x in left.saturating_add(1)..right.saturating_sub(1) {
         frame
             .grid
@@ -462,8 +489,7 @@ pub(super) fn render_key_hints(
         }
         // A label too long for its column ends in an ellipsis instead of stopping mid-word.
         let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
-        let label =
-            super::surfaces::ellipsized(&row.label, room, ambiguous);
+        let label = super::surfaces::ellipsized(&row.label, room, ambiguous);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,

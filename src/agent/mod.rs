@@ -879,7 +879,9 @@ mod tests {
         let (writes, incoming) = mpsc::sync_channel(1);
         process.writes = writes;
         process.notify("busy", Value::Null).unwrap();
-        process.respond(json!(1), Ok(json!({"content": "first"}))).unwrap();
+        process
+            .respond(json!(1), Ok(json!({"content": "first"})))
+            .unwrap();
         process.respond(json!(2), Err("second".into())).unwrap();
         assert_eq!(process.responses.len(), 2);
         incoming.recv().unwrap();
@@ -893,7 +895,10 @@ mod tests {
         assert_eq!(second["error"]["message"], "second");
         assert!(process.responses.is_empty());
         drop(incoming);
-        assert_eq!(process.respond(json!(3), Ok(Value::Null)), Err("the agent input is closed".into()));
+        assert_eq!(
+            process.respond(json!(3), Ok(Value::Null)),
+            Err("the agent input is closed".into())
+        );
     }
 
     #[cfg(unix)]
@@ -930,18 +935,32 @@ mod tests {
         let (failures, failure_receiver) = mpsc::sync_channel(1);
         process.messages = receiver;
         process.failures = failure_receiver;
-        messages.send(AgentMessage::Notification {
-            method: "session/update".into(),
-            params: json!({"text": "final answer"}),
-        }).unwrap();
-        messages.send(AgentMessage::Response { id: 1, result: Ok(Value::Null) }).unwrap();
+        messages
+            .send(AgentMessage::Notification {
+                method: "session/update".into(),
+                params: json!({"text": "final answer"}),
+            })
+            .unwrap();
+        messages
+            .send(AgentMessage::Response {
+                id: 1,
+                result: Ok(Value::Null),
+            })
+            .unwrap();
         failures.send("writing to the agent failed".into()).unwrap();
 
-        assert!(matches!(process.try_message(), Some(AgentMessage::Notification { params, .. })
-            if params["text"] == "final answer"));
-        assert!(matches!(process.try_message(), Some(AgentMessage::Response { id: 1, .. })));
-        assert!(matches!(process.try_message(), Some(AgentMessage::Exited(reason))
-            if reason == "writing to the agent failed"));
+        assert!(
+            matches!(process.try_message(), Some(AgentMessage::Notification { params, .. })
+            if params["text"] == "final answer")
+        );
+        assert!(matches!(
+            process.try_message(),
+            Some(AgentMessage::Response { id: 1, .. })
+        ));
+        assert!(
+            matches!(process.try_message(), Some(AgentMessage::Exited(reason))
+            if reason == "writing to the agent failed")
+        );
         assert!(process.try_message().is_none());
     }
 
@@ -962,7 +981,10 @@ mod tests {
         }
         process.notify("continue", Value::Null).unwrap();
         assert!(matches!(
-            process.messages.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            process
+                .messages
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
             AgentMessage::Response { id: 1, .. }
         ));
         while process.log.lock().unwrap().as_deref() != Some("last") {
@@ -1133,7 +1155,11 @@ mod tests {
             ("a", "a\n", "file\n- a [no final newline]\n+ a"),
             ("\n", "", "file\n- "),
             ("", "\n", "file\n+ "),
-            ("same\nlast\n", "same\nlast", "file\n- last\n+ last [no final newline]"),
+            (
+                "same\nlast\n",
+                "same\nlast",
+                "file\n- last\n+ last [no final newline]",
+            ),
             ("a\n", "a\n", "file"),
         ] {
             let edit = json!({"toolCall": {

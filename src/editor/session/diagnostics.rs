@@ -374,7 +374,8 @@ impl DiagnosticSession {
                 row.problem.uri == uri
                     && if start == end {
                         range.start <= start
-                            && (start < range.end || range.start == range.end && start == range.start)
+                            && (start < range.end
+                                || range.start == range.end && start == range.start)
                     } else if range.start == range.end {
                         start <= range.start && range.start < end
                     } else {
@@ -402,11 +403,16 @@ impl DiagnosticSession {
         }
         // Navigation skips other diagnostics at the same position, just as a single step does.
         rows.dedup_by_key(|row| row.problem.range.start);
-        let first = rows.iter().position(|row| if direction < 0 {
-            row.problem.range.start < offset
-        } else {
-            row.problem.range.start > offset
-        }).or_else(|| (!rows.is_empty()).then_some(0))?;
+        let first = rows
+            .iter()
+            .position(|row| {
+                if direction < 0 {
+                    row.problem.range.start < offset
+                } else {
+                    row.problem.range.start > offset
+                }
+            })
+            .or_else(|| (!rows.is_empty()).then_some(0))?;
         let index = (first as u128 + u128::from(count.saturating_sub(1))) % rows.len() as u128;
         Some(rows[index as usize].key.clone())
     }
@@ -497,7 +503,8 @@ impl DiagnosticSession {
                         severity: row.problem.severity,
                         source: row.problem.source.clone(),
                         code: row.problem.code.as_ref().map(|code| {
-                            code.as_str().map_or_else(|| code.to_string(), str::to_owned)
+                            code.as_str()
+                                .map_or_else(|| code.to_string(), str::to_owned)
                         }),
                         message: row.problem.message.clone(),
                     })
@@ -515,7 +522,9 @@ mod tests {
     fn equivalent_unsorted_reports_keep_keys_and_metadata_updates_replace_payloads() {
         let mut editor = EditorState::new("/workspace".into());
         let path = std::path::PathBuf::from("/workspace/file");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abc"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
         let mut owner = DiagnosticSession::new(10, 10);
@@ -559,7 +568,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abc"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let old = DiagnosticProducer::new(DiagnosticOwner::new("same name").unwrap());
         let other = DiagnosticProducer::new(DiagnosticOwner::new("independent").unwrap());
@@ -654,7 +665,9 @@ mod tests {
         disk.validity = DiagnosticValidity::DiskReport;
         owner.publish(disk, &editor).unwrap();
         let key = owner.choices().next().unwrap().0;
-        editor.open_text(TextBuffer::from_text("new"), Some(disk_path)).unwrap();
+        editor
+            .open_text(TextBuffer::from_text("new"), Some(disk_path))
+            .unwrap();
         assert!(
             owner.resolve(&key, &editor).is_none(),
             "an unbound disk report cannot adopt a newly opened buffer"
@@ -665,18 +678,32 @@ mod tests {
     fn diagnostic_intersections_are_half_open_and_include_points() {
         let mut owner = DiagnosticSession::new(10, 10);
         owner.rows = [(0, 1), (1, 2), (2, 3), (1, 1), (2, 2)]
-            .into_iter().enumerate().map(|(index, (start, end))| Row {
-                key: DiagnosticKey { epoch: Arc::new(()), index },
+            .into_iter()
+            .enumerate()
+            .map(|(index, (start, end))| Row {
+                key: DiagnosticKey {
+                    epoch: Arc::new(()),
+                    index,
+                },
                 problem: ProblemRow {
                     owner: DiagnosticOwner::new("test").unwrap(),
                     uri: "file:///file".into(),
                     range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
                     severity: DiagnosticSeverity::Error,
-                    source: "test".into(), code: None, message: index.to_string(), data: None,
+                    source: "test".into(),
+                    code: None,
+                    message: index.to_string(),
+                    data: None,
                 },
-            }).collect();
-        let messages = |start, end| owner.within("file:///file", ByteOffset(start), ByteOffset(end))
-            .into_iter().map(|row| row.message.as_str()).collect::<Vec<_>>();
+            })
+            .collect();
+        let messages = |start, end| {
+            owner
+                .within("file:///file", ByteOffset(start), ByteOffset(end))
+                .into_iter()
+                .map(|row| row.message.as_str())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(messages(1, 2), vec!["1", "3"]);
         assert_eq!(messages(1, 1), vec!["1", "3"]);
         assert_eq!(messages(2, 2), vec!["2", "4"]);
@@ -686,34 +713,64 @@ mod tests {
     fn collapsed_diagnostics_cannot_reassign_existing_keys() {
         let mut editor = EditorState::new("/workspace".into());
         let path = PathBuf::from("/workspace/file");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abcd"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abcd"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
         let mut owner = DiagnosticSession::new(10, 10);
         owner.activate(producer.clone());
-        owner.publish(DiagnosticBatch {
-            producer, uri: uri.clone(), document: DiagnosticDocument::capture(&editor, buffer),
-            validity: DiagnosticValidity::RequestedSnapshot,
-            items: [(1, DiagnosticSeverity::Warning), (2, DiagnosticSeverity::Error)]
-                .into_iter().map(|(at, severity)| Diagnostic {
-                    uri: uri.clone(), version: None,
-                    range: ByteRange::empty(ByteOffset(at)), severity,
-                    source: "test".into(), code: None, message: format!("{severity:?}"),
-                    related: Vec::new(), tags: Vec::new(), fixes: Vec::new(), data: None,
-                    timestamp: std::time::UNIX_EPOCH,
-                }).collect(),
-        }, &editor).unwrap();
+        owner
+            .publish(
+                DiagnosticBatch {
+                    producer,
+                    uri: uri.clone(),
+                    document: DiagnosticDocument::capture(&editor, buffer),
+                    validity: DiagnosticValidity::RequestedSnapshot,
+                    items: [
+                        (1, DiagnosticSeverity::Warning),
+                        (2, DiagnosticSeverity::Error),
+                    ]
+                    .into_iter()
+                    .map(|(at, severity)| Diagnostic {
+                        uri: uri.clone(),
+                        version: None,
+                        range: ByteRange::empty(ByteOffset(at)),
+                        severity,
+                        source: "test".into(),
+                        code: None,
+                        message: format!("{severity:?}"),
+                        related: Vec::new(),
+                        tags: Vec::new(),
+                        fixes: Vec::new(),
+                        data: None,
+                        timestamp: std::time::UNIX_EPOCH,
+                    })
+                    .collect(),
+                },
+                &editor,
+            )
+            .unwrap();
         let key = owner.choices().next().unwrap().0;
-        assert_eq!(owner.resolve(&key, &editor).unwrap().severity, DiagnosticSeverity::Warning);
+        assert_eq!(
+            owner.resolve(&key, &editor).unwrap().severity,
+            DiagnosticSeverity::Warning
+        );
         let text = &mut editor.buffers[buffer].text;
-        text.apply_edits(&crate::editor::text::TextEditSet::new(text.revision(), vec![
-            crate::editor::text::TextEdit::new(
-                ByteRange::new(ByteOffset(1), ByteOffset(3)).unwrap(), String::new(),
-            ),
-        ])).unwrap();
+        text.apply_edits(&crate::editor::text::TextEditSet::new(
+            text.revision(),
+            vec![crate::editor::text::TextEdit::new(
+                ByteRange::new(ByteOffset(1), ByteOffset(3)).unwrap(),
+                String::new(),
+            )],
+        ))
+        .unwrap();
         owner.projection(&editor);
         assert!(owner.resolve(&key, &editor).is_none());
-        assert_eq!(owner.choices().next().unwrap().1.severity, DiagnosticSeverity::Error);
+        assert_eq!(
+            owner.choices().next().unwrap().1.severity,
+            DiagnosticSeverity::Error
+        );
     }
 
     #[test]
@@ -721,7 +778,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc\ndef\n"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abc\ndef\n"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("server").unwrap());
         let mut owner = DiagnosticSession::new(4, 2);

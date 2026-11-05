@@ -255,7 +255,9 @@ impl PtyScreen {
     }
 
     pub fn resize(&mut self, columns: u16, rows: u16) {
-        let history = self.scrollback_bytes.map(|bytes| Self::scrollback_lines(columns, bytes));
+        let history = self
+            .scrollback_bytes
+            .map(|bytes| Self::scrollback_lines(columns, bytes));
         if history.is_some_and(|_| usize::from(columns) < self.term.columns()) {
             self.term.set_options(Config {
                 scrolling_history: history.unwrap(),
@@ -288,7 +290,10 @@ impl PtyScreen {
         let position = |point: Option<(usize, usize)>| {
             let (row, column) = point?;
             let &(line, start) = before.get(row)?;
-            Some((line as isize - old_reference as isize, start + column as isize))
+            Some((
+                line as isize - old_reference as isize,
+                start + column as isize,
+            ))
         };
         let old_cursor = *cursor;
         let cursor_position = position(*cursor);
@@ -299,10 +304,18 @@ impl PtyScreen {
         let restore = |position: Option<(isize, isize)>| {
             let (delta, column) = position?;
             let line = reference.checked_add_signed(delta)?;
-            after.iter().enumerate().rev().find_map(|(row, &(candidate, start))| {
-                (candidate == line && start <= column)
-                    .then(|| (row, ((column - start) as usize).min(self.term.columns() - 1)))
-            })
+            after
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(row, &(candidate, start))| {
+                    (candidate == line && start <= column).then(|| {
+                        (
+                            row,
+                            ((column - start) as usize).min(self.term.columns() - 1),
+                        )
+                    })
+                })
         };
         *cursor = restore(cursor_position);
         *anchor = restore(anchor_position);
@@ -327,11 +340,14 @@ impl PtyScreen {
                 column += self.term.columns()
                     - usize::from(last.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER));
             } else {
-                let used = (0..self.term.columns()).rfind(|&column| {
-                    let cell = &grid_row[Column(column)];
-                    cell.c != ' ' || cell.zerowidth().is_some()
-                        || cell.flags.contains(Flags::WIDE_CHAR_SPACER)
-                }).map_or(0, |column| column + 1);
+                let used = (0..self.term.columns())
+                    .rfind(|&column| {
+                        let cell = &grid_row[Column(column)];
+                        cell.c != ' '
+                            || cell.zerowidth().is_some()
+                            || cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+                    })
+                    .map_or(0, |column| column + 1);
                 // The end of a logical line survives eviction of its oldest wrapped
                 // rows; a column measured from the beginning does not.
                 let length = (column + used) as isize;
@@ -704,8 +720,11 @@ mod tests {
 
     #[test]
     fn widening_reflows_history_before_reducing_its_byte_budget() {
-        let bytes = 6 * (10 * std::mem::size_of::<alacritty_terminal::term::cell::Cell>()
-            + std::mem::size_of::<alacritty_terminal::grid::Row<alacritty_terminal::term::cell::Cell>>());
+        let bytes = 6
+            * (10 * std::mem::size_of::<alacritty_terminal::term::cell::Cell>()
+                + std::mem::size_of::<
+                    alacritty_terminal::grid::Row<alacritty_terminal::term::cell::Cell>,
+                >());
         let mut screen = PtyScreen::with_scrollback_bytes(10, 2, bytes);
         let text = format!("A{}", "x".repeat(79));
         screen.feed_bytes(text.as_bytes());
@@ -755,9 +774,12 @@ mod tests {
             screen.feed_bytes(format!(
                 "\x1b]11;rgb:12/34/56{terminator}\x1b]11;?{terminator}\x1b]11;rgb:ab/cd/ef{terminator}\x1b]11;?{terminator}"
             ).as_bytes());
-            assert_eq!(String::from_utf8(screen.take_replies()).unwrap(), format!(
-                "\x1b]11;rgb:1212/3434/5656{terminator}\x1b]11;rgb:abab/cdcd/efef{terminator}"
-            ));
+            assert_eq!(
+                String::from_utf8(screen.take_replies()).unwrap(),
+                format!(
+                    "\x1b]11;rgb:1212/3434/5656{terminator}\x1b]11;rgb:abab/cdcd/efef{terminator}"
+                )
+            );
         }
     }
 
@@ -765,13 +787,21 @@ mod tests {
     fn default_foreground_queries_use_the_terminal_text_style() {
         let mut theme = crate::config::load_bundled_config().theme;
         theme.styles.terminal_text.foreground = crate::config::ThemeColor::Rgb(0x12, 0x34, 0x56);
-        theme.styles.terminal_background.foreground = crate::config::ThemeColor::Rgb(0xab, 0xcd, 0xef);
+        theme.styles.terminal_background.foreground =
+            crate::config::ThemeColor::Rgb(0xab, 0xcd, 0xef);
         let mut screen = PtyScreen::new(10, 2, 4);
         screen.set_theme(&theme);
         screen.feed_bytes(b"\x1b]10;?\x07");
         assert_eq!(screen.take_replies(), b"\x1b]10;rgb:1212/3434/5656\x07");
         let screen = PtyScreen::new(10, 2, 4);
-        assert_eq!(screen.default_colors.0, crate::config::load_bundled_config().theme.styles.terminal_text.foreground);
+        assert_eq!(
+            screen.default_colors.0,
+            crate::config::load_bundled_config()
+                .theme
+                .styles
+                .terminal_text
+                .foreground
+        );
     }
 
     #[test]
@@ -784,30 +814,111 @@ mod tests {
             (TerminalMouseInput::ScrollDown, PtyMouseMode::Click, 65, 'M'),
         ] {
             for (modifiers, bits) in [
-                (Modifiers { shift: true, ..Default::default() }, 4),
-                (Modifiers { alt: true, ..Default::default() }, 8),
-                (Modifiers { control: true, ..Default::default() }, 16),
-                (Modifiers { shift: true, alt: true, control: true }, 28),
+                (
+                    Modifiers {
+                        shift: true,
+                        ..Default::default()
+                    },
+                    4,
+                ),
+                (
+                    Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    },
+                    8,
+                ),
+                (
+                    Modifiers {
+                        control: true,
+                        ..Default::default()
+                    },
+                    16,
+                ),
+                (
+                    Modifiers {
+                        shift: true,
+                        alt: true,
+                        control: true,
+                    },
+                    28,
+                ),
             ] {
                 let report = super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
-                    event: event.clone(), modifiers,
-                    column: 12, row: 23, left: 10, top: 20, width: 8, height: 6,
-                    mode, sgr: true, ceiling: 64,
-                }).unwrap();
-                assert_eq!(report, format!("\x1b[<{};3;4{suffix}", button | bits).as_bytes());
+                    event: event.clone(),
+                    modifiers,
+                    column: 12,
+                    row: 23,
+                    left: 10,
+                    top: 20,
+                    width: 8,
+                    height: 6,
+                    mode,
+                    sgr: true,
+                    ceiling: 64,
+                })
+                .unwrap();
+                assert_eq!(
+                    report,
+                    format!("\x1b[<{};3;4{suffix}", button | bits).as_bytes()
+                );
             }
         }
-        let modifiers = Modifiers { control: true, ..Default::default() };
-        assert_eq!(encode_sgr_mouse(PtyMouseEvent::Release(0), 2, 3, PtyMouseMode::Click, false, modifiers).unwrap(), b"\x1b[M\x33\x23\x24");
+        let modifiers = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            encode_sgr_mouse(
+                PtyMouseEvent::Release(0),
+                2,
+                3,
+                PtyMouseMode::Click,
+                false,
+                modifiers
+            )
+            .unwrap(),
+            b"\x1b[M\x33\x23\x24"
+        );
     }
 
     #[test]
     fn drag_tracking_ignores_motion_without_a_pressed_button() {
         for sgr in [false, true] {
-            assert!(encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Drag, sgr, Default::default()).is_none());
-            assert!(encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Any, sgr, Default::default()).is_some());
+            assert!(
+                encode_sgr_mouse(
+                    PtyMouseEvent::Move(3),
+                    0,
+                    0,
+                    PtyMouseMode::Drag,
+                    sgr,
+                    Default::default()
+                )
+                .is_none()
+            );
+            assert!(
+                encode_sgr_mouse(
+                    PtyMouseEvent::Move(3),
+                    0,
+                    0,
+                    PtyMouseMode::Any,
+                    sgr,
+                    Default::default()
+                )
+                .is_some()
+            );
             for button in 0..=2 {
-                assert!(encode_sgr_mouse(PtyMouseEvent::Move(button), 0, 0, PtyMouseMode::Drag, sgr, Default::default()).is_some());
+                assert!(
+                    encode_sgr_mouse(
+                        PtyMouseEvent::Move(button),
+                        0,
+                        0,
+                        PtyMouseMode::Drag,
+                        sgr,
+                        Default::default()
+                    )
+                    .is_some()
+                );
             }
         }
     }
@@ -829,18 +940,50 @@ mod tests {
             );
         }
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Press(2), 2, 3, PtyMouseMode::Click, false, Default::default()).unwrap(),
+            encode_sgr_mouse(
+                PtyMouseEvent::Press(2),
+                2,
+                3,
+                PtyMouseMode::Click,
+                false,
+                Default::default()
+            )
+            .unwrap(),
             b"\x1b[M\x22\x23\x24"
         );
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Release(2), 2, 3, PtyMouseMode::Click, false, Default::default()).unwrap(),
+            encode_sgr_mouse(
+                PtyMouseEvent::Release(2),
+                2,
+                3,
+                PtyMouseMode::Click,
+                false,
+                Default::default()
+            )
+            .unwrap(),
             b"\x1b[M\x23\x23\x24"
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Press(0), 223, 0, PtyMouseMode::Click, false, Default::default()).is_none()
+            encode_sgr_mouse(
+                PtyMouseEvent::Press(0),
+                223,
+                0,
+                PtyMouseMode::Click,
+                false,
+                Default::default()
+            )
+            .is_none()
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Click, false, Default::default()).is_none()
+            encode_sgr_mouse(
+                PtyMouseEvent::Move(3),
+                0,
+                0,
+                PtyMouseMode::Click,
+                false,
+                Default::default()
+            )
+            .is_none()
         );
     }
 
@@ -873,7 +1016,10 @@ mod tests {
             let (row, column) = cursor.unwrap();
             let (anchor_row, anchor_column) = anchor.unwrap();
             assert_eq!(row, anchor_row);
-            assert_eq!(&screen.history_row(row).unwrap()[anchor_column..=column], selected);
+            assert_eq!(
+                &screen.history_row(row).unwrap()[anchor_column..=column],
+                selected
+            );
         }
     }
 
@@ -1004,11 +1150,27 @@ mod tests {
         assert_eq!(encode_focus(true, true), Some(&b"\x1b[I"[..]));
         assert!(encode_focus(false, false).is_none());
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Press(0), 2, 3, PtyMouseMode::Click, true, Default::default()).unwrap(),
+            encode_sgr_mouse(
+                PtyMouseEvent::Press(0),
+                2,
+                3,
+                PtyMouseMode::Click,
+                true,
+                Default::default()
+            )
+            .unwrap(),
             b"\x1b[<0;3;4M"
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Move(0), 1, 1, PtyMouseMode::Click, true, Default::default()).is_none()
+            encode_sgr_mouse(
+                PtyMouseEvent::Move(0),
+                1,
+                1,
+                PtyMouseMode::Click,
+                true,
+                Default::default()
+            )
+            .is_none()
         );
         assert_eq!(
             super::encode_terminal_mouse_event(super::TerminalMouseEncoding {

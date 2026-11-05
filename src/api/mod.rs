@@ -36,8 +36,8 @@ pub fn check_compatibility(path: &Path, maximum_bytes: usize) -> Result<ApiCompa
     if bytes.len() > maximum_bytes {
         return Err("API fixture exceeds byte ceiling".into());
     }
-    let required: ApiManifest = serde_json::from_slice(&bytes)
-        .map_err(|error| error.to_string())?;
+    let required: ApiManifest =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     let current = manifest()?;
     let mut reasons = Vec::new();
     if required.command_api < current.minimum_compatible_command_api
@@ -257,7 +257,11 @@ mod tests {
     #[test]
     fn persistence_schema_must_match_the_reader() {
         let mut required = super::manifest().unwrap();
-        for version in [0, super::PERSISTENCE_SCHEMA_VERSION - 1, super::PERSISTENCE_SCHEMA_VERSION + 1] {
+        for version in [
+            0,
+            super::PERSISTENCE_SCHEMA_VERSION - 1,
+            super::PERSISTENCE_SCHEMA_VERSION + 1,
+        ] {
             required.persistence_schema = version;
             assert!(!compatibility(&required).compatible);
         }
@@ -274,7 +278,9 @@ mod tests {
     fn removed_installer_is_not_supported() {
         let mut required = super::manifest().unwrap();
         assert!(!required.capabilities.contains_key("installer"));
-        required.capabilities.insert("installer".into(), "user-local-atomic-v1".into());
+        required
+            .capabilities
+            .insert("installer".into(), "user-local-atomic-v1".into());
         assert!(!compatibility(&required).compatible);
     }
 

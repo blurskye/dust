@@ -5,12 +5,17 @@ use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 #[test]
 fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("oldest"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("oldest"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
-    let (_, first_view) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+    let (_, first_view) = app
+        .state
+        .open_text(TextBuffer::from_text("first"), None)
+        .unwrap();
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -55,7 +60,9 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
 #[test]
 fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("first"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
@@ -63,18 +70,38 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
     )));
     let second_view = app.state.active_view.unwrap();
     let second_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
-    let first = app.window_session.editor_ids().window_for(first_pane).unwrap();
-    let second = app.window_session.editor_ids().window_for(second_pane).unwrap();
+    let first = app
+        .window_session
+        .editor_ids()
+        .window_for(first_pane)
+        .unwrap();
+    let second = app
+        .window_session
+        .editor_ids()
+        .window_for(second_pane)
+        .unwrap();
     let first_target = format!("window:{}", first.0);
     let second_target = format!("window:{}", second.0);
-    app.place_graph_window(&second_target, WindowPlacement::Floating(WindowRect {
-        x: 1, y: 1, width: 30, height: 8,
-    })).unwrap();
-    app.place_graph_window(&first_target, WindowPlacement::Fullscreen).unwrap();
-    app.swap_graph_windows(&first_target, &second_target).unwrap();
+    app.place_graph_window(
+        &second_target,
+        WindowPlacement::Floating(WindowRect {
+            x: 1,
+            y: 1,
+            width: 30,
+            height: 8,
+        }),
+    )
+    .unwrap();
+    app.place_graph_window(&first_target, WindowPlacement::Fullscreen)
+        .unwrap();
+    app.swap_graph_windows(&first_target, &second_target)
+        .unwrap();
     assert_eq!(app.window_session.graph().focused(), Some(second));
     assert_eq!(app.state.active_view, Some(second_view));
-    assert_eq!(app.state.tabs[app.state.active_tab.unwrap()].focused, second_pane);
+    assert_eq!(
+        app.state.tabs[app.state.active_tab.unwrap()].focused,
+        second_pane
+    );
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.graph().focused(), Some(second));
 }
@@ -83,7 +110,10 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
 fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
     for reverse in [false, true] {
         let (_app_dirs, mut app) = app();
-        let (_, original_view) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+        let (_, original_view) = app
+            .state
+            .open_text(TextBuffer::from_text("first"), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.reconcile_editor_windows();
         let original = app.window_session.graph().focused().unwrap();
@@ -97,12 +127,40 @@ fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
         } else {
             (original, clone, clone_view)
         };
-        let rect = WindowPlacement::Floating(WindowRect { x: 2, y: 2, width: 30, height: 8 });
-        app.place_graph_window(&format!("window:{}", floating.0), rect).unwrap();
-        app.place_graph_window(&format!("window:{}", fullscreen.0), WindowPlacement::Fullscreen).unwrap();
-        app.swap_graph_windows(&format!("window:{}", original.0), &format!("window:{}", clone.0)).unwrap();
-        assert_eq!(app.window_session.graph().window(floating).unwrap().placement, WindowPlacement::Fullscreen);
-        assert_eq!(app.window_session.graph().window(fullscreen).unwrap().placement, rect);
+        let rect = WindowPlacement::Floating(WindowRect {
+            x: 2,
+            y: 2,
+            width: 30,
+            height: 8,
+        });
+        app.place_graph_window(&format!("window:{}", floating.0), rect)
+            .unwrap();
+        app.place_graph_window(
+            &format!("window:{}", fullscreen.0),
+            WindowPlacement::Fullscreen,
+        )
+        .unwrap();
+        app.swap_graph_windows(
+            &format!("window:{}", original.0),
+            &format!("window:{}", clone.0),
+        )
+        .unwrap();
+        assert_eq!(
+            app.window_session
+                .graph()
+                .window(floating)
+                .unwrap()
+                .placement,
+            WindowPlacement::Fullscreen
+        );
+        assert_eq!(
+            app.window_session
+                .graph()
+                .window(fullscreen)
+                .unwrap()
+                .placement,
+            rect
+        );
         assert_eq!(app.window_session.graph().focused(), Some(floating));
         assert_eq!(app.state.active_view, Some(floating_view));
         app.window_session.graph().validate().unwrap();
@@ -112,28 +170,48 @@ fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
 #[test]
 fn showing_the_last_editor_dismisses_the_dashboard() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let editor = app.window_session.graph().focused().unwrap();
-    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Hidden).unwrap();
+    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Hidden)
+        .unwrap();
     assert!(app.window_session.dashboard_visible());
-    app.show_graph_window(&format!("window:{}", editor.0)).unwrap();
+    app.show_graph_window(&format!("window:{}", editor.0))
+        .unwrap();
     assert!(!app.window_session.dashboard_visible());
     assert_eq!(app.active_input_context(), "editor.normal");
     assert_eq!(app.window_session.graph().focused(), Some(editor));
     let dashboard = app.window_session.native_ids().dashboard().unwrap().window;
-    assert_eq!(app.window_session.graph().window(dashboard).unwrap().placement, WindowPlacement::Hidden);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(dashboard)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
 }
 
 #[test]
 fn perpendicular_docked_editor_resizes_do_nothing() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let editor = app.window_session.graph().focused().unwrap();
-    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    app.place_graph_window(
+        &format!("window:{}", editor.0),
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 20,
+        },
+    )
+    .unwrap();
     let graph = app.window_session.graph().clone();
     for key in ["ctrl-up", "ctrl-down"] {
         app.handle_configured_key(key.parse().unwrap());
@@ -145,54 +223,98 @@ fn perpendicular_docked_editor_resizes_do_nothing() {
 #[test]
 fn tiled_window_resize_accepts_the_minimum_delta() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
-    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
     app.resize_graph_window("focused", i16::MIN).unwrap();
-    assert!(matches!(app.state.tabs[app.state.active_tab.unwrap()].root,
-        crate::editor::LayoutNode::Split { ratio: 900, .. }));
+    assert!(matches!(
+        app.state.tabs[app.state.active_tab.unwrap()].root,
+        crate::editor::LayoutNode::Split { ratio: 900, .. }
+    ));
 }
 
 #[test]
 fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let first = app.window_session.graph().focused().unwrap();
-    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
-    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
-    app.place_graph_window("focused", WindowPlacement::Hidden).unwrap();
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    app.place_graph_window("focused", WindowPlacement::Hidden)
+        .unwrap();
     let tab = app.state.active_tab.unwrap();
     app.handle_configured_key("ctrl-right".parse().unwrap());
-    let crate::editor::LayoutNode::Split { ratio, second, .. } = &app.state.tabs[tab].root else { panic!("outer split"); };
+    let crate::editor::LayoutNode::Split { ratio, second, .. } = &app.state.tabs[tab].root else {
+        panic!("outer split");
+    };
     assert!(*ratio < 500);
-    assert!(matches!(**second, crate::editor::LayoutNode::Split { ratio: 500, .. }));
+    assert!(matches!(
+        **second,
+        crate::editor::LayoutNode::Split { ratio: 500, .. }
+    ));
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 
-    app.place_graph_window(&format!("window:{}", first.0), WindowPlacement::Hidden).unwrap();
-    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
-        profile: "shell".into(), screen: PtyScreen::new(20, 20, 100),
-        running: true, exit_code: None, truncated: false,
-    }, app.workspace.version());
+    app.place_graph_window(&format!("window:{}", first.0), WindowPlacement::Hidden)
+        .unwrap();
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(20, 20, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
     app.terminal_session.select(PtyId(1));
     app.set_terminal_focus(true);
     app.sync_terminal_panel();
-    app.place_graph_window("terminal", WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    app.place_graph_window(
+        "terminal",
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 20,
+        },
+    )
+    .unwrap();
     app.process_effect(AppEffect::TerminalUnfocus);
     let root = app.state.tabs[tab].root.clone();
     app.handle_configured_key("ctrl-right".parse().unwrap());
     assert_eq!(app.state.tabs[tab].root, root);
     let terminal = app.window_session.native_ids().terminal(1).unwrap().window;
-    assert_eq!(app.window_session.graph().window(terminal).unwrap().placement,
-        WindowPlacement::Docked { edge: DockEdge::Right, size: 20 - crate::ui::render::TERMINAL_PANEL_RESIZE_STEP });
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal)
+            .unwrap()
+            .placement,
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 20 - crate::ui::render::TERMINAL_PANEL_RESIZE_STEP
+        }
+    );
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 }
 
 #[test]
 fn directional_resize_uses_the_focused_explorer_clone() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let primary = app.window_session.native_ids().explorer().unwrap().window;
@@ -298,7 +420,8 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
     );
 
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("editor"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.ui.picker = Some(crate::ui::PickerUiState {
         preview_side_scroll: (0, 0),
@@ -371,7 +494,8 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
 fn notifications_expire_but_remain_available_in_bounded_history() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
-        std::time::UNIX_EPOCH, Instant::now(),
+        std::time::UNIX_EPOCH,
+        Instant::now(),
     ));
     app.clock = clock.clone();
     app.notify_message("first".into(), false);
@@ -395,7 +519,11 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
         app.notify_message(format!("notice {index}"), false);
     }
     app.invoke_mapped_command("application.notifications.open");
-    let picker = app.ui.picker.as_ref().expect("bounded notification history");
+    let picker = app
+        .ui
+        .picker
+        .as_ref()
+        .expect("bounded notification history");
     assert_eq!(picker.rows.len(), 200);
     assert_eq!(picker.rows.first().unwrap().label, "notice 204");
     assert_eq!(picker.rows.last().unwrap().label, "notice 5");
@@ -410,7 +538,10 @@ fn log_selection_survives_eviction_of_an_earlier_entry() {
     app.show_lsp_logs();
     app.picker_move(-1);
     let selected = app.ui.picker.as_ref().unwrap().selected.unwrap();
-    assert_eq!(app.ui.picker.as_ref().unwrap().rows[selected].label, "selected");
+    assert_eq!(
+        app.ui.picker.as_ref().unwrap().rows[selected].label,
+        "selected"
+    );
     app.language.append_log("new".into(), 3);
     app.show_lsp_logs();
     let picker = app.ui.picker.as_ref().unwrap();
@@ -421,7 +552,10 @@ fn log_selection_survives_eviction_of_an_earlier_entry() {
 fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("original.rs");
-    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone())).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone()))
+        .unwrap();
     app.set_dashboard_visibility(false);
     let row = crate::debugger::DapSourceBreakpoint {
         path,
@@ -433,19 +567,27 @@ fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings(
     };
     app.debugger_session.breakpoint(row.clone(), false).unwrap();
     app.process_effect(AppEffect::DapBreakpointConfigure {
-        condition: None, hit_condition: None, log_message: None,
+        condition: None,
+        hit_condition: None,
+        log_message: None,
     });
     assert_eq!(app.input.prompt().unwrap().input, "old");
     // An asynchronous stop can navigate while the condition question is open.
     app.state.views[view].cursor = ByteOffset(6);
     let another = app.state.workspace_root.join("another.rs");
-    app.state.open_text(TextBuffer::from_text("another"), Some(another)).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("another"), Some(another))
+        .unwrap();
     app.input.prompt_insert(" && ready");
     app.submit_prompt();
     let mut expected = row;
     expected.condition = Some("old && ready".into());
     assert_eq!(app.debugger_session.persisted_breakpoints().len(), 1);
-    assert_eq!(app.debugger_session.breakpoint_at(&expected.path, expected.line), Some(&expected));
+    assert_eq!(
+        app.debugger_session
+            .breakpoint_at(&expected.path, expected.line),
+        Some(&expected)
+    );
 }
 
 #[test]
@@ -463,11 +605,19 @@ fn saved_watches_are_listed_without_a_debugger() {
 #[test]
 fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
     let (_app_dirs, mut app) = app();
-    for index in 0..200 { app.append_lsp_log(format!("message {index}")); }
+    for index in 0..200 {
+        app.append_lsp_log(format!("message {index}"));
+    }
     app.show_lsp_logs();
     app.search.picker_move(-1, false);
     app.sync_picker_ui();
-    let before = app.search.picker().unwrap().selected_item().unwrap().clone();
+    let before = app
+        .search
+        .picker()
+        .unwrap()
+        .selected_item()
+        .unwrap()
+        .clone();
     app.append_lsp_log("new message".into());
     let after = app.search.picker().unwrap().selected_item().unwrap();
     assert_eq!(before.id, after.id);
@@ -512,7 +662,9 @@ fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new
 #[test]
 fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     for kind in [PickerSurfaceKind::Problems, PickerSurfaceKind::Output] {
         if kind == PickerSurfaceKind::Problems {
@@ -522,18 +674,30 @@ fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
         }
         app.reconcile_editor_windows();
         let ids = app.window_session.native_ids().picker_for(kind).unwrap();
-        assert!(app.ui.content_tabs.iter().any(|entry| entry.identity.0 == ids.content));
+        assert!(
+            app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.identity.0 == ids.content)
+        );
         app.close_picker();
         app.reconcile_editor_windows();
         assert!(app.window_session.graph().content(ids.content).is_some());
-        assert!(!app.ui.content_tabs.iter().any(|entry| entry.identity.0 == ids.content));
+        assert!(
+            !app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.identity.0 == ids.content)
+        );
     }
 }
 
 #[test]
 fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
 
     app.open_builtin_picker(PickerKind::Diagnostics);
@@ -669,7 +833,8 @@ fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
 fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
     let (_app_dirs, mut app) = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.open_prompt(crate::ui::PromptKind::WorkspaceTrust, String::new());
@@ -701,7 +866,8 @@ fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
 fn normalized_mouse_position_invokes_real_cursor_placement() {
     let (_app_dirs, mut app) = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let view = app.state.active_view.expect("view");
@@ -758,7 +924,8 @@ fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
     }
     let (_, view) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("a\tb"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("a\tb"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].scroll_column = 2;
     app.reconcile_editor_windows();
@@ -786,7 +953,11 @@ fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
 fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let (_app_dirs, mut app) = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef abcdef abcdef"), None).unwrap();
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("abcdef abcdef abcdef"),
+            None,
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     let first = app.state.active_view.expect("first view");
     app.state
@@ -796,7 +967,10 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let flash_view = app.state.active_view.unwrap();
     app.reconcile_editor_windows();
     app.begin_flash();
-    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    app.handle_event(UiEvent::Key {
+        key: KeyEvent::character('a'),
+        kind: crate::ui::KeyInputKind::Press,
+    });
     assert!(app.flash.is_some());
     let viewport = crate::ui::pane_viewports(
         &app.state,
@@ -827,8 +1001,12 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     assert_eq!((geometry.3, geometry.4), (viewport.width, viewport.height));
     let (column, row) = app.input.mouse_position().unwrap();
     app.handle_event(UiEvent::Mouse {
-        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
-        column, row,
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseLeftDown,
+            Default::default(),
+        ),
+        column,
+        row,
     });
     assert_eq!(app.state.active_view, Some(first));
     assert_eq!(
@@ -837,7 +1015,10 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     );
     assert!(app.flash.is_none());
     assert!(app.ui.flash.is_none());
-    app.handle_event(UiEvent::Key { key: KeyEvent::character('l'), kind: crate::ui::KeyInputKind::Press });
+    app.handle_event(UiEvent::Key {
+        key: KeyEvent::character('l'),
+        kind: crate::ui::KeyInputKind::Press,
+    });
     assert_eq!(app.state.views[first].cursor, ByteOffset(2));
     assert_eq!(app.state.views[flash_view].cursor, ByteOffset(0));
 }
@@ -1039,12 +1220,15 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     *app.state = draft.accept(&app.state.version()).unwrap();
     app.reconcile_editor_windows();
     assert_eq!(app.state.buffers[buffer].text.to_string(), refresh.text);
-    assert_eq!(app.state.buffers[buffer].origin, crate::editor::BufferOrigin::VirtualReadOnly {
-        owner: refresh.plugin.clone(),
-        generation: refresh.load.0,
-        document: refresh.document,
-        revision: refresh.revision,
-    });
+    assert_eq!(
+        app.state.buffers[buffer].origin,
+        crate::editor::BufferOrigin::VirtualReadOnly {
+            owner: refresh.plugin.clone(),
+            generation: refresh.load.0,
+            document: refresh.document,
+            revision: refresh.revision,
+        }
+    );
     assert_eq!(
         (app.state.active_view, app.window_session.graph().focused()),
         ids
@@ -1064,7 +1248,8 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
     let (_app_dirs, mut app) = app();
     let (buffer, original_view) = app
         .state
-        .open_text(TextBuffer::from_text("αbc\nline"), None).unwrap();
+        .open_text(TextBuffer::from_text("αbc\nline"), None)
+        .unwrap();
     {
         let view = &mut app.state.views[original_view];
         view.cursor = crate::editor::text::ByteOffset(2);
@@ -1271,7 +1456,9 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
 #[test]
 fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
 
     app.terminal_session.fixture(
@@ -1315,7 +1502,8 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
     let (_closed_app_dirs, mut closed_app) = super::app();
     closed_app
         .state
-        .open_text(TextBuffer::from_text("close then clone"), None).unwrap();
+        .open_text(TextBuffer::from_text("close then clone"), None)
+        .unwrap();
     let first_tab = closed_app.state.active_tab.expect("first tab");
     let first_pane = closed_app.state.tabs[first_tab].focused;
     closed_app.state.new_tab().expect("remaining tab");
@@ -1360,7 +1548,9 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
 #[test]
 fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let window = app.window_session.graph().focused().expect("source window");
@@ -1391,7 +1581,8 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("virtual"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("virtual"), None)
+        .unwrap();
     app.state.buffers[buffer].read_only = true;
     app.state.buffers[buffer].origin = crate::editor::BufferOrigin::VirtualReadOnly {
         owner: "demo".into(),
@@ -1429,7 +1620,10 @@ fn ordinary_read_only_files_can_reload_without_becoming_writable() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("external.txt");
     fs::write(&path, "old").unwrap();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+        .unwrap();
     app.state.buffers[buffer].read_only = true;
     fs::write(&path, "new").unwrap();
     app.start_reload(true);
@@ -1443,7 +1637,9 @@ fn gate_document_worker(app: &mut InteractiveApplication) -> std::sync::mpsc::Se
     let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(8);
     app.documents = crate::editor::session::documents::DocumentSession::new(
         worker,
-        &StartupTarget::Dashboard { root: app.state.workspace_root.clone() },
+        &StartupTarget::Dashboard {
+            root: app.state.workspace_root.clone(),
+        },
         app.state.window_version(),
         app.workspace.root_revision(),
         8,
@@ -1459,9 +1655,15 @@ fn a_pending_open_reserves_its_save_destination() {
         let destination = root.join("b.txt");
         fs::write(&destination, "original B").unwrap();
         fs::create_dir(root.join("sub")).unwrap();
-        app.state.open_text(TextBuffer::from_text("A"), Some(root.join("a.txt"))).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("A"), Some(root.join("a.txt")))
+            .unwrap();
         let gate = gate_document_worker(&mut app);
-        app.start_open(if alias { root.join("sub/../b.txt") } else { destination.clone() });
+        app.start_open(if alias {
+            root.join("sub/../b.txt")
+        } else {
+            destination.clone()
+        });
         app.start_save(false, Some(destination.clone()), true);
         gate.send(()).unwrap();
         wait_vfs(&mut app);
@@ -1479,7 +1681,10 @@ fn saves_and_reloads_wait_for_the_same_buffers_completion() {
         let root = app.state.workspace_root.clone();
         let original = root.join("a.txt");
         fs::write(&original, "disk").unwrap();
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text("buffer"), Some(original.clone())).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text("buffer"), Some(original.clone()))
+            .unwrap();
         let gate = gate_document_worker(&mut app);
         if reload_first {
             app.start_reload(true);
@@ -1487,9 +1692,21 @@ fn saves_and_reloads_wait_for_the_same_buffers_completion() {
             app.start_save(false, Some(root.join("b.txt")), false);
         }
         app.start_save(false, Some(root.join("c.txt")), true);
-        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .unwrap()
+                .contains("already pending")
+        );
         app.start_reload(true);
-        assert!(app.ui.notification.as_deref().unwrap().contains("already pending"));
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .unwrap()
+                .contains("already pending")
+        );
         gate.send(()).unwrap();
         wait_vfs(&mut app);
         assert!(!root.join("c.txt").exists());
@@ -1498,13 +1715,22 @@ fn saves_and_reloads_wait_for_the_same_buffers_completion() {
             assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
         } else {
             assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"buffer");
-            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("b.txt")));
+            assert_eq!(
+                app.state.buffers[buffer].path.as_ref(),
+                Some(&root.join("b.txt"))
+            );
         }
         // Admission resumes after the first result has been reconciled.
         app.start_save(false, Some(root.join("c.txt")), false);
         wait_vfs(&mut app);
-        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&root.join("c.txt")));
-        assert_eq!(fs::read(root.join("c.txt")).unwrap(), app.state.buffers[buffer].text.to_bytes());
+        assert_eq!(
+            app.state.buffers[buffer].path.as_ref(),
+            Some(&root.join("c.txt"))
+        );
+        assert_eq!(
+            fs::read(root.join("c.txt")).unwrap(),
+            app.state.buffers[buffer].text.to_bytes()
+        );
     }
 }
 
@@ -1515,7 +1741,10 @@ fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
     let path = root.join("file.txt");
     fs::create_dir(root.join("sub")).unwrap();
     fs::write(&path, "old").unwrap();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+        .unwrap();
     app.invoke_insert_text("new ".into());
     app.start_save(false, Some(root.join("sub/../file.txt")), false);
     wait_vfs(&mut app);
@@ -1540,7 +1769,10 @@ fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
     fs::write(&original, "old").unwrap();
     fs::write(&other, "unrelated").unwrap();
     std::os::unix::fs::symlink(&original, &alias).unwrap();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(original.clone())).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("old"), Some(original.clone()))
+        .unwrap();
     app.invoke_insert_text("new ".into());
     let gate = gate_document_worker(&mut app);
     app.start_save(false, Some(alias.clone()), false);
@@ -1560,7 +1792,10 @@ fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("file.txt");
         fs::write(&path, "a\nb\n").unwrap();
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text("a\nb\n"), Some(path.clone())).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text("a\nb\n"), Some(path.clone()))
+            .unwrap();
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::CrLf;
         app.configuration.install_fixture(fixture);
@@ -1573,13 +1808,23 @@ fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
         wait_vfs(&mut app);
         assert_eq!(fs::read(&path).unwrap(), b"a\r\nb\r\n");
         assert_eq!(app.state.buffers[buffer].dirty, edit_during_save);
-        assert_eq!(app.state.buffers[buffer].text.format().preferred_line_ending, crate::editor::text::LineEnding::CrLf);
+        assert_eq!(
+            app.state.buffers[buffer]
+                .text
+                .format()
+                .preferred_line_ending,
+            crate::editor::text::LineEnding::CrLf
+        );
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::Preserve;
         app.configuration.install_fixture(fixture);
         app.start_save(false, None, false);
         wait_vfs(&mut app);
-        let expected = if edit_during_save { b"new\r\na\r\nb\r\n".as_slice() } else { b"a\r\nb\r\n".as_slice() };
+        let expected = if edit_during_save {
+            b"new\r\na\r\nb\r\n".as_slice()
+        } else {
+            b"a\r\nb\r\n".as_slice()
+        };
         assert_eq!(fs::read(&path).unwrap(), expected);
         assert!(!app.state.buffers[buffer].dirty);
     }
@@ -1589,12 +1834,19 @@ fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
 fn shutdown_saves_normalized_text_with_resumable_undo_history() {
     for (source, policy, saved) in [
         ("base", crate::config::FinalNewlinePolicy::Insert, "Xbase\n"),
-        ("base\n\n", crate::config::FinalNewlinePolicy::Remove, "Xbase"),
+        (
+            "base\n\n",
+            crate::config::FinalNewlinePolicy::Remove,
+            "Xbase",
+        ),
     ] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("normalized.txt");
         fs::write(&path, source).unwrap();
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text(source), Some(path.clone())).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text(source), Some(path.clone()))
+            .unwrap();
         app.set_dashboard_visibility(false);
         let directory = app.persistence.undo_directory();
         app.state.undo_directory = Some(directory.clone());
@@ -1604,19 +1856,24 @@ fn shutdown_saves_normalized_text_with_resumable_undo_history() {
         app.configuration.install_fixture(fixture);
         app.invoke_insert_text("X".into());
         app.start_save(true, None, false);
-        app.finish_shutdown_before(Instant::now() + Duration::from_secs(5)).unwrap();
+        app.finish_shutdown_before(Instant::now() + Duration::from_secs(5))
+            .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), saved);
         assert_eq!(app.state.buffers[buffer].text.to_string(), saved);
         assert!(!app.persistence.undo_pending());
         let mut reopened = EditorState::new(app.state.workspace_root.clone());
         reopened.undo_directory = Some(directory);
         reopened.undo_maximum_bytes = 1 << 20;
-        let (id, _) = reopened.open_text(TextBuffer::from_text(saved), Some(path)).unwrap();
+        let (id, _) = reopened
+            .open_text(TextBuffer::from_text(saved), Some(path))
+            .unwrap();
         for expected in [format!("X{source}"), source.into()] {
-            reopened.apply_transaction(
-                &EditorTransaction::new(TransactionId(1))
-                    .with_operation(EditorOperation::Undo { buffer: id }),
-            ).unwrap();
+            reopened
+                .apply_transaction(
+                    &EditorTransaction::new(TransactionId(1))
+                        .with_operation(EditorOperation::Undo { buffer: id }),
+                )
+                .unwrap();
             assert_eq!(reopened.buffers[id].text.to_string(), expected);
         }
     }
@@ -1627,7 +1884,9 @@ fn undo_history_failures_are_notified_and_fail_shutdown() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("history.txt");
     fs::write(&path, "base").unwrap();
-    app.state.open_text(TextBuffer::from_text("base"), Some(path)).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("base"), Some(path))
+        .unwrap();
     app.set_dashboard_visibility(false);
     let invalid = app.state.workspace_root.join("not-a-directory");
     fs::write(&invalid, "occupied").unwrap();
@@ -1642,7 +1901,12 @@ fn undo_history_failures_are_notified_and_fail_shutdown() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
-    assert!(app.ui.notification.as_ref().is_some_and(|text| text.contains("could not save undo history")));
+    assert!(
+        app.ui
+            .notification
+            .as_ref()
+            .is_some_and(|text| text.contains("could not save undo history"))
+    );
     assert!(app.finish_shutdown_before(deadline).is_err());
 }
 
@@ -1670,7 +1934,8 @@ fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close(
     let (_app_dirs, mut app) = app();
     let (dirty, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.buffers[dirty].dirty = true;
     app.state
@@ -1704,10 +1969,13 @@ fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("dirty-close.txt");
     std::fs::write(&path, "saved\n").unwrap();
-    let (buffer, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("saved\n"),
-        Some(path.clone()),
-    ).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("saved\n"),
+            Some(path.clone()),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.buffers[buffer]
         .text
@@ -1775,13 +2043,15 @@ fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() 
     let (_app_dirs, mut app) = app();
     let (keeper, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("keeper"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("keeper"), None)
+        .unwrap();
     app.state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .unwrap();
     let (dirty, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("dirty"), None)
+        .unwrap();
     app.state.set_buffer_dirty(dirty, true);
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
@@ -1814,10 +2084,13 @@ fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() 
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("save-before-close.txt");
     std::fs::write(&path, "old\n").unwrap();
-    let (buffer, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("old\n"),
-        Some(path.clone()),
-    ).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("old\n"),
+            Some(path.clone()),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.buffers[buffer]
         .text
@@ -1836,10 +2109,13 @@ fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() 
 
     let directory = app.state.workspace_root.join("not-a-file");
     std::fs::create_dir(&directory).unwrap();
-    let (failed, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("dirty\n"),
-        Some(directory),
-    ).unwrap();
+    let (failed, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("dirty\n"),
+            Some(directory),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.set_buffer_dirty(failed, true);
     app.reconcile_editor_windows();
@@ -1874,26 +2150,34 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     let (_app_dirs, mut app) = app();
     let keeper = app.state.workspace_root.join("keeper.txt");
     std::fs::write(&keeper, "keeper\n").unwrap();
-    app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("keeper\n"),
-        Some(keeper),
-    ).unwrap();
+    app.state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("keeper\n"),
+            Some(keeper),
+        )
+        .unwrap();
     app.state.new_tab().unwrap();
     let first_path = app.state.workspace_root.join("first.txt");
     let second_path = app.state.workspace_root.join("second.rs");
     std::fs::write(&first_path, "first\n").unwrap();
     std::fs::write(&second_path, "second\n").unwrap();
-    let (first, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("first\n"),
-        Some(first_path.clone()),
-    ).unwrap();
+    let (first, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("first\n"),
+            Some(first_path.clone()),
+        )
+        .unwrap();
     app.state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .unwrap();
-    let (second, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("second\n"),
-        Some(second_path),
-    ).unwrap();
+    let (second, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("second\n"),
+            Some(second_path),
+        )
+        .unwrap();
     let (_, document) = app.active_lsp_document().unwrap();
     let definition = app
         .tooling
@@ -1973,13 +2257,15 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     app.state.new_tab().unwrap();
     let (a, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("a"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("a"), None)
+        .unwrap();
     app.state
         .split_active(crate::editor::Axis::Vertical, 500)
         .unwrap();
     let (b, _) = app
         .state
-        .open_text(crate::editor::text::TextBuffer::from_text("b"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("b"), None)
+        .unwrap();
     app.state.set_buffer_dirty(a, true);
     app.state.set_buffer_dirty(b, true);
     app.reconcile_editor_windows();
@@ -2022,29 +2308,44 @@ fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
     app.configuration.install_fixture(fixture);
     app.project_configuration();
     assert_eq!(app.ui.dashboard_selected, 1);
-    assert_eq!(app.configuration.dashboard_invocation(app.ui.dashboard_selected).unwrap().id.as_str(), expected);
+    assert_eq!(
+        app.configuration
+            .dashboard_invocation(app.ui.dashboard_selected)
+            .unwrap()
+            .id
+            .as_str(),
+        expected
+    );
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.dashboard.action.clear();
     app.configuration.install_fixture(fixture);
     app.project_configuration();
     assert_eq!(app.ui.dashboard_selected, 0);
-    assert!(app.configuration.dashboard_invocation(app.ui.dashboard_selected).is_none());
+    assert!(
+        app.configuration
+            .dashboard_invocation(app.ui.dashboard_selected)
+            .is_none()
+    );
 }
 
 #[test]
 fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text(&"line\n".repeat(30)), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text(&"line\n".repeat(30)), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.handle_event(crate::ui::UiEvent::Resize(80, 24));
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         typed: 0,
-        items: (0..16).map(|_| crate::ui::CompletionItem {
-            icon: None,
-            color: None,
-            label: "completion".into(),
-            detail: "detail".repeat(12),
-        }).collect(),
+        items: (0..16)
+            .map(|_| crate::ui::CompletionItem {
+                icon: None,
+                color: None,
+                label: "completion".into(),
+                detail: "detail".repeat(12),
+            })
+            .collect(),
         selected: 0,
         scroll: 0,
     });
@@ -2053,7 +2354,10 @@ fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() 
         "Completion".into(),
         String::new(),
         None,
-        [(crate::ui::DocumentationMarkupKind::PlainText, format!("{}THE-END", "x".repeat(2000)))],
+        [(
+            crate::ui::DocumentationMarkupKind::PlainText,
+            format!("{}THE-END", "x".repeat(2000)),
+        )],
         app.configuration.settings(),
         80,
     );
@@ -2062,7 +2366,12 @@ fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() 
         app.process_effect(AppEffect::LspDocumentationScroll(1));
     }
     let (frame, geometry) = crate::ui::render::render_with_documentation_geometry(
-        &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 80, 24,
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        80,
+        24,
     );
     let (visible, total) = geometry.unwrap();
     assert_eq!(app.input.documentation().unwrap().scroll, total - visible);
@@ -2112,7 +2421,8 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
     app.invoke_insert_text("A".into());
@@ -2155,20 +2465,34 @@ fn recovery_retention_keeps_all_live_dirty_journals() {
     let (_app_dirs, mut app) = app();
     let mut journals = Vec::new();
     for index in 0..101 {
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text(&format!("draft {index}")), None).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text(&format!("draft {index}")), None)
+            .unwrap();
         app.state.set_buffer_dirty(buffer, true);
         journals.push(app.recovery.path(buffer));
     }
     let deadline = Instant::now() + Duration::from_secs(10);
-    while app.recovery.unwritten(&app.state, &app.configuration.settings().recovery) > 0 {
+    while app
+        .recovery
+        .unwritten(&app.state, &app.configuration.settings().recovery)
+        > 0
+    {
         assert!(Instant::now() < deadline);
         app.queue_dirty_recovery_before_exit();
         wait_vfs(&mut app);
     }
     app.schedule_recovery_work();
     wait_vfs(&mut app);
-    assert!(journals.iter().all(|path| path.exists()), "retention must not delete live drafts");
-    assert_eq!(app.recovery.unwritten(&app.state, &app.configuration.settings().recovery), 0);
+    assert!(
+        journals.iter().all(|path| path.exists()),
+        "retention must not delete live drafts"
+    );
+    assert_eq!(
+        app.recovery
+            .unwritten(&app.state, &app.configuration.settings().recovery),
+        0
+    );
 }
 
 #[test]
@@ -2177,7 +2501,10 @@ fn recovery_save_and_close_removes_the_older_journal() {
     app.recovery.skip_maintenance();
     let path = app.state.workspace_root.join("close-recovery.txt");
     fs::write(&path, "saved").unwrap();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("saved"), Some(path.clone())).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("saved"), Some(path.clone()))
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.invoke_insert_text("A".into());
     app.queue_dirty_recovery_before_exit();
@@ -2188,7 +2515,8 @@ fn recovery_save_and_close_removes_the_older_journal() {
     let expected = app.state.buffers[buffer].text.to_string();
     app.reconcile_editor_windows();
     app.close_active_buffer(false);
-    app.input.select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     wait_vfs(&mut app);
     assert!(!app.state.buffers.contains_key(buffer));
@@ -2203,7 +2531,8 @@ fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().unwrap();
     app.invoke_insert_text("A".into());
@@ -2231,7 +2560,8 @@ fn recovery_rewrites_the_path_without_a_text_revision_change() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().unwrap();
     app.invoke_insert_text("A".into());
@@ -2252,15 +2582,26 @@ fn recovery_rewrites_the_path_without_a_text_revision_change() {
 fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
-    app.state.open_text(
-        crate::editor::text::TextBuffer::from_text(&"x".repeat(12 * 1024 * 1024)),
-        None,
-    ).unwrap();
+    app.state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text(&"x".repeat(12 * 1024 * 1024)),
+            None,
+        )
+        .unwrap();
     let buffer = app.state.active_buffer_id().unwrap();
     app.state.buffers[buffer].dirty = true;
-    let error = app.finish_shutdown_before(Instant::now()).unwrap_err().to_string();
-    assert!(error.contains("exceed the recovery journal size limit"), "{error}");
-    assert!(error.contains("unsaved contents cannot be recovered"), "{error}");
+    let error = app
+        .finish_shutdown_before(Instant::now())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("exceed the recovery journal size limit"),
+        "{error}"
+    );
+    assert!(
+        error.contains("unsaved contents cannot be recovered"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -2282,7 +2623,8 @@ fn shutdown_retries_recovery_after_document_admission_drains() {
         app.documents.read(file.clone()).unwrap();
     }
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().unwrap();
     app.invoke_insert_text("A".into());
@@ -2373,7 +2715,8 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     let buffer = app.state.active_buffer_id().expect("buffer");
     let journal = app.recovery.directory().join("recovered-draft.toml");
@@ -2412,7 +2755,10 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     app.state.buffers[buffer].mark_saved(latest);
     app.schedule_recovery_work();
     wait_vfs(&mut app);
-    assert!(!journal.exists(), "saving removes the recovered journal, not a new session path");
+    assert!(
+        !journal.exists(),
+        "saving removes the recovered journal, not a new session path"
+    );
 }
 
 #[test]
@@ -2424,7 +2770,8 @@ fn disabled_recovery_policy_schedules_no_work() {
         app.configuration.install_fixture(fixture);
     }
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("base"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("base"), None)
+        .unwrap();
     app.invoke_insert_text("X".into());
     app.schedule_recovery_work();
     assert!(app.recovery.scheduled().is_empty());
@@ -2434,14 +2781,20 @@ fn disabled_recovery_policy_schedules_no_work() {
 #[test]
 fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
     let (_app_dirs, mut app) = app();
-    let (first, _) = app.state.open_text(
-        TextBuffer::from_text("first"),
-        Some(PathBuf::from("/workspace/first.rs")),
-    ).unwrap();
-    let (second, _) = app.state.open_text(
-        TextBuffer::from_text("second"),
-        Some(PathBuf::from("/workspace/second.rs")),
-    ).unwrap();
+    let (first, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        )
+        .unwrap();
+    let (second, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/second.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     assert_eq!(app.state.active_buffer_id(), Some(second));
 
@@ -2454,20 +2807,33 @@ fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
 #[test]
 fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
     let (_app_dirs, mut app) = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("abc abc abc"), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abc abc abc"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     app.set_explorer_focus(false);
     app.reconcile_editor_windows();
     app.begin_flash();
-    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    app.handle_event(UiEvent::Key {
+        key: KeyEvent::character('a'),
+        kind: crate::ui::KeyInputKind::Press,
+    });
     assert!(app.flash.is_some());
     let rect = app.explorer_window_rect().unwrap();
     app.handle_event(UiEvent::Mouse {
-        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
-        column: rect.x + 1, row: rect.y + 1,
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseLeftDown,
+            Default::default(),
+        ),
+        column: rect.x + 1,
+        row: rect.y + 1,
     });
-    app.handle_event(UiEvent::Key { key: KeyEvent::character('j'), kind: crate::ui::KeyInputKind::Press });
+    app.handle_event(UiEvent::Key {
+        key: KeyEvent::character('j'),
+        kind: crate::ui::KeyInputKind::Press,
+    });
     assert!(app.flash.is_none());
     assert!(app.ui.flash.is_none());
     assert!(app.window_session.explorer_focused());
@@ -2477,29 +2843,58 @@ fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
 #[test]
 fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
     let (_app_dirs, mut app) = app();
-    let (first, _) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
-    let (second, _) = app.state.open_text(TextBuffer::from_text("second"), None).unwrap();
+    let (first, _) = app
+        .state
+        .open_text(TextBuffer::from_text("first"), None)
+        .unwrap();
+    let (second, _) = app
+        .state
+        .open_text(TextBuffer::from_text("second"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
-    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
-        profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
-        running: true, exit_code: None, truncated: false,
-    }, app.workspace.version());
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(40, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
     app.terminal_session.select(PtyId(1));
     app.set_terminal_focus(true);
     app.sync_terminal_panel();
     app.process_effect(AppEffect::WindowFloat {
-        target: "terminal".into(), x: 0, y: 0, width: 60, height: 12,
+        target: "terminal".into(),
+        x: 0,
+        y: 0,
+        width: 60,
+        height: 12,
     });
     let target = app.window_session.editor_ids().content_for(first).unwrap();
     let bounds = app.workspace_bounds().unwrap();
-    let column = (0..bounds.width).find(|column| {
-        crate::ui::content_tab_at_column(&app.ui.content_tabs, app.configuration.settings(), bounds.width, *column)
+    let column = (0..bounds.width)
+        .find(|column| {
+            crate::ui::content_tab_at_column(
+                &app.ui.content_tabs,
+                app.configuration.settings(),
+                bounds.width,
+                *column,
+            )
             .is_some_and(|id| id.0 == target)
-    }).unwrap() + bounds.x;
+        })
+        .unwrap()
+        + bounds.x;
     let row = bounds.y + u16::from(app.state.tabs.len() > 1);
     app.handle_event(UiEvent::Mouse {
-        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseRightDown, Default::default()),
-        column, row,
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseRightDown,
+            Default::default(),
+        ),
+        column,
+        row,
     });
     assert!(app.state.buffers.contains_key(first));
     assert!(app.state.buffers.contains_key(second));
@@ -2510,13 +2905,22 @@ fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
 fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
     for running in [false, true] {
         let (_app_dirs, mut app) = app();
-        app.state.open_text(TextBuffer::from_text("source"), None).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("source"), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         for id in [PtyId(1), PtyId(2)] {
-            app.terminal_session.fixture(id, crate::editor::session::terminal::TerminalFixture {
-                profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
-                running, exit_code: (!running).then_some(0), truncated: false,
-            }, app.workspace.version());
+            app.terminal_session.fixture(
+                id,
+                crate::editor::session::terminal::TerminalFixture {
+                    profile: "shell".into(),
+                    screen: PtyScreen::new(40, 8, 100),
+                    running,
+                    exit_code: (!running).then_some(0),
+                    truncated: false,
+                },
+                app.workspace.version(),
+            );
         }
         app.terminal_session.select(PtyId(1));
         app.set_terminal_focus(true);
@@ -2524,9 +2928,19 @@ fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
         app.reconcile_editor_windows();
         let target = app.window_session.native_ids().terminal(2).unwrap().window;
         assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
-        app.close_graph_window(&format!("window:{}", target.0)).unwrap();
+        app.close_graph_window(&format!("window:{}", target.0))
+            .unwrap();
         if running {
-            assert!(app.input.prompt().unwrap().confirmation.as_ref().unwrap().title.contains("#2"));
+            assert!(
+                app.input
+                    .prompt()
+                    .unwrap()
+                    .confirmation
+                    .as_ref()
+                    .unwrap()
+                    .title
+                    .contains("#2")
+            );
             app.submit_terminal_close(crate::ui::ConfirmationChoice::Yes);
         }
         assert!(app.terminal_session.contains(PtyId(1)));
@@ -2539,70 +2953,139 @@ fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
 fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("source.rs");
-    app.state.open_text(TextBuffer::from_text(&"source\n".repeat(15)), Some(path.clone())).unwrap();
+    app.state
+        .open_text(
+            TextBuffer::from_text(&"source\n".repeat(15)),
+            Some(path.clone()),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
-    app.debugger_session.breakpoint(crate::debugger::DapSourceBreakpoint {
-        path: path.clone(), line: 10, column: None,
-        condition: Some("ready".into()), hit_condition: None, log_message: None,
-    }, false).unwrap();
+    app.debugger_session
+        .breakpoint(
+            crate::debugger::DapSourceBreakpoint {
+                path: path.clone(),
+                line: 10,
+                column: None,
+                condition: Some("ready".into()),
+                hit_condition: None,
+                log_message: None,
+            },
+            false,
+        )
+        .unwrap();
     app.project_debug_panes();
     assert_eq!(app.ui.debug_signs[0].line, 9);
-    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
-    app.debugger_session.set_breakpoint_disabled(&path, 10, true);
+    assert_eq!(
+        app.ui.debug_signs[0].kind,
+        crate::ui::DebugSignKind::ConditionalBreakpoint
+    );
+    app.debugger_session
+        .set_breakpoint_disabled(&path, 10, true);
     app.project_debug_panes();
     assert_eq!(app.ui.debug_signs[0].line, 9);
-    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::DisabledBreakpoint);
-    app.debugger_session.set_breakpoint_disabled(&path, 10, false);
+    assert_eq!(
+        app.ui.debug_signs[0].kind,
+        crate::ui::DebugSignKind::DisabledBreakpoint
+    );
+    app.debugger_session
+        .set_breakpoint_disabled(&path, 10, false);
     app.project_debug_panes();
-    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
+    assert_eq!(
+        app.ui.debug_signs[0].kind,
+        crate::ui::DebugSignKind::ConditionalBreakpoint
+    );
 }
 
 #[test]
 fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("source"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("source"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
-    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
-        profile: "shell".into(), screen: PtyScreen::new(20, 24, 100),
-        running: true, exit_code: None, truncated: false,
-    }, app.workspace.version());
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(20, 24, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
     app.terminal_session.select(PtyId(1));
     app.sync_terminal_panel();
-    app.process_effect(AppEffect::WindowDock { target: "terminal".into(), edge: "right".into(), size: 20 });
+    app.process_effect(AppEffect::WindowDock {
+        target: "terminal".into(),
+        edge: "right".into(),
+        size: 20,
+    });
     app.ui.debug_panes = Some(crate::ui::DebugPanesUiState {
-        selected: crate::ui::DebugPane::Sessions, target: String::new(), status: String::new(),
-        threads: Vec::new(), stack: Vec::new(), breakpoints: Vec::new(), variables: Vec::new(),
-        watches: Vec::new(), console: Vec::new(),
+        selected: crate::ui::DebugPane::Sessions,
+        target: String::new(),
+        status: String::new(),
+        threads: Vec::new(),
+        stack: Vec::new(),
+        breakpoints: Vec::new(),
+        variables: Vec::new(),
+        watches: Vec::new(),
+        console: Vec::new(),
     });
     app.window_session.set_debugging(true);
     app.reconcile_editor_windows();
     let bounds = app.workspace_bounds().unwrap();
     let top = crate::ui::workspace_top_rows(&app.state, &app.ui, app.configuration.settings());
-    let region = WindowRect { y: bounds.y + top, height: bounds.height - top, ..bounds };
-    let (column, row) = (region.y..region.y + region.height).find_map(|row| {
-        (region.x..region.x + region.width).find(|column| {
-            crate::ui::debug_pane_tab_at(region, crate::ui::DebugPane::Sessions, *column, row)
-                == Some(crate::ui::DebugPane::Threads)
-        }).map(|column| (column, row))
-    }).expect("visible Threads tab");
+    let region = WindowRect {
+        y: bounds.y + top,
+        height: bounds.height - top,
+        ..bounds
+    };
+    let (column, row) = (region.y..region.y + region.height)
+        .find_map(|row| {
+            (region.x..region.x + region.width)
+                .find(|column| {
+                    crate::ui::debug_pane_tab_at(
+                        region,
+                        crate::ui::DebugPane::Sessions,
+                        *column,
+                        row,
+                    ) == Some(crate::ui::DebugPane::Threads)
+                })
+                .map(|column| (column, row))
+        })
+        .expect("visible Threads tab");
     app.handle_event(UiEvent::Mouse {
-        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
-        column, row,
+        key: KeyEvent::mouse(
+            crate::editor::input::KeyCode::MouseLeftDown,
+            Default::default(),
+        ),
+        column,
+        row,
     });
-    assert_eq!(app.ui.debug_panes.as_ref().unwrap().selected, crate::ui::DebugPane::Threads);
+    assert_eq!(
+        app.ui.debug_panes.as_ref().unwrap().selected,
+        crate::ui::DebugPane::Threads
+    );
 }
 
 #[test]
 fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
     let (_app_dirs, mut app) = app();
-    let (first, _) = app.state.open_text(
-        TextBuffer::from_text("first"),
-        Some(PathBuf::from("/workspace/first.rs")),
-    ).unwrap();
-    let (second, _) = app.state.open_text(
-        TextBuffer::from_text("second"),
-        Some(PathBuf::from("/workspace/second.rs")),
-    ).unwrap();
+    let (first, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        )
+        .unwrap();
+    let (second, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/second.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let bounds = app.workspace_bounds().unwrap();
@@ -2675,12 +3158,22 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
 fn content_line_uses_filename_icons_for_extensionless_files() {
     let (_app_dirs, mut app) = app();
     for name in ["Dockerfile", "Makefile", "README", ".gitignore"] {
-        app.state.open_text(TextBuffer::from_text("file"), Some(PathBuf::from("/workspace").join(name))).unwrap();
+        app.state
+            .open_text(
+                TextBuffer::from_text("file"),
+                Some(PathBuf::from("/workspace").join(name)),
+            )
+            .unwrap();
     }
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     for name in ["Dockerfile", "Makefile", "README", ".gitignore"] {
-        let entry = app.ui.content_tabs.iter().find(|entry| entry.title == name).unwrap();
+        let entry = app
+            .ui
+            .content_tabs
+            .iter()
+            .find(|entry| entry.title == name)
+            .unwrap();
         assert_eq!(entry.icon, crate::files::file_icon(name).unwrap().glyph);
         assert_ne!(entry.icon, SCRATCH_ICON);
     }
@@ -2689,21 +3182,32 @@ fn content_line_uses_filename_icons_for_extensionless_files() {
 #[test]
 fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
     let (_app_dirs, mut app) = app();
-    let (a, _) = app.state.open_text(
-        TextBuffer::from_text("a"),
-        Some(PathBuf::from("/workspace/a.rs")),
-    ).unwrap();
-    let (b, _) = app.state.open_text(
-        TextBuffer::from_text("b"),
-        Some(PathBuf::from("/workspace/b.rs")),
-    ).unwrap();
-    let (c, _) = app.state.open_text(
-        TextBuffer::from_text("c"),
-        Some(PathBuf::from("/workspace/c.rs")),
-    ).unwrap();
+    let (a, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("a"),
+            Some(PathBuf::from("/workspace/a.rs")),
+        )
+        .unwrap();
+    let (b, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("b"),
+            Some(PathBuf::from("/workspace/b.rs")),
+        )
+        .unwrap();
+    let (c, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("c"),
+            Some(PathBuf::from("/workspace/c.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    app.state.open_text(TextBuffer::from_text("scratch"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("scratch"), None)
+        .unwrap();
     app.reconcile_editor_windows();
     assert!(
         app.ui
@@ -2786,7 +3290,8 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
     let (_app_dirs, mut app) = app();
     let path = PathBuf::from("/workspace/diagnostic.rs");
     app.state
-        .open_text(TextBuffer::from_text("bad"), Some(path.clone())).unwrap();
+        .open_text(TextBuffer::from_text("bad"), Some(path.clone()))
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let producer = crate::workspace::DiagnosticProducer::new(
@@ -2952,14 +3457,20 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
 #[test]
 fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     let (_app_dirs, mut app) = app();
-    let (first, _) = app.state.open_text(
-        TextBuffer::from_text("first"),
-        Some(PathBuf::from("/workspace/src/main.rs")),
-    ).unwrap();
-    let (second, _) = app.state.open_text(
-        TextBuffer::from_text("second"),
-        Some(PathBuf::from("/workspace/tests/main.rs")),
-    ).unwrap();
+    let (first, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/src/main.rs")),
+        )
+        .unwrap();
+    let (second, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("second"),
+            Some(PathBuf::from("/workspace/tests/main.rs")),
+        )
+        .unwrap();
     app.state.set_buffer_dirty(first, true);
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
@@ -2969,10 +3480,16 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     assert!(app.ui.content_tabs[0].dirty);
     assert!(app.ui.content_tabs[1].active);
     let before = app.window_session.editor_ids().reconciliation_count();
-    app.state.set_workspace_root(PathBuf::from("/workspace/src"));
+    app.state
+        .set_workspace_root(PathBuf::from("/workspace/src"));
     app.reconcile_editor_windows();
     assert!(app.window_session.editor_ids().reconciliation_count() > before);
-    assert!(app.ui.content_tabs.iter().any(|entry| entry.title == "main.rs ·1"));
+    assert!(
+        app.ui
+            .content_tabs
+            .iter()
+            .any(|entry| entry.title == "main.rs ·1")
+    );
     assert_eq!(
         app.ui.content_tabs[1].identity,
         crate::ui::ContentTabIdentity(
@@ -3003,26 +3520,48 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
 
     // Splits and workspace tabs share content entries rather than duplicating them.
     assert_eq!(app.ui.content_tabs.len(), 2);
-    let identities = app.ui.content_tabs.iter().map(|entry| entry.identity.0).collect::<BTreeSet<_>>();
+    let identities = app
+        .ui
+        .content_tabs
+        .iter()
+        .map(|entry| entry.identity.0)
+        .collect::<BTreeSet<_>>();
     assert_eq!(identities.len(), 2);
     let frame = render(
-        &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(),
-        app.window_session.width(), app.window_session.height(),
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        app.window_session.width(),
+        app.window_session.height(),
     );
     let row = u16::from(app.state.tabs.len() > 1);
     let line = frame.grid.row_text(row);
     for entry in &app.ui.content_tabs {
         assert_eq!(line.matches(&entry.title).count(), 1, "{line:?}");
-        let columns = (0..frame.grid.width()).filter(|column| {
-            crate::ui::content_tab_at_column(
-                &app.ui.content_tabs, app.configuration.settings(), frame.grid.width(), *column,
-            ) == Some(entry.identity)
-        }).collect::<Vec<_>>();
+        let columns = (0..frame.grid.width())
+            .filter(|column| {
+                crate::ui::content_tab_at_column(
+                    &app.ui.content_tabs,
+                    app.configuration.settings(),
+                    frame.grid.width(),
+                    *column,
+                ) == Some(entry.identity)
+            })
+            .collect::<Vec<_>>();
         assert!(!columns.is_empty(), "each tab is visible");
-        let dirty_cells = columns.iter().filter(|column| {
-            frame.grid.get(**column, row).unwrap().style == crate::ui::Style::BufferLineDirty
-        }).count();
-        assert_eq!(dirty_cells > 0, entry.dirty, "{} dirty indicator", entry.title);
+        let dirty_cells = columns
+            .iter()
+            .filter(|column| {
+                frame.grid.get(**column, row).unwrap().style == crate::ui::Style::BufferLineDirty
+            })
+            .count();
+        assert_eq!(
+            dirty_cells > 0,
+            entry.dirty,
+            "{} dirty indicator",
+            entry.title
+        );
     }
 
     app.state.close_active_tab().expect("close workspace tab");
@@ -3038,7 +3577,9 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
 #[test]
 fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let initial_revision = app
@@ -3157,10 +3698,12 @@ fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_tra
 fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
-    app.state.open_text(
-        TextBuffer::from_text("floating editor contents"),
-        Some(PathBuf::from("/workspace/floating.rs")),
-    ).unwrap();
+    app.state
+        .open_text(
+            TextBuffer::from_text("floating editor contents"),
+            Some(PathBuf::from("/workspace/floating.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     let tab = app.state.active_tab.expect("editor tab");
     let source_pane = app.state.tabs[tab].focused;
@@ -3503,7 +4046,8 @@ fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
-        .open_text(TextBuffer::from_text("TOP_EDITOR"), None).unwrap();
+        .open_text(TextBuffer::from_text("TOP_EDITOR"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.open_explorer();
@@ -3583,7 +4127,9 @@ fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
 #[test]
 fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -3651,10 +4197,13 @@ fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
 #[test]
 fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
     let (_app_dirs, mut app) = app();
-    let (buffer, _) = app.state.open_text(
-        TextBuffer::from_text("first"),
-        Some(PathBuf::from("/workspace/first.rs")),
-    ).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("first"),
+            Some(PathBuf::from("/workspace/first.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let initial_count = app.window_session.editor_ids().reconciliation_count();
@@ -3729,7 +4278,9 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
 #[test]
 fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let ids = app
@@ -3759,25 +4310,50 @@ fn picker_title_changes_update_the_retained_window_content() {
     app.start_workspace_file_picker();
     app.reconcile_editor_windows();
     let files = app.window_session.native_ids().picker().unwrap();
-    assert_eq!(app.window_session.graph().content(files.content).unwrap().title, "Files");
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content(files.content)
+            .unwrap()
+            .title,
+        "Files"
+    );
     app.open_builtin_picker(PickerKind::Commands);
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.native_ids().picker(), Some(files));
-    assert_eq!(app.window_session.graph().content(files.content).unwrap().title, "Commands");
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content(files.content)
+            .unwrap()
+            .title,
+        "Commands"
+    );
     app.process_effect(AppEffect::WindowList);
-    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label.contains("Commands")));
+    assert!(
+        app.ui
+            .picker
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .any(|row| row.label.contains("Commands"))
+    );
 }
 
 #[test]
 fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.apply_persisted_window_rules(&[PersistedWindowRule {
         content_type: "builtin.terminal".into(),
         placement: PersistedWindowPlacement::Hidden,
-    }]).unwrap();
+    }])
+    .unwrap();
     app.terminal_session.fixture(
         PtyId(7),
         crate::editor::session::terminal::TerminalFixture {
@@ -3792,28 +4368,63 @@ fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
     app.terminal_session.select(PtyId(7));
     app.sync_terminal_panel();
     let terminal = app.window_session.native_ids().terminal(7).unwrap();
-    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
     app.show_graph_window("terminal").unwrap();
-    assert!(matches!(app.window_session.graph().window(terminal.window).unwrap().placement,
-        WindowPlacement::Docked { edge: DockEdge::Bottom, .. }));
+    assert!(matches!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            ..
+        }
+    ));
     app.reconcile_editor_windows();
-    assert_ne!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
+    assert_ne!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
 }
 
 #[test]
 fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let placement = WindowPlacement::Docked { edge: DockEdge::Right, size: 31 };
-    let candidate = app.prepare_configured_window_rules(&crate::config::WindowsConfig {
-        rules: vec![crate::config::WindowRuleConfig {
-            content_type: "builtin.explorer".into(),
-            placement: crate::config::WindowPlacementConfig::Docked { edge: "right".into(), size: 31 },
-        }],
-    }).unwrap();
-    app.window_session.accept_current(candidate, &app.state.window_version()).unwrap();
+    let placement = WindowPlacement::Docked {
+        edge: DockEdge::Right,
+        size: 31,
+    };
+    let candidate = app
+        .prepare_configured_window_rules(&crate::config::WindowsConfig {
+            rules: vec![crate::config::WindowRuleConfig {
+                content_type: "builtin.explorer".into(),
+                placement: crate::config::WindowPlacementConfig::Docked {
+                    edge: "right".into(),
+                    size: 31,
+                },
+            }],
+        })
+        .unwrap();
+    app.window_session
+        .accept_current(candidate, &app.state.window_version())
+        .unwrap();
     app.open_explorer();
     let explorer = app.window_session.native_ids().explorer().unwrap();
     app.terminal_session.fixture(
@@ -3829,18 +4440,42 @@ fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
     );
     app.terminal_session.select(PtyId(7));
     app.sync_terminal_panel();
-    app.place_graph_window("terminal", WindowPlacement::Hidden).unwrap();
-    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, placement);
+    app.place_graph_window("terminal", WindowPlacement::Hidden)
+        .unwrap();
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(explorer.window)
+            .unwrap()
+            .placement,
+        placement
+    );
     app.swap_graph_windows("explorer", "terminal").unwrap();
-    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, WindowPlacement::Hidden);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(explorer.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
     app.show_graph_window("explorer").unwrap();
-    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, placement);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(explorer.window)
+            .unwrap()
+            .placement,
+        placement
+    );
 }
 
 #[test]
 fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.window_session.observe_size((100, 30));
     app.open_explorer();
@@ -3947,25 +4582,62 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     );
     assert!(app.ui.notification_error);
 
-    let floating = WindowPlacement::Floating(WindowRect { x: 5, y: 4, width: 30, height: 8 });
+    let floating = WindowPlacement::Floating(WindowRect {
+        x: 5,
+        y: 4,
+        width: 30,
+        height: 8,
+    });
     app.place_graph_window("terminal", floating).unwrap();
     assert_eq!(app.window_session.graph().focused(), Some(explorer.window));
     app.swap_graph_windows("explorer", "terminal").unwrap();
-    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Fullscreen);
-    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, floating);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Fullscreen
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(explorer.window)
+            .unwrap()
+            .placement,
+        floating
+    );
     assert_eq!(app.window_session.graph().focused(), Some(terminal.window));
     app.swap_graph_windows("terminal", "explorer").unwrap();
     assert_eq!(app.window_session.graph().focused(), Some(explorer.window));
-    app.place_graph_window("terminal", original_terminal).unwrap();
+    app.place_graph_window("terminal", original_terminal)
+        .unwrap();
 
     let bottom_height = app.window_session.terminal_height();
-    app.place_graph_window("terminal", WindowPlacement::Docked { edge: DockEdge::Right, size: 62 }).unwrap();
+    app.place_graph_window(
+        "terminal",
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 62,
+        },
+    )
+    .unwrap();
     assert_eq!(app.window_session.terminal_height(), bottom_height);
     app.resize_graph_window("terminal", 2).unwrap();
-    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement,
-        WindowPlacement::Docked { edge: DockEdge::Right, size: 64 });
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Docked {
+            edge: DockEdge::Right,
+            size: 64
+        }
+    );
     assert_eq!(app.window_session.terminal_height(), bottom_height);
-    app.place_graph_window("terminal", original_terminal).unwrap();
+    app.place_graph_window("terminal", original_terminal)
+        .unwrap();
 
     app.process_effect(crate::editor::AppEffect::WindowDock {
         target: "explorer".into(),
@@ -4082,7 +4754,9 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
 #[test]
 fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     app.terminal_session.fixture(
@@ -4099,36 +4773,71 @@ fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
     app.terminal_session.select(PtyId(7));
     app.sync_terminal_panel();
     let terminal = app.window_session.native_ids().terminal(7).unwrap();
-    let candidate = app.prepare_configured_window_rules(&crate::config::WindowsConfig {
-        rules: vec![crate::config::WindowRuleConfig {
-            content_type: "builtin.terminal".into(),
-            placement: crate::config::WindowPlacementConfig::Fullscreen,
-        }],
-    }).unwrap();
-    app.window_session.accept_current(candidate, &app.state.window_version()).unwrap();
+    let candidate = app
+        .prepare_configured_window_rules(&crate::config::WindowsConfig {
+            rules: vec![crate::config::WindowRuleConfig {
+                content_type: "builtin.terminal".into(),
+                placement: crate::config::WindowPlacementConfig::Fullscreen,
+            }],
+        })
+        .unwrap();
+    app.window_session
+        .accept_current(candidate, &app.state.window_version())
+        .unwrap();
     app.reconcile_editor_windows();
-    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Fullscreen);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Fullscreen
+    );
     app.apply_persisted_window_rules(&[
-        PersistedWindowRule { content_type: "builtin.explorer".into(), placement: PersistedWindowPlacement::Fullscreen },
-        PersistedWindowRule { content_type: "builtin.terminal".into(), placement: PersistedWindowPlacement::Hidden },
-    ]).unwrap();
+        PersistedWindowRule {
+            content_type: "builtin.explorer".into(),
+            placement: PersistedWindowPlacement::Fullscreen,
+        },
+        PersistedWindowRule {
+            content_type: "builtin.terminal".into(),
+            placement: PersistedWindowPlacement::Hidden,
+        },
+    ])
+    .unwrap();
     let explorer = app.window_session.native_ids().explorer().unwrap();
-    assert_eq!(app.window_session.graph().window(explorer.window).unwrap().placement, WindowPlacement::Fullscreen);
-    assert_eq!(app.window_session.graph().window(terminal.window).unwrap().placement, WindowPlacement::Hidden);
-    assert_eq!(app.window_session.native_ids().semantic_defaults(None), vec![
-        ("builtin.explorer", WindowPlacement::Fullscreen),
-        ("builtin.terminal", WindowPlacement::Hidden),
-    ]);
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(explorer.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Fullscreen
+    );
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(terminal.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Hidden
+    );
+    assert_eq!(
+        app.window_session.native_ids().semantic_defaults(None),
+        vec![
+            ("builtin.explorer", WindowPlacement::Fullscreen),
+            ("builtin.terminal", WindowPlacement::Hidden),
+        ]
+    );
 }
 
 #[test]
 fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
     let (_source_dirs, mut source) = app();
     let path = source.state.workspace_root.join("editor.rs");
-    source.state.open_text(
-        TextBuffer::from_text("editor"),
-        Some(path),
-    ).unwrap();
+    source
+        .state
+        .open_text(TextBuffer::from_text("editor"), Some(path))
+        .unwrap();
     source.set_dashboard_visibility(false);
     source.open_explorer();
     source.process_effect(crate::editor::AppEffect::WindowDock {
@@ -4148,7 +4857,8 @@ fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
     let (_restored_dirs, mut restored) = app();
     restored
         .state
-        .open_text(TextBuffer::from_text("restored"), None).unwrap();
+        .open_text(TextBuffer::from_text("restored"), None)
+        .unwrap();
     restored.set_dashboard_visibility(false);
     restored.open_explorer();
     let ids = restored
@@ -4245,7 +4955,9 @@ fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
 #[test]
 fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let explorer = app
@@ -4295,7 +5007,8 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
     );
 
     let visible = app.window_session.graph().clone();
-    app.show_graph_window("explorer").expect("show already-visible explorer");
+    app.show_graph_window("explorer")
+        .expect("show already-visible explorer");
     assert_eq!(app.window_session.graph(), &visible);
 
     let hostile = crate::config::WindowsConfig {
@@ -4323,16 +5036,24 @@ fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
     // Even the largest dimensions must not overflow before the missing-terminal check.
     app.window_session.observe_size((u16::MAX, u16::MAX));
     app.process_effect(AppEffect::TerminalFloat(None));
-    assert_eq!(app.ui.notification.as_deref(), Some(app.message("terminal_missing", &[]).as_str()));
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some(app.message("terminal_missing", &[]).as_str())
+    );
 
     app.window_session.observe_size((80, 24));
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.terminal_session.fixture(
         PtyId(1),
         crate::editor::session::terminal::TerminalFixture {
-            profile: "shell".into(), screen: PtyScreen::new(80, 8, 100),
-            running: true, exit_code: None, truncated: false,
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
         },
         app.workspace.version(),
     );
@@ -4342,8 +5063,19 @@ fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
     app.handle_event(UiEvent::Resize(20_000, 24));
     app.process_effect(AppEffect::TerminalFloat(None));
     let ids = app.window_session.native_ids().terminal(1).unwrap();
-    assert_eq!(app.window_session.graph().window(ids.window).unwrap().placement,
-        WindowPlacement::Floating(WindowRect { x: 2_000, y: 2, width: 16_000, height: 19 }));
+    assert_eq!(
+        app.window_session
+            .graph()
+            .window(ids.window)
+            .unwrap()
+            .placement,
+        WindowPlacement::Floating(WindowRect {
+            x: 2_000,
+            y: 2,
+            width: 16_000,
+            height: 19
+        })
+    );
 }
 
 #[test]
@@ -4364,7 +5096,9 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         std::sync::Arc::new(crate::clock::SystemClock),
     )
     .unwrap();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.window_session.observe_size((80, 24));
     let mut first_screen = PtyScreen::new(80, 8, 100);
@@ -4521,13 +5255,17 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.process_effect(crate::editor::AppEffect::TerminalResize(1));
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 11));
-    let mut resize = crate::editor::CommandInvocation::new("window.resize.directional", InvocationSource::Test).unwrap()
-        .with_argument("direction", CommandValue::String("up".into()));
+    let mut resize =
+        crate::editor::CommandInvocation::new("window.resize.directional", InvocationSource::Test)
+            .unwrap()
+            .with_argument("direction", CommandValue::String("up".into()));
     resize.count = std::num::NonZeroU64::new(3);
     app.invoke(resize.clone());
     assert_eq!(app.window_session.terminal_height(), 18);
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 17));
-    resize.arguments.insert("direction".into(), CommandValue::String("down".into()));
+    resize
+        .arguments
+        .insert("direction".into(), CommandValue::String("down".into()));
     app.invoke(resize);
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.workspace_render_height(), 11);
@@ -4957,25 +5695,45 @@ fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
     let name = loaded.config.agents.default.clone();
-    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
-    loaded.config.terminals.profiles.insert(name.clone(), crate::config::TerminalProfileConfig {
-        program: "/bin/sh".into(), arguments: vec!["-c".into(), "echo SHELL_READY; cat".into()],
-        cwd: None, environment: Default::default(), columns: 80, rows: 24, float: false, close_on_exit: false,
-    });
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli =
+        vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
+    loaded.config.terminals.profiles.insert(
+        name.clone(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "echo SHELL_READY; cat".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 80,
+            rows: 24,
+            float: false,
+            close_on_exit: false,
+        },
+    );
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open(&name);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !driver.terminal_lines().iter().any(|line| line.contains("SHELL_READY")) {
+    while !driver
+        .terminal_lines()
+        .iter()
+        .any(|line| line.contains("SHELL_READY"))
+    {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
     let shell = driver.application_mut().displayed_terminal().unwrap();
     assert!(!driver.application_mut().agent_terminal(shell));
-    driver.application_mut().process_effect(crate::editor::AppEffect::AgentAsk);
-    while !driver.terminal_lines().iter().any(|line| line.contains("AGENT_READY")) {
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
+    while !driver
+        .terminal_lines()
+        .iter()
+        .any(|line| line.contains("AGENT_READY"))
+    {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
@@ -4994,13 +5752,20 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
     let name = loaded.config.agents.default.clone();
-    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli =
+        vec!["sh".into(), "-c".into(), "echo AGENT_READY; cat".into()];
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
-    driver.application_mut().process_effect(crate::editor::AppEffect::AgentAsk);
+    driver
+        .application_mut()
+        .process_effect(crate::editor::AppEffect::AgentAsk);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !driver.terminal_lines().iter().any(|line| line.contains("AGENT_READY")) {
+    while !driver
+        .terminal_lines()
+        .iter()
+        .any(|line| line.contains("AGENT_READY"))
+    {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
@@ -5009,27 +5774,53 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
     let agent = app.keyboard_terminal().unwrap();
     app.terminal_session.enter_terminal_normal_mode(agent);
     app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
-    let (_, view) = app.state.open_text(TextBuffer::from_text("SELECTION_SENT"), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("SELECTION_SENT"), None)
+        .unwrap();
     app.reconcile_editor_windows();
     app.state.views[view].selection = Some(crate::editor::Selection {
-        anchor: crate::editor::text::ByteOffset(0), head: crate::editor::text::ByteOffset(13), kind: crate::editor::SelectionKind::Character,
+        anchor: crate::editor::text::ByteOffset(0),
+        head: crate::editor::text::ByteOffset(13),
+        kind: crate::editor::SelectionKind::Character,
     });
     app.process_effect(crate::editor::AppEffect::AgentAsk);
     assert!(app.state.views[view].selection.is_none());
-    assert_eq!(app.terminal_session.mode(agent), Some(crate::ui::TerminalPanelMode::Input));
+    assert_eq!(
+        app.terminal_session.mode(agent),
+        Some(crate::ui::TerminalPanelMode::Input)
+    );
     assert_eq!(app.terminal_session.descriptions().len(), 1);
-    while !driver.application_mut().terminal_session.fixture_lines(agent).iter().any(|line| line.contains("SELECTION_SENT")) {
+    while !driver
+        .application_mut()
+        .terminal_session
+        .fixture_lines(agent)
+        .iter()
+        .any(|line| line.contains("SELECTION_SENT"))
+    {
         driver.pump_terminal();
-        assert!(Instant::now() < deadline, "{:?}", driver.application_mut().terminal_session.fixture_lines(agent));
+        assert!(
+            Instant::now() < deadline,
+            "{:?}",
+            driver
+                .application_mut()
+                .terminal_session
+                .fixture_lines(agent)
+        );
         thread::sleep(Duration::from_millis(2));
     }
     let app = driver.application_mut();
     app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
     let text = "x".repeat(crate::editor::session::terminal::TERMINAL_MAXIMUM_INPUT_BYTES + 1);
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&text), None)
+        .unwrap();
     app.reconcile_editor_windows();
     let selection = crate::editor::Selection {
-        anchor: crate::editor::text::ByteOffset(0), head: crate::editor::text::ByteOffset(text.len() - 1), kind: crate::editor::SelectionKind::Character,
+        anchor: crate::editor::text::ByteOffset(0),
+        head: crate::editor::text::ByteOffset(text.len() - 1),
+        kind: crate::editor::SelectionKind::Character,
     };
     app.state.views[view].selection = Some(selection);
     app.process_effect(crate::editor::AppEffect::AgentAsk);
@@ -5860,9 +6651,16 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
     program.program = "/bin/sh".into();
-    program.arguments = vec!["-c".into(), "printf ready > debug-ready; while [ ! -f debug-exit ]; do sleep .01; done".into()];
+    program.arguments = vec![
+        "-c".into(),
+        "printf ready > debug-ready; while [ ! -f debug-exit ]; do sleep .01; done".into(),
+    ];
     program.float = false;
-    loaded.config.terminals.profiles.insert("debug-output".into(), program);
+    loaded
+        .config
+        .terminals
+        .profiles
+        .insert("debug-output".into(), program);
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
@@ -5889,13 +6687,23 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
     loop {
         driver.pump_terminal();
         let app = driver.application_mut();
-        if app.terminal_session.descriptions().iter().any(|(id, _, state)| {
-            *id == debug.0 && *state == crate::ui::window::ContentLifecycle::Exited
-        }) { break; }
+        if app
+            .terminal_session
+            .descriptions()
+            .iter()
+            .any(|(id, _, state)| {
+                *id == debug.0 && *state == crate::ui::window::ContentLifecycle::Exited
+            })
+        {
+            break;
+        }
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(driver.application_mut().window_session.focused_terminal(), Some(shell.0));
+    assert_eq!(
+        driver.application_mut().window_session.focused_terminal(),
+        Some(shell.0)
+    );
 }
 
 #[cfg(unix)]
@@ -5906,7 +6714,11 @@ fn retired_debugger_terminal_preflight_never_launches_the_program() {
     let mut program = loaded.config.terminals.profiles["shell"].clone();
     program.program = "/bin/sh".into();
     program.arguments = vec!["-c".into(), "printf started > retired-debug-started".into()];
-    loaded.config.terminals.profiles.insert("retired-debug".into(), program);
+    loaded
+        .config
+        .terminals
+        .profiles
+        .insert("retired-debug".into(), program);
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
@@ -5967,17 +6779,25 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
         Some(crate::ui::TerminalPhase::Failed)
     );
     assert_eq!(driver.terminal_exit_code(), Some(7));
-    assert!(!driver.projection().terminal_panel.as_ref().unwrap().truncated);
-    assert!(driver.notification().is_some_and(|message| message.contains("status Some(7)")));
+    assert!(
+        !driver
+            .projection()
+            .terminal_panel
+            .as_ref()
+            .unwrap()
+            .truncated
+    );
+    assert!(
+        driver
+            .notification()
+            .is_some_and(|message| message.contains("status Some(7)"))
+    );
 
     loaded.config.terminals.profiles.insert(
         "stale-close".into(),
         crate::config::TerminalProfileConfig {
             program: "/bin/sh".into(),
-            arguments: vec![
-                "-c".into(),
-                "read -r release; exit 7".into(),
-            ],
+            arguments: vec!["-c".into(), "read -r release; exit 7".into()],
             cwd: None,
             environment: Default::default(),
             columns: 40,
@@ -6060,14 +6880,16 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
     owner.begin_stop();
     let stop = owner.stop_epoch();
     let adapter = attach_adapter(owner);
-    let DebugResponse::Picker { rows, .. } = owner.response(DapResponse::Stack(vec![DapStackFrame {
-        id: 42,
-        name: "main".into(),
-        path: None,
-        line: 1,
-        column: 1,
-        source_reference: None,
-    }])) else {
+    let DebugResponse::Picker { rows, .. } =
+        owner.response(DapResponse::Stack(vec![DapStackFrame {
+            id: 42,
+            name: "main".into(),
+            path: None,
+            line: 1,
+            column: 1,
+            source_reference: None,
+        }]))
+    else {
         panic!("expected a frames picker");
     };
     assert_eq!(rows.len(), 1);
@@ -6113,7 +6935,10 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
     let entries = app.debugger_session.console().cloned().collect::<Vec<_>>();
     let first = entries.iter().find(|entry| entry.text == "first").unwrap();
     let older = entries.iter().find(|entry| entry.text == "older").unwrap();
-    let answer = entries.iter().find(|entry| entry.text == "result = 1").unwrap();
+    let answer = entries
+        .iter()
+        .find(|entry| entry.text == "result = 1")
+        .unwrap();
     assert_eq!(first.actor.as_deref(), Some("same-name"));
     assert_eq!(first.stop, Some(stop));
     assert_eq!(first.frame, Some(42));
@@ -6124,7 +6949,10 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
     assert_eq!(answer.actor, first.actor);
     assert_eq!(answer.stop, first.stop);
     assert_eq!(answer.frame, first.frame);
-    assert_eq!(older.result, None, "the reply must not update the oldest request");
+    assert_eq!(
+        older.result, None,
+        "the reply must not update the oldest request"
+    );
     assert_eq!(entries.len(), 3, "the draft has not been submitted");
 
     let prompt = app.input.prompt().expect("the draft stays open");
@@ -6150,9 +6978,16 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
         },
     );
     app.process_dap_events();
-    let older = app.debugger_session.console().find(|entry| entry.text == "older").unwrap();
+    let older = app
+        .debugger_session
+        .console()
+        .find(|entry| entry.text == "older")
+        .unwrap();
     assert_eq!(older.result.as_deref(), Some("result = 0"));
-    let prompt = app.input.prompt().expect("the draft stays open after both replies");
+    let prompt = app
+        .input
+        .prompt()
+        .expect("the draft stays open after both replies");
     assert_eq!(prompt.input, draft.input);
     assert_eq!(prompt.cursor, draft.cursor);
 }
@@ -6221,7 +7056,8 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         driver.pump_debug();
         assert!(
             Instant::now() < program_deadline,
-            "program preflight not admitted: {:?}", driver.projection().notification
+            "program preflight not admitted: {:?}",
+            driver.projection().notification
         );
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -6244,10 +7080,16 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     let deadline = Instant::now() + Duration::from_secs(4);
     while driver.debug_source_text().is_none() {
         driver.pump_debug();
-        assert!(Instant::now() < deadline, "stopped generated source did not open automatically");
+        assert!(
+            Instant::now() < deadline,
+            "stopped generated source did not open automatically"
+        );
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(driver.debug_source_text().as_deref(), Some("original adapter source\n"));
+    assert_eq!(
+        driver.debug_source_text().as_deref(),
+        Some("original adapter source\n")
+    );
     driver.new_buffer();
     assert!(driver.debug_source_text().is_none());
     let picker = |driver: &mut TestSession, needle: &str| {
@@ -6338,7 +7180,10 @@ fn session_restore_reads_more_files_than_the_document_queue_capacity() {
         if index > 0 {
             app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::NewTab));
         }
-        let path = app.state.workspace_root.join(format!("restore-{index}.txt"));
+        let path = app
+            .state
+            .workspace_root
+            .join(format!("restore-{index}.txt"));
         fs::write(&path, format!("file {index}\n")).unwrap();
         app.start_open(path);
         wait_vfs(&mut app);
@@ -6358,7 +7203,10 @@ fn session_restore_reads_more_files_than_the_document_queue_capacity() {
     assert_eq!(app.state.tabs.len(), 12);
     assert!(app.persistence.next_restore_path().is_none());
     for index in 0..12 {
-        let path = app.state.workspace_root.join(format!("restore-{index}.txt"));
+        let path = app
+            .state
+            .workspace_root
+            .join(format!("restore-{index}.txt"));
         assert!(app.state.buffers.values().any(|buffer| {
             buffer.path.as_ref() == Some(&path)
                 && buffer.text.to_string() == format!("file {index}\n")
@@ -6377,7 +7225,10 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     wait_vfs(&mut app);
     app.set_dashboard_visibility(false);
     let first = app.state.active_view.unwrap();
-    let second = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    let second = app
+        .state
+        .split_active(crate::editor::Axis::Vertical, 500)
+        .unwrap();
     app.state.views[first].cursor = ByteOffset(0);
     app.state.views[second].cursor = ByteOffset(11);
     app.reconcile_editor_windows();
@@ -6393,7 +7244,10 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     app.restore_session(session);
     wait_vfs(&mut app);
     assert_eq!(app.ui.config_diagnostic, None);
-    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(11));
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor,
+        ByteOffset(11)
+    );
 }
 
 #[test]
@@ -6407,7 +7261,9 @@ fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     wait_vfs(&mut app);
     let first = app.state.active_view.unwrap();
     app.state.views[first].cursor = ByteOffset(1);
-    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    app.state
+        .split_active(crate::editor::Axis::Horizontal, 500)
+        .unwrap();
     let second = app.state.active_view.unwrap();
     assert_ne!(first, second);
     app.state.views[second].cursor = ByteOffset(8);
@@ -6430,7 +7286,12 @@ fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     let active = app.state.active_view.unwrap();
     assert_eq!(app.state.views[active].cursor, ByteOffset(8));
     assert_eq!(app.state.views.len(), 2);
-    assert!(app.state.views.values().any(|view| view.cursor == ByteOffset(1)));
+    assert!(
+        app.state
+            .views
+            .values()
+            .any(|view| view.cursor == ByteOffset(1))
+    );
     assert_eq!(app.capture_session().unwrap().tabs[0].focused_pane, Some(1));
 }
 
@@ -6494,10 +7355,12 @@ fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_place
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("descriptor-restore.txt");
     std::fs::write(&path, "restored descriptor\n").expect("fixture file");
-    app.state.open_text(
-        TextBuffer::from_text("restored descriptor\n"),
-        Some(path.clone()),
-    ).unwrap();
+    app.state
+        .open_text(
+            TextBuffer::from_text("restored descriptor\n"),
+            Some(path.clone()),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let old_window = app.window_session.graph().focused().expect("old window");
@@ -6613,7 +7476,8 @@ fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
     let path = app.state.workspace_root.join("descriptor-hostile.txt");
     std::fs::write(&path, "preserved\n").expect("fixture file");
     app.state
-        .open_text(TextBuffer::from_text("preserved\n"), Some(path)).unwrap();
+        .open_text(TextBuffer::from_text("preserved\n"), Some(path))
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let mut session = app.capture_session().expect("session");
@@ -6646,7 +7510,10 @@ fn live_marks_follow_command_edits_before_saving_and_jumping() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("marked.txt");
     fs::write(&path, "abc").unwrap();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), Some(path)).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abc"), Some(path))
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = ByteOffset(2);
@@ -6668,7 +7535,10 @@ fn live_marks_follow_command_edits_before_saving_and_jumping() {
     app.handle_configured_key(KeyEvent::plain(crate::editor::input::KeyCode::Escape));
     app.process_effect(AppEffect::MarkJump("a".into()));
     wait_vfs(&mut app);
-    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(182));
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor,
+        ByteOffset(182)
+    );
     assert_eq!(app.persistence.marks()[0].location.anchor, 182);
 }
 
@@ -6712,34 +7582,58 @@ fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
 
 #[test]
 fn startup_plugin_publication_waits_for_session_restoration() {
-    use crate::persistence::{PersistedLayout, PersistedPane, PersistedSession, PersistedState, PersistedTab, PersistenceService};
+    use crate::persistence::{
+        PersistedLayout, PersistedPane, PersistedSession, PersistedState, PersistedTab,
+        PersistenceService,
+    };
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("restored.txt");
     fs::write(&path, "restored text\n").unwrap();
     let session = PersistedSession {
         roots: vec![app.state.workspace_root.clone()],
         tabs: vec![PersistedTab {
-            layout: PersistedLayout::Pane { pane: PersistedPane {
-                path: path.clone(), cursor: 3, anchor: 3, scroll_line: 0, scroll_column: 0,
-            } },
+            layout: PersistedLayout::Pane {
+                pane: PersistedPane {
+                    path: path.clone(),
+                    cursor: 3,
+                    anchor: 3,
+                    scroll_line: 0,
+                    scroll_column: 0,
+                },
+            },
             focused_path: Some(path.clone()),
             focused_pane: None,
         }],
-        active_tab: 0, window_rules: Vec::new(), content_descriptors: Vec::new(), pinned: Vec::new(),
+        active_tab: 0,
+        window_rules: Vec::new(),
+        content_descriptors: Vec::new(),
+        pinned: Vec::new(),
     };
     let saved = tempdir().unwrap();
     let state_path = saved.path().join("session.json");
-    fs::write(&state_path, serde_json::to_vec(&PersistedState {
-        session: Some(session), ..Default::default()
-    }).unwrap()).unwrap();
+    fs::write(
+        &state_path,
+        serde_json::to_vec(&PersistedState {
+            session: Some(session),
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
     let (worker, release) = PersistenceService::gated_for_test(1);
-    app.persistence = crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
+    app.persistence =
+        crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
     let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     app.load_persistence();
-    fixture.indexed(crate::extensions::index_manifest_contributions(
-        &plugin_manifest("demo", "plugin.demo.test", "x y"), 1, "startup".into(),
-    ).unwrap());
+    fixture.indexed(
+        crate::extensions::index_manifest_contributions(
+            &plugin_manifest("demo", "plugin.demo.test", "x y"),
+            1,
+            "startup".into(),
+        )
+        .unwrap(),
+    );
     let revision = app.configuration.binding_revision();
     app.process_plugin_events();
     assert!(app.extension.contributions().get("demo").is_none());
@@ -6758,8 +7652,14 @@ fn startup_plugin_publication_waits_for_session_restoration() {
     assert!(!app.persistence.restoring());
     let buffer = app.state.active_buffer_id().unwrap();
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
-    assert_eq!(app.state.buffers[buffer].text.to_string(), "restored text\n");
-    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(3));
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "restored text\n"
+    );
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor,
+        ByteOffset(3)
+    );
     app.process_plugin_events();
     assert!(app.extension.contributions().get("demo").is_some());
     assert!(app.configuration.binding_revision() > revision);
@@ -6812,7 +7712,8 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.restore_session(session.clone());
     let (newer, view) = app
         .state
-        .open_text(TextBuffer::from_text("newer unsaved"), None).unwrap();
+        .open_text(TextBuffer::from_text("newer unsaved"), None)
+        .unwrap();
     app.state.buffers[newer].dirty = true;
     wait_vfs(&mut app);
     assert_eq!(app.state.active_view, Some(view));
@@ -6830,7 +7731,9 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     let (manager, plugin) = crate::extensions::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
-        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+        plugin: "demo".into(),
+        command: "run".into(),
+        arguments: Vec::new(),
     });
     let invocation = plugin.take();
     app.persistence.fixture_restore_source(context!());
@@ -6839,12 +7742,19 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.restore_session(session.clone());
     assert_eq!(app.ui.notification.as_deref(), Some("restoring"));
     wait_vfs(&mut app);
-    assert_eq!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some(app.message("session_restored", &[]).as_str())
+    );
     plugin.reply_with(&invocation, |execution| {
         execution.messages.push("obsolete plugin reply".into());
     });
     app.process_plugin_events();
-    assert!(!app.notices.history().any(|(_, message)| message == "obsolete plugin reply"));
+    assert!(
+        !app.notices
+            .history()
+            .any(|(_, message)| message == "obsolete plugin reply")
+    );
     let buffer = app.state.active_buffer_id().unwrap();
     assert!(!app.state.buffers.contains_key(newer));
     assert_ne!(buffer, newer);
@@ -6880,7 +7790,10 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.notify_message("waiting for missing file".into(), false);
     app.restore_session(missing);
     wait_vfs(&mut app);
-    assert_ne!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    assert_ne!(
+        app.ui.notification.as_deref(),
+        Some(app.message("session_restored", &[]).as_str())
+    );
     assert!(!app.session_restore_notice);
     assert_eq!(app.state.version(), before);
     assert_eq!(app.window_session.graph(), &graph_before);
@@ -6896,7 +7809,8 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         scroll_line: 0,
         scroll_column: 0,
     };
-    app.persistence.set_mark("x".into(), location(3), 8, &app.state);
+    app.persistence
+        .set_mark("x".into(), location(3), 8, &app.state);
     let live = app.state.workspace_root.join("live.txt");
     app.persistence.record_recent(live.clone(), 8);
     let mut saved = PersistedState {
@@ -6944,7 +7858,9 @@ fn logging_adapter_fixture(
     loaded.config.debug.sessions.insert(
         if attach { "attached" } else { "logging" }.into(),
         crate::config::DebugSessionConfig {
-            adapter: "logging".into(), request, cwd: None,
+            adapter: "logging".into(),
+            request,
+            cwd: None,
             program: (!attach).then(|| "debuggee".into()),
             run_in_terminal_profile: None,
             arguments: if attach {
@@ -6967,7 +7883,8 @@ fn logging_adapter_fixture(
 #[test]
 fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
     use super::driver::TestSession;
-    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
+    let (_files, _log_path, mut driver) =
+        logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
     driver.resize(120, 40);
     let tiled = |driver: &TestSession| {
         driver
@@ -7024,7 +7941,8 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // The stronger half is MEASURED: the adapter itself records every request it receives, so the
     // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
     // could never distinguish.
-    let (_files, log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
+    let (_files, log_path, mut driver) =
+        logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 
     // The start sequence the passing debugger test uses: start, then PUMP until the adapter's
     // answer arrives as a picker.
@@ -7055,7 +7973,10 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     let deadline = Instant::now() + Duration::from_secs(6);
     while driver.projection().picker.is_none() {
         driver.pump_debug();
-        assert!(Instant::now() < deadline, "the post-hide threads request was not acknowledged");
+        assert!(
+            Instant::now() < deadline,
+            "the post-hide threads request was not acknowledged"
+        );
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(driver.application().debugger_session.is_running());
@@ -7076,7 +7997,8 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
 #[test]
 fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
-    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
+    let (_files, _log_path, mut driver) =
+        logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 
     assert!(
         driver.application().ui.debug_panes.is_none(),
@@ -7151,7 +8073,8 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
     // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
     // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
     // branch cannot satisfy both.
-    let (_files, _log_path, mut driver) = logging_adapter_fixture(crate::config::DebugRequestKind::Attach);
+    let (_files, _log_path, mut driver) =
+        logging_adapter_fixture(crate::config::DebugRequestKind::Attach);
     driver.debug_start("attached");
     driver.open_debug_threads_after_stop();
 
@@ -7186,10 +8109,12 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
 fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
-    app.state.open_text(
-        TextBuffer::from_text("one\ntwo\n"),
-        Some(PathBuf::from("/workspace/zoom.rs")),
-    ).unwrap();
+    app.state
+        .open_text(
+            TextBuffer::from_text("one\ntwo\n"),
+            Some(PathBuf::from("/workspace/zoom.rs")),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     let origin_tab = app.state.active_tab.expect("editor tab");
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
@@ -7228,7 +8153,10 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     let zoomed_tab = app.state.active_tab;
     app.process_effect(AppEffect::Zen);
     app.process_effect(AppEffect::Zen);
-    assert!(app.state.is_zoomed(), "zen must preserve a pre-existing zoom");
+    assert!(
+        app.state.is_zoomed(),
+        "zen must preserve a pre-existing zoom"
+    );
     assert_eq!(app.state.active_tab, zoomed_tab);
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
 
@@ -7250,13 +8178,21 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
 fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("draft.txt");
-    let (buffer, _) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("draft"),
-        Some(path.clone()),
-    ).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("draft"),
+            Some(path.clone()),
+        )
+        .unwrap();
     let root = app.state.workspace_root.clone();
     let buffers = vec![(buffer, path.clone())];
-    let changes = |request: &serde_json::Value| crate::agent::permission_changes(request).iter().map(|path| root.join(path)).collect::<Vec<_>>();
+    let changes = |request: &serde_json::Value| {
+        crate::agent::permission_changes(request)
+            .iter()
+            .map(|path| root.join(path))
+            .collect::<Vec<_>>()
+    };
     let request =
         serde_json::json!({"toolCall": {"kind": "edit", "rawInput": {"file_path": path}}});
     assert_eq!(
@@ -7340,16 +8276,22 @@ fn a_saved_location_reads_as_file_and_line() {
             .ends_with("marked-location.txt:1")
     );
     std::fs::write(&path, b"\xef\xbb\xbfa\r\nb\r\nc\r\n").unwrap();
-    assert!(app.persisted_location_label(&location(4)).ends_with("marked-location.txt:3"));
+    assert!(
+        app.persisted_location_label(&location(4))
+            .ends_with("marked-location.txt:3")
+    );
     std::fs::remove_file(&path).unwrap();
     assert!(
         app.persisted_location_label(&location(13))
             .ends_with("marked-location.txt")
     );
-    let _ = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text("one\nline two\nline three\n"),
-        Some(path.clone()),
-    ).unwrap();
+    let _ = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("one\nline two\nline three\n"),
+            Some(path.clone()),
+        )
+        .unwrap();
     assert!(
         app.persisted_location_label(&location(5))
             .ends_with("marked-location.txt:2")
@@ -7366,13 +8308,15 @@ fn a_restored_session_keeps_the_buffer_line_in_window_order() {
     std::fs::write(&zeta, "zeta\n").expect("zeta");
     std::fs::write(&alpha, "alpha\n").expect("alpha");
     app.state
-        .open_text(TextBuffer::from_text("zeta\n"), Some(zeta.clone())).unwrap();
+        .open_text(TextBuffer::from_text("zeta\n"), Some(zeta.clone()))
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     app.state
-        .open_text(TextBuffer::from_text("alpha\n"), Some(alpha.clone())).unwrap();
+        .open_text(TextBuffer::from_text("alpha\n"), Some(alpha.clone()))
+        .unwrap();
     app.reconcile_editor_windows();
     let session = app.capture_session().expect("captured session");
     let context = RestoreContext {
@@ -7398,7 +8342,9 @@ fn a_restored_session_keeps_the_buffer_line_in_window_order() {
 #[test]
 fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.handle_event(crate::ui::UiEvent::Resize(100, 30));
     app.process_effect(AppEffect::ExplorerOpen);
@@ -7448,7 +8394,12 @@ fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
 #[test]
 fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
     use super::driver::TestSession;
-    for (profile, close_on_exit) in [("completed", false), ("completed", true), ("debug", false), ("debug", true)] {
+    for (profile, close_on_exit) in [
+        ("completed", false),
+        ("completed", true),
+        ("debug", false),
+        ("debug", true),
+    ] {
         let mut loaded = crate::config::load_bundled_config();
         loaded.config.terminals.profiles.insert(
             profile.into(),
@@ -7504,30 +8455,47 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
 fn oversized_terminal_paste_reports_its_rejection() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
-    loaded.config.terminals.profiles.insert("paste".into(), crate::config::TerminalProfileConfig {
-        program: "/bin/sh".into(), arguments: vec!["-c".into(), "printf ready; read line".into()],
-        cwd: None, environment: Default::default(), columns: 40, rows: 8,
-        float: false, close_on_exit: false,
-    });
+    loaded.config.terminals.profiles.insert(
+        "paste".into(),
+        crate::config::TerminalProfileConfig {
+            program: "/bin/sh".into(),
+            arguments: vec!["-c".into(), "printf ready; read line".into()],
+            cwd: None,
+            environment: Default::default(),
+            columns: 40,
+            rows: 8,
+            float: false,
+            close_on_exit: false,
+        },
+    );
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("paste");
     let deadline = Instant::now() + Duration::from_secs(4);
-    while !driver.terminal_lines().iter().any(|line| line.contains("ready")) {
+    while !driver
+        .terminal_lines()
+        .iter()
+        .any(|line| line.contains("ready"))
+    {
         driver.pump_terminal();
         assert!(Instant::now() < deadline, "{:?}", driver.notification());
         thread::sleep(Duration::from_millis(2));
     }
     driver.paste(&"x".repeat(2 * 1024 * 1024));
-    assert_eq!(driver.notification(), Some("terminal paste exceeds the input limit"));
+    assert_eq!(
+        driver.notification(),
+        Some("terminal paste exceeds the input limit")
+    );
     driver.terminal_close();
 }
 
 #[test]
 fn configured_terminal_navigation_bindings_run_before_pty_encoding() {
     let (_app_dirs, mut app) = app();
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.terminal_session.fixture(
         crate::process::PtyId(1),
@@ -7616,7 +8584,9 @@ fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
 fn nested_border_drag_uses_the_border_axis_on_both_sides() {
     fn drag(right: bool) -> u16 {
         let (_app_dirs, mut app) = app();
-        app.state.open_text(TextBuffer::from_text("top"), None).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("top"), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.state
             .split_active(crate::editor::Axis::Vertical, 500)
@@ -7650,7 +8620,10 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
         });
         match &app.state.tabs[app.state.active_tab.unwrap()].root {
             crate::editor::LayoutNode::Split { ratio, .. } => {
-                assert!(*ratio > 500, "dragging down must enlarge the top pane (right={right}): {ratio}");
+                assert!(
+                    *ratio > 500,
+                    "dragging down must enlarge the top pane (right={right}): {ratio}"
+                );
                 *ratio
             }
             _ => panic!("split"),
@@ -7662,7 +8635,10 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
 #[test]
 fn clipped_dirty_close_cannot_save_or_discard() {
     let (_app_dirs, mut app) = app();
-    let (buffer, _) = app.state.open_text(TextBuffer::from_text("unsaved"), None).unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("unsaved"), None)
+        .unwrap();
     app.state.set_buffer_dirty(buffer, true);
     app.set_dashboard_visibility(false);
     app.window_session.observe_size((80, 24));
@@ -7743,14 +8719,17 @@ fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     wait_vfs(&mut app);
     let discovery = crate::files::discover_recovery(app.recovery.directory());
     assert!(discovery.diagnostics.is_empty());
-    assert_eq!(discovery.records, vec![(
-        journal,
-        crate::files::RecoveryRecord::new(
-            None,
-            app.state.buffers[buffer].text.revision().0,
-            "recovered".into(),
-        ),
-    )]);
+    assert_eq!(
+        discovery.records,
+        vec![(
+            journal,
+            crate::files::RecoveryRecord::new(
+                None,
+                app.state.buffers[buffer].text.revision().0,
+                "recovered".into(),
+            ),
+        )]
+    );
     app.invoke_mapped_command("history.undo");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
 }
@@ -7759,7 +8738,9 @@ fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
 fn hiding_another_terminal_preserves_the_focused_terminal() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((100, 30));
-    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     for id in [PtyId(1), PtyId(2)] {
         app.terminal_session.fixture(
@@ -7837,17 +8818,25 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
         Some(crate::ui::TerminalPhase::Failed)
     );
     assert_eq!(driver.terminal_exit_code(), Some(7));
-    assert!(!driver.projection().terminal_panel.as_ref().unwrap().truncated);
-    assert!(driver.notification().is_some_and(|message| message.contains("status Some(7)")));
+    assert!(
+        !driver
+            .projection()
+            .terminal_panel
+            .as_ref()
+            .unwrap()
+            .truncated
+    );
+    assert!(
+        driver
+            .notification()
+            .is_some_and(|message| message.contains("status Some(7)"))
+    );
 
     loaded.config.terminals.profiles.insert(
         "stale-close".into(),
         crate::config::TerminalProfileConfig {
             program: "/bin/sh".into(),
-            arguments: vec![
-                "-c".into(),
-                "read -r release; exit 7".into(),
-            ],
+            arguments: vec!["-c".into(), "read -r release; exit 7".into()],
             cwd: None,
             environment: Default::default(),
             columns: 40,

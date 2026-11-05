@@ -59,7 +59,10 @@ fn one_content_view_and_window_move_without_identity_replacement() {
         height: 24,
     });
     graph.place(window, floating).expect("float");
-    assert_eq!(graph.window(window).expect("same window").placement, floating);
+    assert_eq!(
+        graph.window(window).expect("same window").placement,
+        floating
+    );
     assert_eq!(graph.window(window).expect("same window").view, view);
     assert_eq!(graph.view(view).expect("same view").content, content);
     assert_eq!(graph.focused(), Some(window));
@@ -276,7 +279,14 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
         .expect("extra view");
     let before_open = graph.clone();
     assert_eq!(
-        graph.open_window(tab, rejected_view, WindowPlacement::Tiled, true, "builtin", 1),
+        graph.open_window(
+            tab,
+            rejected_view,
+            WindowPlacement::Tiled,
+            true,
+            "builtin",
+            1
+        ),
         Err(WindowError::TooManyTiledWindows)
     );
     assert_eq!(graph, before_open);
@@ -306,9 +316,17 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
     );
     assert_eq!(graph, before_place);
 
-    let source_tab = graph.create_workspace_tab("builtin", 1).expect("source tab");
+    let source_tab = graph
+        .create_workspace_tab("builtin", 1)
+        .expect("source tab");
     graph
-        .rehost(floating, source_tab, floating_view, WindowPlacement::Tiled, true)
+        .rehost(
+            floating,
+            source_tab,
+            floating_view,
+            WindowPlacement::Tiled,
+            true,
+        )
         .expect("tile in source tab");
     let before_rehost = graph.clone();
     assert_eq!(
@@ -349,10 +367,14 @@ fn depth_limit_refusals_preserve_the_entire_graph() {
             second: Box::new(TiledLayoutNode::Window(window)),
         };
     }
-    graph.set_tiled_layout(tab, Some(root.clone())).expect("maximum depth");
+    graph
+        .set_tiled_layout(tab, Some(root.clone()))
+        .expect("maximum depth");
     graph.validate().expect("valid at depth limit");
 
-    let view = graph.create_view(content, "builtin", 1).expect("extra view");
+    let view = graph
+        .create_view(content, "builtin", 1)
+        .expect("extra view");
     let extra = graph
         .open_window(tab, view, WindowPlacement::Hidden, true, "builtin", 1)
         .expect("hidden window");
@@ -374,7 +396,9 @@ fn depth_limit_refusals_preserve_the_entire_graph() {
         Err(WindowError::TiledLayoutTooDeep)
     );
     assert_eq!(graph, before);
-    graph.validate().expect("refused mutations leave a valid graph");
+    graph
+        .validate()
+        .expect("refused mutations leave a valid graph");
 }
 
 #[test]
@@ -482,33 +506,113 @@ fn nested_projection_tiny_fallback_resize_and_swap_preserve_window_ids() {
 #[test]
 fn spatial_navigation_prefers_the_topmost_equal_candidate() {
     let (mut graph, content, view, tab) = graph_with_content();
-    let tiled = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let tiled = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
     let dock_view = graph.create_view(content, "builtin", 1).unwrap();
-    let dock = graph.open_window(tab, dock_view, WindowPlacement::Docked { edge: DockEdge::Left, size: 20 }, true, "builtin", 1).unwrap();
+    let dock = graph
+        .open_window(
+            tab,
+            dock_view,
+            WindowPlacement::Docked {
+                edge: DockEdge::Left,
+                size: 20,
+            },
+            true,
+            "builtin",
+            1,
+        )
+        .unwrap();
     let float_view = graph.create_view(content, "builtin", 1).unwrap();
-    let float = graph.open_window(tab, float_view, WindowPlacement::Floating(WindowRect { x: 0, y: 0, width: 20, height: 30 }), true, "builtin", 1).unwrap();
-    let projection = graph.compositor_snapshot(tab).unwrap().project(WindowRect { x: 0, y: 0, width: 100, height: 30 }, 5, 2);
-    assert_eq!(projection.window(dock).unwrap().rect, projection.window(float).unwrap().rect);
+    let float = graph
+        .open_window(
+            tab,
+            float_view,
+            WindowPlacement::Floating(WindowRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 30,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .unwrap();
+    let projection = graph.compositor_snapshot(tab).unwrap().project(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        },
+        5,
+        2,
+    );
+    assert_eq!(
+        projection.window(dock).unwrap().rect,
+        projection.window(float).unwrap().rect
+    );
     assert_eq!(projection.hit_test(1, 1), Some(float));
-    assert_eq!(projection.spatial_neighbor(tiled, SpatialDirection::Left), Some(float));
+    assert_eq!(
+        projection.spatial_neighbor(tiled, SpatialDirection::Left),
+        Some(float)
+    );
 }
 
 #[test]
 fn docks_reserve_tiled_minimum_and_chrome_on_both_axes() {
     let (mut graph, content, view, tab) = graph_with_content();
-    let tiled = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let tiled = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
     for edge in [DockEdge::Bottom, DockEdge::Right] {
         let view = graph.create_view(content, "builtin", 1).unwrap();
-        graph.open_window(tab, view, WindowPlacement::Docked { edge, size: 100 }, true, "builtin", 1).unwrap();
+        graph
+            .open_window(
+                tab,
+                view,
+                WindowPlacement::Docked { edge, size: 100 },
+                true,
+                "builtin",
+                1,
+            )
+            .unwrap();
     }
     let snapshot = graph.compositor_snapshot(tab).unwrap();
-    let insets = super::TiledInsets { screen_bottom: 1, top: 1, bottom: 2, left: 2, right: 1 };
-    let projection = snapshot.project_with_tiled_insets(WindowRect { x: 0, y: 0, width: 80, height: 24 }, 5, 2, insets);
+    let insets = super::TiledInsets {
+        screen_bottom: 1,
+        top: 1,
+        bottom: 2,
+        left: 2,
+        right: 1,
+    };
+    let projection = snapshot.project_with_tiled_insets(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        },
+        5,
+        2,
+        insets,
+    );
     assert_eq!(projection.workspace_bounds.width, 8);
     assert_eq!(projection.workspace_bounds.height, 5);
     assert_eq!(projection.window(tiled).unwrap().rect.width, 5);
     assert_eq!(projection.window(tiled).unwrap().rect.height, 2);
-    let tiny = snapshot.project_with_tiled_insets(WindowRect { x: 0, y: 0, width: 2, height: 2 }, 5, 2, insets);
+    let tiny = snapshot.project_with_tiled_insets(
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        },
+        5,
+        2,
+        insets,
+    );
     assert_eq!(tiny.workspace_bounds.width, 2);
     assert_eq!(tiny.workspace_bounds.height, 1);
 }
@@ -1201,13 +1305,11 @@ fn generation_cleanup_removes_only_exact_owned_graph_resources() {
         )
         .expect("other owner content");
     let mut surviving_resources = Vec::new();
-    for (content, owner, generation) in [(old, "plugin", 1), (new, "plugin", 2), (other, "other", 1)] {
-        let view = graph
-            .create_view(content, owner, generation)
-            .expect("view");
-        let tab = graph
-            .create_workspace_tab(owner, generation)
-            .expect("tab");
+    for (content, owner, generation) in
+        [(old, "plugin", 1), (new, "plugin", 2), (other, "other", 1)]
+    {
+        let view = graph.create_view(content, owner, generation).expect("view");
+        let tab = graph.create_workspace_tab(owner, generation).expect("tab");
         let window = graph
             .open_window(
                 tab,
@@ -1279,18 +1381,35 @@ fn fullscreen_moves_focus_and_rejects_suppressed_windows() {
 #[test]
 fn non_focusable_content_can_move_to_fullscreen() {
     let (mut graph, text_content, view, tab) = graph_with_content();
-    let tile = graph.open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let tile = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
     let mut capabilities = ContentCapabilities::for_adapter(ContentAdapterKind::DeclarativeUi);
     capabilities.focusable = false;
-    let content = graph.create_content_with_contract(
-        ContentTypeId::new("plugin.status").unwrap(),
-        ContentContract::declared(ContentAdapterKind::DeclarativeUi, capabilities),
-        "status".into(), false, "plugin", 1,
-    ).unwrap();
+    let content = graph
+        .create_content_with_contract(
+            ContentTypeId::new("plugin.status").unwrap(),
+            ContentContract::declared(ContentAdapterKind::DeclarativeUi, capabilities),
+            "status".into(),
+            false,
+            "plugin",
+            1,
+        )
+        .unwrap();
     let view = graph.create_view(content, "plugin", 1).unwrap();
-    let window = graph.open_window(tab, view, WindowPlacement::Docked {
-        edge: DockEdge::Bottom, size: 5,
-    }, false, "plugin", 1).unwrap();
+    let window = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Docked {
+                edge: DockEdge::Bottom,
+                size: 5,
+            },
+            false,
+            "plugin",
+            1,
+        )
+        .unwrap();
     graph.focus(tile).unwrap();
     graph.place(window, WindowPlacement::Fullscreen).unwrap();
     assert_eq!(graph.focused(), None);
@@ -1300,7 +1419,16 @@ fn non_focusable_content_can_move_to_fullscreen() {
     // Returning to this tab must not select its suppressed tile as a fallback.
     let other_tab = graph.create_workspace_tab("builtin", 1).unwrap();
     let other_view = graph.create_view(text_content, "builtin", 1).unwrap();
-    graph.open_window(other_tab, other_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    graph
+        .open_window(
+            other_tab,
+            other_view,
+            WindowPlacement::Tiled,
+            true,
+            "builtin",
+            1,
+        )
+        .unwrap();
     graph.set_active_tab(other_tab).unwrap();
     graph.set_active_tab(tab).unwrap();
     assert_eq!(graph.active_tab(), Some(tab));
@@ -1314,14 +1442,24 @@ fn non_focusable_content_can_move_to_fullscreen() {
 fn swapping_fullscreen_repairs_suppressed_focus() {
     for focusable in [true, false] {
         let (mut graph, content, view, tab) = graph_with_content();
-        let dock = WindowPlacement::Docked { edge: DockEdge::Bottom, size: 5 };
-        let a = graph.open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1).unwrap();
+        let dock = WindowPlacement::Docked {
+            edge: DockEdge::Bottom,
+            size: 5,
+        };
+        let a = graph
+            .open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1)
+            .unwrap();
         let view = graph.create_view(content, "builtin", 1).unwrap();
-        let b = graph.open_window(tab, view, dock, focusable, "builtin", 1).unwrap();
+        let b = graph
+            .open_window(tab, view, dock, focusable, "builtin", 1)
+            .unwrap();
         graph.swap_non_tiled_placements(a, b).unwrap();
         assert_eq!(graph.focused(), focusable.then_some(b));
         assert_eq!(graph.window(a).unwrap().placement, dock);
-        assert_eq!(graph.window(b).unwrap().placement, WindowPlacement::Fullscreen);
+        assert_eq!(
+            graph.window(b).unwrap().placement,
+            WindowPlacement::Fullscreen
+        );
         graph.validate().unwrap();
     }
 }
@@ -1329,16 +1467,32 @@ fn swapping_fullscreen_repairs_suppressed_focus() {
 #[test]
 fn overlays_above_fullscreen_can_receive_and_remember_focus() {
     let (mut graph, content, view, tab) = graph_with_content();
-    let fullscreen = graph.open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1).unwrap();
+    let fullscreen = graph
+        .open_window(tab, view, WindowPlacement::Fullscreen, true, "builtin", 1)
+        .unwrap();
     let view = graph.create_view(content, "builtin", 1).unwrap();
-    let overlay = graph.open_window(tab, view, WindowPlacement::Overlay(WindowRect {
-        x: 1, y: 1, width: 20, height: 10,
-    }), true, "builtin", 1).unwrap();
+    let overlay = graph
+        .open_window(
+            tab,
+            view,
+            WindowPlacement::Overlay(WindowRect {
+                x: 1,
+                y: 1,
+                width: 20,
+                height: 10,
+            }),
+            true,
+            "builtin",
+            1,
+        )
+        .unwrap();
     graph.focus(fullscreen).unwrap();
     graph.focus(overlay).unwrap();
     let other_tab = graph.create_workspace_tab("builtin", 1).unwrap();
     let view = graph.create_view(content, "builtin", 1).unwrap();
-    graph.open_window(other_tab, view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    graph
+        .open_window(other_tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
     graph.set_active_tab(tab).unwrap();
     assert_eq!(graph.focused(), Some(overlay));
     graph.validate().unwrap();
@@ -1408,8 +1562,12 @@ fn sixty_five_windows_can_be_installed_before_a_balanced_root() {
 fn tiled_resize_accepts_minimum_delta_for_either_child() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let second_view = graph.create_view(content, "builtin", 1).unwrap();
-    let first = graph.open_window(tab, first_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
-    let second = graph.open_window(tab, second_view, WindowPlacement::Tiled, true, "builtin", 1).unwrap();
+    let first = graph
+        .open_window(tab, first_view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    let second = graph
+        .open_window(tab, second_view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
     for (window, expected) in [(second, 999), (first, 1)] {
         graph.resize_tiled_split(tab, window, i16::MIN).unwrap();
         let snapshot = graph.tiled_layout_snapshot(tab).unwrap();

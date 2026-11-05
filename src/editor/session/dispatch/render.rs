@@ -2,16 +2,16 @@ use super::super::windows::{
     CommandEffect, CommandError, CommandPolicy, WindowCommand, rect_contains_point,
 };
 use super::{
-    CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId,
-    WindowPlacement, WindowRect, explorer_panel_width,
-};
-use super::{
     BTreeMap, EditorMode, EditorOperation, EditorTransaction, EditorWindowBridge,
     EditorWindowLayoutState, LogLevel, NativeDescriptions, NativeSurfaceSignature,
     NativeSurfaceWindowBinding, Precondition, ProjectionRequest, TransactionId,
     UiEditorWindowBinding, UndoPolicy, ViewId, VisualRowAnchor, VisualRowModel,
     active_editor_pane_viewport, editor_state_content_width, screen_foot_rows, snap_display_column,
     snap_display_column_forward, terminal_panel_geometry, workspace_top_rows,
+};
+use super::{
+    CompositorProjection, DockEdge, FocusDirection, NativeSurfaceTarget, PtyId, WindowPlacement,
+    WindowRect, explorer_panel_width,
 };
 use super::{Duration, InteractiveApplication, LiveCrashSnapshot, PluginStatus};
 use super::{PickerOrigin, PickerPayload, PickerSurfaceKind};
@@ -171,7 +171,9 @@ impl InteractiveApplication {
 
     pub(super) fn project_configuration(&mut self) {
         self.ui.dashboard_actions = self.configuration.dashboard_actions();
-        self.ui.dashboard_selected = self.ui.dashboard_selected
+        self.ui.dashboard_selected = self
+            .ui
+            .dashboard_selected
             .min(self.ui.dashboard_actions.len().saturating_sub(1));
     }
     pub(super) fn project_input_hints(&mut self) {
@@ -296,7 +298,9 @@ impl InteractiveApplication {
             .persisted_breakpoints()
             .into_iter()
             .map(|breakpoint| {
-                let state = self.debugger_session.breakpoint_state(&breakpoint.path, breakpoint.line);
+                let state = self
+                    .debugger_session
+                    .breakpoint_state(&breakpoint.path, breakpoint.line);
                 let line = match state {
                     Some(crate::debugger::DapBreakpointState::Verified { line }) => line,
                     _ => breakpoint.line,
@@ -357,7 +361,9 @@ impl InteractiveApplication {
                 phase: bar.phase,
                 blockers: bar.blockers,
                 actions: bar.actions.iter().map(|a| a.name().to_owned()).collect(),
-                abort_binding: self.configuration.keymaps()
+                abort_binding: self
+                    .configuration
+                    .keymaps()
                     .binding_for("editor.normal", "workspace.git.conflict.abort")
                     .map(super::palette::readable_keys),
             }
@@ -418,7 +424,8 @@ impl InteractiveApplication {
         let projection = self.compositor_projection().cloned();
         self.extension.synchronize_windows(
             projection.as_ref(),
-            self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide,
+            self.configuration.settings().editor.ambiguous_width
+                == crate::config::AmbiguousWidth::Wide,
         );
         self.ui.plugin_surfaces = self.extension.window_snapshots();
         self.ui.private_surfaces = self
@@ -1381,12 +1388,16 @@ impl InteractiveApplication {
                     self.configuration.settings().editor.ambiguous_width,
                 );
                 let visible_start = line_start.get().saturating_add(skipped);
-                hints.iter()
+                hints
+                    .iter()
                     .filter(|hint| hint.position.get() >= visible_start)
                     .take(32)
-                    .map(|hint| crate::ui::geometry::cell_text_width(
-                        &hint.label, self.configuration.settings().editor.ambiguous_width,
-                    ))
+                    .map(|hint| {
+                        crate::ui::geometry::cell_text_width(
+                            &hint.label,
+                            self.configuration.settings().editor.ambiguous_width,
+                        )
+                    })
                     .fold(0usize, usize::saturating_add)
             };
             let cursor_column = source_column.saturating_add(virtual_width(view.scroll_column));
@@ -1422,10 +1433,14 @@ impl InteractiveApplication {
             } else {
                 snap_display_column_forward(
                     line_text,
-                    cursor_column.saturating_add(1).saturating_sub(available).min(source_column),
+                    cursor_column
+                        .saturating_add(1)
+                        .saturating_sub(available)
+                        .min(source_column),
                     self.configuration.settings().editor.tab_width,
                     self.configuration.settings().editor.ambiguous_width,
-                ).min(source_column)
+                )
+                .min(source_column)
             }
         };
         if first == view.scroll_line
@@ -1559,7 +1574,12 @@ impl InteractiveApplication {
                 .as_ref()
                 .filter(|_| picker_rect.is_some())
                 .map(|picker| picker.surface),
-            picker_title: self.ui.picker.as_ref().map_or("Picker", |picker| &picker.title).to_owned(),
+            picker_title: self
+                .ui
+                .picker
+                .as_ref()
+                .map_or("Picker", |picker| &picker.title)
+                .to_owned(),
             protected_prompt_height: self.input.prompt().map_or(0, |prompt| {
                 let (width, height) = crate::ui::prompt_surface_dimensions(
                     &self.state,

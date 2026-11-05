@@ -197,7 +197,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             .package_store
             .as_ref()
             .ok_or("--package-store is required")?;
-        let count = dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+        let count =
+            dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         println!("verified {count} package(s)");
         return Ok(());
     }
@@ -293,16 +294,18 @@ fn previous_crash_count(path: &Path) -> u64 {
     if !metadata.is_file() {
         return 0;
     }
-    let Ok(file) = fs::File::open(path) else { return 0 };
-    let Ok(metadata) = file.metadata() else { return 0 };
+    let Ok(file) = fs::File::open(path) else {
+        return 0;
+    };
+    let Ok(metadata) = file.metadata() else {
+        return 0;
+    };
     const MAXIMUM: u64 = 1024 * 1024;
     if !metadata.is_file() || metadata.len() > MAXIMUM {
         return 0;
     }
     let mut bytes = Vec::new();
-    if file.take(MAXIMUM + 1).read_to_end(&mut bytes).is_err()
-        || bytes.len() as u64 > MAXIMUM
-    {
+    if file.take(MAXIMUM + 1).read_to_end(&mut bytes).is_err() || bytes.len() as u64 > MAXIMUM {
         return 0;
     }
     serde_json::from_slice::<serde_json::Value>(&bytes)
@@ -385,7 +388,10 @@ mod tests {
         assert_eq!(previous_crash_count(&path), 3);
         fs::write(&path, "invalid report").unwrap();
         assert_eq!(previous_crash_count(&path), 1);
-        fs::File::create(&path).unwrap().set_len(1024 * 1024 + 1).unwrap();
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(1024 * 1024 + 1)
+            .unwrap();
         assert_eq!(previous_crash_count(&path), 0);
         assert_eq!(previous_crash_count(root.path()), 0);
     }

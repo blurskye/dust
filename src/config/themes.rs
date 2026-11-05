@@ -223,7 +223,9 @@ pub(super) fn discover(request: ThemeRead) {
                     }
                     match read_theme(&path) {
                         Ok(theme) => {
-                            catalog.choices.retain(|choice| choice.theme.name != theme.name);
+                            catalog
+                                .choices
+                                .retain(|choice| choice.theme.name != theme.name);
                             catalog.choices.push(ThemeChoice { theme, path });
                         }
                         Err(error) => catalog
@@ -262,8 +264,7 @@ fn read_theme(path: &Path) -> Result<ThemeConfig, String> {
         .file_stem()
         .and_then(|s| s.to_str())
         .ok_or("theme filename is not UTF-8")?;
-    if !valid_theme_name(name)
-    {
+    if !valid_theme_name(name) {
         return Err("theme filename must be a bounded lowercase ASCII identifier".into());
     }
     if !fs::symlink_metadata(path)
@@ -309,11 +310,19 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut installed = super::super::load::bundled_theme();
         installed.styles.accent.foreground = super::super::ThemeColor::Red;
-        fs::write(root.path().join("dust.toml"), toml::to_string(&installed).unwrap()).unwrap();
+        fs::write(
+            root.path().join("dust.toml"),
+            toml::to_string(&installed).unwrap(),
+        )
+        .unwrap();
         for name in ["Solar", "solár"] {
             let mut theme = installed.clone();
             theme.name = name.into();
-            fs::write(root.path().join(format!("{name}.toml")), toml::to_string(&theme).unwrap()).unwrap();
+            fs::write(
+                root.path().join(format!("{name}.toml")),
+                toml::to_string(&theme).unwrap(),
+            )
+            .unwrap();
             let mut config = super::super::load::load_bundled_config().config;
             config.ui.theme = name.into();
             assert!(config.validate().is_err());
@@ -326,7 +335,11 @@ mod tests {
         });
         let catalog = receiver.try_recv().unwrap();
         assert_eq!(catalog.choices.len(), BUNDLED.len());
-        let dust = catalog.choices.iter().find(|choice| choice.theme.name == "dust").unwrap();
+        let dust = catalog
+            .choices
+            .iter()
+            .find(|choice| choice.theme.name == "dust")
+            .unwrap();
         assert_eq!(dust.theme, installed);
         assert_eq!(dust.path, root.path().join("dust.toml"));
         assert_eq!(catalog.diagnostics.len(), 2);

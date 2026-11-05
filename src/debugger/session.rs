@@ -518,7 +518,14 @@ impl Writer {
                     }
                 }
             })?;
-        Ok((Self { sender, pending: VecDeque::new(), actor }, worker))
+        Ok((
+            Self {
+                sender,
+                pending: VecDeque::new(),
+                actor,
+            },
+            worker,
+        ))
     }
     pub(super) fn reply(&mut self, value: Value, receipt: Arc<AtomicU8>) -> Result<(), Value> {
         if self.flush().is_err() {
@@ -583,7 +590,8 @@ impl Writer {
                     }
                     mpsc::TrySendError::Disconnected(_) => {
                         if let Ok(mut failure) = self.actor.failure.lock() {
-                            *failure = Some("DAP writer stopped; admitted write outcomes unknown".into());
+                            *failure =
+                                Some("DAP writer stopped; admitted write outcomes unknown".into());
                         }
                         self.actor.live.store(false, Ordering::Release);
                         self.actor.cancel.store(true, Ordering::Release);
@@ -623,9 +631,8 @@ impl TestAdapter {
         self.controls.try_recv().ok().map(|c| c.value)
     }
     pub(crate) fn with_terminal_reply(&self, test: impl FnOnce(super::DapTerminalReply)) {
-        let (_request, reply) = super::reverse::ReverseRequest::reserve(
-            1, self.events.actor.live.clone(),
-        );
+        let (_request, reply) =
+            super::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone());
         test(reply);
     }
 }
@@ -814,7 +821,10 @@ mod request_tests {
     fn queued_session_controls_survive_new_stop_generations() {
         use crate::debugger::transport_tests::{ADAPTER, python};
         use serde_json::json;
-        use std::{collections::{BTreeMap, HashMap}, time::Instant};
+        use std::{
+            collections::{BTreeMap, HashMap},
+            time::Instant,
+        };
         let root = tempfile::tempdir().unwrap();
         let script = root.path().join("queued.py");
         let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
@@ -833,40 +843,83 @@ while True:
 "#;
         std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
         let mut service = DapService::new();
-        service.start_absolute(DapLaunch {
-            adapter: "queued".into(), executable: python(),
-            arguments: vec!["-u".into(), script.display().to_string()],
-            environment: HashMap::new(), path_maps: BTreeMap::new(), root: root.path().into(),
-            request: "launch".into(), request_arguments: json!({}), breakpoints: vec![],
-        }).unwrap();
+        service
+            .start_absolute(DapLaunch {
+                adapter: "queued".into(),
+                executable: python(),
+                arguments: vec!["-u".into(), script.display().to_string()],
+                environment: HashMap::new(),
+                path_maps: BTreeMap::new(),
+                root: root.path().into(),
+                request: "launch".into(),
+                request_arguments: json!({}),
+                breakpoints: vec![],
+            })
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            if matches!(service.try_event(), Some(DapEvent::Stopped { .. })) { break; }
+            if matches!(service.try_event(), Some(DapEvent::Stopped { .. })) {
+                break;
+            }
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
         }
         // These controls were admitted before the stop advanced, unlike stopped-data queries.
         for (request_id, value) in [
-            (100, DapControl::SetBreakpoints { path: root.path().join("main.rs"), breakpoints: vec![] }),
-            (101, DapControl::Disconnect { terminate_debuggee: true }),
+            (
+                100,
+                DapControl::SetBreakpoints {
+                    path: root.path().join("main.rs"),
+                    breakpoints: vec![],
+                },
+            ),
+            (
+                101,
+                DapControl::Disconnect {
+                    terminate_debuggee: true,
+                },
+            ),
         ] {
-            service.session.as_ref().unwrap().sender.try_send(Control {
-                request_id, value, generation: 0,
-            }).unwrap();
+            service
+                .session
+                .as_ref()
+                .unwrap()
+                .sender
+                .try_send(Control {
+                    request_id,
+                    value,
+                    generation: 0,
+                })
+                .unwrap();
         }
         let mut breakpoint_answer = false;
         let mut disconnected = false;
         while !breakpoint_answer || !disconnected {
             match service.try_event() {
-                Some(DapEvent::Response { request_id: 100, response: DapResponse::Breakpoints(_), .. }) => breakpoint_answer = true,
-                Some(DapEvent::Response { request_id: 101, response: DapResponse::Disconnected { .. }, .. }) => disconnected = true,
+                Some(DapEvent::Response {
+                    request_id: 100,
+                    response: DapResponse::Breakpoints(_),
+                    ..
+                }) => breakpoint_answer = true,
+                Some(DapEvent::Response {
+                    request_id: 101,
+                    response: DapResponse::Disconnected { .. },
+                    ..
+                }) => disconnected = true,
                 Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
                 _ => {}
             }
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
         }
-        while !service.session.as_ref().unwrap().actor.done.load(Ordering::Acquire) {
+        while !service
+            .session
+            .as_ref()
+            .unwrap()
+            .actor
+            .done
+            .load(Ordering::Acquire)
+        {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
         }
@@ -878,18 +931,35 @@ while True:
     fn successful_disconnect_is_a_terminal_outcome() {
         for completed_before_poll in [false, true] {
             let (mut service, adapter) = fixture();
-            adapter.event(0, DapEvent::Response {
-                adapter: "same-name".into(),
-                stop_generation: 0,
-                request_id: 1,
-                request: Some(DapControl::Disconnect { terminate_debuggee: false }),
-                response: DapResponse::Disconnected { terminate_debuggee: false },
-            });
+            adapter.event(
+                0,
+                DapEvent::Response {
+                    adapter: "same-name".into(),
+                    stop_generation: 0,
+                    request_id: 1,
+                    request: Some(DapControl::Disconnect {
+                        terminate_debuggee: false,
+                    }),
+                    response: DapResponse::Disconnected {
+                        terminate_debuggee: false,
+                    },
+                },
+            );
             adapter.advance(1);
-            adapter.events.actor.done.store(completed_before_poll, Ordering::Release);
-            assert!(matches!(service.try_event(), Some(DapEvent::Response {
-                response: DapResponse::Disconnected { terminate_debuggee: false }, ..
-            })));
+            adapter
+                .events
+                .actor
+                .done
+                .store(completed_before_poll, Ordering::Release);
+            assert!(matches!(
+                service.try_event(),
+                Some(DapEvent::Response {
+                    response: DapResponse::Disconnected {
+                        terminate_debuggee: false
+                    },
+                    ..
+                })
+            ));
             adapter.events.actor.done.store(true, Ordering::Release);
             assert!(service.try_event().is_none());
             assert!(service.try_event().is_none());
@@ -902,8 +972,19 @@ while True:
             assert!(service.try_event().is_none());
             thread::scope(|scope| {
                 scope.spawn(move || {
-                    adapter.event(0, DapEvent::Output { adapter: "same-name".into(), output: "done".into() });
-                    adapter.event(0, DapEvent::Terminated { adapter: "same-name".into() });
+                    adapter.event(
+                        0,
+                        DapEvent::Output {
+                            adapter: "same-name".into(),
+                            output: "done".into(),
+                        },
+                    );
+                    adapter.event(
+                        0,
+                        DapEvent::Terminated {
+                            adapter: "same-name".into(),
+                        },
+                    );
                     adapter.events.actor.done.store(true, Ordering::Release);
                 });
                 let deadline = std::time::Instant::now() + Duration::from_secs(3);
@@ -936,7 +1017,11 @@ while True:
         let (service, _adapter) = fixture();
         let actor = service.session.as_ref().unwrap().actor.clone();
         let (sender, receiver) = mpsc::sync_channel(CAPACITY);
-        let mut writer = Writer { sender, pending: VecDeque::new(), actor: actor.clone() };
+        let mut writer = Writer {
+            sender,
+            pending: VecDeque::new(),
+            actor: actor.clone(),
+        };
         for sequence in 0..CAPACITY * 3 {
             writer.submit(serde_json::json!({"seq": sequence})).unwrap();
         }
@@ -944,7 +1029,10 @@ while True:
         assert!(!actor.cancel.load(Ordering::Acquire));
         let receipt = Arc::new(AtomicU8::new(super::super::DapReplyOutcome::Ready as u8));
         let reply = serde_json::json!({"seq": CAPACITY * 3});
-        assert_eq!(writer.reply(reply.clone(), receipt.clone()), Err(reply.clone()));
+        assert_eq!(
+            writer.reply(reply.clone(), receipt.clone()),
+            Err(reply.clone())
+        );
         for sequence in 0..CAPACITY * 3 {
             let (value, state) = receiver.try_recv().unwrap();
             actor.writes_queued.fetch_sub(1, Ordering::AcqRel);
@@ -964,21 +1052,26 @@ while True:
     fn session_scoped_failures_survive_but_execution_responses_are_filtered() {
         let (mut service, adapter) = fixture();
         for command in ["stackTrace", "setBreakpoints", "disconnect"] {
-            adapter.event(0, DapEvent::RequestFailed {
-                adapter: "same-name".into(),
-                stop_generation: 0,
-                request_seq: 1,
-                request_id: 1,
-                request: None,
-                command: command.into(),
-                message: "rejected".into(),
-            });
+            adapter.event(
+                0,
+                DapEvent::RequestFailed {
+                    adapter: "same-name".into(),
+                    stop_generation: 0,
+                    request_seq: 1,
+                    request_id: 1,
+                    request: None,
+                    command: command.into(),
+                    message: "rejected".into(),
+                },
+            );
         }
         adapter.advance(1);
         for expected in ["setBreakpoints", "disconnect"] {
             let (context, event) = service.try_owned_event().unwrap();
             assert_eq!(context.generation, 1);
-            assert!(matches!(event, DapEvent::RequestFailed { command, .. } if command == expected));
+            assert!(
+                matches!(event, DapEvent::RequestFailed { command, .. } if command == expected)
+            );
         }
         assert!(service.try_event().is_none());
     }

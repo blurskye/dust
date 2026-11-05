@@ -18,13 +18,18 @@ pub(in crate::editor::session) enum ExtensionUpdate {
     Failed { operation: String, error: String },
 }
 pub(in crate::editor::session) enum RegistryUpdate {
-    Present(Box<RegistryResult>, Option<crate::editor::session::search::PickerEpoch>),
+    Present(
+        Box<RegistryResult>,
+        Option<crate::editor::session::search::PickerEpoch>,
+    ),
     ValidateArtifact,
     Error(String),
 }
 impl ExtensionSession {
     pub(in crate::editor::session) fn pending_packages(&self) -> usize {
-        self.packages.pending_count() + self.package_aborts.len() + usize::from(self.package_refresh)
+        self.packages.pending_count()
+            + self.package_aborts.len()
+            + usize::from(self.package_refresh)
     }
     pub(in crate::editor::session) fn contributions(&self) -> &PluginContributionCatalog {
         &self.plugin_contributions
@@ -132,8 +137,10 @@ impl ExtensionSession {
         // Serialize mutations through preparation, plugin loading, and commit acknowledgement.
         if matches!(
             operation,
-            PackageOperation::Install { .. } | PackageOperation::PrepareRegistry { .. }
-                | PackageOperation::Rollback | PackageOperation::Remove(_)
+            PackageOperation::Install { .. }
+                | PackageOperation::PrepareRegistry { .. }
+                | PackageOperation::Rollback
+                | PackageOperation::Remove(_)
         ) && (self.pending_packages() != 0
             || !self.package_preparing.is_empty()
             || !self.package_prepared.is_empty()
@@ -142,7 +149,10 @@ impl ExtensionSession {
         {
             return Err(PackageError::Busy);
         }
-        if matches!(operation, PackageOperation::Rollback | PackageOperation::Remove(_)) {
+        if matches!(
+            operation,
+            PackageOperation::Rollback | PackageOperation::Remove(_)
+        ) {
             self.package_startup_rollback_attempted = false;
         }
         if let PackageOperation::Abort { token } = operation {
@@ -430,7 +440,11 @@ impl ExtensionSession {
     }
     fn load_activations(
         &mut self,
-        activations: Vec<(crate::extensions::PluginManifest, std::path::PathBuf, std::sync::Arc<std::fs::File>)>,
+        activations: Vec<(
+            crate::extensions::PluginManifest,
+            std::path::PathBuf,
+            std::sync::Arc<std::fs::File>,
+        )>,
         limits: &PluginLimits,
         config: &crate::config::PluginsConfig,
         safe_mode: bool,
@@ -442,7 +456,10 @@ impl ExtensionSession {
         for (manifest, path, object_lock) in activations {
             let plugin = manifest.id.clone();
             // A failed load may disable a generation too; only explicit disablement persists.
-            if config.entries.get(&plugin).is_some_and(|entry| !entry.enabled)
+            if config
+                .entries
+                .get(&plugin)
+                .is_some_and(|entry| !entry.enabled)
                 || self.disabled_plugins.contains(&plugin)
             {
                 continue;
@@ -454,7 +471,13 @@ impl ExtensionSession {
                 updates.push(ExtensionUpdate::Conflict(plugin));
                 continue;
             }
-            match self.manager.load_protected(self.package_store.clone(), path, manifest, limits.clone(), Some(object_lock)) {
+            match self.manager.load_protected(
+                self.package_store.clone(),
+                path,
+                manifest,
+                limits.clone(),
+                Some(object_lock),
+            ) {
                 Ok(load) => {
                     self.package_startup_pending.insert(plugin.clone(), load);
                     self.package_managed_plugins.insert(plugin, load);
@@ -479,21 +502,33 @@ impl ExtensionSession {
             match event {
                 PackageServiceEvent::Completed(mut result) => {
                     if let Some(error) = result.cleanup_error.take() {
-                        updates.push(ExtensionUpdate::Error(format!("package cleanup failed: {error}")));
+                        updates.push(ExtensionUpdate::Error(format!(
+                            "package cleanup failed: {error}"
+                        )));
                     }
                     let prepared_operation = result.prepared.is_some();
                     let activation_operation = result.operation == "activations";
                     if let Some(prepared) = result.prepared.take() {
-                        if !safe_mode && config.entries.get(&prepared.plugin.id).is_none_or(|entry| entry.enabled)
-                            && !self.disabled_plugins.contains(&prepared.plugin.id) {
+                        if !safe_mode
+                            && config
+                                .entries
+                                .get(&prepared.plugin.id)
+                                .is_none_or(|entry| entry.enabled)
+                            && !self.disabled_plugins.contains(&prepared.plugin.id)
+                        {
                             updates.extend(self.load_prepared(result.id, prepared, &limits));
                         } else {
                             self.package_preparing.remove(&result.id);
-                            let _ = self.request_package(PackageOperation::Abort { token: prepared.token });
+                            let _ = self.request_package(PackageOperation::Abort {
+                                token: prepared.token,
+                            });
                         }
                     }
                     updates.extend(self.load_activations(
-                        std::mem::take(&mut result.activations), &limits, config, safe_mode,
+                        std::mem::take(&mut result.activations),
+                        &limits,
+                        config,
+                        safe_mode,
                     ));
                     if let Some((plugin, load)) = self.package_commits.remove(&result.id) {
                         if self.manager.load_id(&plugin) == Some(load) {
@@ -516,9 +551,11 @@ impl ExtensionSession {
                             updates.extend(self.rollback_packages());
                             continue;
                         }
-                        match (!safe_mode).then(|| self.packages.request(PackageOperation::Activations)) {
+                        match (!safe_mode)
+                            .then(|| self.packages.request(PackageOperation::Activations))
+                        {
                             Some(Ok(id)) => self.package_startup_request = Some(id),
-                            None => {},
+                            None => {}
                             Some(Err(error)) => {
                                 updates.push(ExtensionUpdate::Error(error.to_string()));
                                 updates.extend(self.rollback_packages());
@@ -575,11 +612,15 @@ impl ExtensionSession {
             }
         }
         for token in self.package_aborts.clone() {
-            if self.request_package(PackageOperation::Abort { token }).is_err() {
+            if self
+                .request_package(PackageOperation::Abort { token })
+                .is_err()
+            {
                 break;
             }
         }
-        if self.package_refresh && self.package_aborts.is_empty()
+        if self.package_refresh
+            && self.package_aborts.is_empty()
             && self.package_startup_request.is_none()
             && let Ok(id) = self.packages.request(PackageOperation::Activations)
         {
@@ -597,7 +638,12 @@ impl ExtensionSession {
     ) -> Result<(), crate::extensions::PluginError> {
         self.plugin_contributions.install(index)
     }
-    pub(in crate::editor::session) fn fixture_prepared(&mut self, plugin: &str, load: PluginLoadId, token: u64) {
+    pub(in crate::editor::session) fn fixture_prepared(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        token: u64,
+    ) {
         self.package_prepared.insert(plugin.into(), (load, token));
     }
     pub(in crate::editor::session) fn fixture_package_reload_pending(&self) -> bool {
@@ -703,7 +749,9 @@ mod tests {
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(10);
             let load = loop {
-                for update in owner.poll_packages(PluginLimits::default(), &Default::default(), false) {
+                for update in
+                    owner.poll_packages(PluginLimits::default(), &Default::default(), false)
+                {
                     assert!(
                         !matches!(
                             update,
@@ -765,19 +813,30 @@ mod tests {
         for (package_name, plugin_id) in [("demo", "renamed"), ("unrelated", "demo")] {
             package.name = package_name.into();
             plugin.id = plugin_id.into();
-            fs::write(root.path().join("package.json"), serde_json::to_vec(&package).unwrap()).unwrap();
-            fs::write(root.path().join("plugin.toml"), toml::to_string(&plugin).unwrap()).unwrap();
-            owner.request_package(PackageOperation::Install {
-                package_manifest: root.path().join("package.json"),
-                plugin_manifest: root.path().join("plugin.toml"),
-                component: root.path().join("plugin.wasm"),
-                roots: vec![root.path().into()],
-                limits: PluginLimits::default(),
-                update: package_name == "demo",
-            }).unwrap();
+            fs::write(
+                root.path().join("package.json"),
+                serde_json::to_vec(&package).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                root.path().join("plugin.toml"),
+                toml::to_string(&plugin).unwrap(),
+            )
+            .unwrap();
+            owner
+                .request_package(PackageOperation::Install {
+                    package_manifest: root.path().join("package.json"),
+                    plugin_manifest: root.path().join("plugin.toml"),
+                    component: root.path().join("plugin.wasm"),
+                    roots: vec![root.path().into()],
+                    limits: PluginLimits::default(),
+                    update: package_name == "demo",
+                })
+                .unwrap();
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let updates = owner.poll_packages(PluginLimits::default(), &Default::default(), false);
+                let updates =
+                    owner.poll_packages(PluginLimits::default(), &Default::default(), false);
                 if updates.iter().any(|update| matches!(update, ExtensionUpdate::Failed { error, .. } if error.contains("belongs to package demo"))) {
                     break;
                 }
@@ -788,17 +847,26 @@ mod tests {
             assert_eq!(owner.manager.load_id("demo"), old_load);
             assert!(owner.manager.load_id("renamed").is_none());
             assert!(owner.package_prepared.is_empty());
-            let manager = PackageManager::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
+            let manager =
+                PackageManager::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
             assert_eq!(manager.read_lock().unwrap().packages.len(), 1);
             assert_eq!(manager.read_lock().unwrap().packages[0].name, "demo");
         }
         // Package maintenance is allowed in safe mode, but must not activate installed code.
-        for operation in [PackageOperation::Rollback, PackageOperation::Remove("demo".into())] {
+        for operation in [
+            PackageOperation::Rollback,
+            PackageOperation::Remove("demo".into()),
+        ] {
             owner.request_package(operation).unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
             while owner.pending_packages() != 0 {
-                for update in owner.poll_packages(PluginLimits::default(), &Default::default(), true) {
-                    assert!(!matches!(update, ExtensionUpdate::Error(_) | ExtensionUpdate::Failed { .. }));
+                for update in
+                    owner.poll_packages(PluginLimits::default(), &Default::default(), true)
+                {
+                    assert!(!matches!(
+                        update,
+                        ExtensionUpdate::Error(_) | ExtensionUpdate::Failed { .. }
+                    ));
                 }
                 assert!(Instant::now() < deadline);
                 thread::sleep(Duration::from_millis(2));
@@ -810,60 +878,146 @@ mod tests {
 
     #[test]
     fn registry_presentations_keep_the_requesting_picker_epoch() {
-        use crate::editor::session::{search::{SearchSession, PickerContent, PickerOrigin}, workspace::WorkspaceSession};
+        use crate::editor::session::{
+            search::{PickerContent, PickerOrigin, SearchSession},
+            workspace::WorkspaceSession,
+        };
         let root = tempfile::tempdir().unwrap();
-        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
         let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
         let workspace = WorkspaceSession::new(
-            crate::workspace::WorkspaceState::new(crate::workspace::WorkspaceId(1), [("root".into(), identity)]).unwrap(),
-            root.path().join("trust"), 1, false, false, 1,
+            crate::workspace::WorkspaceState::new(
+                crate::workspace::WorkspaceId(1),
+                [("root".into(), identity)],
+            )
+            .unwrap(),
+            root.path().join("trust"),
+            1,
+            false,
+            false,
+            1,
         );
         let mut search = SearchSession::default();
         let content = |title: &str| PickerContent {
-            surface: crate::ui::PickerSurfaceKind::Generic, origin: PickerOrigin::General,
-            title: title.into(), items: Vec::new(), query: String::new(), complete: true,
+            surface: crate::ui::PickerSurfaceKind::Generic,
+            origin: PickerOrigin::General,
+            title: title.into(),
+            items: Vec::new(),
+            query: String::new(),
+            complete: true,
         };
-        let epoch = search.install_picker(content("registry"), 100, workspace.version(), 1).unwrap();
+        let epoch = search
+            .install_picker(content("registry"), 100, workspace.version(), 1)
+            .unwrap();
         owner.registry_intents.insert(1, (false, Some(epoch)));
         let Some(RegistryUpdate::Present(_, Some(epoch))) = owner.accept_registry(RegistryEvent {
-            id: 1, result: Ok(RegistryResult::Search(crate::tools::RegistrySearchResponse { schema: 1, packages: Vec::new() })),
-        }) else { panic!("search must preserve its picker owner") };
+            id: 1,
+            result: Ok(RegistryResult::Search(
+                crate::tools::RegistrySearchResponse {
+                    schema: 1,
+                    packages: Vec::new(),
+                },
+            )),
+        }) else {
+            panic!("search must preserve its picker owner")
+        };
         assert!(search.owns_picker_epoch(&epoch));
-        search.install_picker(content("files"), 100, workspace.version(), 1).unwrap();
+        search
+            .install_picker(content("files"), 100, workspace.version(), 1)
+            .unwrap();
         search.picker_insert("my query");
-        assert!(!search.owns_picker_epoch(&epoch), "a late registry result cannot replace the file picker");
+        assert!(
+            !search.owns_picker_epoch(&epoch),
+            "a late registry result cannot replace the file picker"
+        );
         assert_eq!(search.picker().unwrap().query(), "my query");
     }
 
     #[test]
     fn package_activation_respects_safe_mode_and_disabled_plugins() {
         let root = tempfile::tempdir().unwrap();
-        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
         let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
         owner.fixture_manager(manager);
         let plugin = PluginManifest {
-            id: "other".into(), version: "1.0.0".into(), component_sha256: "0".repeat(64),
-            capabilities: Default::default(), commands: Default::default(), contributions: Default::default(),
+            id: "other".into(),
+            version: "1.0.0".into(),
+            component_sha256: "0".repeat(64),
+            capabilities: Default::default(),
+            commands: Default::default(),
+            contributions: Default::default(),
         };
-        let lock = std::sync::Arc::new(std::fs::File::create(root.path().join("object-lock")).unwrap());
+        let lock =
+            std::sync::Arc::new(std::fs::File::create(root.path().join("object-lock")).unwrap());
         let activation = vec![(plugin, root.path().join("other.wasm"), lock)];
-        assert!(owner.load_activations(activation.clone(), &PluginLimits::default(), &Default::default(), true).is_empty());
+        assert!(
+            owner
+                .load_activations(
+                    activation.clone(),
+                    &PluginLimits::default(),
+                    &Default::default(),
+                    true
+                )
+                .is_empty()
+        );
         assert!(owner.load_id("other").is_none());
         let mut config = crate::config::PluginsConfig::default();
-        config.entries.insert("other".into(), crate::config::PluginEntryConfig {
-            manifest: "other.toml".into(), component: "other.wasm".into(), enabled: false,
-        });
-        assert!(owner.load_activations(activation.clone(), &PluginLimits::default(), &config, false).is_empty());
+        config.entries.insert(
+            "other".into(),
+            crate::config::PluginEntryConfig {
+                manifest: "other.toml".into(),
+                component: "other.wasm".into(),
+                enabled: false,
+            },
+        );
+        assert!(
+            owner
+                .load_activations(activation.clone(), &PluginLimits::default(), &config, false)
+                .is_empty()
+        );
         assert!(owner.load_id("other").is_none());
         owner.disable("other").unwrap();
-        assert!(owner.load_activations(activation.clone(), &PluginLimits::default(), &Default::default(), false).is_empty());
+        assert!(
+            owner
+                .load_activations(
+                    activation.clone(),
+                    &PluginLimits::default(),
+                    &Default::default(),
+                    false
+                )
+                .is_empty()
+        );
         assert!(owner.load_id("other").is_none());
-        assert!(matches!(owner.statuses().get("other"), Some(crate::extensions::PluginStatus::Disabled)));
+        assert!(matches!(
+            owner.statuses().get("other"),
+            Some(crate::extensions::PluginStatus::Disabled)
+        ));
         // A normal enabled activation still starts loading.
         owner.disabled_plugins.remove("other");
-        if let Some(update) = owner.load_activations(activation, &PluginLimits::default(), &Default::default(), false).into_iter().next() {
+        if let Some(update) = owner
+            .load_activations(
+                activation,
+                &PluginLimits::default(),
+                &Default::default(),
+                false,
+            )
+            .into_iter()
+            .next()
+        {
             match update {
                 ExtensionUpdate::Error(error) => panic!("enabled activation failed: {error}"),
                 _ => panic!("unexpected activation update"),
@@ -874,19 +1028,40 @@ mod tests {
         // It must also release the pending-load blocker on subsequent package changes.
         owner.disable("other").unwrap();
         assert!(!owner.package_startup_pending.contains_key("other"));
-        owner.request_package(crate::tools::PackageOperation::Remove("other".into())).unwrap();
+        owner
+            .request_package(crate::tools::PackageOperation::Remove("other".into()))
+            .unwrap();
     }
 
     #[test]
     fn package_activation_conflicts_do_not_request_persistent_rollback() {
         let root = tempfile::tempdir().unwrap();
-        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
         let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
         owner.fixture_manager(manager);
         let manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
-        let updates = owner.load_activations(vec![(manifest, root.path().join("demo.wasm"), std::sync::Arc::new(std::fs::File::create(root.path().join("object-lock")).unwrap()))], &PluginLimits::default(), &Default::default(), false);
-        assert!(matches!(updates.as_slice(), [ExtensionUpdate::Conflict(plugin)] if plugin == "demo"));
+        let updates = owner.load_activations(
+            vec![(
+                manifest,
+                root.path().join("demo.wasm"),
+                std::sync::Arc::new(
+                    std::fs::File::create(root.path().join("object-lock")).unwrap(),
+                ),
+            )],
+            &PluginLimits::default(),
+            &Default::default(),
+            false,
+        );
+        assert!(
+            matches!(updates.as_slice(), [ExtensionUpdate::Conflict(plugin)] if plugin == "demo")
+        );
         assert!(owner.package_startup_rollback.is_none());
         assert!(!owner.package_startup_rollback_attempted);
         assert_eq!(owner.pending_packages(), 0);
@@ -897,39 +1072,76 @@ mod tests {
     fn package_changes_wait_for_prepare_load_and_commit() {
         use crate::tools::{PackageError, PackageOperation};
         let root = tempfile::tempdir().unwrap();
-        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
         for stage in 0..3 {
             match stage {
-                0 => { owner.package_preparing.insert(1); }
-                1 => { owner.package_prepared.insert("demo".into(), (PluginLoadId(1), 1)); }
-                _ => { owner.package_commits.insert(1, ("demo".into(), PluginLoadId(1))); }
+                0 => {
+                    owner.package_preparing.insert(1);
+                }
+                1 => {
+                    owner
+                        .package_prepared
+                        .insert("demo".into(), (PluginLoadId(1), 1));
+                }
+                _ => {
+                    owner
+                        .package_commits
+                        .insert(1, ("demo".into(), PluginLoadId(1)));
+                }
             }
-            for operation in [PackageOperation::Remove("demo".into()), PackageOperation::Rollback] {
-                assert!(matches!(owner.request_package(operation), Err(PackageError::Busy)));
+            for operation in [
+                PackageOperation::Remove("demo".into()),
+                PackageOperation::Rollback,
+            ] {
+                assert!(matches!(
+                    owner.request_package(operation),
+                    Err(PackageError::Busy)
+                ));
             }
-            assert!(matches!(owner.rollback_packages().as_slice(), [ExtensionUpdate::Error(error)] if error == &PackageError::Busy.to_string()));
+            assert!(
+                matches!(owner.rollback_packages().as_slice(), [ExtensionUpdate::Error(error)] if error == &PackageError::Busy.to_string())
+            );
             assert_eq!(owner.packages.pending_count(), 0);
             owner.package_preparing.clear();
             owner.package_prepared.clear();
             owner.package_commits.clear();
         }
-        owner.request_package(PackageOperation::Remove("demo".into())).unwrap();
+        owner
+            .request_package(PackageOperation::Remove("demo".into()))
+            .unwrap();
         // A new install cannot start while removal is waiting for the worker either.
-        assert!(matches!(owner.request_package(PackageOperation::Install {
-            package_manifest: root.path().join("package.json"),
-            plugin_manifest: root.path().join("plugin.toml"),
-            component: root.path().join("plugin.wasm"),
-            roots: vec![root.path().into()], limits: PluginLimits::default(), update: true,
-        }), Err(PackageError::Busy)));
+        assert!(matches!(
+            owner.request_package(PackageOperation::Install {
+                package_manifest: root.path().join("package.json"),
+                plugin_manifest: root.path().join("plugin.toml"),
+                component: root.path().join("plugin.wasm"),
+                roots: vec![root.path().into()],
+                limits: PluginLimits::default(),
+                update: true,
+            }),
+            Err(PackageError::Busy)
+        ));
     }
 
     #[test]
     fn package_abort_retries_after_queue_saturation() {
         use crate::tools::{PackageError, PackageOperation, PackageService};
         let root = tempfile::tempdir().unwrap();
-        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let registry =
+            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(
+            root.path().join("storage"),
+            4,
+            root.path().join("packages"),
+            registry,
+        );
         owner.packages = PackageService::start(root.path().join("packages"), 1, 1024 * 1024, 1024);
         let deadline = Instant::now() + Duration::from_secs(5);
         // One result fills the event queue, the next blocks its worker, and a third fills requests.
@@ -941,10 +1153,15 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }
-        assert!(matches!(owner.packages.request(PackageOperation::List), Err(PackageError::QueueFull)));
+        assert!(matches!(
+            owner.packages.request(PackageOperation::List),
+            Err(PackageError::QueueFull)
+        ));
         let (manager, _fixture) = crate::extensions::ExecutionFixture::new(4);
         owner.fixture_manager(manager);
-        owner.package_prepared.insert("demo".into(), (PluginLoadId(1), 41));
+        owner
+            .package_prepared
+            .insert("demo".into(), (PluginLoadId(1), 41));
         owner.disable("demo").unwrap();
         assert!(owner.package_prepared.is_empty());
         assert!(owner.package_aborts.contains(&41));

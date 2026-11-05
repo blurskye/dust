@@ -14,7 +14,10 @@ pub(in crate::editor::session) use discovery::{
 };
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -169,7 +172,10 @@ impl WorkspaceSession {
     }
     pub(in crate::editor::session) fn pending_root_switch(&self) -> Option<(&Path, &Path)> {
         let operation = self.root_operation.as_ref()?;
-        let old = self.roots().iter().find(|root| Some(root.id) == operation.replaces)?;
+        let old = self
+            .roots()
+            .iter()
+            .find(|root| Some(root.id) == operation.replaces)?;
         Some((&old.identity.canonical_path, &operation.requested_path))
     }
     pub(in crate::editor::session) fn cancel_root_switch(&mut self) {
@@ -232,7 +238,11 @@ impl WorkspaceSession {
     }
     /// Ignore a pending inspection when its caller abandons this destination.
     pub(in crate::editor::session) fn cancel_root_request(&mut self, path: &Path) {
-        if self.root_operation.as_ref().is_some_and(|operation| operation.requested_path == path) {
+        if self
+            .root_operation
+            .as_ref()
+            .is_some_and(|operation| operation.requested_path == path)
+        {
             self.root_operation = None;
         }
     }
@@ -317,7 +327,8 @@ impl WorkspaceSession {
         !self.safe_mode
             && self.state.trust() != WorkspaceTrust::Trusted
             && !self.startup_root_seen.unwrap_or_else(|| {
-                self.state.active_root()
+                self.state
+                    .active_root()
                     .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
                     .is_none_or(|r| self.store.is_seen(&r.identity))
             })
@@ -421,7 +432,11 @@ impl WorkspaceSession {
             identities.clone(),
             self.store.seen_identities(),
             if target == Some(WorkspaceTrust::Untrusted) {
-                self.state.roots().iter().map(|root| root.identity.clone()).collect()
+                self.state
+                    .roots()
+                    .iter()
+                    .map(|root| root.identity.clone())
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -458,9 +473,12 @@ impl WorkspaceSession {
             return Ok(());
         }
         if self.startup_root_seen.is_none() {
-            self.startup_root_seen = Some(self.state.active_root()
-                .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
-                .is_none_or(|r| self.store.is_seen(&r.identity)));
+            self.startup_root_seen = Some(
+                self.state
+                    .active_root()
+                    .and_then(|id| self.state.roots().iter().find(|r| r.id == id))
+                    .is_none_or(|r| self.store.is_seen(&r.identity)),
+            );
         }
         let mut changed = false;
         for root in self.state.roots() {
@@ -484,7 +502,10 @@ impl WorkspaceSession {
             .authorize_execution(ExecutionSource::ProjectLocal)
             .map_err(WorkspaceFailure::from)
     }
-    pub(in crate::editor::session) fn poll(&mut self, editor: &EditorState) -> Vec<WorkspaceUpdate> {
+    pub(in crate::editor::session) fn poll(
+        &mut self,
+        editor: &EditorState,
+    ) -> Vec<WorkspaceUpdate> {
         let before = self.version();
         let mut updates = Vec::new();
         loop {
@@ -581,16 +602,22 @@ impl WorkspaceSession {
                         );
                         match operation.replaces {
                             Some(old) => {
-                                if let Some(root) = self.state.roots().iter().find(|root| root.id == old)
+                                if let Some(root) =
+                                    self.state.roots().iter().find(|root| root.id == old)
                                     && editor.buffers.values().any(|buffer| {
-                                        buffer.dirty && buffer.path.as_deref().is_some_and(|file| {
-                                            leaves_root(file, &root.identity.canonical_path, &identity.canonical_path)
-                                        })
+                                        buffer.dirty
+                                            && buffer.path.as_deref().is_some_and(|file| {
+                                                leaves_root(
+                                                    file,
+                                                    &root.identity.canonical_path,
+                                                    &identity.canonical_path,
+                                                )
+                                            })
                                     })
                                 {
-                                    updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Message(
-                                        "workspace_root_dirty_blocker",
-                                    )));
+                                    updates.push(WorkspaceUpdate::Failure(
+                                        WorkspaceFailure::Message("workspace_root_dirty_blocker"),
+                                    ));
                                     return;
                                 }
                                 match self.switch_root(old, name, identity.clone()) {
@@ -605,7 +632,8 @@ impl WorkspaceSession {
                                 Ok(_) => {
                                     self.changed();
                                     self.reconcile_trust();
-                                    updates.push(WorkspaceUpdate::RootAdded(identity.canonical_path));
+                                    updates
+                                        .push(WorkspaceUpdate::RootAdded(identity.canonical_path));
                                 }
                                 Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
                             },
@@ -627,7 +655,9 @@ impl WorkspaceSession {
                     Ok(()) => {
                         self.persisted_identities = pending.identities;
                         self.reconcile_trust();
-                        if pending.source == self.version && let Some(target) = pending.target {
+                        if pending.source == self.version
+                            && let Some(target) = pending.target
+                        {
                             updates.push(WorkspaceUpdate::Message(
                                 if target == WorkspaceTrust::Trusted {
                                     "workspace_trusted"
@@ -766,16 +796,23 @@ mod tests {
         };
         owner.store.trust(identity.clone());
         owner.persisted_identities.push(identity.clone());
-        owner.add_root_request(identity.canonical_path.clone(), None)
+        owner
+            .add_root_request(identity.canonical_path.clone(), None)
             .unwrap_or_else(|_| panic!("root request"));
         let generation = owner.root_operation.as_ref().unwrap().generation;
         let mut updates = Vec::new();
         owner.accept_event(
-            TrustEvent::RootInspected { generation, result: Ok(identity) },
+            TrustEvent::RootInspected {
+                generation,
+                result: Ok(identity),
+            },
             &mut updates,
             &EditorState::new("/".into()),
         );
-        assert!(matches!(updates.as_slice(), [WorkspaceUpdate::RootAdded(_)]));
+        assert!(matches!(
+            updates.as_slice(),
+            [WorkspaceUpdate::RootAdded(_)]
+        ));
         assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
         assert!(owner.execution_allowed().is_ok());
     }
@@ -784,35 +821,59 @@ mod tests {
     fn workspace_root_replacement_at_capacity_is_atomic() {
         let (mut owner, _directory) = fixture();
         for index in 3..=64 {
-            owner.state.add_root(format!("root-{index}"), RootIdentity {
-                canonical_path: format!("/root-{index}").into(),
-                filesystem_identity: Some((1, index)),
-            }).unwrap();
+            owner
+                .state
+                .add_root(
+                    format!("root-{index}"),
+                    RootIdentity {
+                        canonical_path: format!("/root-{index}").into(),
+                        filesystem_identity: Some((1, index)),
+                    },
+                )
+                .unwrap();
         }
         let identity = RootIdentity {
             canonical_path: "/replacement".into(),
             filesystem_identity: Some((1, 100)),
         };
-        owner.add_root_request(identity.canonical_path.clone(), Some(RootId(1)))
+        owner
+            .add_root_request(identity.canonical_path.clone(), Some(RootId(1)))
             .unwrap_or_else(|_| panic!("root request"));
         let generation = owner.root_operation.as_ref().unwrap().generation;
         let mut updates = Vec::new();
         owner.accept_event(
-            TrustEvent::RootInspected { generation, result: Ok(identity.clone()) },
+            TrustEvent::RootInspected {
+                generation,
+                result: Ok(identity.clone()),
+            },
             &mut updates,
             &EditorState::new("/".into()),
         );
-        assert!(matches!(updates.as_slice(), [WorkspaceUpdate::RootSwitched { path, old }]
-            if path == &identity.canonical_path && old == Path::new("/one")));
+        assert!(
+            matches!(updates.as_slice(), [WorkspaceUpdate::RootSwitched { path, old }]
+            if path == &identity.canonical_path && old == Path::new("/one"))
+        );
         assert_eq!(owner.roots().len(), 64);
         assert!(owner.roots().iter().all(|root| root.id != RootId(1)));
         let new = owner.active_root().unwrap();
-        assert_eq!(owner.roots().iter().find(|root| root.id == new).unwrap().identity, identity);
+        assert_eq!(
+            owner
+                .roots()
+                .iter()
+                .find(|root| root.id == new)
+                .unwrap()
+                .identity,
+            identity
+        );
 
         let roots = owner.roots().to_vec();
         let version = owner.version();
         let revision = owner.root_revision();
-        assert!(owner.switch_root(new, "duplicate".into(), roots[0].identity.clone()).is_err());
+        assert!(
+            owner
+                .switch_root(new, "duplicate".into(), roots[0].identity.clone())
+                .is_err()
+        );
         assert_eq!(owner.roots(), roots);
         assert_eq!(owner.active_root(), Some(new));
         assert_eq!(owner.version(), version);
@@ -829,7 +890,9 @@ mod tests {
             if fail {
                 owner.state_path = directory.path().to_path_buf();
             }
-            owner.request_confirmation().unwrap_or_else(|_| panic!("prompt"));
+            owner
+                .request_confirmation()
+                .unwrap_or_else(|_| panic!("prompt"));
             owner.confirm().unwrap_or_else(|_| panic!("save trust"));
             owner.set_active_root(RootId(2)).unwrap();
             assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
@@ -843,9 +906,13 @@ mod tests {
                 std::thread::yield_now();
             }
             if fail {
-                assert!(matches!(updates.as_slice(), [WorkspaceUpdate::Failure(
-                    WorkspaceFailure::Diagnostic("workspace_trust_state_failed", _)
-                )]));
+                assert!(matches!(
+                    updates.as_slice(),
+                    [WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
+                        "workspace_trust_state_failed",
+                        _
+                    ))]
+                ));
                 assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
                 assert!(owner.store.identities().is_empty());
                 owner.reconcile_trust();
@@ -915,13 +982,17 @@ mod tests {
         owner.cancel_root_request(&path);
         assert!(!owner.root_operation_pending());
         let mut updates = Vec::new();
-        owner.accept_event(TrustEvent::RootInspected {
-            generation: 99,
-            result: Ok(RootIdentity {
-                canonical_path: path,
-                filesystem_identity: Some((1, 3)),
-            }),
-        }, &mut updates, &EditorState::new("/".into()));
+        owner.accept_event(
+            TrustEvent::RootInspected {
+                generation: 99,
+                result: Ok(RootIdentity {
+                    canonical_path: path,
+                    filesystem_identity: Some((1, 3)),
+                }),
+            },
+            &mut updates,
+            &EditorState::new("/".into()),
+        );
         assert!(updates.is_empty());
         assert_eq!(owner.active_root(), active);
         assert_eq!(owner.roots().len(), 2);

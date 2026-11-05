@@ -80,7 +80,8 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
             && CLASSES.contains(&kind)
             && !(kind == "type_declaration" && {
                 let mut walk = node.walk();
-                node.named_children(&mut walk).any(|child| child.kind() == "type_spec")
+                node.named_children(&mut walk)
+                    .any(|child| child.kind() == "type_spec")
             })
         {
             objects.push(block(node, source, SyntaxObjectKind::Class));
@@ -121,20 +122,27 @@ fn block(node: tree_sitter::Node<'_>, source: &str, kind: SyntaxObjectKind) -> S
         }
         if let Some(ty) = node.child_by_field_name("type") {
             let mut walk = ty.walk();
-            body = ty.named_children(&mut walk)
+            body = ty
+                .named_children(&mut walk)
                 .find(|child| child.kind() == "field_declaration_list");
         }
     } else if node.kind() == "function_def" {
         let mut walk = node.walk();
-        body = node.named_children(&mut walk).find(|child| child.kind() == "body");
+        body = node
+            .named_children(&mut walk)
+            .find(|child| child.kind() == "body");
     }
     let mut body = body.map_or((outer.1, outer.1), |body| {
         (body.start_byte(), body.end_byte())
     });
     // Julia stores statements directly between the signature and the `end` keyword.
     if node.kind() == "function_definition"
-        && let Some(signature) = node.named_child(0).filter(|child| child.kind() == "signature")
-        && let Some(end) = node.child(node.child_count() - 1).filter(|child| child.kind() == "end")
+        && let Some(signature) = node
+            .named_child(0)
+            .filter(|child| child.kind() == "signature")
+        && let Some(end) = node
+            .child(node.child_count() - 1)
+            .filter(|child| child.kind() == "end")
     {
         body = (signature.end_byte(), end.start_byte());
         if source[body.0..body.1].starts_with('\n') {
@@ -180,7 +188,9 @@ fn arguments(list: tree_sitter::Node<'_>, objects: &mut Vec<SyntaxObject>, remai
             (inner.0, next.start_byte())
         } else {
             let mut walker = list.walk();
-            let mut commas = list.children(&mut walker).filter(|child| child.kind() == ",");
+            let mut commas = list
+                .children(&mut walker)
+                .filter(|child| child.kind() == ",");
             if let Some(previous) = previous {
                 (
                     commas
@@ -248,17 +258,29 @@ mod tests {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&language).unwrap();
         let tree = parser.parse(source, None).unwrap();
-        assert!(!tree.root_node().has_error(), "{}", tree.root_node().to_sexp());
+        assert!(
+            !tree.root_node().has_error(),
+            "{}",
+            tree.root_node().to_sexp()
+        );
         collect(&tree, source, 100)
     }
     #[test]
     fn ruby_methods_and_parameters_have_objects() {
-        for source in ["def f(x, y)\n  x + y\nend", "def self.f(x, y)\n  x + y\nend"] {
+        for source in [
+            "def f(x, y)\n  x + y\nend",
+            "def self.f(x, y)\n  x + y\nend",
+        ] {
             let found = parsed(source, tree_sitter_ruby::LANGUAGE.into());
-            let function = found.iter().find(|o| o.kind == SyntaxObjectKind::Function).unwrap();
+            let function = found
+                .iter()
+                .find(|o| o.kind == SyntaxObjectKind::Function)
+                .unwrap();
             assert_eq!(&source[function.outer.0..function.outer.1], source);
             assert_eq!(source[function.inner.0..function.inner.1].trim(), "x + y");
-            let parameters = found.iter().filter(|o| o.kind == SyntaxObjectKind::Argument)
+            let parameters = found
+                .iter()
+                .filter(|o| o.kind == SyntaxObjectKind::Argument)
                 .map(|o| (&source[o.inner.0..o.inner.1], &source[o.outer.0..o.outer.1]))
                 .collect::<Vec<_>>();
             assert_eq!(parameters, [("x", "x, "), ("y", ", y")]);
@@ -268,22 +290,34 @@ mod tests {
     fn cmake_function_objects_cover_definitions_not_keywords() {
         let source = "function(foo)\n  message(hi)\nendfunction()";
         let found = parsed(source, tree_sitter_cmake::LANGUAGE.into());
-        let functions = found.iter().filter(|o| o.kind == SyntaxObjectKind::Function).collect::<Vec<_>>();
+        let functions = found
+            .iter()
+            .filter(|o| o.kind == SyntaxObjectKind::Function)
+            .collect::<Vec<_>>();
         assert_eq!(functions.len(), 1);
         let function = functions[0];
         assert_eq!(&source[function.outer.0..function.outer.1], source);
-        assert_eq!(source[function.inner.0..function.inner.1].trim(), "message(hi)");
+        assert_eq!(
+            source[function.inner.0..function.inner.1].trim(),
+            "message(hi)"
+        );
     }
     #[test]
     fn julia_function_inner_stays_between_signature_and_end() {
         for (source, expected) in [
             ("function f()\n  x = 1\nend", "  x = 1\n"),
-            ("function f()\n  if true\n    x = 1\n  end\nend", "  if true\n    x = 1\n  end\n"),
+            (
+                "function f()\n  if true\n    x = 1\n  end\nend",
+                "  if true\n    x = 1\n  end\n",
+            ),
             ("function f()\nend", ""),
             ("function f(); x = 1; end", "; x = 1; "),
         ] {
             let found = parsed(source, tree_sitter_julia::LANGUAGE.into());
-            let function = found.iter().find(|o| o.kind == SyntaxObjectKind::Function).unwrap();
+            let function = found
+                .iter()
+                .find(|o| o.kind == SyntaxObjectKind::Function)
+                .unwrap();
             assert_eq!(&source[function.outer.0..function.outer.1], source);
             assert_eq!(&source[function.inner.0..function.inner.1], expected);
             assert!(function.inner.1 < function.outer.1);
@@ -309,7 +343,9 @@ mod tests {
         ] {
             let source = format!("package main\n{declaration}\n");
             let found = parsed(&source, tree_sitter_go::LANGUAGE.into());
-            let classes = found.iter().filter(|o| o.kind == SyntaxObjectKind::Class)
+            let classes = found
+                .iter()
+                .filter(|o| o.kind == SyntaxObjectKind::Class)
                 .collect::<Vec<_>>();
             assert_eq!(classes.len(), 1);
             let class = classes[0];
@@ -320,22 +356,32 @@ mod tests {
     #[test]
     fn grouped_go_types_have_separate_class_bodies() {
         for prefix in ["type (", "type /* comment */ (", "type (\n // comment"] {
-            let source = format!("package main\n{prefix}\n A struct {{ X int }}\n B struct {{ Y int }}\n)\n");
+            let source = format!(
+                "package main\n{prefix}\n A struct {{ X int }}\n B struct {{ Y int }}\n)\n"
+            );
             let found = parsed(&source, tree_sitter_go::LANGUAGE.into());
-            let classes = found.iter().filter(|o| o.kind == SyntaxObjectKind::Class)
+            let classes = found
+                .iter()
+                .filter(|o| o.kind == SyntaxObjectKind::Class)
                 .map(|o| (&source[o.outer.0..o.outer.1], &source[o.inner.0..o.inner.1]))
                 .collect::<Vec<_>>();
-            assert_eq!(classes, [
-                ("A struct { X int }", " X int "),
-                ("B struct { Y int }", " Y int "),
-            ], "{source}");
+            assert_eq!(
+                classes,
+                [
+                    ("A struct { X int }", " X int "),
+                    ("B struct { Y int }", " Y int "),
+                ],
+                "{source}"
+            );
         }
     }
     #[test]
     fn argument_collection_respects_remaining_object_capacity() {
         let source = format!("fn f() {{ g({}); }}", vec!["x"; 1000].join(", "));
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
         let tree = parser.parse(&source, None).unwrap();
         for limit in [0, 1, 2, 10, 1001, 2000] {
             let found = collect(&tree, &source, limit);

@@ -35,12 +35,16 @@ fn replacement_template(replacement: &str) -> String {
 /// A bounded, single-line sample for a replacement question.
 fn substitute_preview(text: &str) -> String {
     let mut characters = text.chars();
-    let mut preview: String = characters.by_ref().take(80).map(|character| match character {
-        '\n' => '⏎',
-        '\t' => '⇥',
-        character if character.is_control() => '�',
-        character => character,
-    }).collect();
+    let mut preview: String = characters
+        .by_ref()
+        .take(80)
+        .map(|character| match character {
+            '\n' => '⏎',
+            '\t' => '⇥',
+            character if character.is_control() => '�',
+            character => character,
+        })
+        .collect();
     if characters.next().is_some() {
         preview.push('…');
     }
@@ -437,12 +441,19 @@ impl InteractiveApplication {
             return;
         };
         let (width, height) = crate::ui::prompt_surface_dimensions(
-            &self.state, &self.ui, self.window_session.width(), self.window_session.height(),
+            &self.state,
+            &self.ui,
+            self.window_session.width(),
+            self.window_session.height(),
         );
         let question = crate::ui::prompt_geometry_for_state(
-            width, height, self.configuration.settings(), prompt,
+            width,
+            height,
+            self.configuration.settings(),
+            prompt,
         );
-        let height = usize::from(viewport.height.min(question.top.saturating_sub(viewport.y))).max(1);
+        let height =
+            usize::from(viewport.height.min(question.top.saturating_sub(viewport.y))).max(1);
         let Some(target) = self.state.views.get(view) else {
             return;
         };
@@ -450,7 +461,13 @@ impl InteractiveApplication {
         let settings = self.configuration.settings();
         let wrap = settings.editor.wrap && !self.ui.large_file_buffers.contains(&target.buffer);
         let rows = crate::ui::VisualRowModel::new_for_state(
-            &self.state, text, view, &self.ui, settings, viewport.width, wrap,
+            &self.state,
+            text,
+            view,
+            &self.ui,
+            settings,
+            viewport.width,
+            wrap,
         );
         let start = rows.normalize(crate::ui::VisualRowAnchor {
             line: target.scroll_line,
@@ -515,9 +532,12 @@ impl InteractiveApplication {
         if self.state.views.contains_key(confirm.view) {
             self.set_specific_mode(confirm.view, EditorMode::Normal);
         }
-        if !self.state.buffers.get(confirm.buffer).is_some_and(|buffer| {
-            buffer.text.source_version() == confirm.source
-        }) {
+        if !self
+            .state
+            .buffers
+            .get(confirm.buffer)
+            .is_some_and(|buffer| buffer.text.source_version() == confirm.source)
+        {
             self.show_error("the file changed, so replacing stopped");
             return;
         }
@@ -554,17 +574,23 @@ impl InteractiveApplication {
             return;
         }
         let text = &self.state.buffers[target.buffer].text;
-        let line = text.byte_to_line(target.cursor).unwrap_or(0)
+        let line = text
+            .byte_to_line(target.cursor)
+            .unwrap_or(0)
             .min(text.visible_lines().saturating_sub(1));
         let start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
         let content = text.line(line).unwrap_or_default();
         let content = content.trim_end_matches('\n');
         let relative = target.cursor.get().saturating_sub(start.get());
-        let cursor = ByteOffset(start.get() + content.grapheme_indices(true)
-            .map(|(offset, _)| offset)
-            .take_while(|offset| *offset <= relative)
-            .last()
-            .unwrap_or(0));
+        let cursor = ByteOffset(
+            start.get()
+                + content
+                    .grapheme_indices(true)
+                    .map(|(offset, _)| offset)
+                    .take_while(|offset| *offset <= relative)
+                    .last()
+                    .unwrap_or(0),
+        );
         self.state.views[view].cursor = cursor;
     }
 }
@@ -603,7 +629,7 @@ mod tests {
 
     #[test]
     fn escaped_word_boundaries_match_literal_backslashes_in_preview_and_execution() {
-        use crate::editor::input::{parse_ex, substitute_pattern, search_matches};
+        use crate::editor::input::{parse_ex, search_matches, substitute_pattern};
         for (command, source, expected) in [
             (r"s/\\</x/g", r"\< \b", r"x \b"),
             (r"s/\\>/x/g", r"\> \b", r"x \b"),
@@ -615,12 +641,34 @@ mod tests {
                 crate::editor::CommandValue::String(value) => value.as_str(),
                 _ => panic!("expected string"),
             };
-            assert_eq!(applied(source, (0, 0), string("pattern"), string("replacement"), string("flags")), expected);
+            assert_eq!(
+                applied(
+                    source,
+                    (0, 0),
+                    string("pattern"),
+                    string("replacement"),
+                    string("flags")
+                ),
+                expected
+            );
             let preview = substitute_pattern(command).unwrap();
             let buffer = TextBuffer::from_text(source);
-            let (edits, _) = substitution_edits(&buffer, (0, 0), string("pattern"), string("replacement"), string("flags")).unwrap();
-            let ranges: Vec<_> = edits.iter().map(|edit| edit.range().start.get()..edit.range().end.get()).collect();
-            assert_eq!(search_matches(source, &preview, false, true).unwrap(), ranges);
+            let (edits, _) = substitution_edits(
+                &buffer,
+                (0, 0),
+                string("pattern"),
+                string("replacement"),
+                string("flags"),
+            )
+            .unwrap();
+            let ranges: Vec<_> = edits
+                .iter()
+                .map(|edit| edit.range().start.get()..edit.range().end.get())
+                .collect();
+            assert_eq!(
+                search_matches(source, &preview, false, true).unwrap(),
+                ranges
+            );
         }
     }
 

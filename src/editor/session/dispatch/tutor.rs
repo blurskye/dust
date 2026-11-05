@@ -581,7 +581,11 @@ impl InteractiveApplication {
                 // A refused or failed switch keeps the practice buffers alive, so their
                 // unsaved edits must still be marked dirty.
                 for buffer in self.state.buffers.values_mut() {
-                    if buffer.path.as_ref().is_some_and(|path| path.starts_with(&practice.root)) {
+                    if buffer
+                        .path
+                        .as_ref()
+                        .is_some_and(|path| path.starts_with(&practice.root))
+                    {
                         buffer.refresh_dirty();
                     }
                 }
@@ -615,7 +619,11 @@ impl InteractiveApplication {
         let observed = std::mem::take(&mut self.tutor.observed);
         // Trust is persisted asynchronously after confirmation; dispatching :trust is not
         // enough, since the user can decline or the write can fail.
-        let done = if self.tutor.steps[index].done.iter().any(|command| command == "workspace.trust") {
+        let done = if self.tutor.steps[index]
+            .done
+            .iter()
+            .any(|command| command == "workspace.trust")
+        {
             self.workspace.trust() == crate::workspace::WorkspaceTrust::Trusted
         } else if self.tutor.steps[index].checks_text() {
             let revision = self.state.revision;
@@ -656,7 +664,10 @@ impl InteractiveApplication {
 
     fn tutor_go(&mut self, index: usize, praised: bool) {
         if !self.tutor_in_project() {
-            self.notify_message("The tutor is paused: :Tutor returns to the practice project.".into(), false);
+            self.notify_message(
+                "The tutor is paused: :Tutor returns to the practice project.".into(),
+                false,
+            );
             return;
         }
         self.tutor.observed = false;
@@ -786,7 +797,12 @@ impl InteractiveApplication {
             .buffers
             .iter()
             .filter(|(_, buffer)| buffer.dirty)
-            .filter(|(_, buffer)| buffer.path.as_ref().is_some_and(|path| path.starts_with(&root)))
+            .filter(|(_, buffer)| {
+                buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| path.starts_with(&root))
+            })
             .map(|(id, _)| id)
             .collect::<Vec<_>>();
         for id in unsaved {
@@ -1101,7 +1117,10 @@ mod tests {
             if terminal {
                 running_terminal(&mut app);
             }
-            app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+            app.start_tutor(TutorStart {
+                language: Language::Rust,
+                step: 0,
+            });
             let root = app.tutor.practice.as_ref().unwrap().root.clone();
             assert_eq!(app.workspace.root_operation_pending(), !terminal);
             app.tutor_quit();
@@ -1123,14 +1142,21 @@ mod tests {
         let home = app.state.workspace_root.clone();
         let original = home.join("original.txt");
         std::fs::write(&original, "keep this").unwrap();
-        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 0,
+        });
         enter(&mut app);
         let root = app.tutor.practice.as_ref().unwrap().root.clone();
         let path = root.join("replaced.txt");
         std::os::unix::fs::symlink(&original, &path).unwrap();
-        let (buffer, _) = app.state.open_text(
-            crate::editor::TextBuffer::from_text("practice edits"), Some(path),
-        ).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(
+                crate::editor::TextBuffer::from_text("practice edits"),
+                Some(path),
+            )
+            .unwrap();
         app.state.set_buffer_dirty(buffer, true);
         app.tutor_quit();
         enter(&mut app);
@@ -1146,36 +1172,65 @@ mod tests {
         let home = app.state.workspace_root.clone();
         let path = home.join("notes.txt");
         std::fs::write(&path, "saved notes").unwrap();
-        app.state.open_text(crate::editor::TextBuffer::from_text("saved notes"), Some(path)).unwrap();
-        let (scratch, _) = app.state.open_text(crate::editor::TextBuffer::from_text("unsaved notes"), None).unwrap();
+        app.state
+            .open_text(
+                crate::editor::TextBuffer::from_text("saved notes"),
+                Some(path),
+            )
+            .unwrap();
+        let (scratch, _) = app
+            .state
+            .open_text(crate::editor::TextBuffer::from_text("unsaved notes"), None)
+            .unwrap();
         app.state.set_buffer_dirty(scratch, true);
-        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 0,
+        });
         assert!(app.tutor.practice.is_none());
         assert!(!app.workspace.root_operation_pending());
         assert_eq!(app.state.workspace_root, home);
         assert_eq!(app.state.buffers[scratch].text.to_string(), "unsaved notes");
         assert!(app.state.buffers[scratch].dirty);
-        assert!(app.ui.notification.as_deref().unwrap().contains("unsaved buffers"));
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .unwrap()
+                .contains("unsaved buffers")
+        );
     }
 
     #[test]
     fn tutor_reports_progress_write_failures_without_stopping_the_lesson() {
         let mut app = app();
-        app.start_tutor(TutorStart { language: Language::Rust, step: 0 });
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 0,
+        });
         enter(&mut app);
         std::fs::remove_file(&app.tutor.progress).unwrap();
         std::fs::create_dir(&app.tutor.progress).unwrap();
         app.tutor_next();
         assert_eq!(app.tutor.current, Some(1));
         assert!(app.ui.tutor.is_some());
-        assert!(app.ui.notification.as_deref().unwrap().contains("could not save tutor progress:"));
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .unwrap()
+                .contains("could not save tutor progress:")
+        );
     }
 
     #[test]
     fn paused_tutor_navigation_leaves_the_other_workspace_unchanged() {
         let mut app = app();
         let home = app.state.workspace_root.clone();
-        app.start_tutor(TutorStart { language: Language::Rust, step: 2 });
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 2,
+        });
         enter(&mut app);
         app.switch_workspace_root(home.clone());
         enter(&mut app);
@@ -1188,7 +1243,10 @@ mod tests {
         assert_eq!(app.tutor.current, Some(2));
         assert_eq!(app.state.revision, revision);
         assert_eq!(app.state.views.len(), views);
-        assert_eq!(std::fs::read_to_string(&app.tutor.progress).unwrap(), progress);
+        assert_eq!(
+            std::fs::read_to_string(&app.tutor.progress).unwrap(),
+            progress
+        );
         assert_eq!(app.state.workspace_root, home);
         app.open_tutor();
         enter(&mut app);
@@ -1199,8 +1257,15 @@ mod tests {
     #[test]
     fn tutor_trust_lesson_waits_for_confirmed_persisted_trust() {
         let mut app = app();
-        let step = lessons(Language::Rust).unwrap().iter().position(|step| step.done.iter().any(|done| done == "workspace.trust")).unwrap();
-        app.start_tutor(TutorStart { language: Language::Rust, step });
+        let step = lessons(Language::Rust)
+            .unwrap()
+            .iter()
+            .position(|step| step.done.iter().any(|done| done == "workspace.trust"))
+            .unwrap();
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step,
+        });
         enter(&mut app);
         let root = app.workspace.active_root().unwrap();
         let identity = crate::workspace::RootIdentity::capture(&app.state.workspace_root).unwrap();
@@ -1236,13 +1301,20 @@ mod tests {
         });
         enter(&mut app);
         assert_eq!(app.tutor.current, Some(2));
-        let path = app.tutor.practice.as_ref().unwrap().root.join("practice.rs");
+        let path = app
+            .tutor
+            .practice
+            .as_ref()
+            .unwrap()
+            .root
+            .join("practice.rs");
         let text = crate::editor::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
         let (buffer, _) = app.state.open_text(text, Some(path)).unwrap();
         app.tutor_command("mode.insert");
-        app.handle_key_in_context("editor.insert", crate::editor::input::KeyEvent::plain(
-            crate::editor::input::KeyCode::Char('x'),
-        ));
+        app.handle_key_in_context(
+            "editor.insert",
+            crate::editor::input::KeyEvent::plain(crate::editor::input::KeyCode::Char('x')),
+        );
         let edited = app.state.buffers[buffer].text.to_string();
         assert!(app.state.buffers[buffer].dirty);
         running_terminal(&mut app);
@@ -1284,12 +1356,21 @@ mod tests {
             ] {
                 let mut app = app();
                 let steps = lessons(language).unwrap();
-                let step = steps.iter().position(|step| step.line.as_deref() == Some(dependent) || step.done.iter().any(|done| done == dependent)).unwrap();
+                let step = steps
+                    .iter()
+                    .position(|step| {
+                        step.line.as_deref() == Some(dependent)
+                            || step.done.iter().any(|done| done == dependent)
+                    })
+                    .unwrap();
                 app.start_tutor(TutorStart { language, step });
                 let resumed = app.tutor.practice.as_ref().unwrap().start;
                 assert!(resumed < step);
                 let first = &app.tutor.steps[resumed];
-                assert!(first.press.contains(prerequisite) || first.done.iter().any(|done| done == prerequisite));
+                assert!(
+                    first.press.contains(prerequisite)
+                        || first.done.iter().any(|done| done == prerequisite)
+                );
                 assert!(!first.resume_from_previous);
             }
         }

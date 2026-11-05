@@ -4,8 +4,8 @@ use crate::{
     ui::render::{explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS, overlays::DOCUMENTATION_MAX_HEIGHT},
     ui::{PickerSurfaceKind, PickerUiState, window::WindowRect},
 };
-use unicode_width::UnicodeWidthStr;
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
 
@@ -19,18 +19,20 @@ pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
 
 /// Width of text painted by CellGrid, including its visible replacements.
 pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
-    text.graphemes(true).map(|grapheme| {
-        let safe = if grapheme == "\t" {
-            " "
-        } else if grapheme.chars().any(char::is_control) {
-            crate::ui::render::CONTROL_CHARACTER_REPLACEMENT
-        } else if text_width(grapheme, ambiguous) == 0 {
-            crate::ui::render::ZERO_WIDTH_REPLACEMENT
-        } else {
-            grapheme
-        };
-        text_width(safe, ambiguous).clamp(1, 2)
-    }).sum()
+    text.graphemes(true)
+        .map(|grapheme| {
+            let safe = if grapheme == "\t" {
+                " "
+            } else if grapheme.chars().any(char::is_control) {
+                crate::ui::render::CONTROL_CHARACTER_REPLACEMENT
+            } else if text_width(grapheme, ambiguous) == 0 {
+                crate::ui::render::ZERO_WIDTH_REPLACEMENT
+            } else {
+                grapheme
+            };
+            text_width(safe, ambiguous).clamp(1, 2)
+        })
+        .sum()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

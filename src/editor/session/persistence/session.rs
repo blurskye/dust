@@ -605,9 +605,10 @@ fn collect_persistable_editor_panes(
                 .and_then(|view| state.buffers.get(view.buffer))
                 .filter(|buffer| {
                     !buffer.dirty
-                        && buffer.path.as_ref().is_some_and(|path| {
-                            roots.iter().any(|root| path.starts_with(root))
-                        })
+                        && buffer
+                            .path
+                            .as_ref()
+                            .is_some_and(|path| roots.iter().any(|root| path.starts_with(root)))
                 })
                 .and_then(|buffer| buffer.path.clone())
             {

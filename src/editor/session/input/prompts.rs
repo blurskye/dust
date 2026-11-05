@@ -187,21 +187,24 @@ impl InputSession {
         }
         let prefix = &request.prefix;
         let detail = &policy.command_labels["file.open"];
-        let mut candidates = prompt.completions
+        let mut candidates = prompt
+            .completions
             .iter()
             .map(|item| (item.label.clone(), item.detail.clone()))
             .collect::<BTreeMap<_, _>>();
-        for path in paths
-            .into_iter()
-            .filter(|path| {
-                path.file_name()
-                    .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(prefix))
-            })
-        {
-            let label = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+        for path in paths.into_iter().filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(prefix))
+        }) {
+            let label = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
             candidates.insert(label, detail.clone());
         }
-        prompt.completions = candidates.into_iter()
+        prompt.completions = candidates
+            .into_iter()
             .take(COMPLETION_LIMIT)
             .map(|(label, detail)| CompletionItem {
                 icon: None,
@@ -218,17 +221,36 @@ impl InputSession {
         id: crate::editor::ViewId,
         view: &crate::editor::View,
     ) -> crate::editor::text::ByteOffset {
-        self.search_origin.get_or_insert((id, view.cursor, view.scroll_line, view.scroll_wrap_row, view.scroll_column)).1
+        self.search_origin
+            .get_or_insert((
+                id,
+                view.cursor,
+                view.scroll_line,
+                view.scroll_wrap_row,
+                view.scroll_column,
+            ))
+            .1
     }
     pub(in crate::editor::session) fn take_search_origin(
         &mut self,
-    ) -> Option<(crate::editor::ViewId, crate::editor::text::ByteOffset, usize, usize, usize)> {
+    ) -> Option<(
+        crate::editor::ViewId,
+        crate::editor::text::ByteOffset,
+        usize,
+        usize,
+        usize,
+    )> {
         self.search_origin.take()
     }
-    pub(in crate::editor::session) fn set_pending_breakpoint(&mut self, row: crate::debugger::DapSourceBreakpoint) {
+    pub(in crate::editor::session) fn set_pending_breakpoint(
+        &mut self,
+        row: crate::debugger::DapSourceBreakpoint,
+    ) {
         self.pending_breakpoint = Some(row);
     }
-    pub(in crate::editor::session) fn take_pending_breakpoint(&mut self) -> Option<crate::debugger::DapSourceBreakpoint> {
+    pub(in crate::editor::session) fn take_pending_breakpoint(
+        &mut self,
+    ) -> Option<crate::debugger::DapSourceBreakpoint> {
         self.pending_breakpoint.take()
     }
     pub(in crate::editor::session) fn prompt_insert(&mut self, text: &str) {
@@ -368,7 +390,10 @@ impl InputSession {
             return;
         }
         if self.history_index.is_none() {
-            self.history_draft = self.prompt.as_ref().map(|prompt| (prompt.input.clone(), prompt.cursor));
+            self.history_draft = self
+                .prompt
+                .as_ref()
+                .map(|prompt| (prompt.input.clone(), prompt.cursor));
         }
         self.history_index = (next < history.len()).then_some(next);
         let (selected, cursor) = if let Some(index) = self.history_index {
@@ -481,7 +506,11 @@ impl InputSession {
             let fragment = fragment.trim();
             let query = fragment.to_lowercase();
             for path in buffers {
-                let label = path.strip_prefix(root).unwrap_or(path).display().to_string();
+                let label = path
+                    .strip_prefix(root)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string();
                 if path.to_string_lossy().to_lowercase().contains(&query) {
                     let detail = &policy.command_labels["file.open"];
                     candidates.insert(label, detail.clone());
@@ -499,7 +528,9 @@ impl InputSession {
             let prefix = if trailing_separator {
                 String::new()
             } else {
-                entered.file_name().map_or_else(String::new, |name| name.to_string_lossy().to_lowercase())
+                entered
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().to_lowercase())
             };
             let directory = parent.map_or_else(
                 || root.to_path_buf(),
@@ -602,10 +633,7 @@ fn command_completions<'a>(
     };
     let mut best = BTreeMap::<String, (bool, usize, bool, String)>::new();
     for (alias, command_id) in &policy.input.command_aliases {
-        let label = policy
-            .command_labels
-            .get(command_id)
-            .unwrap_or(command_id);
+        let label = policy.command_labels.get(command_id).unwrap_or(command_id);
         let prefix = alias.to_lowercase().starts_with(&query);
         if !prefix && !label.to_lowercase().contains(&query) {
             continue;
@@ -634,7 +662,11 @@ fn command_completions<'a>(
     let mut rows = best
         .into_iter()
         .map(|(command_id, rank)| {
-            let label = policy.command_labels.get(&command_id).cloned().unwrap_or(command_id);
+            let label = policy
+                .command_labels
+                .get(&command_id)
+                .cloned()
+                .unwrap_or(command_id);
             (rank, label)
         })
         .collect::<Vec<_>>();

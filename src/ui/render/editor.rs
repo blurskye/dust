@@ -13,7 +13,10 @@ use crate::{
             byte_range_for_display_columns, display_column_at,
         },
     },
-    ui::{CellGrid, Style, geometry::{cell_text_width, text_width}},
+    ui::{
+        CellGrid, Style,
+        geometry::{cell_text_width, text_width},
+    },
 };
 
 use super::{
@@ -247,10 +250,15 @@ pub(super) fn render_editor_view(
         .as_ref()
         .filter(|prompt| prompt.kind == crate::ui::PromptKind::Command)
         .and_then(|prompt| crate::editor::input::substitute_pattern(&prompt.input));
-    let search_prompt = ui.prompt.as_ref().is_some_and(|prompt| matches!(
-        prompt.kind, crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward
-    ));
-    let substitute_flags = ui.prompt.as_ref()
+    let search_prompt = ui.prompt.as_ref().is_some_and(|prompt| {
+        matches!(
+            prompt.kind,
+            crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward
+        )
+    });
+    let substitute_flags = ui
+        .prompt
+        .as_ref()
         .and_then(|prompt| crate::editor::input::typed_substitution(&prompt.input))
         .map(|(_, _, _, flags)| flags)
         .unwrap_or_default();
@@ -306,25 +314,39 @@ pub(super) fn render_editor_view(
                                 offset += line.len();
                             }
                             matches
-                        }).unwrap_or_default()
-                } else {
-                    crate::editor::input::search_matches(&source, query, config.search.smart_case, false)
+                        })
                         .unwrap_or_default()
-                };
-                matches.into_iter()
-                .filter(|range| {
-                    let word = |ch: char| ch.is_alphanumeric() || ch == '_';
-                    !whole_word || source[..range.start].chars().next_back().is_none_or(|ch| !word(ch))
-                        && source[range.end..].chars().next().is_none_or(|ch| !word(ch))
-                })
-                .filter_map(|range| {
-                    ByteRange::new(
-                        ByteOffset(first + range.start),
-                        ByteOffset(first + range.end),
+                } else {
+                    crate::editor::input::search_matches(
+                        &source,
+                        query,
+                        config.search.smart_case,
+                        false,
                     )
-                    .ok()
-                })
-                .collect()
+                    .unwrap_or_default()
+                };
+                matches
+                    .into_iter()
+                    .filter(|range| {
+                        let word = |ch: char| ch.is_alphanumeric() || ch == '_';
+                        !whole_word
+                            || source[..range.start]
+                                .chars()
+                                .next_back()
+                                .is_none_or(|ch| !word(ch))
+                                && source[range.end..]
+                                    .chars()
+                                    .next()
+                                    .is_none_or(|ch| !word(ch))
+                    })
+                    .filter_map(|range| {
+                        ByteRange::new(
+                            ByteOffset(first + range.start),
+                            ByteOffset(first + range.end),
+                        )
+                        .ok()
+                    })
+                    .collect()
             })
     } else {
         Vec::new()
@@ -352,18 +374,27 @@ pub(super) fn render_editor_view(
         {
             if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
                 diagnostic_lines.entry(line).or_default().push(diagnostic);
-                let mut end_line = buffer.text.byte_to_line(diagnostic.range.end).unwrap_or(line);
+                let mut end_line = buffer
+                    .text
+                    .byte_to_line(diagnostic.range.end)
+                    .unwrap_or(line);
                 if !diagnostic.range.is_empty()
                     && buffer.text.line_to_byte(end_line).ok() == Some(diagnostic.range.end)
                 {
                     end_line = end_line.saturating_sub(1);
                 }
-                for &row in visible_lines.iter().filter(|&&row| row >= line && row <= end_line) {
+                for &row in visible_lines
+                    .iter()
+                    .filter(|&&row| row >= line && row <= end_line)
+                {
                     diagnostic_ranges.entry(row).or_default().push(diagnostic);
                 }
             }
         }
-        for diagnostics in diagnostic_lines.values_mut().chain(diagnostic_ranges.values_mut()) {
+        for diagnostics in diagnostic_lines
+            .values_mut()
+            .chain(diagnostic_ranges.values_mut())
+        {
             diagnostics.sort_unstable_by_key(|diagnostic| {
                 (
                     diagnostic.severity,
@@ -424,14 +455,19 @@ pub(super) fn render_editor_view(
         let head = buffer.text.byte_to_line(selection.head).unwrap_or(0);
         anchor.min(head)..=anchor.max(head)
     });
-    let block_columns = view.selection
+    let block_columns = view
+        .selection
         .filter(|selection| selection.kind == SelectionKind::Block)
         .and_then(|selection| {
             let column = |offset| {
                 let line = buffer.text.byte_to_line(offset).ok()?;
                 let start = buffer.text.line_to_byte(line).ok()?;
                 let source = buffer.text.line(line).ok()?;
-                Some(display_column_at(source.trim_end_matches('\n'), offset.get().saturating_sub(start.get()), width_policy))
+                Some(display_column_at(
+                    source.trim_end_matches('\n'),
+                    offset.get().saturating_sub(start.get()),
+                    width_policy,
+                ))
             };
             Some((column(selection.anchor)?, column(selection.head)?))
         });
@@ -575,27 +611,28 @@ pub(super) fn render_editor_view(
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
         // Resolve the selection once per source line, not once per painted grapheme.
-        let selected_bytes = view.selection.and_then(|selection| {
-            match selection.kind {
-                SelectionKind::Character => {
-                    let start = selection.anchor.min(selection.head);
-                    let mut end = selection.anchor.max(selection.head);
-                    if view.mode == EditorMode::Insert {
-                        if end == start { return None; }
-                        end = ByteOffset(end.get() - 1);
+        let selected_bytes = view.selection.and_then(|selection| match selection.kind {
+            SelectionKind::Character => {
+                let start = selection.anchor.min(selection.head);
+                let mut end = selection.anchor.max(selection.head);
+                if view.mode == EditorMode::Insert {
+                    if end == start {
+                        return None;
                     }
-                    Some(start..=end)
+                    end = ByteOffset(end.get() - 1);
                 }
-                SelectionKind::Line if selection_lines.as_ref()?.contains(&line_index) => {
-                    Some(line_start..=ByteOffset(line_start.get() + full_content.len()))
-                }
-                SelectionKind::Block if selection_lines.as_ref()?.contains(&line_index) => {
-                    let (anchor, head) = block_columns?;
-                    let (start, end) = byte_range_for_display_columns(full_content, anchor, head, width_policy)?;
-                    Some(ByteOffset(line_start.get() + start)..=ByteOffset(line_start.get() + end - 1))
-                }
-                _ => None,
+                Some(start..=end)
             }
+            SelectionKind::Line if selection_lines.as_ref()?.contains(&line_index) => {
+                Some(line_start..=ByteOffset(line_start.get() + full_content.len()))
+            }
+            SelectionKind::Block if selection_lines.as_ref()?.contains(&line_index) => {
+                let (anchor, head) = block_columns?;
+                let (start, end) =
+                    byte_range_for_display_columns(full_content, anchor, head, width_policy)?;
+                Some(ByteOffset(line_start.get() + start)..=ByteOffset(line_start.get() + end - 1))
+            }
+            _ => None,
         });
         let markdown_line = visual_rows.markdown_line(line_index);
         let table = markdown_line
@@ -730,10 +767,13 @@ pub(super) fn render_editor_view(
                     None => {}
                 }
             }
-            let style = if selected_bytes.as_ref().is_some_and(|range| range.contains(&global)) || view
-                .multi_marks
-                .iter()
-                .any(|mark| mark.contains(global) || (mark.is_empty() && mark.start == global))
+            let style = if selected_bytes
+                .as_ref()
+                .is_some_and(|range| range.contains(&global))
+                || view
+                    .multi_marks
+                    .iter()
+                    .any(|mark| mark.contains(global) || (mark.is_empty() && mark.start == global))
                 || view.block_insert.contains(&global)
             {
                 Style::Selection
@@ -905,8 +945,11 @@ pub(super) fn render_editor_view(
                 x = x.saturating_add(advance);
             }
         }
-        if full_content.is_empty() && x < width
-            && selected_bytes.as_ref().is_some_and(|range| range.contains(&line_start))
+        if full_content.is_empty()
+            && x < width
+            && selected_bytes
+                .as_ref()
+                .is_some_and(|range| range.contains(&line_start))
         {
             grid.set_cell(x, screen_row, " ", Style::Selection);
         }
@@ -944,7 +987,8 @@ pub(super) fn render_editor_view(
                 }
             }
         }
-        if let Some((start, end)) = visual_rows.containing_fold(line_index.saturating_add(1))
+        if let Some((start, end)) = visual_rows
+            .containing_fold(line_index.saturating_add(1))
             .filter(|(start, _)| *start == line_index)
         {
             let hidden = end.saturating_sub(start);
@@ -1056,7 +1100,13 @@ pub(super) fn render_editor_view(
 
 /// Draw the operation bar. At narrow widths the blockers are dropped and then the phase is
 /// shortened, because the operation and the cancellation are what must not be lost.
-pub(super) fn render_operation_bar(grid: &mut CellGrid, ui: &UiState, config: &Config, width: u16, y: u16) {
+pub(super) fn render_operation_bar(
+    grid: &mut CellGrid,
+    ui: &UiState,
+    config: &Config,
+    width: u16,
+    y: u16,
+) {
     let Some(bar) = ui.operation_bar.as_ref() else {
         return;
     };
@@ -1438,7 +1488,10 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
         let hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
         let virtual_cells = hints
             .into_iter()
-            .filter(|hint| hint.position >= line_start && hint.position <= ByteOffset(line_start.get() + content.len()))
+            .filter(|hint| {
+                hint.position >= line_start
+                    && hint.position <= ByteOffset(line_start.get() + content.len())
+            })
             .take(32)
             .filter(|hint| hint.position >= visible_start && hint.position <= view.cursor)
             .map(|hint| cell_text_width(&hint.label, config.editor.ambiguous_width))

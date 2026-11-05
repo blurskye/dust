@@ -176,7 +176,10 @@ fn word_in(
     let mut end = first + grapheme.len();
     let mut current = class(grapheme);
     let mut leading = first;
-    while characters.peek().is_some_and(|(index, _)| *index <= relative) {
+    while characters
+        .peek()
+        .is_some_and(|(index, _)| *index <= relative)
+    {
         let (index, grapheme) = characters.next().expect("peeked grapheme");
         let next = class(grapheme);
         if next != current {
@@ -186,7 +189,9 @@ fn word_in(
         }
         end = index + grapheme.len();
     }
-    while let Some((index, grapheme)) = characters.next_if(|(_, grapheme)| class(grapheme) == current) {
+    while let Some((index, grapheme)) =
+        characters.next_if(|(_, grapheme)| class(grapheme) == current)
+    {
         end = index + grapheme.len();
     }
     if around {
@@ -194,7 +199,9 @@ fn word_in(
             && (current == 0 || class(grapheme) == 0)
         {
             let next = class(grapheme);
-            while let Some((index, grapheme)) = characters.next_if(|(_, grapheme)| class(grapheme) == next) {
+            while let Some((index, grapheme)) =
+                characters.next_if(|(_, grapheme)| class(grapheme) == next)
+            {
                 end = index + grapheme.len();
             }
         } else if current != 0 {
@@ -202,8 +209,8 @@ fn word_in(
         }
     }
     ByteRange::new(ByteOffset(start + first), ByteOffset(start + end))
-    .map(Some)
-    .map_err(failed)
+        .map(Some)
+        .map_err(failed)
 }
 
 fn paragraph(

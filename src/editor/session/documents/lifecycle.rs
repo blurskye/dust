@@ -37,7 +37,10 @@ impl DocumentView<'_> {
     }
     fn save_version(&self) -> Version {
         let mut version = self.version();
-        version.snapshot = Some(Box::new((self.text.to_string().into(), self.text.format().clone())));
+        version.snapshot = Some(Box::new((
+            self.text.to_string().into(),
+            self.text.format().clone(),
+        )));
         version
     }
 }
@@ -66,7 +69,10 @@ enum Operation {
         generation: Arc<()>,
         retired: Vec<PathBuf>,
     },
-    Reload { version: Version, check_disk: bool },
+    Reload {
+        version: Version,
+        check_disk: bool,
+    },
     Save {
         version: Version,
         bytes: Vec<u8>,
@@ -274,7 +280,10 @@ impl DocumentSession {
                     editor: editor.clone(),
                     workspace,
                 },
-                operation: Operation::Reload { version: view.version(), check_disk },
+                operation: Operation::Reload {
+                    version: view.version(),
+                    check_disk,
+                },
             },
         );
         Ok(())
@@ -301,13 +310,17 @@ impl DocumentSession {
         } else {
             request.base.join(path)
         };
-        request.other_open_paths.extend(self.pending_files.values().filter_map(|intent| {
-            match &intent.operation {
-                Operation::Open { requested, .. } => Some(requested.clone()),
-                Operation::Save { target, .. } => Some(target.clone()),
-                Operation::Reload { .. } => None,
-            }
-        }));
+        request
+            .other_open_paths
+            .extend(
+                self.pending_files
+                    .values()
+                    .filter_map(|intent| match &intent.operation {
+                        Operation::Open { requested, .. } => Some(requested.clone()),
+                        Operation::Save { target, .. } => Some(target.clone()),
+                        Operation::Reload { .. } => None,
+                    }),
+            );
         if request.other_open_paths.iter().any(|path| path == &target) {
             return Err(DocumentFailure::Error(
                 "save-as target belongs to another open buffer".into(),
@@ -349,11 +362,19 @@ impl DocumentSession {
         Ok(id)
     }
     fn check_buffer_mutation(&self, buffer: BufferId) -> Result<(), DocumentFailure> {
-        if self.pending_files.values().any(|intent| match &intent.operation {
-            Operation::Reload { version, .. } | Operation::Save { version, .. } => version.id == buffer,
-            Operation::Open { .. } => false,
-        }) {
-            return Err(DocumentFailure::Error("a save or reload for this buffer is already pending".into()));
+        if self
+            .pending_files
+            .values()
+            .any(|intent| match &intent.operation {
+                Operation::Reload { version, .. } | Operation::Save { version, .. } => {
+                    version.id == buffer
+                }
+                Operation::Open { .. } => false,
+            })
+        {
+            return Err(DocumentFailure::Error(
+                "a save or reload for this buffer is already pending".into(),
+            ));
         }
         Ok(())
     }
@@ -414,7 +435,13 @@ impl DocumentSession {
                         .map_err(|e| DocumentFailure::Error(e.to_string()))?,
                 }
             }
-            (Operation::Reload { version, check_disk }, VfsResult::Read { path, result, .. }) => {
+            (
+                Operation::Reload {
+                    version,
+                    check_disk,
+                },
+                VfsResult::Read { path, result, .. },
+            ) => {
                 let current = view.ok_or_else(stale)?;
                 if current.id != version.id
                     || current.path != version.path.as_deref()
@@ -497,7 +524,9 @@ impl DocumentSession {
     ) {
         self.pending_files.retain(|id, intent| {
             let keep = match &mut intent.operation {
-                Operation::Reload { version, .. } | Operation::Save { version, .. } => version.id != buffer,
+                Operation::Reload { version, .. } | Operation::Save { version, .. } => {
+                    version.id != buffer
+                }
                 Operation::Open {
                     requested, retired, ..
                 } => match path {
@@ -637,7 +666,10 @@ mod tests {
                     editor: state.window_version(),
                     workspace: workspace.version(),
                 },
-                operation: Operation::Reload { version: view(state, id).version(), check_disk: false },
+                operation: Operation::Reload {
+                    version: view(state, id).version(),
+                    check_disk: false,
+                },
             },
             event: VfsResult::Read {
                 id: RequestId(1),
@@ -661,10 +693,12 @@ mod tests {
             ),
         ] {
             let mut state = EditorState::new("/workspace".into());
-            let (buffer, _) = state.open_text(
-                TextBuffer::from_text(source),
-                Some("/workspace/file".into()),
-            ).unwrap();
+            let (buffer, _) = state
+                .open_text(
+                    TextBuffer::from_text(source),
+                    Some("/workspace/file".into()),
+                )
+                .unwrap();
             let mut config = crate::config::load_bundled_config().config;
             config.editor.final_newline = policy;
             let bytes = configured_file_bytes(&state.buffers[buffer].text, &config.editor);
@@ -683,10 +717,12 @@ mod tests {
             assert!(!state.buffers[buffer].dirty);
             assert_eq!(state.buffers[buffer].persisted_bytes(), disk);
             assert_eq!(state.buffers[buffer].text.to_bytes(), disk);
-            state.apply_transaction(
-                &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
-                    .with_operation(crate::editor::EditorOperation::Undo { buffer }),
-            ).unwrap();
+            state
+                .apply_transaction(
+                    &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+                        .with_operation(crate::editor::EditorOperation::Undo { buffer }),
+                )
+                .unwrap();
             assert_eq!(state.buffers[buffer].text.to_string(), source);
         }
     }
@@ -695,14 +731,19 @@ mod tests {
     fn line_ending_save_policy_keeps_the_requested_format_snapshot_clean() {
         for (ending, disk) in [
             (crate::config::LineEndingPolicy::Lf, b"a\nb\n".as_slice()),
-            (crate::config::LineEndingPolicy::CrLf, b"a\r\nb\r\n".as_slice()),
+            (
+                crate::config::LineEndingPolicy::CrLf,
+                b"a\r\nb\r\n".as_slice(),
+            ),
             (crate::config::LineEndingPolicy::Cr, b"a\rb\r".as_slice()),
         ] {
             let mut state = EditorState::new("/workspace".into());
-            let (buffer, _) = state.open_text(
-                TextBuffer::from_bytes(b"a\r\nb\n").unwrap(),
-                Some("/workspace/file".into()),
-            ).unwrap();
+            let (buffer, _) = state
+                .open_text(
+                    TextBuffer::from_bytes(b"a\r\nb\n").unwrap(),
+                    Some("/workspace/file".into()),
+                )
+                .unwrap();
             let mut config = crate::config::load_bundled_config().config;
             config.editor.line_endings = ending;
             let bytes = configured_file_bytes(&state.buffers[buffer].text, &config.editor);
@@ -710,8 +751,12 @@ mod tests {
             let version = view(&state, buffer).save_version();
             let mut draft = state.draft();
             assert!(draft.save_document(
-                buffer, &version.text, version.revision, bytes,
-                "/workspace/file".into(), *version.snapshot.unwrap(),
+                buffer,
+                &version.text,
+                version.revision,
+                bytes,
+                "/workspace/file".into(),
+                *version.snapshot.unwrap(),
             ));
             state = draft.accept(&state.version()).unwrap();
             assert!(!state.buffers[buffer].dirty);
@@ -724,7 +769,9 @@ mod tests {
     #[test]
     fn read_only_files_reject_save_and_reload_collisions_are_checked() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into())).unwrap();
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()))
+            .unwrap();
         state.buffers[buffer].read_only = true;
         let workspace = workspace();
         let mut documents = owner(&state);
@@ -753,7 +800,9 @@ mod tests {
             path: "/workspace/b".into(),
             result: Ok(b"b".to_vec()),
         };
-        let (other, _) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into())).unwrap();
+        let (other, _) = state
+            .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
+            .unwrap();
         assert!(
             reply
                 .check_save_destination(std::iter::once((
@@ -767,10 +816,12 @@ mod tests {
     #[test]
     fn completed_saves_are_reconciled_after_a_workspace_switch() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, _) = state.open_text(
-            TextBuffer::from_text("saved"),
-            Some("/workspace/file".into()),
-        ).unwrap();
+        let (buffer, _) = state
+            .open_text(
+                TextBuffer::from_text("saved"),
+                Some("/workspace/file".into()),
+            )
+            .unwrap();
         let old = workspace();
         let current = workspace();
         let version = view(&state, buffer).save_version();
@@ -811,7 +862,9 @@ mod tests {
     #[test]
     fn reload_rejects_edits_reloaded_incarnations_closed_targets_and_foreign_roots_before_decode() {
         let mut state = EditorState::new("/workspace".into());
-        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into())).unwrap();
+        let (id, _) = state
+            .open_text(TextBuffer::from_text("old"), Some("/workspace/file".into()))
+            .unwrap();
         let owner = owner(&state);
         let workspace = workspace();
         let reply = reload(&state, &workspace, id);
@@ -866,7 +919,9 @@ mod tests {
     #[test]
     fn stale_save_cannot_clean_new_edits_or_replace_reload_metadata() {
         let mut state = EditorState::new("/workspace".into());
-        let (id, _) = state.open_text(TextBuffer::from_text("old"), Some("/workspace/file".into())).unwrap();
+        let (id, _) = state
+            .open_text(TextBuffer::from_text("old"), Some("/workspace/file".into()))
+            .unwrap();
         let owner = owner(&state);
         let workspace = workspace();
         let reply = |state: &EditorState| FileReply {

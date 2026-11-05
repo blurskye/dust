@@ -215,7 +215,11 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
         return executable_file(&path).then_some(path);
     }
     env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
-        let directory = if directory.as_os_str().is_empty() { PathBuf::from(".") } else { directory };
+        let directory = if directory.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            directory
+        };
         let path = std::path::absolute(directory.join(executable)).ok()?;
         executable_file(&path).then_some(path)
     })
@@ -251,7 +255,11 @@ impl PathExecutables {
         let mut found = HashMap::new();
         let mut listed = BTreeSet::new();
         for directory in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
-            let directory = if directory.as_os_str().is_empty() { PathBuf::from(".") } else { directory };
+            let directory = if directory.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                directory
+            };
             let Ok(directory) = std::path::absolute(directory) else {
                 continue;
             };
@@ -371,7 +379,11 @@ pub(super) fn nixos_os_release_at(path: &Path) -> bool {
         let value = value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| value.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            })
             .unwrap_or(value);
         value == "nixos"
     })
@@ -690,8 +702,11 @@ pub(crate) fn nix_lsp_launch_environment_at(
     definition: &ToolDefinition,
 ) -> Result<BTreeMap<String, OsString>, String> {
     let runtime = nix_lsp_runtime_at(root, definition)?;
-    let mut environment: BTreeMap<String, OsString> = runtime.environment().into_iter()
-        .map(|(key, value)| (key, value.into())).collect();
+    let mut environment: BTreeMap<String, OsString> = runtime
+        .environment()
+        .into_iter()
+        .map(|(key, value)| (key, value.into()))
+        .collect();
     let mut paths = Vec::new();
     if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
         paths.push(root.join(&definition.id).join("bin"));
@@ -811,7 +826,10 @@ mod tests {
         if std::env::var_os(CHILD).is_some() {
             let scanned = PathExecutables::scan();
             assert_eq!(scanned.find(name), discover_executable(name));
-            assert_eq!(scanned.find(name).unwrap(), std::env::current_dir().unwrap().join(name));
+            assert_eq!(
+                scanned.find(name).unwrap(),
+                std::env::current_dir().unwrap().join(name)
+            );
             return;
         }
         let local = root.path().join(name);
@@ -823,7 +841,11 @@ mod tests {
             .env("PATH", path)
             .current_dir(root.path())
             .output().unwrap();
-        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
     }
 
     #[test]
@@ -841,7 +863,10 @@ mod tests {
     #[test]
     fn managed_discovery_requires_an_executable_file() {
         let root = tempfile::tempdir().unwrap();
-        let definition = bundled_tool_catalog().into_iter().find(|tool| tool.id == "prettier").unwrap();
+        let definition = bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "prettier")
+            .unwrap();
         let bin = root.path().join(&definition.id).join("bin");
         fs::create_dir_all(&bin).unwrap();
         let executable = bin.join(&definition.executable);
@@ -849,7 +874,10 @@ mod tests {
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(managed_executable(root.path(), &definition).is_none());
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(managed_executable(root.path(), &definition), Some(executable));
+        assert_eq!(
+            managed_executable(root.path(), &definition),
+            Some(executable)
+        );
     }
 
     #[test]
@@ -863,24 +891,46 @@ mod tests {
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "tools::catalog::tests::managed_formatter_preserves_native_paths_in_arguments_and_environment"])
                 .env(CHILD, "1").env("PATH", path).output().unwrap();
-            assert!(result.status.success(), "{}{}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
             return;
         }
         let root = directory.path().join("tools");
         let bin = root.join("prettier/bin");
         fs::create_dir_all(&bin).unwrap();
         let executable = bin.join("prettier");
-        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n").unwrap();
+        fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n",
+        )
+        .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(bin.join("node"), "runtime").unwrap();
-        let path = directory.path().join(OsString::from_vec(b"file-\xff{path}.js".to_vec()));
+        let path = directory
+            .path()
+            .join(OsString::from_vec(b"file-\xff{path}.js".to_vec()));
         let formatter = managed_formatter_at(&root, |tool| tool.id == "prettier", &path).unwrap();
-        assert!(formatter.arguments.iter().any(|argument| argument == path.as_os_str()));
+        assert!(
+            formatter
+                .arguments
+                .iter()
+                .any(|argument| argument == path.as_os_str())
+        );
         let mut paths = env::split_paths(&formatter.environment["PATH"]);
         assert_eq!(paths.next(), Some(bin));
-        assert_eq!(paths.collect::<Vec<_>>(), env::split_paths(&env::var_os("PATH").unwrap()).collect::<Vec<_>>());
+        assert_eq!(
+            paths.collect::<Vec<_>>(),
+            env::split_paths(&env::var_os("PATH").unwrap()).collect::<Vec<_>>()
+        );
         let output = std::process::Command::new(formatter.executable)
-            .args(&formatter.arguments).envs(&formatter.environment).output().unwrap();
+            .args(&formatter.arguments)
+            .envs(&formatter.environment)
+            .output()
+            .unwrap();
         assert!(output.status.success());
         let mut expected = Vec::new();
         for argument in formatter.arguments {

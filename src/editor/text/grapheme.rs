@@ -23,7 +23,9 @@ fn grapheme_boundary(buffer: &TextBuffer, offset: ByteOffset, forward: bool) -> 
             cursor.prev_boundary(chunk, start)
         };
         match result {
-            Ok(boundary) => return ByteOffset(boundary.unwrap_or(if forward { buffer.len_bytes() } else { 0 })),
+            Ok(boundary) => {
+                return ByteOffset(boundary.unwrap_or(if forward { buffer.len_bytes() } else { 0 }));
+            }
             Err(GraphemeIncomplete::NextChunk) => {
                 (chunk, start, _, _) = buffer.rope.chunk_at_byte(start + chunk.len());
             }
@@ -34,7 +36,9 @@ fn grapheme_boundary(buffer: &TextBuffer, offset: ByteOffset, forward: bool) -> 
                 let (context, context_start, _, _) = buffer.rope.chunk_at_byte(end - 1);
                 cursor.provide_context(&context[..end - context_start], context_start);
             }
-            Err(GraphemeIncomplete::InvalidOffset) => unreachable!("cursor stays in the supplied rope chunk"),
+            Err(GraphemeIncomplete::InvalidOffset) => {
+                unreachable!("cursor stays in the supplied rope chunk")
+            }
         }
     }
 }
@@ -69,8 +73,14 @@ mod tests {
     #[test]
     fn regional_indicators_use_preceding_context_inside_a_cluster() {
         let buffer = TextBuffer::from_text("🇦🇧🇨🇩🇪");
-        assert_eq!(next_grapheme_boundary(&buffer, ByteOffset(4)), ByteOffset(8));
-        assert_eq!(previous_grapheme_boundary(&buffer, ByteOffset(12)), ByteOffset(8));
+        assert_eq!(
+            next_grapheme_boundary(&buffer, ByteOffset(4)),
+            ByteOffset(8)
+        );
+        assert_eq!(
+            previous_grapheme_boundary(&buffer, ByteOffset(12)),
+            ByteOffset(8)
+        );
     }
 
     #[test]
@@ -88,11 +98,23 @@ mod tests {
             let mut boundaries: Vec<_> = text.grapheme_indices(true).map(|(at, _)| at).collect();
             boundaries.push(text.len());
             for pair in boundaries.windows(2) {
-                assert_eq!(next_grapheme_boundary(&buffer, ByteOffset(pair[0])), ByteOffset(pair[1]));
-                assert_eq!(previous_grapheme_boundary(&buffer, ByteOffset(pair[1])), ByteOffset(pair[0]));
+                assert_eq!(
+                    next_grapheme_boundary(&buffer, ByteOffset(pair[0])),
+                    ByteOffset(pair[1])
+                );
+                assert_eq!(
+                    previous_grapheme_boundary(&buffer, ByteOffset(pair[1])),
+                    ByteOffset(pair[0])
+                );
             }
-            assert_eq!(next_grapheme_boundary(&buffer, ByteOffset(text.len())), ByteOffset(text.len()));
-            assert_eq!(previous_grapheme_boundary(&buffer, ByteOffset(0)), ByteOffset(0));
+            assert_eq!(
+                next_grapheme_boundary(&buffer, ByteOffset(text.len())),
+                ByteOffset(text.len())
+            );
+            assert_eq!(
+                previous_grapheme_boundary(&buffer, ByteOffset(0)),
+                ByteOffset(0)
+            );
         }
     }
 

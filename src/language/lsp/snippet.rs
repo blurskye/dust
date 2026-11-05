@@ -13,7 +13,8 @@ impl SnippetTabstop {
         crate::editor::text::ByteRange::new(
             crate::editor::text::ByteOffset(self.start),
             crate::editor::text::ByteOffset(self.end),
-        ).expect("snippet tabstop endpoints are ordered")
+        )
+        .expect("snippet tabstop endpoints are ordered")
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,14 +38,22 @@ pub fn parse_snippet_with_variables(
     }
     // TextEdit performs this same normalization when the completion is inserted.
     let normalized = crate::editor::text::TextEdit::new(
-        crate::editor::text::ByteRange::empty(crate::editor::text::ByteOffset(0)), source,
+        crate::editor::text::ByteRange::empty(crate::editor::text::ByteOffset(0)),
+        source,
     );
-    let mut parser = Parser { source: normalized.replacement(), cursor: 0 };
+    let mut parser = Parser {
+        source: normalized.replacement(),
+        cursor: 0,
+    };
     let pieces = parser.parse(false, 0)?;
     let mut resolver = Resolver {
-        definitions: HashMap::new(), values: HashMap::new(), active: Vec::new(),
-        unknown_variables: HashMap::new(), highest_index: 0,
-        variables, maximum_bytes,
+        definitions: HashMap::new(),
+        values: HashMap::new(),
+        active: Vec::new(),
+        unknown_variables: HashMap::new(),
+        highest_index: 0,
+        variables,
+        maximum_bytes,
     };
     resolver.collect(&pieces);
     let mut text = String::new();
@@ -52,7 +61,9 @@ pub fn parse_snippet_with_variables(
     resolver.expand(&pieces, &mut text, &mut tabstops, 0)?;
     tabstops.sort_by_key(|stop| (stop.index == 0, stop.index, stop.start));
     Ok(ParsedSnippet {
-        first_tabstop: tabstops.first().map(|stop| stop.start), text, tabstops,
+        first_tabstop: tabstops.first().map(|stop| stop.start),
+        text,
+        tabstops,
     })
 }
 
@@ -82,7 +93,10 @@ impl Parser<'_> {
         self.source.as_bytes().get(self.cursor).copied()
     }
     fn character(&mut self) -> Result<char, String> {
-        let character = self.source[self.cursor..].chars().next().ok_or("unexpected snippet end")?;
+        let character = self.source[self.cursor..]
+            .chars()
+            .next()
+            .ok_or("unexpected snippet end")?;
         self.cursor += character.len_utf8();
         Ok(character)
     }
@@ -95,11 +109,18 @@ impl Parser<'_> {
         while let Some(byte) = self.peek() {
             if byte == b'}' && nested {
                 self.cursor += 1;
-                if !literal.is_empty() { pieces.push(Piece::Text(literal)); }
+                if !literal.is_empty() {
+                    pieces.push(Piece::Text(literal));
+                }
                 return Ok(pieces);
             }
-            if byte == b'\\' && self.source.as_bytes().get(self.cursor + 1)
-                .is_some_and(|b| matches!(b, b'$' | b'}' | b'\\')) {
+            if byte == b'\\'
+                && self
+                    .source
+                    .as_bytes()
+                    .get(self.cursor + 1)
+                    .is_some_and(|b| matches!(b, b'$' | b'}' | b'\\'))
+            {
                 self.cursor += 1;
                 literal.push(self.character()?);
                 continue;
@@ -110,30 +131,53 @@ impl Parser<'_> {
             }
             self.cursor += 1;
             let braced = self.peek() == Some(b'{');
-            if braced { self.cursor += 1; }
+            if braced {
+                self.cursor += 1;
+            }
             let start = self.cursor;
             let numeric = self.peek().is_some_and(|b| b.is_ascii_digit());
             if numeric {
-                while self.peek().is_some_and(|b| b.is_ascii_digit()) { self.cursor += 1; }
-            } else if self.peek().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
-                while self.peek().is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+                    self.cursor += 1;
+                }
+            } else if self
+                .peek()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+            {
+                while self
+                    .peek()
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
                     self.cursor += 1;
                 }
             }
             if start == self.cursor {
-                if braced { return Err("snippet placeholder has no index or variable".into()); }
+                if braced {
+                    return Err("snippet placeholder has no index or variable".into());
+                }
                 literal.push('$');
                 continue;
             }
-            if !literal.is_empty() { pieces.push(Piece::Text(std::mem::take(&mut literal))); }
+            if !literal.is_empty() {
+                pieces.push(Piece::Text(std::mem::take(&mut literal)));
+            }
             let key = if numeric {
-                Key::Tabstop(self.source[start..self.cursor].parse().map_err(|_| "invalid tabstop")?)
-            } else { Key::Variable(self.source[start..self.cursor].into()) };
+                Key::Tabstop(
+                    self.source[start..self.cursor]
+                        .parse()
+                        .map_err(|_| "invalid tabstop")?,
+                )
+            } else {
+                Key::Variable(self.source[start..self.cursor].into())
+            };
             let piece = if !braced {
                 Piece::Value(key, None)
             } else {
                 match self.peek() {
-                    Some(b'}') => { self.cursor += 1; Piece::Value(key, None) }
+                    Some(b'}') => {
+                        self.cursor += 1;
+                        Piece::Value(key, None)
+                    }
                     Some(b':') => {
                         self.cursor += 1;
                         Piece::Value(key, Some(self.parse(true, depth + 1)?))
@@ -148,19 +192,34 @@ impl Parser<'_> {
                         let pattern = self.segment(false)?;
                         let replacement = self.segment(true)?;
                         let start = self.cursor;
-                        while self.peek().is_some_and(|b| b != b'}') { self.cursor += 1; }
+                        while self.peek().is_some_and(|b| b != b'}') {
+                            self.cursor += 1;
+                        }
                         let options = self.source[start..self.cursor].into();
-                        if self.peek() != Some(b'}') { return Err("unterminated snippet transform".into()); }
+                        if self.peek() != Some(b'}') {
+                            return Err("unterminated snippet transform".into());
+                        }
                         self.cursor += 1;
-                        Piece::Transform(key, Transform { pattern, replacement, options })
+                        Piece::Transform(
+                            key,
+                            Transform {
+                                pattern,
+                                replacement,
+                                options,
+                            },
+                        )
                     }
                     _ => return Err("invalid snippet placeholder".into()),
                 }
             };
             pieces.push(piece);
         }
-        if nested { return Err("unterminated snippet default".into()); }
-        if !literal.is_empty() { pieces.push(Piece::Text(literal)); }
+        if nested {
+            return Err("unterminated snippet default".into());
+        }
+        if !literal.is_empty() {
+            pieces.push(Piece::Text(literal));
+        }
         Ok(pieces)
     }
     fn choice(&mut self) -> Result<String, String> {
@@ -172,12 +231,24 @@ impl Parser<'_> {
                     self.cursor += 2;
                     return Ok(choice);
                 }
-                Some(b',') => { first = false; self.cursor += 1; }
+                Some(b',') => {
+                    first = false;
+                    self.cursor += 1;
+                }
                 Some(_) => {
-                    if self.peek() == Some(b'\\') && self.source.as_bytes().get(self.cursor + 1)
-                        .is_some_and(|b| matches!(b, b',' | b'|' | b'\\')) { self.cursor += 1; }
+                    if self.peek() == Some(b'\\')
+                        && self
+                            .source
+                            .as_bytes()
+                            .get(self.cursor + 1)
+                            .is_some_and(|b| matches!(b, b',' | b'|' | b'\\'))
+                    {
+                        self.cursor += 1;
+                    }
                     let character = self.character()?;
-                    if first { choice.push(character); }
+                    if first {
+                        choice.push(character);
+                    }
                 }
                 None => return Err("unterminated snippet choice".into()),
             }
@@ -194,14 +265,18 @@ impl Parser<'_> {
             if byte == b'\\' {
                 self.cursor += 1;
                 let next = self.character()?;
-                if next != '/' { value.push('\\'); }
+                if next != '/' {
+                    value.push('\\');
+                }
                 value.push(next);
                 continue;
             }
             if format {
                 if byte == b'$' && self.source.as_bytes().get(self.cursor + 1) == Some(&b'{') {
                     braces += 1;
-                } else if byte == b'}' { braces = braces.saturating_sub(1); }
+                } else if byte == b'}' {
+                    braces = braces.saturating_sub(1);
+                }
             }
             value.push(self.character()?);
         }
@@ -221,11 +296,15 @@ struct Resolver<'a> {
 impl<'a> Resolver<'a> {
     fn collect(&mut self, pieces: &'a [Piece]) {
         for piece in pieces {
-            if let Piece::Value(Key::Tabstop(index), _) | Piece::Transform(Key::Tabstop(index), _) = piece {
+            if let Piece::Value(Key::Tabstop(index), _) | Piece::Transform(Key::Tabstop(index), _) =
+                piece
+            {
                 self.highest_index = self.highest_index.max(*index);
             }
             if let Piece::Value(key, Some(default)) = piece {
-                if let Key::Tabstop(index) = key { self.definitions.entry(*index).or_insert(default); }
+                if let Key::Tabstop(index) = key {
+                    self.definitions.entry(*index).or_insert(default);
+                }
                 self.collect(default);
             }
         }
@@ -234,8 +313,12 @@ impl<'a> Resolver<'a> {
         match key {
             Key::Variable(name) => Ok(self.variables.get(name).cloned().unwrap_or_default()),
             Key::Tabstop(index) => {
-                if let Some(value) = self.values.get(index) { return Ok(value.clone()); }
-                if self.active.contains(index) { return Err("cyclic snippet placeholders".into()); }
+                if let Some(value) = self.values.get(index) {
+                    return Ok(value.clone());
+                }
+                if self.active.contains(index) {
+                    return Err("cyclic snippet placeholders".into());
+                }
                 self.active.push(*index);
                 let mut value = String::new();
                 if let Some(default) = self.definitions.get(index).copied() {
@@ -247,8 +330,16 @@ impl<'a> Resolver<'a> {
             }
         }
     }
-    fn expand(&mut self, pieces: &[Piece], text: &mut String, stops: &mut Vec<SnippetTabstop>, depth: usize) -> Result<(), String> {
-        if depth > 32 { return Err("snippet nesting exceeds limit".into()); }
+    fn expand(
+        &mut self,
+        pieces: &[Piece],
+        text: &mut String,
+        stops: &mut Vec<SnippetTabstop>,
+        depth: usize,
+    ) -> Result<(), String> {
+        if depth > 32 {
+            return Err("snippet nesting exceeds limit".into());
+        }
         for piece in pieces {
             match piece {
                 Piece::Text(literal) => text.push_str(literal),
@@ -261,7 +352,13 @@ impl<'a> Resolver<'a> {
                     match key {
                         Key::Tabstop(index) => {
                             let stop = stops.len();
-                            stops.push(SnippetTabstop { index: *index, start, end: start, depth, order: stop });
+                            stops.push(SnippetTabstop {
+                                index: *index,
+                                start,
+                                end: start,
+                                depth,
+                                order: stop,
+                            });
                             if let Some(default) = default {
                                 self.expand(default, text, stops, depth + 1)?;
                             } else {
@@ -277,18 +374,32 @@ impl<'a> Resolver<'a> {
                             } else {
                                 // Unknown variables become editable placeholders, as in TextMate.
                                 text.push_str(name);
-                                let index = if let Some(index) = self.unknown_variables.get(name) { *index } else {
-                                    self.highest_index = self.highest_index.checked_add(1).ok_or("too many snippet tabstops")?;
-                                    self.unknown_variables.insert(name.clone(), self.highest_index);
+                                let index = if let Some(index) = self.unknown_variables.get(name) {
+                                    *index
+                                } else {
+                                    self.highest_index = self
+                                        .highest_index
+                                        .checked_add(1)
+                                        .ok_or("too many snippet tabstops")?;
+                                    self.unknown_variables
+                                        .insert(name.clone(), self.highest_index);
                                     self.highest_index
                                 };
-                                stops.push(SnippetTabstop { index, start, end: text.len(), depth, order: stops.len() });
+                                stops.push(SnippetTabstop {
+                                    index,
+                                    start,
+                                    end: text.len(),
+                                    depth,
+                                    order: stops.len(),
+                                });
                             }
                         }
                     }
                 }
             }
-            if text.len() > self.maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+            if text.len() > self.maximum_bytes {
+                return Err("expanded snippet exceeds byte ceiling".into());
+            }
         }
         Ok(())
     }
@@ -299,32 +410,57 @@ impl Transform {
         let mut builder = regex::RegexBuilder::new(&self.pattern);
         for option in self.options.chars() {
             match option {
-                'g' | 'u' => {},
-                'i' => { builder.case_insensitive(true); }
-                'm' => { builder.multi_line(true); }
-                's' => { builder.dot_matches_new_line(true); }
+                'g' | 'u' => {}
+                'i' => {
+                    builder.case_insensitive(true);
+                }
+                'm' => {
+                    builder.multi_line(true);
+                }
+                's' => {
+                    builder.dot_matches_new_line(true);
+                }
                 _ => return Err("unsupported snippet regex option".into()),
             }
         }
-        let regex = builder.build().map_err(|error| format!("invalid snippet regex: {error}"))?;
+        let regex = builder
+            .build()
+            .map_err(|error| format!("invalid snippet regex: {error}"))?;
         let mut output = String::new();
         let mut end = 0;
         for captures in regex.captures_iter(value) {
             let matched = captures.get(0).expect("whole match");
             output.push_str(&value[end..matched.start()]);
-            output.push_str(&format_capture(&self.replacement, &captures, maximum_bytes)?);
-            if output.len() > maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+            output.push_str(&format_capture(
+                &self.replacement,
+                &captures,
+                maximum_bytes,
+            )?);
+            if output.len() > maximum_bytes {
+                return Err("expanded snippet exceeds byte ceiling".into());
+            }
             end = matched.end();
-            if !self.options.contains('g') { break; }
+            if !self.options.contains('g') {
+                break;
+            }
         }
         output.push_str(&value[end..]);
-        if output.len() > maximum_bytes { return Err("expanded snippet exceeds byte ceiling".into()); }
+        if output.len() > maximum_bytes {
+            return Err("expanded snippet exceeds byte ceiling".into());
+        }
         Ok(output)
     }
 }
 
-fn format_capture(format: &str, captures: &regex::Captures<'_>, maximum_bytes: usize) -> Result<String, String> {
-    let mut parser = Parser { source: format, cursor: 0 };
+fn format_capture(
+    format: &str,
+    captures: &regex::Captures<'_>,
+    maximum_bytes: usize,
+) -> Result<String, String> {
+    let mut parser = Parser {
+        source: format,
+        cursor: 0,
+    };
     let mut output = String::new();
     while let Some(byte) = parser.peek() {
         if byte == b'\\' {
@@ -332,35 +468,67 @@ fn format_capture(format: &str, captures: &regex::Captures<'_>, maximum_bytes: u
             output.push(parser.character()?);
             continue;
         }
-        if byte != b'$' { output.push(parser.character()?); continue; }
+        if byte != b'$' {
+            output.push(parser.character()?);
+            continue;
+        }
         parser.cursor += 1;
         let braced = parser.peek() == Some(b'{');
-        if braced { parser.cursor += 1; }
+        if braced {
+            parser.cursor += 1;
+        }
         let start = parser.cursor;
-        while parser.peek().is_some_and(|b| b.is_ascii_digit()) { parser.cursor += 1; }
-        if start == parser.cursor { output.push('$'); continue; }
-        let index: usize = format[start..parser.cursor].parse().map_err(|_| "invalid transform capture")?;
+        while parser.peek().is_some_and(|b| b.is_ascii_digit()) {
+            parser.cursor += 1;
+        }
+        if start == parser.cursor {
+            output.push('$');
+            continue;
+        }
+        let index: usize = format[start..parser.cursor]
+            .parse()
+            .map_err(|_| "invalid transform capture")?;
         let value = captures.get(index).map_or("", |matched| matched.as_str());
         if braced && parser.peek() == Some(b':') {
             parser.cursor += 1;
             let start = parser.cursor;
-            while parser.peek().is_some_and(|b| b != b'}') { parser.character()?; }
+            while parser.peek().is_some_and(|b| b != b'}') {
+                parser.character()?;
+            }
             let modifier = &format[start..parser.cursor];
             let replacement = if let Some(case) = modifier.strip_prefix('/') {
                 change_case(value, case)?
             } else if let Some(yes) = modifier.strip_prefix('+') {
-                if value.is_empty() { String::new() } else { yes.into() }
+                if value.is_empty() {
+                    String::new()
+                } else {
+                    yes.into()
+                }
             } else if let Some(condition) = modifier.strip_prefix('?') {
-                let (yes, no) = condition.split_once(':').ok_or("invalid conditional snippet format")?;
-                if value.is_empty() { no.into() } else { yes.into() }
+                let (yes, no) = condition
+                    .split_once(':')
+                    .ok_or("invalid conditional snippet format")?;
+                if value.is_empty() {
+                    no.into()
+                } else {
+                    yes.into()
+                }
             } else {
                 let no = modifier.strip_prefix('-').unwrap_or(modifier);
-                if value.is_empty() { no.into() } else { value.into() }
+                if value.is_empty() {
+                    no.into()
+                } else {
+                    value.into()
+                }
             };
             output.push_str(&replacement);
-        } else { output.push_str(value); }
+        } else {
+            output.push_str(value);
+        }
         if braced {
-            if parser.peek() != Some(b'}') { return Err("unterminated transform format".into()); }
+            if parser.peek() != Some(b'}') {
+                return Err("unterminated transform format".into());
+            }
             parser.cursor += 1;
         }
         if output.len() > maximum_bytes {
@@ -373,17 +541,27 @@ fn format_capture(format: &str, captures: &regex::Captures<'_>, maximum_bytes: u
 fn change_case(value: &str, case: &str) -> Result<String, String> {
     fn capitalize(value: &str) -> String {
         let mut chars = value.chars();
-        chars.next().map_or_else(String::new, |first| first.to_uppercase().collect::<String>() + chars.as_str())
+        chars.next().map_or_else(String::new, |first| {
+            first.to_uppercase().collect::<String>() + chars.as_str()
+        })
     }
     Ok(match case {
         "upcase" => value.to_uppercase(),
         "downcase" => value.to_lowercase(),
         "capitalize" => capitalize(value),
         "camelcase" | "pascalcase" => {
-            let mut words = value.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty());
+            let mut words = value
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|word| !word.is_empty());
             let first = words.next().unwrap_or("");
-            let mut result = if case == "camelcase" { first.to_lowercase() } else { capitalize(first) };
-            for word in words { result.push_str(&capitalize(&word.to_lowercase())); }
+            let mut result = if case == "camelcase" {
+                first.to_lowercase()
+            } else {
+                capitalize(first)
+            };
+            for word in words {
+                result.push_str(&capitalize(&word.to_lowercase()));
+            }
             result
         }
         _ => return Err("unsupported snippet case modifier".into()),
@@ -409,18 +587,30 @@ mod tests {
         let parsed = parse_snippet("call(${1:${2:value}})$0", 1024).unwrap();
         assert_eq!(parsed.text, "call(value)");
         assert_eq!((parsed.tabstops[0].start, parsed.tabstops[0].end), (5, 10));
-        assert_eq!((parsed.tabstops[1].index, parsed.tabstops[1].start, parsed.tabstops[1].end), (2, 5, 10));
+        assert_eq!(
+            (
+                parsed.tabstops[1].index,
+                parsed.tabstops[1].start,
+                parsed.tabstops[1].end
+            ),
+            (2, 5, 10)
+        );
         let parsed = parse_snippet("${1:name} = $1;$0", 1024).unwrap();
         assert_eq!(parsed.text, "name = name;");
         assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (7, 11));
-        assert_eq!(parse_snippet("$1 = ${1:name}", 1024).unwrap().text, "name = name");
+        assert_eq!(
+            parse_snippet("$1 = ${1:name}", 1024).unwrap().text,
+            "name = name"
+        );
         assert_eq!(parse_snippet("${1:a\\}b}", 1024).unwrap().text, "a}b");
     }
     #[test]
     fn transitive_forward_references_resolve_before_emitting_ranges() {
         let parsed = parse_snippet("$1 ${1:$2} ${2:$3} ${3:name}", 1024).unwrap();
         assert_eq!(parsed.text, "name name name name");
-        for stop in parsed.tabstops { assert_eq!(&parsed.text[stop.start..stop.end], "name"); }
+        for stop in parsed.tabstops {
+            assert_eq!(&parsed.text[stop.start..stop.end], "name");
+        }
         assert!(parse_snippet("${1:$2}${2:$1}", 1024).is_err());
         assert!(parse_snippet("${1:$1}", 1024).is_err());
         assert!(parse_snippet("$1$1${1:abcd}", 10).is_err());
@@ -437,7 +627,11 @@ mod tests {
     }
     #[test]
     fn transform_replacements_obey_the_expansion_ceiling() {
-        let source = format!("${{1:{}}} ${{1/(.*)/{}/}}", "x".repeat(1024), "$1".repeat(1024));
+        let source = format!(
+            "${{1:{}}} ${{1/(.*)/{}/}}",
+            "x".repeat(1024),
+            "$1".repeat(1024)
+        );
         assert!(parse_snippet(&source, 4096).is_err());
     }
     #[test]
@@ -452,18 +646,57 @@ mod tests {
         let variables = HashMap::from([("TM_FILENAME".into(), "hello_world.rs".into())]);
         let source = "${TM_FILENAME} $TM_FILENAME ${MISSING:untitled} $UNKNOWN ${1|one\\,two,three|} ${1/(.*)/${1:/upcase}/} ${TM_FILENAME/(.*)\\..+$/${1:/pascalcase}/}";
         let parsed = parse_snippet_with_variables(source, 4096, &variables).unwrap();
-        assert_eq!(parsed.text, "hello_world.rs hello_world.rs untitled UNKNOWN one,two ONE,TWO HelloWorld");
-        assert_eq!(parse_snippet("${TM_FILENAME:untitled}", 1024).unwrap().text, "untitled");
-        let parsed = parse_snippet("${1:abc123} ${1/([a-z]+)|(\\d+)/${1:+letters}${2:?digits:none}/g}", 1024).unwrap();
+        assert_eq!(
+            parsed.text,
+            "hello_world.rs hello_world.rs untitled UNKNOWN one,two ONE,TWO HelloWorld"
+        );
+        assert_eq!(
+            parse_snippet("${TM_FILENAME:untitled}", 1024).unwrap().text,
+            "untitled"
+        );
+        let parsed = parse_snippet(
+            "${1:abc123} ${1/([a-z]+)|(\\d+)/${1:+letters}${2:?digits:none}/g}",
+            1024,
+        )
+        .unwrap();
         assert_eq!(parsed.text, "abc123 lettersnonedigits");
-        assert_eq!(parse_snippet("${1:AbC} ${1/a/x/i}", 1024).unwrap().text, "AbC xbC");
-        assert_eq!(parse_snippet("${1:a/b} ${1/a\\/b/c/}", 1024).unwrap().text, "a/b c");
-        assert_eq!(parse_snippet("${1:foo} ${1/z/x/}", 1024).unwrap().text, "foo foo");
-        assert_eq!(parse_snippet("${1:foo} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "foo foo");
-        assert_eq!(parse_snippet("${1:bar} ${1/(foo)?/${1:-absent}/}", 1024).unwrap().text, "bar absentbar");
+        assert_eq!(
+            parse_snippet("${1:AbC} ${1/a/x/i}", 1024).unwrap().text,
+            "AbC xbC"
+        );
+        assert_eq!(
+            parse_snippet("${1:a/b} ${1/a\\/b/c/}", 1024).unwrap().text,
+            "a/b c"
+        );
+        assert_eq!(
+            parse_snippet("${1:foo} ${1/z/x/}", 1024).unwrap().text,
+            "foo foo"
+        );
+        assert_eq!(
+            parse_snippet("${1:foo} ${1/(foo)?/${1:-absent}/}", 1024)
+                .unwrap()
+                .text,
+            "foo foo"
+        );
+        assert_eq!(
+            parse_snippet("${1:bar} ${1/(foo)?/${1:-absent}/}", 1024)
+                .unwrap()
+                .text,
+            "bar absentbar"
+        );
         let variables = HashMap::from([("TM_SELECTED_TEXT".into(), String::new())]);
-        assert_eq!(parse_snippet_with_variables("${TM_SELECTED_TEXT:body}", 1024, &variables).unwrap().text, "");
-        assert_eq!(parse_snippet_with_variables("$TM_SELECTED_TEXT", 1024, &variables).unwrap().text, "");
+        assert_eq!(
+            parse_snippet_with_variables("${TM_SELECTED_TEXT:body}", 1024, &variables)
+                .unwrap()
+                .text,
+            ""
+        );
+        assert_eq!(
+            parse_snippet_with_variables("$TM_SELECTED_TEXT", 1024, &variables)
+                .unwrap()
+                .text,
+            ""
+        );
         assert!(parse_snippet("${1/foo/bar", 1024).is_err());
     }
 }

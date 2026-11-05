@@ -103,17 +103,22 @@ while True:
     let script = root.path().join("startup.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut configuration = launch(root.path(), &script);
-    configuration.breakpoints = (0..96).map(|index| {
-        let source = root.path().join(format!("program{index}.py"));
-        (source.clone(), vec![DapSourceBreakpoint {
-            path: source,
-            line: 2,
-            column: None,
-            condition: None,
-            hit_condition: None,
-            log_message: None,
-        }])
-    }).collect();
+    configuration.breakpoints = (0..96)
+        .map(|index| {
+            let source = root.path().join(format!("program{index}.py"));
+            (
+                source.clone(),
+                vec![DapSourceBreakpoint {
+                    path: source,
+                    line: 2,
+                    column: None,
+                    condition: None,
+                    hit_condition: None,
+                    log_message: None,
+                }],
+            )
+        })
+        .collect();
     let mut service = DapService::new();
     service.start_absolute(configuration).unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
@@ -129,25 +134,45 @@ while True:
     std::fs::write(root.path().join("configure"), "go").unwrap();
     assert!(service.is_running());
     service.writer_gate(false);
-    wait(|| request_log(root.path()).iter().any(|line| line == "setBreakpoints"));
-    assert!(!request_log(root.path()).iter().any(|line| line == "configurationDone"));
+    wait(|| {
+        request_log(root.path())
+            .iter()
+            .any(|line| line == "setBreakpoints")
+    });
+    assert!(
+        !request_log(root.path())
+            .iter()
+            .any(|line| line == "configurationDone")
+    );
     std::fs::write(root.path().join("breakpoints-go"), "go").unwrap();
     let mut answers = 0;
     wait(|| {
         while let Some(event) = service.try_event() {
             match event {
-                DapEvent::Response { response: DapResponse::Breakpoints(_), .. } => answers += 1,
+                DapEvent::Response {
+                    response: DapResponse::Breakpoints(_),
+                    ..
+                } => answers += 1,
                 DapEvent::Failed { message, .. } => panic!("{message}"),
                 _ => {}
             }
         }
-        answers == 96 && request_log(root.path()).iter().any(|line| line == "configurationDone")
+        answers == 96
+            && request_log(root.path())
+                .iter()
+                .any(|line| line == "configurationDone")
     });
     let log = request_log(root.path());
-    assert_eq!(log.iter().filter(|line| *line == "setBreakpoints").count(), 96);
+    assert_eq!(
+        log.iter().filter(|line| *line == "setBreakpoints").count(),
+        96
+    );
     let position = |name: &str| log.iter().position(|line| line == name).expect(name);
     assert!(
-        log.iter().rposition(|line| line == "setBreakpoints").unwrap() < position("configurationDone"),
+        log.iter()
+            .rposition(|line| line == "setBreakpoints")
+            .unwrap()
+            < position("configurationDone"),
         "breakpoints come first, or the program runs past them: {log:?}"
     );
     service.stop().unwrap();
@@ -175,17 +200,31 @@ while True:
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let path = root.path().join("program.py");
     let mut configuration = launch(root.path(), &script);
-    configuration.breakpoints = vec![(path.clone(), vec![DapSourceBreakpoint {
-        path: path.clone(), line: 2, column: None, condition: None,
-        hit_condition: None, log_message: None,
-    }])];
+    configuration.breakpoints = vec![(
+        path.clone(),
+        vec![DapSourceBreakpoint {
+            path: path.clone(),
+            line: 2,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    )];
     let mut service = DapService::new();
     service.start_absolute(configuration).unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
-    service.control(DapControl::SetBreakpoints { path, breakpoints: vec![] }).unwrap();
+    service
+        .control(DapControl::SetBreakpoints {
+            path,
+            breakpoints: vec![],
+        })
+        .unwrap();
     service.control(DapControl::Threads).unwrap();
     wait(|| {
-        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() {
+            panic!("{message}");
+        }
         root.path().join("configured").exists()
     });
     service.stop().unwrap();
@@ -199,15 +238,24 @@ fn adapter_startup_failures_include_bounded_stderr() {
         let script = root.path().join("failure.py");
         let rejection = if rejected {
             "m=read()\nsend({'type':'response','request_seq':m['seq'],'command':'initialize','success':False})\ntime.sleep(30)\n"
-        } else { "" };
+        } else {
+            ""
+        };
         std::fs::write(&script, format!("{prefix}\nsys.stderr.write('x'*20000+' missing library libadapter.so\\n')\nsys.stderr.flush()\n{rejection}")).unwrap();
         let mut service = DapService::new();
-        service.start_absolute(launch(root.path(), &script)).unwrap();
+        service
+            .start_absolute(launch(root.path(), &script))
+            .unwrap();
         wait(|| match service.try_event() {
             Some(DapEvent::Failed { message, .. }) => {
-                assert!(message.contains("missing library libadapter.so"), "{message}");
+                assert!(
+                    message.contains("missing library libadapter.so"),
+                    "{message}"
+                );
                 assert!(message.len() < 9000);
-                if rejected { assert!(message.contains("initialize rejected"), "{message}"); }
+                if rejected {
+                    assert!(message.contains("initialize rejected"), "{message}");
+                }
                 true
             }
             _ => false,
@@ -232,7 +280,9 @@ while True:
     let script = root.path().join("slow-launch.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         match service.try_event() {
@@ -254,14 +304,24 @@ fn debuggee_exit_preserves_final_output_until_termination_or_eof() {
         let script = root.path().join("exit.py");
         let termination = if explicit_termination {
             "  send({'type':'event','event':'terminated','body':{}})\n"
-        } else { "" };
+        } else {
+            ""
+        };
         std::fs::write(&script, format!("{prefix}\nwhile True:\n m=read()\n if m is None: break\n c=m['command']\n send({{'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':{{}}}})\n if c=='launch':\n  send({{'type':'event','event':'exited','body':{{'exitCode':0}}}})\n  send({{'type':'event','event':'output','body':{{'output':'final output'}}}})\n{termination}  break\n")).unwrap();
         let mut service = DapService::new();
-        service.start_absolute(launch(root.path(), &script)).unwrap();
+        service
+            .start_absolute(launch(root.path(), &script))
+            .unwrap();
         let mut output = String::new();
         wait(|| match service.try_event() {
-            Some(DapEvent::Output { output: text, .. }) => { output.push_str(&text); false }
-            Some(DapEvent::Terminated { .. }) => { assert_eq!(output, "final output"); true }
+            Some(DapEvent::Output { output: text, .. }) => {
+                output.push_str(&text);
+                false
+            }
+            Some(DapEvent::Terminated { .. }) => {
+                assert_eq!(output, "final output");
+                true
+            }
             Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
             _ => false,
         });
@@ -288,10 +348,15 @@ while True:
     let script = root.path().join("buffered-exit.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
     let mut outputs = 0;
     wait(|| match service.try_event() {
-        Some(DapEvent::Output { .. }) => { outputs += 1; false }
+        Some(DapEvent::Output { .. }) => {
+            outputs += 1;
+            false
+        }
         Some(DapEvent::Failed { message, .. }) => {
             assert!(message.contains("buffered launch rejection"), "{message}");
             assert_eq!(outputs, 200);
@@ -321,7 +386,10 @@ fn rejection_variables_are_not_templates_and_output_is_bounded() {
     let response = json!({"body":{"error":{
         "format":"{a}{a}", "variables":{"a":"é".repeat(5000)}
     }}});
-    assert_eq!(rejection_detail(&response), format!("{}\n[output truncated]\n", "é".repeat(4096)));
+    assert_eq!(
+        rejection_detail(&response),
+        format!("{}\n[output truncated]\n", "é".repeat(4096))
+    );
 }
 
 #[test]
@@ -466,25 +534,44 @@ fn dap_result_queue_blocks_the_producer_until_results_are_drained() {
     let (progress, received) = std::sync::mpsc::channel();
     let producer = thread::spawn(move || {
         for n in 0..32 {
-            adapter.event(0, DapEvent::Output {
-                adapter: "same-name".into(),
-                output: format!("{n}\n"),
-            });
+            adapter.event(
+                0,
+                DapEvent::Output {
+                    adapter: "same-name".into(),
+                    output: format!("{n}\n"),
+                },
+            );
         }
         progress.send("full").unwrap();
-        adapter.event(0, DapEvent::Output {
-            adapter: "same-name".into(),
-            output: "32\n".into(),
-        });
+        adapter.event(
+            0,
+            DapEvent::Output {
+                adapter: "same-name".into(),
+                output: "32\n".into(),
+            },
+        );
         progress.send("resumed").unwrap();
     });
-    assert_eq!(received.recv_timeout(Duration::from_secs(3)).unwrap(), "full");
-    assert_eq!(received.recv_timeout(Duration::from_millis(100)), Err(std::sync::mpsc::RecvTimeoutError::Timeout));
-    assert!(matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "0\n"));
-    assert_eq!(received.recv_timeout(Duration::from_secs(3)).unwrap(), "resumed");
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "full"
+    );
+    assert_eq!(
+        received.recv_timeout(Duration::from_millis(100)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    );
+    assert!(
+        matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "0\n")
+    );
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "resumed"
+    );
     producer.join().unwrap();
     for n in 1..=32 {
-        assert!(matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == format!("{n}\n")));
+        assert!(
+            matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == format!("{n}\n"))
+        );
     }
     assert!(service.try_event().is_none());
 }
@@ -524,7 +611,10 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     wait(|| root.path().join("flood-start").exists());
     let undrained_until = Instant::now() + Duration::from_millis(250);
     while Instant::now() < undrained_until {
-        assert!(!root.path().join("flood-finished").exists(), "undrained results did not block the producer");
+        assert!(
+            !root.path().join("flood-finished").exists(),
+            "undrained results did not block the producer"
+        );
         thread::sleep(Duration::from_millis(2));
     }
     // Actual JSON/process stdout, undrained beyond the bounded event queue.
@@ -550,7 +640,9 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     });
     assert_eq!(
         outputs,
-        (0..300).map(|n| format!("{n} {}\n", "x".repeat(4000))).collect::<Vec<_>>()
+        (0..300)
+            .map(|n| format!("{n} {}\n", "x".repeat(4000)))
+            .collect::<Vec<_>>()
     );
     assert!(
         service.control_owned(&old, DapControl::Threads).is_err(),
@@ -641,17 +733,20 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
             .control_owned(&stopped, DapControl::Threads)
             .is_err()
     );
-    service.control(DapControl::Evaluate {
-        expression: "x".repeat(64 * 1024),
-        frame_id: None,
-        context: "repl".into(),
-    }).unwrap();
+    service
+        .control(DapControl::Evaluate {
+            expression: "x".repeat(64 * 1024),
+            frame_id: None,
+            context: "repl".into(),
+        })
+        .unwrap();
     let (stopped_tx, stopped_rx) = std::sync::mpsc::sync_channel(1);
     let stopper = thread::spawn(move || {
         service.stop().unwrap();
         stopped_tx.send(service).unwrap();
     });
-    let mut service = stopped_rx.recv_timeout(Duration::from_secs(3))
+    let mut service = stopped_rx
+        .recv_timeout(Duration::from_secs(3))
         .expect("foreground stop joined the nonreading adapter");
     stopper.join().unwrap();
     wait(|| service.pending() == 0);
@@ -993,7 +1088,8 @@ fn continued_events_only_retire_the_affected_stopped_thread() {
         (json!({"threadId":1,"allThreadsContinued":true}), false),
         (json!({"threadId":1}), false),
     ] {
-        let body = format!(r#"
+        let body = format!(
+            r#"
 continued=json.loads('{continued}')
 while True:
  m=read()
@@ -1006,21 +1102,53 @@ while True:
  send({{'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body}})
  if c=='launch': send({{'type':'event','event':'stopped','body':{{'reason':'entry','threadId':2}}}})
  if c=='evaluate': send({{'type':'event','event':'output','body':{{'output':'done'}}}})
-"#);
+"#
+        );
         let root = tempfile::tempdir().unwrap();
         let script = root.path().join("continued.py");
         std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
         let mut service = DapService::new();
-        service.start_absolute(launch(root.path(), &script)).unwrap();
-        wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
+        service
+            .start_absolute(launch(root.path(), &script))
+            .unwrap();
+        wait(|| {
+            matches!(
+                service.try_event(),
+                Some(DapEvent::Response {
+                    response: DapResponse::Threads(_),
+                    ..
+                })
+            )
+        });
         let stopped = service.context().unwrap();
-        service.control_owned(&stopped, DapControl::Evaluate { expression: "value".into(), frame_id: Some(2), context: "watch".into() }).unwrap();
+        service
+            .control_owned(
+                &stopped,
+                DapControl::Evaluate {
+                    expression: "value".into(),
+                    frame_id: Some(2),
+                    context: "watch".into(),
+                },
+            )
+            .unwrap();
         let mut evaluated = false;
         let mut running = false;
         wait(|| match service.try_event() {
-            Some(DapEvent::Response { response: DapResponse::Evaluate(_), .. }) => { evaluated = true; false }
-            Some(DapEvent::Running { .. }) => { running = true; false }
-            Some(DapEvent::Output { output, .. }) => { assert_eq!(output, "done"); true }
+            Some(DapEvent::Response {
+                response: DapResponse::Evaluate(_),
+                ..
+            }) => {
+                evaluated = true;
+                false
+            }
+            Some(DapEvent::Running { .. }) => {
+                running = true;
+                false
+            }
+            Some(DapEvent::Output { output, .. }) => {
+                assert_eq!(output, "done");
+                true
+            }
             Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
             _ => false,
         });
@@ -1056,17 +1184,42 @@ while True:
     let script = root.path().join("resume.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
-    wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
+    wait(|| {
+        matches!(
+            service.try_event(),
+            Some(DapEvent::Response {
+                response: DapResponse::Threads(_),
+                ..
+            })
+        )
+    });
     let stopped = service.context().unwrap();
-    service.control(DapControl::Evaluate { expression: "value".into(), frame_id: Some(2), context: "watch".into() }).unwrap();
+    service
+        .control(DapControl::Evaluate {
+            expression: "value".into(),
+            frame_id: Some(2),
+            context: "watch".into(),
+        })
+        .unwrap();
     service.control(DapControl::StepIn).unwrap();
     let mut rejected = false;
     let mut evaluated = false;
     wait(|| {
         match service.try_event() {
-            Some(DapEvent::RequestFailed { command, .. }) => { assert_eq!(command, "stepIn"); rejected = true; }
-            Some(DapEvent::Response { response: DapResponse::Evaluate(value), .. }) => { assert_eq!(value.value, "retained"); evaluated = true; }
+            Some(DapEvent::RequestFailed { command, .. }) => {
+                assert_eq!(command, "stepIn");
+                rejected = true;
+            }
+            Some(DapEvent::Response {
+                response: DapResponse::Evaluate(value),
+                ..
+            }) => {
+                assert_eq!(value.value, "retained");
+                evaluated = true;
+            }
             Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
             _ => {}
         }
@@ -1074,7 +1227,9 @@ while True:
     });
     assert!(service.current(&stopped));
     service.control_owned(&stopped, DapControl::Next).unwrap();
-    wait(|| matches!(service.try_event(), Some(DapEvent::RequestFailed { command, .. }) if command == "next"));
+    wait(
+        || matches!(service.try_event(), Some(DapEvent::RequestFailed { command, .. }) if command == "next"),
+    );
     service.stop().unwrap();
 }
 
@@ -1100,22 +1255,45 @@ while True:
     let script = root.path().join("pause.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
     let source = service.context().unwrap();
     let id = service.control_tracked(&source, DapControl::Pause).unwrap();
     wait(|| match service.try_event() {
-        Some(DapEvent::RequestFailed { request_id, request: Some(DapControl::Pause), command, .. }) => {
-            assert_eq!(request_id, id); assert_eq!(command, "pause"); true
+        Some(DapEvent::RequestFailed {
+            request_id,
+            request: Some(DapControl::Pause),
+            command,
+            ..
+        }) => {
+            assert_eq!(request_id, id);
+            assert_eq!(command, "pause");
+            true
         }
         Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
         _ => false,
     });
     service.control(DapControl::Threads).unwrap();
-    wait(|| matches!(service.try_event(), Some(DapEvent::Response { response: DapResponse::Threads(_), .. })));
-    service.control(DapControl::Disconnect { terminate_debuggee: true }).unwrap();
     wait(|| {
-        if let Some(DapEvent::Failed { message, .. }) = service.try_event() { panic!("{message}"); }
+        matches!(
+            service.try_event(),
+            Some(DapEvent::Response {
+                response: DapResponse::Threads(_),
+                ..
+            })
+        )
+    });
+    service
+        .control(DapControl::Disconnect {
+            terminate_debuggee: true,
+        })
+        .unwrap();
+    wait(|| {
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() {
+            panic!("{message}");
+        }
         root.path().join("no-stale-pause").exists()
     });
     service.stop().unwrap();
@@ -1148,17 +1326,37 @@ while True:
     let script = root.path().join("breakpoint-order.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
     let mut service = DapService::new();
-    service.start_absolute(launch(root.path(), &script)).unwrap();
-    wait(|| matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "ready"));
+    service
+        .start_absolute(launch(root.path(), &script))
+        .unwrap();
+    wait(
+        || matches!(service.try_event(), Some(DapEvent::Output { output, .. }) if output == "ready"),
+    );
     let path = root.path().join("main.rs");
-    for line in [10,20] {
-        service.control(DapControl::SetBreakpoints { path: path.clone(), breakpoints: vec![DapSourceBreakpoint {
-            path: path.clone(), line, column: None, condition: None, hit_condition: None, log_message: None,
-        }] }).unwrap();
+    for line in [10, 20] {
+        service
+            .control(DapControl::SetBreakpoints {
+                path: path.clone(),
+                breakpoints: vec![DapSourceBreakpoint {
+                    path: path.clone(),
+                    line,
+                    column: None,
+                    condition: None,
+                    hit_condition: None,
+                    log_message: None,
+                }],
+            })
+            .unwrap();
     }
     let mut changed = Vec::new();
     wait(|| match service.try_event() {
-        Some(DapEvent::Response { response: DapResponse::BreakpointChanged { requested, .. }, .. }) => { changed.push(requested); false }
+        Some(DapEvent::Response {
+            response: DapResponse::BreakpointChanged { requested, .. },
+            ..
+        }) => {
+            changed.push(requested);
+            false
+        }
         Some(DapEvent::Output { output, .. }) => output == "done",
         Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
         _ => false,
@@ -1332,7 +1530,10 @@ while True:
         )
     });
     wait(|| service.pending() == 0);
-    assert!(service.try_event().is_none(), "disconnect must not synthesize a worker failure");
+    assert!(
+        service.try_event().is_none(),
+        "disconnect must not synthesize a worker failure"
+    );
     service.stop().unwrap();
 }
 #[test]

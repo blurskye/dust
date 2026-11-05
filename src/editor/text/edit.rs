@@ -120,10 +120,16 @@ impl TextBuffer {
             }
         }
         edits.retain(|edit| {
-            !self.rope.byte_slice(edit.range.start.get()..edit.range.end.get())
-                .bytes().eq(edit.replacement.bytes())
-                || (set.normalize_line_endings && self.line_endings(edit.range).iter()
-                    .any(|ending| *ending != self.format.preferred_line_ending))
+            !self
+                .rope
+                .byte_slice(edit.range.start.get()..edit.range.end.get())
+                .bytes()
+                .eq(edit.replacement.bytes())
+                || (set.normalize_line_endings
+                    && self
+                        .line_endings(edit.range)
+                        .iter()
+                        .any(|ending| *ending != self.format.preferred_line_ending))
         });
         Ok(edits)
     }
@@ -235,19 +241,24 @@ mod tests {
         let mut buffer = TextBuffer::from_bytes(original).unwrap();
         let revision = buffer.revision();
         let source = buffer.source_version();
-        let unchanged = TextEdit::new(
-            ByteRange::new(ByteOffset(0), ByteOffset(2)).unwrap(), "a\n",
-        );
-        let delta = buffer.apply_edits(&TextEditSet::new(revision, vec![unchanged.clone()])).unwrap();
+        let unchanged = TextEdit::new(ByteRange::new(ByteOffset(0), ByteOffset(2)).unwrap(), "a\n");
+        let delta = buffer
+            .apply_edits(&TextEditSet::new(revision, vec![unchanged.clone()]))
+            .unwrap();
         assert!(delta.spans().is_empty());
         assert_eq!(buffer.to_bytes(), original);
         assert_eq!(buffer.revision(), revision);
         assert_eq!(buffer.source_version(), source);
 
-        let delta = buffer.apply_edits(&TextEditSet::new(revision, vec![
-            unchanged,
-            TextEdit::new(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(), "B"),
-        ])).unwrap();
+        let delta = buffer
+            .apply_edits(&TextEditSet::new(
+                revision,
+                vec![
+                    unchanged,
+                    TextEdit::new(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(), "B"),
+                ],
+            ))
+            .unwrap();
         assert_eq!(buffer.to_bytes(), b"a\r\nB\nc\n");
         assert_eq!(delta.spans().len(), 1);
     }

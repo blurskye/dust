@@ -496,7 +496,11 @@ pub(super) fn run_session(
             return;
         }
     };
-    stdin.set_write_timeout(policy.request_timeout.clamp(Duration::from_secs(1), Duration::from_secs(60)));
+    stdin.set_write_timeout(
+        policy
+            .request_timeout
+            .clamp(Duration::from_secs(1), Duration::from_secs(60)),
+    );
     let (messages, message_receiver) = mpsc::sync_channel(MESSAGE_QUEUE);
     let reader_cancelled = cancelled.clone();
     let reader = thread::spawn(move || {
@@ -532,7 +536,10 @@ pub(super) fn run_session(
                         &events,
                         LspEvent::Log {
                             server: server.clone(),
-                            message: sanitize_log(&String::from_utf8_lossy(line), MAX_LOG_LINE_BYTES),
+                            message: sanitize_log(
+                                &String::from_utf8_lossy(line),
+                                MAX_LOG_LINE_BYTES,
+                            ),
                         },
                     );
                 }
@@ -602,11 +609,15 @@ pub(super) fn run_session(
                         &events,
                         &mut stopping,
                         &mut configuration,
-                    ) && !stopping {
-                        send_event(&events, LspEvent::Failed {
-                            server: server.clone(),
-                            message: format!("language server synchronization failed: {error}"),
-                        });
+                    ) && !stopping
+                    {
+                        send_event(
+                            &events,
+                            LspEvent::Failed {
+                                server: server.clone(),
+                                message: format!("language server synchronization failed: {error}"),
+                            },
+                        );
                         stopping = true;
                     }
                 }
@@ -652,33 +663,38 @@ pub(super) fn run_session(
                     }
                     initialized = true;
                     let setup = (|| {
-                    write_content_length_message(
-                        &mut stdin,
-                        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
-                    )?;
-                    // Configuration-capable servers such as Pyright defer document
-                    // work until the client publishes its initial settings snapshot.
-                    // Dust has no adapter settings here, so the explicit empty object
-                    // is the protocol-correct initial state rather than no state.
-                    write_content_length_message(
-                        &mut stdin,
-                        &json!({
-                            "jsonrpc":"2.0",
-                            "method":"workspace/didChangeConfiguration",
-                            "params":{"settings":configuration.settings.clone()}
-                        }),
-                    )?;
-                    for document in documents.values() {
-                        send_open(&mut stdin, document)?;
-                        opened_documents.insert(document.uri(), document.version);
-                    }
-                    Ok::<_, crate::process::ProtocolError>(())
+                        write_content_length_message(
+                            &mut stdin,
+                            &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+                        )?;
+                        // Configuration-capable servers such as Pyright defer document
+                        // work until the client publishes its initial settings snapshot.
+                        // Dust has no adapter settings here, so the explicit empty object
+                        // is the protocol-correct initial state rather than no state.
+                        write_content_length_message(
+                            &mut stdin,
+                            &json!({
+                                "jsonrpc":"2.0",
+                                "method":"workspace/didChangeConfiguration",
+                                "params":{"settings":configuration.settings.clone()}
+                            }),
+                        )?;
+                        for document in documents.values() {
+                            send_open(&mut stdin, document)?;
+                            opened_documents.insert(document.uri(), document.version);
+                        }
+                        Ok::<_, crate::process::ProtocolError>(())
                     })();
                     if let Err(error) = setup {
-                        send_event(&events, LspEvent::Failed {
-                            server: server.clone(),
-                            message: format!("language server initialization write failed: {error}"),
-                        });
+                        send_event(
+                            &events,
+                            LspEvent::Failed {
+                                server: server.clone(),
+                                message: format!(
+                                    "language server initialization write failed: {error}"
+                                ),
+                            },
+                        );
                         break;
                     }
                     send_event(
@@ -834,14 +850,18 @@ fn shutdown_server(
     if write_content_length_message(
         stdin,
         &json!({"jsonrpc":"2.0","id":id,"method":"shutdown","params":null}),
-    ).is_err() {
+    )
+    .is_err()
+    {
         return;
     }
     let deadline = Instant::now() + Duration::from_millis(200);
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         match messages.recv_timeout(remaining) {
-            Ok(Ok(message)) if message.get("method").is_none()
-                && message.get("id").and_then(Value::as_i64) == Some(id) => {
+            Ok(Ok(message))
+                if message.get("method").is_none()
+                    && message.get("id").and_then(Value::as_i64) == Some(id) =>
+            {
                 let _ = write_content_length_message(
                     stdin,
                     &json!({"jsonrpc":"2.0","method":"exit","params":null}),
@@ -859,7 +879,10 @@ fn shutdown_server(
 fn server_exit_status(child: &mut std::process::Child) -> std::io::Result<Option<bool>> {
     #[cfg(unix)]
     {
-        use nix::{sys::wait::{waitid, Id, WaitPidFlag, WaitStatus}, unistd::Pid};
+        use nix::{
+            sys::wait::{Id, WaitPidFlag, WaitStatus, waitid},
+            unistd::Pid,
+        };
         match waitid(
             Id::Pid(Pid::from_raw(child.id() as i32)),
             WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
@@ -870,7 +893,9 @@ fn server_exit_status(child: &mut std::process::Child) -> std::io::Result<Option
         }
     }
     #[cfg(not(unix))]
-    child.try_wait().map(|status| status.map(|status| status.success()))
+    child
+        .try_wait()
+        .map(|status| status.map(|status| status.success()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -933,8 +958,21 @@ pub(super) fn handle_command(
     match command {
         SessionCommand::SyncOwned { .. } => unreachable!("normalized owned sync"),
         SessionCommand::Sync(document) => {
-            if let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
-                send_event(events, LspEvent::Failed { server: server.into(), message: format!("language server synchronization write failed: {error}") });
+            if let Err(error) = sync_document(
+                stdin,
+                &document,
+                initialized,
+                capabilities,
+                documents,
+                opened_documents,
+            ) {
+                send_event(
+                    events,
+                    LspEvent::Failed {
+                        server: server.into(),
+                        message: format!("language server synchronization write failed: {error}"),
+                    },
+                );
                 *stopping = true;
                 return Err(error);
             }
@@ -942,12 +980,33 @@ pub(super) fn handle_command(
         SessionCommand::Save(document) => {
             // An older disk snapshot must not rewind already synchronized edits.
             let uri = document.uri();
-            if documents.get(&uri).is_none_or(|old| old.version <= document.version) {
-                if documents.get(&uri).is_none_or(|old| old.version != document.version || old.text != document.text) {
+            if documents
+                .get(&uri)
+                .is_none_or(|old| old.version <= document.version)
+            {
+                if documents
+                    .get(&uri)
+                    .is_none_or(|old| old.version != document.version || old.text != document.text)
+                {
                     document_sources.remove(&uri);
                 }
-                if let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
-                    send_event(events, LspEvent::Failed { server: server.into(), message: format!("language server synchronization write failed: {error}") });
+                if let Err(error) = sync_document(
+                    stdin,
+                    &document,
+                    initialized,
+                    capabilities,
+                    documents,
+                    opened_documents,
+                ) {
+                    send_event(
+                        events,
+                        LspEvent::Failed {
+                            server: server.into(),
+                            message: format!(
+                                "language server synchronization write failed: {error}"
+                            ),
+                        },
+                    );
                     *stopping = true;
                     return Err(error);
                 }
@@ -971,12 +1030,16 @@ pub(super) fn handle_command(
         } => {
             // Workspace requests use a document only for routing; their caller may
             // hold an older snapshot, which must not roll back server text.
-            let needs_document = !matches!(feature,
-                LspFeature::ExecuteCommand(_) | LspFeature::WorkspaceSymbols { .. });
-            if needs_document && documents.get(&document.uri()).is_some_and(|old| {
-                old.version > document.version
-                    || old.version == document.version && old.text != document.text
-            }) {
+            let needs_document = !matches!(
+                feature,
+                LspFeature::ExecuteCommand(_) | LspFeature::WorkspaceSymbols { .. }
+            );
+            if needs_document
+                && documents.get(&document.uri()).is_some_and(|old| {
+                    old.version > document.version
+                        || old.version == document.version && old.text != document.text
+                })
+            {
                 send_event(events, LspEvent::RequestFailed {
                     server: server.into(),
                     generation,
@@ -985,9 +1048,10 @@ pub(super) fn handle_command(
                 });
                 return Ok(());
             }
-            if needs_document && documents
-                .get(&document.uri())
-                .is_none_or(|old| old.version != document.version || old.text != document.text)
+            if needs_document
+                && documents
+                    .get(&document.uri())
+                    .is_none_or(|old| old.version != document.version || old.text != document.text)
             {
                 document_sources.remove(&document.uri());
             }
@@ -1054,13 +1118,25 @@ pub(super) fn handle_command(
                 );
                 return Ok(());
             };
-            if needs_document && let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
-                send_event(events, LspEvent::RequestFailed {
-                    server: server.into(),
-                    generation,
-                    method: feature.method().into(),
-                    message: format!("document synchronization failed: {error}"),
-                });
+            if needs_document
+                && let Err(error) = sync_document(
+                    stdin,
+                    &document,
+                    initialized,
+                    capabilities,
+                    documents,
+                    opened_documents,
+                )
+            {
+                send_event(
+                    events,
+                    LspEvent::RequestFailed {
+                        server: server.into(),
+                        generation,
+                        method: feature.method().into(),
+                        message: format!("document synchronization failed: {error}"),
+                    },
+                );
                 return Err(error);
             }
             let id = *next_request_id;
@@ -1195,7 +1271,9 @@ fn sync_document(
     let uri = document.uri();
     if initialized {
         if let Some(version) = opened_documents.get(&uri) {
-            let previous = documents.get(&uri).filter(|previous| previous.version == *version);
+            let previous = documents
+                .get(&uri)
+                .filter(|previous| previous.version == *version);
             if previous.is_none_or(|previous| {
                 previous.version != document.version || previous.text != document.text
             }) {
@@ -1293,8 +1371,16 @@ mod tests {
 
     #[test]
     fn continuous_document_commands_do_not_starve_server_responses() {
-        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-        let script = super::super::tests::BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let script = super::super::tests::BOUNDARY_SERVER
+            .split("m=read()\nsend(")
+            .next()
+            .unwrap()
+            .to_owned()
+            + r#"
 m=read()
 send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
 while True:
@@ -1310,13 +1396,24 @@ while True:
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(1));
         }
-        service.request("boundary", LspFeature::Hover, document.clone(), ByteOffset(0), 42).unwrap();
+        service
+            .request(
+                "boundary",
+                LspFeature::Hover,
+                document.clone(),
+                ByteOffset(0),
+                42,
+            )
+            .unwrap();
         let sender = service.sessions["boundary"].sender.clone();
         let done = Arc::new(AtomicBool::new(false));
         let producer_done = done.clone();
         let producer = thread::spawn(move || {
             while !producer_done.load(Ordering::Acquire) {
-                if matches!(sender.try_send(SessionCommand::Sync(document.clone())), Err(TrySendError::Disconnected(_))) {
+                if matches!(
+                    sender.try_send(SessionCommand::Sync(document.clone())),
+                    Err(TrySendError::Disconnected(_))
+                ) {
                     break;
                 }
             }
@@ -1324,7 +1421,10 @@ while True:
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut received = false;
         while Instant::now() < deadline {
-            if matches!(service.try_event(), Some(LspEvent::Result { generation: 42, .. })) {
+            if matches!(
+                service.try_event(),
+                Some(LspEvent::Result { generation: 42, .. })
+            ) {
                 received = true;
                 break;
             }
@@ -1358,34 +1458,89 @@ while True:
     #[test]
     fn failed_sync_does_not_advance_snapshot_and_unchanged_sync_writes_nothing() {
         let mut document = LspDocument {
-            path: "/fixture/main.rs".into(), language_id: "rust".into(),
-            version: 0, text: "old".into(),
+            path: "/fixture/main.rs".into(),
+            language_id: "rust".into(),
+            version: 0,
+            text: "old".into(),
         };
         let mut documents = HashMap::new();
         let mut opened = HashMap::new();
-        let capabilities = LspCapabilities { sync_kind: super::super::SyncKind::Incremental, ..Default::default() };
+        let capabilities = LspCapabilities {
+            sync_kind: super::super::SyncKind::Incremental,
+            ..Default::default()
+        };
         let mut wire = Vec::new();
-        sync_document(&mut wire, &document, true, &capabilities, &mut documents, &mut opened).unwrap();
+        sync_document(
+            &mut wire,
+            &document,
+            true,
+            &capabilities,
+            &mut documents,
+            &mut opened,
+        )
+        .unwrap();
         wire.clear();
-        sync_document(&mut wire, &document, true, &capabilities, &mut documents, &mut opened).unwrap();
+        sync_document(
+            &mut wire,
+            &document,
+            true,
+            &capabilities,
+            &mut documents,
+            &mut opened,
+        )
+        .unwrap();
         assert!(wire.is_empty());
         document.version = 1;
         document.text = "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING);
-        assert!(sync_document(&mut wire, &document, true, &capabilities, &mut documents, &mut opened).is_err());
+        assert!(
+            sync_document(
+                &mut wire,
+                &document,
+                true,
+                &capabilities,
+                &mut documents,
+                &mut opened
+            )
+            .is_err()
+        );
         assert_eq!(documents[&document.uri()].text, "old");
         assert_eq!(documents[&document.uri()].version, 0);
         document.text = "new".into();
-        sync_document(&mut wire, &document, true, &capabilities, &mut documents, &mut opened).unwrap();
-        let change = read_content_length_message(&mut std::io::Cursor::new(wire)).unwrap().unwrap();
+        sync_document(
+            &mut wire,
+            &document,
+            true,
+            &capabilities,
+            &mut documents,
+            &mut opened,
+        )
+        .unwrap();
+        let change = read_content_length_message(&mut std::io::Cursor::new(wire))
+            .unwrap()
+            .unwrap();
         assert_eq!(change["params"]["contentChanges"][0]["text"], "new");
-        assert_eq!(change["params"]["contentChanges"][0]["range"]["end"]["character"], 3);
+        assert_eq!(
+            change["params"]["contentChanges"][0]["range"]["end"]["character"],
+            3
+        );
         assert_eq!(documents[&document.uri()].version, 1);
 
         let mut documents = HashMap::new();
         let mut opened = HashMap::new();
-        assert!(sync_document(&mut std::io::sink(), &LspDocument {
-            text: "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING), ..document
-        }, true, &capabilities, &mut documents, &mut opened).is_err());
+        assert!(
+            sync_document(
+                &mut std::io::sink(),
+                &LspDocument {
+                    text: "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING),
+                    ..document
+                },
+                true,
+                &capabilities,
+                &mut documents,
+                &mut opened
+            )
+            .is_err()
+        );
         assert!(documents.is_empty() && opened.is_empty());
     }
 
@@ -1393,13 +1548,21 @@ while True:
     fn request_replaces_at_capacity_and_syncs_its_captured_document_first() {
         let text = TextBuffer::from_text("old");
         let mut editor = crate::editor::EditorState::new("/fixture".into());
-        let (buffer, _) = editor.open_text(text.clone(), Some("/fixture/main.rs".into())).unwrap();
+        let (buffer, _) = editor
+            .open_text(text.clone(), Some("/fixture/main.rs".into()))
+            .unwrap();
         let mut document = LspDocument {
-            path: "/fixture/main.rs".into(), language_id: "rust".into(),
-            version: 0, text: "old".into(),
+            path: "/fixture/main.rs".into(),
+            language_id: "rust".into(),
+            version: 0,
+            text: "old".into(),
         };
         let mut service = LspService::new();
-        let endpoint = service.replace_edit_source_fixture(document.uri(), (buffer, text.source_version()), PositionEncoding::Utf16);
+        let endpoint = service.replace_edit_source_fixture(
+            document.uri(),
+            (buffer, text.source_version()),
+            PositionEncoding::Utf16,
+        );
         let mut documents = HashMap::from([(document.uri(), document.clone())]);
         let mut opened = HashMap::from([(document.uri(), document.version)]);
         let mut sources = HashMap::new();
@@ -1408,24 +1571,56 @@ while True:
         let mut pending = HashMap::new();
         for id in 0..MAX_PENDING_REQUESTS as i64 {
             let mut captured = document.clone();
-            if id > 0 { captured.path = format!("/fixture/{id}.rs").into(); }
-            pending.insert(id, PendingRequest {
-                feature: LspFeature::Hover, document: captured, generation: id as u64,
-                deadline: Instant::now() + Duration::from_secs(1), encoding: PositionEncoding::Utf16,
-                sources: Default::default(),
-            });
+            if id > 0 {
+                captured.path = format!("/fixture/{id}.rs").into();
+            }
+            pending.insert(
+                id,
+                PendingRequest {
+                    feature: LspFeature::Hover,
+                    document: captured,
+                    generation: id as u64,
+                    deadline: Instant::now() + Duration::from_secs(1),
+                    encoding: PositionEncoding::Utf16,
+                    sources: Default::default(),
+                },
+            );
         }
         document.text = "new".into();
         document.version = 1;
         let mut wire = Vec::new();
         let mut next = MAX_PENDING_REQUESTS as i64;
         let mut stopping = false;
-        handle_command(SessionCommand::Request {
-            feature: LspFeature::Hover, document: document.clone(), offset: ByteOffset(1), generation: 999,
-        }, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"), &mut wire,
-        true, &LspCapabilities { hover: true, ..Default::default() }, &mut documents, &mut sources,
-        &mut lineage, &mut apply, &mut opened, &mut pending, &mut next, Duration::from_secs(1), 0,
-        &endpoint.events, &mut stopping, &mut LspServerConfiguration::standard()).unwrap();
+        handle_command(
+            SessionCommand::Request {
+                feature: LspFeature::Hover,
+                document: document.clone(),
+                offset: ByteOffset(1),
+                generation: 999,
+            },
+            "owned-edit-fixture",
+            Path::new("/fixture"),
+            Path::new("/server"),
+            &mut wire,
+            true,
+            &LspCapabilities {
+                hover: true,
+                ..Default::default()
+            },
+            &mut documents,
+            &mut sources,
+            &mut lineage,
+            &mut apply,
+            &mut opened,
+            &mut pending,
+            &mut next,
+            Duration::from_secs(1),
+            0,
+            &endpoint.events,
+            &mut stopping,
+            &mut LspServerConfiguration::standard(),
+        )
+        .unwrap();
         assert!(!stopping);
         assert_eq!(pending.len(), MAX_PENDING_REQUESTS);
         assert!(!pending.contains_key(&0));
@@ -1444,24 +1639,64 @@ while True:
         // Cached document snapshots must neither rewind text nor prevent
         // documentless code-action commands from running.
         sources.insert(document.uri(), (buffer, text.source_version()));
-        let stale = LspDocument { version: 0, text: "old".into(), ..document.clone() };
+        let stale = LspDocument {
+            version: 0,
+            text: "old".into(),
+            ..document.clone()
+        };
         for (feature, method) in [
             (LspFeature::Hover, "textDocument/hover"),
-            (LspFeature::WorkspaceSymbols { query: "name".into() }, "workspace/symbol"),
-            (LspFeature::ExecuteCommand(super::super::LspCommand {
-                command: "fix".into(), arguments: Vec::new(),
-            }), "workspace/executeCommand"),
+            (
+                LspFeature::WorkspaceSymbols {
+                    query: "name".into(),
+                },
+                "workspace/symbol",
+            ),
+            (
+                LspFeature::ExecuteCommand(super::super::LspCommand {
+                    command: "fix".into(),
+                    arguments: Vec::new(),
+                }),
+                "workspace/executeCommand",
+            ),
         ] {
             let rejected = matches!(feature, LspFeature::Hover);
-            if !rejected { pending.clear(); }
+            if !rejected {
+                pending.clear();
+            }
             let mut wire = Vec::new();
-            handle_command(SessionCommand::Request {
-                feature, document: stale.clone(), offset: ByteOffset(0), generation: 1000,
-            }, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"), &mut wire,
-            true, &LspCapabilities { hover: true, workspace_symbols: true, execute_command: true, ..Default::default() },
-            &mut documents, &mut sources, &mut lineage, &mut apply, &mut opened, &mut pending,
-            &mut next, Duration::from_secs(1), 0, &endpoint.events, &mut stopping,
-            &mut LspServerConfiguration::standard()).unwrap();
+            handle_command(
+                SessionCommand::Request {
+                    feature,
+                    document: stale.clone(),
+                    offset: ByteOffset(0),
+                    generation: 1000,
+                },
+                "owned-edit-fixture",
+                Path::new("/fixture"),
+                Path::new("/server"),
+                &mut wire,
+                true,
+                &LspCapabilities {
+                    hover: true,
+                    workspace_symbols: true,
+                    execute_command: true,
+                    ..Default::default()
+                },
+                &mut documents,
+                &mut sources,
+                &mut lineage,
+                &mut apply,
+                &mut opened,
+                &mut pending,
+                &mut next,
+                Duration::from_secs(1),
+                0,
+                &endpoint.events,
+                &mut stopping,
+                &mut LspServerConfiguration::standard(),
+            )
+            .unwrap();
             assert_eq!(documents[&document.uri()].version, 1);
             assert_eq!(documents[&document.uri()].text, "new");
             assert!(sources.contains_key(&document.uri()));
@@ -1469,7 +1704,13 @@ while True:
                 assert!(wire.is_empty());
                 assert_eq!(pending.len(), MAX_PENDING_REQUESTS);
                 assert!(pending.contains_key(&(MAX_PENDING_REQUESTS as i64)));
-                assert!(matches!(service.try_event(), Some(LspEvent::RequestFailed { generation: 1000, .. })));
+                assert!(matches!(
+                    service.try_event(),
+                    Some(LspEvent::RequestFailed {
+                        generation: 1000,
+                        ..
+                    })
+                ));
             } else {
                 let mut wire = std::io::Cursor::new(wire);
                 let request = read_content_length_message(&mut wire).unwrap().unwrap();
@@ -1484,9 +1725,15 @@ while True:
     fn diagnostic_tracking_exhaustion_does_not_restart_or_invalidate_tracked_documents() {
         let text = TextBuffer::from_text("text");
         let mut editor = crate::editor::EditorState::new("/fixture".into());
-        let (buffer, _) = editor.open_text(text.clone(), Some("/fixture/main.rs".into())).unwrap();
+        let (buffer, _) = editor
+            .open_text(text.clone(), Some("/fixture/main.rs".into()))
+            .unwrap();
         let mut service = LspService::new();
-        let endpoint = service.replace_edit_source_fixture("file:///fixture/main.rs".into(), (buffer, text.source_version()), PositionEncoding::Utf16);
+        let endpoint = service.replace_edit_source_fixture(
+            "file:///fixture/main.rs".into(),
+            (buffer, text.source_version()),
+            PositionEncoding::Utf16,
+        );
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
         let mut opened = HashMap::new();
@@ -1496,15 +1743,36 @@ while True:
         let mut stopping = false;
         for index in (0..4097).chain(std::iter::once(0)) {
             let document = LspDocument {
-                path: format!("/fixture/{index}.rs").into(), language_id: "rust".into(),
-                version: 0, text: "text".into(),
+                path: format!("/fixture/{index}.rs").into(),
+                language_id: "rust".into(),
+                version: 0,
+                text: "text".into(),
             };
-            handle_command(SessionCommand::SyncOwned {
-                document, source: (buffer, text.source_version()),
-            }, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"), &mut std::io::sink(),
-            true, &LspCapabilities::default(), &mut documents, &mut sources, &mut lineage, &mut apply,
-            &mut opened, &mut pending, &mut 2, Duration::from_secs(1), 0, &endpoint.events,
-            &mut stopping, &mut LspServerConfiguration::standard()).unwrap();
+            handle_command(
+                SessionCommand::SyncOwned {
+                    document,
+                    source: (buffer, text.source_version()),
+                },
+                "owned-edit-fixture",
+                Path::new("/fixture"),
+                Path::new("/server"),
+                &mut std::io::sink(),
+                true,
+                &LspCapabilities::default(),
+                &mut documents,
+                &mut sources,
+                &mut lineage,
+                &mut apply,
+                &mut opened,
+                &mut pending,
+                &mut 2,
+                Duration::from_secs(1),
+                0,
+                &endpoint.events,
+                &mut stopping,
+                &mut LspServerConfiguration::standard(),
+            )
+            .unwrap();
             assert!(!stopping);
         }
         assert_eq!(opened.len(), 4097);
@@ -1517,14 +1785,22 @@ while True:
     fn saving_an_older_snapshot_does_not_replace_synchronized_text_or_sources() {
         let mut editor = crate::editor::EditorState::new("/fixture".into());
         let text = TextBuffer::from_text("newer unsaved text");
-        let (buffer, _) = editor.open_text(text.clone(), Some("/fixture/main.rs".into())).unwrap();
+        let (buffer, _) = editor
+            .open_text(text.clone(), Some("/fixture/main.rs".into()))
+            .unwrap();
         let document = LspDocument {
-            path: "/fixture/main.rs".into(), language_id: "rust".into(),
-            version: 2, text: "newer unsaved text".into(),
+            path: "/fixture/main.rs".into(),
+            language_id: "rust".into(),
+            version: 2,
+            text: "newer unsaved text".into(),
         };
         let source = (buffer, text.source_version());
         let mut service = LspService::new();
-        let endpoint = service.replace_edit_source_fixture(document.uri(), source.clone(), PositionEncoding::Utf16);
+        let endpoint = service.replace_edit_source_fixture(
+            document.uri(),
+            source.clone(),
+            PositionEncoding::Utf16,
+        );
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
         let mut opened = HashMap::new();
@@ -1536,13 +1812,38 @@ while True:
         let mut config = LspServerConfiguration::standard();
         let mut sink = Vec::new();
         for command in [
-            SessionCommand::SyncOwned { document: document.clone(), source: source.clone() },
-            SessionCommand::Save(LspDocument { version: 1, text: "written".into(), ..document.clone() }),
+            SessionCommand::SyncOwned {
+                document: document.clone(),
+                source: source.clone(),
+            },
+            SessionCommand::Save(LspDocument {
+                version: 1,
+                text: "written".into(),
+                ..document.clone()
+            }),
         ] {
-            handle_command(command, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"),
-                &mut sink, true, &LspCapabilities::default(), &mut documents, &mut sources,
-                &mut lineage, &mut apply, &mut opened, &mut pending, &mut next,
-                Duration::from_secs(1), 0, &endpoint.events, &mut stopping, &mut config).unwrap();
+            handle_command(
+                command,
+                "owned-edit-fixture",
+                Path::new("/fixture"),
+                Path::new("/server"),
+                &mut sink,
+                true,
+                &LspCapabilities::default(),
+                &mut documents,
+                &mut sources,
+                &mut lineage,
+                &mut apply,
+                &mut opened,
+                &mut pending,
+                &mut next,
+                Duration::from_secs(1),
+                0,
+                &endpoint.events,
+                &mut stopping,
+                &mut config,
+            )
+            .unwrap();
         }
         assert_eq!(documents[&document.uri()].text, "newer unsaved text");
         assert_eq!(documents[&document.uri()].version, 2);
@@ -1565,12 +1866,18 @@ while True:
             let (buffer, _) = editor.open_text(text.clone(), None).unwrap();
             let mut service = LspService::new();
             let endpoint = service.replace_edit_source_fixture(
-                "file:///fixture/main.rs".into(), (buffer, text.source_version()), PositionEncoding::Utf16,
+                "file:///fixture/main.rs".into(),
+                (buffer, text.source_version()),
+                PositionEncoding::Utf16,
             );
-            let base = LspCapabilities { sync_kind: super::super::model::SyncKind::None, ..Default::default() };
+            let base = LspCapabilities {
+                sync_kind: super::super::model::SyncKind::None,
+                ..Default::default()
+            };
             let options = json!({"documentSelector":[{"language":"rust"}],"syncKind":2});
             let active = super::super::server_message::effective_capabilities(
-                &base, [("textDocument/didChange", &options)].into_iter(),
+                &base,
+                [("textDocument/didChange", &options)].into_iter(),
             );
             let mut documents = HashMap::new();
             let mut sources = HashMap::new();
@@ -1582,10 +1889,15 @@ while True:
             let mut stopping = false;
             let mut config = LspServerConfiguration::standard();
             let mut output = Vec::new();
-            for (version, text) in ["a", "longer", "longer!", "longer!!"].into_iter().enumerate() {
+            for (version, text) in ["a", "longer", "longer!", "longer!!"]
+                .into_iter()
+                .enumerate()
+            {
                 let document = LspDocument {
-                    path: "/fixture/main.rs".into(), language_id: "rust".into(),
-                    version: version as u64, text: text.into(),
+                    path: "/fixture/main.rs".into(),
+                    language_id: "rust".into(),
+                    version: version as u64,
+                    text: text.into(),
                 };
                 let command = if save && version >= 2 {
                     SessionCommand::Save(document)
@@ -1593,19 +1905,40 @@ while True:
                     SessionCommand::Sync(document)
                 };
                 handle_command(
-                    command, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"),
-                    &mut output, true, if version >= 2 { &active } else { &base },
-                    &mut documents, &mut sources, &mut lineage, &mut apply, &mut opened,
-                    &mut pending, &mut next, Duration::from_secs(1), 0,
-                    &endpoint.events, &mut stopping, &mut config,
-                ).unwrap();
+                    command,
+                    "owned-edit-fixture",
+                    Path::new("/fixture"),
+                    Path::new("/server"),
+                    &mut output,
+                    true,
+                    if version >= 2 { &active } else { &base },
+                    &mut documents,
+                    &mut sources,
+                    &mut lineage,
+                    &mut apply,
+                    &mut opened,
+                    &mut pending,
+                    &mut next,
+                    Duration::from_secs(1),
+                    0,
+                    &endpoint.events,
+                    &mut stopping,
+                    &mut config,
+                )
+                .unwrap();
             }
             let mut input = std::io::Cursor::new(output);
-            let changes = std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap())
-                .filter(|message| message["method"] == "textDocument/didChange").collect::<Vec<_>>();
+            let changes = std::iter::from_fn(|| {
+                crate::process::read_content_length_message(&mut input).unwrap()
+            })
+            .filter(|message| message["method"] == "textDocument/didChange")
+            .collect::<Vec<_>>();
             assert_eq!(changes.len(), 2);
             assert_eq!(changes[0]["params"]["textDocument"]["version"], 2);
-            assert_eq!(changes[0]["params"]["contentChanges"], json!([{"text":"longer!"}]));
+            assert_eq!(
+                changes[0]["params"]["contentChanges"],
+                json!([{"text":"longer!"}])
+            );
             assert_eq!(changes[1]["params"]["contentChanges"][0]["text"], "!");
             assert!(changes[1]["params"]["contentChanges"][0]["range"].is_object());
         }
@@ -1616,7 +1949,9 @@ while True:
         use crate::editor::{EditorState, text::TextBuffer};
         let mut editor = EditorState::new("/fixture".into());
         let first = TextBuffer::from_text("first");
-        let (buffer, _) = editor.open_text(first.clone(), Some("/fixture/main.rs".into())).unwrap();
+        let (buffer, _) = editor
+            .open_text(first.clone(), Some("/fixture/main.rs".into()))
+            .unwrap();
         let document = LspDocument {
             path: "/fixture/main.rs".into(),
             language_id: "rust".into(),
@@ -1670,7 +2005,8 @@ while True:
                 &endpoint.events,
                 &mut stopping,
                 &mut config,
-            ).unwrap();
+            )
+            .unwrap();
         }
         assert!(stopping);
         let event = service.try_owned_event().unwrap();

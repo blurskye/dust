@@ -213,7 +213,8 @@ impl SearchSession {
             };
             picker.source == (scope.clone(), configuration) && same_origin
         };
-        let refresh_suspended = !help_install && self.picker.help_open
+        let refresh_suspended = !help_install
+            && self.picker.help_open
             && self.picker.suspended.as_ref().is_some_and(same_interaction);
         if !help_install && self.picker.help_open && !refresh_suspended {
             // A genuinely new surface supersedes both the help page and what it was showing, so
@@ -289,16 +290,16 @@ impl SearchSession {
             previous
         } else {
             PickerInteraction {
-            state,
-            payloads,
-            surface: content.surface,
-            footer: surface_footer(content.surface),
-            changes_other_layer: false,
-            preview_scroll: None,
-            preview_rows: 0,
-            origin: content.origin,
-            source: (scope, configuration),
-            epoch: epoch.clone(),
+                state,
+                payloads,
+                surface: content.surface,
+                footer: surface_footer(content.surface),
+                changes_other_layer: false,
+                preview_scroll: None,
+                preview_rows: 0,
+                origin: content.origin,
+                source: (scope, configuration),
+                epoch: epoch.clone(),
             }
         };
         if refresh_suspended {

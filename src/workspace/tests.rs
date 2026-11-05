@@ -303,11 +303,20 @@ fn failed_trust_database_replacement_preserves_existing_bytes() {
     destination.push("/");
     assert!(matches!(
         persist_trust_database(Path::new(&destination), &update),
-        Err(TrustStateError::Io { operation: "replace", .. })
+        Err(TrustStateError::Io {
+            operation: "replace",
+            ..
+        })
     ));
     assert_eq!(fs::read(&path).expect("preserved bytes"), bytes);
-    assert_eq!(load_trust_database(&path).expect("preserved database"), original);
-    assert_eq!(fs::read_dir(state.path()).expect("state directory").count(), 1);
+    assert_eq!(
+        load_trust_database(&path).expect("preserved database"),
+        original
+    );
+    assert_eq!(
+        fs::read_dir(state.path()).expect("state directory").count(),
+        1
+    );
 }
 
 #[cfg(unix)]
@@ -458,16 +467,40 @@ fn explorer_rejects_children_from_a_replaced_directory() {
     let root_id = explorer.selected_id().unwrap();
     let child_path = root.path().join("child");
     assert!(explorer.begin_load(root_id, 1));
-    assert!(explorer.apply_load(root_id, 1, 1, vec![ExplorerChild {
-        path: child_path.clone(), name: "child".into(), kind: ExplorerKind::Directory,
-    }]));
+    assert!(explorer.apply_load(
+        root_id,
+        1,
+        1,
+        vec![ExplorerChild {
+            path: child_path.clone(),
+            name: "child".into(),
+            kind: ExplorerKind::Directory,
+        }]
+    ));
     let child_id = explorer.visible_ids()[1];
     assert!(explorer.begin_load(child_id, 2));
-    assert!(explorer.apply_load(child_id, 2, 1, vec![
-        ExplorerChild { path: child_path.clone(), name: "child".into(), kind: ExplorerKind::Directory },
-        ExplorerChild { path: root.path().join("sibling"), name: "sibling".into(), kind: ExplorerKind::Directory },
-        ExplorerChild { path: child_path.join("valid"), name: "valid".into(), kind: ExplorerKind::File },
-    ]));
+    assert!(explorer.apply_load(
+        child_id,
+        2,
+        1,
+        vec![
+            ExplorerChild {
+                path: child_path.clone(),
+                name: "child".into(),
+                kind: ExplorerKind::Directory
+            },
+            ExplorerChild {
+                path: root.path().join("sibling"),
+                name: "sibling".into(),
+                kind: ExplorerKind::Directory
+            },
+            ExplorerChild {
+                path: child_path.join("valid"),
+                name: "valid".into(),
+                kind: ExplorerKind::File
+            },
+        ]
+    ));
     assert_eq!(explorer.visible_ids().len(), 3);
     assert_eq!(explorer.visible_ids()[..2], [root_id, child_id]);
     explorer.select(child_id);
@@ -522,7 +555,11 @@ fn explorer_replaces_large_listings_and_prunes_removed_expansions() {
         assert!(explorer.node(old).is_none());
         assert!(!explorer.is_expanded(old));
     }
-    assert!(explorer.id_for_path(&root.path().join("old0/nested")).is_none());
+    assert!(
+        explorer
+            .id_for_path(&root.path().join("old0/nested"))
+            .is_none()
+    );
     assert!(explorer.id_for_path(&root.path().join("new9999")).is_some());
     assert!(explorer.is_expanded(root_id));
 }
@@ -535,18 +572,31 @@ fn explorer_child_expands_collapsed_directories_and_selects_only_visible_childre
     explorer.reset_roots(workspace.roots(), 1);
     let root_id = explorer.selected_id().unwrap();
     explorer.begin_load(root_id, 1);
-    explorer.apply_load(root_id, 1, 1, vec![ExplorerChild {
-        path: root.path().join("directory"),
-        name: "directory".into(),
-        kind: ExplorerKind::Directory,
-    }]);
+    explorer.apply_load(
+        root_id,
+        1,
+        1,
+        vec![ExplorerChild {
+            path: root.path().join("directory"),
+            name: "directory".into(),
+            kind: ExplorerKind::Directory,
+        }],
+    );
     let directory = explorer.node(root_id).unwrap().children[0];
     explorer.begin_load(directory, 2);
-    explorer.apply_load(directory, 2, 1, ["hidden", "match"].into_iter().map(|name| ExplorerChild {
-        path: root.path().join("directory").join(name),
-        name: name.into(),
-        kind: ExplorerKind::File,
-    }).collect());
+    explorer.apply_load(
+        directory,
+        2,
+        1,
+        ["hidden", "match"]
+            .into_iter()
+            .map(|name| ExplorerChild {
+                path: root.path().join("directory").join(name),
+                name: name.into(),
+                kind: ExplorerKind::File,
+            })
+            .collect(),
+    );
     let children = explorer.node(directory).unwrap().children.clone();
     explorer.select(directory);
     explorer.collapse_or_parent();
@@ -756,7 +806,9 @@ fn picker_rejects_stale_streams_deduplicates_and_filters_stably() {
     ));
     let presentation = picker.presentation();
     assert_eq!(
-        presentation.rows.iter()
+        presentation
+            .rows
+            .iter()
             .map(|row| (row.id.0.as_str(), row.label.as_str()))
             .collect::<Vec<_>>(),
         vec![("a", "alpha"), ("b", "beta")]
@@ -802,15 +854,28 @@ fn picker_filtering_keeps_matching_entries_under_their_sections() {
     picker.insert_query("ab");
     let presentation = picker.presentation();
     assert_eq!(
-        presentation.rows.iter().map(|row| row.id.0.as_str()).collect::<Vec<_>>(),
-        vec!["unstaged", "unstaged-exact", "unstaged-scattered", "staged", "staged-exact"]
+        presentation
+            .rows
+            .iter()
+            .map(|row| row.id.0.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "unstaged",
+            "unstaged-exact",
+            "unstaged-scattered",
+            "staged",
+            "staged-exact"
+        ]
     );
     assert_eq!(picker.selected_item().unwrap().id.0, "unstaged-exact");
     picker.move_selection(1, false);
     picker.move_selection(1, false);
     assert_eq!(picker.selected_item().unwrap().id.0, "staged-exact");
     picker.set_query("staged".into());
-    assert!(picker.presentation().rows.is_empty(), "headers alone are not matches");
+    assert!(
+        picker.presentation().rows.is_empty(),
+        "headers alone are not matches"
+    );
     picker.set_query(String::new());
     assert_eq!(picker.presentation().rows.len(), 8);
     assert_eq!(picker.selected_item().unwrap().id.0, "draft");
@@ -980,11 +1045,16 @@ fn explorer_refresh_preserves_a_later_collapse() {
     explorer.toggle_loaded(root);
     assert!(!explorer.is_expanded(root));
     let path = workspace.roots()[0].identity.canonical_path.join("new.txt");
-    assert!(explorer.apply_load(root, 2, 1, vec![ExplorerChild {
-        path: path.clone(),
-        name: "new.txt".into(),
-        kind: ExplorerKind::File,
-    }]));
+    assert!(explorer.apply_load(
+        root,
+        2,
+        1,
+        vec![ExplorerChild {
+            path: path.clone(),
+            name: "new.txt".into(),
+            kind: ExplorerKind::File,
+        }]
+    ));
     let child = explorer.id_for_path(&path).expect("refreshed child");
     let node = explorer.node(root).unwrap();
     assert_eq!(node.load, ExplorerLoadState::Loaded);

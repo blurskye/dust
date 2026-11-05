@@ -579,7 +579,13 @@ impl PickerTextPreview {
         highlight_line: Option<usize>,
         language: Option<crate::language::syntax::SyntaxLanguage>,
     ) -> Self {
-        let mut preview = Self { lines, first_line, highlight_line, language, spans: Vec::new() };
+        let mut preview = Self {
+            lines,
+            first_line,
+            highlight_line,
+            language,
+            spans: Vec::new(),
+        };
         preview.prepare_highlighting();
         preview
     }
@@ -607,8 +613,16 @@ impl PickerTextPreview {
 
     fn prepare_highlighting(&mut self) {
         self.spans.clear();
-        let Some(language) = self.language else { return };
-        if self.lines.iter().map(|line| line.len().saturating_add(1)).sum::<usize>() > 512 * 1024 {
+        let Some(language) = self.language else {
+            return;
+        };
+        if self
+            .lines
+            .iter()
+            .map(|line| line.len().saturating_add(1))
+            .sum::<usize>()
+            > 512 * 1024
+        {
             return;
         }
         let source = self.lines.join("\n");
@@ -1452,13 +1466,22 @@ impl OperationBarState {
     #[must_use]
     pub fn row(&self, width: u16, ambiguous: AmbiguousWidth) -> String {
         let width = usize::from(width);
-        let abort = self.abort_binding.as_ref().map_or_else(
-            || "abort".to_owned(),
-            |binding| format!("{binding} abort"),
-        );
-        let actions = self.actions.iter().map(|action| {
-            if action == "abort" { abort.as_str() } else { action.as_str() }
-        }).collect::<Vec<_>>().join("/");
+        let abort = self
+            .abort_binding
+            .as_ref()
+            .map_or_else(|| "abort".to_owned(), |binding| format!("{binding} abort"));
+        let actions = self
+            .actions
+            .iter()
+            .map(|action| {
+                if action == "abort" {
+                    abort.as_str()
+                } else {
+                    action.as_str()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
         let tail = if self.actions.iter().any(|action| action == "abort") {
             abort.as_str()
         } else {
@@ -1489,10 +1512,13 @@ impl OperationBarState {
         let separator = usize::from(!tail.is_empty());
         let budget = width.saturating_sub(tail_width + separator);
         let mut used = 0;
-        let head: String = brief.graphemes(true).take_while(|grapheme| {
-            used += text_width(grapheme, ambiguous);
-            used <= budget
-        }).collect();
+        let head: String = brief
+            .graphemes(true)
+            .take_while(|grapheme| {
+                used += text_width(grapheme, ambiguous);
+                used <= budget
+            })
+            .collect();
         let compact = if tail.is_empty() {
             head
         } else if head.trim_end().is_empty() {
@@ -1501,10 +1527,13 @@ impl OperationBarState {
             format!("{} {tail}", head.trim_end())
         };
         let mut used = 0;
-        compact.graphemes(true).take_while(|grapheme| {
-            used += text_width(grapheme, ambiguous);
-            used <= width
-        }).collect()
+        compact
+            .graphemes(true)
+            .take_while(|grapheme| {
+                used += text_width(grapheme, ambiguous);
+                used <= width
+            })
+            .collect()
     }
 }
 
@@ -1926,11 +1955,13 @@ fn render_error_notification(
 }
 
 fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
-    text.split('\n').flat_map(|line| {
-        overlays::wrap_ranges(line, width, ambiguous)
-            .into_iter()
-            .map(|range| line[range].to_owned())
-    }).collect()
+    text.split('\n')
+        .flat_map(|line| {
+            overlays::wrap_ranges(line, width, ambiguous)
+                .into_iter()
+                .map(|range| line[range].to_owned())
+        })
+        .collect()
 }
 
 /// Tutor text wrapped to `width`, each line a list of (piece, is a key) runs.
@@ -2197,12 +2228,10 @@ pub(crate) fn render_with_documentation_geometry(
             .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
             .map(|window| window.rect)
     });
-    let dashboard_window = compositor.and_then(|compositor| {
-        compositor.projection.window(compositor.surfaces.dashboard?)
-    });
-    let dashboard_floating = dashboard_window.is_some_and(|window| {
-        window.layer == crate::ui::window::CompositorLayer::Floating
-    });
+    let dashboard_window = compositor
+        .and_then(|compositor| compositor.projection.window(compositor.surfaces.dashboard?));
+    let dashboard_floating = dashboard_window
+        .is_some_and(|window| window.layer == crate::ui::window::CompositorLayer::Floating);
     // ONE decision, so the regions cannot disagree: the source is whatever the inspectors leave,
     // and the workspace is rendered at that size rather than being squeezed into it.
     // The terminal panel is planned WITH the arrangement rather than after it: the panel's top row
@@ -2240,10 +2269,16 @@ pub(crate) fn render_with_documentation_geometry(
             WindowRect {
                 x,
                 y,
-                width: rect.x.saturating_add(rect.width)
-                    .min(bounds.x.saturating_add(bounds.width)).saturating_sub(x),
-                height: rect.y.saturating_add(rect.height)
-                    .min(bounds.y.saturating_add(bounds.height)).saturating_sub(y),
+                width: rect
+                    .x
+                    .saturating_add(rect.width)
+                    .min(bounds.x.saturating_add(bounds.width))
+                    .saturating_sub(x),
+                height: rect
+                    .y
+                    .saturating_add(rect.height)
+                    .min(bounds.y.saturating_add(bounds.height))
+                    .saturating_sub(y),
             }
         })
     } else {
@@ -2253,9 +2288,13 @@ pub(crate) fn render_with_documentation_geometry(
     let content_height = content_bounds.map_or(workspace_height, |bounds| bounds.height);
     let content = if dashboard_floating && (ui.dashboard || state.active_view.is_none()) {
         Frame {
-            grid: CellGrid::new_with_policy(content_width, content_height,
-                CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT,
-                config.editor.ambiguous_width == AmbiguousWidth::Wide),
+            grid: CellGrid::new_with_policy(
+                content_width,
+                content_height,
+                CONTROL_CHARACTER_REPLACEMENT,
+                ZERO_WIDTH_REPLACEMENT,
+                config.editor.ambiguous_width == AmbiguousWidth::Wide,
+            ),
             cursor: None,
         }
     } else if ui.dashboard || state.active_view.is_none() {
@@ -2419,17 +2458,30 @@ pub(crate) fn render_with_documentation_geometry(
             }
             if compositor.surfaces.dashboard == Some(projected.window) {
                 let rect = projected.rect;
-                let dashboard = render_dashboard(&state.workspace_root, &ui.dashboard_actions,
-                    ui.dashboard_selected, dashboard, config, rect.width, rect.height);
+                let dashboard = render_dashboard(
+                    &state.workspace_root,
+                    &ui.dashboard_actions,
+                    ui.dashboard_selected,
+                    dashboard,
+                    config,
+                    rect.width,
+                    rect.height,
+                );
                 for y in 0..rect.height {
                     for x in 0..rect.width {
-                        if let Some(cell) = dashboard.grid.get(x, y) && !cell.continuation {
-                            frame.grid.set_cell(rect.x + x, rect.y + y, &cell.symbol, cell.style);
+                        if let Some(cell) = dashboard.grid.get(x, y)
+                            && !cell.continuation
+                        {
+                            frame
+                                .grid
+                                .set_cell(rect.x + x, rect.y + y, &cell.symbol, cell.style);
                         }
                     }
                 }
                 if projected.focused {
-                    frame.cursor = dashboard.cursor.map(|(x, y, shape)| (rect.x + x, rect.y + y, shape));
+                    frame.cursor = dashboard
+                        .cursor
+                        .map(|(x, y, shape)| (rect.x + x, rect.y + y, shape));
                 }
                 continue;
             }
@@ -2516,29 +2568,55 @@ pub(crate) fn render_with_documentation_geometry(
         render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
     }
     let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
-    let completion_menu = ui.language_completion.as_ref().filter(|_| !modal_open).and_then(|completion| {
-        let pane = active_editor_pane_viewport(state, ui)?;
-        render_language_completion(
-            &mut frame,
-            completion,
-            config,
-            WindowRect {
-                x: pane.x,
-                y: pane.y,
-                width: pane.width,
-                height: pane.height,
-            },
-        )
-    });
-    if let (Some(text), None) = (&ui.lsp_loading, completion_menu) && !modal_open {
+    let completion_menu = ui
+        .language_completion
+        .as_ref()
+        .filter(|_| !modal_open)
+        .and_then(|completion| {
+            let pane = active_editor_pane_viewport(state, ui)?;
+            render_language_completion(
+                &mut frame,
+                completion,
+                config,
+                WindowRect {
+                    x: pane.x,
+                    y: pane.y,
+                    width: pane.width,
+                    height: pane.height,
+                },
+            )
+        });
+    if let (Some(text), None) = (&ui.lsp_loading, completion_menu)
+        && !modal_open
+    {
         render_lsp_loading(&mut frame, text, config);
     }
-    let overlay_bounds = workspace.unwrap_or(WindowRect { x: 0, y: 0, width, height });
-    let documentation_geometry = ui.documentation_popup.as_ref().filter(|_| !modal_open).and_then(|documentation| {
-        render_documentation_popup(&mut frame, documentation, config, overlay_bounds, completion_menu)
+    let overlay_bounds = workspace.unwrap_or(WindowRect {
+        x: 0,
+        y: 0,
+        width,
+        height,
     });
+    let documentation_geometry = ui
+        .documentation_popup
+        .as_ref()
+        .filter(|_| !modal_open)
+        .and_then(|documentation| {
+            render_documentation_popup(
+                &mut frame,
+                documentation,
+                config,
+                overlay_bounds,
+                completion_menu,
+            )
+        });
     if let Some(key_hints) = &ui.key_hints {
-        render_key_hints(&mut frame, key_hints, overlay_bounds, config.editor.ambiguous_width);
+        render_key_hints(
+            &mut frame,
+            key_hints,
+            overlay_bounds,
+            config.editor.ambiguous_width,
+        );
     }
     // A modal's footer is at the bottom right too, and its keys matter more.
     if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {

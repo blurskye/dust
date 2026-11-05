@@ -376,7 +376,11 @@ impl ModalResolver {
             let surround = self.operator.as_deref() == Some("surround_add");
             if let Some(character) = character {
                 invocation = invocation.with_argument(
-                    if surround { "find_character" } else { "character" },
+                    if surround {
+                        "find_character"
+                    } else {
+                        "character"
+                    },
                     CommandValue::String(character.to_string()),
                 );
             }
@@ -563,7 +567,9 @@ mod tests {
         let mut invocation = super::command("view.cursor.move").unwrap();
         resolver.decorate_invocation(&mut invocation);
         assert_eq!(invocation.count, None);
-        resolver.feed(EditorMode::Normal, GrammarInput::Count(1)).unwrap();
+        resolver
+            .feed(EditorMode::Normal, GrammarInput::Count(1))
+            .unwrap();
         resolver.decorate_invocation(&mut invocation);
         assert_eq!(invocation.count, NonZeroU64::new(1));
         assert!(!resolver.has_pending_grammar());

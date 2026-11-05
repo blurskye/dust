@@ -94,12 +94,18 @@ impl PackageManager {
         write_lock_atomic(staged.path(), lock, self.maximum_lock_bytes)?;
         let backup = self.backup_path();
         let previous = if backup.exists() {
-            Some(read_bounded_regular(&backup, self.maximum_lock_bytes as u64)?)
+            Some(read_bounded_regular(
+                &backup,
+                self.maximum_lock_bytes as u64,
+            )?)
         } else {
             None
         };
         let current = if self.lock_path().exists() {
-            Some(read_bounded_regular(&self.lock_path(), self.maximum_lock_bytes as u64)?)
+            Some(read_bounded_regular(
+                &self.lock_path(),
+                self.maximum_lock_bytes as u64,
+            )?)
         } else {
             None
         };
@@ -229,13 +235,19 @@ impl PackageManager {
     }
     fn activation_manifest(&self, package: &LockedPackage) -> Result<PluginManifest, PackageError> {
         if !valid_digest(&package.content_sha256)
-            || package.activation_sha256.as_ref().is_some_and(|digest| !valid_digest(digest))
+            || package
+                .activation_sha256
+                .as_ref()
+                .is_some_and(|digest| !valid_digest(digest))
         {
             return Err(PackageError::InvalidManifest);
         }
         let path = self.root.join("activations").join(format!(
             "{}.toml",
-            package.activation_sha256.as_ref().unwrap_or(&package.content_sha256)
+            package
+                .activation_sha256
+                .as_ref()
+                .unwrap_or(&package.content_sha256)
         ));
         let bytes = read_bounded_regular(&path, 1024 * 1024)?;
         if let Some(expected) = &package.activation_sha256
@@ -243,10 +255,13 @@ impl PackageManager {
         {
             return Err(PackageError::ChecksumMismatch);
         }
-        let plugin: PluginManifest = toml::from_str(
-            std::str::from_utf8(&bytes).map_err(|_| PackageError::InvalidManifest)?,
-        ).map_err(|_| PackageError::InvalidManifest)?;
-        if !plugin.component_sha256.eq_ignore_ascii_case(&package.content_sha256) {
+        let plugin: PluginManifest =
+            toml::from_str(std::str::from_utf8(&bytes).map_err(|_| PackageError::InvalidManifest)?)
+                .map_err(|_| PackageError::InvalidManifest)?;
+        if !plugin
+            .component_sha256
+            .eq_ignore_ascii_case(&package.content_sha256)
+        {
             return Err(PackageError::ChecksumMismatch);
         }
         Ok(plugin)
@@ -274,7 +289,9 @@ impl PackageManager {
         }
         Ok(output)
     }
-    pub fn activations(&self) -> Result<Vec<(PluginManifest, PathBuf, Arc<fs::File>)>, PackageError> {
+    pub fn activations(
+        &self,
+    ) -> Result<Vec<(PluginManifest, PathBuf, Arc<fs::File>)>, PackageError> {
         let _transaction = self.transaction()?;
         let lock = self.read_lock()?;
         self.activations_for_lock(&lock)
@@ -286,7 +303,11 @@ impl PackageManager {
             return Err(PackageError::PackageNotFound(name.into()));
         }
         if lock.packages.iter().any(|package| {
-            package.name != name && package.dependencies.iter().any(|dependency| dependency == name)
+            package.name != name
+                && package
+                    .dependencies
+                    .iter()
+                    .any(|dependency| dependency == name)
         }) {
             return Err(PackageError::PackageRequired(name.into()));
         }
@@ -327,9 +348,7 @@ impl PackageManager {
             retained.insert(package.content_sha256);
         }
         let mut removed = 0;
-        for entry in fs::read_dir(self.root.join("store"))
-            .map_err(PackageError::Io)?
-        {
+        for entry in fs::read_dir(self.root.join("store")).map_err(PackageError::Io)? {
             let entry = entry.map_err(PackageError::Io)?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let metadata = entry.metadata().map_err(PackageError::Io)?;
@@ -353,9 +372,7 @@ impl PackageManager {
             }
         }
         if removed < maximum_removals {
-            for entry in fs::read_dir(self.root.join("activations"))
-                .map_err(PackageError::Io)?
-            {
+            for entry in fs::read_dir(self.root.join("activations")).map_err(PackageError::Io)? {
                 let entry = entry.map_err(PackageError::Io)?;
                 let path = entry.path();
                 let stem = path
@@ -764,25 +781,37 @@ mod tests {
             let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
             for index in 0..12 {
                 let name = format!("{index:064x}");
-                let name = if directory == "activations" { format!("{name}.toml") } else { name };
+                let name = if directory == "activations" {
+                    format!("{name}.toml")
+                } else {
+                    name
+                };
                 fs::write(root.path().join(directory).join(name), "unused").unwrap();
             }
-            let entries = fs::read_dir(root.path().join(directory)).unwrap()
-                .map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+            let entries = fs::read_dir(root.path().join(directory))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
             let mut lock = manager.read_lock().unwrap();
             for path in &entries[..entries.len() - 1] {
                 let digest = path.file_stem().unwrap().to_str().unwrap().to_owned();
                 lock.packages.push(LockedPackage {
-                    name: digest.clone(), version: "1".into(),
+                    name: digest.clone(),
+                    version: "1".into(),
                     source: super::super::tests::package_fixture("unused").0.source,
-                    content_sha256: digest.clone(), activation_sha256: Some(digest),
+                    content_sha256: digest.clone(),
+                    activation_sha256: Some(digest),
                     dependencies: Vec::new(),
                 });
             }
             write_lock_atomic(&manager.lock_path(), &lock, 1024 * 1024).unwrap();
             assert_eq!(manager.gc(1).unwrap(), 1, "{directory}");
             assert!(!entries.last().unwrap().exists(), "{directory}");
-            assert!(entries[..entries.len() - 1].iter().all(|path| path.exists()));
+            assert!(
+                entries[..entries.len() - 1]
+                    .iter()
+                    .all(|path| path.exists())
+            );
         }
     }
 
@@ -792,14 +821,22 @@ mod tests {
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
         let lock = manager.remove("demo").unwrap();
         // An unrelated cleanup failure must not undo or hide the removal.
         fs::remove_dir_all(manager.store_root()).unwrap();
         fs::write(manager.store_root(), "not a directory").unwrap();
         let mut result = PackageOperationResult {
-            id: 1, operation: "remove".into(), lock: Some(lock), verified: None,
-            removed: None, prepared: None, activations: Vec::new(), cleanup_error: None,
+            id: 1,
+            operation: "remove".into(),
+            lock: Some(lock),
+            verified: None,
+            removed: None,
+            prepared: None,
+            activations: Vec::new(),
+            cleanup_error: None,
         };
         result.collect_garbage(&manager);
         assert!(result.cleanup_error.is_some());
@@ -814,23 +851,33 @@ mod tests {
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (installed, plugin, bytes) = super::super::tests::package_fixture("publisher/alpha");
         let object = manager.stage_verified_object(&installed, &bytes).unwrap();
-        manager.commit_prepared(&installed, &plugin, &object).unwrap();
+        manager
+            .commit_prepared(&installed, &plugin, &object)
+            .unwrap();
         let mut service = PackageService::start(root.path().into(), 1, 1024 * 1024, 1024);
         for registry in [false, true] {
             for (name, plugin_id, message) in [
                 ("alpha", "renamed", "cannot change plugin ID"),
                 ("beta", "publisher/alpha", "already owned"),
             ] {
-                let (package, mut plugin, component) = super::super::tests::package_fixture(&format!("publisher/{name}"));
+                let (package, mut plugin, component) =
+                    super::super::tests::package_fixture(&format!("publisher/{name}"));
                 plugin.id = plugin_id.into();
                 let operation = if registry {
                     PackageOperation::PrepareRegistry {
                         metadata: Box::new(RegistryPackageMetadata {
-                            schema: 1, publisher: "publisher".into(), name: name.into(),
-                            version: "1.0.0".into(), yanked: false, artifact_path: "plugin.wasm".into(),
-                            artifact_sha256: plugin.component_sha256.clone(), package, plugin,
+                            schema: 1,
+                            publisher: "publisher".into(),
+                            name: name.into(),
+                            version: "1.0.0".into(),
+                            yanked: false,
+                            artifact_path: "plugin.wasm".into(),
+                            artifact_sha256: plugin.component_sha256.clone(),
+                            package,
+                            plugin,
                         }),
-                        component, limits: PluginLimits::default(),
+                        component,
+                        limits: PluginLimits::default(),
                     }
                 } else {
                     let package_manifest = root.path().join("package.json");
@@ -840,20 +887,29 @@ mod tests {
                     fs::write(&plugin_manifest, toml::to_string(&plugin).unwrap()).unwrap();
                     fs::write(&component_path, component).unwrap();
                     PackageOperation::Install {
-                        package_manifest, plugin_manifest, component: component_path,
+                        package_manifest,
+                        plugin_manifest,
+                        component: component_path,
                         roots: vec![root.path().canonicalize().unwrap()],
-                        limits: PluginLimits::default(), update: true,
+                        limits: PluginLimits::default(),
+                        update: true,
                     }
                 };
                 let request = service.request(operation).unwrap();
                 let deadline = Instant::now() + Duration::from_secs(3);
                 let event = loop {
-                    if let Some(event) = service.poll().unwrap().into_iter().next() { break event; }
+                    if let Some(event) = service.poll().unwrap().into_iter().next() {
+                        break event;
+                    }
                     assert!(Instant::now() < deadline);
                     std::thread::sleep(Duration::from_millis(2));
                 };
                 match event {
-                    PackageServiceEvent::Failed { id, error: PackageError::Activation(error), .. } => {
+                    PackageServiceEvent::Failed {
+                        id,
+                        error: PackageError::Activation(error),
+                        ..
+                    } => {
                         assert_eq!(id, request);
                         assert!(error.contains(message), "{error}");
                     }
@@ -871,7 +927,9 @@ mod tests {
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
         for direct in [false, true] {
             let transaction = manager.transaction().unwrap();
             let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
@@ -880,16 +938,30 @@ mod tests {
             let worker = thread::spawn(move || {
                 started.send(()).unwrap();
                 let verified = if direct {
-                    verify_lock_store(&other.lock_path(), &other.store_root(), 1024 * 1024, 1024 * 1024)
+                    verify_lock_store(
+                        &other.lock_path(),
+                        &other.store_root(),
+                        1024 * 1024,
+                        1024 * 1024,
+                    )
                 } else {
                     other.verify()
                 };
                 done.send(verified).unwrap();
             });
             ready.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert!(matches!(result.recv_timeout(Duration::from_millis(50)), Err(mpsc::RecvTimeoutError::Timeout)));
+            assert!(matches!(
+                result.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
             drop(transaction);
-            assert_eq!(result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), 1);
+            assert_eq!(
+                result
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap(),
+                1
+            );
             worker.join().unwrap();
         }
     }
@@ -901,37 +973,75 @@ mod tests {
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = super::super::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
         fs::remove_file(&object).unwrap();
         mkfifo(&object, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
-        assert!(matches!(manager.activations(), Err(PackageError::InvalidManifest)));
+        assert!(matches!(
+            manager.activations(),
+            Err(PackageError::InvalidManifest)
+        ));
     }
 
     #[test]
     fn startup_objects_stay_locked_through_indexing_and_loading() {
-        use crate::extensions::{PluginActivationBehavior, PluginCommandContext, PluginCommandDeclaration, PluginEvent, PluginManager};
+        use crate::extensions::{
+            PluginActivationBehavior, PluginCommandContext, PluginCommandDeclaration, PluginEvent,
+            PluginManager,
+        };
         use std::time::{Duration, Instant};
         let root = tempfile::tempdir().unwrap();
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
         let (mut manifest, mut plugin, _) = super::super::tests::package_fixture("demo");
         let core = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
-        let bytes = wit_component::ComponentEncoder::default().module(core).unwrap().validate(true).encode().unwrap();
+        let bytes = wit_component::ComponentEncoder::default()
+            .module(core)
+            .unwrap()
+            .validate(true)
+            .encode()
+            .unwrap();
         let digest = format!("{:x}", Sha256::digest(&bytes));
         if let PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
             *archive_sha256 = digest.clone();
         }
         plugin.component_sha256 = digest;
-        plugin.commands = ["drive", "trap", "flood", "spin", "private", "events", "storage", "provider", "virtual", "confirmation", "confirmationprobe"]
-            .into_iter().map(|name| (name.into(), PluginCommandDeclaration {
-                title: name.into(), description: String::new(), arguments: BTreeMap::new(),
-                context: PluginCommandContext::Application, activation: PluginActivationBehavior::ActiveOnly,
-            })).collect();
+        plugin.commands = [
+            "drive",
+            "trap",
+            "flood",
+            "spin",
+            "private",
+            "events",
+            "storage",
+            "provider",
+            "virtual",
+            "confirmation",
+            "confirmationprobe",
+        ]
+        .into_iter()
+        .map(|name| {
+            (
+                name.into(),
+                PluginCommandDeclaration {
+                    title: name.into(),
+                    description: String::new(),
+                    arguments: BTreeMap::new(),
+                    context: PluginCommandContext::Application,
+                    activation: PluginActivationBehavior::ActiveOnly,
+                },
+            )
+        })
+        .collect();
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
-        manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+        manager
+            .commit_prepared(&manifest, &plugin, &object)
+            .unwrap();
         let mut activations = manager.activations().unwrap();
         let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
         other.remove("demo").unwrap();
-        let (mut replacement, mut replacement_plugin, mut bytes) = super::super::tests::package_fixture("other");
+        let (mut replacement, mut replacement_plugin, mut bytes) =
+            super::super::tests::package_fixture("other");
         bytes.extend_from_slice(&[0, 2, 1, b'x']); // Empty component with a custom section.
         let digest = format!("{:x}", Sha256::digest(&bytes));
         if let PackageSource::Registry { archive_sha256, .. } = &mut replacement.source {
@@ -939,14 +1049,24 @@ mod tests {
         }
         replacement_plugin.component_sha256 = digest;
         let replacement_object = other.stage_verified_object(&replacement, &bytes).unwrap();
-        other.commit_prepared(&replacement, &replacement_plugin, &replacement_object).unwrap();
+        other
+            .commit_prepared(&replacement, &replacement_plugin, &replacement_object)
+            .unwrap();
         other.gc(256).unwrap();
         assert!(object.exists());
 
         let (manifest, path, object_lock) = activations.pop().unwrap();
         let checksum = manifest.component_sha256.clone();
         let mut plugins = PluginManager::start(2);
-        let load = plugins.load_protected(manager.store_root(), path, manifest, PluginLimits::default(), Some(object_lock)).unwrap();
+        let load = plugins
+            .load_protected(
+                manager.store_root(),
+                path,
+                manifest,
+                PluginLimits::default(),
+                Some(object_lock),
+            )
+            .unwrap();
         let next_event = |plugins: &mut PluginManager| {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
@@ -957,7 +1077,10 @@ mod tests {
                 thread::sleep(Duration::from_millis(2));
             }
         };
-        assert!(matches!(next_event(&mut plugins), PluginEvent::Indexed { .. }));
+        assert!(matches!(
+            next_event(&mut plugins),
+            PluginEvent::Indexed { .. }
+        ));
         other.gc(256).unwrap();
         assert!(object.exists());
         plugins.activate_indexed("demo", load, checksum).unwrap();

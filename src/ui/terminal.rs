@@ -564,7 +564,11 @@ fn queue_colors(
     tier: ColorTier,
 ) -> io::Result<()> {
     if tier != ColorTier::Ansi16 {
-        return queue!(writer, SetForegroundColor(foreground), SetBackgroundColor(background));
+        return queue!(
+            writer,
+            SetForegroundColor(foreground),
+            SetBackgroundColor(background)
+        );
     }
     // Crossterm emits extended indexed SGR even for named colours.
     for (color, base) in [(foreground, 30), (background, 40)] {
@@ -666,7 +670,7 @@ fn terminal_pty_color(color: crate::ui::PtyColor, tier: ColorTier) -> Color {
         }
         (crate::ui::PtyColor::Rgb(r, g, b), ColorTier::Ansi16) => {
             terminal_color(ThemeColor::Rgb(r, g, b).ansi16())
-        },
+        }
     }
 }
 fn terminal_ansi_color(index: u8) -> Color {
@@ -798,7 +802,8 @@ fn normalize_keyboard_event(event: Event, legacy: bool) -> Option<UiEvent> {
                         alt: key.modifiers.contains(KeyModifiers::ALT),
                         shift: key.modifiers.contains(KeyModifiers::SHIFT),
                     },
-                }.normalized_shift(),
+                }
+                .normalized_shift(),
                 kind: match key.kind {
                     KeyEventKind::Press => KeyInputKind::Press,
                     KeyEventKind::Repeat => KeyInputKind::Repeat,
@@ -1145,7 +1150,11 @@ mod tests {
             crossterm::style::SetAttribute(crossterm::style::Attribute::Reverse)
         )
         .expect("expected colours and reverse attribute");
-        assert!(reversed.windows(expected.len()).any(|window| window == expected));
+        assert!(
+            reversed
+                .windows(expected.len())
+                .any(|window| window == expected)
+        );
         assert_eq!(
             configured_color_tier(crate::config::ColorMode::Ansi256),
             (ColorTier::Ansi256, "configured")
@@ -1166,7 +1175,8 @@ mod tests {
             }),
             &theme,
             ColorTier::TrueColor,
-        ).unwrap();
+        )
+        .unwrap();
         let emitted = String::from_utf8(output).unwrap();
         assert!(emitted.contains("\x1b[39m\x1b[49m\x1b[7m"));
     }
@@ -1186,7 +1196,8 @@ mod tests {
                 }),
                 &theme,
                 ColorTier::Ansi16,
-            ).unwrap();
+            )
+            .unwrap();
             let emitted = String::from_utf8(output).unwrap();
             let foreground = 30 + index % 8 + if index >= 8 { 60 } else { 0 };
             let background = foreground + 10;
@@ -1200,14 +1211,23 @@ mod tests {
             (PtyColor::Indexed(244), crossterm::style::Color::DarkGrey),
             (PtyColor::Rgb(255, 0, 0), crossterm::style::Color::Red),
         ] {
-            assert_eq!(super::terminal_pty_color(input, ColorTier::Ansi16), expected);
+            assert_eq!(
+                super::terminal_pty_color(input, ColorTier::Ansi16),
+                expected
+            );
         }
         // Missing or extended theme fallbacks must not leak extended SGR either.
         theme.styles.accent.foreground = crate::config::ThemeColor::Indexed(196);
         theme.styles.accent.foreground_16 = None;
         theme.styles.accent.background_16 = Some(crate::config::ThemeColor::Rgb(0, 255, 0));
         let mut output = Vec::new();
-        queue_style(&mut output, crate::ui::Style::Accent, &theme, ColorTier::Ansi16).unwrap();
+        queue_style(
+            &mut output,
+            crate::ui::Style::Accent,
+            &theme,
+            ColorTier::Ansi16,
+        )
+        .unwrap();
         let emitted = String::from_utf8(output).unwrap();
         assert!(emitted.contains("\x1b[91m\x1b[102m"));
         assert!(!emitted.contains("38;") && !emitted.contains("48;"));
@@ -1228,7 +1248,10 @@ mod tests {
         assert_eq!(section.foreground_256, theme.styles.status.foreground_256);
         assert_eq!(section.foreground_16, theme.styles.status.foreground_16);
         assert_eq!(section.background, theme.styles.selection.background);
-        assert_eq!(section.background_256, theme.styles.selection.background_256);
+        assert_eq!(
+            section.background_256,
+            theme.styles.selection.background_256
+        );
         assert_eq!(section.background_16, theme.styles.selection.background_16);
         for tier in [ColorTier::Ansi16, ColorTier::Ansi256, ColorTier::TrueColor] {
             let mut output = Vec::new();
@@ -1257,7 +1280,11 @@ mod tests {
             assert!(emitted.contains("\x1b[?25h"));
             let mut before_keyboard_push = Vec::new();
             super::queue_terminal_restore(&mut before_keyboard_push, options, false).unwrap();
-            assert!(!String::from_utf8(before_keyboard_push).unwrap().contains("\x1b[<1u"));
+            assert!(
+                !String::from_utf8(before_keyboard_push)
+                    .unwrap()
+                    .contains("\x1b[<1u")
+            );
         }
     }
 
@@ -1395,10 +1422,13 @@ mod tests {
                 KeyCode::Char(character),
                 KeyModifiers::CONTROL | KeyModifiers::SHIFT,
             )));
-            assert_eq!(event, Some(UiEvent::Key {
-                key: "ctrl-shift-h".parse().unwrap(),
-                kind: KeyInputKind::Press,
-            }));
+            assert_eq!(
+                event,
+                Some(UiEvent::Key {
+                    key: "ctrl-shift-h".parse().unwrap(),
+                    kind: KeyInputKind::Press,
+                })
+            );
         }
     }
 

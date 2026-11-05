@@ -78,7 +78,11 @@ impl VirtualDocumentEditorBridge {
             ) {
                 return Err(VirtualDocumentEditorError::StaleRevision);
             }
-            state.set_virtual_metadata(entry.buffer, snapshot.title.clone(), snapshot.language.clone());
+            state.set_virtual_metadata(
+                entry.buffer,
+                snapshot.title.clone(),
+                snapshot.language.clone(),
+            );
             entry.revision = snapshot.revision;
             entry.text = state.topology().buffers()[entry.buffer]
                 .text
@@ -103,13 +107,15 @@ impl VirtualDocumentEditorBridge {
         }) {
             return Err(VirtualDocumentEditorError::GenerationMismatch);
         }
-        let (buffer, _) = state.open_virtual_read_only(
-            TextBuffer::from_text(&snapshot.text),
-            snapshot.plugin.clone(),
-            snapshot.load.0,
-            snapshot.document,
-            snapshot.revision,
-        ).map_err(VirtualDocumentEditorError::Layout)?;
+        let (buffer, _) = state
+            .open_virtual_read_only(
+                TextBuffer::from_text(&snapshot.text),
+                snapshot.plugin.clone(),
+                snapshot.load.0,
+                snapshot.document,
+                snapshot.revision,
+            )
+            .map_err(VirtualDocumentEditorError::Layout)?;
         state.set_virtual_metadata(buffer, snapshot.title.clone(), snapshot.language.clone());
         self.entries.insert(
             key,
@@ -250,7 +256,10 @@ mod tests {
         let mut bridge = VirtualDocumentEditorBridge::default();
         let b = publish(&mut bridge, &mut state, &snap(1, "héllo")).unwrap();
         assert_eq!(state.buffers[b].virtual_title(), Some("Help"));
-        assert_eq!(state.buffers[b].virtual_language.as_deref(), Some("markdown"));
+        assert_eq!(
+            state.buffers[b].virtual_language.as_deref(),
+            Some("markdown")
+        );
         let view = state.active_view.unwrap();
         state.views[view].cursor = ByteOffset(3);
         let buffers = state.buffers.len();
@@ -263,7 +272,10 @@ mod tests {
         assert_eq!(state.active_view, Some(view));
         assert_eq!(state.views[view].cursor, ByteOffset(3));
         assert_eq!(state.buffers[b].virtual_title(), Some("Help"));
-        assert_eq!(state.buffers[b].virtual_language.as_deref(), Some("markdown"));
+        assert_eq!(
+            state.buffers[b].virtual_language.as_deref(),
+            Some("markdown")
+        );
         let before = state.buffers[b].text.to_string();
         assert_eq!(
             publish(&mut bridge, &mut state, &snap(4, "stale")),

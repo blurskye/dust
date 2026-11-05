@@ -499,7 +499,10 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         }
         let chunk = convert_component_provider_chunk(chunk);
         providers::validate_chunk(&chunk).map_err(component_provider_error)?;
-        if self.provider_chunks.iter().chain(std::iter::once(&chunk))
+        if self
+            .provider_chunks
+            .iter()
+            .chain(std::iter::once(&chunk))
             .map(provider_chunk_bytes)
             .try_fold(0usize, usize::checked_add)
             .is_none_or(|bytes| bytes > MAXIMUM_PROVIDER_BYTES as usize)
@@ -570,15 +573,20 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         }
         let proposal = convert_component_virtual_document_proposal(proposal)
             .map_err(component_virtual_document_error)?;
-        if self.virtual_document_proposals.iter().chain(std::iter::once(&proposal))
+        if self
+            .virtual_document_proposals
+            .iter()
+            .chain(std::iter::once(&proposal))
             .map(virtual_document_proposal_bytes)
             .try_fold(0usize, usize::checked_add)
             .is_none_or(|bytes| bytes > MAXIMUM_VIRTUAL_DOCUMENT_AGGREGATE_BYTES as usize)
         {
-            return Err(component_virtual_document_error(PluginVirtualDocumentError::new(
-                PluginVirtualDocumentErrorCode::ByteCeiling,
-                "virtual document proposal queue byte ceiling exceeded",
-            )));
+            return Err(component_virtual_document_error(
+                PluginVirtualDocumentError::new(
+                    PluginVirtualDocumentErrorCode::ByteCeiling,
+                    "virtual document proposal queue byte ceiling exceeded",
+                ),
+            ));
         }
         self.virtual_document_proposals.push(proposal);
         Ok(())
@@ -586,19 +594,32 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 }
 
 fn provider_chunk_bytes(chunk: &PluginPickerChunk) -> usize {
-    chunk.items.iter().map(|item| {
-        item.id.len() + item.primary.len() + item.secondary.as_ref().map_or(0, String::len)
-            + item.action_data.len()
-    }).sum::<usize>() + match &chunk.terminal {
-        PluginProviderTerminal::Error(error) => error.detail.len(),
-        _ => 0,
-    }
+    chunk
+        .items
+        .iter()
+        .map(|item| {
+            item.id.len()
+                + item.primary.len()
+                + item.secondary.as_ref().map_or(0, String::len)
+                + item.action_data.len()
+        })
+        .sum::<usize>()
+        + match &chunk.terminal {
+            PluginProviderTerminal::Error(error) => error.detail.len(),
+            _ => 0,
+        }
 }
 
 fn virtual_document_proposal_bytes(proposal: &PluginVirtualDocumentProposal) -> usize {
     match &proposal.kind {
-        PluginVirtualDocumentProposalKind::Full(full) => full.title.len() + full.language.len() + full.text.len(),
-        PluginVirtualDocumentProposalKind::Patches(patches) => patches.patches.iter().map(|patch| patch.replacement.len()).sum(),
+        PluginVirtualDocumentProposalKind::Full(full) => {
+            full.title.len() + full.language.len() + full.text.len()
+        }
+        PluginVirtualDocumentProposalKind::Patches(patches) => patches
+            .patches
+            .iter()
+            .map(|patch| patch.replacement.len())
+            .sum(),
         PluginVirtualDocumentProposalKind::Error(error) => error.detail.len(),
         PluginVirtualDocumentProposalKind::CloseAcknowledged => 0,
     }

@@ -14,10 +14,13 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
         fixture.settings.ui.status_line.enabled = false;
         app.configuration.install_fixture(fixture);
     }
-    let (_, view) = app.state.open_text(
-        TextBuffer::from_text("aa界界\naa\t\t\ne\u{301}界x\ntail"),
-        None,
-    ).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("aa界界\naa\t\t\ne\u{301}界x\ntail"),
+            None,
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let viewport = active_pane_viewport(
@@ -33,8 +36,18 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     // Padding before another wrapped row stays on the clicked row's last grapheme.
     // Expected rows and byte offsets are specified independently of VisualRowModel.
     for (line, rows) in [
-        (0, vec![("aa ", [0, 1, 1]), ("界 ", [2, 2, 2]), ("界 ", [5, 5, 8])]),
-        (1, vec![("aa ", [9, 10, 10]), ("   ", [11, 11, 11]), ("   ", [12, 12, 12])]),
+        (
+            0,
+            vec![("aa ", [0, 1, 1]), ("界 ", [2, 2, 2]), ("界 ", [5, 5, 8])],
+        ),
+        (
+            1,
+            vec![
+                ("aa ", [9, 10, 10]),
+                ("   ", [11, 11, 11]),
+                ("   ", [12, 12, 12]),
+            ],
+        ),
         (2, vec![("e\u{301}界", [14, 17, 17]), ("x  ", [20, 21, 21])]),
     ] {
         app.state.views[view].scroll_line = line;
@@ -49,7 +62,11 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
         );
         for (wrap_row, (painted, offsets)) in rows.iter().enumerate() {
             let y = viewport.y + u16::try_from(wrap_row).unwrap();
-            assert_eq!(frame.grid.row_text(y), *painted, "line {line} row {wrap_row}");
+            assert_eq!(
+                frame.grid.row_text(y),
+                *painted,
+                "line {line} row {wrap_row}"
+            );
             if painted.contains('界') {
                 let x = if line == 2 { 1 } else { 0 };
                 assert_eq!(frame.grid.get(x, y).unwrap().symbol, "界");
@@ -58,10 +75,8 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
             for (cell, &expected) in offsets.iter().enumerate() {
                 app.state.views[view].scroll_line = line;
                 app.state.views[view].scroll_wrap_row = 0;
-                app.input.observe_mouse(
-                    viewport.x + u16::try_from(cell).unwrap(),
-                    y,
-                );
+                app.input
+                    .observe_mouse(viewport.x + u16::try_from(cell).unwrap(), y);
                 app.apply_mouse_cursor(false);
                 assert_eq!(
                     app.state.views[view].cursor,
@@ -78,10 +93,16 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     let body = usize::from(viewport.height.max(1));
     let amount = body.saturating_mul(usize::from(FULL_PAGE_PERCENT)) / 100;
     let expected_rows = [
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1), (1, 2),
-        (2, 0), (2, 1),
-        (3, 0), (3, 1),
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (3, 0),
+        (3, 1),
     ];
     let (line, wrap_row) = expected_rows[amount.max(1)];
     let expected_down = VisualRowAnchor { line, wrap_row };
@@ -114,7 +135,10 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
         "{}\nfold\nhidden 界\nhidden e\u{301}\ntail",
         "x".repeat(150)
     );
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&text), None)
+        .unwrap();
     let buffer = app.state.views[view].buffer;
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
@@ -311,7 +335,10 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
         app.configuration.install_fixture(fixture);
     }
     let text = (0..30).map(|n| format!("line {n}\n")).collect::<String>();
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&text), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = app.state.buffers[app.state.views[view].buffer]
         .text
@@ -347,7 +374,10 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
         app.configuration.install_fixture(fixture);
     }
     let text = "a\t界e\u{301}bcdefghijklmnopqrstuvwxyz";
-    let (_, view) = app.state.open_text(TextBuffer::from_text(text), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text(text), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(text.len());
     app.ensure_cursor_visible();
@@ -393,7 +423,10 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
 #[test]
 fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let (_app_dirs, mut app) = app();
-    let (_, view) = app.state.open_text(TextBuffer::from_text("a\tX"), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text("a\tX"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset("a\t".len());
     {
@@ -552,8 +585,12 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
         .expect("split source view");
     source.views[second].scroll_column = 17;
     let source_tab = source.active_tab.expect("source tab");
-    let persisted = capture_persisted_layout(&source, &source.tabs[source_tab].root, std::slice::from_ref(&source.workspace_root))
-        .expect("capture clean layout");
+    let persisted = capture_persisted_layout(
+        &source,
+        &source.tabs[source_tab].root,
+        std::slice::from_ref(&source.workspace_root),
+    )
+    .expect("capture clean layout");
 
     let mut restored = crate::editor::EditorState::new(PathBuf::from("/workspace"));
     let loaded = HashMap::from([(path.clone(), (path.clone(), text))]);
@@ -570,21 +607,28 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
 fn session_capture_keeps_project_panes_after_external_navigation() {
     let mut state = crate::editor::EditorState::new("/workspace".into());
     let path = PathBuf::from("/workspace/main.rs");
-    state.open_text(TextBuffer::from_text("project"), Some(path.clone())).unwrap();
+    state
+        .open_text(TextBuffer::from_text("project"), Some(path.clone()))
+        .unwrap();
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .unwrap();
-    let (external, _) = state.open_text(
-        TextBuffer::from_text("library"),
-        Some("/library/lib.rs".into()),
-    ).unwrap();
+    let (external, _) = state
+        .open_text(
+            TextBuffer::from_text("library"),
+            Some("/library/lib.rs".into()),
+        )
+        .unwrap();
     state.buffers[external].read_only = true;
     let tab = state.active_tab.unwrap();
     let roots = std::slice::from_ref(&state.workspace_root);
     let layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
     state.buffers[external].read_only = false;
     let writable_layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
-    assert_eq!(serde_json::to_value(&layout).unwrap(), serde_json::to_value(&writable_layout).unwrap());
+    assert_eq!(
+        serde_json::to_value(&layout).unwrap(),
+        serde_json::to_value(&writable_layout).unwrap()
+    );
     assert!(
         matches!(layout, crate::persistence::PersistedLayout::Pane { pane } if pane.path == path)
     );
@@ -594,7 +638,10 @@ fn session_capture_keeps_project_panes_after_external_navigation() {
 fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let (_app_dirs, mut app) = app();
     let text = format!("{}\nx", "0123456789".repeat(8));
-    let (_, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    let (_, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&text), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -801,7 +848,9 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
 fn dragging_the_border_between_two_windows_resizes_them() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((100, 30));
-    app.state.open_text(TextBuffer::from_text("a\n"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("a\n"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -842,7 +891,9 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
  {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((160, 45));
-    app.state.open_text(TextBuffer::from_text("a\n"), None).unwrap();
+    app.state
+        .open_text(TextBuffer::from_text("a\n"), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     for key in [' ', 'a', 't'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -905,14 +956,21 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 
 #[test]
 fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
-    for mode in [crate::editor::EditorMode::Normal, crate::editor::EditorMode::Insert, crate::editor::EditorMode::Replace] {
+    for mode in [
+        crate::editor::EditorMode::Normal,
+        crate::editor::EditorMode::Insert,
+        crate::editor::EditorMode::Replace,
+    ] {
         let (_app_dirs, mut app) = app();
         app.window_session.observe_size((80, 24));
         let mut fixture = app.configuration.fixture_snapshot();
         fixture.settings.editor.wrap = false;
         app.configuration.install_fixture(fixture);
         let source = format!("0123456789abcdef\n{}", "x\n".repeat(100));
-        let (buffer, view) = app.state.open_text(TextBuffer::from_text(&source), None).unwrap();
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text(&source), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.state.views[view].cursor = ByteOffset(10);
         app.state.views[view].mode = mode;
@@ -921,7 +979,13 @@ fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
         let cursor = app.state.views[view].cursor;
         let line = text.byte_to_line(cursor).unwrap();
         assert!(line > 0);
-        assert_eq!(cursor.get() - text.line_to_byte(line).unwrap().get(), usize::from(matches!(mode, crate::editor::EditorMode::Insert | crate::editor::EditorMode::Replace)));
+        assert_eq!(
+            cursor.get() - text.line_to_byte(line).unwrap().get(),
+            usize::from(matches!(
+                mode,
+                crate::editor::EditorMode::Insert | crate::editor::EditorMode::Replace
+            ))
+        );
         if mode == crate::editor::EditorMode::Normal {
             app.handle_configured_key(KeyEvent::character('x'));
             assert_eq!(app.state.buffers[buffer].text.line(line).unwrap(), "\n");
@@ -937,7 +1001,10 @@ fn cancelling_incremental_search_restores_the_original_viewport() {
     fixture.settings.editor.wrap = false;
     app.configuration.install_fixture(fixture);
     let source = format!("{}needle\n", "line\n".repeat(100));
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&source), None).unwrap();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&source), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let cursor = app.state.buffers[buffer].text.line_to_byte(15).unwrap();
@@ -960,7 +1027,10 @@ fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 44));
     let text = (0..200).map(|_| "line\n").collect::<String>();
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&text), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(30).unwrap();
@@ -990,7 +1060,8 @@ fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
     app.configuration.install_fixture(config);
     let (buffer, view) = app
         .state
-        .open_text(TextBuffer::from_text(&"x".repeat(60)), None).unwrap();
+        .open_text(TextBuffer::from_text(&"x".repeat(60)), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(20);
     app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
@@ -1030,7 +1101,8 @@ fn viewport_accounts_for_inlays_at_the_cursor_exactly() {
         app.configuration.install_fixture(config);
         let (buffer, view) = app
             .state
-            .open_text(TextBuffer::from_text(&"x".repeat(60)), None).unwrap();
+            .open_text(TextBuffer::from_text(&"x".repeat(60)), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.state.views[view].cursor = ByteOffset(20);
         app.ensure_cursor_visible();
@@ -1068,7 +1140,10 @@ fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
     config.settings.editor.wrap = false;
     config.settings.editor.line_numbers = crate::config::LineNumbers::Off;
     app.configuration.install_fixture(config);
-    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&"x".repeat(200)), None).unwrap();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(&"x".repeat(200)), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.state.views[view].cursor = ByteOffset(40);
     app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
@@ -1082,8 +1157,18 @@ fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
         app.ensure_cursor_visible();
         let scroll = app.state.views[view].scroll_column;
         assert!(scroll <= cursor, "scroll {scroll} passed cursor {cursor}");
-        let frame = render(&app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 22, 12);
-        assert!(frame.cursor.is_some(), "cursor {cursor} hidden at scroll {scroll}");
+        let frame = render(
+            &app.state,
+            &app.ui,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
+            22,
+            12,
+        );
+        assert!(
+            frame.cursor.is_some(),
+            "cursor {cursor} hidden at scroll {scroll}"
+        );
     }
 }
 
@@ -1092,7 +1177,8 @@ fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
-        .open_text(TextBuffer::from_text(&"line\n".repeat(60)), None).unwrap();
+        .open_text(TextBuffer::from_text(&"line\n".repeat(60)), None)
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let before = app.compositor_projection().unwrap().workspace_bounds.height;
@@ -1125,9 +1211,13 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
         app.configuration.install_fixture(fixture);
     }
     let path = PathBuf::from("/tmp/expanded-diagnostics.rs");
-    let (buffer, view) = app.state.open_text(
-        TextBuffer::from_text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl"), Some(path.clone()),
-    ).unwrap();
+    let (buffer, view) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl"),
+            Some(path.clone()),
+        )
+        .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let cursor = app.state.buffers[buffer].text.line_to_byte(3).unwrap();
@@ -1141,7 +1231,9 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
         message: "diagnostic ".repeat(40),
     });
     app.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
-        path, line: 3, severities: vec![DiagnosticSeverity::Error],
+        path,
+        line: 3,
+        severities: vec![DiagnosticSeverity::Error],
     });
     // Cursor follow must not count the expanded rows as ordinary source lines.
     app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(6).unwrap();
@@ -1149,11 +1241,27 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
     let assert_visible = |app: &InteractiveApplication| {
         let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
         let model = VisualRowModel::new_for_state(
-            &app.state, &app.state.buffers[buffer].text, view, &app.ui,
-            app.configuration.settings(), viewport.width, false,
+            &app.state,
+            &app.state.buffers[buffer].text,
+            view,
+            &app.ui,
+            app.configuration.settings(),
+            viewport.width,
+            false,
         );
-        let start = VisualRowAnchor { line: app.state.views[view].scroll_line, wrap_row: 0 };
-        assert!(model.screen_row(start, model.cursor_anchor(app.state.views[view].cursor), usize::from(viewport.height)).is_some());
+        let start = VisualRowAnchor {
+            line: app.state.views[view].scroll_line,
+            wrap_row: 0,
+        };
+        assert!(
+            model
+                .screen_row(
+                    start,
+                    model.cursor_anchor(app.state.views[view].cursor),
+                    usize::from(viewport.height)
+                )
+                .is_some()
+        );
     };
     assert_visible(&app);
     app.state.views[view].cursor = cursor;
@@ -1190,18 +1298,28 @@ fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
             fixture.settings.ui.status_line.enabled = false;
             app.configuration.install_fixture(fixture);
         }
-        let (buffer, view) = app.state.open_text(TextBuffer::from_text(text), None).unwrap();
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text(text), None)
+            .unwrap();
         app.set_dashboard_visibility(false);
         app.reconcile_editor_windows();
         let revision = app.state.buffers[buffer].text.revision();
         let mark = |start, end, mark| crate::ui::UiMarkdownMark {
-            buffer, revision,
+            buffer,
+            revision,
             range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
             mark,
         };
-        app.ui.markdown_marks = text.match_indices('|')
-            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect();
-        app.ui.markdown_marks.push(mark(1, text.find("\n\nlast").unwrap() + 1, MarkdownMark::Table));
+        app.ui.markdown_marks = text
+            .match_indices('|')
+            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+            .collect();
+        app.ui.markdown_marks.push(mark(
+            1,
+            text.find("\n\nlast").unwrap() + 1,
+            MarkdownMark::Table,
+        ));
         app.ui.markdown_marks.sort_by_key(|mark| mark.range.start);
         let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
         for (row, word) in [(1, "long"), (2, "here"), (3, "more")] {
@@ -1210,7 +1328,11 @@ fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
             app.state.views[view].scroll_wrap_row = 0;
             app.input.observe_mouse(viewport.x + 6, viewport.y + row);
             app.apply_mouse_cursor(false);
-            assert_eq!(app.state.views[view].cursor, ByteOffset(text.find(word).unwrap()), "wrap {wrap}, row {row}");
+            assert_eq!(
+                app.state.views[view].cursor,
+                ByteOffset(text.find(word).unwrap()),
+                "wrap {wrap}, row {row}"
+            );
         }
     }
 }
@@ -1218,7 +1340,10 @@ fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
 #[test]
 fn mouse_hits_use_painted_inlay_replacement_widths() {
     for wrap in [false, true] {
-        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        for ambiguous in [
+            crate::config::AmbiguousWidth::Narrow,
+            crate::config::AmbiguousWidth::Wide,
+        ] {
             let (_app_dirs, mut app) = app();
             app.window_session.observe_size((40, 12));
             let mut config = app.configuration.fixture_snapshot();
@@ -1227,7 +1352,10 @@ fn mouse_hits_use_painted_inlay_replacement_widths() {
             config.settings.editor.line_numbers = crate::config::LineNumbers::Off;
             config.settings.editor.git_signs.enabled = false;
             app.configuration.install_fixture(config);
-            let (buffer, view) = app.state.open_text(TextBuffer::from_text("xyz"), None).unwrap();
+            let (buffer, view) = app
+                .state
+                .open_text(TextBuffer::from_text("xyz"), None)
+                .unwrap();
             app.set_dashboard_visibility(false);
             app.reconcile_editor_windows();
             let label = "a\u{200b}\tb";
@@ -1237,12 +1365,16 @@ fn mouse_hits_use_painted_inlay_replacement_widths() {
                 position: ByteOffset(0),
                 label: label.into(),
             });
-            let cells = u16::try_from(crate::ui::geometry::cell_text_width(label, ambiguous)).unwrap();
+            let cells =
+                u16::try_from(crate::ui::geometry::cell_text_width(label, ambiguous)).unwrap();
             let viewport = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).unwrap();
             for column in 0..=cells + 1 {
                 app.input.observe_mouse(viewport.x + column, viewport.y);
                 app.apply_mouse_cursor(false);
-                assert_eq!(app.state.views[view].cursor, ByteOffset(usize::from(column.saturating_sub(cells))));
+                assert_eq!(
+                    app.state.views[view].cursor,
+                    ByteOffset(usize::from(column.saturating_sub(cells)))
+                );
             }
         }
     }

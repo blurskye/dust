@@ -52,7 +52,12 @@ pub(in crate::editor::session) struct SearchSession {
     byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
     preview_location: Option<(usize, usize)>,
     diff_preview: crate::workspace::git::GitHunkService,
-    diff_preview_key: Option<(WorkspaceVersion, u64, std::path::PathBuf, crate::workspace::git::GitDiffLayer)>,
+    diff_preview_key: Option<(
+        WorkspaceVersion,
+        u64,
+        std::path::PathBuf,
+        crate::workspace::git::GitDiffLayer,
+    )>,
 }
 pub(in crate::editor::session) enum Intent {
     Find,
@@ -413,7 +418,10 @@ impl SearchSession {
         items: Vec<SearchWorkflowItem>,
         complete: bool,
     ) -> Result<(), SearchWorkflowError> {
-        let next = self.sequence.checked_add(1).ok_or(SearchWorkflowError::Limit)?;
+        let next = self
+            .sequence
+            .checked_add(1)
+            .ok_or(SearchWorkflowError::Limit)?;
         self.workflow
             .as_mut()
             .ok_or(SearchWorkflowError::Stale)?

@@ -294,12 +294,16 @@ pub struct LspCapabilities {
 impl LspCapabilities {
     pub fn supports_document(&self, method: &str, document: &LspDocument) -> bool {
         self.document_selectors.get(method).is_none_or(|options| {
-            options.iter().any(|options| registration_matches(options, document))
+            options
+                .iter()
+                .any(|options| registration_matches(options, document))
         })
     }
 
     pub(super) fn sync_kind_for_document(&self, document: &LspDocument) -> SyncKind {
-        let mut kinds = self.sync_registrations.iter()
+        let mut kinds = self
+            .sync_registrations
+            .iter()
             .filter(|options| registration_matches(options, document))
             .filter_map(|options| options.get("syncKind").and_then(Value::as_u64))
             .peekable();
@@ -319,26 +323,45 @@ fn registration_matches(options: &Value, document: &LspDocument) -> bool {
     if selector.is_null() {
         return true;
     }
-    selector.as_array().is_some_and(|filters| filters.iter().any(|filter| {
-        filter.is_object()
-            && filter.get("language").is_none_or(|language| language.as_str() == Some(&document.language_id))
-            && filter.get("scheme").is_none_or(|scheme| scheme.as_str() == Some("file"))
-            && filter.get("pattern").is_none_or(|pattern| {
-                let (pattern, path) = if let Some(pattern) = pattern.as_str() {
-                    (pattern, document.path.as_path())
-                } else {
-                    let Some(base) = pattern.get("baseUri") else { return false };
-                    let Some(base) = base.as_str().or_else(|| base.get("uri").and_then(Value::as_str))
-                        .and_then(super::paths::path_from_file_uri) else { return false };
-                    let (Some(pattern), Ok(path)) = (
-                        pattern.get("pattern").and_then(Value::as_str), document.path.strip_prefix(base),
-                    ) else { return false };
-                    (pattern, path)
-                };
-                globset::GlobBuilder::new(pattern).literal_separator(true).build().ok()
-                    .is_some_and(|glob| glob.compile_matcher().is_match(path))
-            })
-    }))
+    selector.as_array().is_some_and(|filters| {
+        filters.iter().any(|filter| {
+            filter.is_object()
+                && filter
+                    .get("language")
+                    .is_none_or(|language| language.as_str() == Some(&document.language_id))
+                && filter
+                    .get("scheme")
+                    .is_none_or(|scheme| scheme.as_str() == Some("file"))
+                && filter.get("pattern").is_none_or(|pattern| {
+                    let (pattern, path) = if let Some(pattern) = pattern.as_str() {
+                        (pattern, document.path.as_path())
+                    } else {
+                        let Some(base) = pattern.get("baseUri") else {
+                            return false;
+                        };
+                        let Some(base) = base
+                            .as_str()
+                            .or_else(|| base.get("uri").and_then(Value::as_str))
+                            .and_then(super::paths::path_from_file_uri)
+                        else {
+                            return false;
+                        };
+                        let (Some(pattern), Ok(path)) = (
+                            pattern.get("pattern").and_then(Value::as_str),
+                            document.path.strip_prefix(base),
+                        ) else {
+                            return false;
+                        };
+                        (pattern, path)
+                    };
+                    globset::GlobBuilder::new(pattern)
+                        .literal_separator(true)
+                        .build()
+                        .ok()
+                        .is_some_and(|glob| glob.compile_matcher().is_match(path))
+                })
+        })
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -658,7 +681,9 @@ pub enum LspFeature {
         range: LspRange,
     },
     CodeLens,
-    CodeLensResolve { item: Value },
+    CodeLensResolve {
+        item: Value,
+    },
     DocumentHighlights,
     FoldingRanges,
     SelectionRanges,
@@ -697,10 +722,16 @@ impl LspFeature {
         }
     }
 
-    pub fn capability_for_document(&self, capabilities: &LspCapabilities, document: &LspDocument) -> bool {
+    pub fn capability_for_document(
+        &self,
+        capabilities: &LspCapabilities,
+        document: &LspDocument,
+    ) -> bool {
         let method = match self {
             Self::CompletionResolve { .. } => "textDocument/completion",
-            Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => "textDocument/semanticTokens",
+            Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => {
+                "textDocument/semanticTokens"
+            }
             _ => self.method(),
         };
         self.capability(capabilities) && capabilities.supports_document(method, document)

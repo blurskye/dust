@@ -425,7 +425,8 @@ impl WorkspaceTrustService {
                             database,
                             revoked,
                         } => {
-                            let result = update_trust_database(&path, &previous, &database, &revoked);
+                            let result =
+                                update_trust_database(&path, &previous, &database, &revoked);
                             if result.is_ok() {
                                 previous = database;
                             }
@@ -504,7 +505,9 @@ impl WorkspaceTrustService {
 
     pub fn shutdown_result(&self) -> Result<(), String> {
         if self.pending_writes() {
-            return Err("workspace trust writes did not finish before the shared shutdown deadline".into());
+            return Err(
+                "workspace trust writes did not finish before the shared shutdown deadline".into(),
+            );
         }
         self.write_error.clone().map_or(Ok(()), Err)
     }
@@ -570,7 +573,9 @@ mod persistence_tests {
     fn non_utf8_trust_paths_round_trip_without_changing_utf8_records() {
         use std::os::unix::ffi::OsStringExt;
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join(std::ffi::OsString::from_vec(b"root-\xff".to_vec()));
+        let root = dir
+            .path()
+            .join(std::ffi::OsString::from_vec(b"root-\xff".to_vec()));
         let utf8 = RootIdentity::capture(dir.path()).unwrap();
         let identity = RootIdentity {
             canonical_path: root,
@@ -584,7 +589,10 @@ mod persistence_tests {
         let path = dir.path().join("trust.toml");
         persist_trust_database(&path, &database).unwrap();
         assert_eq!(load_trust_database(&path).unwrap(), database);
-        assert!(fs::read_to_string(&path).unwrap().contains(&format!("canonical_path = {:?}", dir.path().to_str().unwrap())));
+        assert!(fs::read_to_string(&path).unwrap().contains(&format!(
+            "canonical_path = {:?}",
+            dir.path().to_str().unwrap()
+        )));
     }
 
     #[test]
@@ -594,15 +602,32 @@ mod persistence_tests {
         let path = dir.path().join("trust.toml");
         let mut service = WorkspaceTrustService::start(2);
         service.load(path.clone()).unwrap();
-        assert!(matches!(wait_for_event(&mut service), TrustEvent::Loaded { result: Ok(_), .. }));
-        persist_trust_database(&path, &TrustDatabase {
-            identities: vec![identity.clone()],
-            seen: vec![identity.clone()],
-            ..TrustDatabase::default()
-        }).unwrap();
-        service.persist(path.clone(), vec![], vec![identity.clone()], vec![identity.clone()]).unwrap();
+        assert!(matches!(
+            wait_for_event(&mut service),
+            TrustEvent::Loaded { result: Ok(_), .. }
+        ));
+        persist_trust_database(
+            &path,
+            &TrustDatabase {
+                identities: vec![identity.clone()],
+                seen: vec![identity.clone()],
+                ..TrustDatabase::default()
+            },
+        )
+        .unwrap();
+        service
+            .persist(
+                path.clone(),
+                vec![],
+                vec![identity.clone()],
+                vec![identity.clone()],
+            )
+            .unwrap();
         assert!(service.pending_writes());
-        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Ok(()), .. }));
+        assert!(matches!(
+            wait_for_event(&mut service),
+            TrustEvent::Persisted { result: Ok(()), .. }
+        ));
         assert!(!service.pending_writes());
         let loaded = load_trust_database(&path).unwrap();
         assert!(loaded.identities.is_empty());
@@ -616,11 +641,15 @@ mod persistence_tests {
         let mut replacement = old.clone();
         replacement.filesystem_identity = Some((123, 456));
         let path = dir.path().join("trust.toml");
-        persist_trust_database(&path, &TrustDatabase {
-            identities: vec![old.clone()],
-            seen: vec![old],
-            ..TrustDatabase::default()
-        }).unwrap();
+        persist_trust_database(
+            &path,
+            &TrustDatabase {
+                identities: vec![old.clone()],
+                seen: vec![old],
+                ..TrustDatabase::default()
+            },
+        )
+        .unwrap();
         let desired = TrustDatabase {
             seen: vec![replacement.clone()],
             ..TrustDatabase::default()
@@ -636,14 +665,27 @@ mod persistence_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("trust.toml");
         let mut service = WorkspaceTrustService::start(2);
-        service.persist(dir.path().to_path_buf(), vec![], vec![], vec![]).unwrap();
+        service
+            .persist(dir.path().to_path_buf(), vec![], vec![], vec![])
+            .unwrap();
         service.persist(path, vec![], vec![], vec![]).unwrap();
         assert!(service.shutdown_result().is_err());
-        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Err(_), .. }));
+        assert!(matches!(
+            wait_for_event(&mut service),
+            TrustEvent::Persisted { result: Err(_), .. }
+        ));
         assert!(service.pending_writes());
-        assert!(matches!(wait_for_event(&mut service), TrustEvent::Persisted { result: Ok(()), .. }));
+        assert!(matches!(
+            wait_for_event(&mut service),
+            TrustEvent::Persisted { result: Ok(()), .. }
+        ));
         assert!(!service.pending_writes());
-        assert!(service.shutdown_result().unwrap_err().contains("trust state"));
+        assert!(
+            service
+                .shutdown_result()
+                .unwrap_err()
+                .contains("trust state")
+        );
     }
 
     #[test]

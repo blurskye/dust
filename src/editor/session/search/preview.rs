@@ -11,8 +11,11 @@ impl SearchSession {
         &self.preview
     }
     pub(in crate::editor::session) fn clear_preview(&mut self) -> Option<RequestId> {
-        if self.preview.is_none() && self.preview_path.is_none() && self.preview_read.is_none()
-            && self.diff_preview_key.is_none() {
+        if self.preview.is_none()
+            && self.preview_path.is_none()
+            && self.preview_read.is_none()
+            && self.diff_preview_key.is_none()
+        {
             return None;
         }
         self.preview = None;
@@ -92,7 +95,10 @@ impl SearchSession {
         if self.preview_path.as_ref() == Some(&path)
             && self.preview_location == location
             && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration))
-            && self.preview.as_ref().and_then(PickerPreview::as_text)
+            && self
+                .preview
+                .as_ref()
+                .and_then(PickerPreview::as_text)
                 .is_some_and(|text| text.highlight_line == location.map(|(line, _)| line))
         {
             return (None, None);
@@ -119,9 +125,15 @@ impl SearchSession {
         configuration: u64,
         title: String,
     ) -> Option<RequestId> {
-        let key = (scope.clone(), policy.status_revision, policy.file.clone(), policy.layer);
+        let key = (
+            scope.clone(),
+            policy.status_revision,
+            policy.file.clone(),
+            policy.layer,
+        );
         if self.diff_preview_key.as_ref() == Some(&key)
-            && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration)) {
+            && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration))
+        {
             return None;
         }
         let retired = self.clear_preview();
@@ -132,7 +144,10 @@ impl SearchSession {
             self.preview = Some(PickerPreview {
                 title,
                 body: PickerPreviewBody::Text(PickerTextPreview::new(
-                    vec!["loading…".into()], 0, None, None,
+                    vec!["loading…".into()],
+                    0,
+                    None,
+                    None,
                 )),
             });
         }
@@ -157,9 +172,13 @@ impl SearchSession {
                     crate::workspace::git::GitDiffLayer::Staged => "HEAD -> index",
                     crate::workspace::git::GitDiffLayer::Unstaged => "index -> disk",
                 };
-                let body = PickerPreviewBody::Diff(crate::editor::session::git::diff_preview_from_hunks(
-                    &snapshot.hunks, provenance, false, 0,
-                ));
+                let body =
+                    PickerPreviewBody::Diff(crate::editor::session::git::diff_preview_from_hunks(
+                        &snapshot.hunks,
+                        provenance,
+                        false,
+                        0,
+                    ));
                 if let Some(preview) = &mut self.preview {
                     preview.body = body;
                 }
@@ -200,7 +219,10 @@ impl SearchSession {
                 self.preview_scope = None;
             }
             if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
-                text.set_content(vec![format!("preview unavailable: {error}")], text.language());
+                text.set_content(
+                    vec![format!("preview unavailable: {error}")],
+                    text.language(),
+                );
             }
         }
     }
@@ -230,7 +252,9 @@ impl SearchSession {
                 Ok(bytes) => crate::editor::text::decode_utf8(bytes).map_or_else(
                     |_| vec!["binary preview unavailable".into()],
                     |decoded| {
-                        let first = self.preview_location.map_or(0, |(line, _)| line.saturating_sub(8));
+                        let first = self
+                            .preview_location
+                            .map_or(0, |(line, _)| line.saturating_sub(8));
                         text.first_line = first;
                         text.highlight_line = self.preview_location.map(|(line, _)| line);
                         picker_preview_lines_from(&decoded.text, first, 512, self.preview_location)
@@ -288,9 +312,18 @@ pub(super) fn search_picker_preview(
     let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
         |_| vec!["binary preview unavailable".into()],
         |text| {
-            let column = bytes[start..match_start].iter().rposition(|byte| *byte == b'\n')
-                .map_or(match_start - start, |offset| match_start - start - offset - 1);
-            picker_preview_lines_from(text, first_visible_offset, 512, Some((selected_offset, column)))
+            let column = bytes[start..match_start]
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(match_start - start, |offset| {
+                    match_start - start - offset - 1
+                });
+            picker_preview_lines_from(
+                text,
+                first_visible_offset,
+                512,
+                Some((selected_offset, column)),
+            )
         },
     );
     first_line = first_line.saturating_add(first_visible_offset);
@@ -322,7 +355,8 @@ fn picker_preview_lines_from(
                 .filter(|_| line.chars().take(4097).count() > 4096)
                 .and_then(|prefix| prefix.char_indices().rev().nth(16))
                 .map_or(0, |(offset, _)| offset);
-            line[start..].chars()
+            line[start..]
+                .chars()
                 .filter(|character| !character.is_control() || *character == '\t')
                 .take(4096)
                 .collect()

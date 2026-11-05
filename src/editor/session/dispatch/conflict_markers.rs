@@ -208,7 +208,10 @@ mod tests {
         let text = "<<<<<<< HEAD\n< input\n<<<<< literal\n=======\n> output\n>>>>>>> other\n";
         let lines = text.lines().collect::<Vec<_>>();
         let block = conflict_block_at(&lines, 0).unwrap();
-        assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "< input\n<<<<< literal\n");
+        assert_eq!(
+            resolved_text(&lines, block, "ours").unwrap(),
+            "< input\n<<<<< literal\n"
+        );
         assert_eq!(conflict_block_count(&lines), 1);
     }
 
@@ -217,22 +220,40 @@ mod tests {
         for width in [1, 5, 7, 12] {
             let text = format!(
                 "{} HEAD\nours\n{} base\nold\n{}\ntheirs\n{} other\n",
-                "<".repeat(width), "|".repeat(width), "=".repeat(width), ">".repeat(width),
+                "<".repeat(width),
+                "|".repeat(width),
+                "=".repeat(width),
+                ">".repeat(width),
             );
             let lines = text.lines().collect::<Vec<_>>();
             let block = conflict_block_at(&lines, 0).unwrap();
             assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "ours\n");
             assert_eq!(conflict_block_count(&lines), 1);
         }
-        assert!(conflict_block_at(&["<<<<< HEAD", "ours", "=======", "theirs", ">>>>> other"], 0).is_none());
-        assert!(conflict_block_at(&["<<<<< HEAD", "ours", "=====", "theirs", ">>>>>>> other"], 0).is_none());
+        assert!(
+            conflict_block_at(
+                &["<<<<< HEAD", "ours", "=======", "theirs", ">>>>> other"],
+                0
+            )
+            .is_none()
+        );
+        assert!(
+            conflict_block_at(
+                &["<<<<< HEAD", "ours", "=====", "theirs", ">>>>>>> other"],
+                0
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn remaining_count_ignores_literal_markers_and_incomplete_blocks() {
         let text = format!("<<<<<<<content\n{TEXT}<<<<<<< orphan\n");
         assert_eq!(conflict_block_count(&text.lines().collect::<Vec<_>>()), 1);
-        assert_eq!(conflict_block_count(&["<<<<<<<content", "<<<<<<< orphan"]), 0);
+        assert_eq!(
+            conflict_block_count(&["<<<<<<<content", "<<<<<<< orphan"]),
+            0
+        );
     }
 
     #[test]
@@ -242,7 +263,10 @@ mod tests {
         assert_eq!((block.start, block.separator, block.end), (1, 3, 5));
         assert_eq!(resolved_text(&lines, block, "ours").unwrap(), "ours\n");
         assert_eq!(resolved_text(&lines, block, "theirs").unwrap(), "theirs\n");
-        assert_eq!(resolved_text(&lines, block, "both").unwrap(), "ours\ntheirs\n");
+        assert_eq!(
+            resolved_text(&lines, block, "both").unwrap(),
+            "ours\ntheirs\n"
+        );
         assert!(resolved_text(&lines, block, "our").is_err());
     }
 

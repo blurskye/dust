@@ -38,8 +38,8 @@ fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
 #[cfg(target_os = "linux")]
 #[test]
 fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
-    use std::os::fd::AsRawFd;
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use std::os::fd::AsRawFd;
     let root = tempfile::tempdir().unwrap();
     let original = root.path().join("original");
     let other = root.path().join("other");
@@ -57,12 +57,21 @@ fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
             std::fs::remove_dir(&original).unwrap();
         }
         // Spawn through portable-pty itself, including its cwd fallback check.
-        let pair = native_pty_system().openpty(PtySize {
-            rows: 8, cols: 80, pixel_width: 0, pixel_height: 0,
-        }).unwrap();
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 8,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
         let mut command = CommandBuilder::new("/bin/sh");
         command.args(["-c", "test . -ef \"$1\"", "sh"]);
-        command.arg(format!("/proc/{}/fd/{}", std::process::id(), cwd.as_raw_fd()));
+        command.arg(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            cwd.as_raw_fd()
+        ));
         command.cwd(&pinned);
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
@@ -78,7 +87,11 @@ fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
             }
             thread::sleep(Duration::from_millis(1));
         };
-        assert_eq!(status.exit_code(), 0, "spawn left the pinned cwd (removed: {removed})");
+        assert_eq!(
+            status.exit_code(),
+            0,
+            "spawn left the pinned cwd (removed: {removed})"
+        );
         assert!(std::fs::metadata(&pinned).unwrap().is_dir());
     }
 }
@@ -305,7 +318,12 @@ fn reaped_pty_child_is_never_signalled_again() {
     assert!(child.try_wait().unwrap().is_some());
     child.kill();
     let pair = portable_pty::native_pty_system()
-        .openpty(portable_pty::PtySize { rows: 8, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .openpty(portable_pty::PtySize {
+            rows: 8,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .unwrap();
     child.terminate(pair.master.as_ref());
     drop(child);
@@ -362,7 +380,9 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
     }
     let root = tempfile::tempdir().unwrap();
     let mut service = PtyService::start(1);
-    let id = service.open(request(root.path(), "tty > slave; read value")).unwrap();
+    let id = service
+        .open(request(root.path(), "tty > slave; read value"))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(4);
     let slave = loop {
         service.poll().unwrap();
@@ -374,11 +394,14 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     };
-    let mut holder = Holder(std::process::Command::new("sleep")
-        .arg("30")
-        .process_group(0)
-        .stdin(slave)
-        .spawn().unwrap());
+    let mut holder = Holder(
+        std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .stdin(slave)
+            .spawn()
+            .unwrap(),
+    );
     service.input(id, b"done\n".to_vec(), 64).unwrap();
     loop {
         if service.poll().unwrap().iter().any(|event| matches!(event, PtyEvent::Exited { id: source, code: Some(0) } if *source == id)) {
@@ -390,11 +413,21 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
     assert!(holder.0.try_wait().unwrap().is_none());
     service.close(id).unwrap();
     let events = drain(&mut service, id);
-    assert!(events.iter().any(|event| matches!(event, PtyEvent::IoComplete { result: Ok(()), .. })));
-    assert!(holder.0.try_wait().unwrap().is_none(), "closing a reaped PTY must not signal its old process group");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, PtyEvent::IoComplete { result: Ok(()), .. }))
+    );
+    assert!(
+        holder.0.try_wait().unwrap().is_none(),
+        "closing a reaped PTY must not signal its old process group"
+    );
     let deadline = Instant::now() + Duration::from_secs(4);
     while service.residents.load(Ordering::Acquire) != 0 {
-        assert!(Instant::now() < deadline, "cancelled reader retained its slot");
+        assert!(
+            Instant::now() < deadline,
+            "cancelled reader retained its slot"
+        );
         thread::sleep(Duration::from_millis(2));
     }
     let next = service.open(request(root.path(), "printf next")).unwrap();
@@ -445,7 +478,9 @@ fn interactive_pty_output_has_no_lifetime_quota() {
     loop {
         for event in service.poll().unwrap() {
             match event {
-                PtyEvent::Output { bytes, truncated, .. } => {
+                PtyEvent::Output {
+                    bytes, truncated, ..
+                } => {
                     assert!(!truncated);
                     assert!(
                         bytes.iter().all(|byte| *byte == b'x'),

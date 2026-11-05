@@ -567,9 +567,15 @@ fn rank(query: &str, items: &BTreeMap<String, PluginPickerItem>) -> Vec<String> 
         .values()
         .filter_map(|item| {
             let score = crate::workspace::fuzzy_score(
-                query, &item.primary, item.secondary.as_deref().unwrap_or(""),
+                query,
+                &item.primary,
+                item.secondary.as_deref().unwrap_or(""),
             )?;
-            Some((std::cmp::Reverse(score), item.primary.to_lowercase(), item.id.clone()))
+            Some((
+                std::cmp::Reverse(score),
+                item.primary.to_lowercase(),
+                item.id.clone(),
+            ))
         })
         .collect::<Vec<_>>();
     ranked.sort();
@@ -634,7 +640,9 @@ mod tests {
     #[test]
     fn provider_ranking_uses_picker_fuzzy_and_unicode_matching() {
         let items = [item("foo", "foo_bar"), item("accent", "Éclair")]
-            .into_iter().map(|item| (item.id.clone(), item)).collect();
+            .into_iter()
+            .map(|item| (item.id.clone(), item))
+            .collect();
         assert_eq!(rank("fb", &items), vec!["foo"]);
         assert_eq!(rank("é", &items), vec!["accent"]);
     }
@@ -846,7 +854,10 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(broker.expire(), vec![request]);
-        assert_eq!(broker.projection(request).unwrap().status, PluginProviderSessionStatus::Failed);
+        assert_eq!(
+            broker.projection(request).unwrap().status,
+            PluginProviderSessionStatus::Failed
+        );
         assert_eq!(
             broker
                 .apply_chunk(
@@ -882,7 +893,10 @@ mod tests {
         let stable = broker.projection(request);
         let projection = stable.as_ref().unwrap();
         assert_eq!(projection.status, PluginProviderSessionStatus::Failed);
-        assert_eq!(projection.error.as_ref().unwrap().code, PluginProviderErrorCode::Expired);
+        assert_eq!(
+            projection.error.as_ref().unwrap().code,
+            PluginProviderErrorCode::Expired
+        );
         for _ in 0..256 {
             assert_eq!(broker.projection(request), stable);
         }

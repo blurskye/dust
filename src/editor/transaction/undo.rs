@@ -193,11 +193,9 @@ impl UndoTree {
                         && child < self.nodes.len()
                         && self.nodes[child].parent == Some(index)
                         && children.insert(child)
-                })
-                    && node.parent.is_none_or(|parent| {
-                        parent < index && self.nodes[parent].children.contains(&index)
-                    })
-                    && (index == 0 || node.parent.is_some())
+                }) && node.parent.is_none_or(|parent| {
+                    parent < index && self.nodes[parent].children.contains(&index)
+                }) && (index == 0 || node.parent.is_some())
             })
     }
 }
@@ -248,7 +246,11 @@ pub(crate) fn save_undo_history(
     maximum_bytes: usize,
 ) -> std::sync::mpsc::Receiver<Result<(), String>> {
     type Save = (
-        PathBuf, PathBuf, TextBuffer, UndoTree, usize,
+        PathBuf,
+        PathBuf,
+        TextBuffer,
+        UndoTree,
+        usize,
         Vec<std::sync::mpsc::Sender<Result<(), String>>>,
     );
     type Queue = (
@@ -358,11 +360,23 @@ mod tests {
         let mut tree = UndoTree::default();
         tree.record(insert(0, "x"), false);
         let reply = super::save_undo_history(
-            root.path().into(), path, crate::editor::text::TextBuffer::from_text("x"),
-            tree, 1 << 20,
+            root.path().into(),
+            path,
+            crate::editor::text::TextBuffer::from_text("x"),
+            tree,
+            1 << 20,
         );
-        assert!(reply.recv_timeout(std::time::Duration::from_secs(5)).unwrap().is_err());
-        assert!(!file.with_extension(format!("{}.partial", std::process::id())).exists());
+        assert!(
+            reply
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .is_err()
+        );
+        assert!(
+            !file
+                .with_extension(format!("{}.partial", std::process::id()))
+                .exists()
+        );
     }
 
     #[test]
@@ -426,16 +440,18 @@ mod tests {
         assert!(tree.is_well_formed());
 
         let mut inconsistent = tree.clone();
-        std::sync::Arc::make_mut(&mut inconsistent.nodes[0]).children.push(2);
-        let restored: UndoTree = serde_json::from_str(
-            &serde_json::to_string(&inconsistent).unwrap(),
-        ).unwrap();
+        std::sync::Arc::make_mut(&mut inconsistent.nodes[0])
+            .children
+            .push(2);
+        let restored: UndoTree =
+            serde_json::from_str(&serde_json::to_string(&inconsistent).unwrap()).unwrap();
         assert!(!restored.is_well_formed());
 
-        std::sync::Arc::make_mut(&mut tree.nodes[0]).children.push(1);
-        let restored: UndoTree = serde_json::from_str(
-            &serde_json::to_string(&tree).unwrap(),
-        ).unwrap();
+        std::sync::Arc::make_mut(&mut tree.nodes[0])
+            .children
+            .push(1);
+        let restored: UndoTree =
+            serde_json::from_str(&serde_json::to_string(&tree).unwrap()).unwrap();
         assert!(!restored.is_well_formed());
     }
 

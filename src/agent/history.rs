@@ -89,7 +89,11 @@ impl Saves {
     }
 }
 
-fn write_history(target: &Path, conversation: &Conversation, entries: &[Entry]) -> Result<(), String> {
+fn write_history(
+    target: &Path,
+    conversation: &Conversation,
+    entries: &[Entry],
+) -> Result<(), String> {
     let write = || -> Result<(), String> {
         let head = serde_json::to_string(conversation).map_err(|error| error.to_string())?;
         let body = serde_json::to_string(entries).map_err(|error| error.to_string())?;
@@ -243,7 +247,10 @@ pub fn load(directory: &Path, id: &str) -> Option<(Conversation, Vec<Entry>)> {
         return None;
     }
     let mut text = String::new();
-    source.take(FILE_BYTE_CEILING + 1).read_to_string(&mut text).ok()?;
+    source
+        .take(FILE_BYTE_CEILING + 1)
+        .read_to_string(&mut text)
+        .ok()?;
     if text.len() as u64 > FILE_BYTE_CEILING {
         return None;
     }
@@ -261,7 +268,11 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
     let mut text = String::new();
     for entry in entries {
         match entry {
-            Entry::User { text: question, context, attachments } => {
+            Entry::User {
+                text: question,
+                context,
+                attachments,
+            } => {
                 text.push_str(&format!("\n\nUser: {question}"));
                 for label in context {
                     text.push_str(&format!("\n[context: {label}]"));
@@ -272,7 +283,10 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
                             text.push('\n');
                             text.push_str(content);
                         }
-                        super::PromptPart::File { path, text: content } => {
+                        super::PromptPart::File {
+                            path,
+                            text: content,
+                        } => {
                             text.push_str(&format!("\n[file: {}]", path.display()));
                             if let Some(content) = content {
                                 text.push('\n');
@@ -346,15 +360,22 @@ mod tests {
         let entries = vec![Entry::Agent("answer".into())];
         let writer = Writer::new();
         writer.save(blocked.clone(), conversation.clone(), entries.clone());
-        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap_err();
+        let error = writer
+            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap_err();
         assert!(error.contains("could not save agent history"));
         assert!(error.contains("blocked"));
-        assert_eq!(writer.take_errors().as_slice(), std::slice::from_ref(&error));
+        assert_eq!(
+            writer.take_errors().as_slice(),
+            std::slice::from_ref(&error)
+        );
         assert!(writer.take_errors().is_empty());
         assert_eq!(writer.flush(Instant::now()), Err(error));
         fs::remove_file(&blocked).unwrap();
         writer.save(blocked.clone(), conversation.clone(), entries.clone());
-        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        writer
+            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
         assert_eq!(load(&blocked, "failed"), Some((conversation, entries)));
     }
 
@@ -371,22 +392,38 @@ mod tests {
         };
         let writer = Writer::new();
         let entries = vec![Entry::Agent("saved answer".into())];
-        writer.save(directory.path().into(), conversation.clone(), entries.clone());
-        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        writer.save(
+            directory.path().into(),
+            conversation.clone(),
+            entries.clone(),
+        );
+        writer
+            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
         writer.save(
             directory.path().into(),
             conversation.clone(),
             vec![Entry::Agent("x".repeat(FILE_BYTE_CEILING as usize))],
         );
-        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(10)).unwrap_err();
+        let error = writer
+            .flush(Instant::now() + std::time::Duration::from_secs(10))
+            .unwrap_err();
         assert!(error.contains("conversation exceeds its size limit"));
-        assert_eq!(load(directory.path(), "large"), Some((conversation.clone(), entries.clone())));
+        assert_eq!(
+            load(directory.path(), "large"),
+            Some((conversation.clone(), entries.clone()))
+        );
         let mut oversized_header = conversation.clone();
         oversized_header.title = "x".repeat(HEADER_BYTE_CEILING as usize);
         writer.save(directory.path().into(), oversized_header, entries.clone());
-        let error = writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap_err();
+        let error = writer
+            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap_err();
         assert!(error.contains("header exceeds its size limit"));
-        assert_eq!(load(directory.path(), "large"), Some((conversation, entries)));
+        assert_eq!(
+            load(directory.path(), "large"),
+            Some((conversation, entries))
+        );
     }
 
     #[test]
@@ -424,7 +461,9 @@ mod tests {
             conversation.clone(),
             entries.clone(),
         );
-        writer.flush(Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        writer
+            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
         assert_eq!(
             load(directory.path(), "ordered"),
             Some((conversation, entries))
@@ -444,10 +483,18 @@ mod tests {
             updated: 1,
         };
         let path = file(directory.path(), &conversation.id);
-        fs::write(&path, format!("{}\n[]\n", serde_json::to_string(&conversation).unwrap())).unwrap();
+        fs::write(
+            &path,
+            format!("{}\n[]\n", serde_json::to_string(&conversation).unwrap()),
+        )
+        .unwrap();
         assert!(list(directory.path()).is_empty());
-        fs::OpenOptions::new().write(true).open(&path).unwrap()
-            .set_len(FILE_BYTE_CEILING + 1).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(FILE_BYTE_CEILING + 1)
+            .unwrap();
         assert!(load(directory.path(), &conversation.id).is_none());
     }
 
@@ -457,7 +504,11 @@ mod tests {
         use std::os::unix::fs::symlink;
         let directory = tempfile::tempdir().unwrap();
         symlink("/dev/zero", file(directory.path(), "device")).unwrap();
-        nix::unistd::mkfifo(&file(directory.path(), "pipe"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+        nix::unistd::mkfifo(
+            &file(directory.path(), "pipe"),
+            nix::sys::stat::Mode::S_IRUSR,
+        )
+        .unwrap();
         fs::create_dir(file(directory.path(), "directory")).unwrap();
         assert!(list(directory.path()).is_empty());
         for id in ["device", "pipe", "directory"] {
@@ -481,21 +532,34 @@ mod tests {
             text: "explain".into(),
             context: vec!["main.rs (1 lines selected)".into()],
             attachments: vec![
-                PromptPart::File { path: "/work/main.rs".into(), text: Some("unsaved fragment".into()) },
+                PromptPart::File {
+                    path: "/work/main.rs".into(),
+                    text: Some("unsaved fragment".into()),
+                },
                 PromptPart::Text("Diagnostics:\nunsaved error".into()),
-                PromptPart::File { path: "/work/other.rs".into(), text: None },
+                PromptPart::File {
+                    path: "/work/other.rs".into(),
+                    text: None,
+                },
             ],
         }];
         write_history(&file(directory.path(), "attached"), &conversation, &entries).unwrap();
         let (_, loaded) = load(directory.path(), "attached").unwrap();
         assert_eq!(loaded, entries);
         let summary = recap(&loaded, 1000);
-        for expected in ["User: explain", "main.rs (1 lines selected)", "/work/main.rs", "unsaved fragment", "Diagnostics:\nunsaved error", "/work/other.rs"] {
+        for expected in [
+            "User: explain",
+            "main.rs (1 lines selected)",
+            "/work/main.rs",
+            "unsaved fragment",
+            "Diagnostics:\nunsaved error",
+            "/work/other.rs",
+        ] {
             assert!(summary.contains(expected), "missing {expected}: {summary}");
         }
-        let legacy: Vec<Entry> = serde_json::from_str(
-            r#"[{"user":{"text":"old question","context":["old context"]}}]"#,
-        ).unwrap();
+        let legacy: Vec<Entry> =
+            serde_json::from_str(r#"[{"user":{"text":"old question","context":["old context"]}}]"#)
+                .unwrap();
         assert!(recap(&legacy, 1000).contains("[context: old context]"));
         assert!(matches!(&legacy[0], Entry::User { attachments, .. } if attachments.is_empty()));
     }

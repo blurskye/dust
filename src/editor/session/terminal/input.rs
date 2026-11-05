@@ -386,9 +386,21 @@ mod tests {
         let mut screen = PtyScreen::new(4, 2, 8);
         screen.feed_bytes(b"abcdefgh\r\nijkl\r\nmn");
         assert!(screen.scrollback_len() > 0);
-        assert_eq!(terminal_yank_text(&screen, (0, 0), (1, 3), false), "abcdefgh");
-        assert_eq!(terminal_yank_text(&screen, (0, 1), (2, 1), false), "bcdefgh\nij");
-        assert_eq!(terminal_yank_text(&screen, (2, 1), (0, 1), false), "bcdefgh\nij");
-        assert_eq!(terminal_yank_text(&screen, (0, 0), (1, 3), true), "abcdefgh\n");
+        assert_eq!(
+            terminal_yank_text(&screen, (0, 0), (1, 3), false),
+            "abcdefgh"
+        );
+        assert_eq!(
+            terminal_yank_text(&screen, (0, 1), (2, 1), false),
+            "bcdefgh\nij"
+        );
+        assert_eq!(
+            terminal_yank_text(&screen, (2, 1), (0, 1), false),
+            "bcdefgh\nij"
+        );
+        assert_eq!(
+            terminal_yank_text(&screen, (0, 0), (1, 3), true),
+            "abcdefgh\n"
+        );
     }
 }

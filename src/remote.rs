@@ -8,6 +8,7 @@
 use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
+    net::Shutdown,
     os::fd::AsFd,
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
@@ -15,8 +16,11 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    net::Shutdown,
-    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -182,7 +186,8 @@ impl RemoteServer {
                     let mut complete = false;
                     loop {
                         let remaining = deadline.saturating_duration_since(Instant::now());
-                        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+                        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err()
+                        {
                             break;
                         }
                         // fill_buf performs at most one socket read, so each read
@@ -191,16 +196,23 @@ impl RemoteServer {
                         let eof = buffer.is_empty();
                         if eof {
                             complete = line.is_empty();
-                            if complete { break; }
+                            if complete {
+                                break;
+                            }
                         } else {
                             let end = buffer.iter().position(|byte| *byte == b'\n');
                             let length = end.map_or(buffer.len(), |end| end + 1);
                             line.extend_from_slice(&buffer[..length]);
                             reader.consume(length);
-                            if end.is_none() { continue; }
+                            if end.is_none() {
+                                continue;
+                            }
                         }
-                        let Ok(text) = std::str::from_utf8(&line) else { break };
-                        let text = text.strip_suffix('\n')
+                        let Ok(text) = std::str::from_utf8(&line) else {
+                            break;
+                        };
+                        let text = text
+                            .strip_suffix('\n')
                             .map(|text| text.strip_suffix('\r').unwrap_or(text))
                             .unwrap_or(text);
                         let request = match text.strip_prefix(AGENT_PREFIX) {
@@ -252,7 +264,15 @@ impl RemoteServer {
                 return Err(error);
             }
         };
-        Ok(Self { path, requests, stopping, reading, writing, wake, workers: vec![listener_worker, reply_worker] })
+        Ok(Self {
+            path,
+            requests,
+            stopping,
+            reading,
+            writing,
+            wake,
+            workers: vec![listener_worker, reply_worker],
+        })
     }
 
     #[must_use]
@@ -339,7 +359,10 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
             serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
         let entry = format!("{line}\t{encoded}\n");
         if message.len().saturating_add(entry.len()) > REQUEST_BYTE_CEILING as usize {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "remote request exceeds 1 MiB"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "remote request exceeds 1 MiB",
+            ));
         }
         message.push_str(&entry);
     }
@@ -350,7 +373,10 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
     stream.shutdown(Shutdown::Write)?;
     let mut answer = [0; 3];
     stream.read_exact(&mut answer).map_err(|error| {
-        io::Error::new(error.kind(), format!("Dust did not accept all remote files: {error}"))
+        io::Error::new(
+            error.kind(),
+            format!("Dust did not accept all remote files: {error}"),
+        )
     })?;
     if &answer != b"ok\n" {
         return Err(io::Error::other("Dust did not accept all remote files"));
@@ -361,8 +387,8 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
 /// Write a lazygit config whose edit keys open files in this Dust, and return the
 /// `LG_CONFIG_FILE` value that layers it over the user's own lazygit config.
 pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
-    let program = format!("'{}'", dust.display().to_string().replace('\'', "'\\''"))
-        .replace('\'', "''");
+    let program =
+        format!("'{}'", dust.display().to_string().replace('\'', "'\\''")).replace('\'', "''");
     let overlay = directory.join(format!("lazygit-{}.yml", std::process::id()));
     fs::write(
         &overlay,
@@ -439,7 +465,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         for _ in 0..=REQUEST_QUEUE_CEILING {
             writeln!(client, "0\t/file.rs").unwrap();
         }
@@ -480,14 +508,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         client.write_all(b"0\t/first\r\r\n0\t/last\r").unwrap();
         client.shutdown(Shutdown::Write).unwrap();
         let mut answer = String::new();
         client.read_to_string(&mut answer).unwrap();
         assert_eq!(answer, "ok\n");
         for expected in ["/first\r", "/last\r"] {
-            let Some(RemoteRequest::Open(open)) = server.try_request() else { panic!("missing file") };
+            let Some(RemoteRequest::Open(open)) = server.try_request() else {
+                panic!("missing file")
+            };
             assert_eq!(open.path, Path::new(expected));
         }
     }
@@ -497,7 +529,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let mut writer = client.try_clone().unwrap();
         let trickling = thread::spawn(move || {
             while writer.write_all(b"x").is_ok() {
@@ -530,7 +564,10 @@ mod tests {
                 stream
             });
             drop(server);
-            assert!(workers.upgrade().is_none(), "both workers released their stop flag");
+            assert!(
+                workers.upgrade().is_none(),
+                "both workers released their stop flag"
+            );
             assert!(!path.exists());
         }
     }
@@ -579,16 +616,28 @@ mod tests {
     #[test]
     fn lazygit_commands_quote_shell_paths_separately_from_yaml() {
         let directory = tempfile::tempdir().unwrap();
-        let dust = directory.path().join("dust '\"$HOME`echo expanded`\\binary");
+        let dust = directory
+            .path()
+            .join("dust '\"$HOME`echo expanded`\\binary");
         fs::write(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
         fs::set_permissions(&dust, fs::Permissions::from_mode(0o700)).unwrap();
         lazygit_config(directory.path(), &dust).unwrap();
-        let overlay = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let overlay = directory
+            .path()
+            .join(format!("lazygit-{}.yml", std::process::id()));
         let yaml = fs::read_to_string(overlay).unwrap();
-        let command = yaml.lines().find_map(|line| line.trim().strip_prefix("edit: '")).unwrap()
-            .strip_suffix('\'').unwrap().replace("''", "'")
+        let command = yaml
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("edit: '"))
+            .unwrap()
+            .strip_suffix('\'')
+            .unwrap()
+            .replace("''", "'")
             .replace("{{filename}}", "sample.rs");
-        let output = std::process::Command::new("sh").args(["-c", &command]).output().unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
         assert!(output.status.success(), "{:?}", output.stderr);
         assert_eq!(output.stdout, b"--remote\nsample.rs\n");
     }
@@ -602,17 +651,27 @@ mod tests {
         }
         let directory = tempfile::tempdir().unwrap();
         lazygit_config(directory.path(), Path::new("/first/dust")).unwrap();
-        let first = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let first = directory
+            .path()
+            .join(format!("lazygit-{}.yml", std::process::id()));
         let original = fs::read_to_string(&first).unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "remote::tests::lazygit_overlays_are_per_process"])
             .env(CHILD_DIRECTORY, directory.path())
-            .status().unwrap();
+            .status()
+            .unwrap();
         assert!(status.success());
-        let overlays: Vec<_> = fs::read_dir(directory.path()).unwrap().map(Result::unwrap).collect();
+        let overlays: Vec<_> = fs::read_dir(directory.path())
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
         assert_eq!(overlays.len(), 2);
         assert_eq!(fs::read_to_string(first).unwrap(), original);
-        assert!(overlays.iter().any(|entry| fs::read_to_string(entry.path()).unwrap().contains("/second/dust")));
+        assert!(overlays.iter().any(|entry| {
+            fs::read_to_string(entry.path())
+                .unwrap()
+                .contains("/second/dust")
+        }));
     }
 
     #[test]

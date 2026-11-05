@@ -21,7 +21,10 @@ use super::motion::{
 use super::transaction::failed;
 
 fn is_word(grapheme: &str) -> bool {
-    grapheme.chars().next().is_some_and(|character| word_class(character) == 1)
+    grapheme
+        .chars()
+        .next()
+        .is_some_and(|character| word_class(character) == 1)
 }
 
 fn word_at(source: &str, cursor: usize) -> Option<ByteRange> {
@@ -43,10 +46,14 @@ fn word_at(source: &str, cursor: usize) -> Option<ByteRange> {
 }
 
 fn is_whole_word(source: &str, start: usize, end: usize) -> bool {
-    !source[..start].graphemes(true).next_back().is_some_and(is_word)
+    !source[..start]
+        .graphemes(true)
+        .next_back()
+        .is_some_and(is_word)
         && !source[end..].graphemes(true).next().is_some_and(is_word)
         && (end == source.len()
-            || source[start..].grapheme_indices(true)
+            || source[start..]
+                .grapheme_indices(true)
                 .take_while(|(index, _)| *index <= end - start)
                 .any(|(index, _)| index == end - start))
 }
@@ -121,7 +128,11 @@ pub(super) fn add_next(
 ) -> Result<(), CommandError> {
     let source = text.to_string();
     let mut marks = view.multi_marks.clone();
-    let whole_word = if marks.is_empty() { visual_range(view, text).is_none() } else { view.multi_whole_word };
+    let whole_word = if marks.is_empty() {
+        visual_range(view, text).is_none()
+    } else {
+        view.multi_whole_word
+    };
     let added = match marks.first().filter(|first| !first.is_empty()) {
         Some(first) => {
             let from = marks[current(&marks, view.cursor)].end.get();
@@ -145,7 +156,14 @@ pub(super) fn add_next(
     })?;
     marks.push(added);
     marks.sort_by_key(|mark| mark.start);
-    set_marks(transaction, view_id, marks, added.start, whole_word, Vec::new());
+    set_marks(
+        transaction,
+        view_id,
+        marks,
+        added.start,
+        whole_word,
+        Vec::new(),
+    );
     Ok(())
 }
 
@@ -199,10 +217,12 @@ pub(super) fn add_line(
     marks.push(ByteRange::empty(position));
     marks.sort_by_key(|mark| mark.start);
     set_marks(transaction, view_id, marks, position, true, Vec::new());
-    transaction.operations.push(EditorOperation::SetPreferredColumn {
-        view: view_id,
-        column,
-    });
+    transaction
+        .operations
+        .push(EditorOperation::SetPreferredColumn {
+            view: view_id,
+            column,
+        });
     Ok(())
 }
 
@@ -240,7 +260,11 @@ pub(super) fn add_all(
     if needle.is_empty() {
         return Err(failed("no word under the cursor"));
     }
-    let whole_word = if view.multi_marks.is_empty() { selected.is_none() } else { view.multi_whole_word };
+    let whole_word = if view.multi_marks.is_empty() {
+        selected.is_none()
+    } else {
+        view.multi_whole_word
+    };
     let marks: Vec<ByteRange> = source
         .match_indices(needle)
         .map(|(start, _)| start)
@@ -297,14 +321,27 @@ pub(super) fn skip(
         .filter(|mark| !mark.is_empty())
         .ok_or_else(|| failed("q skips a word match; these cursors were added by line"))?;
     // With no match left to take instead, skipping just drops this one.
-    let Some(next) = next_occurrence(&source, skipped, skipped.end.get(), &marks, view.multi_whole_word) else {
+    let Some(next) = next_occurrence(
+        &source,
+        skipped,
+        skipped.end.get(),
+        &marks,
+        view.multi_whole_word,
+    ) else {
         remove(transaction, view_id, view);
         return Ok(());
     };
     marks.remove(index);
     marks.push(next);
     marks.sort_by_key(|mark| mark.start);
-    set_marks(transaction, view_id, marks, next.start, view.multi_whole_word, Vec::new());
+    set_marks(
+        transaction,
+        view_id,
+        marks,
+        next.start,
+        view.multi_whole_word,
+        Vec::new(),
+    );
     Ok(())
 }
 
@@ -317,7 +354,14 @@ pub(super) fn remove(transaction: &mut EditorTransaction, view_id: ViewId, view:
     let index = current(&marks, view.cursor);
     marks.remove(index);
     match marks.get(index.saturating_sub(1)).map(|mark| mark.start) {
-        Some(cursor) => set_marks(transaction, view_id, marks, cursor, view.multi_whole_word, Vec::new()),
+        Some(cursor) => set_marks(
+            transaction,
+            view_id,
+            marks,
+            cursor,
+            view.multi_whole_word,
+            Vec::new(),
+        ),
         None => {
             transaction.undo_policy = UndoPolicy::Ignore;
             transaction.operations.push(EditorOperation::SetMode {
@@ -364,7 +408,14 @@ pub(super) fn move_all(
     marks.dedup_by_key(|(mark, _)| *mark);
     let preferred_columns = marks.iter().filter_map(|(_, column)| *column).collect();
     if let Some(cursor) = cursor {
-        set_marks(transaction, view_id, marks.into_iter().map(|(mark, _)| mark).collect(), cursor, view.multi_whole_word, preferred_columns);
+        set_marks(
+            transaction,
+            view_id,
+            marks.into_iter().map(|(mark, _)| mark).collect(),
+            cursor,
+            view.multi_whole_word,
+            preferred_columns,
+        );
     }
     Ok(())
 }
@@ -417,10 +468,15 @@ pub(super) fn begin_insert(
     let mut positions = Vec::with_capacity(marks.len());
     let mut padding = Vec::new();
     let append_column = if placement == "end" && view.mode == EditorMode::VisualBlock {
-        view.selection.map(|selection| {
-            Ok::<_, CommandError>(cursor_display_column(text, selection.anchor, policy)?
-                .max(cursor_display_column(text, selection.head, policy)?) + 1)
-        }).transpose()?
+        view.selection
+            .map(|selection| {
+                Ok::<_, CommandError>(
+                    cursor_display_column(text, selection.anchor, policy)?
+                        .max(cursor_display_column(text, selection.head, policy)?)
+                        + 1,
+                )
+            })
+            .transpose()?
     } else {
         None
     };
@@ -430,13 +486,20 @@ pub(super) fn begin_insert(
             let line_start = text.line_to_byte(line).map_err(failed)?;
             let content = text.line(line).map_err(failed)?;
             let content = content.strip_suffix('\n').unwrap_or(&content);
-            let end_column = display_column_at(content, content.len(), DisplayWidthPolicy {
-                tab_width: policy.tab_width,
-                ambiguous_wide: policy.ambiguous_width_wide,
-            });
+            let end_column = display_column_at(
+                content,
+                content.len(),
+                DisplayWidthPolicy {
+                    tab_width: policy.tab_width,
+                    ambiguous_wide: policy.ambiguous_width_wide,
+                },
+            );
             if column > end_column {
                 let end = ByteOffset(line_start.get() + content.len());
-                padding.push(TextEdit::new(ByteRange::empty(end), " ".repeat(column - end_column)));
+                padding.push(TextEdit::new(
+                    ByteRange::empty(end),
+                    " ".repeat(column - end_column),
+                ));
             }
             positions.push(mark.end);
             continue;

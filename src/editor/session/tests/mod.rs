@@ -88,22 +88,33 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
     assert!(launch.environment(&definition).is_err());
 }
 
-pub(super) fn app() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+pub(super) fn app() -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+) {
     app_with_optional_plugin_queue(None)
 }
 
 fn app_with_plugin_queue(
     plugin_queue_capacity: usize,
-) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+) -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+) {
     app_with_optional_plugin_queue(Some(plugin_queue_capacity))
 }
 
 fn app_with_optional_plugin_queue(
     plugin_queue_capacity: Option<usize>,
-) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+) -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    InteractiveApplication,
+) {
     let root = tempdir().expect("tempdir");
     let state = tempdir().expect("isolated state directory");
-    let startup = StartupTarget::Dashboard { root: root.path().into() };
+    let startup = StartupTarget::Dashboard {
+        root: root.path().into(),
+    };
     let mut loaded = crate::config::load_bundled_config();
     if let Some(plugin_queue_capacity) = plugin_queue_capacity {
         loaded.config.plugins.queue_capacity = plugin_queue_capacity;
@@ -218,7 +229,11 @@ fn wait_workspace_approval(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.workspace_edits.proposal().is_some() {
         app.process_workspace_approval();
-        assert!(Instant::now() < deadline, "workspace approval timed out: {:?}", app.ui.notification);
+        assert!(
+            Instant::now() < deadline,
+            "workspace approval timed out: {:?}",
+            app.ui.notification
+        );
         thread::sleep(Duration::from_millis(2));
     }
 }

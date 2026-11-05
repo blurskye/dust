@@ -20,24 +20,40 @@ pub(super) fn projected_inlay_hints(
     buffer: crate::editor::BufferId,
     ui: &UiState,
 ) -> Vec<super::UiInlayHint> {
-    let mut hints = ui.lsp_inlay_hints.iter().chain(&ui.substitute_preview)
+    let mut hints = ui
+        .lsp_inlay_hints
+        .iter()
+        .chain(&ui.substitute_preview)
         .filter(|hint| hint.buffer == buffer && hint.revision == text.revision())
-        .take(10_000).collect::<Vec<_>>();
+        .take(10_000)
+        .collect::<Vec<_>>();
     hints.sort_unstable_by_key(|hint| hint.position);
     let mut projected = Vec::with_capacity(hints.len());
-    for group in hints.chunk_by(|a, b| text.byte_to_line(a.position).ok() == text.byte_to_line(b.position).ok()) {
-        let Ok(line) = text.byte_to_line(group[0].position) else { continue; };
-        let Ok(start) = text.line_to_byte(line) else { continue; };
-        let Ok(source) = text.line(line) else { continue; };
-        let mut boundaries = source.grapheme_indices(true).map(|(at, _)| at)
-            .chain(std::iter::once(source.len())).peekable();
+    for group in hints
+        .chunk_by(|a, b| text.byte_to_line(a.position).ok() == text.byte_to_line(b.position).ok())
+    {
+        let Ok(line) = text.byte_to_line(group[0].position) else {
+            continue;
+        };
+        let Ok(start) = text.line_to_byte(line) else {
+            continue;
+        };
+        let Ok(source) = text.line(line) else {
+            continue;
+        };
+        let mut boundaries = source
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain(std::iter::once(source.len()))
+            .peekable();
         for hint in group {
             let relative = hint.position.get().saturating_sub(start.get());
             while boundaries.peek().is_some_and(|at| *at < relative) {
                 boundaries.next();
             }
             let mut hint = (*hint).clone();
-            hint.position = ByteOffset(start.get() + boundaries.peek().copied().unwrap_or(source.len()));
+            hint.position =
+                ByteOffset(start.get() + boundaries.peek().copied().unwrap_or(source.len()));
             projected.push(hint);
         }
     }
@@ -120,8 +136,9 @@ impl<'a> VisualRowModel<'a> {
     ) -> Self {
         let mut inlay_widths = BTreeMap::<ByteOffset, usize>::new();
         let mut labels = BTreeMap::<ByteOffset, Vec<&str>>::new();
-        let hints = state.views.get(view)
-            .map_or_else(Vec::new, |view| projected_inlay_hints(text, view.buffer, ui));
+        let hints = state.views.get(view).map_or_else(Vec::new, |view| {
+            projected_inlay_hints(text, view.buffer, ui)
+        });
         {
             let mut per_line = BTreeMap::<usize, usize>::new();
             for hint in &hints {
@@ -170,7 +187,8 @@ impl<'a> VisualRowModel<'a> {
                             relative,
                             DisplayWidthPolicy {
                                 tab_width,
-                                ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
+                                ambiguous_wide: config.editor.ambiguous_width
+                                    == AmbiguousWidth::Wide,
                             },
                         );
                         tab_width - (column % tab_width)
@@ -282,7 +300,8 @@ impl<'a> VisualRowModel<'a> {
 
     #[must_use]
     pub fn is_table_line(&self, line: usize) -> bool {
-        self.markdown_line(line).is_some_and(|markdown| markdown.table.is_some())
+        self.markdown_line(line)
+            .is_some_and(|markdown| markdown.table.is_some())
     }
 
     /// The cells a grapheme takes as drawn, with what markdown draws before it.
@@ -341,8 +360,12 @@ impl<'a> VisualRowModel<'a> {
         let mut ranges: Vec<ByteRange> = Vec::new();
         let mut previous = None;
         for row in 0..height {
-            let Some(anchor) = self.painted_row(start, row) else { break };
-            if previous == Some(anchor) { continue; }
+            let Some(anchor) = self.painted_row(start, row) else {
+                break;
+            };
+            if previous == Some(anchor) {
+                continue;
+            }
             previous = Some(anchor);
             let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
             let line = self.text.line(anchor.line).unwrap_or_default();
@@ -602,19 +625,22 @@ impl<'a> VisualRowModel<'a> {
         if let Some(markdown) = &markdown
             && let Some(table) = &markdown.table
         {
-            return content.grapheme_indices(true)
+            return content
+                .grapheme_indices(true)
                 .filter_map(|(relative, grapheme)| {
                     let at = ByteOffset(line_start.get() + relative);
                     let (wrap_row, column) = table.place(at)?;
                     let width = markdown.drawn_width(
-                        at, cell_text_width(grapheme, self.ambiguous_width), self.ambiguous_width,
+                        at,
+                        cell_text_width(grapheme, self.ambiguous_width),
+                        self.ambiguous_width,
                     );
                     if width == 0 {
                         return None;
                     }
-                    let distance = column.saturating_sub(cell).max(
-                        cell.saturating_sub(column.saturating_add(width).saturating_sub(1)),
-                    );
+                    let distance = column
+                        .saturating_sub(cell)
+                        .max(cell.saturating_sub(column.saturating_add(width).saturating_sub(1)));
                     Some(((wrap_row.abs_diff(anchor.wrap_row), distance), relative))
                 })
                 .min_by_key(|(distance, _)| *distance)
@@ -622,10 +648,15 @@ impl<'a> VisualRowModel<'a> {
         }
         if !self.wrap {
             row.byte_start = super::editor::byte_offset_at_display_column(
-                content, scroll_column, self.tab_width, self.ambiguous_width,
+                content,
+                scroll_column,
+                self.tab_width,
+                self.ambiguous_width,
             );
             row.source_column_start = display_column(
-                &content[..row.byte_start], self.tab_width, self.ambiguous_width,
+                &content[..row.byte_start],
+                self.tab_width,
+                self.ambiguous_width,
             );
         }
         let mut source_column = row.source_column_start;
@@ -634,16 +665,22 @@ impl<'a> VisualRowModel<'a> {
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
             let relative = row.byte_start.saturating_add(relative);
             last_grapheme = relative;
-            let virtual_width = self.inlay_width(ByteOffset(line_start.get() + relative))
+            let virtual_width = self
+                .inlay_width(ByteOffset(line_start.get() + relative))
                 .min(self.content_width);
             if cell < used.saturating_add(virtual_width) {
                 return relative;
             }
             used = used.saturating_add(virtual_width);
             let source_width = self.grapheme_width(grapheme, source_column);
-            let visible_width = self.drawn_width(
-                markdown.as_ref(), ByteOffset(line_start.get() + relative), grapheme, source_column,
-            ).min(self.content_width);
+            let visible_width = self
+                .drawn_width(
+                    markdown.as_ref(),
+                    ByteOffset(line_start.get() + relative),
+                    grapheme,
+                    source_column,
+                )
+                .min(self.content_width);
             if cell < used.saturating_add(visible_width) {
                 return relative;
             }
@@ -660,7 +697,12 @@ impl<'a> VisualRowModel<'a> {
     /// Source graphemes that can receive an overlay in this painted row. Horizontal scrolling
     /// skips source columns before drawing inlays, just as the editor renderer does.
     #[must_use]
-    pub fn visible_bytes(&self, anchor: VisualRowAnchor, scroll_column: usize, width: usize) -> Vec<usize> {
+    pub fn visible_bytes(
+        &self,
+        anchor: VisualRowAnchor,
+        scroll_column: usize,
+        width: usize,
+    ) -> Vec<usize> {
         let anchor = self.normalize(anchor);
         let row = self.row_slice(anchor);
         let text = self.text.line(anchor.line).unwrap_or_default();
@@ -673,18 +715,26 @@ impl<'a> VisualRowModel<'a> {
             row.byte_start
         } else {
             super::editor::byte_offset_at_display_column(
-                content, scroll_column, self.tab_width, self.ambiguous_width,
+                content,
+                scroll_column,
+                self.tab_width,
+                self.ambiguous_width,
             )
         };
-        let mut source_column = display_column(&content[..first], self.tab_width, self.ambiguous_width);
+        let mut source_column =
+            display_column(&content[..first], self.tab_width, self.ambiguous_width);
         let mut used = 0usize;
         let mut bytes = Vec::new();
         for (relative, grapheme) in content[first..end].grapheme_indices(true) {
             let relative = first + relative;
             let at = ByteOffset(line_start.get() + relative);
             if let Some(table) = table {
-                let Some((painted_row, column)) = table.place(at) else { continue };
-                if painted_row != anchor.wrap_row { continue; }
+                let Some((painted_row, column)) = table.place(at) else {
+                    continue;
+                };
+                if painted_row != anchor.wrap_row {
+                    continue;
+                }
                 used = column;
             }
             used = used.saturating_add(self.inlay_width(at));
@@ -703,7 +753,9 @@ impl<'a> VisualRowModel<'a> {
             }
             let source_width = self.grapheme_width(grapheme, source_column);
             if used >= width || (!self.wrap && used.saturating_add(source_width) > width) {
-                if table.is_some() { continue; }
+                if table.is_some() {
+                    continue;
+                }
                 break;
             }
             bytes.push(relative);
@@ -1176,15 +1228,39 @@ mod tests {
         config.editor.line_numbers = LineNumbers::Off;
         config.editor.tab_width = 4;
         let ui = UiState::default();
-        let model = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, false);
+        let model = VisualRowModel::new(
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            6,
+            false,
+        );
         let start = VisualRowAnchor::default();
         assert_eq!(model.visible_bytes(start, 2, 5), vec![1, 2]);
         assert_eq!(model.visible_bytes(start, 6, 4), vec![5, 8, 19]);
         assert!(model.visible_bytes(start, 20, 11).is_empty());
         assert_eq!(model.byte_at_cell(start, 20), text.len_bytes());
-        let wrapped = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 6, true);
+        let wrapped = VisualRowModel::new(
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            6,
+            true,
+        );
         assert_eq!(wrapped.visible_bytes(start, 0, 6), vec![0, 1, 2]);
-        assert_eq!(wrapped.visible_bytes(VisualRowAnchor { line: 0, wrap_row: 1 }, 0, 6), vec![5, 8, 19]);
+        assert_eq!(
+            wrapped.visible_bytes(
+                VisualRowAnchor {
+                    line: 0,
+                    wrap_row: 1
+                },
+                0,
+                6
+            ),
+            vec![5, 8, 19]
+        );
     }
 
     #[test]
@@ -1193,7 +1269,14 @@ mod tests {
         let mut config = Config::default();
         config.editor.line_numbers = LineNumbers::Off;
         let ui = UiState::default();
-        let mut model = VisualRowModel::new(&text, crate::editor::ViewId::default(), &ui, &config, 4, false);
+        let mut model = VisualRowModel::new(
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            4,
+            false,
+        );
         let start = VisualRowAnchor::default();
         // A wide grapheme that does not fit is not drawn at all.
         assert_eq!(model.visible_bytes(start, 0, 2), vec![0]);
@@ -1210,7 +1293,12 @@ mod tests {
     #[test]
     fn visible_source_excludes_replaced_markdown() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text("- x [y](url)\nlast"), None).unwrap();
+        let (buffer, view) = state
+            .open_text(
+                crate::editor::text::TextBuffer::from_text("- x [y](url)\nlast"),
+                None,
+            )
+            .unwrap();
         state.views[view].cursor = ByteOffset(13);
         let mut config = Config::default();
         config.editor.line_numbers = LineNumbers::Off;
@@ -1221,20 +1309,36 @@ mod tests {
             (6, 12, crate::language::syntax::MarkdownMark::Hide),
         ] {
             ui.markdown_marks.push(crate::ui::UiMarkdownMark {
-                buffer, revision: state.buffers[buffer].text.revision(),
-                range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+                mark,
             });
         }
-        let model = VisualRowModel::new_for_state(&state, &state.buffers[buffer].text, view, &ui, &config, 20, false);
-        assert_eq!(model.visible_bytes(VisualRowAnchor::default(), 0, 20), vec![1, 2, 3, 4, 5]);
+        let model = VisualRowModel::new_for_state(
+            &state,
+            &state.buffers[buffer].text,
+            view,
+            &ui,
+            &config,
+            20,
+            false,
+        );
+        assert_eq!(
+            model.visible_bytes(VisualRowAnchor::default(), 0, 20),
+            vec![1, 2, 3, 4, 5]
+        );
     }
 
     #[test]
     fn visible_ranges_exclude_hidden_markdown_and_unpainted_table_cells() {
         use crate::{editor::text::TextBuffer, language::syntax::MarkdownMark, ui::UiMarkdownMark};
-        let source = "cursor\nz hidden\n| a | long text here and more |\n|---|---|\n| b | c |\nlast";
+        let source =
+            "cursor\nz hidden\n| a | long text here and more |\n|---|---|\n| b | c |\nlast";
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text(source), None).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text(source), None)
+            .unwrap();
         let text = &state.buffers[buffer].text;
         let revision = text.revision();
         let mut config = crate::config::load_bundled_config().config;
@@ -1242,20 +1346,47 @@ mod tests {
         config.editor.git_signs.enabled = false;
         let mut ui = UiState::default();
         let mark = |start, end, mark| UiMarkdownMark {
-            buffer, revision, range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+            buffer,
+            revision,
+            range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
+            mark,
         };
         let table_start = source.find('|').unwrap();
         let table_end = source.find("last").unwrap();
-        ui.markdown_marks = source.match_indices('|')
-            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect();
+        ui.markdown_marks = source
+            .match_indices('|')
+            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+            .collect();
         ui.markdown_marks.push(mark(7, 15, MarkdownMark::Hide));
-        ui.markdown_marks.push(mark(table_start, table_end, MarkdownMark::Table));
+        ui.markdown_marks
+            .push(mark(table_start, table_end, MarkdownMark::Table));
         ui.markdown_marks.sort_by_key(|mark| mark.range.start);
         for wrap in [true, false] {
             let model = VisualRowModel::new_for_state(&state, text, view, &ui, &config, 20, wrap);
-            assert!(model.visible_text_ranges(VisualRowAnchor { line: 1, wrap_row: 0 }, 1, 0).is_empty());
-            let visible = model.visible_text_ranges(VisualRowAnchor { line: 2, wrap_row: 0 }, 2, 0);
-            let painted = visible.iter().map(|range| text.slice(*range).unwrap()).collect::<String>();
+            assert!(
+                model
+                    .visible_text_ranges(
+                        VisualRowAnchor {
+                            line: 1,
+                            wrap_row: 0
+                        },
+                        1,
+                        0
+                    )
+                    .is_empty()
+            );
+            let visible = model.visible_text_ranges(
+                VisualRowAnchor {
+                    line: 2,
+                    wrap_row: 0,
+                },
+                2,
+                0,
+            );
+            let painted = visible
+                .iter()
+                .map(|range| text.slice(*range).unwrap())
+                .collect::<String>();
             assert!(painted.contains('a'), "{painted:?}");
             assert!(painted.contains("long text"), "{painted:?}");
             assert!(!painted.contains("more"), "{painted:?}");
@@ -1301,13 +1432,20 @@ mod tests {
         config.editor.line_numbers = LineNumbers::Off;
         let ui = UiState::default();
         let model = VisualRowModel::new(
-            &text, crate::editor::ViewId::default(), &ui, &config, 4, true,
+            &text,
+            crate::editor::ViewId::default(),
+            &ui,
+            &config,
+            4,
+            true,
         );
         assert_eq!(model.byte_at_cell(VisualRowAnchor::default(), 3), 2);
-        let second = VisualRowAnchor { line: 0, wrap_row: 1 };
+        let second = VisualRowAnchor {
+            line: 0,
+            wrap_row: 1,
+        };
         assert_eq!(model.byte_at_cell(second, 0), 3);
         assert_eq!(model.byte_at_cell(second, 1), 3);
         assert_eq!(model.byte_at_cell(second, 3), text.len_bytes());
     }
-
 }

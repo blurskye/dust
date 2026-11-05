@@ -95,7 +95,11 @@ pub(super) fn load_manifest_component(
         .collect::<String>();
     let result = (|| {
         let (manifest, _, store, component_relative) = index_manifest_from_store(
-            store, manifest_relative, component_relative, PluginLoadId(0), limits,
+            store,
+            manifest_relative,
+            component_relative,
+            PluginLoadId(0),
+            limits,
         )?;
         load_component(&store, &store.join(component_relative), manifest, limits)
     })();
@@ -698,16 +702,19 @@ pub(crate) fn load_component(
     let activation = (|| {
         component_api::EditorPlugin::add_to_linker(&mut linker, |state| state)
             .map_err(|error| error.to_string())?;
-        let instance = linker.instantiate(&mut store, &component)
+        let instance = linker
+            .instantiate(&mut store, &component)
             .map_err(|error| format!("{error:#}"))?;
         let bindings = component_api::EditorPlugin::new(&mut store, &instance)
             .map_err(|error| format!("{error:#}"))?;
         // Lazy lifting keeps aliased guest strings from being copied before limits apply.
         use wasmtime::component::{WasmList, WasmStr};
-        let activate = instance.get_typed_func::<(), (Result<WasmList<WasmStr>, WasmStr>,)>(
-            &mut store, "activate",
-        ).map_err(|error| format!("{error:#}"))?;
-        let (result,) = activate.call(&mut store, ()).map_err(|error| format!("{error:#}"))?;
+        let activate = instance
+            .get_typed_func::<(), (Result<WasmList<WasmStr>, WasmStr>,)>(&mut store, "activate")
+            .map_err(|error| format!("{error:#}"))?;
+        let (result,) = activate
+            .call(&mut store, ())
+            .map_err(|error| format!("{error:#}"))?;
         let commands = match result {
             Ok(list) => {
                 if list.len() > limits.maximum_commands {
@@ -715,9 +722,13 @@ pub(crate) fn load_component(
                 }
                 let mut commands = Vec::with_capacity(list.len());
                 for index in 0..list.len() {
-                    let command = list.get(&mut store, index).unwrap()
+                    let command = list
+                        .get(&mut store, index)
+                        .unwrap()
                         .map_err(|error| format!("{error:#}"))?;
-                    let command = command.to_str(&store).map_err(|error| format!("{error:#}"))?;
+                    let command = command
+                        .to_str(&store)
+                        .map_err(|error| format!("{error:#}"))?;
                     if command.len() > 256 {
                         return Err("activation command exceeds byte ceiling".into());
                     }
@@ -730,7 +741,9 @@ pub(crate) fn load_component(
                 return Err(error.chars().take(4096).collect());
             }
         };
-        activate.post_return(&mut store).map_err(|error| format!("{error:#}"))?;
+        activate
+            .post_return(&mut store)
+            .map_err(|error| format!("{error:#}"))?;
         Ok::<_, String>((bindings, commands))
     })();
     drop(deadline);

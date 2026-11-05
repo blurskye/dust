@@ -91,10 +91,7 @@ pub(super) struct ResourcePermit<'a> {
     _editor: &'a crate::editor::EditorState,
 }
 impl ResourcePermit<'_> {
-    pub(super) fn intent(
-        &self,
-        worker: &Arc<()>,
-    ) -> Result<&CheckedResourceIntent, String> {
+    pub(super) fn intent(&self, worker: &Arc<()>) -> Result<&CheckedResourceIntent, String> {
         if self
             .applying
             .values()
@@ -255,11 +252,12 @@ impl WorkspaceEditSession {
         }
         if p.resources.iter().any(|resource| {
             drafts
-                    .iter()
-                    .any(|draft| draft.canonical_path == resource.source && !draft.edits.is_empty())
+                .iter()
+                .any(|draft| draft.canonical_path == resource.source && !draft.edits.is_empty())
         }) {
             return Err(
-                "text edits and renames or deletions of the same file cannot be applied together".into(),
+                "text edits and renames or deletions of the same file cannot be applied together"
+                    .into(),
             );
         }
         let proposal = WorkspaceEditProposal::build(
@@ -290,14 +288,23 @@ impl WorkspaceEditSession {
             .or_else(|| self.preparing_origin())
     }
     pub(super) fn resources_pending(&self, proposal: ProposalId) -> bool {
-        self.accepted.iter().any(|request| request.proposal == proposal)
-            || self.applying.values().any(|(_, request)| request.proposal == proposal)
+        self.accepted
+            .iter()
+            .any(|request| request.proposal == proposal)
+            || self
+                .applying
+                .values()
+                .any(|(_, request)| request.proposal == proposal)
     }
     pub(super) fn next_resource_proposal(&self) -> Option<ProposalId> {
         self.accepted.first().map(|request| request.proposal)
     }
-    pub(super) fn resource_proposal(&self, reply: &super::documents::WorkspaceIoReply) -> Option<ProposalId> {
-        self.applying.get(&reply.id())
+    pub(super) fn resource_proposal(
+        &self,
+        reply: &super::documents::WorkspaceIoReply,
+    ) -> Option<ProposalId> {
+        self.applying
+            .get(&reply.id())
             .filter(|(worker, _)| reply.is_from(worker))
             .map(|(_, request)| request.proposal)
     }
@@ -340,9 +347,13 @@ impl WorkspaceEditSession {
         }
         let (sources, proposal) = self.approval(workspace, configuration)?;
         let needs_history = editor.undo_directory.is_some()
-            && proposal.files.iter().any(|file| file.selected && file.base_revision.is_none());
+            && proposal
+                .files
+                .iter()
+                .any(|file| file.selected && file.base_revision.is_none());
         if !needs_history {
-            return editor.prepare_workspace_edit(sources, proposal, transaction)
+            return editor
+                .prepare_workspace_edit(sources, proposal, transaction)
                 .map(|draft| Some((draft, changes)));
         }
         // Unopened files restore persistent undo while constructing the draft.
@@ -350,7 +361,8 @@ impl WorkspaceEditSession {
         let editor = editor.clone();
         let sources = sources.clone();
         let proposal = proposal.clone();
-        let worker = std::thread::Builder::new().name("dust-workspace-edit".into())
+        let worker = std::thread::Builder::new()
+            .name("dust-workspace-edit".into())
             .spawn(move || editor.prepare_workspace_edit(&sources, &proposal, transaction))
             .map_err(|error| error.to_string())?;
         self.pending_approval = Some(PendingApproval { worker, changes });
@@ -367,7 +379,9 @@ impl WorkspaceEditSession {
         let pending = self.pending_approval.take()?;
         Some((|| {
             self.approval(workspace, configuration)?;
-            let draft = pending.worker.join()
+            let draft = pending
+                .worker
+                .join()
                 .map_err(|_| "workspace preparation worker failed".to_owned())??;
             Ok((draft, pending.changes))
         })())

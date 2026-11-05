@@ -30,8 +30,16 @@ pub struct RequestId(pub u64);
 
 #[derive(Debug)]
 pub enum VfsRequest {
-    ResolvePaths { id: RequestId, paths: Vec<PathBuf> },
-    AgentWrite { id: RequestId, path: PathBuf, root: PathBuf, bytes: Vec<u8> },
+    ResolvePaths {
+        id: RequestId,
+        paths: Vec<PathBuf>,
+    },
+    AgentWrite {
+        id: RequestId,
+        path: PathBuf,
+        root: PathBuf,
+        bytes: Vec<u8>,
+    },
     Read {
         id: RequestId,
         path: PathBuf,
@@ -162,7 +170,10 @@ pub enum WriteExpectation {
 
 #[derive(Debug)]
 pub enum VfsResult {
-    PathsResolved { id: RequestId, paths: Vec<PathBuf> },
+    PathsResolved {
+        id: RequestId,
+        paths: Vec<PathBuf>,
+    },
     ResourceResolved {
         id: RequestId,
         result: Result<CheckedResourceIntent, VfsError>,
@@ -382,7 +393,10 @@ impl VfsWorker {
                             let participating =
                                 participating_roots(&[&path], &[&canonical], roots)?;
                             roots_current(&participating)?;
-                            let paths = participating.iter().map(|root| root.canonical_path.clone()).collect::<Vec<_>>();
+                            let paths = participating
+                                .iter()
+                                .map(|root| root.canonical_path.clone())
+                                .collect::<Vec<_>>();
                             let bytes = read_scoped_file(&canonical, &paths, maximum_bytes)?;
                             roots_current(&participating)?;
                             Ok((canonical, bytes))
@@ -445,10 +459,21 @@ impl VfsWorker {
                             }
                         } else {
                             match request {
-                                VfsRequest::ResolvePaths { id, paths } => VfsResult::PathsResolved {
-                                    id, paths: paths.iter().map(|path| resolve_existing_prefix(path)).collect(),
-                                },
-                                VfsRequest::AgentWrite { id, path, root, bytes } => {
+                                VfsRequest::ResolvePaths { id, paths } => {
+                                    VfsResult::PathsResolved {
+                                        id,
+                                        paths: paths
+                                            .iter()
+                                            .map(|path| resolve_existing_prefix(path))
+                                            .collect(),
+                                    }
+                                }
+                                VfsRequest::AgentWrite {
+                                    id,
+                                    path,
+                                    root,
+                                    bytes,
+                                } => {
                                     let result = agent_atomic_write(&root, &path, &bytes);
                                     VfsResult::Write { id, path, result }
                                 }
@@ -484,7 +509,11 @@ impl VfsWorker {
                                     {
                                         VfsResult::Read {
                                             id,
-                                            result: read_scoped_file(&path, &canonical_roots, DOCUMENT_BYTE_CEILING),
+                                            result: read_scoped_file(
+                                                &path,
+                                                &canonical_roots,
+                                                DOCUMENT_BYTE_CEILING,
+                                            ),
                                             path,
                                         }
                                     }
@@ -520,7 +549,11 @@ impl VfsWorker {
                                     {
                                         VfsResult::Read {
                                             id,
-                                            result: read_scoped_file(&path, &canonical_roots, maximum_bytes),
+                                            result: read_scoped_file(
+                                                &path,
+                                                &canonical_roots,
+                                                maximum_bytes,
+                                            ),
                                             path,
                                         }
                                     }
@@ -626,9 +659,11 @@ impl VfsWorker {
                                         let mut expectation = expectation;
                                         if let Some((source, paths)) = queued.document_paths {
                                             let requested = path.clone();
-                                            path = canonical_write_path(&path).unwrap_or(path.clone());
+                                            path =
+                                                canonical_write_path(&path).unwrap_or(path.clone());
                                             if paths.iter().any(|other| {
-                                                other == &requested || other == &path
+                                                other == &requested
+                                                    || other == &path
                                                     || canonical_write_path(other).ok().as_ref()
                                                         == Some(&path)
                                             }) {
@@ -636,12 +671,18 @@ impl VfsWorker {
                                                     path.clone(),
                                                 ));
                                             }
-                                            let current_file = source.as_ref().is_some_and(|source| {
-                                                source == &requested || source == &path
-                                                    || canonical_write_path(source).ok().as_ref()
-                                                        == Some(&path)
-                                            });
-                                            if !current_file && matches!(expectation, WriteExpectation::Exact(_)) {
+                                            let current_file =
+                                                source.as_ref().is_some_and(|source| {
+                                                    source == &requested
+                                                        || source == &path
+                                                        || canonical_write_path(source)
+                                                            .ok()
+                                                            .as_ref()
+                                                            == Some(&path)
+                                                });
+                                            if !current_file
+                                                && matches!(expectation, WriteExpectation::Exact(_))
+                                            {
                                                 expectation = WriteExpectation::Missing;
                                             }
                                         }
@@ -939,9 +980,19 @@ impl VfsWorker {
         Ok(id)
     }
 
-    pub(crate) fn agent_write(&mut self, path: PathBuf, root: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
+    pub(crate) fn agent_write(
+        &mut self,
+        path: PathBuf,
+        root: PathBuf,
+        bytes: Vec<u8>,
+    ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
-        self.submit(VfsRequest::AgentWrite { id, path, root, bytes })?;
+        self.submit(VfsRequest::AgentWrite {
+            id,
+            path,
+            root,
+            bytes,
+        })?;
         Ok(id)
     }
 
@@ -1208,10 +1259,16 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
     let mut rest = Vec::new();
     loop {
         if let Ok(resolved) = existing.canonicalize() {
-            return rest.iter().rev().fold(resolved, |path, part| path.join(part));
+            return rest
+                .iter()
+                .rev()
+                .fold(resolved, |path, part| path.join(part));
         }
         match (existing.parent(), existing.file_name()) {
-            (Some(parent), Some(name)) => { rest.push(name.to_owned()); existing = parent; }
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                existing = parent;
+            }
             _ => return path.to_path_buf(),
         }
     }
@@ -1271,57 +1328,120 @@ pub(crate) fn participating_roots(
 
 // Canonicalization alone cannot constrain a later open if an ancestor is swapped
 // for a symlink. Resolve from a held root and reject links in every component.
-pub(super) fn open_scoped(path: &Path, roots: &[PathBuf], flags: rustix::fs::OFlags) -> Result<fs::File, VfsError> {
+pub(super) fn open_scoped(
+    path: &Path,
+    roots: &[PathBuf],
+    flags: rustix::fs::OFlags,
+) -> Result<fs::File, VfsError> {
     use rustix::fs::OFlags;
-    let root = roots.iter().filter(|root| path.starts_with(root))
+    let root = roots
+        .iter()
+        .filter(|root| path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
     let error = |source: io::Error| VfsError::Io {
-        operation: "open scoped path", path: path.into(), source,
+        operation: "open scoped path",
+        path: path.into(),
+        source,
     };
     let directory = open_no_symlinks(root, OFlags::PATH | OFlags::DIRECTORY).map_err(error)?;
-    let relative = path.strip_prefix(root).map_err(|_| VfsError::OutsideScope(path.into()))?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| VfsError::OutsideScope(path.into()))?;
     open_beneath(directory, relative, flags).map_err(error)
 }
 
 pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Result<fs::File> {
     use rustix::fs::{CWD, Mode, OFlags, openat};
-    let relative = path.strip_prefix("/").map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "expected an absolute path"))?;
-    let root = fs::File::from(openat(CWD, "/", OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?);
+    let relative = path
+        .strip_prefix("/")
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "expected an absolute path"))?;
+    let root = fs::File::from(openat(
+        CWD,
+        "/",
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?);
     open_beneath(root, relative, flags)
 }
 
-fn open_beneath(mut directory: fs::File, relative: &Path, flags: rustix::fs::OFlags) -> io::Result<fs::File> {
+fn open_beneath(
+    mut directory: fs::File,
+    relative: &Path,
+    flags: rustix::fs::OFlags,
+) -> io::Result<fs::File> {
     use rustix::fs::{Mode, OFlags, openat};
     use std::path::Component;
-    let mut components = relative.components().filter(|part| *part != Component::CurDir).peekable();
+    let mut components = relative
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .peekable();
     while let Some(component) = components.next() {
         let Component::Normal(name) = component else {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "path escapes its directory"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "path escapes its directory",
+            ));
         };
-        let flags = if components.peek().is_some() { OFlags::PATH | OFlags::DIRECTORY } else { flags };
-        directory = fs::File::from(openat(&directory, name, flags | OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty())?);
+        let flags = if components.peek().is_some() {
+            OFlags::PATH | OFlags::DIRECTORY
+        } else {
+            flags
+        };
+        directory = fs::File::from(openat(
+            &directory,
+            name,
+            flags | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?);
         // O_PATH | O_NOFOLLOW opens the symlink itself instead of rejecting it.
         if directory.metadata()?.file_type().is_symlink() {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "symlink in scoped path"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "symlink in scoped path",
+            ));
         }
         if components.peek().is_none() {
             return Ok(directory);
         }
     }
     // Reopen even an empty relative path so the requested access flags apply.
-    Ok(fs::File::from(openat(&directory, ".", flags | OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty())?))
+    Ok(fs::File::from(openat(
+        &directory,
+        ".",
+        flags | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?))
 }
 
-fn scoped_parent(path: &Path, roots: &[PathBuf]) -> Result<(fs::File, std::ffi::OsString), VfsError> {
-    let parent = path.parent().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
-    let name = path.file_name().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
-    let file = open_scoped(parent, roots, rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY)?;
+fn scoped_parent(
+    path: &Path,
+    roots: &[PathBuf],
+) -> Result<(fs::File, std::ffi::OsString), VfsError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
+    let file = open_scoped(
+        parent,
+        roots,
+        rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY,
+    )?;
     Ok((file, name.into()))
 }
 
-pub(super) fn read_scoped_file(path: &Path, roots: &[PathBuf], maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
-    let file = open_scoped(path, roots, rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK)?;
+pub(super) fn read_scoped_file(
+    path: &Path,
+    roots: &[PathBuf],
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, VfsError> {
+    let file = open_scoped(
+        path,
+        roots,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK,
+    )?;
     read_open_file_with_ceiling(file, path, maximum_bytes)
 }
 
@@ -1379,7 +1499,9 @@ pub(super) fn apply_explorer_mutation(
     roots: &[PathBuf],
     maximum_bytes: u64,
 ) -> Result<(), VfsError> {
-    use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, mkdirat, openat, renameat_with, unlinkat};
+    use rustix::fs::{
+        AtFlags, Mode, OFlags, RenameFlags, mkdirat, openat, renameat_with, unlinkat,
+    };
     let error = |path: &Path, source: rustix::io::Errno| VfsError::Io {
         operation: "mutate explorer entry",
         path: path.into(),
@@ -1392,10 +1514,19 @@ pub(super) fn apply_explorer_mutation(
             if *directory {
                 mkdirat(&parent, &name, Mode::from_raw_mode(0o777)).map_err(|e| error(&target, e))
             } else {
-                let file = fs::File::from(openat(&parent, &name,
-                    OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-                    Mode::from_raw_mode(0o666),
-                ).map_err(|e| error(&target, e))?);
+                let file = fs::File::from(
+                    openat(
+                        &parent,
+                        &name,
+                        OFlags::WRONLY
+                            | OFlags::CREATE
+                            | OFlags::EXCL
+                            | OFlags::CLOEXEC
+                            | OFlags::NOFOLLOW,
+                        Mode::from_raw_mode(0o666),
+                    )
+                    .map_err(|e| error(&target, e))?,
+                );
                 file.sync_all().map_err(|source| VfsError::Io {
                     operation: "sync explorer file",
                     path: target,
@@ -1408,10 +1539,20 @@ pub(super) fn apply_explorer_mutation(
             let target = scoped_missing_target(target, roots)?;
             let (source_parent, source_name) = scoped_parent(&source, roots)?;
             let (target_parent, target_name) = scoped_parent(&target, roots)?;
-            renameat_with(&source_parent, &source_name, &target_parent, &target_name, RenameFlags::NOREPLACE)
-                .map_err(|e| if e == rustix::io::Errno::EXIST {
+            renameat_with(
+                &source_parent,
+                &source_name,
+                &target_parent,
+                &target_name,
+                RenameFlags::NOREPLACE,
+            )
+            .map_err(|e| {
+                if e == rustix::io::Errno::EXIST {
                     VfsError::DestinationExists(target.clone())
-                } else { error(&source, e) })
+                } else {
+                    error(&source, e)
+                }
+            })
         }
         ExplorerMutation::Copy { source, target } => {
             let source = scoped_existing_path(source, roots)?;
@@ -1448,10 +1589,19 @@ pub(super) fn apply_explorer_mutation(
                     });
                 }
                 let permissions = metadata.permissions();
-                let mut output = fs::File::from(openat(&parent, &name,
-                    OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-                    Mode::from_raw_mode(0o600),
-                ).map_err(|e| error(&target, e))?);
+                let mut output = fs::File::from(
+                    openat(
+                        &parent,
+                        &name,
+                        OFlags::WRONLY
+                            | OFlags::CREATE
+                            | OFlags::EXCL
+                            | OFlags::CLOEXEC
+                            | OFlags::NOFOLLOW,
+                        Mode::from_raw_mode(0o600),
+                    )
+                    .map_err(|e| error(&target, e))?,
+                );
                 let copied = io::copy(
                     &mut std::io::Read::by_ref(&mut input).take(maximum_bytes.saturating_add(1)),
                     &mut output,
@@ -1499,7 +1649,9 @@ pub(super) fn apply_explorer_mutation(
             let path = scoped_existing_path(path, roots)?;
             let file = open_scoped(&path, roots, OFlags::PATH)?;
             let metadata = file.metadata().map_err(|source| VfsError::Io {
-                operation: "inspect explorer delete target", path: path.clone(), source,
+                operation: "inspect explorer delete target",
+                path: path.clone(),
+                source,
             })?;
             let (parent, name) = scoped_parent(&path, roots)?;
             if metadata.is_dir() {
@@ -1521,7 +1673,11 @@ pub(super) fn resolve_resource_intent(
 ) -> Result<CheckedResourceIntent, VfsError> {
     use std::os::unix::fs::MetadataExt;
     let source = scoped_existing_path(source, roots)?;
-    let input = open_scoped(&source, roots, rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK)?;
+    let input = open_scoped(
+        &source,
+        roots,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK,
+    )?;
     let metadata = input.metadata().map_err(|source_error| VfsError::Io {
         operation: "inspect resource source",
         path: source.clone(),
@@ -1583,7 +1739,11 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
     if source != intent.source {
         return Err(VfsError::ChangedOnDisk);
     }
-    let input = open_scoped(&source, &intent.canonical_roots, rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK)?;
+    let input = open_scoped(
+        &source,
+        &intent.canonical_roots,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK,
+    )?;
     let metadata = input.metadata().map_err(|source_error| VfsError::Io {
         operation: "revalidate resource",
         path: source.clone(),
@@ -1599,11 +1759,12 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
     let (source_parent, source_name) = scoped_parent(&source, &intent.canonical_roots)?;
     match &intent.kind {
         ResourceIntentKind::Delete => {
-            rustix::fs::unlinkat(&source_parent, &source_name, rustix::fs::AtFlags::empty()).map_err(|source_error| VfsError::Io {
-                operation: "delete resource",
-                path: source,
-                source: source_error.into(),
-            })
+            rustix::fs::unlinkat(&source_parent, &source_name, rustix::fs::AtFlags::empty())
+                .map_err(|source_error| VfsError::Io {
+                    operation: "delete resource",
+                    path: source,
+                    source: source_error.into(),
+                })
         }
         ResourceIntentKind::Rename {
             target,
@@ -1620,18 +1781,35 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
                 return Err(VfsError::ChangedOnDisk);
             }
             let (target_parent, target_name) = scoped_parent(target, &intent.canonical_roots)?;
-            let parent_metadata = target_parent.metadata().map_err(|source_error| VfsError::Io {
-                operation: "revalidate resource parent",
-                path: parent.clone(),
-                source: source_error,
-            })?;
+            let parent_metadata =
+                target_parent
+                    .metadata()
+                    .map_err(|source_error| VfsError::Io {
+                        operation: "revalidate resource parent",
+                        path: parent.clone(),
+                        source: source_error,
+                    })?;
             if parent_metadata.dev() != *parent_device || parent_metadata.ino() != *parent_inode {
                 return Err(VfsError::ChangedOnDisk);
             }
-            rustix::fs::renameat_with(&source_parent, &source_name, &target_parent, &target_name, rustix::fs::RenameFlags::NOREPLACE)
-                .map_err(|e| if e == rustix::io::Errno::EXIST {
+            rustix::fs::renameat_with(
+                &source_parent,
+                &source_name,
+                &target_parent,
+                &target_name,
+                rustix::fs::RenameFlags::NOREPLACE,
+            )
+            .map_err(|e| {
+                if e == rustix::io::Errno::EXIST {
                     VfsError::DestinationExists(target.clone())
-                } else { VfsError::Io { operation: "rename resource", path: source, source: e.into() } })
+                } else {
+                    VfsError::Io {
+                        operation: "rename resource",
+                        path: source,
+                        source: e.into(),
+                    }
+                }
+            })
         }
     }
 }
@@ -1642,7 +1820,10 @@ fn canonical_write_path(path: &Path) -> io::Result<PathBuf> {
             return Err(error);
         }
         let name = path.file_name().ok_or(error)?;
-        let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
         Ok(fs::canonicalize(parent)?.join(name))
     })
 }
@@ -1668,7 +1849,13 @@ pub(super) fn list_directory(
     let prefix = prefix.to_lowercase();
     let mut paths = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().to_lowercase().starts_with(&prefix))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase()
+                .starts_with(&prefix)
+        })
         .map(|entry| entry.path())
         .take(maximum_entries.saturating_add(1))
         .collect::<Vec<_>>();
@@ -1685,7 +1872,10 @@ pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
         .custom_flags(nix::libc::O_NONBLOCK)
         .open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected a regular file"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected a regular file",
+        ));
     }
     Ok(file)
 }
@@ -1719,7 +1909,8 @@ pub(super) fn read_open_file_with_ceiling(
     }
     if metadata.len() > maximum_bytes {
         return Err(VfsError::DocumentTooLarge {
-            path: path.to_path_buf(), maximum_bytes,
+            path: path.to_path_buf(),
+            maximum_bytes,
         });
     }
     read_bounded_bytes(file, maximum_bytes)
@@ -1850,17 +2041,26 @@ pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
 /// Agent paths are already resolved. Open each directory without following
 /// symlinks and keep the parent descriptor for creation, rename and cleanup.
 fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
-    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, openat, renameat, statat, unlinkat};
+    use rustix::fs::{
+        AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, openat, renameat, statat, unlinkat,
+    };
     use std::{path::Component, sync::atomic::AtomicU64};
     static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
-    let relative = path.strip_prefix(root).map_err(|_| VfsError::OutsideScope(path.into()))?;
-    if !root.is_absolute() || root.components().chain(relative.components())
-        .any(|part| matches!(part, Component::ParentDir))
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| VfsError::OutsideScope(path.into()))?;
+    if !root.is_absolute()
+        || root
+            .components()
+            .chain(relative.components())
+            .any(|part| matches!(part, Component::ParentDir))
     {
         return Err(VfsError::OutsideScope(path.into()));
     }
-    let name = relative.file_name().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
+    let name = relative
+        .file_name()
+        .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
     let result = (|| -> io::Result<()> {
         // Ancestors need search permission, not directory-listing permission.
         let flags = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
@@ -1881,12 +2081,16 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
                 directory = openat(&directory, name, flags, Mode::empty())?.into();
             }
         }
-        let directory = File::from(openat(&directory, ".",
+        let directory = File::from(openat(
+            &directory,
+            ".",
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty())?);
+            Mode::empty(),
+        )?);
         let permissions = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
-            Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile =>
-                Some(Mode::from_raw_mode(stat.st_mode)),
+            Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile => {
+                Some(Mode::from_raw_mode(stat.st_mode))
+            }
             Ok(_) => return Err(io::Error::other("not a regular file")),
             Err(rustix::io::Errno::NOENT) => None,
             Err(error) => return Err(error.into()),
@@ -1896,18 +2100,24 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
             attempts += 1;
             let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
             let temporary_name = format!(".dust-{}-{sequence}.tmp", std::process::id());
-            if std::ffi::OsStr::new(&temporary_name) == name { continue; }
-            match openat(&directory, &temporary_name,
+            if std::ffi::OsStr::new(&temporary_name) == name {
+                continue;
+            }
+            match openat(
+                &directory,
+                &temporary_name,
                 OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::RUSR | Mode::WUSR)
-            {
+                Mode::RUSR | Mode::WUSR,
+            ) {
                 Ok(fd) => break (temporary_name, File::from(fd)),
                 Err(rustix::io::Errno::EXIST) if attempts < 16 => continue,
                 Err(error) => return Err(error.into()),
             }
         };
         let result = (|| -> io::Result<()> {
-            if let Some(permissions) = permissions { fchmod(&temporary, permissions)?; }
+            if let Some(permissions) = permissions {
+                fchmod(&temporary, permissions)?;
+            }
             temporary.write_all(bytes)?;
             temporary.sync_all()?;
             renameat(&directory, &temporary_name, &directory, name)?;
@@ -1919,7 +2129,11 @@ fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsE
         result?;
         directory.sync_all()
     })();
-    result.map_err(|source| VfsError::Io { operation: "agent write", path: path.into(), source })
+    result.map_err(|source| VfsError::Io {
+        operation: "agent write",
+        path: path.into(),
+        source,
+    })
 }
 
 /// Write through a same-directory temporary file, sync it, then atomically
@@ -1939,7 +2153,11 @@ pub(crate) fn atomic_write_with_executable(
     let set_mode = || -> io::Result<()> {
         let mut permissions = temporary.as_file().metadata()?.permissions();
         let mode = permissions.mode() & !0o111;
-        permissions.set_mode(if executable { mode | ((mode & 0o444) >> 2) } else { mode });
+        permissions.set_mode(if executable {
+            mode | ((mode & 0o444) >> 2)
+        } else {
+            mode
+        });
         temporary.as_file().set_permissions(permissions)?;
         temporary.as_file().sync_all()
     };
@@ -1974,13 +2192,19 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
     match fs::metadata(path) {
         Ok(metadata) => {
             use std::os::unix::fs::{MetadataExt, fchown};
-            fchown(temporary.as_file(), Some(metadata.uid()), Some(metadata.gid()))
-                .map_err(|source| VfsError::Io {
-                    operation: "copy ownership",
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-            temporary.as_file().set_permissions(metadata.permissions())
+            fchown(
+                temporary.as_file(),
+                Some(metadata.uid()),
+                Some(metadata.gid()),
+            )
+            .map_err(|source| VfsError::Io {
+                operation: "copy ownership",
+                path: path.to_path_buf(),
+                source,
+            })?;
+            temporary
+                .as_file()
+                .set_permissions(metadata.permissions())
                 .map_err(|source| VfsError::Io {
                     operation: "copy permissions",
                     path: path.to_path_buf(),
@@ -1988,11 +2212,13 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
                 })?;
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(source) => return Err(VfsError::Io {
-            operation: "inspect write target",
-            path: path.to_path_buf(),
-            source,
-        }),
+        Err(source) => {
+            return Err(VfsError::Io {
+                operation: "inspect write target",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
     }
     temporary
         .as_file()
@@ -2041,12 +2267,27 @@ mod lifecycle_tests {
         std::os::unix::fs::symlink(root.path(), root.path().join("alias")).unwrap();
         let owned = root.path().join("new.txt");
         let mut worker = VfsWorker::start(2);
-        for target in [root.path().join("sub/../new.txt"), root.path().join("alias/new.txt")] {
+        for target in [
+            root.path().join("sub/../new.txt"),
+            root.path().join("alias/new.txt"),
+        ] {
             for (target, other) in [(target.clone(), owned.clone()), (owned.clone(), target)] {
-                worker.write_document(target, b"not written".to_vec(), WriteExpectation::Any, None, vec![other]).unwrap();
-                assert!(matches!(result(&worker), VfsResult::Write {
-                    result: Err(VfsError::DestinationExists(_)), ..
-                }));
+                worker
+                    .write_document(
+                        target,
+                        b"not written".to_vec(),
+                        WriteExpectation::Any,
+                        None,
+                        vec![other],
+                    )
+                    .unwrap();
+                assert!(matches!(
+                    result(&worker),
+                    VfsResult::Write {
+                        result: Err(VfsError::DestinationExists(_)),
+                        ..
+                    }
+                ));
                 assert!(!owned.exists());
             }
         }
@@ -2112,7 +2353,10 @@ mod lifecycle_tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
         agent_atomic_write(&root, &path, b"new").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"new");
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
     }
 
@@ -2171,7 +2415,10 @@ mod lifecycle_tests {
         fs::write(&source, b"source").unwrap();
         let roots = vec![root.path().to_path_buf()];
         let target = scoped_missing_target(&target, &roots).unwrap();
-        let rename = ExplorerMutation::Rename { source: source.clone(), target: target.clone() };
+        let rename = ExplorerMutation::Rename {
+            source: source.clone(),
+            target: target.clone(),
+        };
         let intent = resolve_resource_intent(&source, Some(&target), &roots, 1024).unwrap();
         fs::write(&target, b"other writer").unwrap();
         assert!(matches!(
@@ -2199,7 +2446,13 @@ mod lifecycle_tests {
         fs::write(&source, b"small").unwrap();
         let intent = resolve_resource_intent(&source, None, &[root.path().into()], 5).unwrap();
         fs::write(&source, b"larger than admitted").unwrap();
-        assert!(matches!(apply_resource_intent(&intent), Err(VfsError::DocumentTooLarge { maximum_bytes: 5, .. })));
+        assert!(matches!(
+            apply_resource_intent(&intent),
+            Err(VfsError::DocumentTooLarge {
+                maximum_bytes: 5,
+                ..
+            })
+        ));
         assert_eq!(fs::read(&source).unwrap(), b"larger than admitted");
     }
 
@@ -2211,11 +2464,20 @@ mod lifecycle_tests {
         fs::create_dir(&parent).unwrap();
         let source = root.path().join("source");
         fs::write(&source, b"keep").unwrap();
-        let intent = resolve_resource_intent(&source, Some(&parent.join("new")), &[root.path().into()], 1024).unwrap();
+        let intent = resolve_resource_intent(
+            &source,
+            Some(&parent.join("new")),
+            &[root.path().into()],
+            1024,
+        )
+        .unwrap();
         let moved = outside.path().join("dest");
         fs::rename(&parent, &moved).unwrap();
         std::os::unix::fs::symlink(&moved, &parent).unwrap();
-        assert!(matches!(apply_resource_intent(&intent), Err(VfsError::ChangedOnDisk)));
+        assert!(matches!(
+            apply_resource_intent(&intent),
+            Err(VfsError::ChangedOnDisk)
+        ));
         assert_eq!(fs::read(&source).unwrap(), b"keep");
         assert!(!moved.join("new").exists());
     }
@@ -2269,10 +2531,17 @@ mod lifecycle_tests {
         let source = root.path().join("fifo");
         let target = root.path().join("copy");
         nix::unistd::mkfifo(&source, nix::sys::stat::Mode::S_IRWXU).unwrap();
-        assert!(matches!(apply_explorer_mutation(
-            &ExplorerMutation::Copy { source, target: target.clone() },
-            &[root.path().into()], 1024,
-        ), Err(VfsError::NotRegularFile(_))));
+        assert!(matches!(
+            apply_explorer_mutation(
+                &ExplorerMutation::Copy {
+                    source,
+                    target: target.clone()
+                },
+                &[root.path().into()],
+                1024,
+            ),
+            Err(VfsError::NotRegularFile(_))
+        ));
         assert!(!target.exists());
     }
 

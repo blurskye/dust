@@ -178,11 +178,13 @@ mod tests {
         let mut registry = CommandRegistry::default();
         register_commands(&mut registry).unwrap();
         for command in ["test.run", "test.list", "test.stop"] {
-            let invocation = CommandInvocation::new(
-                &format!("{command}.prompt"), InvocationSource::Test,
-            ).unwrap();
+            let invocation =
+                CommandInvocation::new(&format!("{command}.prompt"), InvocationSource::Test)
+                    .unwrap();
             let outcome = registry.execute(&state, &invocation).unwrap();
-            assert!(matches!(outcome.effects.as_slice(), [AppEffect::OpenPrompt { kind: PromptKind::Command, initial }] if initial == &format!("{command} name=")));
+            assert!(
+                matches!(outcome.effects.as_slice(), [AppEffect::OpenPrompt { kind: PromptKind::Command, initial }] if initial == &format!("{command} name="))
+            );
         }
     }
 }

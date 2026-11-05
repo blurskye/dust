@@ -55,7 +55,8 @@ impl InteractiveApplication {
         let dashboard_visible = matches!(startup, StartupTarget::Dashboard { .. })
             && configuration.settings.startup.show_dashboard;
         if matches!(startup, StartupTarget::Dashboard { .. }) && !dashboard_visible {
-            state.open_text(TextBuffer::from_text(""), None)
+            state
+                .open_text(TextBuffer::from_text(""), None)
                 .map_err(|error| InteractiveError::Configuration(error.into()))?;
         }
         let workspace = WorkspaceState::new(
@@ -132,7 +133,9 @@ impl InteractiveApplication {
             commands,
             input: InputSession::new(ABSOLUTE_MAX_COUNT),
             configuration: ConfigurationSession::new(
-                configuration, use_user_configuration, source_fingerprint,
+                configuration,
+                use_user_configuration,
+                source_fingerprint,
             ),
             ui: super::Tracked::new(UiState {
                 config_diagnostic,
@@ -217,7 +220,8 @@ impl InteractiveApplication {
     }
 
     pub(super) fn queue_startup_reads(&mut self) {
-        self.documents.startup_activation(&self.state, &self.window_session);
+        self.documents
+            .startup_activation(&self.state, &self.window_session);
         for error in self
             .documents
             .queue_startup(&self.state.window_version(), self.workspace.root_revision())
@@ -234,7 +238,9 @@ impl InteractiveApplication {
         self.window_session
             .check_editor_admission(&(&*self.state).into())?;
         let mut candidate = self.state.draft();
-        let activate = self.documents.startup_activation(&self.state, &self.window_session);
+        let activate = self
+            .documents
+            .startup_activation(&self.state, &self.window_session);
         let buffer = if activate {
             candidate.open_document(text, path)?.0
         } else {
@@ -242,12 +248,15 @@ impl InteractiveApplication {
         };
         self.commit_editor_draft(candidate, None, activate)?;
         if activate {
-            self.documents.startup_activated(&self.state, &self.window_session);
+            self.documents
+                .startup_activated(&self.state, &self.window_session);
         }
         Ok(buffer)
     }
     pub(super) fn finish_startup_reads_if_complete(&mut self) {
-        let activate = self.documents.startup_activation(&self.state, &self.window_session);
+        let activate = self
+            .documents
+            .startup_activation(&self.state, &self.window_session);
         if let Some(buffer) = self
             .documents
             .take_startup_primary(&self.state.window_version(), self.workspace.root_revision())

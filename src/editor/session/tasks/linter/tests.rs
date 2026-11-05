@@ -135,10 +135,12 @@ fn reply(
 #[test]
 fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
-    let (id, _) = editor.open_text(
-        TextBuffer::from_text("abc\n"),
-        Some(root.path().join("open")),
-    ).unwrap();
+    let (id, _) = editor
+        .open_text(
+            TextBuffer::from_text("abc\n"),
+            Some(root.path().join("open")),
+        )
+        .unwrap();
     for name in ["first", "second"] {
         let task = completed(
             &mut tasks,
@@ -194,10 +196,12 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
     tasks
         .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
         .unwrap();
-    editor.open_text(
-        TextBuffer::from_text("unrelated"),
-        Some(root.path().join("other")),
-    ).unwrap();
+    editor
+        .open_text(
+            TextBuffer::from_text("unrelated"),
+            Some(root.path().join("other")),
+        )
+        .unwrap();
     editor.buffers[id].text = TextBuffer::from_text("abc\n");
     assert!(matches!(
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
@@ -305,24 +309,65 @@ fn linter_symlinks_share_canonical_reads_and_respect_open_buffers() {
     let path = root.path().join("real");
     std::fs::write(&path, "abc\n").unwrap();
     std::os::unix::fs::symlink(&path, root.path().join("link")).unwrap();
-    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"link:1:1:alias\nreal:1:2:real\n");
-    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
-    assert_eq!(tasks.linters.builds.values().next().unwrap().unread.len(), 1);
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"link:1:1:alias\nreal:1:2:real\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+        .unwrap();
+    assert_eq!(
+        tasks.linters.builds.values().next().unwrap().unread.len(),
+        1
+    );
     let mut docs = documents(VfsWorker::start(1), &editor, &workspace);
-    docs.submit_linter_read(tasks.linter_read(&editor, &workspace, &1, &diagnostics).unwrap()).unwrap();
-    tasks.accept_linter_read(reply(&mut docs, &editor, &workspace), &editor, &workspace, 1, &diagnostics).unwrap();
-    let Some(LinterUpdate::Publish { batches, .. }) = tasks.next_linter_update(&editor, &workspace, 1, &diagnostics) else {
+    docs.submit_linter_read(
+        tasks
+            .linter_read(&editor, &workspace, &1, &diagnostics)
+            .unwrap(),
+    )
+    .unwrap();
+    tasks
+        .accept_linter_read(
+            reply(&mut docs, &editor, &workspace),
+            &editor,
+            &workspace,
+            1,
+            &diagnostics,
+        )
+        .unwrap();
+    let Some(LinterUpdate::Publish { batches, .. }) =
+        tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
+    else {
         panic!("symlink read was not published");
     };
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].items.len(), 2);
     assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&path));
 
-    let (id, _) = editor.open_text(TextBuffer::from_text("abc\n"), Some(root.path().join("link"))).unwrap();
-    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"real:1:1:open\n");
-    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
+    let (id, _) = editor
+        .open_text(
+            TextBuffer::from_text("abc\n"),
+            Some(root.path().join("link")),
+        )
+        .unwrap();
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"real:1:1:open\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+        .unwrap();
     let Some(LinterUpdate::Publish { producer, batches }) =
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
     else {
@@ -331,34 +376,72 @@ fn linter_symlinks_share_canonical_reads_and_respect_open_buffers() {
     let uri = crate::language::lsp::file_uri(&root.path().join("link"));
     assert_eq!(batches[0].uri, uri);
     assert_eq!(batches[0].items[0].uri, uri);
-    diagnostics.replace_source(&producer, batches, &editor).unwrap();
+    diagnostics
+        .replace_source(&producer, batches, &editor)
+        .unwrap();
     assert_eq!(diagnostics.choices().count(), 1);
     editor.buffers[id].dirty = true;
-    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"real:1:1:dirty\n");
-    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).is_err());
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"real:1:1:dirty\n",
+    );
+    assert!(
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+            .is_err()
+    );
 
     std::fs::create_dir(root.path().join("sources")).unwrap();
     std::os::unix::fs::symlink(root.path().join("sources"), root.path().join("alias")).unwrap();
     let new_path = root.path().join("alias/new");
-    editor.open_text(TextBuffer::from_text("new text"), Some(new_path.clone())).unwrap();
-    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"sources/new:1:1:new buffer\n");
-    tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap();
+    editor
+        .open_text(TextBuffer::from_text("new text"), Some(new_path.clone()))
+        .unwrap();
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"sources/new:1:1:new buffer\n",
+    );
+    tasks
+        .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+        .unwrap();
     let Some(LinterUpdate::Publish { producer, batches }) =
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics)
     else {
         panic!("new buffer under a symlinked directory was not published");
     };
     assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&new_path));
-    diagnostics.replace_source(&producer, batches, &editor).unwrap();
+    diagnostics
+        .replace_source(&producer, batches, &editor)
+        .unwrap();
 
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("source"), "text").unwrap();
     std::os::unix::fs::symlink(outside.path().join("source"), root.path().join("escape")).unwrap();
-    let task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"escape:1:1:outside\n");
-    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap_err().contains("outside"));
+    let task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"escape:1:1:outside\n",
+    );
+    assert!(
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+            .unwrap_err()
+            .contains("outside")
+    );
 }
 
 #[test]
@@ -552,7 +635,9 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
             .contains("unowned")
     );
     assert_eq!(TextBuffer::test_materializations(), before);
-    editor.open_text(TextBuffer::from_text("new"), Some(root.path().join("a"))).unwrap();
+    editor
+        .open_text(TextBuffer::from_text("new"), Some(root.path().join("a")))
+        .unwrap();
     let after_open = TextBuffer::test_materializations();
     release.send(()).unwrap();
     tasks
@@ -699,7 +784,9 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
     std::fs::create_dir_all(root.path().join("sub/src")).unwrap();
     std::fs::create_dir(root.path().join("sub/build")).unwrap();
     let path = root.path().join("sub/src/main.rs");
-    editor.open_text(TextBuffer::from_text("text"), Some(path.clone())).unwrap();
+    editor
+        .open_text(TextBuffer::from_text("text"), Some(path.clone()))
+        .unwrap();
     let mut task = completed(
         &mut tasks,
         &config,
@@ -731,19 +818,33 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
         panic!("publication missing")
     };
     assert_eq!(batches[0].uri, crate::language::lsp::file_uri(&path));
-    let mut task = completed(&mut tasks, &config, &workspace, &editor, &mut diagnostics,
-        "first", b"../../../outside:1:1:problem\n");
+    let mut task = completed(
+        &mut tasks,
+        &config,
+        &workspace,
+        &editor,
+        &mut diagnostics,
+        "first",
+        b"../../../outside:1:1:problem\n",
+    );
     task.cwd = root.path().join("sub/build");
-    assert!(tasks.begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024)).unwrap_err().contains("outside"));
+    assert!(
+        tasks
+            .begin_linter(task, &editor, &workspace, 1, &diagnostics, (100, 1024))
+            .unwrap_err()
+            .contains("outside")
+    );
 }
 
 #[test]
 fn a_failing_dependency_publishes_its_matched_diagnostics() {
     let (root, mut editor, workspace, mut config, mut tasks, mut diagnostics) = fixture();
-    editor.open_text(
-        TextBuffer::from_text("text"),
-        Some(root.path().join("source")),
-    ).unwrap();
+    editor
+        .open_text(
+            TextBuffer::from_text("text"),
+            Some(root.path().join("source")),
+        )
+        .unwrap();
     let mut dependency = config.tasks["first"].clone();
     dependency.matcher = None;
     dependency.arguments = vec![
@@ -809,10 +910,18 @@ fn a_failing_dependency_publishes_its_matched_diagnostics() {
     else {
         panic!("missing dependency diagnostic publication")
     };
-    diagnostics.replace_source(&producer, batches, &editor).unwrap();
-    let rows = diagnostics.choices().map(|(_, row, _)| row).collect::<Vec<_>>();
+    diagnostics
+        .replace_source(&producer, batches, &editor)
+        .unwrap();
+    let rows = diagnostics
+        .choices()
+        .map(|(_, row, _)| row)
+        .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].uri, crate::language::lsp::file_uri(&root.path().join("source")));
+    assert_eq!(
+        rows[0].uri,
+        crate::language::lsp::file_uri(&root.path().join("source"))
+    );
     assert_eq!(rows[0].range.start.get(), 0);
     assert_eq!(rows[0].message, "compile failed");
 }
@@ -822,17 +931,38 @@ fn linter_columns_match_the_codec_for_sorted_repeated_unicode_positions() {
     use crate::editor::text::{PositionCodec, PositionEncoding};
     let text = TextBuffer::from_text(&format!("{}\nlast", "a😀é".repeat(100_000)));
     let codec = PositionCodec::new(&text);
-    for encoding in [PositionEncoding::Utf8, PositionEncoding::Utf16, PositionEncoding::Utf32] {
-        let end_column = codec.byte_to_lsp(crate::editor::text::ByteOffset(699_993), encoding).unwrap().1;
-        let raw = (0..10_000).map(|_| Raw {
-            line: 0, column: end_column, encoding, severity: DiagnosticSeverity::Error, message: "end".into(),
-        }).collect();
+    for encoding in [
+        PositionEncoding::Utf8,
+        PositionEncoding::Utf16,
+        PositionEncoding::Utf32,
+    ] {
+        let end_column = codec
+            .byte_to_lsp(crate::editor::text::ByteOffset(699_993), encoding)
+            .unwrap()
+            .1;
+        let raw = (0..10_000)
+            .map(|_| Raw {
+                line: 0,
+                column: end_column,
+                encoding,
+                severity: DiagnosticSeverity::Error,
+                message: "end".into(),
+            })
+            .collect();
         let items = convert(Path::new("/source"), raw, &text, None, "test").unwrap();
         assert_eq!(items.len(), 10_000);
         assert!(items.iter().all(|item| item.range.start.get() == 699_993));
-        let invalid = Raw { line: 0, column: 2, encoding, severity: DiagnosticSeverity::Error, message: "split".into() };
-        assert_eq!(convert(Path::new("/source"), vec![invalid], &text, None, "test").is_err(),
-            codec.lsp_to_byte(0, 2, encoding).is_err());
+        let invalid = Raw {
+            line: 0,
+            column: 2,
+            encoding,
+            severity: DiagnosticSeverity::Error,
+            message: "split".into(),
+        };
+        assert_eq!(
+            convert(Path::new("/source"), vec![invalid], &text, None, "test").is_err(),
+            codec.lsp_to_byte(0, 2, encoding).is_err()
+        );
     }
 }
 

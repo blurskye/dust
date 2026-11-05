@@ -102,10 +102,9 @@ impl TaskDiagnosticRun {
         match self.documents.get(path) {
             Some((document, true))
                 if document.current(state)
-                    && state
-                        .buffers
-                        .iter()
-                        .any(|(_, b)| b.path.as_deref().is_some_and(|p| source_path(p) == path) && !b.dirty) =>
+                    && state.buffers.iter().any(|(_, b)| {
+                        b.path.as_deref().is_some_and(|p| source_path(p) == path) && !b.dirty
+                    }) =>
             {
                 Ok(Some(document))
             }
@@ -132,9 +131,10 @@ pub(super) fn resolve_source_path(path: &Path) -> std::io::Result<PathBuf> {
         }
         // A new open buffer can have a missing file under a symlinked directory.
         let parent = std::fs::canonicalize(path.parent().ok_or(error)?)?;
-        Ok(parent.join(path.file_name().ok_or_else(|| {
-            std::io::Error::other("linter source has no filename")
-        })?))
+        Ok(parent.join(
+            path.file_name()
+                .ok_or_else(|| std::io::Error::other("linter source has no filename"))?,
+        ))
     })
 }
 
@@ -183,24 +183,26 @@ impl TaskSession {
                     .name(&matcher.path_group)
                     .map(|value| PathBuf::from(value.as_str()))
                     .map(|path| super::super::search::MatcherSource {
-                            path: if path.is_absolute() {
-                                path
-                            } else {
-                                task.cwd.join(path)
-                            },
-                            line: captures
-                                .name(&matcher.line_group)
-                                .and_then(|v| v.as_str().parse::<usize>().ok())
-                                .unwrap_or(1)
-                                .saturating_sub(1),
-                            column: matcher
-                                .column_group
-                                .as_ref()
-                                .and_then(|name| captures.name(name))
-                                .and_then(|v| v.as_str().parse::<usize>().ok())
-                                .unwrap_or(1)
-                                .saturating_sub(1),
-                            encoding: matcher.column_encoding.unwrap_or(crate::editor::text::PositionEncoding::Utf8),
+                        path: if path.is_absolute() {
+                            path
+                        } else {
+                            task.cwd.join(path)
+                        },
+                        line: captures
+                            .name(&matcher.line_group)
+                            .and_then(|v| v.as_str().parse::<usize>().ok())
+                            .unwrap_or(1)
+                            .saturating_sub(1),
+                        column: matcher
+                            .column_group
+                            .as_ref()
+                            .and_then(|name| captures.name(name))
+                            .and_then(|v| v.as_str().parse::<usize>().ok())
+                            .unwrap_or(1)
+                            .saturating_sub(1),
+                        encoding: matcher
+                            .column_encoding
+                            .unwrap_or(crate::editor::text::PositionEncoding::Utf8),
                     })
                     .filter(|source| source.path.starts_with(&task.root)),
             })

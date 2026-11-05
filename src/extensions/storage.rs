@@ -868,8 +868,14 @@ mod tests {
         let stored = wait(&mut service);
         assert_eq!(stored.revision, Some(1));
         assert!(stored.error.is_none());
-        let path = root.path().join("data").join(format!("{:x}.json", Sha256::digest(b"demo")));
-        assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+        let path = root
+            .path()
+            .join("data")
+            .join(format!("{:x}.json", Sha256::digest(b"demo")));
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         service
             .request(
                 "demo".into(),

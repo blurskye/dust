@@ -1220,15 +1220,24 @@ mod tests {
             }),
         };
         assert_eq!(
-            broker.apply("demo", load, proposal.clone()).unwrap_err().code,
+            broker
+                .apply("demo", load, proposal.clone())
+                .unwrap_err()
+                .code,
             PluginVirtualDocumentErrorCode::Cancelled
         );
         let error = err(PluginVirtualDocumentErrorCode::Internal, "close failed");
         assert_eq!(
-            broker.apply("demo", load, PluginVirtualDocumentProposal {
-                kind: PluginVirtualDocumentProposalKind::Error(error.clone()),
-                ..proposal
-            }).unwrap_err(),
+            broker
+                .apply(
+                    "demo",
+                    load,
+                    PluginVirtualDocumentProposal {
+                        kind: PluginVirtualDocumentProposalKind::Error(error.clone()),
+                        ..proposal
+                    }
+                )
+                .unwrap_err(),
             error
         );
         assert!(broker.documents.is_empty() && broker.pending.is_empty());

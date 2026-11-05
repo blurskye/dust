@@ -464,7 +464,10 @@ mod metadata_tests {
             metadata.artifact_path = format!(
                 "packages/publisher/demo/1.0.0/artifacts/{traversal}/2.0.0/artifacts/x.wasm"
             );
-            assert!(matches!(validate_metadata(&metadata, None), Err(RegistryError::Origin)));
+            assert!(matches!(
+                validate_metadata(&metadata, None),
+                Err(RegistryError::Origin)
+            ));
             assert!(matches!(
                 validate_metadata(&metadata, Some(("publisher", "demo", "1.0.0"))),
                 Err(RegistryError::Origin)
@@ -550,7 +553,10 @@ mod cache_tests {
     #[test]
     fn independent_cache_clients_serialize_publication_reads_and_pruning() {
         let directory = tempfile::tempdir().unwrap();
-        let policy = RegistryPolicy { offline: true, ..RegistryPolicy::default() };
+        let policy = RegistryPolicy {
+            offline: true,
+            ..RegistryPolicy::default()
+        };
         let client = RegistryClient::new(policy.clone(), directory.path().into()).unwrap();
         let url = client.official_url("packages/search?q=test").unwrap();
         let key = format!("{:x}", Sha256::digest(url.as_str().as_bytes()));

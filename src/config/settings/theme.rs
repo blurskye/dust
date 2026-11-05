@@ -306,7 +306,8 @@ impl ThemeConfig {
         let mut name = group.name();
         loop {
             name = name.rsplit_once('.')?.0;
-            if let Some(style) = Highlight::named(name).and_then(|group| styles.get(group.index())) {
+            if let Some(style) = Highlight::named(name).and_then(|group| styles.get(group.index()))
+            {
                 return style.as_ref();
             }
         }

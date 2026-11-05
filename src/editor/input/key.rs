@@ -102,7 +102,9 @@ impl KeyEvent {
     /// Use the translated character as the identity for ordinary shifted letters and symbols.
     #[must_use]
     pub fn normalized_shift(mut self) -> Self {
-        if self.modifiers.shift && let KeyCode::Char(character) = &mut self.code {
+        if self.modifiers.shift
+            && let KeyCode::Char(character) = &mut self.code
+        {
             if (self.modifiers.control || self.modifiers.alt) && character.is_ascii_lowercase() {
                 *character = character.to_ascii_uppercase();
             }
@@ -266,7 +268,8 @@ impl FromStr for KeyEvent {
         let mut named_input = named_lowercase.as_str();
         let mut named_modifiers = Modifiers::default();
         loop {
-            if let Some(rest) = named_input.strip_prefix("ctrl-")
+            if let Some(rest) = named_input
+                .strip_prefix("ctrl-")
                 .or_else(|| named_input.strip_prefix("control-"))
             {
                 named_modifiers.control = true;
@@ -285,7 +288,8 @@ impl FromStr for KeyEvent {
             return Ok(Self {
                 code,
                 modifiers: named_modifiers,
-            }.normalized_shift());
+            }
+            .normalized_shift());
         }
         let parts: Vec<_> = input.split('-').collect();
         let (key_name, modifier_names) = parts.split_last().ok_or(KeyParseError::Empty)?;
@@ -365,9 +369,15 @@ mod tests {
             ("control--", "ctrl--"),
             ("CTRL--", "ctrl--"),
             ("CTRL-mouse-left-down", "ctrl-mouse-left-down"),
-            ("Control-ALT-SHIFT-mouse-left-down", "ctrl-alt-shift-mouse-left-down"),
+            (
+                "Control-ALT-SHIFT-mouse-left-down",
+                "ctrl-alt-shift-mouse-left-down",
+            ),
         ] {
-            assert_eq!(alias.parse::<KeyEvent>().unwrap(), canonical.parse().unwrap());
+            assert_eq!(
+                alias.parse::<KeyEvent>().unwrap(),
+                canonical.parse().unwrap()
+            );
         }
     }
 
@@ -380,7 +390,10 @@ mod tests {
             ("shift-!", "!"),
             ("shift--", "-"),
         ] {
-            assert_eq!(shifted.parse::<KeyEvent>().unwrap(), translated.parse().unwrap());
+            assert_eq!(
+                shifted.parse::<KeyEvent>().unwrap(),
+                translated.parse().unwrap()
+            );
         }
         for notation in ["shift-tab", "shift-left", "shift-1", "shift-space"] {
             assert!(notation.parse::<KeyEvent>().unwrap().modifiers.shift);

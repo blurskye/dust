@@ -103,7 +103,10 @@ fn disabled_target03_buttons_are_rejected_before_conversion() {
     assert!(matches!(error.code, wire::ErrorCode::Unsupported));
     let converted = tree(button(true)).unwrap();
     assert_eq!(converted.nodes[0].kind, PluginUiNodeKind::Button);
-    assert_eq!(converted.nodes[0].action.as_deref(), Some("plugin.demo.open"));
+    assert_eq!(
+        converted.nodes[0].action.as_deref(),
+        Some("plugin.demo.open")
+    );
 }
 
 enum TargetPlacement {

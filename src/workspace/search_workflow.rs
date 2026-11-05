@@ -273,7 +273,8 @@ impl SearchWorkflowBroker {
             return Some(items.into_iter().map(|(item, _)| item).collect());
         }
         items.sort_by(|(a, a_score), (b, b_score)| {
-            b_score.cmp(a_score)
+            b_score
+                .cmp(a_score)
                 .then_with(|| a.title.cmp(&b.title))
                 .then_with(|| a.stable_key.cmp(&b.stable_key))
         });
@@ -400,7 +401,11 @@ mod tests {
                 .unwrap();
             let snapshot = broker.snapshot_if_changed(0).unwrap();
             assert_eq!(
-                snapshot.items.iter().map(|item| item.stable_key.as_str()).collect::<Vec<_>>(),
+                snapshot
+                    .items
+                    .iter()
+                    .map(|item| item.stable_key.as_str())
+                    .collect::<Vec<_>>(),
                 expected
             );
         }

@@ -801,7 +801,10 @@ impl WindowGraph {
             if let Some(window) = focus.filter(|window| candidate.can_focus(*window)) {
                 candidate.focus(window)?;
             }
-            if candidate.focused.is_some_and(|focused| !candidate.can_focus(focused)) {
+            if candidate
+                .focused
+                .is_some_and(|focused| !candidate.can_focus(focused))
+            {
                 candidate.focused = [first, second].into_iter().find(|window| {
                     candidate.windows[window].placement == WindowPlacement::Fullscreen
                         && candidate.can_focus(*window)
@@ -868,9 +871,7 @@ impl WindowGraph {
                         candidate
                             .windows
                             .values()
-                            .find(|window| {
-                                candidate.eligible_focus(window.id, tab)
-                            })
+                            .find(|window| candidate.eligible_focus(window.id, tab))
                             .map(|window| window.id)
                     });
             }

@@ -92,7 +92,8 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     if !path.starts_with(root) {
                         return None;
                     }
-                    let bytes = crate::files::read_file_with_ceiling(&path, 4 * 1024 * 1024).ok()?;
+                    let bytes =
+                        crate::files::read_file_with_ceiling(&path, 4 * 1024 * 1024).ok()?;
                     Some((
                         uri.to_owned(),
                         crate::editor::text::TextBuffer::from_text(&String::from_utf8(bytes).ok()?),
@@ -197,7 +198,9 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             let response = if parsed.is_some() {
                 *capabilities = effective_capabilities(
                     base_capabilities,
-                    registrations.values().map(|(method, options)| (method.as_str(), options)),
+                    registrations
+                        .values()
+                        .map(|(method, options)| (method.as_str(), options)),
                 );
                 for (method, options) in registrations.values() {
                     if method == "textDocument/completion" {
@@ -366,7 +369,9 @@ pub(super) fn effective_capabilities<'a>(
         }
         let enabled = match method {
             "textDocument/diagnostic" => &mut value.pull_diagnostics,
-            "textDocument/semanticTokens" | "textDocument/semanticTokens/full" => &mut value.semantic_tokens,
+            "textDocument/semanticTokens" | "textDocument/semanticTokens/full" => {
+                &mut value.semantic_tokens
+            }
             "textDocument/inlayHint" => &mut value.inlay_hints,
             "textDocument/documentColor" => &mut value.document_colors,
             "textDocument/codeLens" => &mut value.code_lens,

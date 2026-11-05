@@ -774,7 +774,10 @@ fn highlight_spans(
         for capture in item.captures {
             if let Some(role) = groups[capture.index as usize] {
                 let range = capture.node.byte_range();
-                if range.start < range.end && source.is_char_boundary(range.start) && source.is_char_boundary(range.end) {
+                if range.start < range.end
+                    && source.is_char_boundary(range.start)
+                    && source.is_char_boundary(range.end)
+                {
                     if spans.len() == maximum {
                         return (spans, true);
                     }
@@ -797,12 +800,33 @@ struct LocalScope<'a> {
 }
 
 /// Definitions and scope boundaries for queries using `#is-not? local`.
-fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &str) -> HashMap<usize, LocalScope<'a>> {
+fn local_definitions<'a>(
+    tree: &tree_sitter::Tree,
+    source: &'a str,
+    language: &str,
+) -> HashMap<usize, LocalScope<'a>> {
     let (grammar, query) = match language {
-        "javascript" => (descriptor(SyntaxLanguage::JavaScript).language, tree_sitter_javascript::LOCALS_QUERY),
-        "typescript" | "tsx" => (descriptor(if language == "tsx" { SyntaxLanguage::Tsx } else { SyntaxLanguage::TypeScript }).language, tree_sitter_typescript::LOCALS_QUERY),
-        "ruby" => (descriptor(SyntaxLanguage::Ruby).language, tree_sitter_ruby::LOCALS_QUERY),
-        "nix" => (descriptor(SyntaxLanguage::Nix).language, include_str!("../../../assets/syntax/nix/locals.scm")),
+        "javascript" => (
+            descriptor(SyntaxLanguage::JavaScript).language,
+            tree_sitter_javascript::LOCALS_QUERY,
+        ),
+        "typescript" | "tsx" => (
+            descriptor(if language == "tsx" {
+                SyntaxLanguage::Tsx
+            } else {
+                SyntaxLanguage::TypeScript
+            })
+            .language,
+            tree_sitter_typescript::LOCALS_QUERY,
+        ),
+        "ruby" => (
+            descriptor(SyntaxLanguage::Ruby).language,
+            tree_sitter_ruby::LOCALS_QUERY,
+        ),
+        "nix" => (
+            descriptor(SyntaxLanguage::Nix).language,
+            include_str!("../../../assets/syntax/nix/locals.scm"),
+        ),
         _ => return HashMap::new(),
     };
     thread_local! {
@@ -826,11 +850,21 @@ fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &s
             for capture in item.captures {
                 match query.capture_names()[capture.index as usize] {
                     "local.scope" => {
-                        let inherits = !query.property_settings(item.pattern_index).iter().any(|property| {
-                            property.key.as_ref() == "local.scope-inherits"
-                                && property.value.as_deref() == Some("false")
-                        });
-                        scopes.insert(capture.node.id(), LocalScope { inherits, ..Default::default() });
+                        let inherits =
+                            !query
+                                .property_settings(item.pattern_index)
+                                .iter()
+                                .any(|property| {
+                                    property.key.as_ref() == "local.scope-inherits"
+                                        && property.value.as_deref() == Some("false")
+                                });
+                        scopes.insert(
+                            capture.node.id(),
+                            LocalScope {
+                                inherits,
+                                ..Default::default()
+                            },
+                        );
                     }
                     "local.definition" => definitions.push(capture.node),
                     _ => {}
@@ -844,7 +878,11 @@ fn local_definitions<'a>(tree: &tree_sitter::Tree, source: &'a str, language: &s
                 scope = parent;
             }
             if let Some(name) = source.get(node.byte_range()) {
-                scopes.get_mut(&scope.id()).expect("enclosing local scope").definitions.insert(name);
+                scopes
+                    .get_mut(&scope.id())
+                    .expect("enclosing local scope")
+                    .definitions
+                    .insert(name);
             }
         }
         scopes
@@ -862,9 +900,17 @@ fn highlight_predicates_match(
         if property.key.as_ref() != "local" {
             return false;
         }
-        let local = captures.iter().filter(|capture| property.capture_id.is_none_or(|id| id == capture.index as usize))
+        let local = captures
+            .iter()
+            .filter(|capture| {
+                property
+                    .capture_id
+                    .is_none_or(|id| id == capture.index as usize)
+            })
             .any(|capture| {
-                let Some(name) = source.get(capture.node.byte_range()) else { return false };
+                let Some(name) = source.get(capture.node.byte_range()) else {
+                    return false;
+                };
                 let mut node = Some(capture.node);
                 while let Some(current) = node {
                     if let Some(scope) = locals.get(&current.id()) {
@@ -886,7 +932,8 @@ fn highlight_predicates_match(
     for predicate in query.general_predicates(pattern) {
         match predicate.operator.as_ref() {
             "has-ancestor?" => {
-                let Some(tree_sitter::QueryPredicateArg::Capture(id)) = predicate.args.first() else {
+                let Some(tree_sitter::QueryPredicateArg::Capture(id)) = predicate.args.first()
+                else {
                     return false;
                 };
                 if !captures.iter().filter(|capture| capture.index == *id).all(|capture| {
@@ -961,13 +1008,8 @@ fn markdown_inline_spans(
             };
             let room = maximum.saturating_sub(spans.len());
             markdown::inline_marks(&tree, source, &references, maximum_marks, marks);
-            let (inline_spans, overflow) = highlight_spans(
-                query,
-                &tree,
-                source,
-                room,
-                "markdown_inline",
-            );
+            let (inline_spans, overflow) =
+                highlight_spans(query, &tree, source, room, "markdown_inline");
             spans.extend(inline_spans);
             truncated |= overflow;
         }
@@ -1004,7 +1046,11 @@ fn markdown_content_ranges(node: tree_sitter::Node<'_>) -> Vec<tree_sitter::Rang
 
 /// A fenced code block that names its language is coloured as that language, as Neovim
 /// injects it.
-fn markdown_fence_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) -> (Vec<SyntaxSpan>, bool) {
+fn markdown_fence_spans(
+    tree: &tree_sitter::Tree,
+    source: &str,
+    maximum: usize,
+) -> (Vec<SyntaxSpan>, bool) {
     thread_local! {
         static QUERIES: std::cell::RefCell<HashMap<SyntaxLanguage, Query>> = Default::default();
     }
@@ -1033,13 +1079,18 @@ fn markdown_fence_spans(tree: &tree_sitter::Tree, source: &str, maximum: usize) 
         };
         let room = maximum.saturating_sub(spans.len());
         if room == 0 {
-            return (spans, truncated || content.start_byte() < content.end_byte());
+            return (
+                spans,
+                truncated || content.start_byte() < content.end_byte(),
+            );
         }
         let descriptor = descriptor(language);
         let mut parser = Parser::new();
         let ranges = markdown_content_ranges(*content);
         if parser.set_language(&descriptor.language).is_err()
-            || ranges.is_empty() || parser.set_included_ranges(&ranges).is_err() {
+            || ranges.is_empty()
+            || parser.set_included_ranges(&ranges).is_err()
+        {
             continue;
         }
         let Some(tree) = parser.parse(source, None) else {
@@ -1128,13 +1179,9 @@ pub fn highlight(language: SyntaxLanguage, source: &str) -> Vec<SyntaxSpan> {
     });
     // Inline and fenced languages use their own query caches.
     if language == SyntaxLanguage::Markdown {
-        spans.extend(markdown_inline_spans(
-            &tree,
-            source,
-            usize::MAX,
-            usize::MAX,
-            &mut Vec::new(),
-        ).0);
+        spans.extend(
+            markdown_inline_spans(&tree, source, usize::MAX, usize::MAX, &mut Vec::new()).0,
+        );
         spans.extend(markdown_fence_spans(&tree, source, usize::MAX).0);
     }
     flatten_spans(spans)
@@ -1316,13 +1363,8 @@ fn parse(request: Request) -> SyntaxEvent {
             let maximum_marks = maximum.saturating_add(1);
             markdown::block_marks(&tree, &request.source, maximum_marks, &mut marks);
             let room = maximum.saturating_sub(spans.len());
-            let (inline, overflow) = markdown_inline_spans(
-                &tree,
-                &request.source,
-                room,
-                maximum_marks,
-                &mut marks,
-            );
+            let (inline, overflow) =
+                markdown_inline_spans(&tree, &request.source, room, maximum_marks, &mut marks);
             spans.extend(inline);
             truncated |= overflow || marks.len() > maximum;
             marks.truncate(maximum);
@@ -1371,13 +1413,16 @@ fn parse(request: Request) -> SyntaxEvent {
         &request.source,
         request.policy.maximum_indent_rows,
     ) {
-        Ok((ranges, truncated)) => (ranges
-            .into_iter()
-            .map(|range| SyntaxIndent {
-                start_row: range.start_row,
-                end_row: range.end_row,
-            })
-            .collect::<Vec<_>>(), truncated),
+        Ok((ranges, truncated)) => (
+            ranges
+                .into_iter()
+                .map(|range| SyntaxIndent {
+                    start_row: range.start_row,
+                    end_row: range.end_row,
+                })
+                .collect::<Vec<_>>(),
+            truncated,
+        ),
         Err(error) => return failed(&request, format!("indent query: {error}")),
     };
     let objects = Arc::new(objects::collect(&tree, &request.source, 50_000));
@@ -1423,7 +1468,9 @@ fn query_rows(
                 .row
                 .saturating_sub(usize::from(end_position.column == 0));
             if query.capture_names()[capture.index as usize] == "indent"
-                && let Some(closing) = capture.node.child(capture.node.child_count().saturating_sub(1))
+                && let Some(closing) = capture
+                    .node
+                    .child(capture.node.child_count().saturating_sub(1))
                 && closing.start_position().row == end
                 && source[..closing.start_byte()]
                     .rsplit('\n')
@@ -1458,9 +1505,16 @@ fn indentation_folds(source: &str, limit: usize, tab_width: usize) -> (Vec<Synta
             continue;
         }
         let tab_width = tab_width.max(1);
-        let indent = line[..line.len() - body.len()].chars().fold(0, |column, ch| {
-            column + if ch == '\t' { tab_width - column % tab_width } else { 1 }
-        });
+        let indent = line[..line.len() - body.len()]
+            .chars()
+            .fold(0, |column, ch| {
+                column
+                    + if ch == '\t' {
+                        tab_width - column % tab_width
+                    } else {
+                        1
+                    }
+            });
         let closes = body.starts_with(['}', ')', ']'])
             || body.starts_with("</")
             || body.split(|c: char| !c.is_alphanumeric()).next() == Some("end");
@@ -1521,12 +1575,28 @@ mod tests {
             latest: Arc::new(Mutex::new(HashMap::new())),
         };
         let document = SyntaxDocumentId(1);
-        service.submit(document, 1, 0, SyntaxLanguage::Rust,
-            || "fn main() {}".into(), SyntaxPolicy::default()).unwrap();
+        service
+            .submit(
+                document,
+                1,
+                0,
+                SyntaxLanguage::Rust,
+                || "fn main() {}".into(),
+                SyntaxPolicy::default(),
+            )
+            .unwrap();
         for _ in 0..10 {
-            assert!(matches!(service.submit(document, 2, 1, SyntaxLanguage::Rust,
-                || panic!("full queue must not copy source"), SyntaxPolicy::default()),
-                Err(SyntaxError::QueueFull)));
+            assert!(matches!(
+                service.submit(
+                    document,
+                    2,
+                    1,
+                    SyntaxLanguage::Rust,
+                    || panic!("full queue must not copy source"),
+                    SyntaxPolicy::default()
+                ),
+                Err(SyntaxError::QueueFull)
+            ));
         }
         assert_eq!(service.latest.lock().unwrap().get(&document), Some(&1));
     }
@@ -1567,7 +1637,8 @@ mod tests {
     #[test]
     fn languages_without_a_fold_query_fold_by_indentation() {
         let rows = |source: &str| {
-            indentation_folds(source, 10, 4).0
+            indentation_folds(source, 10, 4)
+                .0
                 .into_iter()
                 .map(|fold| (fold.start_row, fold.end_row))
                 .collect::<Vec<_>>()
@@ -1589,11 +1660,22 @@ mod tests {
     fn indentation_folds_use_configured_tab_stops() {
         let source = "void f() {\n\tx;\n    y;\n}\n";
         for tab_width in [4, 8] {
-            let result = parse_with_policy(SyntaxLanguage::C, source, SyntaxPolicy {
-                tab_width,
-                ..Default::default()
-            });
-            assert_eq!(result.folds.iter().map(|fold| (fold.start_row, fold.end_row)).collect::<Vec<_>>(), [(0, 3)]);
+            let result = parse_with_policy(
+                SyntaxLanguage::C,
+                source,
+                SyntaxPolicy {
+                    tab_width,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                result
+                    .folds
+                    .iter()
+                    .map(|fold| (fold.start_row, fold.end_row))
+                    .collect::<Vec<_>>(),
+                [(0, 3)]
+            );
         }
         let source = "void f() {\n    x;\n\ty;\n}\n";
         assert_eq!(indentation_folds(source, 10, 4).0.len(), 1);
@@ -1693,13 +1775,26 @@ mod tests {
     #[test]
     fn highlight_queries_enforce_text_local_and_ancestor_predicates() {
         for (language, source, ordinary, special) in [
-            (SyntaxLanguage::Zig, "var count: u32 = 0; const VALUE = 1;", "count", "VALUE"),
-            (SyntaxLanguage::CMake, "set(lower value)\nset(UPPER value)\n", "lower", "UPPER"),
+            (
+                SyntaxLanguage::Zig,
+                "var count: u32 = 0; const VALUE = 1;",
+                "count",
+                "VALUE",
+            ),
+            (
+                SyntaxLanguage::CMake,
+                "set(lower value)\nset(UPPER value)\n",
+                "lower",
+                "UPPER",
+            ),
         ] {
             let spans = highlight(language, source);
             let role = |word: &str| {
                 let at = source.find(word).unwrap();
-                spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role.name())
+                spans
+                    .iter()
+                    .find(|span| span.start <= at && at < span.end)
+                    .map(|span| span.role.name())
             };
             let expected = match language {
                 SyntaxLanguage::Zig => "@constant.zig",
@@ -1710,10 +1805,26 @@ mod tests {
             assert_eq!(role(special), Some(expected), "{language:?}: {spans:?}");
         }
         for (language, source, word) in [
-            (SyntaxLanguage::JavaScript, "console.log(1); function f(console) { console.log(2); }", "console"),
-            (SyntaxLanguage::TypeScript, "console.log(1); function f(console: any) { console.log(2); }", "console"),
-            (SyntaxLanguage::Ruby, "value\ndef f\n  value = 1\n  value\nend\n", "value"),
-            (SyntaxLanguage::Nix, "[ map (let map = x: x; in map 1) ]", "map"),
+            (
+                SyntaxLanguage::JavaScript,
+                "console.log(1); function f(console) { console.log(2); }",
+                "console",
+            ),
+            (
+                SyntaxLanguage::TypeScript,
+                "console.log(1); function f(console: any) { console.log(2); }",
+                "console",
+            ),
+            (
+                SyntaxLanguage::Ruby,
+                "value\ndef f\n  value = 1\n  value\nend\n",
+                "value",
+            ),
+            (
+                SyntaxLanguage::Nix,
+                "[ map (let map = x: x; in map 1) ]",
+                "map",
+            ),
         ] {
             let descriptor = descriptor(language);
             let mut parser = Parser::new();
@@ -1729,7 +1840,11 @@ mod tests {
         parser.set_language(&ruby.language).unwrap();
         let source = "value = 1\nvalue\ndef f\n  value\nend\n";
         let tree = parser.parse(source, None).unwrap();
-        let query = Query::new(&ruby.language, "((identifier) @function.method (#eq? @function.method \"value\") (#is-not? local))").unwrap();
+        let query = Query::new(
+            &ruby.language,
+            "((identifier) @function.method (#eq? @function.method \"value\") (#is-not? local))",
+        )
+        .unwrap();
         let (spans, _) = highlight_spans(&query, &tree, source, 100, "ruby");
         assert_eq!(spans.len(), 1, "{spans:?}");
         assert_eq!(spans[0].start, source.rfind("value").unwrap());
@@ -1739,9 +1854,16 @@ mod tests {
         parser.set_language(&descriptor.language).unwrap();
         let source = "fn f() { outside; foo(inside); }";
         let tree = parser.parse(source, None).unwrap();
-        let query = Query::new(&descriptor.language, "((identifier) @variable.builtin (#has-ancestor? @variable.builtin call_expression))").unwrap();
+        let query = Query::new(
+            &descriptor.language,
+            "((identifier) @variable.builtin (#has-ancestor? @variable.builtin call_expression))",
+        )
+        .unwrap();
         let (spans, _) = highlight_spans(&query, &tree, source, 100, "rust");
-        let words = spans.iter().map(|span| &source[span.start..span.end]).collect::<Vec<_>>();
+        let words = spans
+            .iter()
+            .map(|span| &source[span.start..span.end])
+            .collect::<Vec<_>>();
         assert_eq!(words, ["foo", "inside"]);
     }
 
@@ -1766,20 +1888,45 @@ mod tests {
         assert_eq!(group("https"), Some("@markup.link.url.markdown_inline"));
         assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
     }
-    fn parse_with_policy(language: SyntaxLanguage, source: &str, policy: SyntaxPolicy) -> SyntaxResult {
-        let event = parse(Request { document: SyntaxDocumentId(1), generation: 1, revision: 1, language, source: source.into(), policy });
-        let SyntaxEvent::Parsed(result) = event else { panic!("{event:?}") };
+    fn parse_with_policy(
+        language: SyntaxLanguage,
+        source: &str,
+        policy: SyntaxPolicy,
+    ) -> SyntaxResult {
+        let event = parse(Request {
+            document: SyntaxDocumentId(1),
+            generation: 1,
+            revision: 1,
+            language,
+            source: source.into(),
+            policy,
+        });
+        let SyntaxEvent::Parsed(result) = event else {
+            panic!("{event:?}")
+        };
         result
     }
 
     #[test]
     fn markdown_mark_budget_is_independent_of_remaining_highlight_capacity() {
         let source = "# h\n\n**b**\n";
-        let result = parse_with_policy(SyntaxLanguage::Markdown, source, SyntaxPolicy {
-            maximum_spans: 6, ..Default::default()
-        });
+        let result = parse_with_policy(
+            SyntaxLanguage::Markdown,
+            source,
+            SyntaxPolicy {
+                maximum_spans: 6,
+                ..Default::default()
+            },
+        );
         assert_eq!(result.markdown.len(), 6);
-        assert_eq!(result.markdown.iter().filter(|span| span.mark == MarkdownMark::Hide).count(), 4);
+        assert_eq!(
+            result
+                .markdown
+                .iter()
+                .filter(|span| span.mark == MarkdownMark::Hide)
+                .count(),
+            4
+        );
         assert!(!result.highlights_truncated);
     }
 
@@ -1893,13 +2040,28 @@ mod tests {
             panic!("parse markdown")
         };
         let fence = source.find("```markdown").unwrap();
-        assert!(result.markdown.iter().all(|span| span.start >= fence), "{:?}", result.markdown);
+        assert!(
+            result.markdown.iter().all(|span| span.start >= fence),
+            "{:?}",
+            result.markdown
+        );
     }
 
     #[test]
     fn markdown_resolves_full_collapsed_and_shortcut_references() {
-        let links = ["[full][label]", "[LaBeL][]", "[label]", "![full][label]", "![LaBeL][]", "![label]", "[spaced][two  words]"];
-        let source = format!("{}\n\n[label]: https://first.example\n[label]: https://ignored.example\n[two words]: https://spaced.example\n", links.join("\n\n"));
+        let links = [
+            "[full][label]",
+            "[LaBeL][]",
+            "[label]",
+            "![full][label]",
+            "![LaBeL][]",
+            "![label]",
+            "[spaced][two  words]",
+        ];
+        let source = format!(
+            "{}\n\n[label]: https://first.example\n[label]: https://ignored.example\n[two words]: https://spaced.example\n",
+            links.join("\n\n")
+        );
         let request = Request {
             document: SyntaxDocumentId(1),
             generation: 1,
@@ -1913,13 +2075,35 @@ mod tests {
         };
         let mut start = 0;
         for link in links {
-            let url = if link.contains("two ") { "https://spaced.example" } else { "https://first.example" };
-            let url_start = source.find(url).unwrap();
-            let mark = if link.starts_with('!') { MarkdownMark::Image } else {
-                MarkdownMark::Link { url: Some((url_start, url_start + url.len())) }
+            let url = if link.contains("two ") {
+                "https://spaced.example"
+            } else {
+                "https://first.example"
             };
-            assert!(result.markdown.iter().any(|span| span.start == start && span.mark == mark), "{link}: {:?}", result.markdown);
-            assert!(result.markdown.iter().any(|span| span.end == start + link.len() && span.mark == MarkdownMark::Hide), "{link}: {:?}", result.markdown);
+            let url_start = source.find(url).unwrap();
+            let mark = if link.starts_with('!') {
+                MarkdownMark::Image
+            } else {
+                MarkdownMark::Link {
+                    url: Some((url_start, url_start + url.len())),
+                }
+            };
+            assert!(
+                result
+                    .markdown
+                    .iter()
+                    .any(|span| span.start == start && span.mark == mark),
+                "{link}: {:?}",
+                result.markdown
+            );
+            assert!(
+                result
+                    .markdown
+                    .iter()
+                    .any(|span| span.end == start + link.len() && span.mark == MarkdownMark::Hide),
+                "{link}: {:?}",
+                result.markdown
+            );
             start += link.len() + 2;
         }
     }
@@ -1947,16 +2131,28 @@ mod tests {
         let plain_spans = highlight(SyntaxLanguage::Bash, plain);
         let at = source.find("echo").unwrap();
         let plain_at = plain.find("echo").unwrap();
-        let expected = plain_spans.iter().find(|span| span.start <= plain_at && plain_at < span.end).unwrap().role;
+        let expected = plain_spans
+            .iter()
+            .find(|span| span.start <= plain_at && plain_at < span.end)
+            .unwrap()
+            .role;
         assert!(!expected.name().starts_with("@string"));
-        assert_eq!(spans.iter().find(|span| span.start <= at && at < span.end).map(|span| span.role), Some(expected));
+        assert_eq!(
+            spans
+                .iter()
+                .find(|span| span.start <= at && at < span.end)
+                .map(|span| span.role),
+            Some(expected)
+        );
     }
 
     #[test]
     fn fenced_highlights_obey_the_remaining_capture_budget() {
         let source = format!("```json\n[{}]\n```\n", vec!["1"; 10_000].join(","));
         let mut parser = Parser::new();
-        parser.set_language(&descriptor(SyntaxLanguage::Markdown).language).unwrap();
+        parser
+            .set_language(&descriptor(SyntaxLanguage::Markdown).language)
+            .unwrap();
         let tree = parser.parse(&source, None).unwrap();
         for maximum in [0, 1, 3] {
             let (spans, truncated) = markdown_fence_spans(&tree, &source, maximum);
@@ -1968,14 +2164,23 @@ mod tests {
     #[test]
     fn collectors_report_only_actual_overflow_including_before_flattening() {
         let source = "fn main() {\n    foo();\n}\n";
-        let policy = SyntaxPolicy { maximum_folds: 1, maximum_indent_rows: 1, ..Default::default() };
+        let policy = SyntaxPolicy {
+            maximum_folds: 1,
+            maximum_indent_rows: 1,
+            ..Default::default()
+        };
         let result = parse_with_policy(SyntaxLanguage::Rust, source, policy.clone());
         assert_eq!(result.folds.len(), 1);
         assert_eq!(result.indents.len(), 1);
         assert!(!result.truncated);
         let result = parse_with_policy(SyntaxLanguage::Rust, &format!("{source}{source}"), policy);
         assert!(result.folds_truncated && result.indents_truncated);
-        let zero = SyntaxPolicy { maximum_spans: 0, maximum_folds: 0, maximum_indent_rows: 0, ..Default::default() };
+        let zero = SyntaxPolicy {
+            maximum_spans: 0,
+            maximum_folds: 0,
+            maximum_indent_rows: 0,
+            ..Default::default()
+        };
         let result = parse_with_policy(SyntaxLanguage::Rust, "", zero.clone());
         assert!(!result.truncated);
         let result = parse_with_policy(SyntaxLanguage::Rust, source, zero);
@@ -1988,11 +2193,29 @@ mod tests {
         let query = Query::new(&descriptor.language, descriptor.highlights).unwrap();
         let (all, overflow) = highlight_spans(&query, &tree, source, usize::MAX, "rust");
         assert!(!overflow);
-        let exact = parse_with_policy(SyntaxLanguage::Rust, source, SyntaxPolicy { maximum_spans: all.len(), ..Default::default() });
+        let exact = parse_with_policy(
+            SyntaxLanguage::Rust,
+            source,
+            SyntaxPolicy {
+                maximum_spans: all.len(),
+                ..Default::default()
+            },
+        );
         assert!(!exact.highlights_truncated);
-        let limited = parse_with_policy(SyntaxLanguage::Rust, source, SyntaxPolicy { maximum_spans: all.len() - 1, ..Default::default() });
+        let limited = parse_with_policy(
+            SyntaxLanguage::Rust,
+            source,
+            SyntaxPolicy {
+                maximum_spans: all.len() - 1,
+                ..Default::default()
+            },
+        );
         assert!(limited.highlights_truncated);
-        let query = Query::new(&descriptor.language, "(identifier) @variable (identifier) @variable (identifier) @variable").unwrap();
+        let query = Query::new(
+            &descriptor.language,
+            "(identifier) @variable (identifier) @variable (identifier) @variable",
+        )
+        .unwrap();
         let (spans, overflow) = highlight_spans(&query, &tree, source, 2, "rust");
         assert!(overflow);
         assert!(flatten_spans(spans).len() < 2);
@@ -2089,7 +2312,11 @@ mod tests {
             "#!/usr/bin/env --unset OLD --chdir /tmp python3",
             "#!/usr/bin/env --unset=OLD --chdir=/tmp FOO=bar python3",
         ] {
-            assert_eq!(language_for_document(Some(script), shebang), Some(SyntaxLanguage::Python), "{shebang}");
+            assert_eq!(
+                language_for_document(Some(script), shebang),
+                Some(SyntaxLanguage::Python),
+                "{shebang}"
+            );
         }
         assert_eq!(language_for_document(Some(script), "echo hi\n"), None);
         // The file name wins over the first line.
@@ -2100,9 +2327,18 @@ mod tests {
     }
     #[test]
     fn uppercase_c_extension_selects_cpp_before_case_folding() {
-        assert_eq!(language_for_path(Path::new("main.C")), Some(SyntaxLanguage::Cpp));
-        assert_eq!(language_for_path(Path::new("main.c")), Some(SyntaxLanguage::C));
-        assert_eq!(language_for_document(Some(Path::new("main.C")), "class Example {};"), Some(SyntaxLanguage::Cpp));
+        assert_eq!(
+            language_for_path(Path::new("main.C")),
+            Some(SyntaxLanguage::Cpp)
+        );
+        assert_eq!(
+            language_for_path(Path::new("main.c")),
+            Some(SyntaxLanguage::C)
+        );
+        assert_eq!(
+            language_for_document(Some(Path::new("main.C")), "class Example {};"),
+            Some(SyntaxLanguage::Cpp)
+        );
     }
 
     #[test]

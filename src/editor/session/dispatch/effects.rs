@@ -192,7 +192,9 @@ impl InteractiveApplication {
             AppEffect::SearchRepeat { reverse, count } => {
                 return self.perform_search(self.input.search_direction(reverse), count);
             }
-            AppEffect::SearchWord { forward, count } => return self.search_word_under_cursor(forward, count),
+            AppEffect::SearchWord { forward, count } => {
+                return self.search_word_under_cursor(forward, count);
+            }
             AppEffect::SearchSelectNext(count) => return self.select_next_search_match(count),
             AppEffect::MacroReplay { register, count } => {
                 self.input.begin_macro_batch();
@@ -881,11 +883,14 @@ impl InteractiveApplication {
         index: &crate::extensions::PluginContributionIndex,
         request: crate::extensions::PluginUiRequest,
     ) -> crate::extensions::PluginUiEvent {
-        match self
-            .extension
-            .prepare_window(index, request, &self.state, &self.window_session,
-                self.configuration.settings().editor.ambiguous_width == crate::config::AmbiguousWidth::Wide)
-        {
+        match self.extension.prepare_window(
+            index,
+            request,
+            &self.state,
+            &self.window_session,
+            self.configuration.settings().editor.ambiguous_width
+                == crate::config::AmbiguousWidth::Wide,
+        ) {
             WindowUpdate::Ready(event) => event,
             WindowUpdate::Publish(source, transition) => {
                 let receipt = self.window_session.accept_plugin_transition(
@@ -914,7 +919,8 @@ impl InteractiveApplication {
             }
         };
         let confirmation_source = source.confirmation_source.clone();
-        let navigation_current = confirmation_source.navigation_current(&self.state, &self.window_session);
+        let navigation_current =
+            confirmation_source.navigation_current(&self.state, &self.window_session);
         let confirmation_result = source.confirmation_result;
         let source_actions_admitted = source.source_actions_admitted;
         let mut execution = source.execution;
@@ -978,7 +984,10 @@ impl InteractiveApplication {
             }
             let workspace_revision = Some(self.workspace.root_revision());
             for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
-                let closing = matches!(proposal.kind, crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged);
+                let closing = matches!(
+                    proposal.kind,
+                    crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged
+                );
                 let result = self
                     .extension
                     .prepare_virtual(
@@ -1187,9 +1196,15 @@ impl InteractiveApplication {
     }
     fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
         match result {
-            Ok(VirtualOpen::Execute { plugin, load, command, document }) => {
+            Ok(VirtualOpen::Execute {
+                plugin,
+                load,
+                command,
+                document,
+            }) => {
                 if !self.execute_plugin_command(plugin.clone(), command, Vec::new()) {
-                    self.extension.cancel_virtual_request(&plugin, load, document);
+                    self.extension
+                        .cancel_virtual_request(&plugin, load, document);
                 }
             }
             Ok(VirtualOpen::Existing(buffer)) => {
@@ -2147,11 +2162,21 @@ impl InteractiveApplication {
                     self.stop_task(&name);
                 }
                 match adapter {
-                    Some(AdapterContext::Test { matcher }) => self.run_trusted(TrustedAction::RunTest { name, matcher }),
-                    Some(AdapterContext::Linter { matcher, lint: true }) => self.run_trusted(TrustedAction::RunLinter { name, matcher }),
+                    Some(AdapterContext::Test { matcher }) => {
+                        self.run_trusted(TrustedAction::RunTest { name, matcher })
+                    }
+                    Some(AdapterContext::Linter {
+                        matcher,
+                        lint: true,
+                    }) => self.run_trusted(TrustedAction::RunLinter { name, matcher }),
                     Some(AdapterContext::Formatter { source }) => {
-                        match crate::editor::session::tasks::FormatterSource::capture(&self.state, source.buffer()) {
-                            Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
+                        match crate::editor::session::tasks::FormatterSource::capture(
+                            &self.state,
+                            source.buffer(),
+                        ) {
+                            Ok(source) => {
+                                self.run_trusted(TrustedAction::RunFormatter { name, source })
+                            }
                             Err(error) => self.show_error(error),
                         }
                     }
@@ -2418,7 +2443,8 @@ impl InteractiveApplication {
                 let Some((path, line)) = self.cursor_breakpoint_place() else {
                     return Ok(());
                 };
-                let row = self.debugger_session
+                let row = self
+                    .debugger_session
                     .breakpoint_at(&path, line)
                     .cloned()
                     .unwrap_or(DapSourceBreakpoint {
@@ -2429,7 +2455,10 @@ impl InteractiveApplication {
                         hit_condition: None,
                         log_message: None,
                     });
-                self.open_prompt(PromptKind::BreakpointCondition, row.condition.clone().unwrap_or_default());
+                self.open_prompt(
+                    PromptKind::BreakpointCondition,
+                    row.condition.clone().unwrap_or_default(),
+                );
                 self.input.set_pending_breakpoint(row);
             }
             AppEffect::DapBreakpointConfigure {
@@ -2717,7 +2746,10 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("lsp-log:{}", self.language.log_start().saturating_add(index as u64))),
+                        id: PickerItemId(format!(
+                            "lsp-log:{}",
+                            self.language.log_start().saturating_add(index as u64)
+                        )),
                         label: line.clone(),
                         detail: String::new(),
                         source: "lsp".into(),
@@ -2947,7 +2979,11 @@ impl InteractiveApplication {
                 self.open_lsp_completion_documentation(true)
             }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::DiagnosticNavigate { direction, filter, count } => {
+            AppEffect::DiagnosticNavigate {
+                direction,
+                filter,
+                count,
+            } => {
                 self.navigate_diagnostic(direction, filter, count);
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
@@ -2988,16 +3024,25 @@ impl InteractiveApplication {
                             .byte_to_line(view.cursor)
                             .ok()
                     });
-                    if let Some(fold) = self.ui.lsp_folds.iter_mut().filter(|fold| {
-                        fold.view == view
-                            && line.is_some_and(|line| {
-                                line >= fold.start_line && line <= fold.end_line
-                            })
-                    }).min_by_key(|fold| fold.end_line.saturating_sub(fold.start_line)) {
+                    if let Some(fold) = self
+                        .ui
+                        .lsp_folds
+                        .iter_mut()
+                        .filter(|fold| {
+                            fold.view == view
+                                && line.is_some_and(|line| {
+                                    line >= fold.start_line && line <= fold.end_line
+                                })
+                        })
+                        .min_by_key(|fold| fold.end_line.saturating_sub(fold.start_line))
+                    {
                         fold.collapsed = !fold.collapsed;
                         if fold.collapsed && line.is_some_and(|line| line > fold.start_line) {
                             let buffer = self.state.views[view].buffer;
-                            if let Ok(cursor) = self.state.buffers[buffer].text.line_to_byte(fold.start_line) {
+                            if let Ok(cursor) = self.state.buffers[buffer]
+                                .text
+                                .line_to_byte(fold.start_line)
+                            {
                                 self.state.views[view].cursor = cursor;
                                 self.state.views[view].selection = None;
                                 self.state.mark_editor_changed();
@@ -3025,7 +3070,10 @@ impl InteractiveApplication {
                         .language
                         .selection_ranges()
                         .iter()
-                        .filter(|_| selection.is_some() || self.language.selection_ranges_current(state.cursor))
+                        .filter(|_| {
+                            selection.is_some()
+                                || self.language.selection_ranges_current(state.cursor)
+                        })
                         .filter(|range| {
                             if let Some((start, end)) = selection {
                                 range.start <= start
@@ -3072,7 +3120,8 @@ impl InteractiveApplication {
             }
             AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
-                    self.persistence.set_mark(name, location, MARK_LIMIT, &self.state);
+                    self.persistence
+                        .set_mark(name, location, MARK_LIMIT, &self.state);
                     self.persistence.reconcile_marks(&self.state);
                 }
             }
@@ -3567,7 +3616,10 @@ impl InteractiveApplication {
                         self.open_workspace_search_picker();
                         if truncated {
                             self.notify_message(
-                                format!("Workspace search was truncated; showing {} matches", self.search.matches().len()),
+                                format!(
+                                    "Workspace search was truncated; showing {} matches",
+                                    self.search.matches().len()
+                                ),
                                 false,
                             );
                         } else if self.search.live() {
@@ -3680,7 +3732,8 @@ impl InteractiveApplication {
             self.show_error(self.message("workspace_edit_busy", &[]));
             return;
         }
-        let mut grouped = BTreeMap::<PathBuf, (std::sync::Arc<[u8]>, Vec<TextEdit>, HashSet<*const [u8]>)>::new();
+        let mut grouped =
+            BTreeMap::<PathBuf, (std::sync::Arc<[u8]>, Vec<TextEdit>, HashSet<*const [u8]>)>::new();
         for found in self.search.matches() {
             let entry = grouped
                 .entry(found.canonical_path.clone())
@@ -4005,7 +4058,9 @@ impl InteractiveApplication {
             if let ExplorerMutation::Rename { source, target } = prepared.operation() {
                 self.state.check_rename_destination(source, target)?;
             }
-            self.documents.apply_explorer(prepared).map_err(|e| e.to_string())
+            self.documents
+                .apply_explorer(prepared)
+                .map_err(|e| e.to_string())
         })();
         let id = result.as_ref().ok().copied();
         if let Err(error) = self.explorer.admit_apply(result) {
@@ -4355,7 +4410,10 @@ impl InteractiveApplication {
 
     pub(super) fn replay_macro(&mut self, requested: char, count: u64) -> bool {
         if self.clipboard.waiting() {
-            self.clipboard.defer(super::super::clipboard::DeferredInput::MacroReplay(requested, count));
+            self.clipboard
+                .defer(super::super::clipboard::DeferredInput::MacroReplay(
+                    requested, count,
+                ));
             return true;
         }
         let Ok(register) = self.input.macro_register(requested) else {
@@ -4976,7 +5034,14 @@ impl InteractiveApplication {
             let line = buffer.text.line(target_line).unwrap_or_default();
             let content = line.strip_suffix('\n').unwrap_or(&line);
             if !content.is_empty() && target_byte >= content.len() {
-                target = ByteOffset(target_start.get() + content.grapheme_indices(true).next_back().expect("nonempty line").0);
+                target = ByteOffset(
+                    target_start.get()
+                        + content
+                            .grapheme_indices(true)
+                            .next_back()
+                            .expect("nonempty line")
+                            .0,
+                );
             }
         }
         let transaction = EditorTransaction::new(self.transaction_id())
@@ -5105,7 +5170,11 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
-        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive) {
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive)
+        {
             self.git.cancel_destructive();
         }
         if let Some((view, cursor, line, wrap_row, column)) = self.input.take_search_origin() {
@@ -5117,7 +5186,11 @@ impl InteractiveApplication {
             }
         }
         self.input.take_pending_breakpoint();
-        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive) {
+        if self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive)
+        {
             if self.git.has_pending_replacement() {
                 self.git.take_pending_replacement();
             }
@@ -5425,9 +5498,11 @@ impl InteractiveApplication {
                 .filter_map(|buffer| buffer.path.as_deref()),
             self.commands.specs().map(|spec| spec.id.as_str()),
         ) && !self.input.completion_read_pending()
-            && let Ok(id) = self
-                .documents
-                .list_directory(request.directory, request.key.prefix.clone(), request.limit)
+            && let Ok(id) = self.documents.list_directory(
+                request.directory,
+                request.key.prefix.clone(),
+                request.limit,
+            )
         {
             self.input.register_completion_read(id, request.key);
         }
@@ -5720,9 +5795,15 @@ impl InteractiveApplication {
                 self.configuration.settings().search.wrap,
             );
             let Ok(Some(matched)) = &found else { break };
-            start = matched.start + if forward {
-                source[matched.start..].graphemes(true).next().map_or(0, str::len)
-            } else { 0 };
+            start = matched.start
+                + if forward {
+                    source[matched.start..]
+                        .graphemes(true)
+                        .next()
+                        .map_or(0, str::len)
+                } else {
+                    0
+                };
         }
         let target = match found {
             Ok(Some(found)) => found.start,
@@ -5771,14 +5852,26 @@ impl InteractiveApplication {
         let search = &self.configuration.settings().search;
         let whole_word = self.input.whole_word_search();
         let found = crate::editor::input::search_match(
-            &source, &query, search.smart_case, whole_word,
-            cursor.saturating_add(1), false, false,
-        ).and_then(|previous| {
+            &source,
+            &query,
+            search.smart_case,
+            whole_word,
+            cursor.saturating_add(1),
+            false,
+            false,
+        )
+        .and_then(|previous| {
             if let Some(found) = previous.filter(|found| found.end > cursor) {
                 Ok(Some(found))
             } else {
                 crate::editor::input::search_match(
-                    &source, &query, search.smart_case, whole_word, cursor, true, search.wrap,
+                    &source,
+                    &query,
+                    search.smart_case,
+                    whole_word,
+                    cursor,
+                    true,
+                    search.wrap,
                 )
             }
         });
@@ -5796,8 +5889,13 @@ impl InteractiveApplication {
         let mut found = found;
         for _ in 1..count {
             match crate::editor::input::search_match(
-                &source, &query, search.smart_case, whole_word,
-                found.end, true, search.wrap,
+                &source,
+                &query,
+                search.smart_case,
+                whole_word,
+                found.end,
+                true,
+                search.wrap,
             ) {
                 Ok(Some(next)) => found = next,
                 Ok(None) => {
@@ -5838,7 +5936,11 @@ impl InteractiveApplication {
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_operation(EditorOperation::SetMode {
                 view: view_id,
-                mode: if empty { EditorMode::Normal } else { EditorMode::VisualChar },
+                mode: if empty {
+                    EditorMode::Normal
+                } else {
+                    EditorMode::VisualChar
+                },
             })
             .with_operation(EditorOperation::SetSelection {
                 view: view_id,
@@ -5997,129 +6099,131 @@ impl InteractiveApplication {
                         false,
                     );
                 }
-                DapEvent::Response { response, .. } => match self
-                    .debugger_session
-                    .response(response)
-                {
-                    crate::editor::session::debugger::DebugResponse::Retired
-                    | crate::editor::session::debugger::DebugResponse::Absorbed => {}
-                    crate::editor::session::debugger::DebugResponse::StoppedAt(location) => {
-                        // A library frame outside the workspace stays in the stack pane.
-                        if self
-                            .workspace
-                            .roots()
-                            .iter()
-                            .any(|root| location.path.starts_with(&root.identity.canonical_path))
-                        {
-                            self.navigate_debug_location(location);
-                        }
-                    }
-                    crate::editor::session::debugger::DebugResponse::StoppedSource(frame) => {
-                        let target = crate::editor::session::debugger::SourceTarget {
-                            line: frame.line,
-                            column: frame.column,
-                            navigation: self.window_session.navigation_stamp(
-                                self.state.window_version(), self.state.active_view,
-                            ),
-                            capture: self.input.capture_epoch(),
-                        };
-                        if let Err(error) = self.debugger_session.request_source(
-                            frame.source_reference.expect("stopped source reference"), target,
-                        ) {
-                            self.show_error(error);
-                        }
-                    }
-                    crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
-                        self.install_debug_rows(kind, rows)
-                    }
-                    crate::editor::session::debugger::DebugResponse::Result(response) => {
-                        match response {
-                            DapResponse::Disconnected { .. }
-                            | DapResponse::BreakpointChanged { .. } => {}
-                            DapResponse::Evaluate(value) => {
-                                // The answer is recorded as an EVALUATION RESULT, which is a
-                                // different origin from the command that asked for it.
-                                self.debugger_session.record_console_evaluation(format!(
-                                    "{} = {}",
-                                    value.name, value.value
-                                ));
-                                self.notify_message(
-                                    self.message(
-                                        "dap_evaluate_result",
-                                        &[("name", value.name), ("value", value.value)],
-                                    ),
-                                    false,
-                                );
+                DapEvent::Response { response, .. } => {
+                    match self.debugger_session.response(response) {
+                        crate::editor::session::debugger::DebugResponse::Retired
+                        | crate::editor::session::debugger::DebugResponse::Absorbed => {}
+                        crate::editor::session::debugger::DebugResponse::StoppedAt(location) => {
+                            // A library frame outside the workspace stays in the stack pane.
+                            if self.workspace.roots().iter().any(|root| {
+                                location.path.starts_with(&root.identity.canonical_path)
+                            }) {
+                                self.navigate_debug_location(location);
                             }
-                            DapResponse::Breakpoints(_) => {}
-                            DapResponse::Threads(_)
-                            | DapResponse::Stack(_)
-                            | DapResponse::Scopes(_)
-                            | DapResponse::Variables(_) => {
-                                unreachable!("owner converts response rows")
-                            }
-                            DapResponse::Source {
-                                name,
-                                content,
-                                mime_type,
-                            } => {
-                                let Some(target) = self.debugger_session.take_source() else {
-                                    continue;
-                                };
-                                if !self.window_session.navigation_current(
-                                    &target.navigation,
-                                    &self.state.window_version(),
+                        }
+                        crate::editor::session::debugger::DebugResponse::StoppedSource(frame) => {
+                            let target = crate::editor::session::debugger::SourceTarget {
+                                line: frame.line,
+                                column: frame.column,
+                                navigation: self.window_session.navigation_stamp(
+                                    self.state.window_version(),
                                     self.state.active_view,
-                                ) || !self.input.capture_current(&target.capture)
-                                {
-                                    continue;
+                                ),
+                                capture: self.input.capture_epoch(),
+                            };
+                            if let Err(error) = self.debugger_session.request_source(
+                                frame.source_reference.expect("stopped source reference"),
+                                target,
+                            ) {
+                                self.show_error(error);
+                            }
+                        }
+                        crate::editor::session::debugger::DebugResponse::Picker { kind, rows } => {
+                            self.install_debug_rows(kind, rows)
+                        }
+                        crate::editor::session::debugger::DebugResponse::Result(response) => {
+                            match response {
+                                DapResponse::Disconnected { .. }
+                                | DapResponse::BreakpointChanged { .. } => {}
+                                DapResponse::Evaluate(value) => {
+                                    // The answer is recorded as an EVALUATION RESULT, which is a
+                                    // different origin from the command that asked for it.
+                                    self.debugger_session.record_console_evaluation(format!(
+                                        "{} = {}",
+                                        value.name, value.value
+                                    ));
+                                    self.notify_message(
+                                        self.message(
+                                            "dap_evaluate_result",
+                                            &[("name", value.name), ("value", value.value)],
+                                        ),
+                                        false,
+                                    );
                                 }
-                                let mut draft = self.state.draft();
-                                if let Err(error) = draft.open_virtual_read_only(
-                                    TextBuffer::from_text(&content),
-                                    "dap".into(),
-                                    0,
-                                    0,
-                                    0,
-                                ) {
-                                    self.show_error(error);
-                                    continue;
+                                DapResponse::Breakpoints(_) => {}
+                                DapResponse::Threads(_)
+                                | DapResponse::Stack(_)
+                                | DapResponse::Scopes(_)
+                                | DapResponse::Variables(_) => {
+                                    unreachable!("owner converts response rows")
                                 }
-                                if let Err(error) = self.commit_editor_draft(draft, None, false) {
-                                    self.show_error(error);
-                                    continue;
-                                }
-                                if let Some(view) = self.state.active_view {
-                                    let buffer = self.state.views[view].buffer;
-                                    let text = &self.state.buffers[buffer].text;
-                                    let line = target.line.saturating_sub(1) as usize;
-                                    let line = line.min(text.len_lines().saturating_sub(1));
-                                    let position = match PositionCodec::new(text).lsp_to_byte(
-                                        line,
-                                        target.column.saturating_sub(1) as usize,
-                                        PositionEncoding::Utf16,
-                                    ) {
-                                        Ok(position) => position,
-                                        Err(error) => {
-                                            self.show_error(error);
-                                            continue;
-                                        }
+                                DapResponse::Source {
+                                    name,
+                                    content,
+                                    mime_type,
+                                } => {
+                                    let Some(target) = self.debugger_session.take_source() else {
+                                        continue;
                                     };
-                                    self.state.views[view].cursor = position;
-                                    self.state.mark_editor_changed();
-                                    self.ensure_cursor_visible();
+                                    if !self.window_session.navigation_current(
+                                        &target.navigation,
+                                        &self.state.window_version(),
+                                        self.state.active_view,
+                                    ) || !self.input.capture_current(&target.capture)
+                                    {
+                                        continue;
+                                    }
+                                    let mut draft = self.state.draft();
+                                    if let Err(error) = draft.open_virtual_read_only(
+                                        TextBuffer::from_text(&content),
+                                        "dap".into(),
+                                        0,
+                                        0,
+                                        0,
+                                    ) {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                    if let Err(error) = self.commit_editor_draft(draft, None, false)
+                                    {
+                                        self.show_error(error);
+                                        continue;
+                                    }
+                                    if let Some(view) = self.state.active_view {
+                                        let buffer = self.state.views[view].buffer;
+                                        let text = &self.state.buffers[buffer].text;
+                                        let line = target.line.saturating_sub(1) as usize;
+                                        let line = line.min(text.len_lines().saturating_sub(1));
+                                        let position = match PositionCodec::new(text).lsp_to_byte(
+                                            line,
+                                            target.column.saturating_sub(1) as usize,
+                                            PositionEncoding::Utf16,
+                                        ) {
+                                            Ok(position) => position,
+                                            Err(error) => {
+                                                self.show_error(error);
+                                                continue;
+                                            }
+                                        };
+                                        self.state.views[view].cursor = position;
+                                        self.state.mark_editor_changed();
+                                        self.ensure_cursor_visible();
+                                    }
+                                    self.notify_message(
+                                        self.message(
+                                            "dap_source_loaded",
+                                            &[
+                                                ("name", name),
+                                                ("mime", mime_type.unwrap_or_default()),
+                                            ],
+                                        ),
+                                        false,
+                                    );
                                 }
-                                self.notify_message(
-                                    self.message(
-                                        "dap_source_loaded",
-                                        &[("name", name), ("mime", mime_type.unwrap_or_default())],
-                                    ),
-                                    false,
-                                );
                             }
                         }
                     }
-                },
+                }
                 DapEvent::Terminated { adapter } => {
                     let _ = self.debugger_session.stop();
                     self.notify_message(
@@ -6232,7 +6336,9 @@ impl InteractiveApplication {
         match self.tasks.plan(
             name,
             &adapter,
-            managed.as_ref().map_or(self.configuration.settings(), |(config, _)| config),
+            managed
+                .as_ref()
+                .map_or(self.configuration.settings(), |(config, _)| config),
             &self.workspace,
             self.configuration.binding_revision(),
             managed.as_ref().map(|(_, tool)| tool.clone()),
@@ -6441,14 +6547,18 @@ impl InteractiveApplication {
                         }
                         // Whatever the formatter did, the save it was holding back goes on.
                         if let AdapterContext::Formatter { source } = task.adapter()
-                            && self.format_on_save.get(&source.buffer()).is_some_and(|pending| {
-                                pending.formatter.as_ref() == Some(task.requested())
-                            })
+                            && self
+                                .format_on_save
+                                .get(&source.buffer())
+                                .is_some_and(|pending| {
+                                    pending.formatter.as_ref() == Some(task.requested())
+                                })
                         {
                             self.finish_format_on_save(source.buffer());
                         }
-                        let linter_ran = matches!(task.adapter(), AdapterContext::Linter { lint: true, .. })
-                            && matches!(code, Some(0 | 1));
+                        let linter_ran =
+                            matches!(task.adapter(), AdapterContext::Linter { lint: true, .. })
+                                && matches!(code, Some(0 | 1));
                         if !linter_ran
                             && (!matches!(task.adapter(), AdapterContext::Formatter { .. })
                                 || code != Some(0))
@@ -7018,8 +7128,10 @@ impl InteractiveApplication {
                     }
                 }
                 // Nothing is left to type to; keys go back to the source.
-                TerminalUpdate::Exited(id, _) if self.debug_terminal == Some(id)
-                    && self.window_session.focused_terminal() == Some(id.0) => {
+                TerminalUpdate::Exited(id, _)
+                    if self.debug_terminal == Some(id)
+                        && self.window_session.focused_terminal() == Some(id.0) =>
+                {
                     self.set_terminal_focus(false);
                 }
                 TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}
@@ -7190,7 +7302,9 @@ impl InteractiveApplication {
         let mut edit = match item.text_edit {
             // The range was the server's at request time; what was typed since goes too.
             Some(mut edit) => {
-                if (edit.range.start.line, edit.range.start.character) > (edit.range.end.line, edit.range.end.character) {
+                if (edit.range.start.line, edit.range.start.character)
+                    > (edit.range.end.line, edit.range.end.character)
+                {
                     self.show_error("completion edit range is reversed");
                     return;
                 }
@@ -7223,38 +7337,92 @@ impl InteractiveApplication {
             let path = &document.path;
             let current_line = buffer.line(line).unwrap_or_default();
             let line_start = buffer.line_to_byte(line).unwrap_or(ByteOffset(0)).get();
-            let column = offset.get().saturating_sub(line_start).min(current_line.len());
-            let word_start = current_line[..column].char_indices().rev()
+            let column = offset
+                .get()
+                .saturating_sub(line_start)
+                .min(current_line.len());
+            let word_start = current_line[..column]
+                .char_indices()
+                .rev()
                 .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
                 .map_or(0, |(at, c)| at + c.len_utf8());
-            let word_end = current_line[column..].char_indices()
+            let word_end = current_line[column..]
+                .char_indices()
                 .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
                 .map_or(current_line.len(), |(at, _)| column + at);
-            let selected = self.state.active_view
+            let selected = self
+                .state
+                .active_view
                 .and_then(|view| self.state.views[view].selection)
                 .and_then(|selection| {
                     let start = selection.anchor.min(selection.head);
                     let end = selection.anchor.max(selection.head);
                     buffer.slice(ByteRange::new(start, end).ok()?).ok()
-                }).unwrap_or_default();
+                })
+                .unwrap_or_default();
             let mut variables = std::collections::HashMap::from([
-                ("TM_FILENAME".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned()),
-                ("TM_FILENAME_BASE".into(), path.file_stem().unwrap_or_default().to_string_lossy().into_owned()),
-                ("TM_DIRECTORY".into(), path.parent().unwrap_or(path).to_string_lossy().into_owned()),
+                (
+                    "TM_FILENAME".into(),
+                    path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    "TM_FILENAME_BASE".into(),
+                    path.file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    "TM_DIRECTORY".into(),
+                    path.parent().unwrap_or(path).to_string_lossy().into_owned(),
+                ),
                 ("TM_FILEPATH".into(), path.to_string_lossy().into_owned()),
-                ("RELATIVE_FILEPATH".into(), path.strip_prefix(&self.state.workspace_root).unwrap_or(path).to_string_lossy().into_owned()),
-                ("WORKSPACE_NAME".into(), self.state.workspace_root.file_name().unwrap_or_default().to_string_lossy().into_owned()),
-                ("WORKSPACE_FOLDER".into(), self.state.workspace_root.to_string_lossy().into_owned()),
+                (
+                    "RELATIVE_FILEPATH".into(),
+                    path.strip_prefix(&self.state.workspace_root)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    "WORKSPACE_NAME".into(),
+                    self.state
+                        .workspace_root
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    "WORKSPACE_FOLDER".into(),
+                    self.state.workspace_root.to_string_lossy().into_owned(),
+                ),
                 ("TM_LINE_INDEX".into(), line.to_string()),
                 ("TM_LINE_NUMBER".into(), (line + 1).to_string()),
-                ("TM_CURRENT_WORD".into(), current_line[word_start..word_end].into()),
-                ("TM_CURRENT_LINE".into(), current_line.trim_end_matches('\n').into()),
+                (
+                    "TM_CURRENT_WORD".into(),
+                    current_line[word_start..word_end].into(),
+                ),
+                (
+                    "TM_CURRENT_LINE".into(),
+                    current_line.trim_end_matches('\n').into(),
+                ),
                 ("TM_SELECTED_TEXT".into(), selected),
             ]);
-            if variables.get("TM_SELECTED_TEXT").is_some_and(String::is_empty) {
+            if variables
+                .get("TM_SELECTED_TEXT")
+                .is_some_and(String::is_empty)
+            {
                 variables.remove("TM_SELECTED_TEXT");
             }
-            match crate::language::lsp::parse_snippet_with_variables(&edit.new_text, 1024 * 1024, &variables) {
+            match crate::language::lsp::parse_snippet_with_variables(
+                &edit.new_text,
+                1024 * 1024,
+                &variables,
+            ) {
                 Ok(parsed) => {
                     edit.new_text = parsed.text;
                     tabstops = parsed.tabstops;
@@ -7390,7 +7558,10 @@ impl InteractiveApplication {
         {
             let transaction = EditorTransaction::new(self.transaction_id())
                 .with_undo_policy(UndoPolicy::Ignore)
-                .with_operation(EditorOperation::SetSelection { view, selection: None });
+                .with_operation(EditorOperation::SetSelection {
+                    view,
+                    selection: None,
+                });
             if let Err(error) = self.state.apply_transaction(&transaction) {
                 self.show_error(error);
             }
@@ -7458,10 +7629,13 @@ impl InteractiveApplication {
             .state
             .active_buffer_id()
             .and_then(|id| self.state.buffers[id].path.as_deref());
-        if let Err(error) =
-            self.git
-                .start_hunks(&self.state, path, self.workspace.root_revision(), action, layer)
-        {
+        if let Err(error) = self.git.start_hunks(
+            &self.state,
+            path,
+            self.workspace.root_revision(),
+            action,
+            layer,
+        ) {
             self.show_error(error);
         }
     }
@@ -7474,7 +7648,10 @@ impl InteractiveApplication {
             }
             return;
         };
-        if let Err(error) = self.git.start_branches(&status.repository, self.workspace.root_revision()) {
+        if let Err(error) = self
+            .git
+            .start_branches(&status.repository, self.workspace.root_revision())
+        {
             self.show_error(error);
         }
     }
@@ -7545,9 +7722,9 @@ impl InteractiveApplication {
             return;
         };
         let result = match action {
-            crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
-                self.git.start_worktree_remove(&self.state, &status.repository, &name)
-            }
+            crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => self
+                .git
+                .start_worktree_remove(&self.state, &status.repository, &name),
         };
         match result {
             Ok(()) => self.git.show_worktrees_after_change(),
@@ -7556,7 +7733,10 @@ impl InteractiveApplication {
     }
     pub(in crate::editor::session) fn process_git_branch_events(&mut self) {
         // One poll per handler call: the service is one shot.
-        let outcome = match self.git.poll_branch_outcome(self.workspace.root_revision(), &self.state.workspace_root) {
+        let outcome = match self
+            .git
+            .poll_branch_outcome(self.workspace.root_revision(), &self.state.workspace_root)
+        {
             Ok(Some(outcome)) => Some(outcome),
             Ok(None) => None,
             Err(error) => {
@@ -7668,7 +7848,10 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn process_git_hunk_events(&mut self) {
-        if self.search.poll_diff_preview(self.workspace.version(), self.configuration.binding_revision()) {
+        if self.search.poll_diff_preview(
+            self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
             self.sync_picker_ui();
         }
         match self.git.poll_hunks(&self.state) {
@@ -8163,7 +8346,9 @@ impl InteractiveApplication {
             Ok(true) => {}
             Err(error) => self.show_error(error),
         }
-        self.state.workspace_repository = self.git.status()
+        self.state.workspace_repository = self
+            .git
+            .status()
             .filter(|snapshot| snapshot.scope_root == self.state.workspace_root)
             .and_then(|snapshot| snapshot.worktree_repository.clone());
         if self.git.status().is_none() {
@@ -8395,21 +8580,32 @@ impl InteractiveApplication {
             self.show_error(self.message("workspace_search_stale_result", &[]));
             return;
         }
-        let Ok(range) = ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end)) else {
+        let Ok(range) = ByteRange::new(ByteOffset(found.range.start), ByteOffset(found.range.end))
+        else {
             self.show_error(self.message("workspace_search_stale_result", &[]));
             return;
         };
         self.record_jump();
-        if self.state.buffers.values().any(|buffer| buffer.path.as_ref() == Some(&found.canonical_path)) {
+        if self
+            .state
+            .buffers
+            .values()
+            .any(|buffer| buffer.path.as_ref() == Some(&found.canonical_path))
+        {
             self.navigate_byte_location(&file_uri(&found.canonical_path), range);
             return;
         }
-        let roots = self.workspace.roots().iter()
-            .map(|root| root.identity.canonical_path.clone()).collect();
+        let roots = self
+            .workspace
+            .roots()
+            .iter()
+            .map(|root| root.identity.canonical_path.clone())
+            .collect();
         match self.documents.read_scoped(found.canonical_path, roots) {
             Ok(id) => {
                 self.remember_navigation_read(id);
-                self.search.register_byte_navigation(id, range, Some(found.snapshot));
+                self.search
+                    .register_byte_navigation(id, range, Some(found.snapshot));
             }
             Err(error) => self.show_error(error),
         }
@@ -8429,8 +8625,12 @@ impl InteractiveApplication {
             .iter()
             .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
         else {
-            let roots = self.workspace.roots().iter()
-                .map(|root| root.identity.canonical_path.clone()).collect();
+            let roots = self
+                .workspace
+                .roots()
+                .iter()
+                .map(|root| root.identity.canonical_path.clone())
+                .collect();
             match self.documents.read_scoped(path, roots) {
                 Ok(id) => {
                     self.remember_navigation_read(id);
@@ -8459,10 +8659,17 @@ impl InteractiveApplication {
             line: usize::try_from(location.line.saturating_sub(1)).unwrap_or(usize::MAX),
             character: usize::try_from(location.column.saturating_sub(1)).unwrap_or(usize::MAX),
         };
-        self.navigate_location_encoded(&crate::language::lsp::LspLocation {
-            uri: crate::language::lsp::file_uri(&location.path),
-            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
-        }, PositionEncoding::Utf16, true);
+        self.navigate_location_encoded(
+            &crate::language::lsp::LspLocation {
+                uri: crate::language::lsp::file_uri(&location.path),
+                range: crate::language::lsp::LspRange {
+                    start: position.clone(),
+                    end: position,
+                },
+            },
+            PositionEncoding::Utf16,
+            true,
+        );
     }
 
     pub(in crate::editor::session) fn navigate_lsp_location_encoded(
@@ -8606,15 +8813,30 @@ impl InteractiveApplication {
             self.show_error(self.message("navigation_outside_workspace", &[]));
             return;
         }
-        if let Some((buffer, document)) = self.state.buffers.iter()
+        if let Some((buffer, document)) = self
+            .state
+            .buffers
+            .iter()
             .find(|(_, buffer)| buffer.path.as_ref() == Some(&source.path))
         {
-            let position = document.text.line_to_byte(source.line).ok()
-                .map(|offset| ByteOffset(offset.get().saturating_add(source.column).min(document.text.len_bytes())))
+            let position = document
+                .text
+                .line_to_byte(source.line)
+                .ok()
+                .map(|offset| {
+                    ByteOffset(
+                        offset
+                            .get()
+                            .saturating_add(source.column)
+                            .min(document.text.len_bytes()),
+                    )
+                })
                 .filter(|offset| document.text.validate_offset(*offset).is_ok())
                 .unwrap_or(ByteOffset(0));
             let transaction = self.transaction_id();
-            match self.state.prepare_document_location(buffer, position, transaction)
+            match self
+                .state
+                .prepare_document_location(buffer, position, transaction)
                 .and_then(|draft| self.commit_editor_draft(draft, None, false))
             {
                 Ok(()) => {
@@ -8707,9 +8929,9 @@ impl InteractiveApplication {
         };
         let uri = crate::language::lsp::file_uri(&path);
         self.diagnostics.retire_documents(&self.state);
-        let Some(key) = self
-            .diagnostics
-            .adjacent(&uri, cursor, direction, filter.severities(), count)
+        let Some(key) =
+            self.diagnostics
+                .adjacent(&uri, cursor, direction, filter.severities(), count)
         else {
             self.show_error(self.message("diagnostic_none", &[]));
             return;
@@ -8926,7 +9148,10 @@ impl InteractiveApplication {
         let mut requested = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
         for location in locations {
             if let Some(path) = path_from_file_uri(&location.uri) {
-                requested.entry(path).or_default().insert(location.range.start.line);
+                requested
+                    .entry(path)
+                    .or_default()
+                    .insert(location.range.start.line);
             }
         }
         let mut excerpts = std::collections::HashMap::new();
@@ -8934,16 +9159,22 @@ impl InteractiveApplication {
             if remaining < 4096 {
                 break;
             }
-            let open = self.state.buffers.values()
+            let open = self
+                .state
+                .buffers
+                .values()
                 .find(|buffer| buffer.path.as_ref() == Some(&path));
             let disk = if open.is_none() {
-                crate::files::read_file_with_ceiling(&path, MAXIMUM_FILE).ok()
+                crate::files::read_file_with_ceiling(&path, MAXIMUM_FILE)
+                    .ok()
                     .and_then(|bytes| crate::editor::text::decode_utf8(&bytes).ok())
             } else {
                 None
             };
             // Walk a closed file once, rather than rescanning it for each reference.
-            let mut disk_lines = disk.as_ref().map(|text| text.text.lines().enumerate().peekable());
+            let mut disk_lines = disk
+                .as_ref()
+                .map(|text| text.text.lines().enumerate().peekable());
             for line in lines {
                 if remaining < 4096 {
                     break;
@@ -8954,7 +9185,9 @@ impl InteractiveApplication {
                     while source.peek().is_some_and(|(index, _)| *index < line) {
                         source.next();
                     }
-                    source.next().filter(|(index, _)| *index == line)
+                    source
+                        .next()
+                        .filter(|(index, _)| *index == line)
                         .map(|(_, text)| text.to_owned())
                 } else {
                     None
@@ -8983,9 +9216,7 @@ impl InteractiveApplication {
                 let id = PickerItemId(format!("symbol:{index}:{}", symbol.name));
                 let payload = symbol.location.map_or_else(
                     || PickerPayload::Command(String::new()),
-                    |location| {
-                        PickerPayload::LspLocation(location, encoding)
-                    },
+                    |location| PickerPayload::LspLocation(location, encoding),
                 );
                 (
                     PickerItem {
@@ -9050,22 +9281,35 @@ impl InteractiveApplication {
         kind: &str,
         rows: Vec<(String, String, DapControl)>,
     ) {
-        let saved = rows.iter().map(|(label, detail, _)| (label.clone(), detail.clone())).collect::<Vec<_>>();
+        let saved = rows
+            .iter()
+            .map(|(label, detail, _)| (label.clone(), detail.clone()))
+            .collect::<Vec<_>>();
         let rows = self.debugger_session.controls(rows);
         if kind == "watches" && rows.is_empty() {
-            let items = saved.into_iter().enumerate().map(|(index, (label, detail))| {
-                (PickerItem {
-                    badge: String::new(),
-                    kind: crate::workspace::PickerItemKind::Entry,
-                    id: PickerItemId(format!("dap:watches:{index}")),
-                    label,
-                    detail,
-                    source: "dap".into(),
-                    action: PickerAction::None,
-                }, PickerPayload::Command(String::new()))
-            }).collect();
-            self.install_surface_picker(PickerSurfaceKind::Debug,
-                self.message("dap_picker_title", &[("kind", kind.into())]), items);
+            let items = saved
+                .into_iter()
+                .enumerate()
+                .map(|(index, (label, detail))| {
+                    (
+                        PickerItem {
+                            badge: String::new(),
+                            kind: crate::workspace::PickerItemKind::Entry,
+                            id: PickerItemId(format!("dap:watches:{index}")),
+                            label,
+                            detail,
+                            source: "dap".into(),
+                            action: PickerAction::None,
+                        },
+                        PickerPayload::Command(String::new()),
+                    )
+                })
+                .collect();
+            self.install_surface_picker(
+                PickerSurfaceKind::Debug,
+                self.message("dap_picker_title", &[("kind", kind.into())]),
+                items,
+            );
         } else {
             self.install_debug_rows(kind, rows);
         }
@@ -9371,24 +9615,31 @@ impl InteractiveApplication {
             None if location.byte <= READ_CEILING => {
                 use std::io::Read;
                 use std::os::unix::fs::OpenOptionsExt;
-                std::fs::OpenOptions::new().read(true)
+                std::fs::OpenOptions::new()
+                    .read(true)
                     .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW)
-                    .open(&location.path).ok().and_then(|file| {
+                    .open(&location.path)
+                    .ok()
+                    .and_then(|file| {
                         if !file.metadata().ok()?.is_file() {
                             return None;
                         }
                         let mut bytes = Vec::new();
                         // CRLF takes two disk bytes for one normalized byte; allow a BOM
                         // and a partial final UTF-8 character as well.
-                        file.take((location.byte * 2 + 7) as u64).read_to_end(&mut bytes).ok()?;
+                        file.take((location.byte * 2 + 7) as u64)
+                            .read_to_end(&mut bytes)
+                            .ok()?;
                         if let Err(error) = std::str::from_utf8(&bytes) {
                             if error.error_len().is_some() {
                                 return None;
                             }
                             bytes.truncate(error.valid_up_to());
                         }
-                        TextBuffer::from_bytes(&bytes).ok()?
-                            .byte_to_line(ByteOffset(location.byte)).ok()
+                        TextBuffer::from_bytes(&bytes)
+                            .ok()?
+                            .byte_to_line(ByteOffset(location.byte))
+                            .ok()
                     })
             }
             None => None,
@@ -9639,20 +9890,22 @@ impl InteractiveApplication {
                     .find(|(path, _)| *path == journal)
                     .map(|(_, record)| crate::ui::PickerPreview {
                         title: label,
-                        body: crate::ui::PickerPreviewBody::Text(crate::ui::PickerTextPreview::new(
-                            record
-                                .content
-                                .lines()
-                                .take(RECOVERY_PREVIEW_LINES)
-                                .map(str::to_owned)
-                                .collect(),
-                            0,
-                            None,
-                            record
-                                .path()
-                                .as_deref()
-                                .and_then(crate::language::syntax::language_for_path),
-                        )),
+                        body: crate::ui::PickerPreviewBody::Text(
+                            crate::ui::PickerTextPreview::new(
+                                record
+                                    .content
+                                    .lines()
+                                    .take(RECOVERY_PREVIEW_LINES)
+                                    .map(str::to_owned)
+                                    .collect(),
+                                0,
+                                None,
+                                record
+                                    .path()
+                                    .as_deref()
+                                    .and_then(crate::language::syntax::language_for_path),
+                            ),
+                        ),
                     });
                 match preview {
                     Some(preview) => {
@@ -9745,7 +9998,12 @@ impl InteractiveApplication {
         }
     }
 
-    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) -> bool {
+    fn execute_plugin_command(
+        &mut self,
+        plugin: String,
+        command: String,
+        arguments: Vec<String>,
+    ) -> bool {
         let Some(load) = self.extension.load_id(&plugin) else {
             self.show_error(crate::extensions::PluginError::NotActive);
             return false;
@@ -9891,16 +10149,21 @@ impl InteractiveApplication {
         };
         let code_action = match &payload {
             Some(PickerPayload::CodeAction(key)) => {
-                let documents = self.state.buffers.iter().filter_map(|(id, buffer)| {
-                    Some(crate::editor::session::lsp_edits::EditDocument {
-                        id,
-                        path: buffer.path.as_deref()?,
-                        text: &buffer.text,
-                        dirty: buffer.dirty,
+                let documents = self
+                    .state
+                    .buffers
+                    .iter()
+                    .filter_map(|(id, buffer)| {
+                        Some(crate::editor::session::lsp_edits::EditDocument {
+                            id,
+                            path: buffer.path.as_deref()?,
+                            text: &buffer.text,
+                            dirty: buffer.dirty,
+                        })
                     })
-                }).collect::<Vec<_>>();
+                    .collect::<Vec<_>>();
                 Some(self.language.take_action(key, &documents))
-            },
+            }
             _ => None,
         };
         let debug_selection = match &payload {
@@ -9914,9 +10177,14 @@ impl InteractiveApplication {
                 request,
                 item,
                 action_command,
-            }) => self
-                .extension
-                .provider_selection(plugin, *load, *request, item, action_command, &self.state),
+            }) => self.extension.provider_selection(
+                plugin,
+                *load,
+                *request,
+                item,
+                action_command,
+                &self.state,
+            ),
             _ => None,
         };
         self.close_picker();
@@ -9967,7 +10235,11 @@ impl InteractiveApplication {
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
-            Some(PickerPayload::LspCodeLens { server, context, lens }) => {
+            Some(PickerPayload::LspCodeLens {
+                server,
+                context,
+                lens,
+            }) => {
                 if !self.language.edit_context_current(&context) {
                     self.show_error("code-lens source retired");
                     return;
@@ -10043,8 +10315,7 @@ impl InteractiveApplication {
                 // A value with nothing inside it opens to the whole of itself, unclipped.
                 if let Some(value) = debug_selection.as_ref().ok().and_then(|s| s.value()) {
                     let value = value.to_owned();
-                    self.debugger_session
-                        .record_inspected_value(value.clone());
+                    self.debugger_session.record_inspected_value(value.clone());
                     self.notify_message(value, false);
                 }
                 match debug_selection
@@ -10817,7 +11088,7 @@ impl InteractiveApplication {
             Ok(()) => {
                 self.switch_approved_terminals = self.terminal_session.ids_in_root(&current_path);
                 self.notify_message("switching…".to_owned(), false);
-            },
+            }
             Err(e) => self.show_workspace_failure(e),
         }
     }
@@ -10858,12 +11129,18 @@ impl InteractiveApplication {
         }
         // Finish one buffer before choosing the next: otherwise fallback buffers can alternate
         // forever when several panes show the same leaving buffer.
-        let leaving_buffers = self.state.buffers.iter()
+        let leaving_buffers = self
+            .state
+            .buffers
+            .iter()
             .filter(|(_, buffer)| !buffer.dirty && buffer.path.as_deref().is_some_and(leaving))
             .map(|(id, _)| id)
             .collect::<Vec<_>>();
         for buffer in leaving_buffers {
-            let views = self.state.views.iter()
+            let views = self
+                .state
+                .views
+                .iter()
                 .filter(|(_, state)| state.buffer == buffer)
                 .map(|(view, _)| view)
                 .collect::<Vec<_>>();
@@ -11134,8 +11411,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn tool_probe_directory(&self) -> Option<PathBuf> {
-        self
-            .active_lsp_document_without_text()
+        self.active_lsp_document_without_text()
             .and_then(|(_, document)| document.path.parent().map(Path::to_path_buf))
             .or_else(|| {
                 self.workspace
@@ -11146,7 +11422,8 @@ impl InteractiveApplication {
     }
 
     fn set_tool_probe_directory(&self) {
-        self.tooling.set_probe_directory(self.tool_probe_directory());
+        self.tooling
+            .set_probe_directory(self.tool_probe_directory());
     }
 
     pub(in crate::editor::session) fn selected_lsp_runtime_available(
@@ -12806,7 +13083,9 @@ impl InteractiveApplication {
         for update in self.extension.poll_registry() {
             match update {
                 RegistryUpdate::Present(_, ref picker)
-                    if !picker.as_ref().is_some_and(|epoch| self.search.owns_picker_epoch(epoch)) => {}
+                    if !picker
+                        .as_ref()
+                        .is_some_and(|epoch| self.search.owns_picker_epoch(epoch)) => {}
                 RegistryUpdate::Present(result, _) => match *result {
                     RegistryResult::Search(result) => {
                         let items = result
@@ -13010,9 +13289,11 @@ impl InteractiveApplication {
         }
         // Wait before recording an observation or copying a launch document: another
         // language's discovery can still own the shared lane.
-        if !self.workspace.execution_lane(
-            crate::editor::session::workspace::DiscoveryKind::Language,
-        ).discovery_available() {
+        if !self
+            .workspace
+            .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language)
+            .discovery_available()
+        {
             return;
         }
         // Every matching server attaches, as in VS Code and Neovim: Tailwind runs
@@ -13045,7 +13326,8 @@ impl InteractiveApplication {
             .into_iter()
             .map(|entry| entry.definition.id.clone())
             .collect::<Vec<_>>();
-        if !self.workspace
+        if !self
+            .workspace
             .execution_lane(crate::editor::session::workspace::DiscoveryKind::Language)
             .discovery_available()
             || launchable.iter().any(|id| self.language.launch_pending(id))
@@ -13435,15 +13717,14 @@ impl InteractiveApplication {
         };
         let from = start.get().saturating_sub(line_start.get());
         let to = view.cursor.get().saturating_sub(line_start.get());
-        content
-            .get(from..to)
-            .map_or(0, |typed| {
-                u16::try_from(configured_text_width(
-                    typed,
-                    self.configuration.settings().editor.tab_width,
-                    self.configuration.settings().editor.ambiguous_width,
-                )).unwrap_or(u16::MAX)
-            })
+        content.get(from..to).map_or(0, |typed| {
+            u16::try_from(configured_text_width(
+                typed,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
+            ))
+            .unwrap_or(u16::MAX)
+        })
     }
 
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
@@ -13827,7 +14108,9 @@ impl InteractiveApplication {
             return;
         }
         let Some((&buffer, document)) = state.documents.iter().find(|(id, document)| {
-            self.state.buffers.get(**id)
+            self.state
+                .buffers
+                .get(**id)
                 .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path))
         }) else {
             return;
@@ -13958,11 +14241,16 @@ impl InteractiveApplication {
     ) -> Result<(), AppEffect> {
         // Refuse before replacing the save-and-stage intent owned by the running mutation.
         if self.git.mutation_pending()
-            && matches!(effect,
-                AppEffect::GitFileStage | AppEffect::GitFileUnstage
-                    | AppEffect::GitHunkStage | AppEffect::GitHunkUnstage
-                    | AppEffect::GitLinesStage { .. } | AppEffect::GitConflictStage
-                    | AppEffect::GitHunkReset)
+            && matches!(
+                effect,
+                AppEffect::GitFileStage
+                    | AppEffect::GitFileUnstage
+                    | AppEffect::GitHunkStage
+                    | AppEffect::GitHunkUnstage
+                    | AppEffect::GitLinesStage { .. }
+                    | AppEffect::GitConflictStage
+                    | AppEffect::GitHunkReset
+            )
         {
             self.show_error("a Git mutation is already running");
             return Ok(());
@@ -14283,7 +14571,9 @@ impl InteractiveApplication {
             AppEffect::NotificationDismiss => {
                 self.clear_notice();
             }
-            AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext(_) => {
+            AppEffect::SearchRepeat { .. }
+            | AppEffect::SearchWord { .. }
+            | AppEffect::SearchSelectNext(_) => {
                 unreachable!("search effects return their status through process_effect_checked")
             }
             AppEffect::SubstituteAll => {
@@ -14323,7 +14613,10 @@ impl InteractiveApplication {
             }
             AppEffect::Zen => {
                 let explorer_open = self.ui.explorer.is_some();
-                match self.configuration.toggle_zen(explorer_open, self.state.is_zoomed()) {
+                match self
+                    .configuration
+                    .toggle_zen(explorer_open, self.state.is_zoomed())
+                {
                     None => {
                         if explorer_open {
                             let _ = self.process_project_effect(AppEffect::ExplorerClose);
@@ -14760,7 +15053,9 @@ impl InteractiveApplication {
         if !self.configuration.settings().lsp.format_on_save {
             return false;
         }
-        if let Some(pending) = self.state.active_buffer_id()
+        if let Some(pending) = self
+            .state
+            .active_buffer_id()
             .and_then(|buffer| self.format_on_save.get_mut(&buffer))
         {
             pending.quit_after |= quit_after;
@@ -14782,22 +15077,25 @@ impl InteractiveApplication {
         let Some(buffer) = buffer else {
             return false;
         };
-        self.format_on_save.insert(buffer, super::FormatOnSave {
-            request: None,
+        self.format_on_save.insert(
             buffer,
-            source: self.state.buffers[buffer].text.source_version(),
-            path: self.state.buffers[buffer].path.clone(),
-            formatter: if managed {
-                self.active_formatter()
-            } else {
-                None
+            super::FormatOnSave {
+                request: None,
+                buffer,
+                source: self.state.buffers[buffer].text.source_version(),
+                path: self.state.buffers[buffer].path.clone(),
+                formatter: if managed {
+                    self.active_formatter()
+                } else {
+                    None
+                },
+                started: !managed,
+                quit_after,
+                // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
+                deadline: std::time::Instant::now()
+                    + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
             },
-            started: !managed,
-            quit_after,
-            // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
-            deadline: std::time::Instant::now()
-                + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
-        });
+        );
         if managed {
             self.start_pending_save_formatters();
         } else {
@@ -14809,16 +15107,24 @@ impl InteractiveApplication {
         true
     }
 
-    pub(super) fn formatting_save_for_request(&self, server: &str, generation: u64) -> Option<crate::editor::BufferId> {
+    pub(super) fn formatting_save_for_request(
+        &self,
+        server: &str,
+        generation: u64,
+    ) -> Option<crate::editor::BufferId> {
         self.format_on_save.values().find_map(|pending| {
-            pending.request.as_ref()
+            pending
+                .request
+                .as_ref()
                 .filter(|(key, request)| key == server && *request == generation)
                 .map(|_| pending.buffer)
         })
     }
 
     fn start_pending_save_formatters(&mut self) {
-        let waiting = self.format_on_save.values()
+        let waiting = self
+            .format_on_save
+            .values()
             .filter(|pending| !pending.started)
             .filter_map(|pending| Some((pending.buffer, pending.formatter.clone()?)))
             .collect::<Vec<_>>();
@@ -14841,11 +15147,16 @@ impl InteractiveApplication {
         }
     }
 
-    pub(in crate::editor::session) fn finish_format_on_save(&mut self, buffer: crate::editor::BufferId) {
+    pub(in crate::editor::session) fn finish_format_on_save(
+        &mut self,
+        buffer: crate::editor::BufferId,
+    ) {
         let Some(pending) = self.format_on_save.remove(&buffer) else {
             return;
         };
-        if pending.started && let Some(formatter) = &pending.formatter {
+        if pending.started
+            && let Some(formatter) = &pending.formatter
+        {
             self.tasks.stop_formatter(formatter, pending.buffer);
         }
         if let Some((server, generation)) = pending.request {
@@ -14925,16 +15236,16 @@ impl InteractiveApplication {
             if self.disk_stamps.get(&id) == Some(&stamp) {
                 continue;
             }
-            if matches!(self.documents.check_admission(), Err(crate::files::VfsError::QueueFull)) {
+            if matches!(
+                self.documents.check_admission(),
+                Err(crate::files::VfsError::QueueFull)
+            ) {
                 break;
             }
             let editor = self.state.window_version();
             let workspace = self.workspace.version();
             let view = Self::document_view(id, &self.state.buffers[id]);
-            match self
-                .documents
-                .request_disk_check(view, &editor, workspace)
-            {
+            match self.documents.request_disk_check(view, &editor, workspace) {
                 Ok(()) => {
                     self.reload_stamps.insert(id, stamp);
                 }
@@ -14944,7 +15255,9 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_format_on_save_deadline(&mut self) {
-        let expired = self.format_on_save.values()
+        let expired = self
+            .format_on_save
+            .values()
             .filter(|pending| pending.started && Instant::now() >= pending.deadline)
             .map(|pending| pending.buffer)
             .collect::<Vec<_>>();
@@ -15008,7 +15321,9 @@ impl InteractiveApplication {
         self.notify_message(self.message("saving", &[]), false);
         for buffer in changed {
             let quit = quit_after && buffer == last;
-            if let Some((_, pending_quit)) = self.pending_saves.iter_mut().find(|(id, _)| *id == buffer) {
+            if let Some((_, pending_quit)) =
+                self.pending_saves.iter_mut().find(|(id, _)| *id == buffer)
+            {
                 *pending_quit |= quit;
             } else {
                 self.pending_saves.push_back((buffer, quit));
@@ -15085,7 +15400,12 @@ impl InteractiveApplication {
         }
         self.close_buffer_target(view, buffer);
     }
-    fn retire_closed_buffer(&mut self, buffer_id: crate::editor::BufferId, path: Option<&Path>, clean: bool) {
+    fn retire_closed_buffer(
+        &mut self,
+        buffer_id: crate::editor::BufferId,
+        path: Option<&Path>,
+        clean: bool,
+    ) {
         self.recovery.retire_buffer(buffer_id, clean);
         self.documents.retire_buffer(buffer_id, path);
         if let Some(path) = path
@@ -15116,7 +15436,11 @@ impl InteractiveApplication {
         view_id: crate::editor::ViewId,
         buffer_id: crate::editor::BufferId,
     ) {
-        let clean = self.state.buffers.get(buffer_id).is_some_and(|buffer| !buffer.dirty);
+        let clean = self
+            .state
+            .buffers
+            .get(buffer_id)
+            .is_some_and(|buffer| !buffer.dirty);
         let closed_path = self
             .state
             .buffers
@@ -15262,7 +15586,11 @@ impl InteractiveApplication {
                     self.clear_notice();
                 }
             }
-            DocumentChange::DiskChecked { buffer, path, changed } => {
+            DocumentChange::DiskChecked {
+                buffer,
+                path,
+                changed,
+            } => {
                 if let Some(stamp) = self.reload_stamps.remove(&buffer) {
                     self.disk_stamps.insert(buffer, stamp);
                 }
@@ -15287,7 +15615,10 @@ impl InteractiveApplication {
                 }
                 self.git.forget_hunks();
                 self.start_git_status_refresh_with_feedback(false);
-                let views = self.state.views.iter()
+                let views = self
+                    .state
+                    .views
+                    .iter()
                     .filter(|(_, view)| view.buffer == buffer)
                     .map(|(id, _)| id)
                     .collect::<Vec<_>>();
@@ -15335,20 +15666,25 @@ impl InteractiveApplication {
                 let buffer_state = &self.state.buffers[buffer];
                 let still_dirty = buffer_state.dirty;
                 if let (Some(directory), false) = (&self.state.undo_directory, still_dirty) {
-                    self.persistence.track_undo_save(path.clone(), crate::editor::save_undo_history(
-                        directory.clone(),
+                    self.persistence.track_undo_save(
                         path.clone(),
-                        buffer_state.text.clone(),
-                        buffer_state.undo.clone(),
-                        self.state.undo_maximum_bytes,
-                    ));
+                        crate::editor::save_undo_history(
+                            directory.clone(),
+                            path.clone(),
+                            buffer_state.text.clone(),
+                            buffer_state.undo.clone(),
+                            self.state.undo_maximum_bytes,
+                        ),
+                    );
                 }
                 let lsp_document = buffer_state.path.clone().and_then(|path| {
                     Some(LspDocument {
                         language_id: language_id_for_path(&path)?.into(),
                         path,
                         version: revision.0,
-                        text: crate::editor::text::decode_utf8(buffer_state.persisted_bytes()).ok()?.text,
+                        text: crate::editor::text::decode_utf8(buffer_state.persisted_bytes())
+                            .ok()?
+                            .text,
                     })
                 });
                 self.git.forget_hunks();
@@ -15390,7 +15726,9 @@ impl InteractiveApplication {
                         // Publish the current buffer before didSave, never the older disk snapshot.
                         if !self.language.synced(&server, buffer, &source)
                             && let Err(error) = self.language.sync_owned(
-                                &server, current.clone(), (buffer, source.clone()),
+                                &server,
+                                current.clone(),
+                                (buffer, source.clone()),
                             )
                         {
                             self.show_error(error);
@@ -15527,9 +15865,16 @@ impl InteractiveApplication {
     pub(in crate::editor::session) fn process_trust_events(&mut self) {
         if let Some((old, new)) = self.workspace.pending_root_switch() {
             let dirty = self.state.buffers.values().any(|buffer| {
-                buffer.dirty && buffer.path.as_deref().is_some_and(|file| leaves_root(file, old, new))
+                buffer.dirty
+                    && buffer
+                        .path
+                        .as_deref()
+                        .is_some_and(|file| leaves_root(file, old, new))
             });
-            let new_terminal = self.terminal_session.ids_in_root(old).iter()
+            let new_terminal = self
+                .terminal_session
+                .ids_in_root(old)
+                .iter()
                 .any(|id| !self.switch_approved_terminals.contains(id));
             if dirty || new_terminal {
                 self.workspace.cancel_root_switch();

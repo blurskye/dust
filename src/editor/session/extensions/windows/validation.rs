@@ -347,9 +347,7 @@ pub(in crate::editor::session) fn validate_private_snapshot(
             let lead = x
                 .checked_sub(1)
                 .and_then(|x| cells.get(&(x, *y)))
-                .filter(|lead| {
-                    !lead.continuation && cell_width(lead.grapheme.as_str()) == 2
-                });
+                .filter(|lead| !lead.continuation && cell_width(lead.grapheme.as_str()) == 2);
             if lead.is_none() {
                 return Err(ui_error(
                     PluginUiErrorCode::SplitWideGrapheme,
@@ -501,7 +499,13 @@ pub(in crate::editor::session) fn apply_private_patch(
     if patch.replace_hit_regions {
         candidate.hit_regions = patch.hit_regions.clone();
     }
-    validate_private_snapshot(declaration, private, &candidate, Some(current.revision), ambiguous_wide)?;
+    validate_private_snapshot(
+        declaration,
+        private,
+        &candidate,
+        Some(current.revision),
+        ambiguous_wide,
+    )?;
     Ok(candidate)
 }
 

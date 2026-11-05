@@ -271,7 +271,8 @@ impl AgentSession {
                 self.phase = Phase::Prompting(request);
             }
             Err(error) => {
-                if !matches!(self.entries.last(), Some(Entry::Notice(previous)) if previous == &error) {
+                if !matches!(self.entries.last(), Some(Entry::Notice(previous)) if previous == &error)
+                {
                     self.entries.push(Entry::Notice(error));
                 }
             }
@@ -431,7 +432,10 @@ impl AgentSession {
 
     fn apply_preferred(&mut self) {
         for (key, value) in std::mem::take(&mut self.preferred) {
-            if self.option(&key).is_some_and(|option| option.current == value) {
+            if self
+                .option(&key)
+                .is_some_and(|option| option.current == value)
+            {
                 continue;
             }
             if let Err(error) = self.set_option(&key, &value) {
@@ -535,7 +539,8 @@ impl InteractiveApplication {
             .descriptions()
             .into_iter()
             .find(|(id, profile, lifecycle)| {
-                self.agent_terminal(super::PtyId(*id)) && *profile == name
+                self.agent_terminal(super::PtyId(*id))
+                    && *profile == name
                     && matches!(
                         lifecycle,
                         ContentLifecycle::Preflight
@@ -717,14 +722,21 @@ impl InteractiveApplication {
         let failure = if let (Phase::Prompting(_), Some(id), Some(process)) =
             (session.phase, session.id.clone(), session.process.as_mut())
         {
-            process.notify("session/cancel", json!({"sessionId": id})).err()
+            process
+                .notify("session/cancel", json!({"sessionId": id}))
+                .err()
         } else {
             None
         };
         let number = session.number;
         if let Some(error) = failure {
-            self.stop_agent_session(self.agent.active, &format!("could not send cancellation: {error}; agent stopped"));
-            self.show_error(format!("could not send cancellation: {error}; agent stopped"));
+            self.stop_agent_session(
+                self.agent.active,
+                &format!("could not send cancellation: {error}; agent stopped"),
+            );
+            self.show_error(format!(
+                "could not send cancellation: {error}; agent stopped"
+            ));
             return;
         }
         self.stop_agent_children(number);
@@ -751,13 +763,23 @@ impl InteractiveApplication {
     fn cancel_agent_permissions(&mut self, numbers: &[u64]) {
         // Permissions waiting for path resolution must be cancelled too, or their
         // completion would reopen the prompt after the turn was stopped.
-        let pending: Vec<_> = self.agent.files.iter()
-            .filter(|(_, request)| request.method == "session/request_permission" && numbers.contains(&request.session))
-            .map(|(id, _)| *id).collect();
+        let pending: Vec<_> = self
+            .agent
+            .files
+            .iter()
+            .filter(|(_, request)| {
+                request.method == "session/request_permission" && numbers.contains(&request.session)
+            })
+            .map(|(id, _)| *id)
+            .collect();
         for id in pending {
             self.documents.cancel_request(id);
             if let Some(request) = self.agent.files.remove(&id)
-                && let Some(index) = self.agent.sessions.iter().position(|session| session.number == request.session)
+                && let Some(index) = self
+                    .agent
+                    .sessions
+                    .iter()
+                    .position(|session| session.number == request.session)
             {
                 self.respond_to_agent(index, request.id, Ok(agent::permission_cancelled()));
             }
@@ -1117,12 +1139,26 @@ impl InteractiveApplication {
 
     /// Close sessions before their disposable workspace is removed.
     pub(super) fn close_agent_sessions_in_root(&mut self, root: &Path) {
-        let active = self.agent.sessions.get(self.agent.active).map(|session| session.number);
-        while let Some(index) = self.agent.sessions.iter().position(|session| session.root.starts_with(root)) {
+        let active = self
+            .agent
+            .sessions
+            .get(self.agent.active)
+            .map(|session| session.number);
+        while let Some(index) = self
+            .agent
+            .sessions
+            .iter()
+            .position(|session| session.root.starts_with(root))
+        {
             self.agent.active = index;
             self.close_agent_session();
         }
-        if let Some(index) = self.agent.sessions.iter().position(|session| Some(session.number) == active) {
+        if let Some(index) = self
+            .agent
+            .sessions
+            .iter()
+            .position(|session| Some(session.number) == active)
+        {
             self.agent.active = index;
         }
         self.refresh_agent_transcript();
@@ -1181,12 +1217,9 @@ impl InteractiveApplication {
                     .iter()
                     .any(|entry| matches!(entry, Entry::User { .. }))
         };
-        if let Some(index) = self
-            .agent
-            .sessions
-            .iter()
-            .position(|session| unused(session) && session.name == name && session.root == self.state.workspace_root)
-        {
+        if let Some(index) = self.agent.sessions.iter().position(|session| {
+            unused(session) && session.name == name && session.root == self.state.workspace_root
+        }) {
             self.agent.active = index;
         } else {
             self.start_agent_session(name)?;
@@ -1224,8 +1257,13 @@ impl InteractiveApplication {
                 .send(Err("the agent that asked is no longer open in Dust".into()));
             return;
         };
-        if !matches!(parent.phase, Phase::Prompting(_)) || parent.cancelling || parent.process.is_none() {
-            request.reply.send(Err("the parent agent turn is no longer active".into()));
+        if !matches!(parent.phase, Phase::Prompting(_))
+            || parent.cancelling
+            || parent.process.is_none()
+        {
+            request
+                .reply
+                .send(Err("the parent agent turn is no longer active".into()));
             return;
         }
         let name = request.agent.clone().unwrap_or_else(|| parent.name.clone());
@@ -1416,9 +1454,13 @@ impl InteractiveApplication {
         let spawned = self.spawn_agent(&name, &root, tab)?;
         // A restarted process can reuse JSON-RPC IDs, but must not receive replies
         // to filesystem requests made by the previous process in this tab.
-        let pending: Vec<_> = self.agent.files.iter()
+        let pending: Vec<_> = self
+            .agent
+            .files
+            .iter()
             .filter(|(_, request)| request.session == self.agent.sessions[self.agent.active].number)
-            .map(|(id, _)| *id).collect();
+            .map(|(id, _)| *id)
+            .collect();
         for id in pending {
             self.agent.files.remove(&id);
             self.documents.cancel_request(id);
@@ -1440,7 +1482,9 @@ impl InteractiveApplication {
         let Some(program) = self.agent_program(&profile.program) else {
             return Err(self.missing_agent_program(&profile.program));
         };
-        let mut environment = profile.environment.iter()
+        let mut environment = profile
+            .environment
+            .iter()
             .chain(&profile.acp_environment)
             .map(|(key, value)| (key.clone(), std::ffi::OsString::from(value)))
             .collect::<BTreeMap<_, _>>();
@@ -1531,7 +1575,11 @@ impl InteractiveApplication {
         }
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
-            if self.agent.sessions[index].reply.as_ref().is_some_and(Reply::is_cancelled) {
+            if self.agent.sessions[index]
+                .reply
+                .as_ref()
+                .is_some_and(Reply::is_cancelled)
+            {
                 let number = self.agent.sessions[index].number;
                 self.cancel_agent_permissions(&[number]);
                 self.agent.sessions[index].stop("the MCP client cancelled the subagent");
@@ -1582,8 +1630,14 @@ impl InteractiveApplication {
                 );
             let title = request.title.clone();
             let action = request.action;
-            let allow = if !request.options.iter().any(|option| option.kind == "allow_once")
-                && request.options.iter().any(|option| option.kind == "allow_always")
+            let allow = if !request
+                .options
+                .iter()
+                .any(|option| option.kind == "allow_once")
+                && request
+                    .options
+                    .iter()
+                    .any(|option| option.kind == "allow_always")
             {
                 "Allow always"
             } else {
@@ -1721,10 +1775,19 @@ impl InteractiveApplication {
                 "session/request_permission" | "fs/read_text_file" | "fs/write_text_file" => {
                     let number = session.number;
                     self.queue_agent_file(AgentFileRequest {
-                        session: number, id, method, params, buffers: Vec::new(), written: None,
+                        session: number,
+                        id,
+                        method,
+                        params,
+                        buffers: Vec::new(),
+                        written: None,
                     });
                 }
-                _ => self.respond_to_agent(index, id, Err(format!("{method} is not supported by Dust"))),
+                _ => self.respond_to_agent(
+                    index,
+                    id,
+                    Err(format!("{method} is not supported by Dust")),
+                ),
             },
             AgentMessage::Log(line) => session.last_log = line,
             AgentMessage::Exited(reason) => {
@@ -1855,26 +1918,51 @@ impl InteractiveApplication {
     }
 
     fn agent_buffer_paths(&self) -> Vec<(BufferId, PathBuf)> {
-        self.state.buffers.iter().filter_map(|(id, buffer)| {
-            buffer.path.clone().map(|path| (id, path))
-        }).collect()
+        self.state
+            .buffers
+            .iter()
+            .filter_map(|(id, buffer)| buffer.path.clone().map(|path| (id, path)))
+            .collect()
     }
 
     /// Resolve paths on the document worker, including aliases of not-yet-created files.
     fn queue_agent_file(&mut self, mut request: AgentFileRequest) {
-        let Some(index) = self.agent.sessions.iter().position(|s| s.number == request.session && s.process.is_some()) else { return; };
+        let Some(index) = self
+            .agent
+            .sessions
+            .iter()
+            .position(|s| s.number == request.session && s.process.is_some())
+        else {
+            return;
+        };
         let root = self.agent.sessions[index].root.clone();
         request.buffers = self.agent_buffer_paths();
-        let mut paths: Vec<_> = request.buffers.iter().map(|(_, path)| path.clone()).collect();
+        let mut paths: Vec<_> = request
+            .buffers
+            .iter()
+            .map(|(_, path)| path.clone())
+            .collect();
         if request.method == "session/request_permission" {
-            paths.extend(agent::permission_changes(&request.params).iter().map(|path| root.join(path)));
+            paths.extend(
+                agent::permission_changes(&request.params)
+                    .iter()
+                    .map(|path| root.join(path)),
+            );
         } else {
             let Some(path) = request.params["path"].as_str().map(PathBuf::from) else {
                 self.respond_to_agent(index, request.id, Err("path is missing".into()));
                 return;
             };
-            if !path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
-                self.respond_to_agent(index, request.id, Err("agent file path must be absolute without parent components".into()));
+            if !path.is_absolute()
+                || path
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
+                self.respond_to_agent(
+                    index,
+                    request.id,
+                    Err("agent file path must be absolute without parent components".into()),
+                );
                 return;
             }
             if request.method == "fs/write_text_file" && !request.params["content"].is_string() {
@@ -1885,25 +1973,54 @@ impl InteractiveApplication {
             paths.push(root);
         }
         match self.documents.resolve_agent_paths(paths) {
-            Ok(id) => { self.agent.files.insert(id, request); }
+            Ok(id) => {
+                self.agent.files.insert(id, request);
+            }
             Err(error) => self.respond_to_agent(index, request.id, Err(error.to_string())),
         }
     }
 
-    pub(in crate::editor::session) fn unsaved_agent_changes(&self, paths: &[PathBuf], buffers: &[(BufferId, PathBuf)]) -> String {
-        paths.iter().filter(|path| buffers.iter().any(|(id, resolved)| {
-            resolved == *path && self.state.buffers.get(*id).is_some_and(|buffer| buffer.dirty)
-        })).map(|path| {
-            let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
-            format!("! {name} has unsaved changes; this changes the saved copy\n")
-        }).collect()
+    pub(in crate::editor::session) fn unsaved_agent_changes(
+        &self,
+        paths: &[PathBuf],
+        buffers: &[(BufferId, PathBuf)],
+    ) -> String {
+        paths
+            .iter()
+            .filter(|path| {
+                buffers.iter().any(|(id, resolved)| {
+                    resolved == *path
+                        && self
+                            .state
+                            .buffers
+                            .get(*id)
+                            .is_some_and(|buffer| buffer.dirty)
+                })
+            })
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy();
+                format!("! {name} has unsaved changes; this changes the saved copy\n")
+            })
+            .collect()
     }
 
     /// All disk work is asynchronous; buffer checks and updates stay on the editor thread.
-    pub(super) fn accept_agent_file(&mut self, result: crate::files::VfsResult) -> Option<crate::files::VfsResult> {
+    pub(super) fn accept_agent_file(
+        &mut self,
+        result: crate::files::VfsResult,
+    ) -> Option<crate::files::VfsResult> {
         use crate::files::VfsResult;
-        let Some(mut request) = self.agent.files.remove(&result.request_id()) else { return Some(result); };
-        let index = self.agent.sessions.iter().position(|s| s.number == request.session && s.process.is_some())?;
+        let Some(mut request) = self.agent.files.remove(&result.request_id()) else {
+            return Some(result);
+        };
+        let index = self
+            .agent
+            .sessions
+            .iter()
+            .position(|s| s.number == request.session && s.process.is_some())?;
         let response = match result {
             VfsResult::PathsResolved { paths, .. } => {
                 if request.buffers != self.agent_buffer_paths() {
@@ -1968,17 +2085,34 @@ impl InteractiveApplication {
         None
     }
 
-    fn finish_agent_write(&mut self, request: &AgentFileRequest, open: &[BufferId]) -> Result<Value, String> {
+    fn finish_agent_write(
+        &mut self,
+        request: &AgentFileRequest,
+        open: &[BufferId],
+    ) -> Result<Value, String> {
         let mut candidate = self.state.draft();
-        let text = TextBuffer::from_bytes(request.params["content"].as_str().expect("validated content").as_bytes()).map_err(|error| error.to_string())?;
+        let text = TextBuffer::from_bytes(
+            request.params["content"]
+                .as_str()
+                .expect("validated content")
+                .as_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
         for id in open {
             let buffer = &self.state.buffers[*id];
             if buffer.dirty {
-                return Err("file written, but newer unsaved changes in Dust were preserved".into());
+                return Err(
+                    "file written, but newer unsaved changes in Dust were preserved".into(),
+                );
             }
-            candidate.reload_document(*id, text.clone(), buffer.path.clone().expect("resolved buffer path"));
+            candidate.reload_document(
+                *id,
+                text.clone(),
+                buffer.path.clone().expect("resolved buffer path"),
+            );
         }
-        self.commit_editor_draft(candidate, None, false).map_err(|e| e.to_string())?;
+        self.commit_editor_draft(candidate, None, false)
+            .map_err(|e| e.to_string())?;
         self.git.forget_hunks();
         self.keep_cursor_off_final_newline();
         Ok(Value::Null)
@@ -1987,7 +2121,12 @@ impl InteractiveApplication {
     pub(super) fn fail_agent_files(&mut self, error: &str) {
         let files = std::mem::take(&mut self.agent.files);
         for (_, request) in files {
-            if let Some(index) = self.agent.sessions.iter().position(|s| s.number == request.session) {
+            if let Some(index) = self
+                .agent
+                .sessions
+                .iter()
+                .position(|s| s.number == request.session)
+            {
                 self.respond_to_agent(index, request.id, Err(error.to_owned()));
             }
         }
@@ -2012,7 +2151,11 @@ impl InteractiveApplication {
         } else {
             "reject_once"
         };
-        let fallback = if choice == ConfirmationChoice::Yes { "allow_always" } else { "reject_always" };
+        let fallback = if choice == ConfirmationChoice::Yes {
+            "allow_always"
+        } else {
+            "reject_always"
+        };
         let option = request
             .options
             .iter()
@@ -2105,18 +2248,19 @@ impl InteractiveApplication {
                 .filter(|id| self.state.buffers.contains_key(*id))
             {
                 Some(buffer) => self.state.replace_active_view(Some(buffer)),
-                None => {
-                    self.state.open_virtual_read_only(
+                None => self
+                    .state
+                    .open_virtual_read_only(
                         TextBuffer::from_text(""),
                         TRANSCRIPT_OWNER.into(),
                         0,
                         0,
                         1,
-                    ).map(|(buffer, _)| {
+                    )
+                    .map(|(buffer, _)| {
                         self.agent.buffer = Some(buffer);
                         self.state.kept_buffer = Some(buffer);
-                    })
-                }
+                    }),
             };
             if let Err(error) = shown {
                 self.show_error(error);
@@ -2253,7 +2397,10 @@ impl InteractiveApplication {
         };
         let lines = crate::ui::transcript_lines(&text.text, &bands).len();
         if self.agent.scroll > 0 && same_width {
-            self.agent.scroll = self.agent.scroll.saturating_add(lines.saturating_sub(self.agent.lines));
+            self.agent.scroll = self
+                .agent
+                .scroll
+                .saturating_add(lines.saturating_sub(self.agent.lines));
         }
         self.agent.lines = lines;
         self.ui.agent_panel = Some(AgentPanelUi {
@@ -2419,8 +2566,13 @@ impl InteractiveApplication {
     fn sync_agent_input(&mut self) {
         if self.agent.normal {
             let cursor = self.agent.cursor.min(self.agent.input.len());
-            let start = self.agent.input[..cursor].rfind('\n').map_or(0, |index| index + 1);
-            if cursor > start && (cursor == self.agent.input.len() || self.agent.input[cursor..].starts_with('\n')) {
+            let start = self.agent.input[..cursor]
+                .rfind('\n')
+                .map_or(0, |index| index + 1);
+            if cursor > start
+                && (cursor == self.agent.input.len()
+                    || self.agent.input[cursor..].starts_with('\n'))
+            {
                 self.agent.cursor = PromptMove::Left.apply(&self.agent.input, cursor);
             }
         }
@@ -2439,15 +2591,22 @@ impl InteractiveApplication {
         panel.placeholder = format!("Ask {name}…  / for commands");
         let menu = self.slash_menu();
         self.agent.selected = self.agent.selected.min(menu.len().saturating_sub(1));
-        let viewport = self.agent_view().and_then(|view| crate::ui::view_pane_viewport(&self.state, &self.ui, view));
+        let viewport = self
+            .agent_view()
+            .and_then(|view| crate::ui::view_pane_viewport(&self.state, &self.ui, view));
         if let Some(panel) = self.ui.agent_panel.as_mut() {
             panel.selected = self.agent.selected;
             panel.menu = menu;
             if let Some(viewport) = viewport {
                 let height = panel.transcript_height(
-                    self.configuration.settings(), viewport.width, viewport.height,
+                    self.configuration.settings(),
+                    viewport.width,
+                    viewport.height,
                 );
-                self.agent.scroll = self.agent.scroll.min(self.agent.lines.saturating_sub(height));
+                self.agent.scroll = self
+                    .agent
+                    .scroll
+                    .min(self.agent.lines.saturating_sub(height));
             }
             panel.scroll = self.agent.scroll;
         }
@@ -2652,16 +2811,10 @@ impl InteractiveApplication {
                 false,
             ),
             "insert" => (cursor, true),
-            "append" => (
-                if cursor < line_end {
-                    next
-                } else {
-                    cursor
-                },
-                true,
-            ),
+            "append" => (if cursor < line_end { next } else { cursor }, true),
             "insert_home" => (
-                line_start + input[line_start..line_end].len() - input[line_start..line_end].trim_start().len(),
+                line_start + input[line_start..line_end].len()
+                    - input[line_start..line_end].trim_start().len(),
                 true,
             ),
             "append_end" => (line_end, true),
@@ -2715,10 +2868,7 @@ impl InteractiveApplication {
     /// Scroll the transcript; positive is up, toward older output.
     pub(super) fn scroll_agent(&mut self, rows: i64) {
         let rows = isize::try_from(rows).unwrap_or(0);
-        self.agent.scroll = self
-            .agent
-            .scroll
-            .saturating_add_signed(rows);
+        self.agent.scroll = self.agent.scroll.saturating_add_signed(rows);
         self.sync_agent_input();
     }
 
@@ -3071,13 +3221,18 @@ fn slash_matches(
 mod tests {
     use super::*;
 
-    fn test_app() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication) {
+    fn test_app() -> (
+        (tempfile::TempDir, tempfile::TempDir),
+        InteractiveApplication,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let mut loaded = crate::config::load_bundled_config();
         loaded.config.persistence.enabled = false;
         let mut app = InteractiveApplication::new(
-            crate::editor::StartupTarget::Dashboard { root: root.path().into() },
+            crate::editor::StartupTarget::Dashboard {
+                root: root.path().into(),
+            },
             loaded,
             false,
             state.path().into(),
@@ -3097,7 +3252,8 @@ mod tests {
             Vec::new(),
             None,
             None,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn child(app: &mut InteractiveApplication, parent: u64, phase: Phase) -> usize {
@@ -3122,7 +3278,11 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn subagent_reply() -> (crate::remote::RemoteServer, Reply, std::io::BufReader<std::os::unix::net::UnixStream>) {
+    fn subagent_reply() -> (
+        crate::remote::RemoteServer,
+        Reply,
+        std::io::BufReader<std::os::unix::net::UnixStream>,
+    ) {
         use std::io::Write;
         let directory = tempfile::tempdir().unwrap();
         let server = crate::remote::RemoteServer::start(directory.path()).unwrap();
@@ -3145,7 +3305,9 @@ mod tests {
     fn echo_agent(app: &mut InteractiveApplication) -> usize {
         let index = tab(app);
         let session = &mut app.agent.sessions[index];
-        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.process = Some(
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap(),
+        );
         session.id = Some("s".into());
         index
     }
@@ -3155,7 +3317,12 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             app.process_vfs_results();
-            if let Some(AgentMessage::Response { result, .. }) = app.agent.sessions[index].process.as_ref().unwrap().try_message() {
+            if let Some(AgentMessage::Response { result, .. }) = app.agent.sessions[index]
+                .process
+                .as_ref()
+                .unwrap()
+                .try_message()
+            {
                 return result;
             }
             assert!(std::time::Instant::now() < deadline);
@@ -3165,8 +3332,12 @@ mod tests {
 
     fn frame(app: &InteractiveApplication) -> crate::ui::Frame {
         crate::ui::render(
-            &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(),
-            app.window_session.width(), app.window_session.height(),
+            &app.state,
+            &app.ui,
+            app.configuration.settings(),
+            app.configuration.dashboard(),
+            app.window_session.width(),
+            app.window_session.height(),
         )
     }
 
@@ -3208,18 +3379,26 @@ mod tests {
         let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         app.agent.active = index;
-        app.agent.sessions[index].entries = vec![Entry::Agent((0..80).map(|row| format!("row {row:02}\n")).collect())];
+        app.agent.sessions[index].entries = vec![Entry::Agent(
+            (0..80).map(|row| format!("row {row:02}\n")).collect(),
+        )];
         app.show_agent_panel();
         app.scroll_agent(40);
         let panel = app.ui.agent_panel.as_ref().unwrap();
         let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, panel.view).unwrap();
         let first = frame(&app).grid.row_text(viewport.y + 1);
-        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText((80..90).map(|row| format!("row {row:02}\n")).collect()));
+        apply_update(
+            &mut app.agent.sessions[index],
+            SessionUpdate::AgentText((80..90).map(|row| format!("row {row:02}\n")).collect()),
+        );
         app.refresh_agent_transcript();
         assert_eq!(app.agent.scroll, 50);
         assert_eq!(frame(&app).grid.row_text(viewport.y + 1), first);
         app.scroll_agent(i64::MIN);
-        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText("last row\n".into()));
+        apply_update(
+            &mut app.agent.sessions[index],
+            SessionUpdate::AgentText("last row\n".into()),
+        );
         app.refresh_agent_transcript();
         assert_eq!(app.agent.scroll, 0);
     }
@@ -3229,9 +3408,12 @@ mod tests {
         let (_directories, mut app) = test_app();
         let index = tab(&mut app);
         app.agent.active = index;
-        app.agent.sessions[index].entries = vec![Entry::Agent((0..100).map(|row| format!("row {row:02}\n")).collect())];
+        app.agent.sessions[index].entries = vec![Entry::Agent(
+            (0..100).map(|row| format!("row {row:02}\n")).collect(),
+        )];
         app.show_agent_panel();
-        let viewport = crate::ui::view_pane_viewport(&app.state, &app.ui, app.agent_view().unwrap()).unwrap();
+        let viewport =
+            crate::ui::view_pane_viewport(&app.state, &app.ui, app.agent_view().unwrap()).unwrap();
         let maximum = 100 - usize::from(viewport.height - 5);
         app.scroll_agent(i64::MAX);
         assert_eq!(app.agent.scroll, maximum);
@@ -3353,20 +3535,42 @@ mod tests {
         let index = echo_agent(&mut app);
         app.agent.active = index;
         app.agent_ask("first".into());
-        let Phase::Prompting(first) = app.agent.sessions[index].phase else { panic!("prompting"); };
-        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText("answer".into()));
+        let Phase::Prompting(first) = app.agent.sessions[index].phase else {
+            panic!("prompting");
+        };
+        apply_update(
+            &mut app.agent.sessions[index],
+            SessionUpdate::AgentText("answer".into()),
+        );
         app.agent.context = vec![PromptPart::Text("attached context".into())];
         app.agent_ask("second".into());
-        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText(" one".into()));
+        apply_update(
+            &mut app.agent.sessions[index],
+            SessionUpdate::AgentText(" one".into()),
+        );
         assert_eq!(app.agent.sessions[index].entries.len(), 2);
         app.handle_agent_response(index, first, Ok(json!({"stopReason": "end_turn"})));
-        apply_update(&mut app.agent.sessions[index], SessionUpdate::AgentText("answer two".into()));
-        assert_eq!(app.agent.sessions[index].entries, vec![
-            Entry::User { text: "first".into(), context: vec![], attachments: vec![] },
-            Entry::Agent("answer one".into()),
-            Entry::User { text: "second".into(), context: vec![context_label(&PromptPart::Text("attached context".into()))], attachments: vec![PromptPart::Text("attached context".into())] },
-            Entry::Agent("answer two".into()),
-        ]);
+        apply_update(
+            &mut app.agent.sessions[index],
+            SessionUpdate::AgentText("answer two".into()),
+        );
+        assert_eq!(
+            app.agent.sessions[index].entries,
+            vec![
+                Entry::User {
+                    text: "first".into(),
+                    context: vec![],
+                    attachments: vec![]
+                },
+                Entry::Agent("answer one".into()),
+                Entry::User {
+                    text: "second".into(),
+                    context: vec![context_label(&PromptPart::Text("attached context".into()))],
+                    attachments: vec![PromptPart::Text("attached context".into())]
+                },
+                Entry::Agent("answer two".into()),
+            ]
+        );
     }
 
     #[cfg(unix)]
@@ -3378,13 +3582,31 @@ mod tests {
         let session = &mut app.agent.sessions[index];
         session.id = Some("s".into());
         session.phase = Phase::Prompting(1);
-        session.process = Some(AgentProcess::spawn(Path::new("/bin/sh"), &["-c".into(), "sleep 60".into()], &BTreeMap::new(), &session.root).unwrap());
+        session.process = Some(
+            AgentProcess::spawn(
+                Path::new("/bin/sh"),
+                &["-c".into(), "sleep 60".into()],
+                &BTreeMap::new(),
+                &session.root,
+            )
+            .unwrap(),
+        );
         let process = session.process.as_mut().unwrap();
-        assert!((0..32).any(|_| process.notify("busy", json!({"text": "x".repeat(128 * 1024)})).is_err()));
+        assert!((0..32).any(|_| {
+            process
+                .notify("busy", json!({"text": "x".repeat(128 * 1024)}))
+                .is_err()
+        }));
         app.cancel_agent_turn();
         assert!(app.agent.sessions[index].process.is_none());
         assert_eq!(app.agent.sessions[index].phase, Phase::Stopped);
-        assert!(app.ui.notification.as_ref().unwrap().contains("could not send cancellation"));
+        assert!(
+            app.ui
+                .notification
+                .as_ref()
+                .unwrap()
+                .contains("could not send cancellation")
+        );
     }
 
     #[cfg(unix)]
@@ -3401,12 +3623,22 @@ mod tests {
                 app.cancel_agent_turn();
             }
             app.start_subagent(AgentRequest {
-                parent: app.agent.sessions[index].number, description: String::new(), prompt: "task".into(), agent: None, model: None, reply,
+                parent: app.agent.sessions[index].number,
+                description: String::new(),
+                prompt: "task".into(),
+                agent: None,
+                model: None,
+                reply,
             });
             assert_eq!(app.agent.sessions.len(), 1);
             let mut line = String::new();
             answer.read_line(&mut line).unwrap();
-            assert!(serde_json::from_str::<Value>(&line).unwrap()["error"].as_str().unwrap().contains("no longer active"));
+            assert!(
+                serde_json::from_str::<Value>(&line).unwrap()["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no longer active")
+            );
         }
     }
 
@@ -3422,18 +3654,34 @@ mod tests {
             session.parent = Some(99);
             session.reply = Some(reply);
             session.phase = Phase::Prompting(10);
-            session.entries = vec![Entry::User { text: "task".into(), context: vec![], attachments: vec![] }, Entry::Agent("partial answer".into())];
+            session.entries = vec![
+                Entry::User {
+                    text: "task".into(),
+                    context: vec![],
+                    attachments: vec![],
+                },
+                Entry::Agent("partial answer".into()),
+            ];
             match outcome {
-                "error" => { app.handle_agent_response(index, 10, Err("prompt failed".into())); }
-                "exit" => app.handle_agent_message(index, AgentMessage::Exited("unexpected exit".into())),
-                _ => { app.handle_agent_response(index, 10, Ok(json!({"stopReason": "end_turn"}))); }
+                "error" => {
+                    app.handle_agent_response(index, 10, Err("prompt failed".into()));
+                }
+                "exit" => {
+                    app.handle_agent_message(index, AgentMessage::Exited("unexpected exit".into()))
+                }
+                _ => {
+                    app.handle_agent_response(index, 10, Ok(json!({"stopReason": "end_turn"})));
+                }
             }
             assert!(app.settle_subagent(index));
             let mut line = String::new();
             answer.read_line(&mut line).unwrap();
             let result: Value = serde_json::from_str(&line).unwrap();
-            if outcome == "success" { assert_eq!(result["text"], "partial answer"); }
-            else { assert!(result["error"].is_string(), "{result}"); }
+            if outcome == "success" {
+                assert_eq!(result["text"], "partial answer");
+            } else {
+                assert!(result["error"].is_string(), "{result}");
+            }
         }
     }
 
@@ -3445,14 +3693,28 @@ mod tests {
         let number = app.agent.sessions[old].number;
         app.agent.sessions[old].root = app.state.workspace_root.join("other-worktree");
         let mut config = app.configuration.fixture_snapshot();
-        let mut profile = config.settings.agents.profiles.values().next().unwrap().clone();
+        let mut profile = config
+            .settings
+            .agents
+            .profiles
+            .values()
+            .next()
+            .unwrap()
+            .clone();
         profile.program = "cat".into();
         profile.arguments.clear();
-        config.settings.agents.profiles.insert("fixture".into(), profile);
+        config
+            .settings
+            .agents
+            .profiles
+            .insert("fixture".into(), profile);
         app.configuration.install_fixture(config);
         app.open_agent_tab("fixture").unwrap();
         assert_ne!(app.agent.sessions[app.agent.active].number, number);
-        assert_eq!(app.agent.sessions[app.agent.active].root, app.state.workspace_root);
+        assert_eq!(
+            app.agent.sessions[app.agent.active].root,
+            app.state.workspace_root
+        );
         let number = app.agent.sessions[app.agent.active].number;
         app.open_agent_tab("fixture").unwrap();
         assert_eq!(app.agent.sessions[app.agent.active].number, number);
@@ -3469,7 +3731,10 @@ mod tests {
         let index = tab(&mut app);
         let tools = &app.agent.sessions[index].tools;
         assert_eq!(tools[0]["env"][0]["value"], socket);
-        assert_eq!(tools[0]["args"][1], app.agent.sessions[index].number.to_string());
+        assert_eq!(
+            tools[0]["args"][1],
+            app.agent.sessions[index].number.to_string()
+        );
     }
 
     #[cfg(unix)]
@@ -3480,14 +3745,21 @@ mod tests {
         let conversation = app.agent.sessions[index].conversation();
         assert_eq!(app.reopen_conversation(&conversation.id).unwrap(), index);
         assert_eq!(app.agent.sessions.len(), 1);
-        history::save(app.agent.directory.clone(), conversation.clone(), Vec::new());
+        history::save(
+            app.agent.directory.clone(),
+            conversation.clone(),
+            Vec::new(),
+        );
         history::flush(std::time::Instant::now() + std::time::Duration::from_secs(5)).unwrap();
         app.agent.sessions.clear();
         let index = app.reopen_conversation(&conversation.id).unwrap();
         assert_eq!(app.agent.sessions[index].history, conversation.id);
         assert_eq!(app.agent.sessions[index].root, conversation.root);
         let started = app.agent.started;
-        assert_eq!(app.reopen_conversation("missing").unwrap_err(), "that conversation could not be read");
+        assert_eq!(
+            app.reopen_conversation("missing").unwrap_err(),
+            "that conversation could not be read"
+        );
         assert_eq!(app.agent.sessions.len(), 1);
         assert_eq!(app.agent.started, started);
     }
@@ -3506,13 +3778,24 @@ mod tests {
         app.agent.sessions[other].reply = Some(other_reply);
         for index in [cancelled, other] {
             app.agent.sessions[index].process = Some(
-                AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &app.state.workspace_root).unwrap()
+                AgentProcess::spawn(
+                    Path::new("cat"),
+                    &[],
+                    &BTreeMap::new(),
+                    &app.state.workspace_root,
+                )
+                .unwrap(),
             );
         }
         let cancelled_number = app.agent.sessions[cancelled].number;
-        app.agent.permissions.push_back(permission(cancelled_number));
+        app.agent
+            .permissions
+            .push_back(permission(cancelled_number));
         app.agent.asking = Some(permission(cancelled_number));
-        connection.get_ref().shutdown(std::net::Shutdown::Both).unwrap();
+        connection
+            .get_ref()
+            .shutdown(std::net::Shutdown::Both)
+            .unwrap();
         app.process_agent_events();
         let session = &app.agent.sessions[cancelled];
         assert_eq!(session.phase, Phase::Stopped);
@@ -3593,7 +3876,9 @@ mod tests {
         let parent = tab(&mut app);
         let parent_number = app.agent.sessions[parent].number;
         let child = child(&mut app, parent_number, Phase::Initializing(1));
-        app.agent.permissions.push_back(permission(app.agent.sessions[child].number));
+        app.agent
+            .permissions
+            .push_back(permission(app.agent.sessions[child].number));
         app.agent.active = unrelated;
         app.tutor_quit();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -3659,7 +3944,9 @@ mod tests {
         let number = app.agent.sessions[parent].number;
         let child = child(&mut app, number, Phase::Creating(2));
         app.agent.permissions.push_back(permission(number));
-        app.agent.permissions.push_back(permission(app.agent.sessions[child].number));
+        app.agent
+            .permissions
+            .push_back(permission(app.agent.sessions[child].number));
         let mut process = AgentProcess::spawn(
             Path::new("python3"),
             &["-c".into(), "import os, sys, time; os.close(0); print('ready', file=sys.stderr, flush=True); time.sleep(60)".into()],
@@ -3684,12 +3971,19 @@ mod tests {
         }
         app.agent.sessions[parent].process = Some(process);
         app.agent.sessions[parent].phase = Phase::Prompting(1);
-        app.handle_agent_message(parent, AgentMessage::Request {
-            id: json!(3), method: "unsupported".into(), params: Value::Null,
-        });
+        app.handle_agent_message(
+            parent,
+            AgentMessage::Request {
+                id: json!(3),
+                method: "unsupported".into(),
+                params: Value::Null,
+            },
+        );
         assert!(app.agent.sessions[parent].process.is_none());
         assert_eq!(app.agent.sessions[parent].phase, Phase::Stopped);
-        assert!(matches!(app.agent.sessions[parent].entries.last(), Some(Entry::Notice(error)) if error.contains("input is closed")));
+        assert!(
+            matches!(app.agent.sessions[parent].entries.last(), Some(Entry::Notice(error)) if error.contains("input is closed"))
+        );
         assert_eq!(app.agent.sessions[child].phase, Phase::Stopped);
         assert!(app.agent.sessions[child].queued.is_empty());
         assert!(app.agent.permissions.is_empty());
@@ -3703,14 +3997,38 @@ mod tests {
         let session = &mut app.agent.sessions[index];
         session.id = Some("s".into());
         session.recap = true;
-        session.entries = vec![Entry::Agent("earlier answer".into()), Entry::User { text: "question".into(), context: vec![], attachments: vec![] }];
-        let parts = vec![PromptPart::File { path: session.root.join("file.rs"), text: Some("selection".into()) }, PromptPart::Text("question".into())];
+        session.entries = vec![
+            Entry::Agent("earlier answer".into()),
+            Entry::User {
+                text: "question".into(),
+                context: vec![],
+                attachments: vec![],
+            },
+        ];
+        let parts = vec![
+            PromptPart::File {
+                path: session.root.join("file.rs"),
+                text: Some("selection".into()),
+            },
+            PromptPart::Text("question".into()),
+        ];
         session.queued.push_back(parts.clone());
-        session.process = Some(AgentProcess::spawn(Path::new("/bin/sh"), &["-c".into(), "sleep 60".into()], &BTreeMap::new(), &session.root).unwrap());
+        session.process = Some(
+            AgentProcess::spawn(
+                Path::new("/bin/sh"),
+                &["-c".into(), "sleep 60".into()],
+                &BTreeMap::new(),
+                &session.root,
+            )
+            .unwrap(),
+        );
         let process = session.process.as_mut().unwrap();
         let mut full = false;
         for _ in 0..32 {
-            if process.notify("busy", json!({"text": "x".repeat(128 * 1024)})).is_err() {
+            if process
+                .notify("busy", json!({"text": "x".repeat(128 * 1024)}))
+                .is_err()
+            {
                 full = true;
                 break;
             }
@@ -3720,17 +4038,28 @@ mod tests {
         assert_eq!(session.phase, Phase::Ready);
         assert_eq!(session.queued.front(), Some(&parts));
         assert!(session.recap);
-        assert!(matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("queue is full")));
-        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        assert!(
+            matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("queue is full"))
+        );
+        session.process = Some(
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap(),
+        );
         session.send_next_prompt();
         assert!(matches!(session.phase, Phase::Prompting(_)));
         assert!(session.queued.is_empty());
         assert!(!session.recap);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Some(AgentMessage::Request { method, params, .. }) = session.process.as_ref().unwrap().try_message() {
+            if let Some(AgentMessage::Request { method, params, .. }) =
+                session.process.as_ref().unwrap().try_message()
+            {
                 assert_eq!(method, "session/prompt");
-                assert!(params["prompt"][0]["text"].as_str().unwrap().contains("earlier answer"));
+                assert!(
+                    params["prompt"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("earlier answer")
+                );
                 assert_eq!(params["prompt"][1]["resource"]["text"], "selection");
                 assert_eq!(params["prompt"][2]["text"], "question");
                 break;
@@ -3747,14 +4076,19 @@ mod tests {
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.earlier = Some("old".into());
-        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.process = Some(
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap(),
+        );
         session.open_session();
-        let Phase::Creating(request) = session.phase else { panic!("new session"); };
+        let Phase::Creating(request) = session.phase else {
+            panic!("new session");
+        };
         assert!(session.recap && session.earlier.is_none());
         app.handle_agent_response(index, request, Err("startup failed".into()));
         let session = &mut app.agent.sessions[index];
         assert!(session.process.is_none());
-        let process = AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap();
+        let process =
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap();
         session.attach((process, Phase::Initializing(10), BTreeMap::new(), None));
         assert!(session.recap);
         assert!(session.earlier.is_none());
@@ -3768,13 +4102,18 @@ mod tests {
         session.id = Some("s".into());
         session.preferred.insert("mode".into(), "plan".into());
         session.apply_preferred();
-        assert!(matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("has no option `mode`")));
+        assert!(
+            matches!(session.entries.last(), Some(Entry::Notice(error)) if error.contains("has no option `mode`"))
+        );
     }
 
     #[test]
     fn agent_empty_question_keeps_attached_context() {
         let (_directories, mut app) = test_app();
-        let context = vec![PromptPart::File { path: app.state.workspace_root.join("file.rs"), text: Some("selection".into()) }];
+        let context = vec![PromptPart::File {
+            path: app.state.workspace_root.join("file.rs"),
+            text: Some("selection".into()),
+        }];
         app.agent.context = context.clone();
         app.agent_ask("  \n ".into());
         assert_eq!(app.agent.context, context);
@@ -3788,18 +4127,26 @@ mod tests {
         let index = tab(&mut app);
         let session = &mut app.agent.sessions[index];
         session.parent = Some(99);
-        session.process = Some(AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap());
+        session.process = Some(
+            AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root).unwrap(),
+        );
         session.phase = Phase::Creating(10);
         session.preferred = BTreeMap::from([
             (SUBAGENT_MODEL.into(), "a".into()),
             ("model".into(), "b".into()),
             ("provider_model".into(), "b".into()),
         ]);
-        session.queued.push_back(vec![PromptPart::Text("task".into())]);
-        app.handle_agent_response(index, 10, Ok(json!({"sessionId": "s", "configOptions": [{
-            "id": "provider_model", "name": "Model", "category": "model", "type": "select",
-            "currentValue": "a", "options": [{"value": "a"}, {"value": "b"}],
-        }]})));
+        session
+            .queued
+            .push_back(vec![PromptPart::Text("task".into())]);
+        app.handle_agent_response(
+            index,
+            10,
+            Ok(json!({"sessionId": "s", "configOptions": [{
+                "id": "provider_model", "name": "Model", "category": "model", "type": "select",
+                "currentValue": "a", "options": [{"value": "a"}, {"value": "b"}],
+            }]})),
+        );
         let session = &app.agent.sessions[index];
         assert!(matches!(session.phase, Phase::Prompting(_)));
         assert!(session.requests.is_empty());
@@ -3897,8 +4244,12 @@ mod tests {
                 if error.contains("UTF-8 workspace path")));
             let mut line = String::new();
             answer.read_line(&mut line).unwrap();
-            assert!(serde_json::from_str::<Value>(&line).unwrap()["error"]
-                .as_str().unwrap().contains("UTF-8 workspace path"));
+            assert!(
+                serde_json::from_str::<Value>(&line).unwrap()["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("UTF-8 workspace path")
+            );
         }
     }
 
@@ -3915,13 +4266,15 @@ mod tests {
             .unwrap()
             .program = "dust-test-missing-adapter".into();
         app.configuration.install_fixture(config);
-        let index = app.add_agent_tab(
-            name,
-            app.state.workspace_root.clone(),
-            Vec::new(),
-            None,
-            None,
-        ).unwrap();
+        let index = app
+            .add_agent_tab(
+                name,
+                app.state.workspace_root.clone(),
+                Vec::new(),
+                None,
+                None,
+            )
+            .unwrap();
         app.agent.active = index;
         app.show_agent_panel();
         app.agent.context.push(PromptPart::Text("context".into()));
@@ -3969,7 +4322,8 @@ mod tests {
             app.agent.sessions[index].entries.last(),
             Some(Entry::User { attachments: saved, .. }) if saved == &attachments
         ));
-        app.finish_agent_history(std::time::Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+        app.finish_agent_history(std::time::Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
         app.agent.sessions.clear();
         let index = app.reopen_conversation(&history).unwrap();
         let session = &mut app.agent.sessions[index];
@@ -3980,7 +4334,8 @@ mod tests {
                 &["-c".into(), "cat >&2".into()],
                 &BTreeMap::new(),
                 &session.root,
-            ).unwrap(),
+            )
+            .unwrap(),
         );
         session.id = Some("fresh".into());
         session.phase = Phase::Ready;
@@ -3997,7 +4352,12 @@ mod tests {
         };
         assert_eq!(prompt["method"], "session/prompt");
         let recap = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
-        for expected in ["Explain this fragment", "unsaved.rs (1 lines selected)", "let unsaved = 42;", "Diagnostics:\nmissing semicolon"] {
+        for expected in [
+            "Explain this fragment",
+            "unsaved.rs (1 lines selected)",
+            "let unsaved = 42;",
+            "Diagnostics:\nmissing semicolon",
+        ] {
             assert!(recap.contains(expected), "missing {expected}: {recap}");
         }
         assert_eq!(prompt["params"]["prompt"][1]["text"], "What next?");
@@ -4059,7 +4419,9 @@ mod tests {
     fn agent_block_attachments_use_the_selected_display_columns() {
         use crate::editor::{Selection, SelectionKind, text::ByteOffset};
         let mut state = crate::editor::EditorState::new("/work".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\nDEF\n"), None).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text("abc\nDEF\n"), None)
+            .unwrap();
         state.views[view].selection = Some(Selection {
             anchor: ByteOffset(1),
             head: ByteOffset(5),
@@ -4074,7 +4436,9 @@ mod tests {
             ),
             "b\nE"
         );
-        let (buffer, view) = state.open_text(TextBuffer::from_text("a界z\nx\tQ\n"), None).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text("a界z\nx\tQ\n"), None)
+            .unwrap();
         state.views[view].selection = Some(Selection {
             anchor: ByteOffset(1),
             head: ByteOffset(7),
@@ -4101,32 +4465,95 @@ mod tests {
         let alias = root.join("alias.txt");
         std::fs::write(&real, "disk").unwrap();
         std::os::unix::fs::symlink(&real, &alias).unwrap();
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text("draft"), Some(real.clone())).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text("draft"), Some(real.clone()))
+            .unwrap();
         app.state.buffers[buffer].dirty = true;
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(100), method: "fs/read_text_file".into(), params: json!({"path": alias}) });
-        assert!(!app.agent.files.is_empty(), "file resolution must be deferred to VFS");
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(100),
+                method: "fs/read_text_file".into(),
+                params: json!({"path": alias}),
+            },
+        );
+        assert!(
+            !app.agent.files.is_empty(),
+            "file resolution must be deferred to VFS"
+        );
         assert_eq!(file_response(&mut app, index).unwrap()["content"], "draft");
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(101), method: "session/request_permission".into(), params: json!({"toolCall": {"kind": "edit", "locations": [{"path": alias}]}}) });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(101),
+                method: "session/request_permission".into(),
+                params: json!({"toolCall": {"kind": "edit", "locations": [{"path": alias}]}}),
+            },
+        );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while app.agent.permissions.is_empty() {
             app.process_vfs_results();
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        assert!(app.agent.permissions.pop_front().unwrap().title.contains("unsaved changes"));
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(102), method: "fs/write_text_file".into(), params: json!({"path": alias, "content": "new"}) });
-        assert!(file_response(&mut app, index).unwrap_err().contains("unsaved changes"));
+        assert!(
+            app.agent
+                .permissions
+                .pop_front()
+                .unwrap()
+                .title
+                .contains("unsaved changes")
+        );
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(102),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": alias, "content": "new"}),
+            },
+        );
+        assert!(
+            file_response(&mut app, index)
+                .unwrap_err()
+                .contains("unsaved changes")
+        );
         app.state.buffers[buffer].dirty = false;
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(103), method: "fs/write_text_file".into(), params: json!({"path": alias, "content": "new"}) });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(103),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": alias, "content": "new"}),
+            },
+        );
         file_response(&mut app, index).unwrap();
         assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
         assert!(!app.state.buffers[buffer].dirty);
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(104), method: "fs/read_text_file".into(), params: json!({"path": alias}) });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(104),
+                method: "fs/read_text_file".into(),
+                params: json!({"path": alias}),
+            },
+        );
         assert_eq!(file_response(&mut app, index).unwrap()["content"], "new");
         let outside = tempfile::tempdir().unwrap();
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(105), method: "fs/write_text_file".into(), params: json!({"path": outside.path().join("escape"), "content": "bad"}) });
-        assert!(file_response(&mut app, index).unwrap_err().contains("outside"));
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(105),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": outside.path().join("escape"), "content": "bad"}),
+            },
+        );
+        assert!(
+            file_response(&mut app, index)
+                .unwrap_err()
+                .contains("outside")
+        );
         assert!(!outside.path().join("escape").exists());
     }
 
@@ -4139,25 +4566,41 @@ mod tests {
         let path = app.state.workspace_root.join("written.txt");
         std::fs::write(&path, "old").unwrap();
         let content = "\u{feff}new\r\n";
-        app.handle_agent_message(index, AgentMessage::Request {
-            id: json!(100), method: "fs/write_text_file".into(),
-            params: json!({"path": path, "content": content}),
-        });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(100),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": path, "content": content}),
+            },
+        );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let completed = loop {
-            if let Some(DocumentEvent::Legacy(result)) = app.documents.poll(&app.state.window_version(), app.workspace.root_revision()).unwrap() {
-                if matches!(result, crate::files::VfsResult::Write { .. }) { break result; }
+            if let Some(DocumentEvent::Legacy(result)) = app
+                .documents
+                .poll(&app.state.window_version(), app.workspace.root_revision())
+                .unwrap()
+            {
+                if matches!(result, crate::files::VfsResult::Write { .. }) {
+                    break result;
+                }
                 app.accept_agent_file(result);
             }
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
         // This open raced with the worker's write and still carries the old text.
-        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+            .unwrap();
         app.accept_agent_file(completed);
         file_response(&mut app, index).unwrap();
         assert_eq!(app.state.buffers[buffer].text.to_string(), "new\n");
-        assert_eq!(app.state.buffers[buffer].text.to_bytes(), content.as_bytes());
+        assert_eq!(
+            app.state.buffers[buffer].text.to_bytes(),
+            content.as_bytes()
+        );
         assert_eq!(std::fs::read(&path).unwrap(), content.as_bytes());
         assert!(!app.state.buffers[buffer].dirty);
     }
@@ -4169,19 +4612,32 @@ mod tests {
         let index = echo_agent(&mut app);
         app.agent.active = index;
         app.agent.sessions[index].phase = Phase::Prompting(1);
-        app.handle_agent_message(index, AgentMessage::Request {
-            id: json!(100), method: "session/request_permission".into(),
-            params: json!({"toolCall": {"kind": "edit"}}),
-        });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(100),
+                method: "session/request_permission".into(),
+                params: json!({"toolCall": {"kind": "edit"}}),
+            },
+        );
         assert_eq!(app.agent.files.len(), 1);
         app.cancel_agent_turn();
         assert!(app.agent.files.is_empty());
-        assert_eq!(file_response(&mut app, index).unwrap(), agent::permission_cancelled());
+        assert_eq!(
+            file_response(&mut app, index).unwrap(),
+            agent::permission_cancelled()
+        );
         // A later worker completion must be discarded, not presented as a new prompt.
         let id = app.documents.resolve_agent_paths(Vec::new()).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Some(crate::editor::session::documents::DocumentEvent::Legacy(crate::files::VfsResult::PathsResolved { id: received, .. })) = app.documents.poll(&app.state.window_version(), app.workspace.root_revision()).unwrap() {
+            if let Some(crate::editor::session::documents::DocumentEvent::Legacy(
+                crate::files::VfsResult::PathsResolved { id: received, .. },
+            )) = app
+                .documents
+                .poll(&app.state.window_version(), app.workspace.root_revision())
+                .unwrap()
+            {
                 assert_eq!(received, id);
                 break;
             }
@@ -4204,14 +4660,40 @@ mod tests {
         std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
         let target = root.join("real/missing/file.txt");
         // The clean alias must not conceal a second, dirty buffer for this destination.
-        app.state.open_text(TextBuffer::from_text("clean"), Some(target.clone())).unwrap();
-        let (dirty, _) = app.state.open_text(TextBuffer::from_text("draft"), Some(root.join("link/missing/file.txt"))).unwrap();
+        app.state
+            .open_text(TextBuffer::from_text("clean"), Some(target.clone()))
+            .unwrap();
+        let (dirty, _) = app
+            .state
+            .open_text(
+                TextBuffer::from_text("draft"),
+                Some(root.join("link/missing/file.txt")),
+            )
+            .unwrap();
         app.state.buffers[dirty].dirty = true;
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(100), method: "fs/write_text_file".into(), params: json!({"path": target, "content": "overwrite"}) });
-        assert!(file_response(&mut app, index).unwrap_err().contains("unsaved changes"));
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(100),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": target, "content": "overwrite"}),
+            },
+        );
+        assert!(
+            file_response(&mut app, index)
+                .unwrap_err()
+                .contains("unsaved changes")
+        );
         assert!(!target.exists());
         app.state.buffers[dirty].dirty = false;
-        app.handle_agent_message(index, AgentMessage::Request { id: json!(101), method: "fs/write_text_file".into(), params: json!({"path": target, "content": "created"}) });
+        app.handle_agent_message(
+            index,
+            AgentMessage::Request {
+                id: json!(101),
+                method: "fs/write_text_file".into(),
+                params: json!({"path": target, "content": "created"}),
+            },
+        );
         file_response(&mut app, index).unwrap();
         assert_eq!(app.state.buffers[dirty].text.to_string(), "created");
         assert_eq!(std::fs::read_to_string(target).unwrap(), "created");
@@ -4224,12 +4706,29 @@ mod tests {
         let index = echo_agent(&mut app);
         let mut request = permission(app.agent.sessions[index].number);
         request.id = json!(100);
-        request.options = vec![PermissionOption { id: "always".into(), name: "Always allow".into(), kind: "allow_always".into() }];
+        request.options = vec![PermissionOption {
+            id: "always".into(),
+            name: "Always allow".into(),
+            kind: "allow_always".into(),
+        }];
         app.agent.permissions.push_back(request);
         app.process_agent_events();
-        assert_eq!(app.ui.prompt.as_ref().unwrap().confirmation.as_ref().unwrap().positive_label, "Allow always");
+        assert_eq!(
+            app.ui
+                .prompt
+                .as_ref()
+                .unwrap()
+                .confirmation
+                .as_ref()
+                .unwrap()
+                .positive_label,
+            "Allow always"
+        );
         app.answer_agent_permission(ConfirmationChoice::Yes);
-        assert_eq!(file_response(&mut app, index).unwrap(), agent::permission_selected("always"));
+        assert_eq!(
+            file_response(&mut app, index).unwrap(),
+            agent::permission_selected("always")
+        );
     }
 
     #[test]
@@ -4238,7 +4737,12 @@ mod tests {
         tab(&mut app);
         app.show_agent_panel();
         let pane = app.agent_pane().unwrap();
-        let others: Vec<_> = app.state.panes.keys().filter(|other| *other != pane).collect();
+        let others: Vec<_> = app
+            .state
+            .panes
+            .keys()
+            .filter(|other| *other != pane)
+            .collect();
         for other in others {
             app.state.focus_pane_id(other).unwrap();
             app.apply_layout_action(LayoutAction::ClosePane);
@@ -4544,10 +5048,16 @@ mod tests {
         let outside = tempfile::tempdir().expect("outside");
         std::os::unix::fs::symlink(outside.path(), root.path().join("link")).expect("link");
         let mut worker = crate::files::VfsWorker::start(1);
-        worker.resolve_paths(vec![root.path().join("link/new/file.txt")]).unwrap();
+        worker
+            .resolve_paths(vec![root.path().join("link/new/file.txt")])
+            .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let resolved = loop {
-            if let Some(crate::files::VfsReply::Public(crate::files::VfsResult::PathsResolved { paths, .. })) = worker.try_reply().unwrap() {
+            if let Some(crate::files::VfsReply::Public(crate::files::VfsResult::PathsResolved {
+                paths,
+                ..
+            })) = worker.try_reply().unwrap()
+            {
                 break paths[0].clone();
             }
             assert!(std::time::Instant::now() < deadline);

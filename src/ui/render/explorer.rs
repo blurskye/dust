@@ -361,7 +361,12 @@ mod tests {
             &mut frame,
             &explorer(query),
             &config,
-            WindowRect { x: 0, y: 0, width: 29, height: 8 },
+            WindowRect {
+                x: 0,
+                y: 0,
+                width: 29,
+                height: 8,
+            },
             true,
         );
         frame
@@ -404,7 +409,10 @@ mod tests {
                 assert!(x < 25, "{x}: {line}");
                 assert_eq!(frame.grid.get(x, y).unwrap().symbol, " ");
                 assert_eq!(frame.grid.get(25, y).unwrap().symbol, "1");
-                assert_eq!(frame.grid.get(x - 1, y).unwrap().style, Style::ExplorerHeader);
+                assert_eq!(
+                    frame.grid.get(x - 1, y).unwrap().style,
+                    Style::ExplorerHeader
+                );
             }
         }
     }

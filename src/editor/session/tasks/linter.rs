@@ -269,13 +269,12 @@ impl TaskSession {
         let mut unread = BTreeMap::new();
         for (path, raw) in raw {
             source.checked_document(&path, editor)?;
-            if let Some(buffer) = editor
-                .buffers
-                .iter()
-                .find_map(|(_, b)| {
-                    b.path.as_ref().filter(|p| super::sources::source_path(p) == path).map(|_| b)
-                })
-            {
+            if let Some(buffer) = editor.buffers.iter().find_map(|(_, b)| {
+                b.path
+                    .as_ref()
+                    .filter(|p| super::sources::source_path(p) == path)
+                    .map(|_| b)
+            }) {
                 grouped.insert(
                     path.clone(),
                     convert(
@@ -478,7 +477,9 @@ impl TaskSession {
                 // Reads share a canonical identity, but open-buffer diagnostics use the
                 // buffer's own path, as required by the diagnostic publisher and gutter.
                 let uri = crate::language::lsp::file_uri(
-                    document.as_ref().map_or(path.as_path(), |document| document.path()),
+                    document
+                        .as_ref()
+                        .map_or(path.as_path(), |document| document.path()),
                 );
                 for item in &mut items {
                     item.uri = uri.clone();
@@ -524,7 +525,10 @@ fn convert(
             }
             if line != Some(raw.line) {
                 line_text = text.line(raw.line).map_err(|e| e.to_string())?;
-                line_start = text.line_to_byte(raw.line).map_err(|e| e.to_string())?.get();
+                line_start = text
+                    .line_to_byte(raw.line)
+                    .map_err(|e| e.to_string())?
+                    .get();
                 line = Some(raw.line);
                 encoding = None;
             }
@@ -535,7 +539,10 @@ fn convert(
             }
             let content = line_text.strip_suffix('\n').unwrap_or(&line_text);
             while units < raw.column && byte_column < content.len() {
-                let scalar = content[byte_column..].chars().next().expect("remaining scalar");
+                let scalar = content[byte_column..]
+                    .chars()
+                    .next()
+                    .expect("remaining scalar");
                 let width = match raw.encoding {
                     crate::editor::text::PositionEncoding::Utf8 => scalar.len_utf8(),
                     crate::editor::text::PositionEncoding::Utf16 => scalar.len_utf16(),

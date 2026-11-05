@@ -36,7 +36,9 @@ never a built-in subagent or task tool. Each subagent shows up as its own tab in
 /// The `mcpServers` entry of `session/new` that runs this server for the tab `tab`.
 pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Result<Value, String> {
     let dust = dust.to_str().ok_or("Dust's MCP server requires a UTF-8 executable path; move Dust to a UTF-8 installation directory")?;
-    let socket = socket.to_str().ok_or("Dust's MCP server requires a UTF-8 socket path; use a UTF-8 runtime directory")?;
+    let socket = socket
+        .to_str()
+        .ok_or("Dust's MCP server requires a UTF-8 socket path; use a UTF-8 runtime directory")?;
     Ok(json!({
         "name": "dust",
         "command": dust,
@@ -51,7 +53,12 @@ pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Res
 /// Answer MCP requests until stdin closes. Tool calls run on their own threads, so several
 /// subagents can work at once. Without Dust's socket and a tab there are no tools.
 pub fn serve(target: Option<(PathBuf, u64)>, profiles: &str) -> io::Result<()> {
-    serve_io(io::stdin().lock(), Arc::new(Mutex::new(io::stdout())), target, profiles)
+    serve_io(
+        io::stdin().lock(),
+        Arc::new(Mutex::new(io::stdout())),
+        target,
+        profiles,
+    )
 }
 
 fn serve_io<W: Write + Send + 'static>(
@@ -69,20 +76,29 @@ fn serve_io<W: Write + Send + 'static>(
     let mut line = Vec::new();
     loop {
         line.clear();
-        if input.by_ref().take(MAX_MESSAGE_BYTES + 1).read_until(b'\n', &mut line)? == 0 {
+        if input
+            .by_ref()
+            .take(MAX_MESSAGE_BYTES + 1)
+            .read_until(b'\n', &mut line)?
+            == 0
+        {
             break;
         }
         if line.len() as u64 > MAX_MESSAGE_BYTES {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "MCP message exceeds 1 MiB"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "MCP message exceeds 1 MiB",
+            ));
         }
         let Ok(message) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
         // Closing this call's connection tells Dust to stop only its subagent.
         if message["method"] == "notifications/cancelled" && message.get("id").is_none() {
-            if let Some((_, stream, _)) = calls.iter().find(|(id, _, call)| {
-                id == &message["params"]["requestId"] && !call.is_finished()
-            }) {
+            if let Some((_, stream, _)) = calls
+                .iter()
+                .find(|(id, _, call)| id == &message["params"]["requestId"] && !call.is_finished())
+            {
                 let _ = stream.shutdown(Shutdown::Both);
             }
             continue;
@@ -113,11 +129,13 @@ fn serve_io<W: Write + Send + 'static>(
                 };
                 calls.retain(|(_, _, call)| !call.is_finished());
                 if calls.len() == MAX_CONCURRENT_CALLS {
-                    Err(json!({"code": -32000, "message": "Dust's subagent capacity is full; retry after a call finishes"}))
+                    Err(
+                        json!({"code": -32000, "message": "Dust's subagent capacity is full; retry after a call finishes"}),
+                    )
                 } else {
-                    match UnixStream::connect(&socket).and_then(|stream| {
-                        stream.try_clone().map(|cancel| (stream, cancel))
-                    }) {
+                    match UnixStream::connect(&socket)
+                        .and_then(|stream| stream.try_clone().map(|cancel| (stream, cancel)))
+                    {
                         Ok((stream, cancel)) => {
                             let (params, output) = (params.clone(), Arc::clone(&output));
                             let request_id = id.clone();
@@ -127,7 +145,9 @@ fn serve_io<W: Write + Send + 'static>(
                             calls.push((request_id, cancel, worker));
                             continue;
                         }
-                        Err(error) => Err(json!({"code": -32603, "message": format!("could not reach Dust: {error}")})),
+                        Err(error) => Err(
+                            json!({"code": -32603, "message": format!("could not reach Dust: {error}")}),
+                        ),
                     }
                 }
             }
@@ -224,15 +244,27 @@ fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{BufReader, Cursor}, os::unix::net::UnixListener, time::{Duration, Instant}};
+    use std::{
+        io::{BufReader, Cursor},
+        os::unix::net::UnixListener,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn mcp_server_entry_rejects_non_utf8_paths() {
         use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
         let invalid = Path::new(OsStr::from_bytes(b"/invalid-\xff"));
         let valid = Path::new("/dust");
-        assert!(server_entry(invalid, valid, 1, "").unwrap_err().contains("executable path"));
-        assert!(server_entry(valid, invalid, 1, "").unwrap_err().contains("socket path"));
+        assert!(
+            server_entry(invalid, valid, 1, "")
+                .unwrap_err()
+                .contains("executable path")
+        );
+        assert!(
+            server_entry(valid, invalid, 1, "")
+                .unwrap_err()
+                .contains("socket path")
+        );
         let entry = server_entry(valid, Path::new("/socket"), 1, "pi").unwrap();
         assert_eq!(entry["command"], "/dust");
         assert_eq!(entry["env"][0]["value"], "/socket");
@@ -246,7 +278,8 @@ mod tests {
                 bytes.push(b'\n');
             }
             let mut input = Cursor::new(bytes);
-            let error = serve_io(&mut input, Arc::new(Mutex::new(Vec::new())), None, "").unwrap_err();
+            let error =
+                serve_io(&mut input, Arc::new(Mutex::new(Vec::new())), None, "").unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
             assert_eq!(input.position(), MAX_MESSAGE_BYTES + 1);
         }
@@ -261,11 +294,17 @@ mod tests {
         let output = Arc::new(Mutex::new(Vec::new()));
         serve_io(bytes.as_slice(), Arc::clone(&output), None, "").unwrap();
         let output = output.lock().unwrap();
-        let replies: Vec<Value> = output.split(|byte| *byte == b'\n')
+        let replies: Vec<Value> = output
+            .split(|byte| *byte == b'\n')
             .filter(|line| !line.is_empty())
-            .map(|line| serde_json::from_slice(line).unwrap()).collect();
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect();
         assert_eq!(replies.len(), 2);
-        assert!(replies.iter().all(|reply| reply["id"] == 1 && reply["result"] == json!({})));
+        assert!(
+            replies
+                .iter()
+                .all(|reply| reply["id"] == 1 && reply["result"] == json!({}))
+        );
     }
 
     #[test]
@@ -281,11 +320,16 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut requests = Vec::new();
         for id in [json!(1), json!("1")] {
-            writeln!(client, "{}", json!({
-                "id": id, "method": "tools/call", "params": {"name": "agent", "arguments": {
-                    "description": "test", "prompt": "wait"
-                }}
-            })).unwrap();
+            writeln!(
+                client,
+                "{}",
+                json!({
+                    "id": id, "method": "tools/call", "params": {"name": "agent", "arguments": {
+                        "description": "test", "prompt": "wait"
+                    }}
+                })
+            )
+            .unwrap();
             loop {
                 if let Some(remote::RemoteRequest::Agent(request)) = server.try_request() {
                     requests.push(request);
@@ -295,9 +339,14 @@ mod tests {
                 thread::yield_now();
             }
         }
-        writeln!(client, "{}", json!({
-            "method": "notifications/cancelled", "params": {"requestId": 1}
-        })).unwrap();
+        writeln!(
+            client,
+            "{}",
+            json!({
+                "method": "notifications/cancelled", "params": {"requestId": 1}
+            })
+        )
+        .unwrap();
         while !requests[0].reply.is_cancelled() {
             assert!(Instant::now() < deadline, "cancellation did not reach Dust");
             thread::yield_now();
@@ -318,24 +367,40 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let mut requests = String::new();
         for id in 0..=MAX_CONCURRENT_CALLS {
-            requests.push_str(&format!("{}\n", json!({
-                "id":id,"method":"tools/call", "params":{"name":"agent", "arguments":{
-                    "description":"test", "prompt":"wait for the reply"
-                }}
-            })));
+            requests.push_str(&format!(
+                "{}\n",
+                json!({
+                    "id":id,"method":"tools/call", "params":{"name":"agent", "arguments":{
+                        "description":"test", "prompt":"wait for the reply"
+                    }}
+                })
+            ));
         }
         requests.push_str("{\"id\":\"ping\",\"method\":\"ping\"}\n");
         let output = Arc::new(Mutex::new(Vec::new()));
-        serve_io(requests.as_bytes(), Arc::clone(&output), Some((socket, 1)), "").unwrap();
+        serve_io(
+            requests.as_bytes(),
+            Arc::clone(&output),
+            Some((socket, 1)),
+            "",
+        )
+        .unwrap();
         {
             let output = output.lock().unwrap();
-            let replies: Vec<Value> = output.split(|byte| *byte == b'\n')
+            let replies: Vec<Value> = output
+                .split(|byte| *byte == b'\n')
                 .filter(|line| !line.is_empty())
-                .map(|line| serde_json::from_slice(line).unwrap()).collect();
+                .map(|line| serde_json::from_slice(line).unwrap())
+                .collect();
             assert_eq!(replies.len(), 2);
             assert_eq!(replies[0]["id"], MAX_CONCURRENT_CALLS);
             assert_eq!(replies[0]["error"]["code"], -32000);
-            assert!(replies[0]["error"]["message"].as_str().unwrap().contains("capacity"));
+            assert!(
+                replies[0]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("capacity")
+            );
             assert_eq!(replies[1]["id"], "ping");
             assert_eq!(replies[1]["result"], json!({}));
         }
@@ -351,20 +416,29 @@ mod tests {
                 Err(error) => panic!("{error}"),
             }
         }
-        assert_eq!(listener.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
         for mut stream in connections {
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut request = String::new();
-            BufReader::new(stream.try_clone().unwrap()).read_line(&mut request).unwrap();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
             assert!(request.starts_with("agent\t"));
             writeln!(stream, "{{\"text\":\"done\"}}").unwrap();
         }
         loop {
             let output = output.lock().unwrap();
             if output.iter().filter(|byte| **byte == b'\n').count() == MAX_CONCURRENT_CALLS + 2 {
-                let replies: Vec<Value> = output.split(|byte| *byte == b'\n')
+                let replies: Vec<Value> = output
+                    .split(|byte| *byte == b'\n')
                     .filter(|line| !line.is_empty())
-                    .map(|line| serde_json::from_slice(line).unwrap()).collect();
+                    .map(|line| serde_json::from_slice(line).unwrap())
+                    .collect();
                 for id in 0..MAX_CONCURRENT_CALLS {
                     let reply = replies.iter().find(|reply| reply["id"] == id).unwrap();
                     assert_eq!(reply["result"]["isError"], false);

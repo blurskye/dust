@@ -10,8 +10,8 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::mpsc::TrySendError,
-    time::Duration,
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 
 pub(super) struct ToolingSession {
@@ -206,7 +206,11 @@ impl ToolingSession {
         let mut unavailable = false;
         let mut rustup_key = None;
         while let Some(result) = self.version_service.try_result() {
-            if result.result.as_ref().is_err_and(|error| error == "version probe cancelled") {
+            if result
+                .result
+                .as_ref()
+                .is_err_and(|error| error == "version probe cancelled")
+            {
                 self.version_pending.remove(&result.id);
                 continue;
             }
@@ -710,7 +714,10 @@ impl ToolingSession {
         }
     }
 
-    pub(in crate::editor::session) fn set_probe_cancellation(&mut self, cancelled: Arc<AtomicBool>) {
+    pub(in crate::editor::session) fn set_probe_cancellation(
+        &mut self,
+        cancelled: Arc<AtomicBool>,
+    ) {
         self.probe_cancelled = cancelled;
     }
 
@@ -767,10 +774,8 @@ impl ToolingSession {
                 }
                 Err(TrySendError::Disconnected(())) => {
                     self.version_pending.remove(&request.id);
-                    self.versions.insert(
-                        request.id,
-                        Err("tool-version probe worker stopped".into()),
-                    );
+                    self.versions
+                        .insert(request.id, Err("tool-version probe worker stopped".into()));
                     changed = true;
                 }
             }
@@ -891,7 +896,11 @@ mod tests {
         definition.probe_args.push("--version".into());
         for id in 0..40 {
             definition.id = format!("queued-{id}");
-            tooling.queue_tool_version_probe(&definition, LspRuntimeSource::Path, executable.clone());
+            tooling.queue_tool_version_probe(
+                &definition,
+                LspRuntimeSource::Path,
+                executable.clone(),
+            );
         }
         assert_eq!(tooling.version_queued.len(), 8);
         assert_eq!(tooling.version_pending.len(), 41);
@@ -905,7 +914,12 @@ mod tests {
         }
         assert!(tooling.version_queued.is_empty());
         assert_eq!(tooling.versions.len(), 41);
-        assert!(tooling.versions.values().all(|version| version.as_deref() == Ok("server 1.2.3")));
+        assert!(
+            tooling
+                .versions
+                .values()
+                .all(|version| version.as_deref() == Ok("server 1.2.3"))
+        );
     }
 
     #[test]
@@ -927,11 +941,18 @@ mod tests {
                 .find(|tool| tool.id == id)
                 .unwrap();
             definition.probe_args = vec!["--version".into()];
-            for source in [LspRuntimeSource::Path, LspRuntimeSource::Managed, LspRuntimeSource::Nix] {
+            for source in [
+                LspRuntimeSource::Path,
+                LspRuntimeSource::Managed,
+                LspRuntimeSource::Nix,
+            ] {
                 tooling.set_probe_directory(Some(one.clone()));
                 let first = tooling.tool_version_key(&definition, source, Some(&executable));
                 tooling.set_probe_directory(Some(two.clone()));
-                assert_ne!(first, tooling.tool_version_key(&definition, source, Some(&executable)));
+                assert_ne!(
+                    first,
+                    tooling.tool_version_key(&definition, source, Some(&executable))
+                );
             }
             for source in [LspRuntimeSource::Path, LspRuntimeSource::Managed] {
                 for (directory, success) in [(&one, false), (&two, true)] {

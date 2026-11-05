@@ -8,13 +8,18 @@ use crate::editor::{CommandInvocation, InvocationSource};
 #[test]
 fn cursor_belongs_to_view_not_shared_buffer() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    let (buffer, first) = state.open_text(TextBuffer::from_text("shared"), None).unwrap();
+    let (buffer, first) = state
+        .open_text(TextBuffer::from_text("shared"), None)
+        .unwrap();
     let second = state.split_active(super::Axis::Horizontal, 500).unwrap();
-    let mut transaction = crate::editor::transaction::EditorTransaction::new(super::TransactionId(1));
-    transaction.operations.push(crate::editor::transaction::EditorOperation::SetCursor {
-        view: first,
-        position: ByteOffset(1),
-    });
+    let mut transaction =
+        crate::editor::transaction::EditorTransaction::new(super::TransactionId(1));
+    transaction
+        .operations
+        .push(crate::editor::transaction::EditorOperation::SetCursor {
+            view: first,
+            position: ByteOffset(1),
+        });
     state.apply_transaction(&transaction).unwrap();
     assert_eq!(state.buffers[buffer].text.to_string(), "shared");
     assert_eq!(state.views[first].cursor, ByteOffset(1));
@@ -58,10 +63,15 @@ fn uppercase_block_register_appends_corresponding_rows() {
     ] {
         let mut registers = RegisterStore::default();
         for (name, text) in [('a', left), ('A', right)] {
-            registers.set(name, super::RegisterValue {
-                text: text.into(),
-                shape: super::RegisterShape::Block,
-            }, true, true);
+            registers.set(
+                name,
+                super::RegisterValue {
+                    text: text.into(),
+                    shape: super::RegisterShape::Block,
+                },
+                true,
+                true,
+            );
         }
         let expected = super::RegisterValue {
             text: expected.into(),
@@ -103,11 +113,15 @@ fn workspace_root_changes_invalidate_window_titles() {
 fn opening_a_file_retires_only_an_unhosted_empty_scratch() {
     let mut state = EditorState::new("/workspace".into());
     let (scratch, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
-    state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into())).unwrap();
+    state
+        .open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()))
+        .unwrap();
     assert!(!state.buffers.contains_key(scratch));
     let (shared, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
     state.split_active(super::Axis::Horizontal, 500).unwrap();
-    state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into())).unwrap();
+    state
+        .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
+        .unwrap();
     assert!(state.buffers.contains_key(shared));
     state.validate_layout().unwrap();
 }
@@ -116,8 +130,12 @@ fn opening_a_file_retires_only_an_unhosted_empty_scratch() {
 fn canonical_path_identity_reuses_buffer_and_view() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let path = PathBuf::from("/workspace/file.rs");
-    let first = state.open_text(TextBuffer::from_text("first"), Some(path.clone())).unwrap();
-    let second = state.open_text(TextBuffer::from_text("ignored"), Some(path)).unwrap();
+    let first = state
+        .open_text(TextBuffer::from_text("first"), Some(path.clone()))
+        .unwrap();
+    let second = state
+        .open_text(TextBuffer::from_text("ignored"), Some(path))
+        .unwrap();
     assert_eq!(first, second);
     assert_eq!(state.buffers.len(), 1);
     assert_eq!(state.views.len(), 1);
@@ -187,13 +205,20 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
             let mut state = EditorState::new(PathBuf::from("/resize"));
             state.open_text(TextBuffer::from_text("abc"), None).unwrap();
             state.split_active(super::Axis::Horizontal, 500).unwrap();
-            if first { state.focus_pane(-1, true).unwrap(); }
+            if first {
+                state.focus_pane(-1, true).unwrap();
+            }
             if on_axis {
-                state.resize_active_pane_on_axis(super::Axis::Horizontal, i16::MIN).unwrap();
+                state
+                    .resize_active_pane_on_axis(super::Axis::Horizontal, i16::MIN)
+                    .unwrap();
             } else {
                 state.resize_active_pane(i16::MIN).unwrap();
             }
-            let super::LayoutNode::Split { ratio, .. } = state.tabs[state.active_tab.unwrap()].root else { panic!("split"); };
+            let super::LayoutNode::Split { ratio, .. } = state.tabs[state.active_tab.unwrap()].root
+            else {
+                panic!("split");
+            };
             assert_eq!(ratio, if first { 100 } else { 900 });
             state.validate_layout().unwrap();
         }
@@ -203,7 +228,9 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
 #[test]
 fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
     let mut state = EditorState::new(PathBuf::from("/bounded"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     for _ in 1..super::MAXIMUM_LAYOUT_DEPTH {
         state
             .split_active(super::Axis::Horizontal, 500)
@@ -232,7 +259,9 @@ fn exhausted_window_revision_fails_open_instead_of_hiding_changes() {
 #[test]
 fn layout_validation_rejects_ratios_outside_editor_source_policy() {
     let mut state = EditorState::new(PathBuf::from("/ratios"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     state
         .split_active(super::Axis::Horizontal, 500)
         .expect("split");
@@ -250,7 +279,9 @@ fn layout_validation_rejects_ratios_outside_editor_source_policy() {
 #[test]
 fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
     let mut state = EditorState::new(PathBuf::from("/bounded-tabs"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     for _ in 1..super::MAXIMUM_LAYOUT_PANES {
         state.new_tab().expect("tab within pane ceiling");
     }
@@ -264,7 +295,9 @@ fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
 #[test]
 fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     let mut state = EditorState::new(PathBuf::from("/bounded-clone"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     for _ in 1..super::MAXIMUM_LAYOUT_PANES {
         state.new_tab().expect("tab within pane ceiling");
     }
@@ -287,8 +320,12 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
 #[test]
 fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
     let mut state = EditorState::new("/workspace".into());
-    let (hidden, _) = state.open_text(TextBuffer::from_text("file"), Some("/workspace/a".into())).unwrap();
-    let (kept, _) = state.open_text(TextBuffer::from_text("panel"), None).unwrap();
+    let (hidden, _) = state
+        .open_text(TextBuffer::from_text("file"), Some("/workspace/a".into()))
+        .unwrap();
+    let (kept, _) = state
+        .open_text(TextBuffer::from_text("panel"), None)
+        .unwrap();
     state.kept_buffer = Some(kept);
     for _ in 1..super::MAXIMUM_LAYOUT_PANES {
         state.new_tab().unwrap();
@@ -297,9 +334,21 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
     let before = state.window_version();
     let buffers = state.buffers.len();
     let views = state.views.len();
-    assert_eq!(state.open_text(TextBuffer::from_text("new"), Some("/workspace/b".into())), Err("layout pane ceiling reached"));
-    assert_eq!(state.open_text(TextBuffer::from_text("ignored"), Some("/workspace/a".into())), Err("layout pane ceiling reached"));
-    assert_eq!(state.show_buffer(hidden), Err("layout pane ceiling reached"));
+    assert_eq!(
+        state.open_text(TextBuffer::from_text("new"), Some("/workspace/b".into())),
+        Err("layout pane ceiling reached")
+    );
+    assert_eq!(
+        state.open_text(
+            TextBuffer::from_text("ignored"),
+            Some("/workspace/a".into())
+        ),
+        Err("layout pane ceiling reached")
+    );
+    assert_eq!(
+        state.show_buffer(hidden),
+        Err("layout pane ceiling reached")
+    );
     assert_eq!(state.active_view, active);
     assert_eq!(state.active_buffer_id(), Some(kept));
     assert_eq!(state.window_version(), before);
@@ -311,7 +360,9 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
 #[test]
 fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
     let mut state = EditorState::new(PathBuf::from("/directional"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     let tab = state.active_tab.expect("tab");
     let top_left = state.tabs[tab].focused;
     state
@@ -360,7 +411,9 @@ fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
 #[test]
 fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
     let mut state = EditorState::new(PathBuf::from("/model"));
-    state.open_text(TextBuffer::from_text("seed"), None).unwrap();
+    state
+        .open_text(TextBuffer::from_text("seed"), None)
+        .unwrap();
     for step in 0..120 {
         match step % 8 {
             0 if state.panes.len() < 8 => {
@@ -379,7 +432,9 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
                 let _ = state.resize_active_pane(50);
             }
             5 => {
-                state.open_text(TextBuffer::from_text(&format!("buffer-{step}")), None).unwrap();
+                state
+                    .open_text(TextBuffer::from_text(&format!("buffer-{step}")), None)
+                    .unwrap();
             }
             6 if state.panes.len() > state.tabs.len() => {
                 let _ = state.close_active_pane();
@@ -409,10 +464,13 @@ fn changed_line_endings_remain_dirty_when_normalized_text_matches() {
     let original = b"a\r\nb\r\nc\n";
     let mut buffer = super::Buffer::new(TextBuffer::from_bytes(original).unwrap(), None);
     for (range, replacement) in [(5..6, ""), (5..5, "\n")] {
-        let edits = TextEditSet::new(buffer.text.revision(), vec![TextEdit::new(
-            ByteRange::new(ByteOffset(range.start), ByteOffset(range.end)).unwrap(),
-            replacement,
-        )]);
+        let edits = TextEditSet::new(
+            buffer.text.revision(),
+            vec![TextEdit::new(
+                ByteRange::new(ByteOffset(range.start), ByteOffset(range.end)).unwrap(),
+                replacement,
+            )],
+        );
         buffer.text.apply_edits(&edits).unwrap();
         buffer.refresh_dirty();
         assert!(buffer.dirty);
@@ -448,13 +506,18 @@ fn save_completion_for_old_revision_does_not_clear_newer_dirty_edit() {
     assert_eq!(buffer.persisted_bytes(), saved_bytes);
     buffer.text.restore_text("ab").unwrap();
     buffer.refresh_dirty();
-    assert!(!buffer.dirty, "dirty checks use the bytes that actually reached disk");
+    assert!(
+        !buffer.dirty,
+        "dirty checks use the bytes that actually reached disk"
+    );
 }
 
 #[test]
 fn independently_changed_branches_have_distinct_window_sources() {
     let mut state = EditorState::new("/workspace".into());
-    let (buffer, _) = state.open_text(TextBuffer::from_text("same"), None).unwrap();
+    let (buffer, _) = state
+        .open_text(TextBuffer::from_text("same"), None)
+        .unwrap();
     let mut left = state.clone();
     let mut right = state.clone();
     left.set_buffer_path_and_dirty(buffer, Some("left.rs".into()), false);
@@ -474,7 +537,8 @@ fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() 
     }
     let mut state = EditorState::new("/workspace".into());
     changed(&mut state, |s| {
-        s.open_text(TextBuffer::from_text("text"), Some("/one".into())).unwrap();
+        s.open_text(TextBuffer::from_text("text"), Some("/one".into()))
+            .unwrap();
     });
     let buffer = state.active_buffer_id().unwrap();
     changed(&mut state, |s| {
@@ -529,7 +593,9 @@ fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() 
 #[test]
 fn reload_clears_stale_editing_positions() {
     let mut state = EditorState::new("/workspace".into());
-    let (buffer, view) = state.open_text(TextBuffer::from_text("abcde"), None).unwrap();
+    let (buffer, view) = state
+        .open_text(TextBuffer::from_text("abcde"), None)
+        .unwrap();
     state.views[view].block_insert = vec![ByteOffset(0), ByteOffset(4)];
     state.views[view].multi_marks = vec![ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()];
     state.views[view]
@@ -570,13 +636,17 @@ fn uppercase_registers_append_and_read_through_lowercase() {
 #[test]
 fn switching_buffers_restores_the_last_cursor_and_scroll() {
     let mut state = EditorState::new("/workspace".into());
-    let (a, view) = state.open_text(
-        TextBuffer::from_text("one\ntwo\nthree"),
-        Some("/workspace/a".into()),
-    ).unwrap();
+    let (a, view) = state
+        .open_text(
+            TextBuffer::from_text("one\ntwo\nthree"),
+            Some("/workspace/a".into()),
+        )
+        .unwrap();
     state.views[view].cursor = ByteOffset(8);
     state.views[view].scroll_line = 2;
-    state.open_text(TextBuffer::from_text("other"), Some("/workspace/b".into())).unwrap();
+    state
+        .open_text(TextBuffer::from_text("other"), Some("/workspace/b".into()))
+        .unwrap();
     let view = state.show_buffer(a).unwrap();
     assert_eq!(state.views[view].cursor, ByteOffset(8));
     assert_eq!(state.views[view].scroll_line, 2);
@@ -585,10 +655,17 @@ fn switching_buffers_restores_the_last_cursor_and_scroll() {
 #[test]
 fn closing_a_buffer_restores_the_hidden_replacements_navigation() {
     let mut state = EditorState::new("/workspace".into());
-    let (a, first) = state.open_text(TextBuffer::from_text("one\ntwo\nthree"), Some("/workspace/a".into())).unwrap();
+    let (a, first) = state
+        .open_text(
+            TextBuffer::from_text("one\ntwo\nthree"),
+            Some("/workspace/a".into()),
+        )
+        .unwrap();
     state.views[first].cursor = ByteOffset(8);
     state.views[first].scroll_line = 2;
-    let (b, view) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into())).unwrap();
+    let (b, view) = state
+        .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
+        .unwrap();
     let mut draft = state.draft();
     assert!(draft.close_document(view, b).unwrap());
     let state = draft.accept(&state.version()).unwrap();
@@ -602,13 +679,23 @@ fn closing_a_buffer_restores_the_hidden_replacements_navigation() {
 fn closing_last_views_preserves_navigation_without_editing_state() {
     for close_tab in [false, true] {
         let mut state = EditorState::new("/workspace".into());
-        state.open_text(TextBuffer::from_text("other"), Some("/workspace/other".into())).unwrap();
+        state
+            .open_text(
+                TextBuffer::from_text("other"),
+                Some("/workspace/other".into()),
+            )
+            .unwrap();
         if close_tab {
             state.new_tab().unwrap();
         } else {
             state.split_active(super::Axis::Horizontal, 500).unwrap();
         }
-        let (a, view) = state.open_text(TextBuffer::from_text("one\ntwo\nthree"), Some("/workspace/a".into())).unwrap();
+        let (a, view) = state
+            .open_text(
+                TextBuffer::from_text("one\ntwo\nthree"),
+                Some("/workspace/a".into()),
+            )
+            .unwrap();
         state.views[view].cursor = ByteOffset(8);
         state.views[view].scroll_line = 2;
         state.views[view].scroll_column = 3;
@@ -633,13 +720,17 @@ fn closing_last_views_preserves_navigation_without_editing_state() {
 #[test]
 fn unzoom_allocates_a_view_when_its_buffer_changes() {
     let mut state = EditorState::new("/workspace".into());
-    state.open_text(TextBuffer::from_text("a"), Some("/workspace/a".into())).unwrap();
+    state
+        .open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()))
+        .unwrap();
     state
         .split_active(crate::editor::Axis::Vertical, 500)
         .unwrap();
     let origin = state.active_view.unwrap();
     state.toggle_zoom().unwrap();
-    let (b, _) = state.open_text(TextBuffer::from_text("b"), Some("/workspace/b".into())).unwrap();
+    let (b, _) = state
+        .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
+        .unwrap();
     state.toggle_zoom().unwrap();
     assert_eq!(state.active_buffer_id(), Some(b));
     assert_ne!(state.active_view, Some(origin));

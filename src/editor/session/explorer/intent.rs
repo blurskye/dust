@@ -591,14 +591,10 @@ impl ExplorerSession {
             } else {
                 Vec::new()
             };
-        if self
-            .mutation
-            .as_ref()
-            .is_some_and(|intent| {
-                !matches!(intent.phase, Phase::Applying(_))
-                    && !self.mutation_current(intent, &scope, configuration, editor)
-            })
-            && let Some(intent) = self.mutation.take()
+        if self.mutation.as_ref().is_some_and(|intent| {
+            !matches!(intent.phase, Phase::Applying(_))
+                && !self.mutation_current(intent, &scope, configuration, editor)
+        }) && let Some(intent) = self.mutation.take()
             && let Phase::Preparing(id) = intent.phase
         {
             ids.push(id);

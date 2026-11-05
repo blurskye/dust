@@ -47,7 +47,12 @@ impl VirtualPublication<'_> {
 }
 pub(in crate::editor::session) enum VirtualOpen {
     Existing(BufferId),
-    Execute { plugin: String, load: PluginLoadId, command: String, document: u64 },
+    Execute {
+        plugin: String,
+        load: PluginLoadId,
+        command: String,
+        document: u64,
+    },
 }
 pub(in crate::editor::session) struct ProviderInvocation {
     pub request: u64,
@@ -99,15 +104,19 @@ impl ExtensionSession {
                     query,
                     context: "editor".into(),
                     workspace_revision: Some(workspace_revision),
-                    buffer_revision: editor.active_buffer_id()
+                    buffer_revision: editor
+                        .active_buffer_id()
                         .map(|buffer| editor.buffers[buffer].text.revision().0),
                 },
                 self.active_picker,
             )
             .map_err(|error| error.detail)?;
-        self.provider_sources.insert(request, editor.active_buffer_id().map(|buffer| {
-            (buffer, editor.buffers[buffer].text.source_version())
-        }));
+        self.provider_sources.insert(
+            request,
+            editor
+                .active_buffer_id()
+                .map(|buffer| (buffer, editor.buffers[buffer].text.source_version())),
+        );
         Ok(ProviderInvocation {
             request,
             plugin,
@@ -139,7 +148,10 @@ impl ExtensionSession {
         self.active_picker == Some(request)
     }
     pub(in crate::editor::session) fn expire_providers(&mut self) -> Option<u64> {
-        self.providers.expire().into_iter().find(|request| self.active_picker == Some(*request))
+        self.providers
+            .expire()
+            .into_iter()
+            .find(|request| self.active_picker == Some(*request))
     }
     pub(in crate::editor::session) fn provider_projection(
         &self,
@@ -178,8 +190,13 @@ impl ExtensionSession {
     ) -> Option<(String, Vec<String>)> {
         let source = self.provider_sources.get(&request)?;
         if match source {
-            Some((buffer, text)) => editor.active_buffer_id() != Some(*buffer)
-                || editor.buffers.get(*buffer).is_none_or(|buffer| buffer.text.source_version() != *text),
+            Some((buffer, text)) => {
+                editor.active_buffer_id() != Some(*buffer)
+                    || editor
+                        .buffers
+                        .get(*buffer)
+                        .is_none_or(|buffer| buffer.text.source_version() != *text)
+            }
             None => editor.active_buffer_id().is_some(),
         } {
             return None;
@@ -256,10 +273,16 @@ impl ExtensionSession {
             .strip_prefix(&format!("plugin.{plugin}."))
             .ok_or("invalid virtual document command")?
             .to_owned();
-        let document = self.virtual_documents
+        let document = self
+            .virtual_documents
             .start(&plugin, load, source, key)
             .map_err(|error| error.detail)?;
-        Ok(VirtualOpen::Execute { plugin, load, command, document })
+        Ok(VirtualOpen::Execute {
+            plugin,
+            load,
+            command,
+            document,
+        })
     }
     pub(in crate::editor::session) fn refresh_virtual(
         &mut self,
@@ -302,32 +325,48 @@ impl ExtensionSession {
         })
     }
     pub(in crate::editor::session) fn cancel_virtual_request(
-        &mut self, plugin: &str, load: PluginLoadId, document: u64,
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+        document: u64,
     ) {
-        self.virtual_documents.cancel_pending(plugin, load, document);
+        self.virtual_documents
+            .cancel_pending(plugin, load, document);
     }
     pub(in crate::editor::session) fn close_virtual_buffer(
-        &mut self, buffer: BufferId,
+        &mut self,
+        buffer: BufferId,
     ) -> Result<Option<VirtualOpen>, String> {
         let Some(entry) = self.virtual_editor.entry_for_buffer(buffer).cloned() else {
             return Ok(None);
         };
-        self.virtual_editor.forget_document(&entry.plugin, entry.load, entry.document);
-        let command = self.virtual_documents
+        self.virtual_editor
+            .forget_document(&entry.plugin, entry.load, entry.document);
+        let command = self
+            .virtual_documents
             .command_for_document(&entry.plugin, entry.load, entry.document)
             .and_then(|command| command.strip_prefix(&format!("plugin.{}.", entry.plugin)))
             .map(str::to_owned);
         let Some(command) = command else {
-            self.virtual_documents.cancel(&entry.plugin, entry.load, entry.document);
+            self.virtual_documents
+                .cancel(&entry.plugin, entry.load, entry.document);
             return Ok(None);
         };
-        self.virtual_documents.cancel_pending(&entry.plugin, entry.load, entry.document);
-        if let Err(error) = self.virtual_documents.close(&entry.plugin, entry.load, entry.document) {
-            self.virtual_documents.cancel(&entry.plugin, entry.load, entry.document);
+        self.virtual_documents
+            .cancel_pending(&entry.plugin, entry.load, entry.document);
+        if let Err(error) = self
+            .virtual_documents
+            .close(&entry.plugin, entry.load, entry.document)
+        {
+            self.virtual_documents
+                .cancel(&entry.plugin, entry.load, entry.document);
             return Err(error.detail);
         }
         Ok(Some(VirtualOpen::Execute {
-            plugin: entry.plugin, load: entry.load, command, document: entry.document,
+            plugin: entry.plugin,
+            load: entry.load,
+            command,
+            document: entry.document,
         }))
     }
 
@@ -380,14 +419,20 @@ impl ExtensionSession {
         self.virtual_documents
             .check_proposal(plugin, load, &proposal)
             .map_err(|error| error.detail)?;
-        if !navigation_current && matches!(&proposal.kind,
+        if !navigation_current
+            && matches!(&proposal.kind,
             crate::extensions::PluginVirtualDocumentProposalKind::Full(full) if full.expected_revision.is_none())
         {
-            self.virtual_documents.cancel(plugin, load, proposal.document);
+            self.virtual_documents
+                .cancel(plugin, load, proposal.document);
             return Err("virtual document opening cancelled after navigation".into());
         }
-        if matches!(proposal.kind, crate::extensions::PluginVirtualDocumentProposalKind::Error(_)) {
-            return Err(self.virtual_documents
+        if matches!(
+            proposal.kind,
+            crate::extensions::PluginVirtualDocumentProposalKind::Error(_)
+        ) {
+            return Err(self
+                .virtual_documents
                 .apply(plugin, load, proposal)
                 .expect_err("an error proposal cannot publish a snapshot")
                 .detail);
@@ -491,7 +536,8 @@ impl ExtensionSession {
         load: PluginLoadId,
     ) -> bool {
         self.providers.remove_generation(plugin, load);
-        self.provider_sources.retain(|request, _| self.providers.presentable(*request));
+        self.provider_sources
+            .retain(|request, _| self.providers.presentable(*request));
         if self
             .active_picker
             .is_some_and(|request| !self.providers.presentable(request))
@@ -517,9 +563,12 @@ impl ExtensionSession {
         editor: &EditorState,
     ) -> Result<u64, PluginProviderError> {
         let request = self.providers.start(start)?;
-        self.provider_sources.insert(request, editor.active_buffer_id().map(|buffer| {
-            (buffer, editor.buffers[buffer].text.source_version())
-        }));
+        self.provider_sources.insert(
+            request,
+            editor
+                .active_buffer_id()
+                .map(|buffer| (buffer, editor.buffers[buffer].text.source_version())),
+        );
         Ok(request)
     }
     pub(in crate::editor::session) fn fixture_virtual_request(

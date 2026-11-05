@@ -261,7 +261,9 @@ impl TestSession {
             .descriptions()
             .into_iter()
             .map(|(id, _, _)| {
-                let lines = self.application.terminal_session
+                let lines = self
+                    .application
+                    .terminal_session
                     .fixture_lines(crate::process::PtyId(id))
                     .into_iter()
                     .filter(|line| !line.trim().is_empty())
@@ -691,7 +693,8 @@ impl TestSession {
         fs::write(&path, b"disk").unwrap();
         let (buffer, _) = app
             .state
-            .open_text(TextBuffer::from_text("disk"), Some(path.clone())).unwrap();
+            .open_text(TextBuffer::from_text("disk"), Some(path.clone()))
+            .unwrap();
         app.reconcile_editor_windows();
         let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(2);
         app.documents = crate::editor::session::documents::DocumentSession::new(
@@ -724,7 +727,8 @@ impl TestSession {
         app.start_open(path.clone());
         let (other, view) = app
             .state
-            .open_text(TextBuffer::from_text("other"), Some(root.join("other.txt"))).unwrap();
+            .open_text(TextBuffer::from_text("other"), Some(root.join("other.txt")))
+            .unwrap();
         app.reconcile_editor_windows();
         gate.send(()).unwrap();
         wait_vfs(app);
@@ -748,10 +752,13 @@ impl TestSession {
         fs::write(&target, b"target").unwrap();
         app.state
             .load_hidden_text(TextBuffer::from_text("target"), target.clone());
-        let (source, _) = app.state.open_text(
-            TextBuffer::from_text("source"),
-            Some(root.join("source.txt")),
-        ).unwrap();
+        let (source, _) = app
+            .state
+            .open_text(
+                TextBuffer::from_text("source"),
+                Some(root.join("source.txt")),
+            )
+            .unwrap();
         app.reconcile_editor_windows();
         app.start_save(false, Some(target.clone()), true);
         wait_vfs(app);
@@ -785,20 +792,26 @@ impl TestSession {
         let result = self
             .application
             .finish_shutdown_before(Instant::now() - Duration::from_secs(1));
-        assert!(matches!(
-            result,
-            Err(super::super::InteractiveError::Vfs(
-                crate::files::VfsError::Io {
-                    operation: "finish persistence shutdown",
-                    ..
-                }
-            ))
-        ), "unexpected shutdown result: {result:?}");
+        assert!(
+            matches!(
+                result,
+                Err(super::super::InteractiveError::Vfs(
+                    crate::files::VfsError::Io {
+                        operation: "finish persistence shutdown",
+                        ..
+                    }
+                ))
+            ),
+            "unexpected shutdown result: {result:?}"
+        );
         let admitted = self.application.persistence.pending();
         let deadline = Instant::now() + Duration::from_secs(2);
         while self.application.persistence.pending() {
             self.application.process_persistence_events();
-            assert!(Instant::now() < deadline, "persistence worker did not drain");
+            assert!(
+                Instant::now() < deadline,
+                "persistence worker did not drain"
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(!admitted, "expired shutdown admitted a persistence request");
@@ -1047,18 +1060,29 @@ impl TestSession {
     pub(super) fn debug_start_native_program_fixture(&mut self) {
         let source = self._workspace.path().join("main.rs");
         std::fs::write(&source, "fn main() {}\n").unwrap();
-        self.application.state.open_text(
-            crate::editor::text::TextBuffer::from_text("fn main() {}\n"), Some(source),
-        ).unwrap();
-        let definition = crate::tools::bundled_tool_catalog().into_iter()
-            .find(|d| d.id == "codelldb").unwrap();
-        self.application.tooling.fixture_retain(|entry| entry.definition.id != "codelldb");
-        self.application.tooling.fixture_insert(crate::tools::ToolEntry {
-            definition,
-            status: crate::tools::ToolStatus::Installed(std::env::current_exe().unwrap()),
-        });
+        self.application
+            .state
+            .open_text(
+                crate::editor::text::TextBuffer::from_text("fn main() {}\n"),
+                Some(source),
+            )
+            .unwrap();
+        let definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|d| d.id == "codelldb")
+            .unwrap();
+        self.application
+            .tooling
+            .fixture_retain(|entry| entry.definition.id != "codelldb");
+        self.application
+            .tooling
+            .fixture_insert(crate::tools::ToolEntry {
+                definition,
+                status: crate::tools::ToolStatus::Installed(std::env::current_exe().unwrap()),
+            });
         self.application.start_dap(
-            Some("codelldb".into()), Some(self._workspace.path().join("debuggee")),
+            Some("codelldb".into()),
+            Some(self._workspace.path().join("debuggee")),
         );
     }
     pub(super) fn debug_program_pending(&self) -> bool {

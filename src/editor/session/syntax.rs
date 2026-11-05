@@ -382,17 +382,30 @@ mod tests {
             let mut session = SyntaxSession::new(1);
             let start = Instant::now();
             let documents = [SyntaxDocument {
-                buffer, text: &text, language: Some(SyntaxLanguage::Rust), enabled: true,
+                buffer,
+                text: &text,
+                language: Some(SyntaxLanguage::Rust),
+                enabled: true,
             }];
             session.tick(&documents, &config, 4, start, "large");
             let deadline = Instant::now() + Duration::from_secs(5);
             while session.result(buffer).is_none() {
-                session.tick(&documents, &config, 4, start + Duration::from_millis(100), "large");
+                session.tick(
+                    &documents,
+                    &config,
+                    4,
+                    start + Duration::from_millis(100),
+                    "large",
+                );
                 assert!(Instant::now() < deadline);
                 std::thread::yield_now();
             }
             let line = if source.contains("if true") { 2 } else { 1 };
-            assert_eq!(session.indentation(buffer, text.revision(), SyntaxLanguage::Rust, line), Ok(levels), "{source}");
+            assert_eq!(
+                session.indentation(buffer, text.revision(), SyntaxLanguage::Rust, line),
+                Ok(levels),
+                "{source}"
+            );
         }
     }
 
@@ -401,7 +414,12 @@ mod tests {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
         let text = TextBuffer::from_text("void f() {\n    x;\n\ty;\n}\n");
-        let documents = [SyntaxDocument { buffer, text: &text, language: Some(SyntaxLanguage::C), enabled: true }];
+        let documents = [SyntaxDocument {
+            buffer,
+            text: &text,
+            language: Some(SyntaxLanguage::C),
+            enabled: true,
+        }];
         let config = SyntaxConfig::default();
         let mut session = SyntaxSession::new(1);
         let mut now = Instant::now();

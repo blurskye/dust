@@ -144,15 +144,15 @@ impl DocumentSession {
         windows: &super::windows::WindowSession,
     ) -> bool {
         if let Some(stamp) = &self.startup_navigation {
-            self.startup_activate &= windows.navigation_current(
-                stamp, &editor.window_version(), editor.active_view,
-            );
+            self.startup_activate &=
+                windows.navigation_current(stamp, &editor.window_version(), editor.active_view);
         } else {
             // New startup files were opened synchronously and need no read receipt.
             self.primary = self.primary_path.as_ref().and_then(|path| {
-                editor.buffers.iter().find_map(|(id, buffer)| {
-                    (buffer.path.as_ref() == Some(path)).then_some(id)
-                })
+                editor
+                    .buffers
+                    .iter()
+                    .find_map(|(id, buffer)| (buffer.path.as_ref() == Some(path)).then_some(id))
             });
             self.startup_activated(editor, windows);
         }
@@ -163,9 +163,8 @@ impl DocumentSession {
         editor: &crate::editor::EditorState,
         windows: &super::windows::WindowSession,
     ) {
-        self.startup_navigation = Some(windows.navigation_stamp(
-            editor.window_version(), editor.active_view,
-        ));
+        self.startup_navigation =
+            Some(windows.navigation_stamp(editor.window_version(), editor.active_view));
     }
     fn startup_current(&self, editor: &EditorWindowVersion, root_revision: u64) -> bool {
         editor.revision().is_some()
@@ -534,14 +533,22 @@ impl DocumentSession {
         Ok(id)
     }
 
-    pub(in crate::editor::session) fn resolve_agent_paths(&mut self, paths: Vec<PathBuf>) -> Result<RequestId, VfsError> {
+    pub(in crate::editor::session) fn resolve_agent_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+    ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
         let id = self.vfs.resolve_paths(paths)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }
 
-    pub(in crate::editor::session) fn write_agent_file(&mut self, path: PathBuf, root: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
+    pub(in crate::editor::session) fn write_agent_file(
+        &mut self,
+        path: PathBuf,
+        root: PathBuf,
+        bytes: Vec<u8>,
+    ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
         let id = self.vfs.agent_write(path, root, bytes)?;
         self.pending_legacy.insert(id);
@@ -827,13 +834,13 @@ impl DocumentSession {
         let file = permit.file(&self.owner)?;
         use super::workspace_edits::InputFile;
         let result = match file {
-                InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
-                    self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
-                }
-                InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
-                InputFile::Resource { source, target } => {
-                    self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
-                }
+            InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
+                self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
+            }
+            InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
+            InputFile::Resource { source, target } => {
+                self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
+            }
         };
         if matches!(result, Err(VfsError::QueueFull)) {
             return Ok(false);
@@ -1041,7 +1048,9 @@ mod tests {
             7,
         );
         assert!(owner.check_admission().is_ok());
-        let (id, _) = state.open_text(TextBuffer::from_text("tiny"), None).unwrap();
+        let (id, _) = state
+            .open_text(TextBuffer::from_text("tiny"), None)
+            .unwrap();
         let policy = crate::config::LargeFileConfig::default();
         owner.set_large_file_mode(id, None, LargeFileOverride::On);
         assert_eq!(
@@ -1056,7 +1065,9 @@ mod tests {
             vec![id]
         );
         let mut foreign = EditorState::new("/workspace".into());
-        let (reused, _) = foreign.open_text(TextBuffer::from_text("tiny"), None).unwrap();
+        let (reused, _) = foreign
+            .open_text(TextBuffer::from_text("tiny"), None)
+            .unwrap();
         assert_eq!(id, reused);
         assert!(
             owner

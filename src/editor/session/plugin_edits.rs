@@ -505,7 +505,9 @@ mod tests {
         let version = workspace.version();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path)).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("éab"), Some(path))
+            .unwrap();
         let (mut manager, endpoint) = ExecutionFixture::new(1);
         let mut source = PluginEditSources::default();
         let submit =
@@ -581,10 +583,12 @@ mod tests {
             .unwrap()
             .unwrap();
         let mut foreign_editor = EditorState::new(root.path().into());
-        foreign_editor.open_text(
-            editor.buffers[buffer].text.clone(),
-            editor.buffers[buffer].path.clone(),
-        ).unwrap();
+        foreign_editor
+            .open_text(
+                editor.buffers[buffer].text.clone(),
+                editor.buffers[buffer].path.clone(),
+            )
+            .unwrap();
         assert!(
             source
                 .prepare_preview(&key, &manager, &foreign_editor, &version, 1)

@@ -162,7 +162,11 @@ impl InputSession {
             let mut head = position;
             if document.view.mode == EditorMode::Insert {
                 // Insert selections (including snippet placeholders) are half-open.
-                let end = if anchor <= head { &mut head } else { &mut anchor };
+                let end = if anchor <= head {
+                    &mut head
+                } else {
+                    &mut anchor
+                };
                 *end = crate::editor::text::next_grapheme_boundary(text, *end);
             }
             transaction.operations.push(EditorOperation::SetSelection {
@@ -288,18 +292,24 @@ mod tests {
     #[test]
     fn scrolled_mouse_hit_testing_ignores_inlays_beyond_the_logical_line_limit() {
         let mut state = EditorState::new("/workspace".into());
-        let (buffer, view) = state.open_text(TextBuffer::from_text(&"a".repeat(50)), None).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text(&"a".repeat(50)), None)
+            .unwrap();
         state.views[view].scroll_column = 33;
         let mut ui = crate::ui::UiState::default();
-        ui.lsp_inlay_hints = (0..40).map(|position| crate::ui::UiInlayHint {
-            buffer,
-            revision: state.buffers[buffer].text.revision(),
-            position: ByteOffset(position),
-            label: ":".into(),
-        }).collect();
+        ui.lsp_inlay_hints = (0..40)
+            .map(|position| crate::ui::UiInlayHint {
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                position: ByteOffset(position),
+                label: ":".into(),
+            })
+            .collect();
         let input = InputSession::new(100);
         let pending = plan_at(&input, &state, &ui, 1, 0, false);
-        state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+        state
+            .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
+            .unwrap();
         assert_eq!(state.views[view].cursor, ByteOffset(34));
     }
 
@@ -307,19 +317,27 @@ mod tests {
     fn unwrapped_mouse_hit_testing_uses_rendered_markdown_after_source_scrolling() {
         for (scroll, column) in [(0, 3), (3, 2)] {
             let mut state = EditorState::new("/workspace".into());
-            let (buffer, view) = state.open_text(TextBuffer::from_text("**abc**def\ncursor"), None).unwrap();
+            let (buffer, view) = state
+                .open_text(TextBuffer::from_text("**abc**def\ncursor"), None)
+                .unwrap();
             state.views[view].cursor = ByteOffset(11);
             state.views[view].scroll_column = scroll;
             let mut ui = crate::ui::UiState::default();
-            ui.markdown_marks = [(0, 2), (5, 7)].into_iter().map(|(start, end)| crate::ui::UiMarkdownMark {
-                buffer,
-                revision: state.buffers[buffer].text.revision(),
-                range: crate::editor::text::ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
-                mark: crate::language::syntax::MarkdownMark::Hide,
-            }).collect();
+            ui.markdown_marks = [(0, 2), (5, 7)]
+                .into_iter()
+                .map(|(start, end)| crate::ui::UiMarkdownMark {
+                    buffer,
+                    revision: state.buffers[buffer].text.revision(),
+                    range: crate::editor::text::ByteRange::new(ByteOffset(start), ByteOffset(end))
+                        .unwrap(),
+                    mark: crate::language::syntax::MarkdownMark::Hide,
+                })
+                .collect();
             let input = InputSession::new(100);
             let pending = plan_at(&input, &state, &ui, column, 0, false);
-            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+            state
+                .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
+                .unwrap();
             assert_eq!(state.views[view].cursor, ByteOffset(7));
         }
     }
@@ -328,25 +346,44 @@ mod tests {
     fn insert_mouse_drags_replace_both_endpoint_graphemes_in_either_direction() {
         for (start, end) in [(0, 2), (2, 0)] {
             let mut state = EditorState::new("/workspace".into());
-            let (buffer, view) = state.open_text(TextBuffer::from_text("abé\u{301}d"), None).unwrap();
+            let (buffer, view) = state
+                .open_text(TextBuffer::from_text("abé\u{301}d"), None)
+                .unwrap();
             state.views[view].mode = EditorMode::Insert;
             let ui = crate::ui::UiState::default();
             let mut input = InputSession::new(100);
             let pending = plan_at(&input, &state, &ui, start, 0, false);
-            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
-            input.accept_mouse_plan(pending, &state.window_version(), Some((view, buffer, state.buffers[buffer].text.revision())));
+            state
+                .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
+                .unwrap();
+            input.accept_mouse_plan(
+                pending,
+                &state.window_version(),
+                Some((view, buffer, state.buffers[buffer].text.revision())),
+            );
             let pending = plan_at(&input, &state, &ui, end, 0, true);
-            state.apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap()).unwrap();
+            state
+                .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
+                .unwrap();
             assert_eq!(state.views[view].mode, EditorMode::Insert);
             let selection = state.views[view].selection.unwrap();
             assert_eq!(selection.anchor.min(selection.head), ByteOffset(0));
-            assert_eq!(selection.anchor.max(selection.head), ByteOffset("abé\u{301}".len()));
+            assert_eq!(
+                selection.anchor.max(selection.head),
+                ByteOffset("abé\u{301}".len())
+            );
             let mut registry = crate::editor::CommandRegistry::<()>::default();
             crate::editor::register_builtin_commands(&mut registry).unwrap();
-            let invocation = crate::editor::CommandInvocation::new("edit.insert_text", crate::editor::InvocationSource::Test).unwrap()
-                .with_argument("text", crate::editor::CommandValue::String("X".into()));
+            let invocation = crate::editor::CommandInvocation::new(
+                "edit.insert_text",
+                crate::editor::InvocationSource::Test,
+            )
+            .unwrap()
+            .with_argument("text", crate::editor::CommandValue::String("X".into()));
             let outcome = registry.execute(&state, &invocation).unwrap();
-            state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+            state
+                .apply_transaction(outcome.transaction.as_ref().unwrap())
+                .unwrap();
             assert_eq!(state.buffers[buffer].text.to_string(), "Xd");
         }
     }

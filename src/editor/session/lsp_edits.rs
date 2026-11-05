@@ -172,7 +172,9 @@ impl LspEditSources {
         let offered = &set.actions[key.index];
         if let Some(context) = &offered.context {
             let path = path_from_file_uri(&offered.uri);
-            let actual = current.iter().find(|document| path.as_deref() == Some(document.path))
+            let actual = current
+                .iter()
+                .find(|document| path.as_deref() == Some(document.path))
                 .map(|document| (document.id, document.text.source_version()));
             if actual.is_none() || actual.as_ref() != context.document_source(&offered.uri) {
                 return Err("code-action document changed since it was requested".into());
@@ -357,7 +359,9 @@ impl LspEditSources {
             if if expected.is_some() {
                 actual.as_ref() != expected
             } else {
-                current.iter().any(|buffer| buffer.path == path && buffer.dirty)
+                current
+                    .iter()
+                    .any(|buffer| buffer.path == path && buffer.dirty)
             } {
                 return Err(format!(
                     "{} no longer has the requesting session's document incarnation/content",
@@ -531,7 +535,10 @@ fn decode_edits(
     while let Some(edit) = decoded.next() {
         if edit.range().is_empty() {
             let mut replacement = edit.replacement().to_owned();
-            while decoded.peek().is_some_and(|next| next.range() == edit.range()) {
+            while decoded
+                .peek()
+                .is_some_and(|next| next.range() == edit.range())
+            {
                 replacement.push_str(decoded.next().expect("peeked insertion").replacement());
             }
             combined.push(TextEdit::new(edit.range(), replacement));
@@ -570,8 +577,14 @@ mod tests {
         let edits = decode_edits(
             vec![LspTextEdit {
                 range: LspRange {
-                    start: LspPosition { line: 0, character: 0 },
-                    end: LspPosition { line: 999, character: 0 },
+                    start: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LspPosition {
+                        line: 999,
+                        character: 0,
+                    },
                 },
                 new_text: "replacement".into(),
             }],
@@ -592,86 +605,189 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.rs");
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("old"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let mut service = LspService::new();
-        let mut endpoint = service.replace_edit_source_fixture(uri.clone(),
-            (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16);
+        let mut endpoint = service.replace_edit_source_fixture(
+            uri.clone(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            PositionEncoding::Utf16,
+        );
         assert!(endpoint.request(ServerRequestId::Number(1), LspWorkspaceEdit::default()));
         let context = service.try_owned_event().unwrap().context;
         let mut sources = LspEditSources::default();
-        let actions = sources.install_actions(vec![OfferedAction {
-            server: "server".into(),
-            uri,
-            context: Some(context),
-            action: crate::language::lsp::LspCodeAction {
-                title: "run old positions".into(), kind: None, preferred: false, edit: None,
-                command: Some(crate::language::lsp::LspCommand {
-                    command: "run".into(), arguments: vec![serde_json::json!({"offset": 2})],
-                }),
-            },
-        }], &service, 4).unwrap();
-        editor.buffers[buffer].text.apply_edits(&TextEditSet::new(BufferRevision(0),
-            vec![TextEdit::new(ByteRange::empty(ByteOffset(0)), "new ")])).unwrap();
-        assert!(sources.take_action(&actions[0].key, &service, &documents(&editor)).is_err());
+        let actions = sources
+            .install_actions(
+                vec![OfferedAction {
+                    server: "server".into(),
+                    uri,
+                    context: Some(context),
+                    action: crate::language::lsp::LspCodeAction {
+                        title: "run old positions".into(),
+                        kind: None,
+                        preferred: false,
+                        edit: None,
+                        command: Some(crate::language::lsp::LspCommand {
+                            command: "run".into(),
+                            arguments: vec![serde_json::json!({"offset": 2})],
+                        }),
+                    },
+                }],
+                &service,
+                4,
+            )
+            .unwrap();
+        editor.buffers[buffer]
+            .text
+            .apply_edits(&TextEditSet::new(
+                BufferRevision(0),
+                vec![TextEdit::new(ByteRange::empty(ByteOffset(0)), "new ")],
+            ))
+            .unwrap();
+        assert!(
+            sources
+                .take_action(&actions[0].key, &service, &documents(&editor))
+                .is_err()
+        );
         assert!(endpoint.executed_command().is_none());
     }
     #[test]
     fn untracked_clean_buffers_are_checked_against_disk_for_workspace_edits() {
-        use crate::editor::{StartupTarget, session::{documents::{DocumentEvent, DocumentSession}, workspace_edits::WorkspaceEditSession}};
+        use crate::editor::{
+            StartupTarget,
+            session::{
+                documents::{DocumentEvent, DocumentSession},
+                workspace_edits::WorkspaceEditSession,
+            },
+        };
         use crate::files::VfsWorker;
-        for (disk, dirty, succeeds) in [("abc", false, true), ("different", false, false), ("abc", true, false)] {
+        for (disk, dirty, succeeds) in [
+            ("abc", false, true),
+            ("different", false, false),
+            ("abc", true, false),
+        ] {
             let root = tempfile::tempdir().unwrap();
             let path = root.path().join("target.rs");
             std::fs::write(&path, disk).unwrap();
             let mut editor = EditorState::new(root.path().into());
-            let (origin, _) = editor.open_text(TextBuffer::from_text("origin"), Some(root.path().join("origin.rs"))).unwrap();
-            let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path.clone())).unwrap();
+            let (origin, _) = editor
+                .open_text(
+                    TextBuffer::from_text("origin"),
+                    Some(root.path().join("origin.rs")),
+                )
+                .unwrap();
+            let (buffer, _) = editor
+                .open_text(TextBuffer::from_text("abc"), Some(path.clone()))
+                .unwrap();
             editor.set_buffer_dirty(buffer, dirty);
             let mut service = LspService::new();
             let mut endpoint = service.replace_edit_source_fixture(
                 crate::language::lsp::file_uri(&root.path().join("origin.rs")),
-                (origin, editor.buffers[origin].text.source_version()), PositionEncoding::Utf16);
-            let edit = LspWorkspaceEdit { resources: vec![], documents: vec![LspDocumentEdit {
-                uri: crate::language::lsp::file_uri(&path), version: None,
-                edits: vec![LspTextEdit { range: LspRange {
-                    start: LspPosition { line: 0, character: 1 }, end: LspPosition { line: 0, character: 2 },
-                }, new_text: "X".into() }],
-            }] };
+                (origin, editor.buffers[origin].text.source_version()),
+                PositionEncoding::Utf16,
+            );
+            let edit = LspWorkspaceEdit {
+                resources: vec![],
+                documents: vec![LspDocumentEdit {
+                    uri: crate::language::lsp::file_uri(&path),
+                    version: None,
+                    edits: vec![LspTextEdit {
+                        range: LspRange {
+                            start: LspPosition {
+                                line: 0,
+                                character: 1,
+                            },
+                            end: LspPosition {
+                                line: 0,
+                                character: 2,
+                            },
+                        },
+                        new_text: "X".into(),
+                    }],
+                }],
+            };
             assert!(endpoint.request(ServerRequestId::Number(1), edit.clone()));
             let packet = service.try_owned_event().unwrap();
             let mut sources = LspEditSources::default();
-            let plan = sources.start(edit, PositionEncoding::Utf16, Some(packet.context), None, &documents(&editor), &service);
+            let plan = sources.start(
+                edit,
+                PositionEncoding::Utf16,
+                Some(packet.context),
+                None,
+                &documents(&editor),
+                &service,
+            );
             if dirty {
                 assert!(plan.is_err());
                 continue;
             }
             let plan = plan.unwrap();
             assert!(matches!(plan.files[0], InputFile::ReadMatchingDisk { .. }));
-            let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), RootIdentity::capture(root.path()).unwrap())]).unwrap();
+            let scope = WorkspaceState::new(
+                WorkspaceId(1),
+                [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+            )
+            .unwrap();
             let workspace = crate::editor::session::workspace::WorkspaceSession::new(
-                scope.clone(), root.path().join("trust.json"), 1, false, false, 1);
+                scope.clone(),
+                root.path().join("trust.json"),
+                1,
+                false,
+                false,
+                1,
+            );
             let version = workspace.version();
             let mut owner = WorkspaceEditSession::default();
-            let ticket = owner.begin(version.clone(), 1, editor.workspace_edit_sources().unwrap()).unwrap();
-            owner.start_files(ticket, "cross-file".into(), Some(plan.key.clone()), false, plan.files,
-                (vec![root.path().into()], 1024)).unwrap();
-            let mut worker = DocumentSession::new(VfsWorker::start(2),
-                &StartupTarget::Dashboard { root: root.path().into() }, editor.window_version(), 1, 2);
-            worker.submit_workspace_io(owner.prepare_io(0, &workspace, &1, &editor).unwrap()).unwrap();
+            let ticket = owner
+                .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
+                .unwrap();
+            owner
+                .start_files(
+                    ticket,
+                    "cross-file".into(),
+                    Some(plan.key.clone()),
+                    false,
+                    plan.files,
+                    (vec![root.path().into()], 1024),
+                )
+                .unwrap();
+            let mut worker = DocumentSession::new(
+                VfsWorker::start(2),
+                &StartupTarget::Dashboard {
+                    root: root.path().into(),
+                },
+                editor.window_version(),
+                1,
+                2,
+            );
+            worker
+                .submit_workspace_io(owner.prepare_io(0, &workspace, &1, &editor).unwrap())
+                .unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             let reply = loop {
-                if let Some(DocumentEvent::WorkspaceIo(reply)) = worker.poll(&editor.window_version(), 1).unwrap() { break reply; }
+                if let Some(DocumentEvent::WorkspaceIo(reply)) =
+                    worker.poll(&editor.window_version(), 1).unwrap()
+                {
+                    break reply;
+                }
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::sleep(std::time::Duration::from_millis(2));
             };
             let accepted = owner.accept_preparation_reply(reply, &version, 1);
             assert_eq!(accepted.is_ok(), succeeds);
             if succeeds {
-                let drafts = sources.decode(&plan.key, owner.prepared_files().unwrap()).unwrap();
-                owner.finish_preparation(drafts, &scope, &version, 1).unwrap();
+                let drafts = sources
+                    .decode(&plan.key, owner.prepared_files().unwrap())
+                    .unwrap();
+                owner
+                    .finish_preparation(drafts, &scope, &version, 1)
+                    .unwrap();
                 let (captured, preview) = owner.approval(&version, 1).unwrap();
-                let draft = editor.prepare_workspace_edit(captured, preview, TransactionId(1)).unwrap();
+                let draft = editor
+                    .prepare_workspace_edit(captured, preview, TransactionId(1))
+                    .unwrap();
                 editor = draft.accept(&editor.version()).unwrap();
                 assert_eq!(editor.buffers[buffer].text.to_string(), "aXc");
             }
@@ -682,24 +798,74 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.rs");
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("x"), Some(path.clone())).unwrap();
-        let insertion = |text: &str| LspTextEdit { range: LspRange {
-            start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 0 },
-        }, new_text: text.into() };
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("x"), Some(path.clone()))
+            .unwrap();
+        let insertion = |text: &str| LspTextEdit {
+            range: LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+            },
+            new_text: text.into(),
+        };
         let edits = vec![insertion("a"), insertion("é"), insertion("b")];
-        let decoded = decode_edits(edits.clone(), &editor.buffers[buffer].text, PositionEncoding::Utf16).unwrap();
+        let decoded = decode_edits(
+            edits.clone(),
+            &editor.buffers[buffer].text,
+            PositionEncoding::Utf16,
+        )
+        .unwrap();
         assert_eq!(decoded.len(), 1);
-        let scope = WorkspaceState::new(WorkspaceId(1), [("root".into(), RootIdentity::capture(root.path()).unwrap())]).unwrap();
-        let proposal = crate::workspace::WorkspaceEditProposal::build(crate::workspace::ProposalId(1), "insert".into(), &scope,
-            vec![WorkspaceEditDraft { canonical_path: path.clone(), expected_revision: Some(BufferRevision(0)), edits: decoded }],
-            vec![crate::workspace::FileSnapshot { canonical_path: path.clone(), revision: Some(BufferRevision(0)), bytes: b"x".to_vec() }]).unwrap();
+        let scope = WorkspaceState::new(
+            WorkspaceId(1),
+            [("root".into(), RootIdentity::capture(root.path()).unwrap())],
+        )
+        .unwrap();
+        let proposal = crate::workspace::WorkspaceEditProposal::build(
+            crate::workspace::ProposalId(1),
+            "insert".into(),
+            &scope,
+            vec![WorkspaceEditDraft {
+                canonical_path: path.clone(),
+                expected_revision: Some(BufferRevision(0)),
+                edits: decoded,
+            }],
+            vec![crate::workspace::FileSnapshot {
+                canonical_path: path.clone(),
+                revision: Some(BufferRevision(0)),
+                bytes: b"x".to_vec(),
+            }],
+        )
+        .unwrap();
         assert_eq!(proposal.files[0].proposed_bytes, "aébx".as_bytes());
-        let transaction = LspEditSources::completion_transaction(LspWorkspaceEdit {
-            resources: vec![], documents: vec![LspDocumentEdit { uri: crate::language::lsp::file_uri(&path), version: None, edits }],
-        }, PositionEncoding::Utf16, &documents(&editor), TransactionId(1)).unwrap();
+        let transaction = LspEditSources::completion_transaction(
+            LspWorkspaceEdit {
+                resources: vec![],
+                documents: vec![LspDocumentEdit {
+                    uri: crate::language::lsp::file_uri(&path),
+                    version: None,
+                    edits,
+                }],
+            },
+            PositionEncoding::Utf16,
+            &documents(&editor),
+            TransactionId(1),
+        )
+        .unwrap();
         editor.apply_transaction(&transaction).unwrap();
         assert_eq!(editor.buffers[buffer].text.to_string(), "aébx");
-        editor.apply_transaction(&EditorTransaction::new(TransactionId(2)).with_operation(EditorOperation::Undo { buffer })).unwrap();
+        editor
+            .apply_transaction(
+                &EditorTransaction::new(TransactionId(2))
+                    .with_operation(EditorOperation::Undo { buffer }),
+            )
+            .unwrap();
         assert_eq!(editor.buffers[buffer].text.to_string(), "x");
     }
     #[test]
@@ -747,7 +913,9 @@ mod tests {
     #[test]
     fn pending_edit_replies_do_not_stop_event_delivery() {
         let mut editor = EditorState::new("/".into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abc"), None)
+            .unwrap();
         let mut service = LspService::new();
         let uri = "file:///source.rs";
         let mut endpoint = service.replace_edit_source_fixture(
@@ -757,14 +925,21 @@ mod tests {
         );
         let mut sources = LspEditSources::default();
         for id in 0..128 {
-            assert!(endpoint.request(ServerRequestId::Number(id), LspWorkspaceEdit {
-                documents: Vec::new(), resources: Vec::new(),
-            }));
+            assert!(endpoint.request(
+                ServerRequestId::Number(id),
+                LspWorkspaceEdit {
+                    documents: Vec::new(),
+                    resources: Vec::new(),
+                }
+            ));
             let packet = sources.poll_event(&service).unwrap();
             sources.reject_reply(packet.reply, "busy".into());
         }
         endpoint.publish_diagnostics(uri, None, Vec::new(), &Default::default());
-        assert!(matches!(sources.poll_event(&service).unwrap().event, LspEvent::Diagnostics { .. }));
+        assert!(matches!(
+            sources.poll_event(&service).unwrap().event,
+            LspEvent::Diagnostics { .. }
+        ));
         for _ in 0..256 {
             assert!(sources.flush().is_empty());
             while endpoint.response().is_some() {}
@@ -779,11 +954,18 @@ mod tests {
     fn pending_edit_replies_do_not_stop_draining_backpressured_events() {
         use std::{sync::mpsc, thread, time::Duration};
         let mut editor = EditorState::new("/workspace".into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("source"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("source"), None)
+            .unwrap();
         let mut service = LspService::new();
         let uri = "file:///workspace/source.rs";
-        let mut endpoint = service.replace_edit_source_fixture_for("fixture", uri.into(),
-            (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16, 1);
+        let mut endpoint = service.replace_edit_source_fixture_for(
+            "fixture",
+            uri.into(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            PositionEncoding::Utf16,
+            1,
+        );
         let mut sources = LspEditSources::default();
         for id in 0..128 {
             assert!(endpoint.request(ServerRequestId::Number(id), LspWorkspaceEdit::default()));
@@ -801,17 +983,27 @@ mod tests {
         let (done, completion) = mpsc::sync_channel(1);
         let producer = thread::spawn(move || {
             endpoint.publish_disk_diagnostics(uri, "source", Vec::new());
-            done.send(endpoint).unwrap_or_else(|_| panic!("test receiver stopped"));
+            done.send(endpoint)
+                .unwrap_or_else(|_| panic!("test receiver stopped"));
         });
-        assert!(matches!(completion.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        assert!(sources.poll_event(&service).is_some(), "reply pressure stopped event draining");
+        assert!(matches!(
+            completion.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(
+            sources.poll_event(&service).is_some(),
+            "reply pressure stopped event draining"
+        );
         let mut endpoint = completion.recv_timeout(Duration::from_secs(3)).unwrap();
         producer.join().unwrap();
         while sources.poll_event(&service).is_some() {}
         endpoint.unblock_responses();
         for id in 0..128 {
             assert!(sources.flush().is_empty());
-            assert_eq!(endpoint.response(), Some((ServerRequestId::Number(id), false)));
+            assert_eq!(
+                endpoint.response(),
+                Some((ServerRequestId::Number(id), false))
+            );
         }
         assert!(sources.flush().is_empty());
         assert!(!sources.pending_replies());
@@ -822,7 +1014,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.rs");
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path.clone())).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("éab"), Some(path.clone()))
+            .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let edit = || LspWorkspaceEdit {
             documents: vec![LspDocumentEdit {
@@ -980,7 +1174,11 @@ mod tests {
             PositionEncoding::Utf16,
         );
         assert!(!service.owns_event_context(&packet.context));
-        assert!(sources.take_action(&old_action, &service, &documents(&editor)).is_err());
+        assert!(
+            sources
+                .take_action(&old_action, &service, &documents(&editor))
+                .is_err()
+        );
         let LspEvent::ApplyEditRequest { edit, .. } = packet.event else {
             panic!("request");
         };
@@ -1031,9 +1229,21 @@ mod tests {
             )
             .unwrap();
         let key = choices[0].key.clone();
-        assert!(sources.take_action(&old_action, &service, &documents(&editor)).is_err());
-        assert!(sources.take_action(&key, &service, &documents(&editor)).is_ok());
-        assert!(sources.take_action(&key, &service, &documents(&editor)).is_err());
+        assert!(
+            sources
+                .take_action(&old_action, &service, &documents(&editor))
+                .is_err()
+        );
+        assert!(
+            sources
+                .take_action(&key, &service, &documents(&editor))
+                .is_ok()
+        );
+        assert!(
+            sources
+                .take_action(&key, &service, &documents(&editor))
+                .is_err()
+        );
         let copies = EditorState::test_clone_count();
         assert!(
             sources
@@ -1223,15 +1433,17 @@ impl LspEditSources {
                     source: diagnostic.source.unwrap_or_else(|| label.into()),
                     code: diagnostic.code,
                     message: diagnostic.message,
-                    related: diagnostic.related.into_iter().map(|(location, message)| {
-                        crate::workspace::RelatedDiagnostic {
+                    related: diagnostic
+                        .related
+                        .into_iter()
+                        .map(|(location, message)| crate::workspace::RelatedDiagnostic {
                             uri: location.uri,
                             range: (location.range.start.line, location.range.start.character)
                                 ..(location.range.end.line, location.range.end.character),
                             encoding: context.encoding(),
                             message,
-                        }
-                    }).collect(),
+                        })
+                        .collect(),
                     tags: Vec::new(),
                     fixes: Vec::new(),
                     data: diagnostic.data,
@@ -1271,7 +1483,9 @@ mod diagnostic_tests {
         let path = root.path().join("open.rs");
         let uri = crate::language::lsp::file_uri(&path);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("abc"), Some(path)).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("abc"), Some(path))
+            .unwrap();
         let mut service = LspService::new();
         let endpoint = service.replace_edit_source_fixture(
             uri.clone(),
@@ -1325,10 +1539,12 @@ mod diagnostic_tests {
         assert_eq!(batch.items.len(), 1);
         assert_eq!(batch.validity, DiagnosticValidity::DiskReport);
         assert!(batch.document.is_none());
-        editor.open_text(
-            TextBuffer::from_text("new contents"),
-            Some(root.path().join("unopened.rs")),
-        ).unwrap();
+        editor
+            .open_text(
+                TextBuffer::from_text("new contents"),
+                Some(root.path().join("unopened.rs")),
+            )
+            .unwrap();
         assert!(
             LspEditSources::diagnostic_batch(
                 &event.context,
@@ -1348,7 +1564,9 @@ mod diagnostic_tests {
         let path = root.path().join("source");
         let uri = crate::language::lsp::file_uri(&path);
         let mut editor = EditorState::new(root.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("éab"), Some(path)).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("éab"), Some(path))
+            .unwrap();
         let mut service = LspService::new();
         let mut endpoint = service.replace_edit_source_fixture(
             uri.clone(),
@@ -1380,8 +1598,14 @@ mod diagnostic_tests {
                     crate::language::lsp::LspLocation {
                         uri: "file:///unopened.rs".into(),
                         range: LspRange {
-                            start: LspPosition { line: 2, character: 4 },
-                            end: LspPosition { line: 2, character: 6 },
+                            start: LspPosition {
+                                line: 2,
+                                character: 4,
+                            },
+                            end: LspPosition {
+                                line: 2,
+                                character: 6,
+                            },
                         },
                     },
                     "other declaration".into(),

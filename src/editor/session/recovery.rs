@@ -141,8 +141,7 @@ impl RecoverySession {
             .join(format!("buffer-{}-{identifier}.toml", self.session))
     }
     fn recorded(&self, buffer: BufferId, revision: BufferRevision, path: &Option<PathBuf>) -> bool {
-        self.paths.get(&buffer) == Some(path)
-            && self.revisions.get(&buffer) == Some(&revision)
+        self.paths.get(&buffer) == Some(path) && self.revisions.get(&buffer) == Some(&revision)
     }
     pub(super) fn retire_buffer(&mut self, buffer: BufferId, clean: bool) {
         if clean && (self.revisions.contains_key(&buffer) || self.recovered.contains_key(&buffer)) {
@@ -171,8 +170,15 @@ impl RecoverySession {
                 });
             }
         }
-        let closed = self.paths.keys().chain(self.recovered.keys()).chain(self.scheduled.keys()).chain(self.oversized.iter())
-            .filter(|buffer| !editor.buffers.contains_key(**buffer)).copied().collect::<Vec<_>>();
+        let closed = self
+            .paths
+            .keys()
+            .chain(self.recovered.keys())
+            .chain(self.scheduled.keys())
+            .chain(self.oversized.iter())
+            .filter(|buffer| !editor.buffers.contains_key(**buffer))
+            .copied()
+            .collect::<Vec<_>>();
         for buffer in closed {
             self.retire_buffer(buffer, false);
         }
@@ -192,11 +198,15 @@ impl RecoverySession {
                 &self.directory,
                 MAXIMUM_RETAINED_JOURNALS,
                 MAXIMUM_JOURNAL_AGE_DAYS,
-                editor.buffers.iter().map(|(buffer, _)| self.path(buffer))
+                editor
+                    .buffers
+                    .iter()
+                    .map(|(buffer, _)| self.path(buffer))
                     .chain(self.pending.values().filter_map(|pending| match pending {
                         Pending::Write { path, .. } => Some(path.clone()),
                         _ => None,
-                    })).collect(),
+                    }))
+                    .collect(),
             )
         {
             self.cleanup_queued = true;
@@ -440,7 +450,12 @@ impl RecoverySession {
                     }
                     if let Some((buffer, revision)) = buffer {
                         let writing = self.pending.values().any(|pending| matches!(pending, Pending::Write { buffer: writing, .. } if *writing == buffer));
-                        if !writing && self.revisions.get(&buffer).is_none_or(|current| *current == revision) {
+                        if !writing
+                            && self
+                                .revisions
+                                .get(&buffer)
+                                .is_none_or(|current| *current == revision)
+                        {
                             self.recovered.remove(&buffer);
                             self.revisions.remove(&buffer);
                             self.paths.remove(&buffer);
@@ -524,19 +539,33 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut recovery = RecoverySession::new(directory.path().into());
         let mut editor = EditorState::new(directory.path().into());
-        let (buffer, _) = editor.open_text(TextBuffer::from_text("draft"), None).unwrap();
+        let (buffer, _) = editor
+            .open_text(TextBuffer::from_text("draft"), None)
+            .unwrap();
         let revision = editor.buffers[buffer].text.revision();
         let path = recovery.path(buffer);
-        crate::files::write_recovery(&path, &RecoveryRecord::new(None, revision.0, "draft".into())).unwrap();
+        crate::files::write_recovery(
+            &path,
+            &RecoveryRecord::new(None, revision.0, "draft".into()),
+        )
+        .unwrap();
         recovery.recovered.insert(buffer, path.clone());
         recovery.revisions.insert(buffer, revision);
         recovery.paths.insert(buffer, None);
-        recovery.scheduled.insert(buffer, (revision, Instant::now()));
+        recovery
+            .scheduled
+            .insert(buffer, (revision, Instant::now()));
         recovery.oversized.insert(buffer);
         let id = RequestId(1);
-        recovery.pending.insert(id, Pending::Write {
-            buffer, revision, path: path.clone(), original_path: None,
-        });
+        recovery.pending.insert(
+            id,
+            Pending::Write {
+                buffer,
+                revision,
+                path: path.clone(),
+                original_path: None,
+            },
+        );
 
         recovery.retire_buffer(buffer, false);
         assert!(recovery.recovered.is_empty());
@@ -545,8 +574,19 @@ mod tests {
         assert!(recovery.scheduled.is_empty());
         assert!(recovery.oversized.is_empty());
         assert!(recovery.pending.contains_key(&id));
-        assert!(path.exists(), "closing a dirty buffer preserves its journal");
-        assert!(recovery.accept(VfsResult::RecoveryWritten { id, path, result: Ok(()) }).is_break());
+        assert!(
+            path.exists(),
+            "closing a dirty buffer preserves its journal"
+        );
+        assert!(
+            recovery
+                .accept(VfsResult::RecoveryWritten {
+                    id,
+                    path,
+                    result: Ok(())
+                })
+                .is_break()
+        );
         assert!(recovery.pending.is_empty());
         assert!(recovery.revisions.is_empty());
         assert!(recovery.paths.is_empty());

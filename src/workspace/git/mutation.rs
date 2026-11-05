@@ -335,13 +335,19 @@ impl Drop for GitMutationService {
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
     use sha2::{Digest, Sha256};
-    let bytes = crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024)
-        .map_err(|error| match error {
-            crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
-            crate::files::VfsError::Io { source, .. } if source.raw_os_error() == Some(nix::libc::ELOOP) => GitMutationError::UnsupportedPath,
-            crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
-            _ => GitMutationError::Backend,
-        })?;
+    let bytes =
+        crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024).map_err(
+            |error| match error {
+                crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
+                crate::files::VfsError::Io { source, .. }
+                    if source.raw_os_error() == Some(nix::libc::ELOOP) =>
+                {
+                    GitMutationError::UnsupportedPath
+                }
+                crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
+                _ => GitMutationError::Backend,
+            },
+        )?;
     let hash = Sha256::digest(&bytes).into();
     Ok((hash, bytes))
 }
@@ -687,8 +693,12 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || !plan.selected_lines.is_empty()
-                || (plan.expected_worktree.is_none() && !unsaved
-                    && !plan.selected.as_ref().is_some_and(|hunk| hunk.new_mode == 0))
+                || (plan.expected_worktree.is_none()
+                    && !unsaved
+                    && !plan
+                        .selected
+                        .as_ref()
+                        .is_some_and(|hunk| hunk.new_mode == 0))
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -711,8 +721,12 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || plan.selected_lines.is_empty()
-                || (plan.expected_worktree.is_none() && !unsaved
-                    && !plan.selected.as_ref().is_some_and(|hunk| hunk.new_mode == 0))
+                || (plan.expected_worktree.is_none()
+                    && !unsaved
+                    && !plan
+                        .selected
+                        .as_ref()
+                        .is_some_and(|hunk| hunk.new_mode == 0))
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -804,7 +818,10 @@ fn verify_patch_paths(diff: &git2::Diff<'_>, path: &Path) -> Result<(), GitMutat
     let old = delta.old_file();
     let new = delta.new_file();
     if old.path().is_none() && new.path().is_none()
-        || [old.path(), new.path()].into_iter().flatten().any(|parsed| parsed != path)
+        || [old.path(), new.path()]
+            .into_iter()
+            .flatten()
+            .any(|parsed| parsed != path)
     {
         return Err(GitMutationError::Invalid);
     }
@@ -1079,8 +1096,12 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
     };
     let entry = match tree.as_ref().map(|tree| tree.get_path(repo_path)) {
         Some(Ok(entry)) => Some(entry),
-        Some(Err(error)) if error.code() == git2::ErrorCode::NotFound
-            && error.class() == git2::ErrorClass::Tree => None,
+        Some(Err(error))
+            if error.code() == git2::ErrorCode::NotFound
+                && error.class() == git2::ErrorClass::Tree =>
+        {
+            None
+        }
         Some(Err(_)) => return Err(GitMutationError::Backend),
         None => None,
     };
@@ -1105,7 +1126,9 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
         restored.ctime = git2::IndexTime::new(0, 0);
         restored.mtime = git2::IndexTime::new(0, 0);
         restored.file_size = 0;
-        index.remove_path(repo_path).map_err(|_| GitMutationError::Backend)?;
+        index
+            .remove_path(repo_path)
+            .map_err(|_| GitMutationError::Backend)?;
         index
             .add(&restored)
             .map_err(|_| GitMutationError::Backend)?;
@@ -1157,7 +1180,11 @@ pub(super) fn apply_change_plan(
     }
 
     let file = root.join(&p.policy.file);
-    let worktree = if from_worktree { Some(worktree_state(&file)?) } else { None };
+    let worktree = if from_worktree {
+        Some(worktree_state(&file)?)
+    } else {
+        None
+    };
     if let Some(worktree) = &worktree {
         match (worktree, p.expected_worktree) {
             (WorktreeState::Regular { sha256 }, Some(expected)) if *sha256 == expected => {}
@@ -1211,7 +1238,11 @@ pub(super) fn apply_change_plan(
         repo.apply(&diff, git2::ApplyLocation::Index, None)
             .map_err(|_| GitMutationError::Backend)?;
     } else if p.kind == GitMutationKind::StageFile {
-        stage_whole_file(&repo, &repo_path, worktree.as_ref().ok_or(GitMutationError::Invalid)?)?;
+        stage_whole_file(
+            &repo,
+            &repo_path,
+            worktree.as_ref().ok_or(GitMutationError::Invalid)?,
+        )?;
     } else {
         unstage_whole_file(&repo, &repo_path)?;
     }
@@ -1249,7 +1280,10 @@ mod tests {
         assert_eq!(worktree_hash(&file).unwrap().1, b"regular\n");
         let symlink = dir.path().join("link");
         std::os::unix::fs::symlink(&file, &symlink).unwrap();
-        assert!(worktree_hash(&symlink).is_err(), "even regular-file links are not followed");
+        assert!(
+            worktree_hash(&symlink).is_err(),
+            "even regular-file links are not followed"
+        );
         let fifo = dir.path().join("fifo");
         nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).unwrap();
         assert_eq!(worktree_hash(&fifo), Err(GitMutationError::UnsupportedPath));
@@ -1263,7 +1297,10 @@ mod tests {
         let patch = b"diff --git a/foo b/foo\n--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-old\n+new\n";
         let diff = git2::Diff::from_buffer(patch).unwrap();
         assert_eq!(verify_patch_paths(&diff, Path::new("foo")), Ok(()));
-        assert_eq!(verify_patch_paths(&diff, Path::new("foo ")), Err(GitMutationError::Invalid));
+        assert_eq!(
+            verify_patch_paths(&diff, Path::new("foo ")),
+            Err(GitMutationError::Invalid)
+        );
     }
 
     #[test]
@@ -1306,14 +1343,18 @@ mod tests {
         let (release, wait) = mpsc::sync_channel(0);
         let worker = thread::spawn(move || {
             wait.recv().unwrap();
-            tx.send(GitMutationEvent::Complete(Err(GitMutationError::StaleWorktree)))
+            tx.send(GitMutationEvent::Complete(Err(
+                GitMutationError::StaleWorktree,
+            )))
         });
         service.cancel();
         assert!(cancellation.load(Ordering::Acquire));
         release.send(()).unwrap();
-        assert!(worker.join().unwrap().is_err(), "cancel drops the result receiver");
+        assert!(
+            worker.join().unwrap().is_err(),
+            "cancel drops the result receiver"
+        );
         assert!(service.poll().unwrap().is_none());
         assert_eq!(service.next, 1);
     }
-
 }
