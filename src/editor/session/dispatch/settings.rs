@@ -352,7 +352,7 @@ impl InteractiveApplication {
     }
 
     /// Write one setting to config.toml and reload; the reload refreshes the page.
-    fn save_setting(
+    pub(super) fn save_setting(
         &mut self,
         key: &str,
         value: Option<toml::Value>,

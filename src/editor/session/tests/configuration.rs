@@ -2014,6 +2014,18 @@ fn the_shortcuts_page_records_new_keys_and_resets_them() {
             .clone()
     };
     app.process_effect(AppEffect::Settings(SettingsAction::Shortcuts));
+    // The leader keys come first, and each section's bindings sit together under one heading.
+    let page = app.ui.settings.as_ref().unwrap();
+    assert_eq!(page.selected_row().unwrap().key, "input.keymaps.leader");
+    assert_eq!(page.sections[1], "Everywhere");
+    let mut headings: Vec<_> = page
+        .lines
+        .iter()
+        .filter(|line| matches!(line, crate::ui::SettingsLine::Heading(_)))
+        .collect();
+    let count = headings.len();
+    headings.dedup();
+    assert_eq!(headings.len(), count, "a section is split");
     app.process_effect(AppEffect::Settings(SettingsAction::Search));
     app.process_effect(AppEffect::Settings(SettingsAction::Insert(
         "search-keymaps".into(),
@@ -2021,7 +2033,7 @@ fn the_shortcuts_page_records_new_keys_and_resets_them() {
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
     let row = selected(&app);
     assert_eq!(row.key, "builtin.global.search-keymaps");
-    assert_eq!(row.value, SettingsValue::Keys("space s k".into()));
+    assert_eq!(row.value, SettingsValue::Keys("<leader> s k".into()));
     assert!(!row.modified);
     // Escape leaves the recording without saving; Backspace takes back a key.
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
@@ -2042,13 +2054,13 @@ fn the_shortcuts_page_records_new_keys_and_resets_them() {
     assert_eq!(entry["command"].as_str(), Some("settings.shortcuts"));
     reloaded(&mut app, generation);
     let row = selected(&app);
-    assert_eq!(row.value, SettingsValue::Keys("space s K".into()));
+    assert_eq!(row.value, SettingsValue::Keys("<leader> s K".into()));
     assert!(row.modified);
     let generation = app.configuration.generation();
     app.process_effect(AppEffect::Settings(SettingsAction::Reset));
     reloaded(&mut app, generation);
     let row = selected(&app);
-    assert_eq!(row.value, SettingsValue::Keys("space s k".into()));
+    assert_eq!(row.value, SettingsValue::Keys("<leader> s k".into()));
     assert!(!row.modified);
     assert!(
         !fs::read_to_string(&path)

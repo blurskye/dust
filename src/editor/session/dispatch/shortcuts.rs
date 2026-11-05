@@ -21,6 +21,25 @@ fn listed(context: &str) -> bool {
 /// A binding longer than this many keys can't be typed in, as in keymaps.toml.
 const MAXIMUM_KEYS: usize = 4;
 
+/// The settings listed first, under "Leader keys": the keys `<leader>` and `<localleader>`
+/// stand for in every binding.
+const LEADERS: [(&str, &str, &str); 2] = [
+    (
+        "input.keymaps.leader",
+        "Leader",
+        "Starts the shortcuts written <leader>, such as <leader> f f",
+    ),
+    (
+        "input.keymaps.local_leader",
+        "Local leader",
+        "Starts the shortcuts written <localleader>, for the file type at hand",
+    ),
+];
+
+fn is_leader(key: &str) -> bool {
+    LEADERS.iter().any(|(setting, ..)| *setting == key)
+}
+
 impl InteractiveApplication {
     pub(super) fn open_shortcuts(&mut self) {
         self.open_settings();
@@ -48,34 +67,40 @@ impl InteractiveApplication {
             .collect()
     }
 
-    /// The page's sections and rows: each binding in effect under its context and mode, its
-    /// keys as they are pressed, and the other bindings there with the same keys.
+    /// The page's sections and rows: the leader keys, then each binding in effect under its
+    /// context and mode with its keys as keymaps.toml writes them, and the other bindings there
+    /// with the same keys.
     pub(super) fn shortcut_rows(&self) -> (Vec<String>, Vec<SettingsRow>) {
         let settings = self.configuration.settings();
         let policy = &settings.input.keymaps;
-        let shown_keys = |keys: &str| {
-            keys.split_whitespace()
-                .map(|token| match token {
-                    "<leader>" => policy.leader.as_str(),
-                    "<localleader>" => policy.local_leader.as_str(),
-                    token => token,
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
+        let user_keys = self.configuration.user_setting_keys();
+        let mut rows: Vec<SettingsRow> = LEADERS
+            .iter()
+            .zip([&policy.leader, &policy.local_leader])
+            .map(|((setting, title, about), keys)| SettingsRow {
+                key: (*setting).into(),
+                section: 0,
+                title: (*title).into(),
+                about: (*about).into(),
+                value: SettingsValue::Keys(keys.clone()),
+                modified: user_keys.contains(*setting),
+                restart: false,
+            })
+            .collect();
         let declared = self.declared_shortcuts();
-        let mut sections = Vec::<String>::new();
+        let mut found = Vec::<(String, String)>::new();
         let mut section_of = HashMap::<(String, String), usize>::new();
-        let mut rows = Vec::new();
+        let mut bindings = Vec::new();
         for keymap in &declared {
             let entry = &keymap.entry;
-            let context = entry.context.clone().unwrap_or_default();
-            let section = *section_of
-                .entry((context.clone(), entry.mode.clone()))
-                .or_insert_with(|| {
-                    sections.push(section_title(&context, &entry.mode));
-                    sections.len() - 1
-                });
+            let place = (
+                entry.context.clone().unwrap_or_default(),
+                entry.mode.clone(),
+            );
+            let section = *section_of.entry(place.clone()).or_insert_with(|| {
+                found.push(place);
+                found.len() - 1
+            });
             let command = entry.command.clone().unwrap_or_default();
             let mut title = settings
                 .command_labels
@@ -96,16 +121,41 @@ impl InteractiveApplication {
             if !arguments.is_empty() {
                 title = format!("{title}: {}", arguments.join(", "));
             }
-            rows.push(SettingsRow {
+            let keys = entry.keys.as_deref().unwrap_or_default();
+            bindings.push(SettingsRow {
                 key: entry.id.clone(),
                 section,
                 title,
                 about: command,
-                value: SettingsValue::Keys(shown_keys(entry.keys.as_deref().unwrap_or_default())),
+                value: SettingsValue::Keys(keys.split_whitespace().collect::<Vec<_>>().join(" ")),
                 modified: keymap.user,
                 restart: false,
             });
         }
+        // Everywhere first, then the editor's modes in the order they are used, then the rest
+        // by name; each section's bindings together under its heading.
+        let titles: Vec<String> = found
+            .iter()
+            .map(|(context, mode)| section_title(context, mode))
+            .collect();
+        let mut order: Vec<usize> = (0..found.len()).collect();
+        order.sort_by(|a, b| {
+            section_rank(&found[*a])
+                .cmp(&section_rank(&found[*b]))
+                .then_with(|| titles[*a].cmp(&titles[*b]))
+        });
+        let mut position = vec![0; found.len()];
+        for (index, section) in order.iter().enumerate() {
+            position[*section] = index + 1;
+        }
+        for row in &mut bindings {
+            row.section = position[row.section];
+        }
+        bindings.sort_by_key(|row| row.section);
+        rows.extend(bindings);
+        let sections = std::iter::once("Leader keys".to_owned())
+            .chain(order.iter().map(|section| titles[*section].clone()))
+            .collect();
         // Same keys in the same section: only one of them runs, so both say so.
         let mut by_keys = HashMap::<(usize, String), Vec<usize>>::new();
         for (index, row) in rows.iter().enumerate() {
@@ -136,6 +186,8 @@ impl InteractiveApplication {
         let Some(page) = self.ui.settings.as_mut() else {
             return false;
         };
+        let leader_row = page.selected_row().is_some_and(|row| is_leader(&row.key));
+        let leader = self.configuration.settings().input.keymaps.leader.clone();
         let Some(SettingsEdit::Keys(keys)) = &mut page.edit else {
             return false;
         };
@@ -148,6 +200,11 @@ impl InteractiveApplication {
             "escape" => page.edit = None,
             "backspace" => {
                 keys.pop();
+            }
+            // A binding that starts with the leader key is written `<leader>`, so it follows
+            // the leader when that changes.
+            notation if keys.is_empty() && !leader_row && notation == leader.as_str() => {
+                keys.push("<leader>".into());
             }
             notation if keys.len() < MAXIMUM_KEYS => keys.push(notation.to_owned()),
             _ => {}
@@ -165,6 +222,17 @@ impl InteractiveApplication {
         else {
             return;
         };
+        if is_leader(&row.key) {
+            if let [key] = keys {
+                let _ = self.save_setting(&row.key, Some(toml::Value::String(key.clone())), false);
+                if let Some(page) = self.ui.settings.as_mut() {
+                    page.edit = None;
+                }
+            } else {
+                self.settings_status("A leader is one key".into(), true);
+            }
+            return;
+        }
         let Some(keymap) = self
             .declared_shortcuts()
             .into_iter()
@@ -177,34 +245,20 @@ impl InteractiveApplication {
             self.refresh_settings();
             return;
         };
-        // Starting with the leader key writes `<leader>`, so the binding follows the leader.
-        let leader = &self.configuration.settings().input.keymaps.leader;
-        let source = keys
-            .iter()
-            .enumerate()
-            .map(|(index, key)| {
-                if index == 0 && key == leader {
-                    "<leader>"
-                } else {
-                    key.as_str()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let shown = keys.join(" ");
+        let source = keys.join(" ");
         let clash = self.ui.settings.as_ref().and_then(|page| {
             page.rows
                 .iter()
                 .find(|other| {
                     other.section == row.section
                         && other.key != row.key
-                        && other.value == SettingsValue::Keys(shown.clone())
+                        && other.value == SettingsValue::Keys(source.clone())
                 })
                 .map(|other| other.title.clone())
         });
         let result = self.write_shortcuts(|path| write_user_keymap(path, &keymap.entry, &source));
         let status = match (&result, clash) {
-            (Ok(()), Some(other)) => (format!("Saved. {shown} is also {other}"), false),
+            (Ok(()), Some(other)) => (format!("Saved. {source} is also {other}"), false),
             (Ok(()), None) => ("Saved".into(), false),
             (Err(error), _) => (error.clone(), true),
         };
@@ -227,6 +281,10 @@ impl InteractiveApplication {
         };
         if !row.modified {
             self.settings_status("Already the default".into(), false);
+            return;
+        }
+        if is_leader(&row.key) {
+            let _ = self.save_setting(&row.key, None, false);
             return;
         }
         let result = self.write_shortcuts(|path| remove_user_keymap(path, &row.key));
@@ -258,6 +316,30 @@ impl InteractiveApplication {
         self.configuration
             .request_reload()
             .map_err(|error| error.to_string())
+    }
+}
+
+fn section_rank((context, mode): &(String, String)) -> (u8, usize) {
+    const EDITOR_MODES: [&str; 8] = [
+        "normal",
+        "insert",
+        "visual_char",
+        "visual_line",
+        "visual_block",
+        "operator_pending",
+        "replace",
+        "multi",
+    ];
+    match context.as_str() {
+        "global" => (0, 0),
+        "editor" => (
+            1,
+            EDITOR_MODES
+                .iter()
+                .position(|known| known == mode)
+                .unwrap_or(EDITOR_MODES.len()),
+        ),
+        _ => (2, 0),
     }
 }
 
