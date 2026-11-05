@@ -603,6 +603,9 @@ pub(crate) struct TestAdapter {
 }
 #[cfg(test)]
 impl TestAdapter {
+    pub(crate) fn terminal_reply(&self) -> (impl Drop, super::DapTerminalReply) {
+        super::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone())
+    }
     pub(crate) fn event(&self, generation: u64, event: DapEvent) {
         self.events
             .actor

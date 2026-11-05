@@ -14,7 +14,7 @@ pub use vfs::{
     CheckedResourceIntent, ExplorerMutation, RequestId, ResourceIntentKind, VfsRequest, VfsResult,
     VfsWorker, WriteExpectation, atomic_write, checked_atomic_write, read_file,
 };
-pub(crate) use vfs::{VfsReply, atomic_write_with_executable, lock_file, open_no_symlinks, open_regular_file};
+pub(crate) use vfs::{VfsReply, atomic_write_with_executable, lock_file, open_no_symlinks, open_regular_file, read_file_with_ceiling};
 mod project_root;
 pub use project_root::{
     PROJECT_ROOT_ANCESTOR_CEILING, PROJECT_ROOT_MARKER_CEILING, ProjectRootResolution,

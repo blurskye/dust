@@ -330,10 +330,12 @@ impl Drop for GitMutationService {
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path).map_err(|_| GitMutationError::Backend)?;
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Err(GitMutationError::Invalid);
-    }
+    let path = path.canonicalize().map_err(|_| GitMutationError::Backend)?;
+    let bytes = crate::files::read_file_with_ceiling(&path, 8 * 1024 * 1024)
+        .map_err(|error| match error {
+            crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
+            _ => GitMutationError::Backend,
+        })?;
     let hash = Sha256::digest(&bytes).into();
     Ok((hash, bytes))
 }

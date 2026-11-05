@@ -26,6 +26,7 @@ pub struct ToolVersionRequest {
     pub environment: BTreeMap<String, String>,
     pub current_directory: Option<PathBuf>,
     pub timeout: Duration,
+    pub cancelled: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +160,9 @@ pub(super) fn probe_tool_version(
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
     use std::os::unix::process::CommandExt;
 
+    if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
+        return Err("version probe cancelled".into());
+    }
     let mut command = Command::new(&request.executable);
     command.process_group(0);
     command
@@ -204,7 +208,7 @@ pub(super) fn probe_tool_version(
         if !stderr_closed {
             stderr_closed = drain_version_pipe(&stderr, &mut stderr_bytes, &mut oversized)?;
         }
-        if cancelled.load(Ordering::Acquire) {
+        if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
             return Err("version probe cancelled".into());
         }
         match child.try_wait() {

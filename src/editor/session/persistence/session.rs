@@ -141,6 +141,12 @@ pub(in crate::editor::session) enum RestoreUpdate {
     Failed(String),
 }
 impl PersistenceSession {
+    /// Startup contributions must wait until the saved layout has been published.
+    pub(in crate::editor::session) fn restoring(&self) -> bool {
+        self.restore.is_some()
+            || self.load_source.is_some() && self.pending.is_some_and(|(_, saving)| !saving)
+    }
+
     pub(in crate::editor::session) fn load_session(
         &mut self,
         policy: crate::persistence::PersistencePolicy,

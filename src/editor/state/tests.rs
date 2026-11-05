@@ -50,6 +50,29 @@ fn register_storage_disable_black_hole_and_mirroring_are_explicit() {
 }
 
 #[test]
+fn uppercase_block_register_appends_corresponding_rows() {
+    for (left, right, expected) in [
+        ("ab\ncd", "12\n34", "ab12\ncd34"),
+        ("ab\ncd", "12", "ab12\ncd"),
+        ("ab", "12\n34", "ab12\n34"),
+    ] {
+        let mut registers = RegisterStore::default();
+        for (name, text) in [('a', left), ('A', right)] {
+            registers.set(name, super::RegisterValue {
+                text: text.into(),
+                shape: super::RegisterShape::Block,
+            }, true, true);
+        }
+        let expected = super::RegisterValue {
+            text: expected.into(),
+            shape: super::RegisterShape::Block,
+        };
+        assert_eq!(registers.get('a'), Some(&expected));
+        assert_eq!(registers.get('"'), Some(&expected));
+    }
+}
+
+#[test]
 fn macro_registers_are_typed_and_uppercase_appends() {
     let mut registers = RegisterStore::default();
     let first =
@@ -359,6 +382,26 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
         state.validate_layout().expect("cycled layout invariant");
     }
     assert_eq!(reachable, expected, "every hidden buffer remains reachable");
+}
+
+#[test]
+fn changed_line_endings_remain_dirty_when_normalized_text_matches() {
+    let original = b"a\r\nb\r\nc\n";
+    let mut buffer = super::Buffer::new(TextBuffer::from_bytes(original).unwrap(), None);
+    for (range, replacement) in [(5..6, ""), (5..5, "\n")] {
+        let edits = TextEditSet::new(buffer.text.revision(), vec![TextEdit::new(
+            ByteRange::new(ByteOffset(range.start), ByteOffset(range.end)).unwrap(),
+            replacement,
+        )]);
+        buffer.text.apply_edits(&edits).unwrap();
+        buffer.refresh_dirty();
+        assert!(buffer.dirty);
+    }
+    assert_eq!(buffer.text.to_string(), "a\nb\nc\n");
+    assert_eq!(buffer.text.to_bytes(), b"a\r\nb\r\nc\r\n");
+    assert_eq!(buffer.persisted_bytes(), original);
+    buffer.mark_saved(buffer.text.revision());
+    assert!(!buffer.dirty);
 }
 
 #[test]

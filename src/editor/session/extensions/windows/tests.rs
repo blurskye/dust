@@ -587,6 +587,104 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
 }
 
 #[test]
+fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
+    use crate::extensions::target03::{TargetAdmission, api::dust::plugin::host as wire};
+
+    let mut admission = TargetAdmission::parse(include_str!(
+        "../../../../../tests/fixtures/target03-clone-guest/manifest.toml"
+    ), 9).unwrap();
+    admission.index = private_index("demo", 9);
+    admission.index.content_types[0].maximum_instances = 2;
+    let mut catalogue = crate::extensions::PluginContributionCatalog::default();
+    catalogue.install(admission.index.clone()).unwrap();
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("builtin.test", 1).unwrap();
+    let mut host = PluginWindowHost::default();
+    let mut handles = Vec::new();
+    for token in 1..=2 {
+        let revision = graph.revision().unwrap();
+        let opened = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
+            token,
+            kind: PluginUiRequestKind::OpenWindow {
+                expected_graph_revision: revision,
+                content_type: "plugin.demo.panel".into(),
+                title: "Cells".into(),
+                placement: PluginRequestedPlacement::Floating {
+                    x: 2, y: 1, width: 12, height: 4,
+                },
+                tree: None,
+            },
+        });
+        assert!(opened.error.is_none(), "{:?}", opened.error);
+        handles.push(opened.handle.unwrap());
+    }
+    let projection = |graph: &WindowGraph| graph.compositor_snapshot(tab).unwrap().project(
+        WindowRect { x: 0, y: 0, width: 80, height: 24 }, 1, 1,
+    );
+    assert_eq!(host.target03_dimensions(&projection(&graph), &catalogue, &admission, 1).unwrap().len(), 2);
+    for handle in &handles {
+        let revision = host.instances[handle].private.as_ref().unwrap().dimensions_revision;
+        let event = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
+            token: 3,
+            kind: PluginUiRequestKind::ReplacePrivate {
+                handle: *handle,
+                snapshot: PluginPrivateSnapshot {
+                    revision: 1,
+                    dimensions_revision: revision,
+                    styles: Vec::new(), cells: Vec::new(), cursor: None, hit_regions: Vec::new(),
+                },
+            },
+        });
+        assert!(event.error.is_none(), "{:?}", event.error);
+    }
+    assert_eq!(host.private_snapshots(&graph).len(), 2);
+    for (handle, placement) in [
+        (handles[0], PluginRequestedPlacement::Hidden),
+        (handles[1], PluginRequestedPlacement::Floating { x: 2, y: 1, width: 16, height: 6 }),
+    ] {
+        let revision = graph.revision().unwrap();
+        let event = process_fixture(&mut host, &mut graph, &admission.index, PluginUiRequest {
+            token: 4,
+            kind: PluginUiRequestKind::PlaceWindow {
+                handle, expected_graph_revision: revision, placement,
+            },
+        });
+        assert!(event.error.is_none(), "{:?}", event.error);
+    }
+    let events = host.target03_dimensions(&projection(&graph), &catalogue, &admission, 10).unwrap();
+    assert_eq!(events.len(), 1);
+    let wire::EventValue::Dimensions(dimensions) = &events[0].value else {
+        panic!("expected dimensions event");
+    };
+    assert_eq!(dimensions.view, host.instances[&handles[1]].view.0);
+    assert_eq!((dimensions.width, dimensions.height), (16, 6));
+    for (handle, expected) in [(handles[0], None), (handles[1], Some((16, 6)))] {
+        let private = host.instances[&handle].private.as_ref().unwrap();
+        assert_eq!(private.dimensions, expected);
+        assert_eq!(private.dimensions_revision, 2);
+        assert!(private.snapshot.is_none());
+    }
+    assert!(host.private_snapshots(&graph).is_empty());
+    assert!(host.target03_dimensions(&projection(&graph), &catalogue, &admission, 11).unwrap().is_empty());
+
+    // Even the latest dimensions revision cannot authorize writes while hidden.
+    let hidden = &host.instances[&handles[0]];
+    // Exercise the existing private-surface validator with the invalidated geometry.
+    let error = validate_private_snapshot(
+        &admission.index.content_types[0],
+        hidden.private.as_ref().unwrap(),
+        &PluginPrivateSnapshot {
+            revision: 1,
+            dimensions_revision: hidden.private.as_ref().unwrap().dimensions_revision,
+            styles: Vec::new(), cells: Vec::new(), cursor: None, hit_regions: Vec::new(),
+        },
+        None,
+        false,
+    ).unwrap_err();
+    assert_eq!(error.code, PluginUiErrorCode::StaleDimensions);
+}
+
+#[test]
 fn real_component_drives_the_retained_window_protocol_without_wasi() {
     use sha2::{Digest, Sha256};
     let core =
@@ -1392,7 +1490,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "2b74a38adc00bfad1f32da7f5c369c42359edace5c40765a25aeab20cfff05a6"
+        "fd96d2ac94bc372426094dfc535cadc00e1ca471abd5431529f3c8cec7e7b3e5"
     );
     assert_eq!(
         include_str!("../../../../../docs/plugin-abi-next.wit"),

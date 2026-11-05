@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::editor::{
     command::CommandInvocation,
-    text::{BufferRevision, ByteOffset, TextBuffer},
+    text::{BufferRevision, ByteOffset, FileFormat, TextBuffer},
     transaction::UndoTree,
 };
 
@@ -60,6 +60,7 @@ pub struct Buffer {
     pub dirty: bool,
     pub saved_revision: BufferRevision,
     saved_text: Option<std::sync::Arc<str>>,
+    saved_format: FileFormat,
     pub(crate) saved_view: Option<View>,
     persisted_bytes: std::sync::Arc<[u8]>,
     pub(crate) new_file: bool,
@@ -103,6 +104,7 @@ impl Buffer {
         let persisted_bytes = text.to_bytes().into();
         Self {
             undo: UndoTree::default(),
+            saved_format: text.format().clone(),
             text,
             path,
             read_only: false,
@@ -128,7 +130,9 @@ impl Buffer {
         self.dirty = self
             .saved_text
             .as_ref()
-            .is_none_or(|saved| !self.text.text_equals(saved));
+            .is_none_or(|saved| !self.text.text_equals(saved))
+            || self.text.format().utf8_bom != self.saved_format.utf8_bom
+            || self.text.format().line_endings != self.saved_format.line_endings;
     }
 
     pub(crate) fn restored_view(&self, buffer: super::BufferId) -> View {
@@ -143,8 +147,14 @@ impl Buffer {
         view
     }
 
-    pub(crate) fn set_saved_text(&mut self, text: Option<std::sync::Arc<str>>) {
-        self.saved_text = text;
+    pub(crate) fn set_saved_snapshot(
+        &mut self,
+        snapshot: Option<(std::sync::Arc<str>, FileFormat)>,
+    ) {
+        self.saved_text = snapshot.map(|(text, format)| {
+            self.saved_format = format;
+            text
+        });
         self.refresh_dirty();
     }
 
@@ -164,6 +174,7 @@ impl Buffer {
         self.saved_revision = revision;
         if let Ok(saved) = TextBuffer::from_bytes(&bytes) {
             self.saved_text = Some(saved.to_string().into());
+            self.saved_format = saved.format().clone();
         }
         self.persisted_bytes = bytes.into();
         self.new_file = false;
@@ -276,11 +287,31 @@ impl RegisterStore {
         if name.is_ascii_uppercase()
             && let Some(previous) = self.values.get(&lower)
         {
-            let mut text = previous.text.clone();
-            if previous.shape == RegisterShape::Line && !text.ends_with('\n') {
-                text.push('\n');
-            }
-            text.push_str(&value.text);
+            let mut text = if previous.shape == RegisterShape::Block
+                && value.shape == RegisterShape::Block
+            {
+                let mut left = previous.text.split('\n');
+                let mut right = value.text.split('\n');
+                let mut rows = Vec::new();
+                loop {
+                    match (left.next(), right.next()) {
+                        (None, None) => break,
+                        (left, right) => rows.push(format!(
+                            "{}{}",
+                            left.unwrap_or_default(),
+                            right.unwrap_or_default()
+                        )),
+                    }
+                }
+                rows.join("\n")
+            } else {
+                let mut text = previous.text.clone();
+                if previous.shape == RegisterShape::Line && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(&value.text);
+                text
+            };
             if previous.shape == RegisterShape::Line || value.shape == RegisterShape::Line {
                 value.shape = RegisterShape::Line;
                 if !text.ends_with('\n') {

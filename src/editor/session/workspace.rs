@@ -14,7 +14,7 @@ pub(in crate::editor::session) use discovery::{
 };
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 
 #[derive(Clone, Debug)]
@@ -78,6 +78,7 @@ pub(super) struct WorkspaceSession {
     startup_prompt_checked: bool,
     startup_root_seen: Option<bool>,
     safe_mode: bool,
+    probe_cancelled: Arc<AtomicBool>,
     root_operation: Option<RootOperation>,
     confirmation: Option<Confirmation>,
     language_roots: discovery::Discovery,
@@ -129,6 +130,7 @@ impl WorkspaceSession {
             startup_prompt_checked: false,
             startup_root_seen: None,
             safe_mode,
+            probe_cancelled: Arc::new(AtomicBool::new(true)),
             root_operation: None,
             confirmation: None,
             language_roots: discovery::Discovery::default(),
@@ -165,6 +167,14 @@ impl WorkspaceSession {
     pub(in crate::editor::session) fn root_operation_pending(&self) -> bool {
         self.root_operation.is_some()
     }
+    pub(in crate::editor::session) fn pending_root_switch(&self) -> Option<(&Path, &Path)> {
+        let operation = self.root_operation.as_ref()?;
+        let old = self.roots().iter().find(|root| Some(root.id) == operation.replaces)?;
+        Some((&old.identity.canonical_path, &operation.requested_path))
+    }
+    pub(in crate::editor::session) fn cancel_root_switch(&mut self) {
+        self.root_operation = None;
+    }
     pub(in crate::editor::session) fn persist_pending(&self) -> bool {
         self.service.pending_writes()
     }
@@ -189,7 +199,12 @@ impl WorkspaceSession {
     ) -> Result<(), WorkspaceError> {
         self.state.authorize_execution(source)
     }
+    pub(in crate::editor::session) fn probe_cancellation(&self) -> Option<Arc<AtomicBool>> {
+        self.execution_allowed().ok()?;
+        Some(self.probe_cancelled.clone())
+    }
     fn changed(&mut self) {
+        self.probe_cancelled.store(true, Ordering::Release);
         self.version = WorkspaceVersion(Arc::new(()));
         self.confirmation = None;
         self.state.set_trust(WorkspaceTrust::Untrusted);
@@ -278,6 +293,13 @@ impl WorkspaceSession {
         } else {
             WorkspaceTrust::Untrusted
         });
+        if trusted && !self.safe_mode {
+            if self.probe_cancelled.load(Ordering::Acquire) {
+                self.probe_cancelled = Arc::new(AtomicBool::new(false));
+            }
+        } else {
+            self.probe_cancelled.store(true, Ordering::Release);
+        }
     }
     pub(in crate::editor::session) fn should_prompt(&mut self, input_busy: bool) -> bool {
         if self.startup_prompt_checked || !self.database_ready || !self.identity_ready || input_busy
@@ -408,6 +430,7 @@ impl WorkspaceSession {
             }
             Err(e) => {
                 self.discard_unsaved_trust();
+                self.probe_cancelled.store(true, Ordering::Release);
                 self.state.set_trust(WorkspaceTrust::Untrusted);
                 Err(WorkspaceFailure::Diagnostic(
                     "workspace_trust_state_failed",
@@ -462,6 +485,7 @@ impl WorkspaceSession {
                 Ok(Some(e)) => e,
                 Ok(None) => break,
                 Err(e) => {
+                    self.probe_cancelled.store(true, Ordering::Release);
                     self.state.set_trust(WorkspaceTrust::Untrusted);
                     self.root_operation = None;
                     updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
@@ -608,6 +632,7 @@ impl WorkspaceSession {
                     }
                     Err(e) => {
                         self.discard_unsaved_trust();
+                        self.probe_cancelled.store(true, Ordering::Release);
                         self.state.set_trust(WorkspaceTrust::Untrusted);
                         updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
                             "workspace_trust_state_failed",
@@ -709,6 +734,14 @@ mod tests {
         owner.reconcile_trust();
         (owner, directory)
     }
+    #[test]
+    fn removing_a_root_preserves_trust_of_remaining_roots() {
+        let (mut owner, _directory) = fixture();
+        owner.remove_root(RootId(2)).unwrap();
+        assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+        assert!(owner.execution_allowed().is_ok());
+    }
+
     #[test]
     fn workspace_root_removal_reconciles_remaining_trust() {
         let (mut owner, _directory) = fixture();
@@ -818,6 +851,47 @@ mod tests {
         }
     }
 
+    #[test]
+    fn revoking_trust_cancels_queued_probes_permanently() {
+        let (mut owner, _directory) = fixture();
+        let cancelled = owner.probe_cancellation().expect("trusted");
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(owner.revoke().is_ok());
+        assert!(cancelled.load(Ordering::Acquire));
+        assert!(owner.probe_cancellation().is_none());
+        for root in owner.state.roots() {
+            owner.store.trust(root.identity.clone());
+        }
+        owner.persisted_identities = owner.store.identities();
+        owner.reconcile_trust();
+        assert!(!owner.probe_cancellation().unwrap().load(Ordering::Acquire));
+        assert!(cancelled.load(Ordering::Acquire));
+        owner.safe_mode = true;
+        owner.reconcile_trust();
+        assert!(owner.probe_cancellation().is_none());
+    }
+    #[test]
+    fn failed_trust_persistence_cancels_queued_probes() {
+        let (mut owner, _directory) = fixture();
+        let cancelled = owner.probe_cancellation().expect("trusted");
+        owner.persist = Some(Persist {
+            generation: 7,
+            source: owner.version(),
+            target: None,
+            identities: owner.store.identities(),
+        });
+        owner.accept_event(
+            TrustEvent::Persisted {
+                generation: 7,
+                result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
+            },
+            &mut Vec::new(),
+            &EditorState::new("/".into()),
+        );
+        assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+        assert!(cancelled.load(Ordering::Acquire));
+        assert!(owner.probe_cancellation().is_none());
+    }
     #[test]
     fn failed_trust_load_cannot_replace_the_original_database() {
         let (mut owner, _directory) = fixture();

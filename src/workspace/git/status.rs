@@ -22,6 +22,7 @@ pub enum GitFileStatus {
     Untracked,
     Added,
     Modified,
+    TypeChanged,
     Deleted,
     Renamed,
     Conflicted,
@@ -180,6 +181,7 @@ impl GitStatusEntry {
         let letter = |status: &Option<GitFileStatus>| match status {
             Some(GitFileStatus::Added) => 'A',
             Some(GitFileStatus::Modified) => 'M',
+            Some(GitFileStatus::TypeChanged) => 'T',
             Some(GitFileStatus::Deleted) => 'D',
             Some(GitFileStatus::Renamed) => 'R',
             Some(GitFileStatus::Conflicted) => 'U',
@@ -362,7 +364,7 @@ pub(super) fn git_status_precedence(status: &GitFileStatus) -> u8 {
     match status {
         GitFileStatus::Untracked => 0,
         GitFileStatus::Added => 1,
-        GitFileStatus::Modified => 2,
+        GitFileStatus::Modified | GitFileStatus::TypeChanged => 2,
         GitFileStatus::Renamed => 3,
         GitFileStatus::Deleted => 4,
         GitFileStatus::Conflicted => 5,
@@ -610,6 +612,7 @@ pub(super) fn read_status(
                 let status = match kind {
                     Some(b'A') => GitFileStatus::Added,
                     Some(b'D') => GitFileStatus::Deleted,
+                    Some(b'T') => GitFileStatus::TypeChanged,
                     Some(b'R' | b'C') => GitFileStatus::Renamed,
                     Some(b'U') => GitFileStatus::Conflicted,
                     _ => GitFileStatus::Modified,

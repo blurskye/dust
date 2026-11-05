@@ -166,12 +166,14 @@ struct FormatOnSave {
     source: crate::editor::text::TextVersion,
     path: Option<std::path::PathBuf>,
     formatter: Option<String>,
+    started: bool,
     quit_after: bool,
     deadline: std::time::Instant,
 }
 
 struct InteractiveApplication {
-    format_on_save: Option<FormatOnSave>,
+    format_on_save: std::collections::HashMap<crate::editor::BufferId, FormatOnSave>,
+    pending_saves: std::collections::VecDeque<(crate::editor::BufferId, bool)>,
     navigation_reads: std::collections::HashMap<
         crate::files::RequestId,
         (super::windows::NavigationStamp, std::sync::Arc<()>),
@@ -192,12 +194,13 @@ struct InteractiveApplication {
         std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
     /// When the repository's index and HEAD last changed, as of the last disk check.
-    pub(super) git_stamp: Option<[Option<std::time::SystemTime>; 2]>,
+    pub(super) git_stamp: Option<([Option<std::time::SystemTime>; 2], Option<crate::workspace::git::GitHeadId>)>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     /// A `:s///c` asking about each match in turn.
     substitute_confirm: Option<substitute::SubstituteConfirm>,
     session_load_requested: bool,
+    session_restore_notice: bool,
     notices: super::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,
@@ -233,6 +236,7 @@ struct InteractiveApplication {
     /// A folder the user was warned that switching to ends the open terminals; asking again
     /// switches.
     switch_ends_terminals: Option<PathBuf>,
+    switch_approved_terminals: Vec<PtyId>,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
     #[allow(clippy::type_complexity)]
     syntax_spans_source: (

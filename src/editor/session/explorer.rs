@@ -925,6 +925,7 @@ impl ExplorerSession {
                             crate::workspace::git::GitFileStatus::Untracked => "?",
                             crate::workspace::git::GitFileStatus::Added => "A",
                             crate::workspace::git::GitFileStatus::Modified => "M",
+                            crate::workspace::git::GitFileStatus::TypeChanged => "T",
                             crate::workspace::git::GitFileStatus::Deleted => "D",
                             crate::workspace::git::GitFileStatus::Renamed => "R",
                             crate::workspace::git::GitFileStatus::Conflicted => "!",

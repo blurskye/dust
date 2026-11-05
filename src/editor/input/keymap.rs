@@ -67,8 +67,8 @@ impl Keymap {
             node = next;
         }
         match (&node.binding, node.children.is_empty()) {
-            (Some(Binding::Disabled), _) => Lookup::Disabled,
-            (Some(Binding::PassThrough), _) => Lookup::PassThrough,
+            (Some(Binding::Disabled), empty) => Lookup::Disabled { prefix: !empty },
+            (Some(Binding::PassThrough), empty) => Lookup::PassThrough { prefix: !empty },
             (Some(Binding::Command(command)), true) => Lookup::Exact(command.clone()),
             (Some(Binding::Command(command)), false) => Lookup::Ambiguous(command.clone()),
             (None, false) => Lookup::Prefix,
@@ -79,8 +79,8 @@ impl Keymap {
 
 enum Lookup {
     Missing,
-    Disabled,
-    PassThrough,
+    Disabled { prefix: bool },
+    PassThrough { prefix: bool },
     Prefix,
     Exact(CommandInvocation),
     Ambiguous(CommandInvocation),
@@ -90,6 +90,7 @@ enum Lookup {
 pub enum MappingResolution {
     Missing,
     Disabled,
+    DisabledAndReplay(Vec<KeyEvent>),
     Pending,
     Ready(CommandInvocation),
     ReadyAndReplay(CommandInvocation, Vec<KeyEvent>),
@@ -114,35 +115,38 @@ impl KeymapBindings {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct KeymapSequence {
     pending: Vec<KeyEvent>,
-    pending_exact: Option<(CommandInvocation, usize)>,
+    // None as the command means that this exact sequence is disabled.
+    pending_exact: Option<(Option<CommandInvocation>, usize)>,
 }
 
 impl KeymapSequence {
     pub(crate) fn feed(&mut self, bindings: &KeymapBindings, key: KeyEvent) -> MappingResolution {
         self.pending.push(key);
         let mut prefix = false;
+        let mut disabled = false;
         for (_, keymap) in bindings.layers.iter().rev() {
             match keymap.lookup(&self.pending) {
-                Lookup::Disabled => {
-                    self.cancel();
-                    return MappingResolution::Disabled;
+                Lookup::Disabled { prefix: continuation } => {
+                    disabled = true;
+                    prefix |= continuation;
                 }
-                Lookup::PassThrough => continue,
+                Lookup::PassThrough { prefix: continuation } => prefix |= continuation,
+                Lookup::Exact(_) if disabled => {}
+                Lookup::Ambiguous(_) if disabled => prefix = true,
                 Lookup::Exact(command) if !prefix => {
                     self.cancel();
                     return MappingResolution::Ready(command);
                 }
-                Lookup::Exact(command) => {
-                    self.pending_exact = Some((command, self.pending.len()));
-                    return MappingResolution::Ambiguous;
-                }
-                Lookup::Ambiguous(command) => {
-                    self.pending_exact = Some((command, self.pending.len()));
+                Lookup::Exact(command) | Lookup::Ambiguous(command) => {
+                    self.pending_exact = Some((Some(command), self.pending.len()));
                     return MappingResolution::Ambiguous;
                 }
                 Lookup::Prefix => prefix = true,
                 Lookup::Missing => {}
             }
+        }
+        if disabled {
+            self.pending_exact = Some((None, self.pending.len()));
         }
         if prefix {
             return if self.pending_exact.is_some() {
@@ -151,10 +155,10 @@ impl KeymapSequence {
                 MappingResolution::Pending
             };
         }
-        let mut rejected = std::mem::take(&mut self.pending);
-        if let Some((command, consumed)) = self.pending_exact.take() {
-            return MappingResolution::ReadyAndReplay(command, rejected.split_off(consumed));
+        if self.pending_exact.is_some() {
+            return self.flush_timeout();
         }
+        let mut rejected = std::mem::take(&mut self.pending);
         let last = rejected.pop().into_iter().collect::<Vec<_>>();
         if rejected.is_empty() {
             MappingResolution::Missing
@@ -171,10 +175,14 @@ impl KeymapSequence {
     pub fn flush_timeout(&mut self) -> MappingResolution {
         let mut pending = std::mem::take(&mut self.pending);
         match self.pending_exact.take() {
-            Some((command, consumed)) if consumed < pending.len() => {
+            Some((Some(command), consumed)) if consumed < pending.len() => {
                 MappingResolution::ReadyAndReplay(command, pending.split_off(consumed))
             }
-            Some((command, _)) => MappingResolution::Ready(command),
+            Some((Some(command), _)) => MappingResolution::Ready(command),
+            Some((None, consumed)) if consumed < pending.len() => {
+                MappingResolution::DisabledAndReplay(pending.split_off(consumed))
+            }
+            Some((None, _)) => MappingResolution::Disabled,
             None if pending.is_empty() => MappingResolution::Missing,
             None => MappingResolution::Replay(pending, Vec::new()),
         }
@@ -250,6 +258,69 @@ mod tests {
             resolver.feed(KeyEvent::character('x')),
             MappingResolution::Disabled
         );
+    }
+
+    #[test]
+    fn disabled_exact_preserves_longer_mappings_across_layers() {
+        for longer_layer in [KeymapLayer::Global, KeymapLayer::Overlay] {
+            let mut resolver = KeymapResolver::default();
+            let command = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
+            let keys = [KeyEvent::character('g'), KeyEvent::character('c')];
+            resolver.layer_mut(KeymapLayer::Global).insert(&keys, command.clone());
+            resolver.layer_mut(KeymapLayer::Overlay).insert_disabled(&keys);
+            resolver.layer_mut(longer_layer).insert(
+                &[keys[0].clone(), keys[1].clone(), KeyEvent::character('c')],
+                command.clone(),
+            );
+            assert_eq!(resolver.feed(keys[0].clone()), MappingResolution::Pending);
+            assert_eq!(resolver.feed(keys[1].clone()), MappingResolution::Ambiguous);
+            assert_eq!(resolver.feed(KeyEvent::character('c')), MappingResolution::Ready(command));
+            resolver.feed(keys[0].clone());
+            assert_eq!(resolver.feed(keys[1].clone()), MappingResolution::Ambiguous);
+            assert_eq!(resolver.flush_timeout(), MappingResolution::Disabled);
+        }
+    }
+
+    #[test]
+    fn disabled_prefix_suppresses_text_and_shorter_fallbacks_but_replays_suffixes() {
+        for timeout in [false, true] {
+            let mut resolver = KeymapResolver::default();
+            let command = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
+            let g = KeyEvent::character('g');
+            let c = KeyEvent::character('c');
+            resolver.layer_mut(KeymapLayer::Global).insert(std::slice::from_ref(&g), command.clone());
+            resolver.layer_mut(KeymapLayer::Overlay).insert_disabled(&[g.clone(), c.clone()]);
+            resolver.layer_mut(KeymapLayer::Global).insert(&[g.clone(), c.clone(), c.clone(), c.clone()], command);
+            assert_eq!(resolver.feed(g), MappingResolution::Ambiguous);
+            assert_eq!(resolver.feed(c.clone()), MappingResolution::Ambiguous);
+            assert_eq!(resolver.feed(c.clone()), MappingResolution::Ambiguous);
+            let result = if timeout {
+                resolver.flush_timeout()
+            } else {
+                resolver.feed(KeyEvent::character('x'))
+            };
+            let suffix = if timeout { vec![c] } else { vec![c, KeyEvent::character('x')] };
+            assert_eq!(result, MappingResolution::DisabledAndReplay(suffix));
+        }
+    }
+
+    #[test]
+    fn pass_through_preserves_its_continuation_and_lower_timeout_fallback() {
+        for timeout in [false, true] {
+            let mut resolver = KeymapResolver::default();
+            let short = CommandInvocation::new("editor.quit", InvocationSource::Test).unwrap();
+            let long = CommandInvocation::new("health.open", InvocationSource::Test).unwrap();
+            let g = KeyEvent::character('g');
+            resolver.layer_mut(KeymapLayer::Global).insert(std::slice::from_ref(&g), short.clone());
+            resolver.layer_mut(KeymapLayer::Overlay).insert_pass_through(std::slice::from_ref(&g));
+            resolver.layer_mut(KeymapLayer::Overlay).insert(&[g.clone(), g.clone()], long.clone());
+            assert_eq!(resolver.feed(g.clone()), MappingResolution::Ambiguous);
+            if timeout {
+                assert_eq!(resolver.flush_timeout(), MappingResolution::Ready(short));
+            } else {
+                assert_eq!(resolver.feed(g), MappingResolution::Ready(long));
+            }
+        }
     }
 
     #[test]

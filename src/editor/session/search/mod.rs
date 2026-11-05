@@ -21,8 +21,10 @@ pub(crate) const SEARCH_BATCH_SIZE: usize = 128;
 pub(crate) const SEARCH_QUEUE_CAPACITY: usize = 8;
 
 pub(in crate::editor::session) use picker::{
-    MatcherSource, PickerContent, PickerOrigin, PickerPayload,
+    MatcherSource, PickerContent, PickerEpoch, PickerOrigin, PickerPayload,
 };
+
+type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8]>>);
 
 #[derive(Default)]
 pub(in crate::editor::session) struct SearchSession {
@@ -47,8 +49,10 @@ pub(in crate::editor::session) struct SearchSession {
     live: bool,
     query: String,
     matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
-    workspace_navigation:
-        std::collections::HashMap<crate::files::RequestId, std::ops::Range<usize>>,
+    byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
+    preview_location: Option<(usize, usize)>,
+    diff_preview: crate::workspace::git::GitHunkService,
+    diff_preview_key: Option<(WorkspaceVersion, u64, std::path::PathBuf, crate::workspace::git::GitDiffLayer)>,
 }
 pub(in crate::editor::session) enum Intent {
     Find,
@@ -77,25 +81,26 @@ impl SearchSession {
     ) -> Option<MatcherSource> {
         self.matcher_navigation.remove(&id)
     }
-    pub(in crate::editor::session) fn register_workspace_navigation(
+    pub(in crate::editor::session) fn register_byte_navigation(
         &mut self,
         id: crate::files::RequestId,
-        range: std::ops::Range<usize>,
+        range: crate::editor::text::ByteRange,
+        snapshot: Option<std::sync::Arc<[u8]>>,
     ) {
-        self.workspace_navigation.insert(id, range);
+        self.byte_navigation.insert(id, (range, snapshot));
     }
-    pub(in crate::editor::session) fn take_workspace_navigation(
+    pub(in crate::editor::session) fn take_byte_navigation(
         &mut self,
         id: crate::files::RequestId,
-    ) -> Option<std::ops::Range<usize>> {
-        self.workspace_navigation.remove(&id)
+    ) -> Option<ByteNavigation> {
+        self.byte_navigation.remove(&id)
     }
     pub(in crate::editor::session) fn retire_document_request(
         &mut self,
         id: crate::files::RequestId,
     ) {
         self.matcher_navigation.remove(&id);
-        self.workspace_navigation.remove(&id);
+        self.byte_navigation.remove(&id);
     }
     pub(in crate::editor::session) fn live(&self) -> bool {
         self.live

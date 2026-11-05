@@ -57,6 +57,7 @@ pub(super) struct GitSession {
     mutation_generation: Option<GitMutationGeneration>,
     branches: GitBranchService,
     branch_generation: Option<GitBranchGeneration>,
+    branch_list_scope: Option<(PathBuf, u64)>,
     show_worktrees: bool,
     /// The previewed whole-file replacement waiting for its confirmation. The plan is rebuilt
     /// when the answer arrives, so a plan previewed against one repository state is never applied
@@ -124,6 +125,7 @@ impl GitSession {
         &mut self,
         plan: crate::workspace::git::GitReplacementPlan,
     ) {
+        self.pending_destructive = None;
         self.pending_replacement = Some(plan);
     }
     /// Take the previewed replacement, so it can be answered exactly once.
@@ -202,6 +204,14 @@ impl GitSession {
         self.selected_change.clear();
     }
     pub(super) fn clear(&mut self) {
+        if self.branch_list_scope.take().is_some() {
+            self.branches.cancel();
+            self.branch_generation = None;
+        }
+        self.clear_status();
+    }
+
+    fn clear_status(&mut self) {
         self.clear_hunks();
         self.pending_destructive = None;
         self.clear_signs();
@@ -246,7 +256,7 @@ impl GitSession {
         revision: u64,
         report: bool,
     ) -> Result<(), String> {
-        self.clear();
+        self.clear_status();
         self.silent = !report;
         let result = match root {
             Some(root) => {
@@ -924,15 +934,17 @@ impl GitSession {
         Ok(())
     }
     /// Read the worktree list.
-    pub(super) fn start_branches(&mut self, repository: &Path) -> Result<(), String> {
+    pub(super) fn start_branches(&mut self, repository: &Path, revision: u64) -> Result<(), String> {
         let request = GitBranchRequest::List(GitBranchListRequest {
             repository: repository.to_path_buf(),
             deadline: Duration::from_secs(10),
         });
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_list_scope = Some((repository.to_path_buf(), revision));
         Ok(())
     }
     pub(super) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
+        self.pending_replacement = None;
         self.pending_destructive = Some(action);
     }
     pub(super) fn take_pending_destructive(&mut self) -> Option<GitDestructiveAction> {
@@ -950,6 +962,7 @@ impl GitSession {
             deadline: Duration::from_secs(10),
         };
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_list_scope = None;
         Ok(())
     }
     /// Create a worktree for a branch. The destination and occupancy checks are the model's.
@@ -975,10 +988,18 @@ impl GitSession {
             deadline: Duration::from_secs(10),
         };
         self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_list_scope = None;
         Ok(())
     }
     /// One poll reporting whichever branch outcome arrived.
-    pub(super) fn poll_branch_outcome(&mut self) -> Result<Option<GitBranchOutcome>, String> {
+    pub(super) fn poll_branch_outcome(&mut self, revision: u64) -> Result<Option<GitBranchOutcome>, String> {
+        if self.branch_list_scope.as_ref().is_some_and(|(repository, expected)| {
+            *expected != revision || self.status().is_some_and(|status| status.repository != *repository)
+        }) {
+            self.branches.cancel();
+            self.branch_generation = None;
+            self.branch_list_scope = None;
+        }
         if self.branch_generation.is_none() {
             return Ok(None);
         }
@@ -988,6 +1009,7 @@ impl GitSession {
                     return Ok(None);
                 }
                 self.branch_generation = None;
+                self.branch_list_scope = None;
                 Ok(Some(GitBranchOutcome::List(list.clone())))
             }
             Ok(Some(crate::workspace::git::GitBranchResult::Changed)) => {
@@ -1381,6 +1403,35 @@ mod regression_tests {
     }
 
     #[test]
+    fn worktree_lists_are_discarded_after_their_workspace_changes() {
+        let (dir, _, _, mut session) = fixture();
+        session.start_branches(dir.path(), 1).unwrap();
+        assert!(session.poll_branch_outcome(2).unwrap().is_none());
+        assert!(!session.branch_pending());
+        session.start_branches(dir.path(), 2).unwrap();
+        session.clear();
+        assert!(!session.branch_pending());
+        assert!(session.poll_branch_outcome(2).unwrap().is_none());
+    }
+
+    #[test]
+    fn status_refresh_does_not_cancel_a_current_worktree_list() {
+        let (dir, _, editor, mut session) = fixture();
+        session.start_branches(dir.path(), 1).unwrap();
+        session.refresh(&editor, Some(dir.path()), 1, false).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(outcome) = session.poll_branch_outcome(1).unwrap() {
+                assert!(matches!(outcome, GitBranchOutcome::List(_)));
+                break;
+            }
+            assert!(session.branch_pending(), "status refresh cancelled the list");
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
     fn hunk_reads_preserve_worktree_mutation_outcomes() {
         let (dir, _, _, mut session) = fixture();
         let path = dir.path().join("review");
@@ -1398,7 +1449,7 @@ mod regression_tests {
         assert!(session.branch_pending());
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            if let Some(outcome) = session.poll_branch_outcome().unwrap() {
+            if let Some(outcome) = session.poll_branch_outcome(1).unwrap() {
                 assert!(matches!(outcome, GitBranchOutcome::Changed));
                 break;
             }

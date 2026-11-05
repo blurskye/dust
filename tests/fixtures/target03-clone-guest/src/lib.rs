@@ -351,8 +351,16 @@ impl Guest for GuestComponent {
                             }),
                             tree: Some(tree("forbidden")),
                         }));
-                        if attempt.is_ok() {
-                            return Err(failure("result-only open unexpectedly succeeded"));
+                        match attempt {
+                            Err(error)
+                                if error.code == host::ErrorCode::PermissionDenied
+                                    && error.message == "callback cannot open or clone a view" => {}
+                            Err(error) => {
+                                return Err(failure(format!(
+                                    "result-only open failed for the wrong reason: {error:?}"
+                                )));
+                            }
+                            Ok(_) => return Err(failure("result-only open unexpectedly succeeded")),
                         }
                         host::notify(&Notice {
                             severity: Severity::Info,

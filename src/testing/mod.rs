@@ -100,29 +100,41 @@ impl HeadlessEditor {
                 }
                 Ok(InputAction::Pending)
             }
-            MappingResolution::Replay(_, replay) => {
+            MappingResolution::Replay(prefix, replay) => {
+                let mode = self.state.views[self.active_view()].mode;
+                if context.starts_with("editor.")
+                    && !matches!(mode, EditorMode::Insert | EditorMode::Replace)
+                {
+                    self.input.cancel_pending();
+                } else {
+                    for key in prefix {
+                        self.type_unmapped(&context, &key)?;
+                    }
+                    for key in replay {
+                        self.feed(key)?;
+                    }
+                }
+                Ok(InputAction::Pending)
+            }
+            MappingResolution::DisabledAndReplay(replay) => {
                 for key in replay {
                     self.feed(key)?;
                 }
                 Ok(InputAction::Pending)
             }
             MappingResolution::Missing => {
-                if let Some(character) = key.text_character()
-                    && let Some(command_id) = self
-                        .config
-                        .input
-                        .character_fallback_commands
-                        .get(&context)
-                        .cloned()
-                        .or_else(|| self.config.input.text_commands.get(&context).cloned())
+                if let Some(action) = self.type_unmapped(&context, &key)? {
+                    return Ok(action);
+                }
+                if let Some(command_id) = self.config.input.unmatched_commands.get(&context).cloned()
                 {
-                    let invocation = CommandInvocation::new(
+                    self.execute(CommandInvocation::new(
                         &command_id,
                         crate::editor::InvocationSource::Keymap,
-                    )?
-                    .with_argument("text", CommandValue::String(character.to_string()));
-                    self.execute(invocation)?;
-                    return Ok(InputAction::Text(character.to_string()));
+                    )?)?;
+                    if self.active_context() != context {
+                        return self.feed(key);
+                    }
                 }
                 Ok(InputAction::Unmapped)
             }
@@ -130,6 +142,26 @@ impl HeadlessEditor {
             | MappingResolution::Pending
             | MappingResolution::Ambiguous => Ok(InputAction::Pending),
         }
+    }
+
+    fn type_unmapped(
+        &mut self,
+        context: &str,
+        key: &KeyEvent,
+    ) -> Result<Option<InputAction>, HarnessError> {
+        let Some(character) = key.text_character() else {
+            return Ok(None);
+        };
+        let Some(command_id) = self.config.input.character_fallback_commands.get(context)
+            .or_else(|| self.config.input.text_commands.get(context)).cloned()
+        else {
+            return Ok(None);
+        };
+        self.execute(CommandInvocation::new(
+            &command_id,
+            crate::editor::InvocationSource::Keymap,
+        )?.with_argument("text", CommandValue::String(character.to_string())))?;
+        Ok(Some(InputAction::Text(character.to_string())))
     }
 
     fn process_grammar(&mut self, input: GrammarInput) -> Result<(), HarnessError> {
@@ -209,6 +241,55 @@ mod tests {
         assert_eq!(editor.text(), "one wo");
         editor.feed(KeyEvent::character('u')).expect("undo");
         assert_eq!(editor.text(), "one two");
+    }
+
+    #[test]
+    fn rejected_normal_mapping_consumes_the_suffix_and_cancels_grammar() {
+        let mut editor = HeadlessEditor::with_text("one two");
+        for character in "2]q".chars() {
+            editor.feed(KeyEvent::character(character)).expect("rejected mapping");
+        }
+        assert_eq!(editor.active_context(), "editor.normal");
+        assert!(editor.input.pending_context().is_none());
+        editor.feed(KeyEvent::character('x')).expect("delete once");
+        assert_eq!(editor.text(), "ne two");
+    }
+
+    #[test]
+    fn rejected_insert_mapping_types_its_prefix_before_replaying_the_suffix() {
+        let mut editor = HeadlessEditor::with_text("base");
+        let mut loaded = crate::config::load_bundled_config();
+        let mut mapping = loaded.keymaps.entries.iter()
+            .find(|mapping| mapping.command.as_deref() == Some("mode.normal"))
+            .expect("normal mode mapping").clone();
+        mapping.id = "test.insert.jk".into();
+        mapping.context = Some("editor".into());
+        mapping.mode = "insert".into();
+        mapping.keys = Some("j k".into());
+        loaded.keymaps.entries.push(mapping);
+        let (keymaps, diagnostic) = crate::editor::compile_keymaps(
+            &editor.registry, &loaded.keymaps, &loaded.config.input.keymaps,
+        );
+        assert!(diagnostic.is_none());
+        editor.keymaps = keymaps;
+        editor.feed(KeyEvent::character('i')).expect("insert mode");
+        for character in "ja".chars() {
+            editor.feed(KeyEvent::character(character)).expect("insert text");
+        }
+        assert_eq!(editor.text(), "jabase");
+        assert_eq!(editor.active_context(), "editor.insert");
+    }
+
+    #[test]
+    fn unmatched_prefix_cancels_the_operator_and_replays_in_normal_mode() {
+        let mut editor = HeadlessEditor::with_text("one two");
+        editor.feed(KeyEvent::character('d')).expect("operator");
+        editor.feed(KeyEvent::character('g')).expect("prefix");
+        assert_eq!(editor.state.views[editor.active_view()].mode, crate::editor::EditorMode::OperatorPending);
+        editor.feed(KeyEvent::character('x')).expect("cancel and delete");
+        assert_eq!(editor.text(), "ne two");
+        assert_eq!(editor.active_context(), "editor.normal");
+        assert!(editor.input.pending_context().is_none());
     }
 
     #[test]

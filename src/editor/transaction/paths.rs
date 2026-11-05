@@ -59,14 +59,15 @@ impl EditorState {
         }
         Ok(())
     }
-    pub(crate) fn check_rename_destination(&self, target: &Path) -> Result<(), String> {
+    pub(crate) fn check_rename_destination(&self, source: &Path, target: &Path) -> Result<(), String> {
         if self.buffers.values().any(|buffer| {
-            buffer.path.as_ref().is_some_and(|path| path.starts_with(target))
+            buffer.path.as_ref().is_some_and(|path| path.starts_with(target) && !path.starts_with(source))
         }) {
             return Err("rename destination belongs to an open buffer".into());
         }
         Ok(())
     }
+
     pub(crate) fn check_resource_destination(&self, target: Option<&Path>) -> Result<(), String> {
         if target.is_some_and(|path| {
             self.buffers
@@ -141,7 +142,7 @@ impl EditorState {
         let mut draft = self.draft();
         for (id, path) in destinations {
             if path.is_none() {
-                draft.state.buffers[id].set_saved_text(None);
+                draft.state.buffers[id].set_saved_snapshot(None);
             }
             let dirty = path.is_none() || draft.state.buffers[id].dirty;
             draft.state.set_buffer_path_and_dirty(id, path, dirty);

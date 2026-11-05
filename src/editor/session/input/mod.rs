@@ -43,8 +43,9 @@ pub(super) struct InputSession {
     mouse: mouse::MouseState,
     last_search_forward: bool,
     whole_word_search: bool,
-    /// Where the cursor was when a `/` prompt began to move it.
-    search_origin: Option<(crate::editor::ViewId, crate::editor::text::ByteOffset)>,
+    /// Cursor and viewport before incremental search moved them.
+    search_origin: Option<(crate::editor::ViewId, crate::editor::text::ByteOffset, usize, usize, usize)>,
+    pending_breakpoint: Option<crate::debugger::DapSourceBreakpoint>,
     modal: ModalResolver,
     sequence: KeymapSequence,
     pending: Option<PendingKeymap>,
@@ -136,6 +137,7 @@ impl InputSession {
             last_search_forward: true,
             whole_word_search: false,
             search_origin: None,
+            pending_breakpoint: None,
             modal: ModalResolver::with_count_limit(count_limit),
             sequence: KeymapSequence::default(),
             pending: None,

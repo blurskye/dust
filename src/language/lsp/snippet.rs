@@ -382,6 +382,17 @@ fn change_case(value: &str, case: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     #[test]
+    fn snippet_tabstops_use_normalized_line_endings() {
+        let parsed = parse_snippet("a\r\n${1:b}$0", 1024).unwrap();
+        assert_eq!(parsed.text, "a\nb");
+        assert_eq!((parsed.tabstops[0].start, parsed.tabstops[0].end), (2, 3));
+        assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (3, 3));
+        let parsed = parse_snippet("${1:a\rb} $1$0", 1024).unwrap();
+        assert_eq!(parsed.text, "a\nb a\nb");
+        assert_eq!((parsed.tabstops[1].start, parsed.tabstops[1].end), (4, 7));
+    }
+
+    #[test]
     fn nested_defaults_and_mirrors_expand_with_linked_ranges() {
         let parsed = parse_snippet("call(${1:${2:value}})$0", 1024).unwrap();
         assert_eq!(parsed.text, "call(value)");

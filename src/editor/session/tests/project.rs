@@ -139,6 +139,42 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
 }
 
 #[test]
+fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("unopened.txt");
+    fs::write(&path, "first\nerror\n").unwrap();
+    let uri = crate::language::lsp::file_uri(&path);
+    let producer = crate::workspace::DiagnosticProducer::new(
+        crate::workspace::DiagnosticOwner::new("lint.test").unwrap());
+    app.diagnostics.activate(producer.clone());
+    app.diagnostics.publish(crate::editor::session::diagnostics::DiagnosticBatch {
+        producer, uri: uri.clone(), document: None,
+        validity: crate::editor::session::diagnostics::DiagnosticValidity::DiskReport,
+        items: vec![crate::workspace::Diagnostic {
+            uri, version: None, range: ByteRange::new(ByteOffset(6), ByteOffset(11)).unwrap(),
+            severity: DiagnosticSeverity::Error, source: "test".into(), code: None,
+            message: "error".into(), related: vec![], tags: vec![], fixes: vec![],
+            data: None, timestamp: std::time::SystemTime::UNIX_EPOCH,
+        }],
+    }, &app.state).unwrap();
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let view = &app.state.views[app.state.active_view.unwrap()];
+    assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
+    assert_eq!(view.cursor, ByteOffset(6));
+
+    let before = view.buffer;
+    let invalid = app.state.workspace_root.join("short.txt");
+    fs::write(&invalid, "x").unwrap();
+    app.navigate_byte_location(&crate::language::lsp::file_uri(&invalid),
+        ByteRange::new(ByteOffset(6), ByteOffset(11)).unwrap());
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), Some(before));
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     let mut app = app();
     app.open_explorer();
@@ -411,6 +447,45 @@ fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
     assert!(!app.explorer.mutation_pending());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "kept");
+}
+
+#[test]
+fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing() {
+    for directory in [false, true] {
+        let mut app = app();
+        let source = app.state.workspace_root.join("source");
+        let target = app.state.workspace_root.join("renamed");
+        let (source_file, target_file) = if directory {
+            fs::create_dir(&source).unwrap();
+            (source.join("inside.txt"), target.join("inside.txt"))
+        } else {
+            (source.clone(), target.clone())
+        };
+        fs::write(&source_file, "original").unwrap();
+        let (original, _) = app.state.open_text(TextBuffer::from_text("original"), Some(source_file.clone())).unwrap();
+        let (unsaved, _) = app.state.open_text(TextBuffer::from_text("unsaved"), Some(target_file.clone())).unwrap();
+        app.state.set_buffer_dirty(unsaved, true);
+        app.open_explorer();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.explorer.tree().id_for_path(&source).is_none() {
+            app.process_explorer_result();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        app.explorer.select(app.explorer.tree().id_for_path(&source).unwrap());
+        app.rename_explorer_path("renamed".into());
+        while app.explorer.mutation_pending() {
+            app.process_vfs_results();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fs::read_to_string(&source_file).unwrap(), "original");
+        assert!(!target.exists());
+        assert_eq!(app.state.buffers[original].path.as_ref(), Some(&source_file));
+        assert_eq!(app.state.buffers[unsaved].path.as_ref(), Some(&target_file));
+        assert_eq!(app.state.buffers[unsaved].text.to_string(), "unsaved");
+        assert!(app.ui.notification_error);
+    }
 }
 
 #[test]
@@ -1423,6 +1498,70 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
             && sign.buffer_revision == revision
             && sign.kind == crate::ui::UiGitSignKind::Deleted
     }));
+
+    app.start_save(false, None, false);
+    wait_vfs(&mut app);
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() || app.git.signs_pending() {
+        app.process_git_status_events();
+        app.reconcile_git_signs();
+        app.process_git_sign_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.ui.explorer.is_none());
+    assert!(!app.state.buffers[buffer].dirty);
+    assert!(app.ui.git_signs.iter().any(|sign| sign.buffer == buffer));
+
+    let path = app.state.buffers[buffer].path.clone().unwrap();
+    fs::write(path, "one\ntwo\nthree\n").unwrap();
+    app.start_reload(false);
+    wait_vfs(&mut app);
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().unwrap().entries.is_empty());
+}
+
+#[test]
+fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
+    let (mut app, repo, _) = near_changes_fixture();
+    let old = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("near.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&old]).unwrap();
+    app.start_git_status_refresh_with_feedback(false);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    let stamp = |name| fs::metadata(repo.path().join(name)).unwrap().modified().unwrap();
+    let before = (stamp("index"), stamp("HEAD"));
+    repo.reset(old.as_object(), git2::ResetType::Soft, None).unwrap();
+    assert_eq!(before, (stamp("index"), stamp("HEAD")));
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    assert!(app.git.status_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().unwrap().entries.iter().any(|entry| entry.sources.staged));
 }
 
 #[test]
@@ -1517,7 +1656,8 @@ fn near_changes_fixture() -> (InteractiveApplication, git2::Repository, std::pat
 
 fn settle_git_work(app: &mut InteractiveApplication) {
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.git.hunks_pending() || app.git.mutation_pending() {
+    while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
+        app.process_git_status_events();
         app.process_git_hunk_events();
         app.process_git_mutation_events();
         assert!(Instant::now() < deadline);
@@ -1576,6 +1716,82 @@ fn hunk_reset_takes_the_change_under_the_cursor() {
         "{:?}",
         app.ui.notification
     );
+}
+
+#[test]
+fn leaving_a_worktree_closes_shared_buffers_without_alternating_fallbacks() {
+    let mut app = app();
+    let old = app.state.workspace_root.clone();
+    let new = old.join(".worktree/topic");
+    fs::create_dir_all(&new).unwrap();
+    let (a, _) = app.state.open_text(TextBuffer::from_text("a"), Some(old.join("a.txt"))).unwrap();
+    let (b, first) = app.state.open_text(TextBuffer::from_text("b"), Some(old.join("b.txt"))).unwrap();
+    let middle = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    app.state.views[middle].buffer = a;
+    let last = app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    app.state.views[last].buffer = b;
+    assert_eq!(app.state.views[first].buffer, b);
+    app.finish_root_switch(new, &old);
+    assert!(!app.state.buffers.contains_key(a));
+    assert!(!app.state.buffers.contains_key(b));
+    assert!(!app.state.views.values().any(|view| view.buffer == a || view.buffer == b));
+}
+
+#[test]
+fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
+    for terminal in [None, Some(false), Some(true)] {
+        let mut app = app();
+        let old = app.state.workspace_root.clone();
+        let new = old.join(".worktree/topic");
+        fs::create_dir_all(&new).unwrap();
+        prepare_trust_identity(&mut app);
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("clean"), Some(old.join("file.txt"))).unwrap();
+        app.switch_workspace_root(new);
+        assert!(app.workspace.root_operation_pending());
+        if let Some(running) = terminal {
+            // A newly opened terminal must also block before its process reports Running.
+            app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+                profile: "shell".into(),
+                screen: crate::ui::PtyScreen::new(80, 8, 100),
+                running,
+                exit_code: None,
+                truncated: false,
+            }, app.workspace.version());
+            app.terminal_session.fixture_cwd(PtyId(1), old.clone());
+        } else {
+            app.replace_with_recovered(buffer, "dirty".into()).unwrap();
+        }
+        app.process_trust_events();
+        assert!(!app.workspace.root_operation_pending());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            app.process_trust_events();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(app.state.workspace_root, old);
+        assert!(app.state.buffers.contains_key(buffer));
+        if let Some(running) = terminal {
+            assert!(app.terminal_session.contains(PtyId(1)));
+            assert_eq!(app.terminal_session.running_count(), usize::from(running));
+        }
+    }
+}
+
+#[test]
+fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("main.rs");
+    app.state.open_text(TextBuffer::from_text("one\ntwo\n"), Some(path.clone())).unwrap();
+    let at = |line| crate::debugger::DapSourceBreakpoint {
+        path: path.clone(), line, column: None, condition: None, hit_condition: None, log_message: None,
+    };
+    app.toggle_breakpoint_disabled();
+    assert!(app.debugger_session.persisted_breakpoints().is_empty());
+    app.debugger_session.breakpoint(at(1), false).unwrap();
+    app.toggle_breakpoint_disabled();
+    app.debugger_session.breakpoint(at(2), false).unwrap();
+    app.toggle_breakpoint_disabled();
+    assert_eq!(app.debugger_session.breakpoint_disabled(&path, 1), Some(false));
 }
 
 #[test]
@@ -1989,6 +2205,40 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
 }
 
 #[test]
+fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
+    let mut app = app();
+    let files = tempfile::tempdir_in(&app.state.workspace_root).unwrap();
+    let mut directory = files.path().to_path_buf();
+    for _ in 0..10 {
+        directory.push("d".repeat(200));
+    }
+    fs::create_dir_all(&directory).unwrap();
+    let count = 3000;
+    for index in 0..count {
+        fs::write(directory.join(format!("file-{index:04}")), "").unwrap();
+    }
+    // Two path copies fit discovery's budget; a third label copy exceeds it.
+    let relative_length = directory.strip_prefix(files.path()).unwrap().as_os_str().len() + 10;
+    let absolute_length = directory.as_os_str().len() + 10;
+    assert!(count * (relative_length + absolute_length) < 16 * 1024 * 1024);
+    assert!(count * (2 * relative_length + absolute_length) > 16 * 1024 * 1024);
+    app.search.start_files(crate::files::WorkspaceFilePolicy {
+        roots: vec![files.path().into()], root_revision: app.workspace.root_revision(),
+        include_hidden: false, include_ignored: false, maximum_files: 100_000,
+        maximum_path_bytes: 16 * 1024 * 1024, batch_size: 128, event_queue_capacity: 8,
+    }, app.workspace.version(), app.configuration.binding_revision()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while app.search.files_pending() {
+        app.process_workspace_file_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let picker = app.search.picker().unwrap().presentation();
+    assert!(!picker.loading);
+    assert_eq!(picker.rows.len(), count);
+}
+
+#[test]
 fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let mut app = app();
     let path = app.state.workspace_root.join("find-me.txt");
@@ -2096,6 +2346,10 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
         + "\n";
     let expected_cursor = text.find("needle").expect("needle offset");
     fs::write(&path, text).expect("fixture");
+    let departure = app.state.workspace_root.join("departure.txt");
+    fs::write(&departure, "origin\n").unwrap();
+    let (original, view) = app.state.open_text(TextBuffer::from_text("origin\n"), Some(departure)).unwrap();
+    app.state.views[view].cursor = ByteOffset(1);
     app.invoke_mapped_command("workspace.search.prompt");
     assert!(app.ui.prompt.is_none());
     assert_eq!(
@@ -2125,6 +2379,58 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
     let view = app.state.active_view.expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(expected_cursor));
+    app.walk_jumps(true);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_buffer_id(), Some(original));
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(1));
+}
+
+#[test]
+fn workspace_search_accepts_normalized_open_buffers() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("crlf.txt");
+        let bytes = b"\xef\xbb\xbffirst\r\nneedle\r\n";
+        fs::write(&path, bytes).unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let found = app.search.matches()[0].clone();
+        app.close_picker();
+        if open {
+            app.state.open_text(TextBuffer::from_bytes(bytes).unwrap(), Some(path.clone())).unwrap();
+        }
+        app.navigate_workspace_search_match(found);
+        wait_vfs(&mut app);
+        let view = &app.state.views[app.state.active_view.unwrap()];
+        assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
+        assert_eq!(view.cursor, ByteOffset(6));
+        assert!(!app.ui.notification_error);
+    }
+}
+
+#[test]
+fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
+    for open in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "before needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let found = app.search.matches()[0].clone();
+        app.close_picker();
+        let (_, view) = if open {
+            app.state.open_text(TextBuffer::from_text("new prefix before needle\n"), Some(path.clone())).unwrap()
+        } else {
+            fs::write(&path, "new prefix before needle\n").unwrap();
+            app.state.open_text(TextBuffer::from_text("unchanged active view"), None).unwrap()
+        };
+        let buffer = app.state.views[view].buffer;
+        app.navigate_workspace_search_match(found);
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), Some(buffer));
+        assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+        assert!(app.ui.notification_error);
+    }
 }
 
 #[test]
@@ -2156,6 +2462,23 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     assert!(!app.search.pending());
     assert!(app.search.workflow().is_none());
     assert!(app.search.matches().is_empty());
+}
+
+#[test]
+fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("many.txt");
+    let before = "needle\n".repeat(3000);
+    fs::write(&path, &before).unwrap();
+    app.start_workspace_search("needle".into(), Some("changed".into()));
+    wait_workspace_search(&mut app);
+    assert_eq!(app.search.matches().len(), 3000);
+    assert_eq!(app.workspace_edits.proposal().unwrap().files.len(), 1);
+    app.accept_workspace_proposal();
+    wait_workspace_approval(&mut app);
+    let buffer = app.state.buffers.values().find(|buffer| buffer.path.as_ref() == Some(&path)).unwrap();
+    assert_eq!(buffer.text.to_string(), "changed\n".repeat(3000));
+    assert_eq!(fs::read_to_string(path).unwrap(), before);
 }
 
 #[test]
@@ -2229,6 +2552,29 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
         "prefix needle\n"
     );
     assert!(app.ui.notification_error);
+}
+
+#[test]
+fn save_all_retries_documents_beyond_the_request_capacity() {
+    let mut app = app();
+    let mut saved = Vec::new();
+    for index in 0..12 {
+        let path = app.state.workspace_root.join(format!("save-all-{index}.txt"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        app.replace_with_recovered(buffer, format!("new {index}")).unwrap();
+        saved.push((buffer, path, format!("new {index}")));
+    }
+    app.process_effect(AppEffect::SaveAll { quit_after: true });
+    assert!(!app.pending_saves.is_empty());
+    assert!(!app.should_quit);
+    wait_vfs(&mut app);
+    assert!(app.pending_saves.is_empty());
+    for (buffer, path, expected) in saved {
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+    assert!(app.should_quit);
 }
 
 #[test]
@@ -2323,6 +2669,57 @@ fn search_moves_forward_wraps_and_repeats() {
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_task_dependencies_publish_their_matched_diagnostics() {
+    let root = tempdir().unwrap();
+    let state_dir = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "source\n").unwrap();
+    let mut loaded = crate::config::load_bundled_config();
+    let dependency = crate::config::TaskConfig {
+        kind: crate::config::TaskKind::Task,
+        executable: "/bin/sh".into(),
+        arguments: vec!["-c".into(), "printf 'a.txt:1:warning:dependency warning\\n'".into()],
+        cwd: None, environment: BTreeMap::new(), dependencies: vec![],
+        timeout_ms: Some(2000), stdin: false,
+        matcher: Some(crate::config::ProblemMatcherConfig {
+            pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<severity>[^:]+):(?P<message>[^\n]+)$".into(),
+            path_group: "path".into(), line_group: "line".into(), column_group: None,
+            column_encoding: None, severity_group: Some("severity".into()),
+            message_group: "message".into(), name_group: None, status_group: None,
+            duration_group: None,
+        }),
+    };
+    let mut parent = dependency.clone();
+    parent.arguments = vec!["-c".into(), "printf 'a.txt:1:warning:parent warning\\n'; printf done > parent-finished".into()];
+    parent.dependencies = vec!["dependency".into()];
+    loaded.config.tasks.insert("dependency".into(), dependency);
+    loaded.config.tasks.insert("parent".into(), parent);
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard { root: root.path().into() }, loaded, false,
+        state_dir.path().into(), false, false, std::sync::Arc::new(crate::clock::SystemClock),
+    ).unwrap();
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity);
+    }
+    app.reconcile_workspace_trust();
+    app.process_effect(AppEffect::TaskRun("parent".into()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !root.path().join("parent-finished").exists() || app.diagnostics.choices().count() < 2 {
+        app.process_execution_preflight();
+        app.process_job_events();
+        app.process_vfs_results();
+        assert!(Instant::now() < deadline, "{:?}", app.ui.notification);
+        thread::sleep(Duration::from_millis(2));
+    }
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|row| row.label.contains("dependency warning")), "{rows:?}");
+    assert!(rows.iter().any(|row| row.label.contains("parent warning")), "{rows:?}");
 }
 
 #[cfg(unix)]
@@ -2441,6 +2838,24 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
         fs::read_to_string(root.path().join("dependency-runs")).unwrap(),
         "okok"
     );
+
+    // Restart formats the original document's current text, not the newly focused buffer.
+    app.state.buffers[buffer].text.restore_text("again").unwrap();
+    let (other, view) = app.state.open_text(TextBuffer::from_text("leave alone"), None).unwrap();
+    app.reconcile_editor_windows();
+    fs::write(root.path().join("go"), "").unwrap();
+    app.process_effect(AppEffect::TaskRestart("owned-format".into()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.tasks.is_running("owned-format") && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!app.tasks.is_running("owned-format"));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "XYZ");
+    assert_eq!(app.state.buffers[other].text.to_string(), "leave alone");
+    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(fs::read_to_string(root.path().join("dependency-runs")).unwrap(), "okokok");
 }
 
 #[cfg(unix)]
@@ -2524,6 +2939,18 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     // Restarting the finished task runs it again without claiming an error from the stop half.
     app.process_effect(AppEffect::TaskRestart("unit".into()));
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    assert!(app.tasks.test_items("unit").is_empty());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.tasks.test_items("unit").is_empty() && Instant::now() < deadline {
+        app.process_execution_preflight();
+        app.process_job_events();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.tasks.test_items("unit").len(), 2);
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
 }
 
 #[cfg(unix)]
@@ -3912,6 +4339,44 @@ fn primary_worktree_and_linked_main_have_distinct_picker_entries() {
 }
 
 #[test]
+fn removing_the_main_checkout_cannot_remove_a_linked_worktree_named_main() {
+    let mut app = app();
+    let repo = history_fixture(&app.state.workspace_root, &["base"]);
+    let outside = tempdir().unwrap();
+    let linked = outside.path().join("linked");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let branch = repo.branch("linked-main", &head, false).unwrap().into_reference();
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&branch));
+    repo.worktree("main", &linked, Some(&options)).unwrap();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.start_git_worktrees();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let rows = app.search.picker_projection().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == "main").count(), 2);
+    let index = rows.iter().position(|row| row.detail.contains(" · main")).unwrap();
+    for _ in 0..index {
+        app.invoke(crate::editor::CommandInvocation::new("picker.next", InvocationSource::Test).unwrap());
+    }
+    app.request_git_worktree_remove();
+    assert!(app.input.prompt().is_none());
+    assert!(app.git.take_pending_destructive().is_none());
+    assert!(app.ui.notification.as_ref().unwrap().contains("main checkout"));
+    assert!(linked.is_dir());
+    assert!(repo.find_worktree("main").is_ok());
+}
+
+#[test]
 fn a_locked_worktree_refuses_removal() {
     let mut app = app();
     let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
@@ -4171,6 +4636,22 @@ fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
         app.search.picker_projection().is_none(),
         "closing help that had nothing underneath leaves no surface rather than inventing one"
     );
+}
+
+#[test]
+fn form_help_captures_keys_without_changing_the_prompt_draft() {
+    let mut app = app();
+    app.open_prompt(crate::ui::PromptKind::Command, "write draft".into());
+    app.handle_configured_key("ctrl-g".parse().unwrap());
+    assert!(app.search.help_is_open());
+    app.handle_configured_key(KeyEvent::character('j'));
+    assert_eq!(app.input.prompt().unwrap().input, "write draft");
+    app.handle_configured_key("escape".parse().unwrap());
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(!app.search.help_is_open());
+    assert_eq!(app.input.prompt().unwrap().input, "write draft");
+    app.handle_configured_key(KeyEvent::character('x'));
+    assert_eq!(app.input.prompt().unwrap().input, "write draftx");
 }
 
 #[test]
@@ -4527,7 +5008,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         let mut builder = repo
             .treebuilder(Some(&base_commit.tree().unwrap()))
             .unwrap();
-        let blob = repo.blob(b"THEIR VERSION\n").unwrap();
+        let blob = repo.blob(b"\xef\xbb\xbfTHEIR VERSION\r\n").unwrap();
         builder.insert("h0.txt", blob, 0o100644).unwrap();
         let tree = repo.find_tree(builder.write().unwrap()).unwrap();
         repo.commit(
@@ -4582,8 +5063,10 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         "the working tree really holds conflict markers: {:?}",
         String::from_utf8_lossy(&on_disk)
     );
+    let mut bom_contents = b"\xef\xbb\xbf".to_vec();
+    bom_contents.extend_from_slice(&on_disk);
     let (buffer, view) = app.state.open_text(
-        crate::editor::text::TextBuffer::from_text(&String::from_utf8_lossy(&on_disk)),
+        crate::editor::text::TextBuffer::from_bytes(&bom_contents).unwrap(),
         Some(conflicted.clone()),
     ).unwrap();
     app.state.active_view = Some(view);
@@ -4609,12 +5092,17 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     .expect("the theirs side is readable");
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
-        content,
-        "the result buffer holds exactly the chosen side's content"
+        crate::editor::text::decode_utf8(content.as_bytes()).unwrap().text,
+        "the result buffer holds exactly the chosen side's decoded content"
     );
     assert!(
         app.state.buffers[buffer].dirty,
         "the buffer is dirty after the choice"
+    );
+    assert_eq!(
+        configured_file_bytes(&app.state.buffers[buffer].text, &app.configuration.settings().editor),
+        b"\xef\xbb\xbfTHEIR VERSION\n",
+        "saving keeps one metadata BOM, not the blob's BOM in the text"
     );
     // SAVING IS SEPARATE: the file on disk is byte-identical until an explicit save.
     assert_eq!(
@@ -4823,6 +5311,47 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         "and says so: {:?}",
         app.ui.notification
     );
+
+    // Escape must retire the preview before a worktree-removal confirmation is opened.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.conflict.replace", InvocationSource::Test).unwrap()
+            .with_argument("side", CommandValue::String("theirs".into()))
+            .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(!app.git.has_pending_replacement());
+    app.install_picker("Worktrees".into(), vec![(
+        crate::workspace::PickerItem {
+            badge: String::new(), kind: crate::workspace::PickerItemKind::Entry,
+            id: crate::workspace::PickerItemId("missing-worktree".into()),
+            label: "missing-worktree".into(), detail: String::new(), source: "worktrees".into(),
+            action: crate::workspace::PickerAction::None,
+        },
+        crate::editor::session::search::PickerPayload::GitWorktree {
+            main: false,
+            name: "missing-worktree".into(), path: root.join("missing-worktree"),
+        },
+    )]);
+    app.request_git_worktree_remove();
+    app.input.select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    while app.git.branch_pending() {
+        app.process_git_branch_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert_eq!(fs::read(&target).unwrap(), before, "removal confirmation must not replace conflicted files");
+    assert!(app.ui.notification_error, "the nonexistent worktree removal was attempted");
+
+    // Replacing the confirmation with another prompt must also discard its plan.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.conflict.replace", InvocationSource::Test).unwrap()
+            .with_argument("side", CommandValue::String("theirs".into()))
+            .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.open_prompt(crate::ui::PromptKind::Command, String::new());
+    assert!(!app.git.has_pending_replacement());
+    app.close_prompt();
 
     // CONFIRM: the file is replaced with the chosen side's content.
     app.invoke(
@@ -5062,6 +5591,38 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     assert_eq!(entries, full_entries[..entries.len()], "only complete legend entries: {footer:?}");
 }
 
+#[test]
+fn changes_rows_display_index_and_worktree_status_independently() {
+    let (mut app, repo, _) = near_changes_fixture();
+    let path = app.state.workspace_root.join("added.txt");
+    fs::write(&path, "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("added.txt")).unwrap();
+    index.write().unwrap();
+    fs::write(&path, "modified after staging\n").unwrap();
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.open_git_status_picker();
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    let added = rows.iter().filter(|row| row.label == "added.txt").collect::<Vec<_>>();
+    assert_eq!(added.len(), 2);
+    assert!(added.iter().all(|row| row.source == "AM"));
+}
+
+fn wait_changes_preview(app: &mut InteractiveApplication) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !app.search.preview().as_ref().is_some_and(|preview| matches!(preview.body, crate::ui::PickerPreviewBody::Diff(_))) {
+        app.process_git_hunk_events();
+        assert!(Instant::now() < deadline, "{:?}", app.search.preview());
+        thread::yield_now();
+    }
+}
+
 /// W-26: the diff pane follows the focused row and shows that path's real diff, and `Tab`
 /// switches it between the two comparisons.
 #[test]
@@ -5119,6 +5680,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
             .join("\n")
     };
 
+    wait_changes_preview(&mut app);
     // The pane shows the focused row's UNSTAGED diff: index to disk. These strings are
     // produced only by the pane, so the row's own provenance column cannot satisfy them.
     let unstaged = frame(&mut app);
@@ -5142,6 +5704,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     )
     .expect("static command");
     app.invoke(switch);
+    wait_changes_preview(&mut app);
     let staged = frame(&mut app);
     assert!(
         staged.contains("HEAD -> index"),
@@ -5163,6 +5726,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
             .expect("static command");
         app.invoke(command);
     }
+    wait_changes_preview(&mut app);
     let staged_row = frame(&mut app);
     assert!(
         staged_row.contains("HEAD -> index"),
@@ -5230,6 +5794,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
             .join("\n")
     };
 
+    wait_changes_preview(&mut app);
     let opened = frame(&mut app);
     assert!(
         opened.contains("index -> disk"),
@@ -6088,6 +6653,34 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
 }
 
 #[test]
+fn conflict_navigation_works_in_unnamed_buffers() {
+    let mut app = app();
+    let text = "intro\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n";
+    let (_, view) = app.state.open_text(TextBuffer::from_text(text), None).unwrap();
+    app.process_effect(AppEffect::GitConflictNavigate(1));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+    app.state.views[view].cursor = ByteOffset(text.len());
+    app.process_effect(AppEffect::GitConflictNavigate(-1));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+}
+
+#[test]
+fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("deleted.txt");
+    fs::write(&path, "first\nsecond\n").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone())).unwrap();
+    fs::remove_file(&path).unwrap();
+    app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
+    app.navigate_matcher_source(crate::editor::session::search::MatcherSource {
+        path, line: 1, column: 2,
+        encoding: crate::editor::text::PositionEncoding::Utf8,
+    });
+    assert_eq!(app.state.active_buffer_id(), Some(buffer));
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(8));
+}
+
+#[test]
 fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
     let mut app = app();
     let path = app.state.workspace_root.join("late.txt");
@@ -6179,7 +6772,7 @@ fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
     app.process_effect(AppEffect::GitFileStage);
     settle_git_work(&mut app);
     assert_eq!(
-        app.input.prompt().unwrap().kind,
+        app.input.prompt().unwrap_or_else(|| panic!("missing stage prompt: {:?}", app.ui.notification)).kind,
         crate::ui::PromptKind::GitStageUnsaved
     );
     app.close_prompt();
@@ -6271,6 +6864,7 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
     }
     app.next_disk_check = None;
     app.process_disk_changes();
+    wait_vfs(&mut app);
     for (_, path) in &buffers {
         fs::write(path, "new contents").unwrap();
     }

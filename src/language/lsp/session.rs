@@ -936,14 +936,8 @@ pub(super) fn handle_command(
             sync_document(stdin, &document, initialized, capabilities, documents, opened_documents)?;
         }
         SessionCommand::Save(document) => {
-            let uri = document.uri();
-            if documents
-                .get(&uri)
-                .is_none_or(|old| old.version != document.version || old.text != document.text)
-            {
-                document_sources.remove(&uri);
-            }
-            sync_document(stdin, &document, initialized, capabilities, documents, opened_documents)?;
+            // The saved snapshot may predate already synchronized edits. didSave describes
+            // disk contents; it must not replace the current document or its source.
             if initialized {
                 send_save(stdin, &document)?;
             }
@@ -1497,6 +1491,49 @@ while True:
         assert!(!lineage.ambiguous("file:///fixture/0.rs"));
         assert!(lineage.ambiguous("file:///fixture/4096.rs"));
         assert!(service.try_event().is_none());
+    }
+
+    #[test]
+    fn saving_an_older_snapshot_does_not_replace_synchronized_text_or_sources() {
+        let mut editor = crate::editor::EditorState::new("/fixture".into());
+        let text = TextBuffer::from_text("newer unsaved text");
+        let (buffer, _) = editor.open_text(text.clone(), Some("/fixture/main.rs".into())).unwrap();
+        let document = LspDocument {
+            path: "/fixture/main.rs".into(), language_id: "rust".into(),
+            version: 2, text: "newer unsaved text".into(),
+        };
+        let source = (buffer, text.source_version());
+        let mut service = LspService::new();
+        let endpoint = service.replace_edit_source_fixture(document.uri(), source.clone(), PositionEncoding::Utf16);
+        let mut documents = HashMap::new();
+        let mut sources = HashMap::new();
+        let mut opened = HashSet::new();
+        let mut pending = HashMap::new();
+        let mut apply = HashMap::new();
+        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut stopping = false;
+        let mut next = 2;
+        let mut config = LspServerConfiguration::standard();
+        let mut sink = Vec::new();
+        for command in [
+            SessionCommand::SyncOwned { document: document.clone(), source: source.clone() },
+            SessionCommand::Save(LspDocument { version: 1, text: "written".into(), ..document.clone() }),
+        ] {
+            handle_command(command, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"),
+                &mut sink, true, &LspCapabilities::default(), &mut documents, &mut sources,
+                &mut lineage, &mut apply, &mut opened, &mut pending, &mut next,
+                Duration::from_secs(1), 0, &endpoint.events, &mut stopping, &mut config).unwrap();
+        }
+        assert_eq!(documents[&document.uri()].text, "newer unsaved text");
+        assert_eq!(documents[&document.uri()].version, 2);
+        assert_eq!(sources[&document.uri()], source);
+        let mut output = sink.as_slice();
+        let opened = read_content_length_message(&mut output).unwrap().unwrap();
+        assert_eq!(opened["method"], "textDocument/didOpen");
+        let saved = read_content_length_message(&mut output).unwrap().unwrap();
+        assert_eq!(saved["method"], "textDocument/didSave");
+        assert_eq!(saved["params"]["text"], "written");
+        assert!(read_content_length_message(&mut output).unwrap().is_none());
     }
 
     #[test]

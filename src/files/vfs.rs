@@ -1261,7 +1261,7 @@ fn scoped_parent(path: &Path, roots: &[PathBuf]) -> Result<(fs::File, std::ffi::
 
 pub(super) fn read_scoped_file(path: &Path, roots: &[PathBuf], maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     let file = open_scoped(path, roots, rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK)?;
-    read_open_file(file, path, maximum_bytes)
+    read_open_file_with_ceiling(file, path, maximum_bytes)
 }
 
 pub(super) fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
@@ -1469,7 +1469,7 @@ pub(super) fn resolve_resource_intent(
     if !metadata.is_file() || metadata.len() > maximum_bytes as u64 {
         return Err(VfsError::NotRegularFile(source));
     }
-    let bytes = read_open_file(input, &source, maximum_bytes as u64)?;
+    let bytes = read_open_file_with_ceiling(input, &source, maximum_bytes as u64)?;
     let kind = if let Some(target) = target {
         let name = target
             .file_name()
@@ -1531,7 +1531,7 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
     if metadata.dev() != intent.source_device
         || metadata.ino() != intent.source_inode
         || intent.source_bytes.len() as u64 > intent.maximum_bytes
-        || read_open_file(input, &source, intent.maximum_bytes)? != intent.source_bytes
+        || read_open_file_with_ceiling(input, &source, intent.maximum_bytes)? != intent.source_bytes
     {
         return Err(VfsError::ChangedOnDisk);
     }
@@ -1628,7 +1628,7 @@ pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
+pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .read(true)
@@ -1639,10 +1639,14 @@ pub(super) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
             path: path.to_path_buf(),
             source,
         })?;
-    read_open_file(file, path, maximum_bytes)
+    read_open_file_with_ceiling(file, path, maximum_bytes)
 }
 
-fn read_open_file(file: fs::File, path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
+pub(super) fn read_open_file_with_ceiling(
+    file: fs::File,
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, VfsError> {
     let metadata = file.metadata().map_err(|source| VfsError::Io {
         operation: "inspect read target",
         path: path.to_path_buf(),
@@ -1650,6 +1654,11 @@ fn read_open_file(file: fs::File, path: &Path, maximum_bytes: u64) -> Result<Vec
     })?;
     if !metadata.is_file() {
         return Err(VfsError::NotRegularFile(path.to_path_buf()));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(VfsError::DocumentTooLarge {
+            path: path.to_path_buf(), maximum_bytes,
+        });
     }
     read_bounded_bytes(file, maximum_bytes)
         .map_err(|source| VfsError::Io {

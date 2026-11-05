@@ -273,6 +273,16 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
     owner.breakpoint(at(30), false).unwrap();
     assert_eq!(owner.breakpoint_state(&path, 10), Some(DapBreakpointState::Disabled));
     assert!(!owner.startup_breakpoints()[0].1.iter().any(|row| row.line == 10));
+    assert_eq!(owner.breakpoint_disabled(&path, 10), Some(true));
+    owner.breakpoint(at(30), true).unwrap();
+
+    // An empty line cannot retain disabled state for a future breakpoint.
+    owner.set_breakpoint_disabled(&path, 40, true);
+    assert_eq!(owner.breakpoint_state(&path, 40), None);
+    owner.breakpoint(at(40), false).unwrap();
+    assert_eq!(owner.breakpoint_disabled(&path, 40), Some(false));
+    owner.breakpoint(at(40), true).unwrap();
+
     // RE-ENABLING makes it a request again rather than silently verified.
     let disabled = owner.breakpoint_state(&path, 10) == Some(DapBreakpointState::Disabled);
     owner.set_breakpoint_disabled(&path, 10, !disabled);
@@ -754,6 +764,26 @@ fn leaf_variables(count: u64) -> Vec<crate::debugger::DapVariable> {
             variables_reference: 0,
         })
         .collect()
+}
+
+#[test]
+fn inspecting_a_leaf_leaves_pending_console_submissions_for_their_answers() {
+    let (mut owner, adapter) = paginated_owner();
+    prime_for(&mut owner, &adapter);
+    let DebugResponse::Picker { rows, .. } = owner.response(DapResponse::Variables(leaf_variables(1))) else {
+        panic!("variables picker");
+    };
+    owner.record_console_command("pending expression".into());
+    let selection = owner.take_selection(&rows[0].key).unwrap();
+    owner.record_inspected_value(selection.value().unwrap().to_owned());
+    assert_eq!(owner.pending_submissions.len(), 1);
+    let inspected = owner.console().last().unwrap();
+    assert_eq!(inspected.text, "v0 = 0");
+    assert_eq!(inspected.submission, None);
+    owner.record_console_evaluation("answer".into());
+    assert!(owner.pending_submissions.is_empty());
+    let command = owner.console().find(|entry| entry.text == "pending expression").unwrap();
+    assert_eq!(command.result.as_deref(), Some("answer"));
 }
 
 #[test]

@@ -60,44 +60,31 @@ pub fn search_match(
     if query.is_empty() {
         return Ok(None);
     }
-    let expression = RegexBuilder::new(&regex::escape(query))
-        .case_insensitive(smart_case && query.is_ascii() && !query.chars().any(char::is_uppercase))
+    let pattern = if whole_word {
+        format!(r"\b(?:{})\b", regex::escape(query))
+    } else {
+        regex::escape(query)
+    };
+    let expression = RegexBuilder::new(&pattern)
+        .case_insensitive(smart_case && !query.chars().any(char::is_uppercase))
         .build()
         .map_err(|error| SearchPatternError::InvalidRegex(error.to_string()))?;
-    let word = |character: char| character.is_alphanumeric() || character == '_';
     let matches = || {
-        expression.find_iter(source).filter(|found| {
-            !whole_word
-                || source[..found.start()]
+        let mut from = 0;
+        let expression = &expression;
+        std::iter::from_fn(move || {
+            let found = expression.find_at(source, from)?;
+            from = found.start()
+                + source[found.start()..]
                     .chars()
-                    .next_back()
-                    .is_none_or(|c| !word(c))
-                    && source[found.end()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !word(c))
+                    .next()
+                    .expect("literal is nonempty")
+                    .len_utf8();
+            Some(found)
         })
     };
     let found = if forward {
-        let mut at = offset;
-        let found = loop {
-            let Some(found) = expression.find_at(source, at) else {
-                break None;
-            };
-            if !whole_word
-                || source[..found.start()]
-                    .chars()
-                    .next_back()
-                    .is_none_or(|c| !word(c))
-                    && source[found.end()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !word(c))
-            {
-                break Some(found);
-            }
-            at = found.end();
-        };
+        let found = expression.find_at(source, offset);
         found.or_else(|| if wrap { matches().next() } else { None })
     } else {
         matches()
@@ -128,6 +115,42 @@ mod tests {
             Some(0..3)
         );
     }
+    #[test]
+    fn whole_word_search_includes_combining_marks() {
+        assert_eq!(super::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(), Some(4..5));
+        assert_eq!(super::search_match("e\u{301} e e\u{301}", "e\u{301}", true, true, 1, true, false).unwrap(), Some(6..9));
+    }
+
+    #[test]
+    fn navigation_uses_unicode_smart_case() {
+        assert_eq!(
+            super::search_match("É é", "é", true, false, 0, true, false).unwrap(),
+            Some(0..2)
+        );
+        assert_eq!(
+            super::search_match("É é", "é", false, false, 0, true, false).unwrap(),
+            Some(3..5)
+        );
+        assert_eq!(
+            super::search_match("é É", "É", true, false, 0, true, false).unwrap(),
+            Some(3..5)
+        );
+    }
+
+    #[test]
+    fn backward_navigation_keeps_overlapping_literal_starts() {
+        for offset in [5, 0] {
+            assert_eq!(
+                super::search_match("banana", "ana", true, false, offset, false, true).unwrap(),
+                Some(3..6)
+            );
+        }
+        assert_eq!(
+            super::search_match("banana", "ana", true, false, 3, false, false).unwrap(),
+            Some(1..4)
+        );
+    }
+
     #[test]
     fn literal_smart_case_and_regex_are_explicit_policies() {
         assert_eq!(

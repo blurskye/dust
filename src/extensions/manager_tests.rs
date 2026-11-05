@@ -1127,27 +1127,44 @@ impl ExecutionFixture {
             other => panic!("expected invocation, got {other:?}"),
         }
     }
+    pub(crate) fn indexed(&self, index: PluginContributionIndex) {
+        self.events.try_send(WorkerEvent::Indexed {
+            load: PluginLoadId(index.generation),
+            plugin: index.owner.clone(),
+            index,
+        }).unwrap();
+    }
+    pub(crate) fn loaded(&self, load: PluginLoadId, component: LoadedComponent) {
+        self.events.try_send(WorkerEvent::Loaded { load, component }).unwrap();
+    }
     pub(crate) fn reply(&self, captured: &CapturedExecution, proposals: Vec<PluginEditProposal>) {
-        self.events
-            .try_send(WorkerEvent::Executed {
-                load: captured.load,
-                origin: captured.origin.clone(),
-                execution: PluginExecution {
-                    plugin: captured.request.plugin.clone(),
-                    command: captured.request.command.clone(),
-                    generation: captured.request.generation,
-                    result: String::new(),
-                    messages: Vec::new(),
-                    proposals,
-                    ui_requests: Vec::new(),
-                    confirmation_requests: Vec::new(),
-                    host_event_acknowledgements: Vec::new(),
-                    storage_requests: Vec::new(),
-                    provider_chunks: Vec::new(),
-                    virtual_document_proposals: Vec::new(),
-                },
-            })
-            .unwrap();
+        self.reply_with(captured, |execution| execution.proposals = proposals);
+    }
+    pub(crate) fn reply_with(
+        &self,
+        captured: &CapturedExecution,
+        update: impl FnOnce(&mut PluginExecution),
+    ) {
+        let mut execution = PluginExecution {
+            plugin: captured.request.plugin.clone(),
+            command: captured.request.command.clone(),
+            generation: captured.request.generation,
+            result: String::new(),
+            messages: Vec::new(),
+            proposals: Vec::new(),
+            ui_requests: Vec::new(),
+            confirmation_requests: Vec::new(),
+            host_event_acknowledgements: Vec::new(),
+            storage_requests: Vec::new(),
+            provider_chunks: Vec::new(),
+            virtual_document_proposals: Vec::new(),
+        };
+        update(&mut execution);
+        self.events.try_send(WorkerEvent::Executed {
+            load: captured.load,
+            origin: captured.origin.clone(),
+            execution,
+        }).unwrap();
     }
     pub(crate) fn reply_confirmation_request(
         &self,

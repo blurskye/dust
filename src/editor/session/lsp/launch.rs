@@ -119,8 +119,40 @@ pub(super) struct Preparation {
     nix: Option<(u64, Pending<PendingNixLspWorkspace>)>,
     worker: NixWorkspaceService,
     preflights: HashMap<PreflightId, Preflight>,
+    missing_roots: Vec<(String, PathBuf, WorkspaceVersion, u64)>,
 }
 impl LspSession {
+    pub(in crate::editor::session) fn project_root_missing(
+        &self,
+        server: &str,
+        path: &std::path::Path,
+        workspace: &WorkspaceVersion,
+        configuration: u64,
+    ) -> bool {
+        self.preparation.missing_roots.iter().any(|(id, document, source, revision)| {
+            id == server && document == path && source == workspace && *revision == configuration
+        })
+    }
+    pub(in crate::editor::session) fn stop_document_launches(&mut self, buffer: crate::editor::BufferId) {
+        let mut definitions = Vec::new();
+        if let Some((_, pending)) = &self.preparation.root
+            && pending.source.buffer == buffer
+        {
+            definitions.push(pending.value.definition.id.clone());
+        }
+        if let Some((_, pending)) = &self.preparation.nix
+            && pending.source.buffer == buffer
+        {
+            definitions.push(pending.value.definition.id.clone());
+        }
+        definitions.extend(self.preparation.preflights.values()
+            .filter(|pending| pending.pending.source.buffer == buffer)
+            .map(|pending| pending.pending.value.definition.id.clone()));
+        for definition in definitions {
+            self.cancel_launches(&definition);
+            self.mark_stopped(&definition);
+        }
+    }
     pub(in crate::editor::session) fn cancel_launches(&mut self, definition: &str) {
         if self
             .preparation
@@ -204,6 +236,7 @@ impl LspSession {
         self.preparation.root = None;
         self.preparation.nix = None;
         self.preparation.preflights.clear();
+        self.preparation.missing_roots.clear();
     }
     pub(in crate::editor::session) fn discover_launch(
         &mut self,
@@ -259,6 +292,21 @@ impl LspSession {
             return Err("language-server root source changed".into());
         }
         let Some(project_root) = resolution.project_root else {
+            // Keep misses only for this document and configuration. The next candidate
+            // can then start instead of repeatedly choosing the server with no root.
+            self.preparation.missing_roots.retain(|(id, path, workspace, configuration)| {
+                id != &pending.definition.id
+                    && path == &pending.document.path
+                    && workspace == &context.workspace
+                    && *configuration == context.configuration
+            });
+            self.preparation.missing_roots.push((
+                pending.definition.id.clone(),
+                pending.document.path.clone(),
+                context.workspace.clone(),
+                context.configuration,
+            ));
+            self.reset_autostart();
             if pending.asked {
                 return Err(format!(
                     "{} starts in a project with {}",
@@ -703,7 +751,8 @@ mod tests {
             },
         );
         assert!(owner.launch_pending(&definition.id));
-        owner.cancel_launches(&definition.id);
+        owner.stop_document_launches(buffer);
+        assert!(owner.is_stopped(&definition.id));
         assert!(!owner.launch_pending(&definition.id));
         assert!(!owner.owns_preflight(PreflightId(3)));
     }

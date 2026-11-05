@@ -861,6 +861,9 @@ impl InteractiveApplication {
             .filter(|id| self.terminal_session.contains(*id))
     }
     pub(super) fn active_input_context(&self) -> String {
+        if self.search.help_is_open() {
+            return if self.input.picker_normal() { "picker_normal" } else { "picker" }.into();
+        }
         if let Some(context) = self.input.capture_context() {
             return context.into();
         }
@@ -1026,6 +1029,11 @@ impl InteractiveApplication {
                     }
                 }
             }
+            MappingResolution::DisabledAndReplay(replay) => {
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             MappingResolution::Disabled => {}
             MappingResolution::Pending | MappingResolution::Ambiguous => return,
             MappingResolution::Missing if context == "snippet" => {
@@ -1154,6 +1162,11 @@ impl InteractiveApplication {
         self.project_input_hints();
         match resolution {
             MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+            MappingResolution::DisabledAndReplay(replay) => {
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
             MappingResolution::Replay(prefix, _)
                 if !context.starts_with("editor.") || self.typing() =>
@@ -1247,6 +1260,10 @@ impl InteractiveApplication {
         let Some(view_id) = self.state.active_view else {
             return;
         };
+        self.keep_view_cursor_off_final_newline(view_id);
+    }
+
+    pub(super) fn keep_view_cursor_off_final_newline(&mut self, view_id: crate::editor::ViewId) {
         let Some(view) = self.state.views.get(view_id) else {
             return;
         };
@@ -1375,6 +1392,7 @@ impl InteractiveApplication {
                         .map(|buffer| buffer.text.source_version())
                 });
                 if let Some(mut transaction) = outcome.transaction {
+                    self.persistence.reconcile_marks(&self.state);
                     let source = self.state.window_version();
                     let snippet_document = self.input.snippet_buffer().and_then(|id| {
                         self.state.buffers.get(id).map(|buffer| {
@@ -1428,7 +1446,9 @@ impl InteractiveApplication {
                 );
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
-                    self.process_effect(effect);
+                    if !self.process_effect_checked(effect) {
+                        return false;
+                    }
                 }
                 true
             }
@@ -1629,7 +1649,7 @@ enum NavigationRead {
         crate::editor::session::windows::NavigationStamp,
         crate::editor::session::workspace::WorkspaceVersion,
     ),
-    WorkspaceSearch(std::ops::Range<usize>),
+    ByteRange(ByteRange, Option<std::sync::Arc<[u8]>>),
     /// A recovery journal's path and text, to put into the file once it is open.
     Recovered(std::path::PathBuf, String),
 }
@@ -1658,6 +1678,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_vfs_results(&mut self) {
+        self.process_pending_saves();
         loop {
             self.submit_restore_reads();
             let result = match self
@@ -1688,6 +1709,7 @@ impl InteractiveApplication {
                 }
                 Ok(Some(DocumentEvent::File(reply))) => {
                     self.process_file_reply(reply);
+                    self.process_pending_saves();
                     continue;
                 }
                 Ok(Some(DocumentEvent::Stopped {
@@ -1841,8 +1863,8 @@ impl InteractiveApplication {
                         })
                         .or_else(|| {
                             self.search
-                                .take_workspace_navigation(id)
-                                .map(NavigationRead::WorkspaceSearch)
+                                .take_byte_navigation(id)
+                                .map(|(range, snapshot)| NavigationRead::ByteRange(range, snapshot))
                         })
                         .or_else(|| {
                             self.recovery.take_read(id, self.workspace.version()).map(
@@ -1880,6 +1902,19 @@ impl InteractiveApplication {
                         }
                         self.finish_recovery(journal, "recovery_restored");
                         continue;
+                    }
+                    if let Some(NavigationRead::ByteRange(_, Some(snapshot))) = &pending {
+                        let current = self.state.buffers.values()
+                            .find(|buffer| buffer.path.as_ref() == Some(&path));
+                        let unchanged = current.map_or_else(
+                            || result.as_deref().is_ok_and(|bytes| bytes == snapshot.as_ref()),
+                            |buffer| crate::editor::text::decode_utf8(snapshot)
+                                .is_ok_and(|snapshot| buffer.text.to_string() == snapshot.text),
+                        );
+                        if !unchanged {
+                            self.show_error(self.message("workspace_search_stale_result", &[]));
+                            continue;
+                        }
                     }
                     match result.map_err(InteractiveError::from).and_then(|bytes| {
                         TextBuffer::from_bytes(&bytes).map_err(InteractiveError::from)
@@ -2016,11 +2051,14 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(NavigationRead::WorkspaceSearch(range)) => {
-                                let start = ByteOffset(range.start);
-                                let end = ByteOffset(range.end);
-                                if text.validate_offset(start).is_err()
-                                    || text.validate_offset(end).is_err()
+                            Some(NavigationRead::ByteRange(range, _)) => {
+                                let start = range.start;
+                                let end = range.end;
+                                let target = self.state.buffers.values()
+                                    .find(|buffer| buffer.path.as_ref() == Some(&path))
+                                    .map_or(&text, |buffer| &buffer.text);
+                                if target.validate_offset(start).is_err()
+                                    || target.validate_offset(end).is_err()
                                 {
                                     self.show_error(
                                         self.message("workspace_search_stale_result", &[]),
@@ -2048,16 +2086,28 @@ impl InteractiveApplication {
                                 self.ensure_cursor_visible();
                             }
                             Some(NavigationRead::Recovered(journal, content)) => {
-                                let (buffer, _) = match self.state.open_text(text, Some(path.clone())) {
+                                // Scoped reads resolve aliases. Never recover over an existing
+                                // buffer, even when the journal used a different spelling.
+                                let already_open = self.state.buffers.values().any(|buffer| {
+                                    buffer.path.as_ref() == Some(&path)
+                                });
+                                let opened = if already_open {
+                                    self.state.open_text(TextBuffer::from_text(""), None)
+                                } else {
+                                    self.state.open_text(text, Some(path.clone()))
+                                };
+                                let (buffer, _) = match opened {
                                     Ok(opened) => opened,
                                     Err(error) => {
                                         self.show_error(error);
                                         continue;
                                     }
                                 };
-                                self.state.buffers[buffer].read_only =
-                                    self.workspace.require_path(&path).is_err();
-                                self.record_recent_file(path);
+                                if !already_open {
+                                    self.state.buffers[buffer].read_only =
+                                        self.workspace.require_path(&path).is_err();
+                                    self.record_recent_file(path);
+                                }
                                 match self.replace_with_recovered(buffer, content) {
                                     Ok(()) => self.finish_recovery(&journal, "recovery_restored"),
                                     Err(error) => self.show_error(error),
@@ -2867,12 +2917,10 @@ impl InteractiveApplication {
         self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting"
-            && self.format_on_save.as_ref().is_some_and(|pending| {
-                pending.request.as_ref() == Some(&(server.clone(), generation))
-            })
+            && let Some(buffer) = self.formatting_save_for_request(&server, generation)
         {
             self.append_lsp_log(format!("format on save failed: {message}"));
-            self.finish_format_on_save();
+            self.finish_format_on_save(buffer);
             return;
         }
         if method == "textDocument/inlayHint" {
@@ -3045,9 +3093,7 @@ impl InteractiveApplication {
                         continue;
                     }
                     let save_format = method == "textDocument/formatting"
-                        && self.format_on_save.as_ref().is_some_and(|pending| {
-                            pending.request.as_ref() == Some(&(server.clone(), generation))
-                        });
+                        && self.formatting_save_for_request(&server, generation).is_some();
                     if save_format {
                         self.present_lsp_result_owned(
                             &server,
@@ -3401,7 +3447,7 @@ impl InteractiveApplication {
             self.language.supporting_server(buffer, &document, &feature)
         };
         // Someone is waiting on these, unlike a save's format or what the editor asks by itself.
-        let asked = !self.format_on_save.is_some()
+        let asked = !self.format_on_save.contains_key(&buffer)
             && !matches!(
                 feature,
                 LspFeature::SemanticTokensFull | LspFeature::SemanticTokensDelta { .. }
@@ -3544,8 +3590,8 @@ impl InteractiveApplication {
                 if formats
                     && let Some(pending) = self
                         .format_on_save
-                        .as_mut()
-                        .filter(|pending| pending.buffer == buffer && pending.request.is_none())
+                        .get_mut(&buffer)
+                        .filter(|pending| pending.request.is_none())
                 {
                     pending.request = Some((server.clone(), self.language.generation()));
                 }
@@ -3787,10 +3833,8 @@ impl InteractiveApplication {
                         }
                         self.restore_view_positions(positions);
                     }
-                    if self.format_on_save.as_ref().is_some_and(|pending| {
-                        pending.request.as_ref() == Some(&(server.to_owned(), generation))
-                    }) {
-                        self.finish_format_on_save();
+                    if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                        self.finish_format_on_save(buffer);
                     }
                     return;
                 }
@@ -3950,6 +3994,10 @@ impl InteractiveApplication {
                 }
             }
             LspFeatureResult::CodeLens(items) => {
+                let Some(context) = context.filter(|context| self.language.edit_context_current(context)) else {
+                    self.show_error("code-lens source retired");
+                    return;
+                };
                 let rows = items
                     .into_iter()
                     .enumerate()
@@ -3965,7 +4013,11 @@ impl InteractiveApplication {
                                 source: String::new(),
                                 action: PickerAction::None,
                             },
-                            PickerPayload::LspCommand(command),
+                            PickerPayload::LspCommand {
+                                server: server.to_owned(),
+                                context: context.clone(),
+                                command,
+                            },
                         ))
                     })
                     .collect::<Vec<_>>();
@@ -4030,7 +4082,12 @@ impl InteractiveApplication {
                             }
                         }
                         "textDocument/selectionRange" => {
-                            self.language.install_selection_ranges(ranges)
+                            let expand = self.language.complete_selection_ranges(generation, ranges);
+                            if let Some(cursor) = expand
+                                && self.state.active_view.is_some_and(|view| self.state.views[view].cursor == cursor)
+                            {
+                                self.process_effect(AppEffect::LspSelectionExpand);
+                            }
                         }
                         _ => {}
                     }
@@ -4039,10 +4096,8 @@ impl InteractiveApplication {
             LspFeatureResult::Colors(_) => {}
             // Nothing to change is a normal answer from a formatter.
             LspFeatureResult::Empty if method == "textDocument/formatting" => {
-                if self.format_on_save.as_ref().is_some_and(|pending| {
-                    pending.request.as_ref() == Some(&(server.to_owned(), generation))
-                }) {
-                    self.finish_format_on_save();
+                if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                    self.finish_format_on_save(buffer);
                 }
             }
             // Only the last of several servers can say that nobody knows.

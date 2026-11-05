@@ -60,6 +60,26 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
 }
 
 #[test]
+fn marks_follow_ordinary_edits_before_any_window_transition() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("marks.txt");
+    fs::write(&path, "abc target").unwrap();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc target"), Some(path)).unwrap();
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(4);
+    app.process_effect(AppEffect::MarkSet("a".into()));
+    app.state.views[view].cursor = ByteOffset(0);
+    for key in ["i", "X", "escape"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "Xabc target");
+    assert_eq!(app.persistence.marks()[0].location.byte, 5);
+    app.process_effect(AppEffect::MarkJump("a".into()));
+    wait_vfs(&mut app);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(5));
+}
+
+#[test]
 fn path_completion_is_bounded_async_and_rejects_stale_generations() {
     let mut app = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
@@ -286,11 +306,32 @@ fn macro_replay_honors_configured_counts() {
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None).unwrap();
     app.set_dashboard_visibility(false);
-    for key in ['q', 'a', 'x', 'q', '3', '@', 'a'] {
+    for key in ['q', 'a', 'x', 'q'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.show_error("an unrelated earlier error");
+    for key in ['3', '@', 'a'] {
         app.handle_configured_key(KeyEvent::character(key));
     }
     let buffer = app.state.active_buffer_id().expect("buffer");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "e");
+}
+
+#[test]
+fn counted_macro_replay_stops_when_a_nested_macro_fails() {
+    let mut app = app();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("abcdef"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    // b calls a, which does not exist. Neither b's deletion nor its next repetition may run.
+    let replay = crate::editor::CommandInvocation::new("macro.replay", InvocationSource::Test)
+        .unwrap()
+        .with_argument("register", CommandValue::String("a".into()));
+    let delete = crate::editor::CommandInvocation::new("edit.delete_char", InvocationSource::Test).unwrap();
+    app.state.registers.set_macro('b', vec![delete.clone(), replay, delete]);
+    assert!(!app.process_effect_checked(AppEffect::MacroReplay { register: 'b', count: 3 }));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "bcdef");
+    assert_eq!(app.input.replay_depth(), 0);
+    assert!(app.ui.notification_error);
 }
 
 #[test]
@@ -1024,6 +1065,19 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 }
 
 #[test]
+fn dot_stops_before_inserting_after_a_failed_search_operator() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("cat cat"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.ui.search_query = Some("cat".into());
+    press_keys(&mut app, &["c", "g", "n", "d", "o", "g", "escape"]);
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("unrelated"), None).unwrap();
+    press_keys(&mut app, &["."]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "unrelated");
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let mut app = app();
     let (_, view) = app.state.open_text(
@@ -1452,6 +1506,76 @@ fn conflict_keys_move_between_markers_and_wrap() {
 }
 
 #[test]
+fn the_first_disk_poll_detects_changes_since_opening() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("changed-before-poll.txt");
+    fs::write(&path, "before\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    fs::write(&path, "after opening\n").unwrap();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    assert!(app.documents.file_work_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "before\n");
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "after opening\n");
+    assert!(!app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn disk_checks_preserve_unsaved_edits_and_warn_only_when_disk_contents_differ() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("dirty-before-poll.txt");
+    fs::write(&path, "disk\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    app.replace_with_recovered(buffer, "unsaved\n".into()).unwrap();
+    let source = app.state.buffers[buffer].text.source_version();
+    app.clear_notice();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert!(app.ui.notification.is_none());
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
+    assert!(app.state.buffers[buffer].dirty);
+    fs::write(&path, "different disk contents\n").unwrap();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "unsaved\n");
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message(
+        "file_changed_on_disk", &[("path", app.workspace_relative_label(&path))],
+    ).as_str()));
+}
+
+#[test]
+fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("shortened.txt");
+    fs::write(&path, "long first line\nsecond line\n").unwrap();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().unwrap();
+    let first = app.state.active_view.unwrap();
+    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    let second = app.state.active_view.unwrap();
+    app.state.views[first].cursor = ByteOffset(20);
+    app.state.views[second].cursor = ByteOffset(20);
+    app.state.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+    fs::write(&path, "x\n").unwrap();
+    app.start_reload(false);
+    let (_, other) = app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.active_view, Some(other));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "x\n");
+    assert_eq!(app.state.views[first].cursor, ByteOffset(0));
+    assert_eq!(app.state.views[second].cursor, ByteOffset(0));
+}
+
+#[test]
 fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     let mut app = app();
     let path = app.state.workspace_root.join("watched.txt");
@@ -1459,8 +1583,11 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("buffer");
+    let source = app.state.buffers[buffer].text.source_version();
     app.next_disk_check = None;
     app.process_disk_changes();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.source_version(), source);
 
     // Longer content, so the length differs even if the clock did not tick.
     fs::write(&path, b"from outside\n").expect("rewrite");
@@ -1528,6 +1655,33 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
         span.range,
         ByteRange::new(ByteOffset(5), ByteOffset(9)).unwrap()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_through_an_alias_preserves_the_already_open_dirty_buffer() {
+    let mut app = app();
+    app.recovery.skip_maintenance();
+    let path = app.state.workspace_root.join("current.txt");
+    let alias = app.state.workspace_root.join("old.txt");
+    fs::write(&path, "disk").unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+    let (original, _) = app.state.open_text(TextBuffer::from_text("disk"), Some(path.clone())).unwrap();
+    app.replace_with_recovered(original, "new unsaved work".into()).unwrap();
+    let journal = app.state.workspace_root.join("journal.toml");
+    fs::write(&journal, "journal").unwrap();
+    let id = app.documents.read_scoped(alias, vec![app.state.workspace_root.clone()]).unwrap();
+    app.recovery.register_read(id, journal, "recovered draft".into(), app.workspace.version());
+    wait_vfs(&mut app);
+    let recovered = app.state.active_buffer_id().unwrap();
+    assert_ne!(recovered, original);
+    assert_eq!(app.state.buffers[original].text.to_string(), "new unsaved work");
+    assert!(app.state.buffers[original].dirty);
+    assert_eq!(app.state.buffers[original].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[recovered].text.to_string(), "recovered draft");
+    assert!(app.state.buffers[recovered].dirty);
+    assert!(app.state.buffers[recovered].path.is_none());
+    assert_eq!(fs::read_to_string(path).unwrap(), "disk");
 }
 
 #[test]
@@ -1747,6 +1901,23 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 }
 
 #[test]
+fn macro_replay_stops_before_an_edit_after_a_failed_search_effect() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.search.wrap = false;
+    app.configuration.install_fixture(fixture);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("cat cat tail"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.ui.search_query = Some("cat".into());
+    press_keys(&mut app, &["q", "a", "n", "x", "q"]);
+    app.state.views[view].cursor = ByteOffset(7);
+    let before = app.state.buffers[buffer].text.to_string();
+    app.replay_macro('a');
+    assert_eq!(app.state.buffers[buffer].text.to_string(), before);
+    assert!(app.ui.notification_error);
+}
+
+#[test]
 fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     let mut app = app();
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("az\nkeep"), None).unwrap();
@@ -1774,6 +1945,41 @@ fn star_and_hash_repeat_only_whole_identifiers() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(0));
     app.search_word_under_cursor(false);
     assert_eq!(app.state.views[view].cursor, ByteOffset(11));
+}
+
+#[test]
+fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    assert!(app.select_text(view, 0, 2));
+    assert!(app.select_text(view, 3, 3));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert!(app.state.views[view].selection.is_none());
+}
+
+#[test]
+fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("e\u{301} e e\u{301}"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    assert!(app.search_word_under_cursor(true));
+    assert_eq!(app.ui.search_query.as_deref(), Some("e\u{301}"));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(6));
+
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo foobar foo"), None).unwrap();
+    app.state.views[view].cursor = ByteOffset(0);
+    app.search_word_under_cursor(true);
+    app.state.views[view].cursor = ByteOffset(5);
+    assert!(app.select_next_search_match());
+    let selection = app.state.views[view].selection.as_ref().unwrap();
+    assert_eq!(selection.anchor, ByteOffset(11));
+    assert_eq!(selection.head, ByteOffset(13));
+    app.set_mode(crate::editor::EditorMode::Normal);
+    app.state.views[view].cursor = ByteOffset(5);
+    press_keys(&mut app, &["c", "g", "n", "X", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "foo foobar X");
 }
 
 #[test]

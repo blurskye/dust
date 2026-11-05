@@ -329,26 +329,28 @@ impl LspSession {
         let command = self.edits.take_command(key);
         self.edits.finish(key, applied, reason)?;
         if applied && let Some((server, command)) = command {
-            let document = self
-                .sessions
-                .get(&server)
-                .and_then(|session| session.documents.values().next())
-                .cloned()
-                .ok_or("code-action server is no longer attached")?;
-            let generation = self
-                .next_generation()
-                .ok_or("language-server request identity exhausted")?;
-            self.service
-                .request(
-                    &server,
-                    crate::language::lsp::LspFeature::ExecuteCommand(command),
-                    document,
-                    crate::editor::text::ByteOffset(0),
-                    generation,
-                )
-                .map_err(|error| error.to_string())?;
+            self.execute_command(&server, command)?;
         }
         Ok(())
+    }
+    pub(super) fn execute_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+    ) -> Result<(), String> {
+        let document = self.sessions.get(server)
+            .and_then(|session| session.documents.values().next())
+            .cloned()
+            .ok_or("command server is no longer attached")?;
+        let generation = self.next_generation()
+            .ok_or("language-server request identity exhausted")?;
+        self.service.request(
+            server,
+            crate::language::lsp::LspFeature::ExecuteCommand(command),
+            document,
+            crate::editor::text::ByteOffset(0),
+            generation,
+        ).map_err(|error| error.to_string())
     }
     pub(super) fn set_edit_command(
         &mut self,
@@ -507,7 +509,11 @@ impl LspSession {
                     continue;
                 };
                 let version = buffer.text.source_version();
-                if self.synced.contains_key(&(key.clone(), *id)) {
+                if self.synced.get(&(key.clone(), *id)).is_some_and(|synced| {
+                    synced == &version || editor.active_buffer_id() == Some(*id)
+                }) {
+                    // The active document is synchronized by dispatch so its changes also
+                    // refresh completion, colors and inlay hints.
                     continue;
                 }
                 document.text = buffer.text.to_string();
@@ -616,8 +622,8 @@ impl LspSession {
     }
     pub(super) fn detach(&mut self, key: &str, buffer: BufferId) {
         self.invalidate_document(key, buffer);
-        if let Some(state) = self.sessions.get_mut(key) {
-            state.documents.remove(&buffer);
+        if let Some(document) = self.sessions.get_mut(key).and_then(|state| state.documents.remove(&buffer)) {
+            self.retire_projection_document(key, &document.uri());
         }
     }
     pub(super) fn hint_install_once(&mut self, language: &str) -> bool {

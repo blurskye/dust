@@ -97,6 +97,7 @@ struct ZenRestore {
     git_signs: bool,
     indent_guides: bool,
     explorer_open: bool,
+    undo_zoom: bool,
 }
 
 /// A fully resolved candidate; only this module can construct or modify it.
@@ -347,7 +348,7 @@ impl ConfigurationSession {
     ) -> Result<ContributionReceipt, String> {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
-        // A theme picked in the theme picker stays while config.toml keeps the same theme.
+        // Keep a different picker selection while config.toml keeps the same theme.
         let keep_theme = candidate.resolved.settings.ui.theme == self.accepted.settings.ui.theme;
         let receipt = ContributionReceipt(candidate.window_contribution().window_source());
         self.accepted = candidate.resolved;
@@ -361,7 +362,7 @@ impl ConfigurationSession {
             editor.indent_guides.enabled = false;
         }
         self.hidden_line_numbers = None;
-        self.themes.reset(keep_theme);
+        self.themes.reset(keep_theme, &self.accepted.theme.name);
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(receipt)
@@ -415,21 +416,22 @@ impl ConfigurationSession {
         }
     }
     /// Enter zen mode, hiding line numbers, git signs and indent guides, or leave it and put
-    /// them back. Leaving returns whether the explorer was open when zen mode began.
-    pub(super) fn toggle_zen(&mut self, explorer_open: bool) -> Option<bool> {
+    /// them back. Leaving returns whether to reopen the explorer and undo zen's zoom.
+    pub(super) fn toggle_zen(&mut self, explorer_open: bool, zoomed: bool) -> Option<(bool, bool)> {
         self.stamp = Arc::new(());
         let editor = &mut self.accepted.settings.editor;
         if let Some(zen) = self.zen.take() {
             editor.line_numbers = zen.line_numbers;
             editor.git_signs.enabled = zen.git_signs;
             editor.indent_guides.enabled = zen.indent_guides;
-            return Some(zen.explorer_open);
+            return Some((zen.explorer_open, zen.undo_zoom));
         }
         self.zen = Some(ZenRestore {
             line_numbers: editor.line_numbers,
             git_signs: editor.git_signs.enabled,
             indent_guides: editor.indent_guides.enabled,
             explorer_open,
+            undo_zoom: !zoomed,
         });
         editor.line_numbers = LineNumbers::Off;
         editor.git_signs.enabled = false;

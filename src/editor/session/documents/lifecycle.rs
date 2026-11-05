@@ -1,7 +1,7 @@
 use super::{DocumentEvent, DocumentSession};
 use crate::editor::session::windows::NavigationStamp;
 use crate::editor::session::workspace::WorkspaceVersion;
-use crate::editor::text::{BufferRevision, LineEnding, TextBuffer, TextVersion};
+use crate::editor::text::{BufferRevision, FileFormat, LineEnding, TextBuffer, TextVersion};
 use crate::editor::{BufferId, EditorVersion, EditorWindowVersion};
 use crate::files::{RequestId, VfsError, VfsResult, WriteExpectation};
 use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ struct Version {
     path: Option<PathBuf>,
     text: TextVersion,
     revision: BufferRevision,
-    snapshot: Option<Arc<str>>,
+    snapshot: Option<Box<(Arc<str>, FileFormat)>>,
 }
 impl DocumentView<'_> {
     fn version(&self) -> Version {
@@ -37,7 +37,7 @@ impl DocumentView<'_> {
     }
     fn save_version(&self) -> Version {
         let mut version = self.version();
-        version.snapshot = Some(self.text.to_string().into());
+        version.snapshot = Some(Box::new((self.text.to_string().into(), self.text.format().clone())));
         version
     }
 }
@@ -66,7 +66,7 @@ enum Operation {
         generation: Arc<()>,
         retired: Vec<PathBuf>,
     },
-    Reload(Version),
+    Reload { version: Version, check_disk: bool },
     Save {
         version: Version,
         bytes: Vec<u8>,
@@ -90,7 +90,7 @@ impl FileReply {
         paths: impl Iterator<Item = (BufferId, &'a Path)>,
     ) -> Result<(), DocumentFailure> {
         if let (
-            Operation::Save { version, .. } | Operation::Reload(version),
+            Operation::Save { version, .. } | Operation::Reload { version, .. },
             VfsResult::Write {
                 path,
                 result: Ok(()),
@@ -115,13 +115,13 @@ impl FileReply {
     ) -> Option<&super::super::windows::EditorCloseSave> {
         match &self.intent.operation {
             Operation::Save { close, .. } => close.as_ref(),
-            Operation::Open { .. } | Operation::Reload(_) => None,
+            Operation::Open { .. } | Operation::Reload { .. } => None,
         }
     }
     pub(in crate::editor::session) fn target(&self) -> Option<BufferId> {
         match &self.intent.operation {
             Operation::Open { .. } => None,
-            Operation::Reload(v) | Operation::Save { version: v, .. } => Some(v.id),
+            Operation::Reload { version, .. } | Operation::Save { version, .. } => Some(version.id),
         }
     }
 }
@@ -138,10 +138,15 @@ pub(in crate::editor::session) enum DocumentChange {
         text: TextBuffer,
         path: PathBuf,
     },
+    DiskChecked {
+        buffer: BufferId,
+        path: PathBuf,
+        changed: bool,
+    },
     Saved {
         buffer: BufferId,
         text: TextVersion,
-        snapshot: Arc<str>,
+        snapshot: Box<(Arc<str>, FileFormat)>,
         revision: BufferRevision,
         bytes: Vec<u8>,
         line_ending: Option<LineEnding>,
@@ -231,6 +236,24 @@ impl DocumentSession {
         editor: &EditorWindowVersion,
         workspace: WorkspaceVersion,
     ) -> Result<(), DocumentFailure> {
+        self.request_reload_inner(view, force, false, editor, workspace)
+    }
+    pub(in crate::editor::session) fn request_disk_check(
+        &mut self,
+        view: DocumentView<'_>,
+        editor: &EditorWindowVersion,
+        workspace: WorkspaceVersion,
+    ) -> Result<(), DocumentFailure> {
+        self.request_reload_inner(Some(view), true, true, editor, workspace)
+    }
+    fn request_reload_inner(
+        &mut self,
+        view: Option<DocumentView<'_>>,
+        force: bool,
+        check_disk: bool,
+        editor: &EditorWindowVersion,
+        workspace: WorkspaceVersion,
+    ) -> Result<(), DocumentFailure> {
         self.check_file_admission(editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_reload"))?;
         if view.virtual_read_only {
@@ -251,7 +274,7 @@ impl DocumentSession {
                     editor: editor.clone(),
                     workspace,
                 },
-                operation: Operation::Reload(view.version()),
+                operation: Operation::Reload { version: view.version(), check_disk },
             },
         );
         Ok(())
@@ -282,7 +305,7 @@ impl DocumentSession {
             match &intent.operation {
                 Operation::Open { requested, .. } => Some(requested.clone()),
                 Operation::Save { target, .. } => Some(target.clone()),
-                Operation::Reload(_) => None,
+                Operation::Reload { .. } => None,
             }
         }));
         if request.other_open_paths.iter().any(|path| path == &target) {
@@ -327,7 +350,7 @@ impl DocumentSession {
     }
     fn check_buffer_mutation(&self, buffer: BufferId) -> Result<(), DocumentFailure> {
         if self.pending_files.values().any(|intent| match &intent.operation {
-            Operation::Reload(version) | Operation::Save { version, .. } => version.id == buffer,
+            Operation::Reload { version, .. } | Operation::Save { version, .. } => version.id == buffer,
             Operation::Open { .. } => false,
         }) {
             return Err(DocumentFailure::Error("a save or reload for this buffer is already pending".into()));
@@ -391,7 +414,7 @@ impl DocumentSession {
                         .map_err(|e| DocumentFailure::Error(e.to_string()))?,
                 }
             }
-            (Operation::Reload(version), VfsResult::Read { path, result, .. }) => {
+            (Operation::Reload { version, check_disk }, VfsResult::Read { path, result, .. }) => {
                 let current = view.ok_or_else(stale)?;
                 if current.id != version.id
                     || current.path != version.path.as_deref()
@@ -400,11 +423,21 @@ impl DocumentSession {
                 {
                     return Err(stale());
                 }
-                DocumentChange::Reload {
-                    buffer: version.id,
-                    path,
-                    text: TextBuffer::from_bytes(&result?)
-                        .map_err(|e| DocumentFailure::Error(e.to_string()))?,
+                let bytes = result?;
+                let changed = check_disk && bytes != current.persisted;
+                if check_disk && (!changed || current.dirty) {
+                    DocumentChange::DiskChecked {
+                        buffer: version.id,
+                        path,
+                        changed,
+                    }
+                } else {
+                    DocumentChange::Reload {
+                        buffer: version.id,
+                        path,
+                        text: TextBuffer::from_bytes(&bytes)
+                            .map_err(|e| DocumentFailure::Error(e.to_string()))?,
+                    }
                 }
             }
             (
@@ -464,7 +497,7 @@ impl DocumentSession {
     ) {
         self.pending_files.retain(|id, intent| {
             let keep = match &mut intent.operation {
-                Operation::Reload(v) | Operation::Save { version: v, .. } => v.id != buffer,
+                Operation::Reload { version, .. } | Operation::Save { version, .. } => version.id != buffer,
                 Operation::Open {
                     requested, retired, ..
                 } => match path {
@@ -604,7 +637,7 @@ mod tests {
                     editor: state.window_version(),
                     workspace: workspace.version(),
                 },
-                operation: Operation::Reload(view(state, id).version()),
+                operation: Operation::Reload { version: view(state, id).version(), check_disk: false },
             },
             event: VfsResult::Read {
                 id: RequestId(1),
@@ -644,7 +677,7 @@ mod tests {
                 version.revision,
                 bytes,
                 "/workspace/file".into(),
-                version.snapshot.unwrap()
+                *version.snapshot.unwrap()
             ));
             state = draft.accept(&state.version()).unwrap();
             assert!(!state.buffers[buffer].dirty);
@@ -655,6 +688,36 @@ mod tests {
                     .with_operation(crate::editor::EditorOperation::Undo { buffer }),
             ).unwrap();
             assert_eq!(state.buffers[buffer].text.to_string(), source);
+        }
+    }
+
+    #[test]
+    fn line_ending_save_policy_keeps_the_requested_format_snapshot_clean() {
+        for (ending, disk) in [
+            (crate::config::LineEndingPolicy::Lf, b"a\nb\n".as_slice()),
+            (crate::config::LineEndingPolicy::CrLf, b"a\r\nb\r\n".as_slice()),
+            (crate::config::LineEndingPolicy::Cr, b"a\rb\r".as_slice()),
+        ] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(
+                TextBuffer::from_bytes(b"a\r\nb\n").unwrap(),
+                Some("/workspace/file".into()),
+            ).unwrap();
+            let mut config = crate::config::load_bundled_config().config;
+            config.editor.line_endings = ending;
+            let bytes = configured_file_bytes(&state.buffers[buffer].text, &config.editor);
+            assert_eq!(bytes, disk);
+            let version = view(&state, buffer).save_version();
+            let mut draft = state.draft();
+            assert!(draft.save_document(
+                buffer, &version.text, version.revision, bytes,
+                "/workspace/file".into(), *version.snapshot.unwrap(),
+            ));
+            state = draft.accept(&state.version()).unwrap();
+            assert!(!state.buffers[buffer].dirty);
+            state.buffers[buffer].refresh_dirty();
+            assert!(!state.buffers[buffer].dirty);
+            assert_eq!(state.buffers[buffer].persisted_bytes(), disk);
         }
     }
 
@@ -854,7 +917,7 @@ mod tests {
             panic!("save")
         };
         let mut candidate = state.draft();
-        assert!(candidate.save_document(buffer, &text, revision, bytes, target, snapshot));
+        assert!(candidate.save_document(buffer, &text, revision, bytes, target, *snapshot));
         state = candidate.accept(&state.version()).unwrap();
         assert!(state.buffers[id].dirty);
         assert_eq!(state.buffers[id].persisted_bytes(), b"old");

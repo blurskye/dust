@@ -11,12 +11,16 @@ impl SearchSession {
         &self.preview
     }
     pub(in crate::editor::session) fn clear_preview(&mut self) -> Option<RequestId> {
-        if self.preview.is_none() && self.preview_path.is_none() && self.preview_read.is_none() {
+        if self.preview.is_none() && self.preview_path.is_none() && self.preview_read.is_none()
+            && self.diff_preview_key.is_none() {
             return None;
         }
         self.preview = None;
         self.preview_snapshot_key = None;
         self.preview_path = None;
+        self.preview_location = None;
+        self.diff_preview.cancel();
+        self.diff_preview_key = None;
         self.preview_scope = None;
         self.preview_epoch = Arc::new(());
         self.preview_read.take().map(|(id, _)| id)
@@ -79,16 +83,17 @@ impl SearchSession {
     pub(in crate::editor::session) fn prepare_preview(
         &mut self,
         path: PathBuf,
-        line: usize,
+        location: Option<(usize, usize)>,
         title: String,
         loading: String,
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> (Option<RequestId>, Option<PreviewTicket>) {
         if self.preview_path.as_ref() == Some(&path)
+            && self.preview_location == location
             && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration))
             && self.preview.as_ref().and_then(PickerPreview::as_text)
-                .is_some_and(|text| text.highlight_line == Some(line))
+                .is_some_and(|text| text.highlight_line == location.map(|(line, _)| line))
         {
             return (None, None);
         }
@@ -98,14 +103,76 @@ impl SearchSession {
             title,
             body: PickerPreviewBody::Text(PickerTextPreview::new(
                 vec![loading],
-                line,
-                Some(line),
+                location.map_or(0, |(line, _)| line),
+                location.map(|(line, _)| line),
                 crate::language::syntax::language_for_path(&path),
             )),
         });
         self.preview_path = Some(path);
+        self.preview_location = location;
         (retired, Some(PreviewTicket(self.preview_epoch.clone())))
     }
+    pub(in crate::editor::session) fn prepare_diff_preview(
+        &mut self,
+        policy: crate::workspace::git::GitHunkPolicy,
+        scope: WorkspaceVersion,
+        configuration: u64,
+        title: String,
+    ) -> Option<RequestId> {
+        let key = (scope.clone(), policy.status_revision, policy.file.clone(), policy.layer);
+        if self.diff_preview_key.as_ref() == Some(&key)
+            && self.preview_scope.as_ref() == Some(&(scope.clone(), configuration)) {
+            return None;
+        }
+        let retired = self.clear_preview();
+        self.picker_preview_replaced();
+        self.preview_scope = Some((scope, configuration));
+        self.diff_preview_key = Some(key);
+        if self.diff_preview.start(policy).is_ok() {
+            self.preview = Some(PickerPreview {
+                title,
+                body: PickerPreviewBody::Text(PickerTextPreview::new(
+                    vec!["loading…".into()], 0, None, None,
+                )),
+            });
+        }
+        retired
+    }
+
+    pub(in crate::editor::session) fn poll_diff_preview(
+        &mut self,
+        scope: WorkspaceVersion,
+        configuration: u64,
+    ) -> bool {
+        if self.diff_preview_key.is_none() {
+            return false;
+        }
+        if self.preview_scope.as_ref() != Some(&(scope, configuration)) {
+            self.clear_preview();
+            return true;
+        }
+        match self.diff_preview.poll() {
+            Ok(Some(snapshot)) => {
+                let provenance = match snapshot.layer {
+                    crate::workspace::git::GitDiffLayer::Staged => "HEAD -> index",
+                    crate::workspace::git::GitDiffLayer::Unstaged => "index -> disk",
+                };
+                let body = PickerPreviewBody::Diff(crate::editor::session::git::diff_preview_from_hunks(
+                    &snapshot.hunks, provenance, false, 0,
+                ));
+                if let Some(preview) = &mut self.preview {
+                    preview.body = body;
+                }
+                true
+            }
+            Err(_) => {
+                self.preview = None;
+                true
+            }
+            Ok(None) => false,
+        }
+    }
+
     pub(in crate::editor::session) fn admit_preview(
         &mut self,
         ticket: PreviewTicket,
@@ -160,11 +227,13 @@ impl SearchSession {
                 Ok(bytes) if bytes.len() > maximum => {
                     vec!["preview exceeds admitted byte limit".into()]
                 }
-                Ok(bytes) => crate::editor::text::TextBuffer::from_bytes(bytes).map_or_else(
+                Ok(bytes) => crate::editor::text::decode_utf8(bytes).map_or_else(
                     |_| vec!["binary preview unavailable".into()],
-                    |buffer| {
-                        text.first_line = text.highlight_line.unwrap_or(0).saturating_sub(8);
-                        picker_preview_lines_from(&buffer.to_string(), text.first_line, 512, None)
+                    |decoded| {
+                        let first = self.preview_location.map_or(0, |(line, _)| line.saturating_sub(8));
+                        text.first_line = first;
+                        text.highlight_line = self.preview_location.map(|(line, _)| line);
+                        picker_preview_lines_from(&decoded.text, first, 512, self.preview_location)
                     },
                 ),
                 Err(error) => vec![format!("preview unavailable: {error}")],

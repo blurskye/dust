@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::TrySendError,
     time::Duration,
+    sync::{Arc, atomic::AtomicBool},
 };
 
 pub(super) struct ToolingSession {
@@ -22,9 +23,12 @@ pub(super) struct ToolingSession {
     nix_preferred: BTreeSet<String>,
     managed_preferred: BTreeSet<String>,
     managed_versions: BTreeMap<String, String>,
+    /// Runtime choices made while the saved settings are being read.
+    changed_runtimes: Option<BTreeSet<String>>,
     installer: ToolInstaller,
     version_service: ToolVersionService,
     probe_directory: RefCell<Option<PathBuf>>,
+    probe_cancelled: Arc<AtomicBool>,
     version_pending: BTreeSet<String>,
     version_queued: VecDeque<ToolVersionRequest>,
     versions: BTreeMap<String, Result<String, String>>,
@@ -141,9 +145,11 @@ impl ToolingSession {
             nix_preferred: BTreeSet::new(),
             managed_preferred: BTreeSet::new(),
             managed_versions: BTreeMap::new(),
+            changed_runtimes: None,
             installer: ToolInstaller::start(),
             version_service: ToolVersionService::start(),
             probe_directory: RefCell::new(None),
+            probe_cancelled: Arc::new(AtomicBool::new(false)),
             version_pending: BTreeSet::new(),
             version_queued: VecDeque::new(),
             versions: BTreeMap::new(),
@@ -197,6 +203,10 @@ impl ToolingSession {
         let mut unavailable = false;
         let mut rustup_key = None;
         while let Some(result) = self.version_service.try_result() {
+            if result.result.as_ref().is_err_and(|error| error == "version probe cancelled") {
+                self.version_pending.remove(&result.id);
+                continue;
+            }
             // Looked up only when a result arrives: this runs every main loop pass.
             let rustup_key = rustup_key.get_or_insert_with(|| {
                 self.entries
@@ -236,6 +246,9 @@ impl ToolingSession {
         }) {
             return Err("this managed runtime has no installable version".into());
         }
+        if let Some(changed) = &mut self.changed_runtimes {
+            changed.insert(id.into());
+        }
         self.managed_versions.insert(id.into(), version);
         Ok(())
     }
@@ -260,6 +273,9 @@ impl ToolingSession {
                 id,
                 version.ok_or("this managed runtime has no installable version")?,
             )?;
+        }
+        if let Some(changed) = &mut self.changed_runtimes {
+            changed.insert(id.into());
         }
         self.nix_preferred.remove(id);
         self.managed_preferred.remove(id);
@@ -290,13 +306,20 @@ impl ToolingSession {
             )
             .collect()
     }
+    pub(super) fn begin_restore(&mut self) {
+        self.changed_runtimes = Some(BTreeSet::new());
+    }
+    pub(super) fn finish_restore(&mut self) {
+        self.changed_runtimes = None;
+    }
     pub(super) fn restore(&mut self, metadata: &BTreeMap<String, String>) {
-        self.nix_preferred.clear();
-        self.managed_preferred.clear();
-        self.managed_versions.clear();
+        let changed = self.changed_runtimes.take().unwrap_or_default();
+        self.nix_preferred.retain(|id| changed.contains(id));
+        self.managed_preferred.retain(|id| changed.contains(id));
+        self.managed_versions.retain(|id, _| changed.contains(id));
         for entry in &self.entries {
             let definition = &entry.definition;
-            if definition.kind != ToolKind::Lsp {
+            if definition.kind != ToolKind::Lsp || changed.contains(&definition.id) {
                 continue;
             }
             match metadata
@@ -684,6 +707,10 @@ impl ToolingSession {
         }
     }
 
+    pub(in crate::editor::session) fn set_probe_cancellation(&mut self, cancelled: Arc<AtomicBool>) {
+        self.probe_cancelled = cancelled;
+    }
+
     pub(in crate::editor::session) fn queue_tool_version_probe(
         &mut self,
         definition: &ToolDefinition,
@@ -721,6 +748,7 @@ impl ToolingSession {
             environment,
             current_directory,
             timeout,
+            cancelled: self.probe_cancelled.clone(),
         });
         self.submit_version_probes();
     }
@@ -795,6 +823,46 @@ impl ToolingSession {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rustup_probes_use_project_directory_and_separate_cached_results() {
+        use std::{fs, os::unix::fs::PermissionsExt, thread, time::Instant};
+        let root = tempfile::tempdir().unwrap();
+        let one = root.path().join("one");
+        let two = root.path().join("two");
+        fs::create_dir(&one).unwrap();
+        fs::create_dir(&two).unwrap();
+        fs::write(two.join("available"), "").unwrap();
+        let executable = root.path().join("rust-analyzer");
+        fs::write(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut definition = crate::tools::bundled_tool_catalog()
+            .into_iter()
+            .find(|tool| tool.id == "rust-analyzer")
+            .unwrap();
+        definition.probe_args = vec!["--version".into()];
+        let mut tooling = ToolingSession::new(Vec::new());
+        for (directory, success) in [(one, false), (two, true)] {
+            tooling.set_probe_directory(Some(directory));
+            let key =
+                tooling.tool_version_key(&definition, LspRuntimeSource::Path, Some(&executable));
+            assert!(!tooling.versions.contains_key(&key));
+            tooling.queue_tool_version_probe(
+                &definition,
+                LspRuntimeSource::Path,
+                executable.clone(),
+            );
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !tooling.versions.contains_key(&key) {
+                tooling.poll_versions(true);
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(tooling.versions[&key].is_ok(), success);
+        }
+        assert_eq!(tooling.versions.len(), 2);
+    }
 
     #[test]
     fn full_probe_queue_retries_without_caching_admission_errors() {

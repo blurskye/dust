@@ -22,6 +22,50 @@ use api::dust::plugin::host as wire;
 const GUEST_FUEL_PER_CALL: u64 = 10_000_000;
 const MAX_MESSAGE_BYTES: usize = 4_096;
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+const MAX_QUEUED_UI_BYTES: usize = 4 * MAX_REQUEST_BYTES;
+
+fn ui_request_size(request: &wire::UiRequest) -> usize {
+    let mut bytes = std::mem::size_of_val(request);
+    let tree = match request {
+        wire::UiRequest::Open(open) => {
+            bytes = bytes.saturating_add(open.content_type.len()).saturating_add(open.title.len());
+            open.tree.as_ref()
+        }
+        wire::UiRequest::Replace(replace) => Some(&replace.tree),
+        wire::UiRequest::Cells(update) => {
+            bytes = bytes.saturating_add(std::mem::size_of_val(update.dirty.as_slice()));
+            for cell in &update.cells {
+                bytes = bytes.saturating_add(std::mem::size_of_val(cell))
+                    .saturating_add(cell.grapheme.len());
+            }
+            for hit in &update.hits {
+                bytes = bytes.saturating_add(std::mem::size_of_val(hit))
+                    .saturating_add(hit.action.len()).saturating_add(hit.label.len());
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(tree) = tree {
+        for node in &tree.nodes {
+            bytes = bytes.saturating_add(std::mem::size_of_val(node))
+                .saturating_add(node.label.len()).saturating_add(node.text.len())
+                .saturating_add(node.value.len())
+                .saturating_add(node.action.as_ref().map_or(0, String::len))
+                .saturating_add(std::mem::size_of_val(node.children.as_slice()));
+            for item in &node.items {
+                bytes = bytes.saturating_add(std::mem::size_of_val(item));
+                for text in [&item.id, &item.text, &item.secondary, &item.origin, &item.status]
+                    .into_iter().chain(item.children.iter())
+                {
+                    bytes = bytes.saturating_add(text.len());
+                }
+                bytes = bytes.saturating_add(std::mem::size_of_val(item.children.as_slice()));
+            }
+        }
+    }
+    bytes
+}
 
 fn guest_failure(failure: wire::Failure) -> String {
     if failure.message.len() > MAX_MESSAGE_BYTES {
@@ -258,6 +302,19 @@ impl HostState {
                 wire::ErrorCode::QueueFull,
                 "target UI request queue is full",
                 true,
+            ));
+        }
+        let request_bytes = ui_request_size(&request)
+            .saturating_add(invocation_size(&invocation).unwrap_or(usize::MAX));
+        let queued_bytes = self.requests.iter().fold(request_bytes, |bytes, staged| {
+            bytes.saturating_add(ui_request_size(&staged.request))
+                .saturating_add(invocation_size(&staged.invocation).unwrap_or(usize::MAX))
+        });
+        if request_bytes > MAX_REQUEST_BYTES || queued_bytes > MAX_QUEUED_UI_BYTES {
+            return Err(failure(
+                wire::ErrorCode::LimitExceeded,
+                "target UI payload exceeds the byte ceiling",
+                false,
             ));
         }
         let token = self.next_token;
@@ -780,5 +837,122 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.lease.active.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wire::Host;
+
+    fn host() -> HostState {
+        HostState {
+            limits: wasmtime::StoreLimitsBuilder::new().build(),
+            invocation: Some(wire::Invocation {
+                id: 1, kind: wire::ExecutionKind::Command, command: "open".into(),
+                arguments: Vec::new(), source: None,
+                ui: Some(wire::UiContext {
+                    graph_revision: 1, tab: 1, window: 1, view: 1,
+                    content: 1, document_bytes: None,
+                }),
+            }),
+            invocation_catalogue: Some(super::super::PluginContributionCatalog::default().version()),
+            lease: Arc::new(LoadLease {
+                owner: "test".into(), generation: 1, checksum: String::new(),
+                activation: Arc::new(()), active: AtomicBool::new(true),
+            }),
+            next_token: 1, pending_tokens: BTreeSet::new(), requests: Vec::new(),
+            notices: Vec::new(),
+            contents: BTreeMap::from([("test".into(), ContentAdmission {
+                private: false, clone_view: false,
+            })]),
+            callback_dimensions: BTreeMap::new(), delivered_events: BTreeSet::new(), active: true,
+        }
+    }
+
+    fn open(text: String) -> wire::UiRequest {
+        wire::UiRequest::Open(wire::OpenView {
+            content_type: "test".into(), content: None, title: "Test".into(),
+            graph_revision: 1, tab: 1, placement: wire::Placement::Fullscreen,
+            tree: Some(wire::Tree {
+                revision: 1, root: 1,
+                nodes: vec![wire::Node {
+                    id: 1, kind: wire::NodeKind::Text, label: String::new(), text,
+                    value: String::new(), value_revision: 1, role: wire::Role::Normal,
+                    enabled: true, required: false, checked: false, action: None,
+                    items: Vec::new(), children: Vec::new(),
+                }],
+            }),
+        })
+    }
+
+    #[test]
+    fn target_ui_rejects_oversized_tree_strings_before_retaining_them() {
+        let mut host = host();
+        let request = open("x".repeat(MAX_REQUEST_BYTES));
+        assert_eq!(host.queue_ui(request).unwrap_err().code, wire::ErrorCode::LimitExceeded);
+        assert!(host.requests.is_empty());
+        assert!(host.pending_tokens.is_empty());
+        assert_eq!(host.next_token, 1);
+
+        let mut request = open(String::new());
+        let wire::UiRequest::Open(open) = &mut request else { unreachable!() };
+        open.tree.as_mut().unwrap().nodes[0].items.push(wire::Item {
+            id: "item".into(), text: String::new(), secondary: String::new(),
+            origin: String::new(), status: String::new(), enabled: true, selected: false,
+            children: vec!["x".repeat(MAX_REQUEST_BYTES)],
+        });
+        assert_eq!(host.queue_ui(request).unwrap_err().code, wire::ErrorCode::LimitExceeded);
+        assert!(host.requests.is_empty());
+    }
+
+    #[test]
+    fn target_ui_bounds_aggregate_bytes_and_releases_budget_on_rollback_and_drain() {
+        let mut host = host();
+        let checkpoint = host.checkpoint();
+        let request = open("x".repeat(MAX_REQUEST_BYTES / 2));
+        for _ in 0..7 {
+            host.queue_ui(request.clone()).unwrap();
+        }
+        assert_eq!(host.queue_ui(request.clone()).unwrap_err().code, wire::ErrorCode::LimitExceeded);
+        assert_eq!(host.requests.len(), 7);
+        assert_eq!(host.pending_tokens.len(), 7);
+        host.rollback(checkpoint);
+        assert!(host.requests.is_empty());
+        host.queue_ui(request.clone()).unwrap();
+        let _drained = std::mem::take(&mut host.requests);
+        for _ in 0..7 {
+            host.queue_ui(request.clone()).unwrap();
+        }
+    }
+
+    #[test]
+    fn target_ui_bounds_private_graphemes_and_hit_strings() {
+        let mut host = host();
+        let invocation = host.invocation.as_mut().unwrap();
+        invocation.kind = wire::ExecutionKind::Lifecycle;
+        invocation.ui = None;
+        host.callback_dimensions.insert(1, 1);
+        for field in 0..3 {
+            let mut update = wire::CellUpdate {
+                view: 1, dimensions_revision: 1, expected: 0, revision: 1, full: true,
+                dirty: Vec::new(), cells: Vec::new(), hits: Vec::new(), cursor: None,
+            };
+            let text = "x".repeat(MAX_REQUEST_BYTES);
+            if field == 0 {
+                update.cells.push(wire::Cell {
+                    x: 0, y: 0, grapheme: text, continuation: false, role: wire::Role::Normal,
+                });
+            } else {
+                update.hits.push(wire::Hit {
+                    bounds: wire::Rect { x: 0, y: 0, width: 1, height: 1 },
+                    action: if field == 1 { text.clone() } else { String::new() },
+                    label: if field == 2 { text } else { String::new() },
+                });
+            }
+            assert_eq!(host.queue_ui(wire::UiRequest::Cells(update)).unwrap_err().code,
+                wire::ErrorCode::LimitExceeded);
+            assert!(host.requests.is_empty());
+        }
     }
 }

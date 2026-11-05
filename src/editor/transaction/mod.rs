@@ -815,7 +815,7 @@ impl EditorDraft {
         revision: BufferRevision,
         bytes: Vec<u8>,
         path: std::path::PathBuf,
-        snapshot: std::sync::Arc<str>,
+        snapshot: (std::sync::Arc<str>, crate::editor::text::FileFormat),
     ) -> bool {
         let changed = self
             .state
@@ -827,6 +827,7 @@ impl EditorDraft {
         };
         let saved_text = saved.to_string();
         let mut saved_revision = revision;
+        let (snapshot, snapshot_format) = snapshot;
         if !changed && saved_text != snapshot.as_ref() {
             // Save policy only changes the trailing newlines. Record that edit so the
             // live text and persistent undo both describe the bytes just written.
@@ -868,6 +869,14 @@ impl EditorDraft {
         {
             return false;
         }
+        // Keep the requested format as the dirty baseline until an explicit line-ending
+        // policy is applied, while retaining any final-newline normalization in the text.
+        let format = if changed {
+            snapshot_format
+        } else {
+            self.state.buffers[buffer].text.format().clone()
+        };
+        self.state.buffers[buffer].set_saved_snapshot(Some((saved_text.into(), format)));
         if changed {
             self.state.set_buffer_dirty(buffer, true);
         }
@@ -880,6 +889,9 @@ impl EditorDraft {
     ) {
         if let Some(buffer) = self.state.buffers.get_mut(buffer) {
             buffer.text.set_line_ending(ending);
+            if let Ok(saved) = TextBuffer::from_bytes(buffer.persisted_bytes()) {
+                buffer.set_saved_snapshot(Some((saved.to_string().into(), saved.format().clone())));
+            }
         }
     }
     pub(crate) fn close_document(
@@ -1201,7 +1213,7 @@ mod tests {
             state.views[view].cursor = ByteOffset(cursor);
             let text = &state.buffers[buffer].text;
             let mut draft = state.draft();
-            assert!(draft.save_document(buffer, &text.source_version(), text.revision(), saved.as_bytes().to_vec(), "/workspace/file".into(), source.into()));
+            assert!(draft.save_document(buffer, &text.source_version(), text.revision(), saved.as_bytes().to_vec(), "/workspace/file".into(), (source.into(), text.format().clone())));
             state = draft.accept(&state.version()).unwrap();
             assert_eq!(state.views[view].cursor, ByteOffset(expected_cursor));
         }

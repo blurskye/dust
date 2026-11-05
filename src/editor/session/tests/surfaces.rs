@@ -262,6 +262,65 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
 }
 
 #[test]
+fn log_selection_survives_eviction_of_an_earlier_entry() {
+    let mut app = app();
+    for line in ["first", "selected", "last"] {
+        app.language.append_log(line.into(), 3);
+    }
+    app.show_lsp_logs();
+    app.picker_move(-1);
+    let selected = app.ui.picker.as_ref().unwrap().selected.unwrap();
+    assert_eq!(app.ui.picker.as_ref().unwrap().rows[selected].label, "selected");
+    app.language.append_log("new".into(), 3);
+    app.show_lsp_logs();
+    let picker = app.ui.picker.as_ref().unwrap();
+    assert_eq!(picker.rows[picker.selected.unwrap()].label, "selected");
+}
+
+#[test]
+fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("original.rs");
+    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone())).unwrap();
+    app.set_dashboard_visibility(false);
+    let row = crate::debugger::DapSourceBreakpoint {
+        path,
+        line: 1,
+        column: Some(2),
+        condition: Some("old".into()),
+        hit_condition: Some("3".into()),
+        log_message: Some("value={value}".into()),
+    };
+    app.debugger_session.breakpoint(row.clone(), false).unwrap();
+    app.process_effect(AppEffect::DapBreakpointConfigure {
+        condition: None, hit_condition: None, log_message: None,
+    });
+    assert_eq!(app.input.prompt().unwrap().input, "old");
+    // An asynchronous stop can navigate while the condition question is open.
+    app.state.views[view].cursor = ByteOffset(6);
+    let another = app.state.workspace_root.join("another.rs");
+    app.state.open_text(TextBuffer::from_text("another"), Some(another)).unwrap();
+    app.input.prompt_insert(" && ready");
+    app.submit_prompt();
+    let mut expected = row;
+    expected.condition = Some("old && ready".into());
+    assert_eq!(app.debugger_session.persisted_breakpoints().len(), 1);
+    assert_eq!(app.debugger_session.breakpoint_at(&expected.path, expected.line), Some(&expected));
+}
+
+#[test]
+fn saved_watches_are_listed_without_a_debugger() {
+    let mut app = app();
+    app.process_effect(AppEffect::DapWatchAdd("counter".into()));
+    app.process_effect(AppEffect::DapWatchList);
+    let picker = app.ui.picker.as_ref().unwrap();
+    assert_eq!(picker.rows.len(), 1);
+    assert_eq!(picker.rows[0].label, "counter");
+    app.accept_picker();
+    assert_eq!(app.debugger_session.watches(), ["counter"]);
+}
+
+#[test]
 fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
     let mut app = app();
     for logs in [false, true] {
@@ -3773,6 +3832,35 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
 }
 
 #[test]
+fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
+    let mut app = app();
+    // Even the largest dimensions must not overflow before the missing-terminal check.
+    app.window_session.observe_size((u16::MAX, u16::MAX));
+    app.process_effect(AppEffect::TerminalFloat(None));
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message("terminal_missing", &[]).as_str()));
+
+    app.window_session.observe_size((80, 24));
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::editor::session::terminal::TerminalFixture {
+            profile: "shell".into(), screen: PtyScreen::new(80, 8, 100),
+            running: true, exit_code: None, truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.handle_event(UiEvent::Resize(20_000, 24));
+    app.process_effect(AppEffect::TerminalFloat(None));
+    let ids = app.window_session.native_ids().terminal(1).unwrap();
+    assert_eq!(app.window_session.graph().window(ids.window).unwrap().placement,
+        WindowPlacement::Floating(WindowRect { x: 2_000, y: 2, width: 16_000, height: 19 }));
+}
+
+#[test]
 fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.ui.terminal_panel.height = 10;
@@ -4341,6 +4429,39 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
+    let name = loaded.config.agents.default.clone();
+    loaded.config.agents.profiles.get_mut(&name).unwrap().cli = vec!["cat".into()];
+    let mut shell = loaded.config.terminals.profiles["shell"].clone();
+    shell.program = "/bin/cat".into();
+    shell.arguments.clear();
+    shell.float = false;
+    loaded.config.terminals.profiles.insert(name.clone(), shell);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open(&name);
+    let app = driver.application_mut();
+    let shell = app.terminal_session.selected().unwrap();
+    assert!(!app.agent_terminal(shell));
+    assert!(!app.terminal_session.side(shell));
+    app.process_effect(AppEffect::TerminalUnfocus);
+    app.process_effect(AppEffect::AgentAsk);
+    let agent = app.terminal_session.selected().unwrap();
+    assert_ne!(shell, agent, "an ordinary shell is not reused as an agent");
+    assert!(app.agent_terminal(agent));
+    assert!(app.terminal_session.side(agent));
+    app.process_effect(AppEffect::TerminalUnfocus);
+    app.process_effect(AppEffect::AgentAsk);
+    assert_eq!(app.terminal_session.selected(), Some(agent));
+    assert_eq!(app.terminal_session.descriptions().len(), 2);
 }
 
 #[cfg(unix)]
@@ -5161,6 +5282,82 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
 
 #[cfg(unix)]
 #[test]
+fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let mut program = loaded.config.terminals.profiles["shell"].clone();
+    program.program = "/bin/sh".into();
+    program.arguments = vec!["-c".into(), "printf ready > debug-ready; while [ ! -f debug-exit ]; do sleep .01; done".into()];
+    program.float = false;
+    loaded.config.terminals.profiles.insert("debug-output".into(), program);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("shell");
+    let app = driver.application_mut();
+    let shell = app.terminal_session.selected().unwrap();
+    app.process_effect(AppEffect::TerminalUnfocus);
+    let (_service, adapter) = crate::debugger::test_session();
+    let (_request, reply) = adapter.terminal_reply();
+    app.request_terminal_open("debug-output", Some(reply));
+    let debug = app.terminal_session.selected().unwrap();
+    assert_ne!(debug, shell);
+    assert_eq!(app.terminal_session.displayed(), Some(debug));
+    assert!(!app.window_session.terminal_focused());
+    let root = app.state.workspace_root.clone();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !root.join("debug-ready").exists() {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    driver.application_mut().reveal_terminal(shell);
+    std::fs::write(root.join("debug-exit"), "exit").unwrap();
+    loop {
+        driver.pump_terminal();
+        let app = driver.application_mut();
+        if app.terminal_session.descriptions().iter().any(|(id, _, state)| {
+            *id == debug.0 && *state == crate::ui::window::ContentLifecycle::Exited
+        }) { break; }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(driver.application_mut().window_session.focused_terminal(), Some(shell.0));
+}
+
+#[cfg(unix)]
+#[test]
+fn retired_debugger_terminal_preflight_never_launches_the_program() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    let mut program = loaded.config.terminals.profiles["shell"].clone();
+    program.program = "/bin/sh".into();
+    program.arguments = vec!["-c".into(), "printf started > retired-debug-started".into()];
+    loaded.config.terminals.profiles.insert("retired-debug".into(), program);
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    let (_service, adapter) = crate::debugger::test_session();
+    let (_request, reply) = adapter.terminal_reply();
+    let app = driver.application_mut();
+    app.request_terminal_open("retired-debug", Some(reply));
+    let debug = app.terminal_session.selected().unwrap();
+    assert_eq!(app.terminal_session.preflight_count(), 1);
+    let root = app.state.workspace_root.clone();
+    let _ = app.debugger_session.stop();
+    assert!(!app.debugger_session.terminal_current(&debug));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while driver.application_mut().terminal_session.preflight_count() != 0 {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!driver.application_mut().terminal_session.contains(debug));
+    assert!(!root.join("retired-debug-started").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     use super::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
@@ -5517,6 +5714,44 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
 }
 
 #[test]
+fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
+    use crate::editor::session::persistence::RestoreContext;
+
+    let mut app = app();
+    let path = app.state.workspace_root.join("shared-panes.txt");
+    std::fs::write(&path, "first\nsecond\n").unwrap();
+    app.start_open(path);
+    wait_vfs(&mut app);
+    let first = app.state.active_view.unwrap();
+    app.state.views[first].cursor = ByteOffset(1);
+    app.state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+    let second = app.state.active_view.unwrap();
+    assert_ne!(first, second);
+    app.state.views[second].cursor = ByteOffset(8);
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let session = app.capture_session().unwrap();
+    assert_eq!(session.tabs[0].focused_pane, Some(1));
+    // Exercise serialization as well as capture and asynchronous restoration.
+    let session = serde_json::from_slice(&serde_json::to_vec(&session).unwrap()).unwrap();
+    app.persistence.fixture_restore_source(RestoreContext {
+        editor: &app.state,
+        workspace: &app.workspace,
+        input: &app.input,
+        windows: &app.window_session,
+        configuration: app.configuration.binding_revision(),
+    });
+    app.restore_session(session);
+    wait_vfs(&mut app);
+    assert_eq!(app.ui.config_diagnostic, None);
+    let active = app.state.active_view.unwrap();
+    assert_eq!(app.state.views[active].cursor, ByteOffset(8));
+    assert_eq!(app.state.views.len(), 2);
+    assert!(app.state.views.values().any(|view| view.cursor == ByteOffset(1)));
+    assert_eq!(app.capture_session().unwrap().tabs[0].focused_pane, Some(1));
+}
+
+#[test]
 fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     use crate::editor::session::persistence::RestoreContext;
 
@@ -5793,6 +6028,61 @@ fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
 }
 
 #[test]
+fn startup_plugin_publication_waits_for_session_restoration() {
+    use crate::persistence::{PersistedLayout, PersistedPane, PersistedSession, PersistedState, PersistedTab, PersistenceService};
+    let mut app = app();
+    let path = app.state.workspace_root.join("restored.txt");
+    fs::write(&path, "restored text\n").unwrap();
+    let session = PersistedSession {
+        roots: vec![app.state.workspace_root.clone()],
+        tabs: vec![PersistedTab {
+            layout: PersistedLayout::Pane { pane: PersistedPane {
+                path: path.clone(), cursor: 3, anchor: 3, scroll_line: 0, scroll_column: 0,
+            } },
+            focused_path: Some(path.clone()),
+            focused_pane: None,
+        }],
+        active_tab: 0, window_rules: Vec::new(), content_descriptors: Vec::new(), pinned: Vec::new(),
+    };
+    let saved = tempdir().unwrap();
+    let state_path = saved.path().join("session.json");
+    fs::write(&state_path, serde_json::to_vec(&PersistedState {
+        session: Some(session), ..Default::default()
+    }).unwrap()).unwrap();
+    let (worker, release) = PersistenceService::gated_for_test(1);
+    app.persistence = crate::editor::session::persistence::PersistenceSession::new(worker, state_path);
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.load_persistence();
+    fixture.indexed(crate::extensions::index_manifest_contributions(
+        &plugin_manifest("demo", "plugin.demo.test", "x y"), 1, "startup".into(),
+    ).unwrap());
+    let revision = app.configuration.binding_revision();
+    app.process_plugin_events();
+    assert!(app.extension.contributions().get("demo").is_none());
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.persistence.pending() {
+        app.process_plugin_events();
+        app.process_persistence_events();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(app.persistence.restoring());
+    app.process_plugin_events();
+    assert_eq!(app.configuration.binding_revision(), revision);
+    wait_vfs(&mut app);
+    assert!(!app.persistence.restoring());
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "restored text\n");
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(3));
+    app.process_plugin_events();
+    assert!(app.extension.contributions().get("demo").is_some());
+    assert!(app.configuration.binding_revision() > revision);
+}
+
+#[test]
 fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::{
         editor::session::persistence::RestoreContext,
@@ -5854,9 +6144,24 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     wait_vfs(&mut app);
     assert_eq!(app.state.active_view, Some(view));
     let identity = app.state.window_version();
+    let (manager, plugin) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+    });
+    let invocation = plugin.take();
     app.persistence.fixture_restore_source(context!());
+    app.session_restore_notice = true;
+    app.notify_message("restoring".into(), false);
     app.restore_session(session.clone());
+    assert_eq!(app.ui.notification.as_deref(), Some("restoring"));
     wait_vfs(&mut app);
+    assert_eq!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    plugin.reply_with(&invocation, |execution| {
+        execution.messages.push("obsolete plugin reply".into());
+    });
+    app.process_plugin_events();
+    assert!(!app.notices.history().any(|(_, message)| message == "obsolete plugin reply"));
     let buffer = app.state.active_buffer_id().unwrap();
     assert!(!app.state.buffers.contains_key(newer));
     assert_ne!(buffer, newer);
@@ -5888,8 +6193,12 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         pane.path = app.state.workspace_root.join("missing.txt");
     }
     app.persistence.fixture_restore_source(context!());
+    app.session_restore_notice = true;
+    app.notify_message("waiting for missing file".into(), false);
     app.restore_session(missing);
     wait_vfs(&mut app);
+    assert_ne!(app.ui.notification.as_deref(), Some(app.message("session_restored", &[]).as_str()));
+    assert!(!app.session_restore_notice);
     assert_eq!(app.state.version(), before);
     assert_eq!(app.window_session.graph(), &graph_before);
     assert_eq!(
@@ -6313,6 +6622,14 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
     assert!(app.configuration.settings().editor.git_signs.enabled);
 
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+    let zoomed_tab = app.state.active_tab;
+    app.process_effect(AppEffect::Zen);
+    app.process_effect(AppEffect::Zen);
+    assert!(app.state.is_zoomed(), "zen must preserve a pre-existing zoom");
+    assert_eq!(app.state.active_tab, zoomed_tab);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Zoom));
+
     let wrap = app.configuration.settings().editor.wrap;
     app.process_effect(AppEffect::ViewToggle(
         crate::editor::session::ViewToggle::Wrap,
@@ -6418,6 +6735,8 @@ fn a_saved_location_reads_as_file_and_line() {
         app.persisted_location_label(&location(0))
             .ends_with("marked-location.txt:1")
     );
+    std::fs::write(&path, b"\xef\xbb\xbfa\r\nb\r\nc\r\n").unwrap();
+    assert!(app.persisted_location_label(&location(4)).ends_with("marked-location.txt:3"));
     std::fs::remove_file(&path).unwrap();
     assert!(
         app.persisted_location_label(&location(13))

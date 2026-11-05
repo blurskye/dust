@@ -894,6 +894,58 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 }
 
 #[test]
+fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
+    for mode in [crate::editor::EditorMode::Normal, crate::editor::EditorMode::Insert, crate::editor::EditorMode::Replace] {
+        let mut app = app();
+        app.window_session.observe_size((80, 24));
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.editor.wrap = false;
+        app.configuration.install_fixture(fixture);
+        let source = format!("0123456789abcdef\n{}", "x\n".repeat(100));
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text(&source), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.state.views[view].cursor = ByteOffset(10);
+        app.state.views[view].mode = mode;
+        app.scroll_view("half_down", 1);
+        let text = &app.state.buffers[buffer].text;
+        let cursor = app.state.views[view].cursor;
+        let line = text.byte_to_line(cursor).unwrap();
+        assert!(line > 0);
+        assert_eq!(cursor.get() - text.line_to_byte(line).unwrap().get(), usize::from(matches!(mode, crate::editor::EditorMode::Insert | crate::editor::EditorMode::Replace)));
+        if mode == crate::editor::EditorMode::Normal {
+            app.handle_configured_key(KeyEvent::character('x'));
+            assert_eq!(app.state.buffers[buffer].text.line(line).unwrap(), "\n");
+        }
+    }
+}
+
+#[test]
+fn cancelling_incremental_search_restores_the_original_viewport() {
+    let mut app = app();
+    app.window_session.observe_size((40, 20));
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.wrap = false;
+    app.configuration.install_fixture(fixture);
+    let source = format!("{}needle\n", "line\n".repeat(100));
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&source), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let cursor = app.state.buffers[buffer].text.line_to_byte(15).unwrap();
+    app.state.views[view].cursor = cursor;
+    app.state.views[view].scroll_line = 10;
+    app.state.views[view].scroll_column = 0;
+    for key in "/needle".chars() {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert!(app.state.views[view].scroll_line > 10);
+    app.handle_configured_key("escape".parse().unwrap());
+    assert_eq!(app.state.views[view].cursor, cursor);
+    assert_eq!(app.state.views[view].scroll_line, 10);
+    assert_eq!(app.state.views[view].scroll_column, 0);
+    assert_eq!(app.state.views[view].scroll_wrap_row, 0);
+}
+
+#[test]
 fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
     let mut app = app();
     app.window_session.observe_size((80, 44));

@@ -24,6 +24,72 @@ fn commit(repo: &git2::Repository, path: &str, text: &str) {
         .unwrap();
 }
 #[test]
+fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_late_work() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "negative.txt", "one\ntwo\nthree\n");
+    std::fs::write(dir.path().join("negative.txt"), "one\nchanged\nthree\n").unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    let policy = GitHunkPolicy {
+        scope_root: root.clone(),
+        repository_id: GitRepositoryId(hasher.finish()),
+        status_revision: 9,
+        root_revision: 4,
+        file: "negative.txt".into(),
+        layer: GitDiffLayer::Unstaged,
+        maximum_hunks: 10,
+        maximum_lines: 100,
+        maximum_bytes: 4096,
+        deadline: Duration::from_secs(2),
+    };
+    let snapshot = read_hunks(&policy).unwrap();
+    let base = GitStageHunkRequest {
+        policy,
+        hunk_snapshot_revision: 1,
+        hunk_id: snapshot.hunks[0].id,
+        selected: snapshot.hunks[0].clone(),
+        expected_index: Some(snapshot.index_fingerprint),
+        expected_worktree: snapshot.worktree_sha256,
+        maximum_patch_bytes: 65536,
+        deadline: Duration::from_secs(2),
+    };
+
+    let mut wrong = base.clone();
+    wrong.selected.header.push_str(" stale");
+    let mut service = GitMutationService::default();
+    service.start(GitMutationRequest::StageHunk(wrong)).unwrap();
+    assert_eq!(
+        wait_mutation_error(&mut service),
+        GitMutationError::WrongHunk
+    );
+
+    let mut stale_worktree = base.clone();
+    stale_worktree.expected_worktree = Some([0; 32]);
+    service
+        .start(GitMutationRequest::StageHunk(stale_worktree.clone()))
+        .unwrap();
+    assert_eq!(
+        wait_mutation_error(&mut service),
+        GitMutationError::StaleWorktree
+    );
+    assert_eq!(
+        stage_hunk(GitMutationGeneration(77), &base, &AtomicBool::new(true)),
+        Err(GitMutationError::Cancelled)
+    );
+    service
+        .start(GitMutationRequest::StageHunk(stale_worktree))
+        .unwrap();
+    service.cancel();
+    let generation = service.next;
+    for _ in 0..256 {
+        assert!(service.poll().unwrap().is_none());
+        assert_eq!(service.next, generation);
+    }
+}
+
+#[test]
 fn status_is_bounded_sorted_and_idle() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -200,6 +266,56 @@ fn unsaved_revision_lookup_handles_large_sorted_lists_and_misses() {
     for index in 0..50_000 {
         assert_eq!(unsaved_document_revision(&documents, Path::new(&format!("missing-{index:05}"))), None);
     }
+}
+
+#[test]
+fn status_keeps_index_and_worktree_codes_independent() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "base.txt", "base\n");
+    std::fs::write(dir.path().join("added.txt"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("added.txt")).unwrap();
+    index.write().unwrap();
+    std::fs::write(dir.path().join("added.txt"), "modified after staging\n").unwrap();
+    let snapshot = super::status::read_status(GitStatusGeneration(1), &GitStatusPolicy {
+        root: dir.path().into(), root_revision: 1,
+        maximum_files: 10, maximum_path_bytes: 1024,
+        deadline: Duration::from_secs(2),
+    }, &[], &AtomicBool::new(false)).unwrap();
+    let entry = snapshot.entries.iter().find(|entry| entry.relative_path == Path::new("added.txt")).unwrap();
+    assert_eq!(entry.change_code(), "AM");
+    assert!(entry.sources.staged && entry.sources.unstaged);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_change_codes_preserve_type_changes_on_both_sides() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "changed.txt", "regular\n");
+    let path = dir.path().join("changed.txt");
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink("target.txt", &path).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("changed.txt")).unwrap();
+    index.write().unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::write(&path, "regular again\n").unwrap();
+    let snapshot = read_status(dir.path());
+    let entry = snapshot.entries.iter().find(|entry| entry.relative_path == Path::new("changed.txt")).unwrap();
+    assert_eq!(entry.staged_status, Some(GitFileStatus::TypeChanged));
+    assert_eq!(entry.unstaged_status, Some(GitFileStatus::TypeChanged));
+    assert_eq!(entry.change_code(), "TT");
+}
+
+#[test]
+fn worktree_hash_rejects_oversized_files_before_reading() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("large.bin");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(1024 * 1024 * 1024).unwrap();
+    assert!(matches!(worktree_hash(&path), Err(GitMutationError::Invalid)));
 }
 
 #[test]

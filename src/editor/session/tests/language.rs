@@ -47,12 +47,84 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
         app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "automatic-rust").unwrap().definition.clone();
+    app.tooling.fixture_retain(|entry| entry.definition.id != "automatic-rust");
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition: definition.clone(),
+        status: ToolStatus::Installing { phase: "queued".into(), completed: 0, total: None },
+    });
+    app.sync_lsp_document();
+    assert!(!app.language.project_pending(), "a queued runtime change blocks autostart");
+    app.start_lsp(Some("automatic-rust".into()));
+    assert!(!app.language.project_pending(), "explicit startup cannot race runtime removal either");
+    app.tooling.fixture_retain(|entry| entry.definition.id != "automatic-rust");
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition,
+        status: ToolStatus::Installed(crate::tools::discover_executable("false").unwrap()),
+    });
     app.sync_lsp_document();
     assert!(
         app.language.project_pending(),
-        "trusting the workspace starts the server"
+        "trusting the workspace starts the server after its runtime change finishes"
     );
     assert_eq!(app.workspace.trust(), WorkspaceTrust::Trusted);
+}
+
+#[test]
+fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root() {
+    let mut app = app();
+    fs::create_dir(app.state.workspace_root.join(".git")).unwrap();
+    let template = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    app.tooling.fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
+    let executable = crate::tools::discover_executable("false").unwrap();
+    for (id, languages, marker) in [
+        ("rust", vec!["rust"], "Cargo.toml"),
+        ("typescript", vec!["typescript"], "package.json"),
+        ("tailwind", vec!["typescript", "html"], ".git"),
+    ] {
+        let mut definition = template.clone();
+        definition.id = id.into();
+        definition.languages = languages.into_iter().map(str::to_owned).collect();
+        definition.executable = executable.display().to_string();
+        definition.install = None;
+        definition.project_root_markers = vec![marker.into()];
+        definition.project_root_strategy = crate::files::ProjectRootStrategy::Marker;
+        app.tooling.fixture_insert(crate::tools::ToolEntry {
+            definition, status: ToolStatus::Installed(executable.clone()),
+        });
+    }
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    let path = app.state.workspace_root.join("main.rs");
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path)).unwrap();
+    app.sync_lsp_document();
+    assert!(app.language.launch_pending("rust"));
+    let path = app.state.workspace_root.join("main.ts");
+    app.state.open_text(TextBuffer::from_text("let value = 1;"), Some(path.clone())).unwrap();
+    app.sync_lsp_document();
+    assert!(!app.language.launch_pending("typescript"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    for expected in ["typescript", "tailwind"] {
+        while app.language.project_pending() {
+            app.process_lsp_project_root();
+            assert!(Instant::now() < deadline, "root discovery timed out");
+            thread::yield_now();
+        }
+        app.sync_lsp_document();
+        assert!(app.language.launch_pending(expected), "next candidate {expected} must be attempted");
+    }
+    while app.language.project_pending() {
+        app.process_lsp_project_root();
+        assert!(Instant::now() < deadline, "Tailwind discovery timed out");
+        thread::yield_now();
+    }
+    assert!(app.language.project_root_missing("typescript", &path, &app.workspace.version(), app.configuration.binding_revision()));
+    assert!(app.language.fixture_preflight_projects().any(|(key, _)| key.contains("tailwind")));
 }
 
 #[test]
@@ -196,6 +268,10 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
             .documents
             .contains_key(&app.state.active_buffer_id().unwrap())
     );
+    app.show_lsp_sessions();
+    let item = app.search.picker().unwrap().selected_item().unwrap();
+    assert!(item.detail.starts_with("nested ·"));
+    assert_eq!(item.source, nested.display().to_string());
     assert!(app.language.capabilities().is_none()); // `false` is not an initialized language server.
     // Synthetic Running publication over the actual admitted transport: idle
     // document sync must not start a fresh completion request every frame.
@@ -793,6 +869,19 @@ fn rust_analyzer_toolchain_and_standalone_versions_are_not_conflated() {
     );
 }
 
+#[test]
+fn rustup_working_directory_follows_the_selected_document() {
+    let mut app = app();
+    let root = app.state.workspace_root.clone();
+    let project = root.join("nested");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("rust-toolchain.toml"), "[toolchain]\nchannel = 'nightly'\n").unwrap();
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(project.join("main.rs"))).unwrap();
+    assert_eq!(app.tool_probe_directory(), Some(project));
+    app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(root.join("main.rs"))).unwrap();
+    assert_eq!(app.tool_probe_directory(), Some(root));
+}
+
 #[cfg(unix)]
 #[test]
 fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
@@ -811,6 +900,42 @@ fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
     assert!(InteractiveApplication::rust_analyzer_is_rustup_proxy(
         &hardlink
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn background_tool_install_updates_preserve_the_selected_row() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut app = app();
+    let directory = tempdir().unwrap();
+    let rustup = directory.path().join("rustup");
+    fs::write(&rustup, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    app.rebuild_tool_menu("lsp", None);
+    let menu = app.ui.tool_menu.as_mut().unwrap();
+    menu.selected = menu.rows.iter().position(|row| row.id != "rust-analyzer").unwrap();
+    let selected = menu.rows[menu.selected].id.clone();
+    app.tooling.install(crate::editor::session::tooling::ToolInstall::Rustup {
+        definition, rustup, proxy, cwd: directory.path().into(),
+    }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        app.process_tool_progress();
+        let menu = app.ui.tool_menu.as_ref().unwrap();
+        assert_eq!(menu.rows[menu.selected].id, selected, "progress must preserve selection");
+        app.process_tool_results();
+        let menu = app.ui.tool_menu.as_ref().unwrap();
+        assert_eq!(menu.rows[menu.selected].id, selected, "completion must preserve selection");
+        if !app.tooling.entries().iter().any(|entry| entry.definition.id == "rust-analyzer" && matches!(entry.status, ToolStatus::Installing { .. })) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "installation timed out");
+        thread::yield_now();
+    }
 }
 
 #[cfg(unix)]
@@ -906,6 +1031,65 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
     assert!(!message.contains("version probe exited"));
     app.tooling
         .check_probe_worker_replacement(&definition, proxy);
+}
+
+#[test]
+fn reference_labels_cache_only_bounded_excerpts() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("references.rs");
+    let location = |line| {
+        let position = crate::language::lsp::LspPosition { line, character: 0 };
+        crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }
+    };
+    fs::write(&path, "x".repeat(900_000) + "\nshort line\n").unwrap();
+    let cache = app.reference_excerpts(&[location(0), location(1)]);
+    assert_eq!(cache[&(path.clone(), 1)], "short line");
+    assert_eq!(cache[&(path.clone(), 0)].len(), 1024);
+    assert_eq!(cache.len(), 2);
+    assert_eq!(cache.values().map(String::len).sum::<usize>(), 1024 + "short line".len());
+
+    let text = ("🦀".repeat(1024) + "\n").repeat(300);
+    app.state.open_text(TextBuffer::from_text(&text), Some(path.clone())).unwrap();
+    let locations = (0..300).map(location).collect::<Vec<_>>();
+    let cache = app.reference_excerpts(&locations);
+    assert_eq!(cache.len(), 256);
+    assert_eq!(cache.values().map(String::len).sum::<usize>(), 1024 * 1024);
+}
+
+#[test]
+fn symbol_picker_uses_the_session_key_to_resolve_position_encoding() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("symbol.rs");
+    let (_, view) = app.state.open_text(TextBuffer::from_text("éx"), Some(path.clone())).unwrap();
+    let definition = app.tooling.entries().iter()
+        .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
+    let key = "rust-analyzer@nested-project";
+    app.language.fixture_session(key.into(), crate::editor::session::dispatch::LspRuntimeState {
+        root: app.workspace.active_root().unwrap(), root_path: app.state.workspace_root.clone(),
+        server_id: definition.id.clone(), definition,
+        launch: crate::editor::session::dispatch::LspLaunch::Direct {
+            executable: crate::tools::discover_executable("false").unwrap(), managed: false,
+        },
+        capabilities: Some(crate::language::lsp::LspCapabilities {
+            position_encoding: crate::editor::text::PositionEncoding::Utf8,
+            ..Default::default()
+        }),
+        documents: HashMap::new(), restart_count: 0, restart_due: None,
+        circuit_open: false, desired_running: true, activate_on_restart: true,
+    });
+    let position = crate::language::lsp::LspPosition { line: 0, character: 2 };
+    app.open_lsp_symbols_picker(key, vec![crate::language::lsp::LspSymbol {
+        name: "x".into(), kind: None, extent: None,
+        location: Some(crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }),
+    }]);
+    app.accept_picker();
+    assert_eq!(app.state.views[view].cursor, ByteOffset(2));
 }
 
 #[test]
@@ -1094,6 +1278,53 @@ fn lsp_installation_mechanisms_are_host_specific() {
         LspRuntimeSource::Nix,
         false
     ));
+}
+
+#[test]
+fn tool_manager_probes_require_trust_and_follow_category_changes() {
+    for safe in [false, true] {
+        let mut app = app();
+        app.tooling.fixture_retain(|_| false);
+        let echo = crate::tools::discover_executable("echo").unwrap();
+        for (id, kind) in [("probe-lsp", ToolKind::Lsp), ("probe-dap", ToolKind::Dap)] {
+            let mut definition = crate::tools::bundled_tool_catalog().remove(0);
+            definition.id = id.into();
+            definition.kind = kind;
+            definition.executable = echo.display().to_string();
+            definition.probe_args = vec![id.into()];
+            definition.install = None;
+            definition.pins.clear();
+            app.tooling.fixture_insert(crate::tools::ToolEntry { definition, status: ToolStatus::Installed(echo.clone()) });
+        }
+        app.open_tool_menu("lsp".into());
+        let definition = app.tooling.entries()[0].definition.clone();
+        let key = app.tool_version_key(&definition, LspRuntimeSource::Path, Some(&echo));
+        assert_eq!(app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0, "detecting…");
+        assert!(app.tooling.version(&key).is_none());
+        prepare_trust_identity(&mut app);
+        for root in app.workspace.roots().to_vec() {
+            app.workspace.fixture_trust_identity(root.identity);
+        }
+        app.workspace.fixture_safe_mode(safe);
+        app.reconcile_workspace_trust();
+        app.open_tool_menu("lsp".into());
+        app.cycle_tool_category(1);
+        assert_eq!(app.ui.tool_menu.as_ref().unwrap().category, "dap");
+        let definition = app.tooling.entries()[1].definition.clone();
+        let key = app.tool_version_key(&definition, LspRuntimeSource::Path, Some(&echo));
+        if safe {
+            assert_eq!(app.observed_tool_version(&definition, LspRuntimeSource::Path, Some(&echo)).0, "detecting…");
+            assert!(app.tooling.version(&key).is_none());
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while app.tooling.version(&key).is_none() {
+                app.process_tool_version_results();
+                assert!(Instant::now() < deadline);
+                thread::yield_now();
+            }
+            assert_eq!(app.tooling.version(&key).unwrap().as_ref().unwrap(), "probe-dap");
+        }
+    }
 }
 
 #[test]
@@ -1675,6 +1906,32 @@ fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
 }
 
 #[test]
+fn completion_anchor_measures_wide_identifiers_in_terminal_cells() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("wide.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("obj.变量"), Some(path)).unwrap();
+    app.state.views[view].cursor = ByteOffset("obj.变量".len());
+    let owner = super::LspProjectionOwner {
+        server: "server".into(), buffer, view,
+        revision: app.state.buffers[buffer].text.revision(),
+        text: app.state.buffers[buffer].text.source_version(),
+        uri: crate::language::lsp::file_uri(app.state.buffers[buffer].path.as_ref().unwrap()),
+        language: "rust".into(),
+    };
+    app.language.fixture_projection(Some(owner.clone()));
+    app.language.fixture_completion_source(Some((7, owner)));
+    app.mark_lsp_completion_start(false);
+    app.language.install_completions("server", vec![crate::language::lsp::LspCompletionItem {
+        label: "变量名称".into(), insert_text: "变量名称".into(),
+        filter_text: None, sort_text: None, detail: String::new(),
+        text_edit: None, additional_edits: Vec::new(), kind: None,
+        snippet: false, documentation: None, resolve_item: None, resolved: true,
+    }], false, 7);
+    app.narrow_lsp_completion();
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().typed, 4);
+}
+
+#[test]
 fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     use crate::language::lsp::LspCompletionItem;
     let item = |label: &str| LspCompletionItem {
@@ -1782,6 +2039,7 @@ fn fixture_owned_lsp(
             capabilities: Some(crate::language::lsp::LspCapabilities {
                 code_action: true,
                 execute_command: true,
+                selection_ranges: true,
                 ..Default::default()
             }),
             documents: HashMap::from([(buffer, document)]),
@@ -1793,6 +2051,82 @@ fn fixture_owned_lsp(
         },
     );
     endpoint
+}
+
+#[test]
+fn overlapping_formatting_saves_wait_for_their_own_results() {
+    let mut app = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.lsp.format_on_save = true;
+    app.configuration.install_fixture(fixture);
+    app.set_dashboard_visibility(false);
+    let mut pending = Vec::new();
+    let mut transports = Vec::new();
+    for index in 0..2 {
+        let path = app.state.workspace_root.join(format!("format-{index}.rs"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        app.replace_with_recovered(buffer, "a  b".into()).unwrap();
+        let server = format!("formatter-{index}");
+        transports.push(fixture_owned_lsp(&mut app, &server, buffer));
+        app.language.running(&server, crate::language::lsp::LspCapabilities {
+            formatting: true,
+            ..Default::default()
+        });
+        app.language.select(&server);
+        app.process_effect(AppEffect::Save { quit_after: false, path: None, force: false });
+        let request = app.format_on_save.get(&buffer).unwrap().request.clone().unwrap();
+        pending.push((buffer, path, request));
+    }
+    assert_eq!(app.format_on_save.len(), 2);
+    assert!(pending.iter().all(|(_, path, _)| fs::read_to_string(path).unwrap() == "old"));
+    for (buffer, path, (server, generation)) in pending.into_iter().rev() {
+        app.present_lsp_result(&server, generation, "textDocument/formatting",
+            &crate::language::lsp::file_uri(&path),
+            crate::language::lsp::LspFeatureResult::WorkspaceEdit(crate::language::lsp::LspWorkspaceEdit {
+                resources: Vec::new(),
+                documents: vec![crate::language::lsp::LspDocumentEdit {
+                    uri: crate::language::lsp::file_uri(&path),
+                    version: None,
+                    edits: vec![crate::language::lsp::LspTextEdit {
+                        range: crate::language::lsp::LspRange {
+                            start: crate::language::lsp::LspPosition { line: 0, character: 1 },
+                            end: crate::language::lsp::LspPosition { line: 0, character: 3 },
+                        },
+                        new_text: " ".into(),
+                    }],
+                }],
+            }));
+        wait_vfs(&mut app);
+        assert_eq!(fs::read_to_string(path).unwrap(), "a b");
+        assert!(!app.state.buffers[buffer].dirty);
+    }
+    assert!(app.format_on_save.is_empty());
+}
+
+#[test]
+fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("saved-snapshot.rs");
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.editor.final_newline = crate::config::FinalNewlinePolicy::Insert;
+    app.configuration.install_fixture(fixture);
+    fs::write(&path, "old").unwrap();
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    let transport = fixture_owned_lsp(&mut app, "owner", buffer);
+    app.replace_with_recovered(buffer, "written".into()).unwrap();
+    let revision = app.state.buffers[buffer].text.revision().0;
+    app.start_save(false, None, false);
+    app.replace_with_recovered(buffer, "newer unsaved text".into()).unwrap();
+    wait_vfs(&mut app);
+    assert_eq!(fs::read_to_string(path).unwrap(), "written\n");
+    let saved = transport.saved_document().unwrap();
+    assert_eq!(saved.text, "written\n");
+    assert_eq!(saved.version, revision);
+    assert_eq!(app.language.sessions()["owner"].documents[&buffer].text, "newer unsaved text");
+    assert!(app.language.synced("owner", buffer, &app.state.buffers[buffer].text.source_version()));
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "newer unsaved text");
+    assert!(app.state.buffers[buffer].dirty);
 }
 
 #[test]
@@ -1823,6 +2157,10 @@ fn save_notifications_reach_every_document_owner_after_buffer_switch() {
         Some(crate::language::lsp::file_uri(&path))
     );
     assert_eq!(unrelated.saved_uri(), None);
+    for server in ["first", "second"] {
+        assert_eq!(app.language.sessions()[server].documents[&buffer].text, "saved");
+        assert!(app.language.synced(server, buffer, &app.state.buffers[buffer].text.source_version()));
+    }
 }
 
 #[test]
@@ -1854,7 +2192,7 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
     use crate::editor::session::diagnostics::{
         DiagnosticBatch, DiagnosticDocument, DiagnosticValidity,
     };
-    for tool_stop in [false, true] {
+    for effect in [AppEffect::LspStop, AppEffect::LspDetach, AppEffect::StopSelectedLsp] {
         let mut app = app();
         let path = app.state.workspace_root.join("problem.rs");
         let (buffer, _) = app
@@ -1892,13 +2230,46 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
                 .unwrap();
         }
         assert_eq!(app.diagnostics.choices().count(), 2);
-        if tool_stop {
+        if matches!(effect, AppEffect::StopSelectedLsp) {
             app.stop_lsp_sessions_for_server("rust-analyzer");
         } else {
-            app.process_effect(AppEffect::LspStop);
+            app.process_effect(effect);
         }
         assert_eq!(app.diagnostics.choices().count(), 0);
     }
+}
+
+#[test]
+fn code_lens_commands_keep_their_originating_session() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("lens.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone())).unwrap();
+    let first = fixture_owned_lsp(&mut app, "first", buffer);
+    let second = fixture_owned_lsp(&mut app, "second", buffer);
+    app.language.select("second");
+    let uri = file_uri(&path);
+    first.publish_disk_diagnostics(&uri, "fn f() {}", Vec::new());
+    let context = app.language.poll_event().unwrap().context;
+    let lens = || LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range: LspRange {
+            start: LspPosition { line: 0, character: 0 },
+            end: LspPosition { line: 0, character: 2 },
+        },
+        title: "Run".into(),
+        command: Some(LspCommand { command: "run-lens".into(), arguments: vec![serde_json::json!(42)] }),
+    }]);
+    app.present_lsp_result_owned("first", 1, "textDocument/codeLens", &uri, lens(), Some(context.clone()));
+    app.accept_picker();
+    assert_eq!(first.executed_command().as_deref(), Some("run-lens"));
+    assert_eq!(second.executed_command(), None);
+
+    app.present_lsp_result_owned("first", 2, "textDocument/codeLens", &uri, lens(), Some(context));
+    let replacement = fixture_owned_lsp(&mut app, "first", buffer);
+    app.accept_picker();
+    assert_eq!(replacement.executed_command(), None);
+    assert_eq!(second.executed_command(), None);
+    assert_eq!(app.ui.notification.as_deref(), Some("code-lens source retired"));
 }
 
 #[test]
@@ -1952,6 +2323,36 @@ fn code_action_command_waits_for_approval_of_its_edits() {
     app.accept_workspace_proposal();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
     assert_eq!(transport.executed_command(), Some("finish-action".into()));
+}
+
+#[test]
+fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
+    use crate::language::lsp::{LspFeatureResult, LspPosition, LspRange};
+    let mut app = app();
+    let path = app.state.workspace_root.join("selection.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), Some(path.clone())).unwrap();
+    app.set_dashboard_visibility(false);
+    let _transport = fixture_owned_lsp(&mut app, "owned", buffer);
+    app.language.select("owned");
+    app.state.views[view].cursor = ByteOffset(5);
+    let generation = app.language.generation();
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert!(app.language.generation() > generation);
+    assert!(app.state.views[view].selection.is_none());
+    app.present_lsp_result("owned", app.language.generation(), "textDocument/selectionRange",
+        &crate::language::lsp::file_uri(&path), LspFeatureResult::Ranges(vec![
+            LspRange { start: LspPosition { line: 0, character: 4 }, end: LspPosition { line: 0, character: 7 } },
+            LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 7 } },
+        ]));
+    assert_eq!(app.state.views[view].selection.unwrap().anchor, ByteOffset(4));
+    assert_eq!(app.state.views[view].selection.unwrap().head, ByteOffset(6));
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert_eq!(app.state.views[view].selection.unwrap().anchor, ByteOffset(0));
+    app.state.views[view].selection = None;
+    app.state.views[view].cursor = ByteOffset(1);
+    let generation = app.language.generation();
+    app.process_effect(AppEffect::LspSelectionExpand);
+    assert!(app.language.generation() > generation, "ranges for another cursor must be requested again");
 }
 
 #[test]
@@ -2025,8 +2426,9 @@ fn stopping_a_starting_server_retires_its_launch() {
 
     app.sync_lsp_document();
     assert!(app.language.project_pending());
-    app.stop_lsp_sessions_for_server("automatic-rust");
-    app.language.mark_stopped("automatic-rust");
+    assert!(app.language.active().is_none());
+    app.process_effect(AppEffect::LspStop);
+    assert!(app.language.is_stopped("automatic-rust"));
     assert!(!app.language.project_pending());
     assert!(!app.language.launch_pending("automatic-rust"));
     wait_vfs(&mut app);

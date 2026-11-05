@@ -22,10 +22,11 @@ pub(super) struct Themes {
     wanted: Option<String>,
 }
 impl Themes {
-    /// Forget the picker and restore state for a new configuration, keeping the applied theme
-    /// when `keep_applied` says the configured theme has not changed.
-    pub(super) fn reset(&mut self, keep_applied: bool) {
-        let applied = self.applied.take().filter(|_| keep_applied);
+    /// Keep a selection only if it differs from the freshly loaded configured theme.
+    pub(super) fn reset(&mut self, keep_applied: bool, configured_name: &str) {
+        let applied = self.applied.take().filter(|choice| {
+            keep_applied && choice.theme.name != configured_name
+        });
         *self = Self {
             applied,
             ..Self::default()
@@ -327,6 +328,26 @@ impl ConfigurationSession {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reloaded_configured_theme_replaces_an_applied_snapshot() {
+        let theme = crate::config::load_bundled_config().theme;
+        let choice = std::sync::Arc::new(crate::config::ThemeChoice {
+            theme: theme.clone(),
+            path: "installed.toml".into(),
+        });
+        let mut themes = super::Themes {
+            applied: Some(choice.clone()),
+            ..Default::default()
+        };
+        themes.reset(true, "another-theme");
+        assert!(themes.applied.is_some());
+        themes.reset(true, &theme.name);
+        assert!(themes.applied.is_none());
+        themes.applied = Some(choice);
+        themes.reset(false, "another-theme");
+        assert!(themes.applied.is_none());
+    }
+
     #[test]
     fn installed_themes_do_not_depend_on_config_provenance() {
         use std::path::{Path, PathBuf};

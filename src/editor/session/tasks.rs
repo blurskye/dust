@@ -13,7 +13,7 @@ const MAXIMUM_RUNNING: usize = 16;
 use crate::{
     config::{Config, TaskConfig},
     editor::{
-        EditorState, TransactionId,
+        BufferId, EditorState, TransactionId,
         text::{ByteOffset, ByteRange, TextEdit, TextEditSet},
         transaction::{EditorOperation, EditorTransaction, Precondition},
     },
@@ -163,6 +163,7 @@ pub(super) struct TaskSession {
     running: HashMap<JobId, RunningTask>,
     keys: HashMap<String, RunKey>,
     plans: HashMap<String, Plan>,
+    adapters: HashMap<String, AdapterContext>,
     rows: HashMap<String, Vec<TaskOutputRecord>>,
     active_output: Option<String>,
     truncated: HashSet<JobId>,
@@ -182,6 +183,7 @@ impl TaskSession {
             running: HashMap::new(),
             keys: HashMap::new(),
             plans: HashMap::new(),
+            adapters: HashMap::new(),
             rows: HashMap::new(),
             active_output: None,
             truncated: HashSet::new(),
@@ -196,6 +198,7 @@ impl TaskSession {
         owner
     }
     pub(super) fn configure(&mut self, config: &Config) {
+        self.adapters.clear();
         self.maximum_output = MAXIMUM_OUTPUT_BYTES;
         self.matchers = config
             .tasks
@@ -278,10 +281,14 @@ impl TaskSession {
                 awaiting: false,
             },
         );
+        self.adapters.insert(name.into(), adapter.clone());
         self.rows.insert(name.into(), Vec::new());
         self.tests.remove(name);
         self.statuses.insert(name.into(), "queued".into());
         Ok(())
+    }
+    pub(super) fn last_adapter(&self, name: &str) -> Option<&AdapterContext> {
+        self.adapters.get(name)
     }
     pub(super) fn step(
         &mut self,
@@ -456,8 +463,14 @@ impl TaskSession {
             _ => None,
         };
         let diagnostic_source = if matches!(step.adapter, AdapterContext::Linter { .. }) {
+            // Each dependency owns its findings independently of later steps in the plan.
+            let diagnostic_name = if step.name == step.requested {
+                step.requested.clone()
+            } else {
+                format!("{}:{}", step.requested, step.name)
+            };
             Some(TaskDiagnosticRun::capture(
-                &step.name,
+                &diagnostic_name,
                 editor,
                 workspace,
                 configuration,
@@ -555,6 +568,14 @@ impl TaskSession {
     }
     pub(super) fn is_running(&self, name: &str) -> bool {
         self.launch_pending(name) || self.running.values().any(|task| task.requested == name)
+    }
+    pub(super) fn stop_formatter(&mut self, name: &str, buffer: BufferId) {
+        if matches!(self.adapters.get(name), Some(AdapterContext::Formatter { source }) if source.buffer() == buffer)
+        {
+            // stop retires the run key as well as cancelling the process, so already
+            // buffered results cannot apply after a formatting-save timeout.
+            let _ = self.stop(name);
+        }
     }
     pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
         let pending = self.launch_pending(name);
@@ -956,6 +977,9 @@ impl TaskSession {
             configuration,
         };
         self.keys.insert(name.into(), key.clone());
+        self.adapters.insert(name.into(), AdapterContext::Formatter {
+            source: FormatterSource::capture(editor, buffer).unwrap(),
+        });
         let job = JobId(self.running.len() as u64 + 1000);
         self.running.insert(
             job,

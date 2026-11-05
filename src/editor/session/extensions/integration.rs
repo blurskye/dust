@@ -18,7 +18,7 @@ pub(in crate::editor::session) enum ExtensionUpdate {
     Failed { operation: String, error: String },
 }
 pub(in crate::editor::session) enum RegistryUpdate {
-    Present(Box<RegistryResult>),
+    Present(Box<RegistryResult>, Option<crate::editor::session::search::PickerEpoch>),
     ValidateArtifact,
     Error(String),
 }
@@ -152,20 +152,22 @@ impl ExtensionSession {
         &mut self,
         request: RegistryRequest,
         install: bool,
+        picker: Option<crate::editor::session::search::PickerEpoch>,
     ) -> Result<(), String> {
         let id = self.registry.request(request).map_err(|e| e.to_string())?;
-        self.registry_intents.insert(id, install);
+        self.registry_intents.insert(id, (install, picker));
         Ok(())
     }
     fn accept_registry(&mut self, event: RegistryEvent) -> Option<RegistryUpdate> {
         // A retired workspace/request must not turn a late artifact into a new install.
-        let install = self.registry_intents.remove(&event.id)?;
+        let (install, picker) = self.registry_intents.remove(&event.id)?;
         Some(match event.result {
             Ok(RegistryResult::Show(metadata)) if install => match self.request_registry(
                 RegistryRequest::Fetch {
                     metadata: Box::new(metadata),
                 },
                 true,
+                None,
             ) {
                 Ok(()) => return None,
                 Err(error) => RegistryUpdate::Error(error),
@@ -182,7 +184,7 @@ impl ExtensionSession {
                     RegistryUpdate::ValidateArtifact
                 }
             }
-            Ok(result) => RegistryUpdate::Present(Box::new(result)),
+            Ok(result) => RegistryUpdate::Present(Box::new(result), picker),
             Err(error) => RegistryUpdate::Error(error.to_string()),
         })
     }
@@ -408,6 +410,7 @@ impl ExtensionSession {
     pub(in crate::editor::session) fn poll_packages(
         &mut self,
         limits: PluginLimits,
+        activate: bool,
     ) -> Vec<ExtensionUpdate> {
         let mut updates = Vec::new();
         for event in self.packages.poll().unwrap_or_default() {
@@ -416,7 +419,15 @@ impl ExtensionSession {
                     let prepared_operation = result.prepared.is_some();
                     let activation_operation = result.operation == "activations";
                     if let Some(prepared) = result.prepared.take() {
-                        updates.extend(self.load_prepared(result.id, prepared, &limits));
+                        if activate {
+                            updates.extend(self.load_prepared(result.id, prepared, &limits));
+                        } else {
+                            self.package_preparing.remove(&result.id);
+                            let _ = self.packages.request(PackageOperation::Abort { token: prepared.token });
+                        }
+                    }
+                    if !activate {
+                        result.activations.clear();
                     }
                     for (manifest, path) in std::mem::take(&mut result.activations) {
                         let plugin = manifest.id.clone();
@@ -466,9 +477,10 @@ impl ExtensionSession {
                             updates.extend(self.rollback_packages());
                             continue;
                         }
-                        match self.packages.request(PackageOperation::Activations) {
-                            Ok(id) => self.package_startup_request = Some(id),
-                            Err(error) => {
+                        match activate.then(|| self.packages.request(PackageOperation::Activations)) {
+                            Some(Ok(id)) => self.package_startup_request = Some(id),
+                            None => {},
+                            Some(Err(error)) => {
                                 updates.push(ExtensionUpdate::Error(error.to_string()));
                                 updates.extend(self.rollback_packages());
                             }
@@ -533,6 +545,12 @@ impl ExtensionSession {
         index: PluginContributionIndex,
     ) -> Result<(), crate::extensions::PluginError> {
         self.plugin_contributions.install(index)
+    }
+    pub(in crate::editor::session) fn fixture_prepared(&mut self, plugin: &str, load: PluginLoadId, token: u64) {
+        self.package_prepared.insert(plugin.into(), (load, token));
+    }
+    pub(in crate::editor::session) fn fixture_package_reload_pending(&self) -> bool {
+        self.package_startup_request.is_some()
     }
     pub(in crate::editor::session) fn fixture_pending_index(
         &mut self,
@@ -634,7 +652,7 @@ mod tests {
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(10);
             let load = loop {
-                for update in owner.poll_packages(PluginLimits::default()) {
+                for update in owner.poll_packages(PluginLimits::default(), true) {
                     assert!(
                         !matches!(
                             update,
@@ -682,7 +700,7 @@ mod tests {
             );
             owner.commit_package("demo".into(), load, token).unwrap();
             while owner.pending_packages() != 0 {
-                owner.poll_packages(PluginLimits::default());
+                owner.poll_packages(PluginLimits::default(), true);
                 assert!(Instant::now() < deadline);
                 thread::sleep(Duration::from_millis(2));
             }
@@ -692,6 +710,48 @@ mod tests {
             );
             old_load = Some(load);
         }
+        // Package maintenance is allowed in safe mode, but must not activate installed code.
+        for operation in [PackageOperation::Rollback, PackageOperation::Remove("demo".into())] {
+            owner.request_package(operation).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while owner.pending_packages() != 0 {
+                for update in owner.poll_packages(PluginLimits::default(), false) {
+                    assert!(!matches!(update, ExtensionUpdate::Error(_) | ExtensionUpdate::Failed { .. }));
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert!(owner.manager.load_id("demo").is_none());
+            assert!(owner.package_startup_request.is_none());
+        }
+    }
+
+    #[test]
+    fn registry_presentations_keep_the_requesting_picker_epoch() {
+        use crate::editor::session::{search::{SearchSession, PickerContent, PickerOrigin}, workspace::WorkspaceSession};
+        let root = tempfile::tempdir().unwrap();
+        let registry = RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = ExtensionSession::new(root.path().join("storage"), 4, root.path().join("packages"), registry);
+        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let workspace = WorkspaceSession::new(
+            crate::workspace::WorkspaceState::new(crate::workspace::WorkspaceId(1), [("root".into(), identity)]).unwrap(),
+            root.path().join("trust"), 1, false, false, 1,
+        );
+        let mut search = SearchSession::default();
+        let content = |title: &str| PickerContent {
+            surface: crate::ui::PickerSurfaceKind::Generic, origin: PickerOrigin::General,
+            title: title.into(), items: Vec::new(), query: String::new(), complete: true,
+        };
+        let epoch = search.install_picker(content("registry"), 100, workspace.version(), 1).unwrap();
+        owner.registry_intents.insert(1, (false, Some(epoch)));
+        let Some(RegistryUpdate::Present(_, Some(epoch))) = owner.accept_registry(RegistryEvent {
+            id: 1, result: Ok(RegistryResult::Search(crate::tools::RegistrySearchResponse { schema: 1, packages: Vec::new() })),
+        }) else { panic!("search must preserve its picker owner") };
+        assert!(search.owns_picker_epoch(&epoch));
+        search.install_picker(content("files"), 100, workspace.version(), 1).unwrap();
+        search.picker_insert("my query");
+        assert!(!search.owns_picker_epoch(&epoch), "a late registry result cannot replace the file picker");
+        assert_eq!(search.picker().unwrap().query(), "my query");
     }
 
     #[test]
@@ -740,25 +800,25 @@ mod tests {
         };
         // Synthetic registry responses; no network or installation is performed.
         assert!(owner.accept_registry(event(1, vec![1])).is_none());
-        owner.registry_intents.insert(1, false);
+        owner.registry_intents.insert(1, (false, None));
         assert!(matches!(
             owner.accept_registry(event(1, vec![1])),
             Some(RegistryUpdate::Error(_))
         ));
         assert!(owner.pending_registry_artifact.is_none());
-        owner.registry_intents.insert(2, true);
+        owner.registry_intents.insert(2, (true, None));
         assert!(matches!(
             owner.accept_registry(event(2, vec![2])),
             Some(RegistryUpdate::ValidateArtifact)
         ));
         assert!(owner.accept_registry(event(2, vec![3])).is_none());
-        owner.registry_intents.insert(3, true);
+        owner.registry_intents.insert(3, (true, None));
         assert!(matches!(
             owner.accept_registry(event(3, vec![3])),
             Some(RegistryUpdate::Error(_))
         ));
         assert_eq!(owner.pending_registry_artifact.as_ref().unwrap().1, vec![2]);
-        owner.registry_intents.insert(4, true);
+        owner.registry_intents.insert(4, (true, None));
         owner.retire_packages();
         assert!(owner.accept_registry(event(4, vec![4])).is_none());
         assert!(owner.pending_registry_artifact.is_none());
@@ -776,7 +836,7 @@ mod tests {
         assert!(owner.package_startup_rollback.is_some());
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            if owner.poll_packages(PluginLimits::default()).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
+            if owner.poll_packages(PluginLimits::default(), true).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
             assert!(Instant::now() < deadline, "rollback terminal missing");
             std::thread::sleep(Duration::from_millis(2));
         }
