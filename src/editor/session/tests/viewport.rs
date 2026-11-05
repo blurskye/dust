@@ -955,6 +955,44 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 }
 
 #[test]
+fn the_agent_panel_opens_on_the_left_when_its_side_says_so() {
+    let (_app_dirs, mut app) = app();
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.agents.side = crate::config::PanelSide::Left;
+    app.configuration.install_fixture(fixture);
+    app.window_session.observe_size((160, 45));
+    app.state
+        .open_text(TextBuffer::from_text("a\n"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    for key in [' ', 'a', 't'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    app.reconcile_editor_windows();
+    let projection = app.compositor_projection().expect("projection");
+    let borders = projection
+        .borders
+        .iter()
+        .filter(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+        .map(|border| border.x)
+        .collect::<Vec<_>>();
+    assert_eq!(borders.len(), 1);
+    assert!(
+        (54..=60).contains(&borders[0]),
+        "the panel takes about 35% on the left: {borders:?}"
+    );
+    assert!(
+        app.ui.agent_panel.is_some(),
+        "the focused panel is the agent's"
+    );
+    let focused = crate::ui::active_editor_pane_viewport(&app.state, &app.ui).expect("focus");
+    assert!(
+        focused.x < borders[0],
+        "the conversation is the left pane: {focused:?}"
+    );
+}
+
+#[test]
 fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
     for mode in [
         crate::editor::EditorMode::Normal,

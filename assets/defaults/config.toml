@@ -169,6 +169,9 @@ enabled = true
 
 [ui.terminal_panel]
 height = 16
+# "bottom" docks the terminal under the editor, "float" opens it in a centered window and
+# "fullscreen" draws it over everything. Profiles with `float = true` always float.
+placement = "bottom"
 
 [ui.tool_manager]
 
@@ -182,6 +185,8 @@ agent = "Agent"
 
 [ui.explorer]
 width = 40
+# "left" or "right": the side the file explorer docks on.
+side = "left"
 icon_mode = "nerd_font"
 
 [ui.explorer.glyphs.nerd_font]
@@ -373,12 +378,14 @@ close_on_exit = true
 [agents]
 default = "claude"
 # "acp" talks to the agent in Dust's agent panel; "terminal" runs its own program (`cli`) in a
-# terminal on the right, where the panel opens, and it handles its own login, permissions and
-# history there.
+# terminal beside the editor, where the panel opens, and it handles its own login, permissions
+# and history there.
 connection = "acp"
 # Share of the editor width the agent panel opens at; drag its border or use ctrl-left and
 # ctrl-right in it to change it.
 panel_width = 35
+# "left" or "right": the side the agent panel or terminal agent opens on.
+side = "right"
 
 [agents.profiles.claude]
 program = "claude-agent-acp"

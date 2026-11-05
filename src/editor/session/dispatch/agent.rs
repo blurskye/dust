@@ -2233,7 +2233,7 @@ impl InteractiveApplication {
         self.refresh_agent_transcript();
     }
 
-    /// Show the panel in a split on the right and put the cursor in its input.
+    /// Show the panel in a split on its side and put the cursor in its input.
     fn show_agent_panel(&mut self) {
         let previous = self.active_tab_focus();
         if self.agent_pane().is_none() {
@@ -2271,11 +2271,22 @@ impl InteractiveApplication {
                 // A conversation needs about 40 columns, however narrow the terminal is.
                 let readable =
                     pane_width.map_or(share, |width| (40 * 1_000 / width.max(1)).min(700));
+                let share = share.max(readable) as u16;
+                // The split's ratio is its first pane's share; on the left the panel is first.
+                let left =
+                    self.configuration.settings().agents.side == crate::config::PanelSide::Left;
                 let _ = self.state.set_split_ratio_between(
                     code,
                     panel,
-                    1_000u16.saturating_sub(share.max(readable) as u16),
+                    if left {
+                        share
+                    } else {
+                        1_000u16.saturating_sub(share)
+                    },
                 );
+                if left && code != panel {
+                    let _ = self.state.swap_panes(code, panel);
+                }
             }
         }
         let Some(pane) = self.agent_pane() else {

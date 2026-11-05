@@ -4305,6 +4305,68 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
 }
 
 #[test]
+fn the_terminal_opens_where_its_placement_setting_says() {
+    use super::driver::TestSession;
+    for (placement, expected) in [
+        (crate::config::TerminalPlacement::Float, "float"),
+        (crate::config::TerminalPlacement::Fullscreen, "fullscreen"),
+    ] {
+        let mut loaded = crate::config::load_bundled_config();
+        loaded.config.ui.terminal_panel.placement = placement;
+        let mut driver = TestSession::new(loaded);
+        driver.new_buffer();
+        driver.trust_owned_terminal_fixture();
+        driver
+            .application_mut()
+            .process_effect(crate::editor::AppEffect::TerminalToggle);
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let id = loop {
+            if let Some(id) = driver.application_mut().displayed_terminal() {
+                break id;
+            }
+            driver.pump_terminal();
+            assert!(Instant::now() < deadline, "{expected} terminal opened");
+            thread::sleep(Duration::from_millis(2));
+        };
+        let shown = driver
+            .application_mut()
+            .window_session
+            .native_ids()
+            .terminal_placement(id.0);
+        assert!(
+            match placement {
+                crate::config::TerminalPlacement::Float =>
+                    matches!(shown, Some(WindowPlacement::Floating(_))),
+                _ => shown == Some(WindowPlacement::Fullscreen),
+            },
+            "{expected}: {shown:?}"
+        );
+    }
+}
+
+#[test]
+fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
+    let (_app_dirs, mut app) = app();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    let left = app.explorer_window_rect().expect("projected explorer");
+    assert_eq!(left.x, 0);
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.settings.ui.explorer.side = crate::config::PanelSide::Right;
+    app.configuration.install_fixture(fixture);
+    app.reconcile_editor_windows();
+    let right = app.explorer_window_rect().expect("projected explorer");
+    assert_eq!(
+        right.x.saturating_add(right.width),
+        app.window_session.width()
+    );
+    assert_eq!(right.width, left.width);
+}
+
+#[test]
 fn picker_title_changes_update_the_retained_window_content() {
     let (_app_dirs, mut app) = app();
     app.start_workspace_file_picker();

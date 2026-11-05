@@ -6649,7 +6649,7 @@ impl InteractiveApplication {
         self.terminal_session.is_agent(id)
     }
 
-    /// An agent's terminal opens on the right at the agent panel's width, where the ACP panel goes.
+    /// An agent's terminal opens at the agent panel's width on its side, where the ACP panel goes.
     fn dock_agent_terminal(&mut self, id: PtyId) {
         self.terminal_session.set_side(id);
         let width = u32::from(self.window_session.width());
@@ -6659,7 +6659,10 @@ impl InteractiveApplication {
         self.window_session.prefer_terminal_placement(
             id.0,
             WindowPlacement::Docked {
-                edge: DockEdge::Right,
+                edge: match self.configuration.settings().agents.side {
+                    crate::config::PanelSide::Left => DockEdge::Left,
+                    crate::config::PanelSide::Right => DockEdge::Right,
+                },
                 size: u16::try_from(size).unwrap_or(u16::MAX),
             },
         );
@@ -6886,6 +6889,12 @@ impl InteractiveApplication {
             return;
         }
         let for_debugger = reply.is_some();
+        // A debugged program's output stays docked under the source it is stepping through.
+        let placement = if for_debugger {
+            crate::config::TerminalPlacement::Bottom
+        } else {
+            self.configuration.settings().ui.terminal_panel.placement
+        };
         match self.terminal_session.prepare(intent, &self.workspace) {
             Ok(open) => {
                 let id = self
@@ -6917,10 +6926,15 @@ impl InteractiveApplication {
                         {
                             self.terminal_session.select(id);
                             self.terminal_session.display(id);
-                            if open.float {
-                                self.float_terminal(id);
-                            } else if self.agent_terminal(id) {
+                            if self.agent_terminal(id) {
                                 self.dock_agent_terminal(id);
+                            } else if open.float
+                                || placement == crate::config::TerminalPlacement::Float
+                            {
+                                self.float_terminal(id);
+                            } else if placement == crate::config::TerminalPlacement::Fullscreen {
+                                self.window_session
+                                    .prefer_terminal_placement(id.0, WindowPlacement::Fullscreen);
                             }
                             // A debugged program's terminal shows, and the user stays on the source.
                             if !for_debugger {

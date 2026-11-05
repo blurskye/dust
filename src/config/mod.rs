@@ -35,12 +35,12 @@ pub use settings::{
     ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, HighlightDefinition,
     IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig,
     LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig, MarkdownCallout,
-    MarkdownConfig, MarkdownGlyphs, PersistenceConfig, PluginEntryConfig, PluginsConfig,
+    MarkdownConfig, MarkdownGlyphs, PanelSide, PersistenceConfig, PluginEntryConfig, PluginsConfig,
     ProblemMatcherConfig, PromptTextConfig, RecoveryConfig, RegisterConfig, SearchConfig,
     StartupConfig, StatusLineConfig, SyntaxConfig, TaskConfig, TaskKind, TerminalPanelConfig,
-    TerminalProfileConfig, TerminalsConfig, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle,
-    ThemeStyles, ToolManagerConfig, UiConfig, WindowPlacementConfig, WindowRuleConfig,
-    WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
+    TerminalPlacement, TerminalProfileConfig, TerminalsConfig, ThemeAttribute, ThemeColor,
+    ThemeConfig, ThemeStyle, ThemeStyles, ToolManagerConfig, UiConfig, WindowPlacementConfig,
+    WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
 };
 mod validation;
 

@@ -12,8 +12,8 @@ mod ui;
 pub use ui::{
     BorderStyle, BufferLineConfig, CommandLineConfig, CursorConfig, DocumentationPopupConfig,
     ExplorerConfig, ExplorerGlyphSet, ExplorerGlyphs, ExplorerIconMode, KeyHintConfig,
-    LspProgressConfig, PromptTextConfig, StatusLineConfig, TerminalPanelConfig, ToolManagerConfig,
-    UiConfig,
+    LspProgressConfig, PanelSide, PromptTextConfig, StatusLineConfig, TerminalPanelConfig,
+    TerminalPlacement, ToolManagerConfig, UiConfig,
 };
 mod input;
 pub use input::{InputConfig, KeymapPolicyConfig, StartupConfig};

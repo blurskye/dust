@@ -658,6 +658,7 @@ pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub explorer_views: Arc<[u64]>,
     pub focused_explorer: Option<u64>,
     pub explorer_size: u16,
+    pub explorer_edge: crate::ui::window::DockEdge,
     pub active_terminal: Option<u64>,
     /// Terminals that keep their windows while another is active: the panel's terminal and side
     /// terminals such as a docked agent.
@@ -834,7 +835,7 @@ impl NativeSurfaceBridge {
             }
         }
         let default_explorer_placement = WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Left,
+            edge: signature.explorer_edge,
             size: signature.explorer_size.max(1),
         };
         if signature.focused_explorer == Some(1)

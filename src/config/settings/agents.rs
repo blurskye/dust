@@ -55,6 +55,9 @@ pub struct AgentsConfig {
     /// How much of the editor width the agent panel takes when it opens, in percent.
     #[serde(default = "default_panel_width")]
     pub panel_width: u16,
+    /// The side the agent panel, or a terminal agent, opens on.
+    #[serde(default = "default_agent_side")]
+    pub side: super::ui::PanelSide,
     #[serde(default)]
     pub profiles: BTreeMap<String, AgentProfileConfig>,
 }
@@ -63,12 +66,17 @@ const fn default_panel_width() -> u16 {
     35
 }
 
+const fn default_agent_side() -> super::ui::PanelSide {
+    super::ui::PanelSide::Right
+}
+
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
             default: String::new(),
             connection: AgentConnection::default(),
             panel_width: default_panel_width(),
+            side: default_agent_side(),
             profiles: BTreeMap::new(),
         }
     }

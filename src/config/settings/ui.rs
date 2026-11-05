@@ -168,6 +168,26 @@ impl Default for ToolManagerConfig {
     }
 }
 
+/// Which edge of the screen a side panel docks on.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelSide {
+    #[default]
+    Left,
+    Right,
+}
+
+/// Where the terminal panel opens: docked at the bottom, as a centered float, or over the
+/// whole screen.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalPlacement {
+    #[default]
+    Bottom,
+    Float,
+    Fullscreen,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplorerIconMode {
@@ -203,6 +223,8 @@ pub struct ExplorerGlyphs {
 #[serde(deny_unknown_fields)]
 pub struct ExplorerConfig {
     pub width: u16,
+    #[serde(default)]
+    pub side: PanelSide,
     pub icon_mode: ExplorerIconMode,
     pub glyphs: ExplorerGlyphs,
 }
@@ -234,6 +256,7 @@ impl Default for ExplorerConfig {
         };
         Self {
             width: 40,
+            side: PanelSide::Left,
             icon_mode: ExplorerIconMode::NerdFont,
             glyphs: ExplorerGlyphs {
                 nerd_font: ExplorerGlyphSet {
@@ -293,11 +316,16 @@ impl Default for DocumentationPopupConfig {
 #[serde(deny_unknown_fields)]
 pub struct TerminalPanelConfig {
     pub height: u16,
+    #[serde(default)]
+    pub placement: TerminalPlacement,
 }
 
 impl Default for TerminalPanelConfig {
     fn default() -> Self {
-        Self { height: 16 }
+        Self {
+            height: 16,
+            placement: TerminalPlacement::Bottom,
+        }
     }
 }
 

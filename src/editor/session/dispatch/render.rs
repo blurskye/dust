@@ -564,7 +564,7 @@ impl InteractiveApplication {
             return Err("universal compositor projection is missing or stale".into());
         }
         let explorer_fallback = WindowPlacement::Docked {
-            edge: DockEdge::Left,
+            edge: self.explorer_edge(),
             size: explorer_panel_width(self.configuration.settings(), self.window_session.width())
                 .unwrap_or(1)
                 .saturating_add(1),
@@ -1494,6 +1494,13 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
+    fn explorer_edge(&self) -> DockEdge {
+        match self.configuration.settings().ui.explorer.side {
+            crate::config::PanelSide::Left => DockEdge::Left,
+            crate::config::PanelSide::Right => DockEdge::Right,
+        }
+    }
+
     pub(super) fn native_surface_signature(
         &self,
         editor: &EditorWindowBridge,
@@ -1546,6 +1553,7 @@ impl InteractiveApplication {
                 .as_ref()
                 .and_then(|_| self.window_session.focused_explorer()),
             explorer_size,
+            explorer_edge: self.explorer_edge(),
             active_terminal: self.displayed_terminal().map(|id| id.0),
             shown_terminals: self
                 .terminal_session

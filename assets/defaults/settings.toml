@@ -86,7 +86,8 @@ settings = [
 title = "AI Agents"
 settings = [
   { key = "agents.default", title = "Default Agent", about = "The agent <leader>aa starts.", choices_from = "agents.profiles" },
-  { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal on the right.", choices = ["acp", "terminal"] },
+  { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
+  { key = "agents.side", title = "Panel Side", about = "The side the agent panel or terminal agent opens on.", choices = ["right", "left"] },
   { key = "agents.panel_width", title = "Panel Width (%)", about = "Share of the editor width the agent panel opens at." },
 ]
 
@@ -94,13 +95,15 @@ settings = [
 title = "Terminal"
 settings = [
   { key = "terminals.default_profile", title = "Default Shell Profile", about = "The terminal profile ctrl-/ opens.", choices_from = "terminals.profiles" },
-  { key = "ui.terminal_panel.height", title = "Panel Height", about = "Rows the terminal panel opens with." },
+  { key = "ui.terminal_panel.placement", title = "Placement", about = "bottom docks the terminal under the editor, float opens it in a centered window, fullscreen draws it over everything.", choices = ["bottom", "float", "fullscreen"] },
+  { key = "ui.terminal_panel.height", title = "Panel Height", about = "Rows the terminal panel opens with when docked at the bottom." },
 ]
 
 [[section]]
 title = "Explorer"
 settings = [
   { key = "ui.explorer.icon_mode", title = "File Icons", about = "nerd_font needs a Nerd Font; unicode and ascii work with any font.", choices = ["nerd_font", "unicode", "ascii"] },
+  { key = "ui.explorer.side", title = "Side", about = "The side the file explorer docks on.", choices = ["left", "right"] },
   { key = "ui.explorer.width", about = "Columns the explorer opens with." },
 ]
 
