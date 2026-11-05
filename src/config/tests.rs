@@ -1496,6 +1496,12 @@ fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
             "setup page {} has nothing to choose",
             page.title
         );
+        assert!(
+            ["layout", "terminal", "agent", "leader"].contains(&page.preview.as_str()),
+            "setup page {} shows an unknown preview {:?}",
+            page.title,
+            page.preview
+        );
         for choice in &page.choices {
             for (key, value) in &choice.settings {
                 assert!(bundled.contains(key), "{} sets unknown {key}", choice.label);

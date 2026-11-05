@@ -112,6 +112,10 @@ pub struct SetupCatalog {
 pub struct SetupPageInfo {
     pub title: String,
     pub question: String,
+    /// What the small editor beside the choices shows open: `layout`, `terminal`, `agent` or
+    /// `leader`.
+    #[serde(default)]
+    pub preview: String,
     /// A configuration table whose entry names are more choices, each setting `key` to its name.
     #[serde(default)]
     pub choices_from: Option<String>,
@@ -127,8 +131,6 @@ pub struct SetupChoiceInfo {
     pub label: String,
     pub about: String,
     pub settings: std::collections::BTreeMap<String, toml::Value>,
-    #[serde(default)]
-    pub preview: String,
 }
 
 /// The bundled setup questions; a test keeps them parsing and their keys real.

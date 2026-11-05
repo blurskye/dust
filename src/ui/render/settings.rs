@@ -49,6 +49,8 @@ pub struct SetupState {
 pub struct SetupPage {
     pub title: String,
     pub question: String,
+    /// What the small editor beside the choices shows open, as setup.toml names it.
+    pub preview: String,
     pub choices: Vec<SetupChoice>,
 }
 
@@ -56,7 +58,6 @@ pub struct SetupPage {
 pub struct SetupChoice {
     pub label: String,
     pub about: String,
-    pub preview: String,
     pub settings: Vec<(String, toml::Value)>,
 }
 

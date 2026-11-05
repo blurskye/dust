@@ -43,7 +43,6 @@ impl InteractiveApplication {
                                 .to_owned(),
                             settings: vec![(key.clone(), toml::Value::String(name.clone()))],
                             label: name,
-                            preview: String::new(),
                         })
                         .collect(),
                     _ => info
@@ -52,7 +51,6 @@ impl InteractiveApplication {
                         .map(|choice| SetupChoice {
                             label: choice.label.clone(),
                             about: choice.about.clone(),
-                            preview: choice.preview.trim_end().to_owned(),
                             settings: choice
                                 .settings
                                 .iter()
@@ -64,6 +62,7 @@ impl InteractiveApplication {
                 SetupPage {
                     title: info.title.clone(),
                     question: info.question.clone(),
+                    preview: info.preview.clone(),
                     choices,
                 }
             })

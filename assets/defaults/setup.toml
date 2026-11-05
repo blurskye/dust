@@ -1,163 +1,79 @@
 # The questions Dust asks the first time it starts, and again on :setup. Each choice sets
 # the settings it lists in your config.toml; the Settings page (ctrl-,) changes them later.
-# A preview is drawn as written, beside the list of choices.
+# `preview` names what the small editor beside the choices shows open: the layout, the
+# terminal, the agent or the leader key's shortcuts.
 
 [[page]]
 title = "Layout"
 question = "Where should the file explorer and the AI agent go?"
+preview = "layout"
 
 [[page.choice]]
 label = "Explorer left, agent right"
 about = "As in VS Code and Cursor."
 settings = { "ui.explorer.side" = "left", "agents.side" = "right" }
-preview = '''
-┌──────────┬──────────┬──────────┐
-│ ▾ src    │ fn main()│ Agent    │
-│   main.rs│   let x =│ > fix it │
-│   lib.rs │   run(x);│ Done: 2  │
-│ ▸ tests  │ }        │ files    │
-│          │          │          │
-│          │          │          │
-│          │          │          │
-└──────────┴──────────┴──────────┘'''
 
 [[page.choice]]
 label = "Explorer right, agent left"
 about = "The same, mirrored."
 settings = { "ui.explorer.side" = "right", "agents.side" = "left" }
-preview = '''
-┌──────────┬──────────┬──────────┐
-│ Agent    │ fn main()│ ▾ src    │
-│ > fix it │   let x =│   main.rs│
-│ Done: 2  │   run(x);│   lib.rs │
-│ files    │ }        │ ▸ tests  │
-│          │          │          │
-│          │          │          │
-│          │          │          │
-└──────────┴──────────┴──────────┘'''
 
 [[page.choice]]
 label = "Both on the left"
 about = "The code keeps the right side to itself."
 settings = { "ui.explorer.side" = "left", "agents.side" = "left" }
-preview = '''
-┌──────────┬──────────┬──────────┐
-│ ▾ src    │ Agent    │ fn main()│
-│   main.rs│ > fix it │   let x =│
-│   lib.rs │ Done: 2  │   run(x);│
-│ ▸ tests  │ files    │ }        │
-│          │          │          │
-│          │          │          │
-│          │          │          │
-└──────────┴──────────┴──────────┘'''
 
 [[page.choice]]
 label = "Both on the right"
 about = "The code starts at the left edge."
 settings = { "ui.explorer.side" = "right", "agents.side" = "right" }
-preview = '''
-┌──────────┬──────────┬──────────┐
-│ fn main()│ Agent    │ ▾ src    │
-│   let x =│ > fix it │   main.rs│
-│   run(x);│ Done: 2  │   lib.rs │
-│ }        │ files    │ ▸ tests  │
-│          │          │          │
-│          │          │          │
-│          │          │          │
-└──────────┴──────────┴──────────┘'''
 
 [[page]]
 title = "Terminal"
 question = "How should the terminal (ctrl-/) open?"
+preview = "terminal"
 
 [[page.choice]]
 label = "Docked at the bottom"
 about = "Under the code, as in VS Code and LazyVim."
 settings = { "ui.terminal_panel.placement" = "bottom" }
-preview = '''
-┌──────────┬─────────────────────┐
-│ ▾ src    │ fn main() {         │
-│   main.rs│   let x = 1;        │
-│   lib.rs │   run(x);           │
-│ ▸ tests  │ }                   │
-│          │                     │
-├──────────┴─────────────────────┤
-│ $ cargo run                    │
-└────────────────────────────────┘'''
 
 [[page.choice]]
 label = "Floating"
 about = "A window over the code, like lazygit in LazyVim."
 settings = { "ui.terminal_panel.placement" = "float" }
-preview = '''
-┌──────────┬─────────────────────┐
-│ ▾ src    │ fn main() {         │
-│   ┌─ shell ────────────────┐   │
-│   │ $ cargo run            │   │
-│ ▸ │    Compiling           │   │
-│   │                        │   │
-│   └────────────────────────┘   │
-│          │                     │
-└──────────┴─────────────────────┘'''
 
 [[page.choice]]
 label = "Full screen"
 about = "Over everything until you hide it again."
 settings = { "ui.terminal_panel.placement" = "fullscreen" }
-preview = '''
-┌─ shell ────────────────────────┐
-│ $ cargo run                    │
-│    Compiling dust              │
-│     Finished                   │
-│                                │
-│                                │
-│                                │
-│                                │
-└────────────────────────────────┘'''
 
 [[page]]
 title = "AI agent"
-question = "How should Dust run your AI agent (space a a)?"
+question = "How should Dust run your AI agent (<leader> a a)?"
+preview = "agent"
 
 [[page.choice]]
 label = "Dust's agent panel"
 about = "Dust shows the conversation and its edits, through ACP."
 settings = { "agents.connection" = "acp" }
-preview = '''
-┌────────────────┬───────────────┐
-│ fn main() {    │ Agent         │
-│   let x = 1;   │ > fix the bug │
-│   run(x);      │ Read main.rs  │
-│ }              │ Edit main.rs  │
-│                │   +2 −1       │
-│                │ Done.         │
-│                │               │
-└────────────────┴───────────────┘'''
 
 [[page.choice]]
 label = "The agent's own program"
 about = "claude, pi, codex and others run as you know them, in a terminal."
 settings = { "agents.connection" = "terminal" }
-preview = '''
-┌────────────────┬───────────────┐
-│ fn main() {    │ claude        │
-│   let x = 1;   │ > fix the bug │
-│   run(x);      │ ● Reading     │
-│ }              │   main.rs     │
-│                │ ● Editing…    │
-│                │ (its own UI)  │
-│                │               │
-└────────────────┴───────────────┘'''
 
 [[page]]
 title = "Agent"
-question = "Which agent should space a a start?"
+question = "Which agent should <leader> a a start?"
+preview = "agent"
 choices_from = "agents.profiles"
 key = "agents.default"
 
 [[page]]
 title = "Leader key"
-question = "Which key starts shortcuts such as space f f?"
+question = "Which key is the leader, the one that starts shortcuts such as <leader> f f?"
+preview = "leader"
 
 [[page.choice]]
 label = "Space"

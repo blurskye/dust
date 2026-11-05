@@ -1,7 +1,8 @@
-//! The first-start setup: one question per page, its choices down the left and a picture of
-//! the highlighted one on the right, in the Settings page's float.
+//! The first-start setup: one question per page, its choices down the left and, on the right,
+//! a small Dust drawn in the theme's colours the way the highlighted choices would lay it out.
 
-use crate::config::Config;
+use crate::config::{AgentConnection, Config, PanelSide, TerminalPlacement};
+use crate::language::syntax::Highlight;
 use crate::ui::{Style, geometry::text_width};
 
 use super::{
@@ -12,6 +13,9 @@ use super::{
 
 /// The list of choices is at least this wide beside the preview, and at most the second.
 const LIST_WIDTH: (u16, u16) = (40, 60);
+/// The preview's smallest and largest size, in columns and rows.
+const PREVIEW_MINIMUM: (u16, u16) = (50, 12);
+const PREVIEW_MAXIMUM: (u16, u16) = (84, 24);
 
 pub(super) fn render_setup(
     frame: &mut Frame,
@@ -72,17 +76,14 @@ pub(super) fn render_setup(
         right - 2,
     );
 
-    let preview_width = page
-        .choices
-        .iter()
-        .flat_map(|choice| choice.preview.lines())
-        .map(|line| u16::try_from(text_width(line, ambiguous)).unwrap_or(u16::MAX))
-        .max()
-        .unwrap_or(0);
     let list_x = left + 2;
     let room = layout.width.saturating_sub(4);
     // The preview goes beside the list when both fit, and is left out otherwise.
-    let show_preview = preview_width > 0 && room >= LIST_WIDTH.0 + 3 + preview_width;
+    let preview_width = room.saturating_sub(LIST_WIDTH.0 + 3).min(PREVIEW_MAXIMUM.0);
+    let preview_height = bottom.saturating_sub(top + 8).min(PREVIEW_MAXIMUM.1);
+    let show_preview = !page.preview.is_empty()
+        && preview_width >= PREVIEW_MINIMUM.0
+        && preview_height >= PREVIEW_MINIMUM.1;
     let list_right = if show_preview {
         list_x + (room - 3 - preview_width).min(LIST_WIDTH.1)
     } else {
@@ -125,17 +126,20 @@ pub(super) fn render_setup(
         );
         y += 3;
     }
-    if show_preview && let Some(choice) = page.choices.get(picked) {
+    if show_preview {
         let preview_x = list_right + 3 + (right - 2 - list_right - 3 - preview_width) / 2;
-        for (offset, line) in choice.preview.lines().enumerate() {
-            let line_y = top + 5 + u16::try_from(offset).unwrap_or(u16::MAX);
-            if line_y >= bottom - 2 {
-                break;
-            }
-            frame
-                .grid
-                .put_text_clipped(preview_x, line_y, line, Style::Default, right - 2);
-        }
+        let area = Area {
+            x: preview_x,
+            y: top + 5,
+            width: preview_width,
+            height: preview_height,
+        };
+        render_preview(
+            frame,
+            &Scene::of(setup, &page.preview, config),
+            config,
+            area,
+        );
     }
 
     let last = setup.page + 1 == setup.pages.len();
@@ -155,4 +159,548 @@ pub(super) fn render_setup(
             .grid
             .put_text(right.saturating_sub(2 + width), footer_y, &text, style);
     }
+}
+
+#[derive(Clone, Copy)]
+struct Area {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+}
+
+impl Area {
+    fn right(self) -> u16 {
+        self.x + self.width
+    }
+
+    fn bottom(self) -> u16 {
+        self.y + self.height
+    }
+}
+
+/// What the small editor shows: the panels where the highlighted choices put them, and what
+/// the page is about open in it.
+struct Scene<'a> {
+    explorer: PanelSide,
+    /// The agent panel's side, whether it is Dust's panel (ACP) rather than the agent's own
+    /// program, and the agent's name.
+    agent: Option<(PanelSide, bool, &'a str)>,
+    terminal: Option<TerminalPlacement>,
+    /// The leader key, with its shortcuts shown.
+    leader: Option<&'a str>,
+}
+
+impl<'a> Scene<'a> {
+    fn of(setup: &'a SetupState, preview: &str, config: &'a Config) -> Self {
+        // The highlighted choice on every page, so each page shows the answers given so far.
+        let chosen = |key: &str| {
+            setup
+                .pages
+                .iter()
+                .zip(&setup.picked)
+                .filter_map(|(page, picked)| page.choices.get(*picked))
+                .flat_map(|choice| &choice.settings)
+                .find(|(name, _)| name == key)
+                .and_then(|(_, value)| value.as_str())
+        };
+        let side = |key: &str, current: PanelSide| match chosen(key) {
+            Some("left") => PanelSide::Left,
+            Some("right") => PanelSide::Right,
+            _ => current,
+        };
+        let acp = match chosen("agents.connection") {
+            Some(connection) => connection == "acp",
+            None => config.agents.connection == AgentConnection::Acp,
+        };
+        let agent = (
+            side("agents.side", config.agents.side),
+            acp,
+            chosen("agents.default").unwrap_or(&config.agents.default),
+        );
+        let terminal = match chosen("ui.terminal_panel.placement") {
+            Some("float") => TerminalPlacement::Float,
+            Some("fullscreen") => TerminalPlacement::Fullscreen,
+            Some(_) => TerminalPlacement::Bottom,
+            None => config.ui.terminal_panel.placement,
+        };
+        let leader = chosen("input.keymaps.leader").unwrap_or(&config.input.keymaps.leader);
+        Self {
+            explorer: side("ui.explorer.side", config.ui.explorer.side),
+            agent: matches!(preview, "layout" | "agent").then_some(agent),
+            terminal: (preview == "terminal").then_some(terminal),
+            leader: (preview == "leader").then_some(leader),
+        }
+    }
+}
+
+/// A token of the sample code and its colour; `None` is plain text.
+type Token = (&'static str, Option<Highlight>);
+
+const KEYWORD: Option<Highlight> = Some(Highlight::KEYWORD);
+const FUNCTION: Option<Highlight> = Some(Highlight::FUNCTION);
+const STRING: Option<Highlight> = Some(Highlight::STRING);
+const TYPE: Option<Highlight> = Some(Highlight::TYPE);
+const COMMENT: Option<Highlight> = Some(Highlight::COMMENT);
+
+const CODE: &[&[Token]] = &[
+    &[("use", KEYWORD), (" std::fs;", None)],
+    &[],
+    &[("// How long the notes are.", COMMENT)],
+    &[
+        ("fn", KEYWORD),
+        (" ", None),
+        ("main", FUNCTION),
+        ("() {", None),
+    ],
+    &[
+        ("    ", None),
+        ("let", KEYWORD),
+        (" text = fs::", None),
+        ("read_to_string", FUNCTION),
+        ("(", None),
+        ("\"notes.md\"", STRING),
+        (");", None),
+    ],
+    &[
+        ("    ", None),
+        ("println!", FUNCTION),
+        ("(", None),
+        ("\"{} lines\"", STRING),
+        (", ", None),
+        ("count", FUNCTION),
+        ("(&text));", None),
+    ],
+    &[("}", None)],
+    &[],
+    &[
+        ("fn", KEYWORD),
+        (" ", None),
+        ("count", FUNCTION),
+        ("(text: &", None),
+        ("str", TYPE),
+        (") -> ", None),
+        ("usize", TYPE),
+        (" {", None),
+    ],
+    &[
+        ("    text.", None),
+        ("lines", FUNCTION),
+        ("().", None),
+        ("count", FUNCTION),
+        ("()", None),
+    ],
+    &[("}", None)],
+];
+
+/// The sample lines added since the last commit, for the git signs.
+const ADDED_LINES: [usize; 2] = [5, 6];
+
+fn render_preview(frame: &mut Frame, scene: &Scene, config: &Config, area: Area) {
+    framed(frame, area, Style::Border, Style::Default);
+    let inner = Area {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width - 2,
+        height: area.height - 2,
+    };
+    let body = Area {
+        height: inner.height - 1,
+        ..inner
+    };
+    // The panels go at their side's edge, the explorer outermost, and the code takes the rest.
+    let explorer_width = (inner.width / 4).clamp(14, 22);
+    let agent_width = (inner.width * 3 / 10).clamp(16, 28);
+    let (mut code_left, mut code_right) = (body.x, body.right());
+    let mut place = |side: PanelSide, width: u16| match side {
+        PanelSide::Left => {
+            let x = code_left;
+            code_left += width + 1;
+            (x, x + width)
+        }
+        PanelSide::Right => {
+            code_right -= width + 1;
+            (code_right + 1, code_right)
+        }
+    };
+    let (explorer_x, explorer_divider) = place(scene.explorer, explorer_width);
+    let agent = scene
+        .agent
+        .map(|(side, acp, name)| (place(side, agent_width), acp, name));
+    let code = Area {
+        x: code_left,
+        width: code_right.saturating_sub(code_left),
+        ..body
+    };
+
+    render_explorer(
+        frame,
+        config,
+        Area {
+            x: explorer_x,
+            width: explorer_width,
+            ..body
+        },
+    );
+    for y in body.y..body.bottom() {
+        frame
+            .grid
+            .set_cell(explorer_divider, y, "│", Style::ExplorerBorder);
+    }
+    if let Some(((x, divider), acp, name)) = agent {
+        for y in body.y..body.bottom() {
+            frame.grid.set_cell(divider, y, "│", Style::Border);
+        }
+        let panel = Area {
+            x,
+            width: agent_width,
+            ..body
+        };
+        if acp {
+            render_agent_panel(frame, name, panel);
+        } else {
+            render_agent_program(frame, name, panel);
+        }
+    }
+    render_code(frame, code);
+    match scene.terminal {
+        Some(TerminalPlacement::Bottom) => {
+            let height = (code.height * 2 / 5).max(4);
+            render_terminal(
+                frame,
+                Area {
+                    y: code.bottom() - height,
+                    height,
+                    ..code
+                },
+                false,
+            );
+        }
+        Some(TerminalPlacement::Float) => {
+            let (width, height) = (body.width * 3 / 5, (body.height * 3 / 5).max(6));
+            render_terminal(
+                frame,
+                Area {
+                    x: body.x + (body.width - width) / 2,
+                    y: body.y + (body.height - height) / 2,
+                    width,
+                    height,
+                },
+                true,
+            );
+        }
+        Some(TerminalPlacement::Fullscreen) => render_terminal(frame, body, false),
+        None => {}
+    }
+    if let Some(leader) = scene.leader {
+        render_leader_keys(frame, leader, code);
+    }
+    render_status(frame, scene, inner);
+}
+
+/// A box in `border`, its inside filled with `inside`.
+fn framed(frame: &mut Frame, area: Area, border: Style, inside: Style) {
+    let (right, bottom) = (area.right() - 1, area.bottom() - 1);
+    for y in area.y..=bottom {
+        fill(frame, area.x, y, area.width, inside);
+        frame.grid.set_cell(area.x, y, "│", border);
+        frame.grid.set_cell(right, y, "│", border);
+    }
+    for x in area.x..=right {
+        frame.grid.set_cell(x, area.y, "─", border);
+        frame.grid.set_cell(x, bottom, "─", border);
+    }
+    frame.grid.set_cell(area.x, area.y, "╭", border);
+    frame.grid.set_cell(right, area.y, "╮", border);
+    frame.grid.set_cell(area.x, bottom, "╰", border);
+    frame.grid.set_cell(right, bottom, "╯", border);
+}
+
+/// Text in one row of `area`, cut off at its right edge.
+fn line(frame: &mut Frame, area: Area, row: u16, x: u16, text: &str, style: Style) -> u16 {
+    if row >= area.height {
+        return x;
+    }
+    frame
+        .grid
+        .put_text_clipped(x, area.y + row, text, style, area.right())
+}
+
+fn render_explorer(frame: &mut Frame, config: &Config, area: Area) {
+    let glyphs = config.ui.explorer.active_glyphs();
+    for y in area.y..area.bottom() {
+        fill(frame, area.x, y, area.width, Style::ExplorerBackground);
+    }
+    line(frame, area, 0, area.x + 1, "my-app", Style::ExplorerHeader);
+    let space = &glyphs.icon_spacing;
+    let entries: [(&str, &str, &str, Style); 6] = [
+        ("", &glyphs.directory_open, "src", Style::ExplorerDirectory),
+        (
+            &glyphs.tree_middle,
+            &glyphs.file,
+            "lib.rs",
+            Style::ExplorerFile,
+        ),
+        (
+            &glyphs.tree_last,
+            &glyphs.file,
+            "main.rs",
+            Style::ExplorerFile,
+        ),
+        ("", &glyphs.directory, "tests", Style::ExplorerDirectory),
+        ("", &glyphs.file, "Cargo.toml", Style::ExplorerFile),
+        ("", &glyphs.file, "README.md", Style::ExplorerFile),
+    ];
+    for (row, (tree, icon, name, style)) in (2..).zip(entries) {
+        let selected = name == "main.rs";
+        if selected && row < area.height {
+            fill(
+                frame,
+                area.x,
+                area.y + row,
+                area.width,
+                Style::ExplorerSelection,
+            );
+        }
+        let pick = |style| {
+            if selected {
+                Style::ExplorerSelection
+            } else {
+                style
+            }
+        };
+        let x = line(
+            frame,
+            area,
+            row,
+            area.x + 1,
+            tree,
+            pick(Style::ExplorerTree),
+        );
+        let x = line(
+            frame,
+            area,
+            row,
+            x,
+            &format!("{icon}{space}"),
+            pick(Style::ExplorerIcon),
+        );
+        line(frame, area, row, x, name, pick(style));
+    }
+}
+
+fn render_code(frame: &mut Frame, area: Area) {
+    // The open files along the top, as the buffer line shows them.
+    fill(
+        frame,
+        area.x,
+        area.y,
+        area.width,
+        Style::BufferLineBackground,
+    );
+    let x = line(frame, area, 0, area.x, " main.rs ", Style::BufferLineActive);
+    line(frame, area, 0, x, " lib.rs ", Style::BufferLineInactive);
+    for (row, tokens) in (1..area.height).zip(CODE) {
+        let number = usize::from(row);
+        let sign = if ADDED_LINES.contains(&number) {
+            "▎"
+        } else {
+            " "
+        };
+        let x = line(frame, area, row, area.x, sign, Style::GitSignAdded);
+        let mut x = line(frame, area, row, x, &format!("{number:>2} "), Style::Muted);
+        for &(text, highlight) in *tokens {
+            let style = highlight.map_or(Style::Default, Style::Syntax);
+            x = line(frame, area, row, x, text, style);
+        }
+    }
+}
+
+fn render_terminal(frame: &mut Frame, area: Area, floating: bool) {
+    let inside = if floating {
+        framed(
+            frame,
+            area,
+            Style::TerminalBorder,
+            Style::TerminalBackground,
+        );
+        frame.grid.put_text_clipped(
+            area.x + 2,
+            area.y,
+            " Terminal ",
+            Style::TerminalTitle,
+            area.right(),
+        );
+        Area {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width - 2,
+            height: area.height - 2,
+        }
+    } else {
+        for x in area.x..area.right() {
+            frame.grid.set_cell(x, area.y, "─", Style::TerminalBorder);
+        }
+        line(
+            frame,
+            area,
+            0,
+            area.x + 1,
+            " Terminal ",
+            Style::TerminalTitle,
+        );
+        for y in area.y + 1..area.bottom() {
+            fill(frame, area.x, y, area.width, Style::TerminalBackground);
+        }
+        Area {
+            y: area.y + 1,
+            height: area.height - 1,
+            ..area
+        }
+    };
+    let output = [
+        "$ cargo test",
+        "   Compiling my-app v0.1.0",
+        "    Finished in 0.42s",
+        "test result: ok. 3 passed",
+        "$ ",
+    ];
+    for (row, text) in (0..).zip(output) {
+        line(
+            frame,
+            inside,
+            row,
+            inside.x + 1,
+            text,
+            Style::TerminalBackground,
+        );
+    }
+}
+
+fn render_agent_panel(frame: &mut Frame, name: &str, area: Area) {
+    let x = line(frame, area, 0, area.x + 1, name, Style::Accent);
+    line(frame, area, 0, x, " · agent", Style::Muted);
+    let transcript = [
+        (2, "You", Style::Accent),
+        (3, "How long is notes.md?", Style::Default),
+        (5, name, Style::Accent),
+        (6, "● Read notes.md", Style::Muted),
+        (7, "It has 42 lines.", Style::Default),
+    ];
+    for (row, text, style) in transcript {
+        if row + 3 < area.height {
+            line(frame, area, row, area.x + 1, text, style);
+        }
+    }
+    let input = area.height - 2;
+    for x in area.x..area.right() {
+        frame.grid.set_cell(x, area.y + input, "─", Style::Border);
+    }
+    line(
+        frame,
+        area,
+        input + 1,
+        area.x + 1,
+        &format!("Ask {name}…"),
+        Style::Muted,
+    );
+}
+
+/// The agent's own program, running in a terminal in the agent's place.
+fn render_agent_program(frame: &mut Frame, name: &str, area: Area) {
+    for y in area.y..area.bottom() {
+        fill(frame, area.x, y, area.width, Style::TerminalBackground);
+    }
+    line(
+        frame,
+        area,
+        0,
+        area.x,
+        &format!(" {name} "),
+        Style::TerminalTitle,
+    );
+    let output = [
+        format!("$ {name}"),
+        "> how long is notes.md?".into(),
+        "● Read(notes.md)".into(),
+        "  It has 42 lines.".into(),
+        String::new(),
+        "> ".into(),
+    ];
+    for (row, text) in (2..).zip(&output) {
+        line(
+            frame,
+            area,
+            row,
+            area.x + 1,
+            text,
+            Style::TerminalBackground,
+        );
+    }
+}
+
+/// The shortcuts that follow the leader key, as the key hints show them after it is pressed.
+fn render_leader_keys(frame: &mut Frame, leader: &str, code: Area) {
+    let entries = [
+        ("a", "+agent", true),
+        ("e", "Explorer", false),
+        ("f", "+find", true),
+        ("g", "+git", true),
+        ("s", "+search", true),
+        ("w", "+windows", true),
+        ("q", "+quit", true),
+    ];
+    let width = 18.min(code.width);
+    let height = (u16::try_from(entries.len()).unwrap_or(u16::MAX) + 2).min(code.height - 1);
+    let area = Area {
+        x: code.right() - width,
+        y: code.bottom() - height,
+        width,
+        height,
+    };
+    framed(frame, area, Style::KeyHintBorder, Style::KeyHintBackground);
+    frame.grid.put_text_clipped(
+        area.x + 2,
+        area.y,
+        &format!(" {leader} "),
+        Style::KeyHintPrefix,
+        area.right() - 1,
+    );
+    let inside = Area {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width - 2,
+        height: area.height - 2,
+    };
+    for (row, (key, label, group)) in (0..).zip(entries) {
+        let x = line(frame, inside, row, inside.x + 1, key, Style::KeyHintKey);
+        let x = line(frame, inside, row, x, " → ", Style::KeyHintBackground);
+        let style = if group {
+            Style::KeyHintGroup
+        } else {
+            Style::KeyHintCommand
+        };
+        line(frame, inside, row, x, label, style);
+    }
+}
+
+fn render_status(frame: &mut Frame, scene: &Scene, inner: Area) {
+    let row = inner.height - 1;
+    fill(frame, inner.x, inner.y + row, inner.width, Style::Status);
+    let x = line(frame, inner, row, inner.x, " NORMAL ", Style::StatusAccent);
+    line(frame, inner, row, x, " main.rs", Style::Status);
+    // The leader just pressed shows at the right, as typed keys do.
+    let right = match scene.leader {
+        Some(leader) => format!("{leader}  5:9 "),
+        None => "5:9 ".into(),
+    };
+    let width = u16::try_from(right.chars().count()).unwrap_or(u16::MAX);
+    line(
+        frame,
+        inner,
+        row,
+        inner.right().saturating_sub(width),
+        &right,
+        Style::Status,
+    );
 }
