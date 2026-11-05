@@ -496,7 +496,7 @@ fn check_status_deadline(
 }
 
 /// Run Git under the existing job supervisor so a stalled scan can be killed and reaped.
-fn status_command(
+pub(super) fn status_command(
     workdir: &Path,
     arguments: &[&str],
     policy: &GitStatusPolicy,

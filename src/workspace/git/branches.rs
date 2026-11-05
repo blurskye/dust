@@ -446,13 +446,31 @@ fn has_changes(
     expires: Instant,
 ) -> Result<bool, GitBranchError> {
     check_request(cancel, expires)?;
-    let mut options = git2::StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(false);
-    let statuses = repository.statuses(Some(&mut options)).map_err(backend)?;
+    let workdir = repository.workdir().ok_or(GitBranchError::NotRepository)?;
+    // libgit2's status scan can't be stopped, so `git status` runs as a job the deadline kills.
+    // Its output is capped at a few lines: any change at all is enough to answer.
+    let started = Instant::now();
+    let policy = super::status::GitStatusPolicy {
+        root: workdir.to_path_buf(),
+        root_revision: 0,
+        maximum_files: 1,
+        maximum_path_bytes: 512,
+        deadline: expires.saturating_duration_since(started),
+    };
+    let (output, truncated) = super::status::status_command(
+        workdir,
+        &["status", "--porcelain", "--untracked-files=normal"],
+        &policy,
+        started,
+        cancel,
+    )
+    .map_err(|error| match error {
+        super::status::GitStatusError::Deadline => GitBranchError::Deadline,
+        super::status::GitStatusError::Cancelled => GitBranchError::Cancelled,
+        error => backend(error),
+    })?;
     check_request(cancel, expires)?;
-    Ok(!statuses.is_empty())
+    Ok(truncated || !output.is_empty())
 }
 
 /// A worktree inside the main checkout would otherwise show as untracked in its status.
@@ -520,10 +538,93 @@ fn checked_out_path(
     cancel: &AtomicBool,
     expires: Instant,
 ) -> Result<Option<PathBuf>, GitBranchError> {
+    // The primary checkout's HEAD lives in the common directory.
+    if let Ok(main) = open(repository.commondir())
+        && let Ok(head) = main.head()
+        && head.is_branch()
+        && head.shorthand() == Some(name)
+    {
+        return Ok(Some(main.workdir().unwrap_or(main.path()).to_path_buf()));
+    }
     Ok(worktree_branches(repository, cancel, expires)?
         .into_iter()
         .find(|linked| linked.branch.as_deref() == Some(name))
         .map(|linked| linked.path))
+}
+
+/// Where a new worktree's HEAD points.
+enum WorktreeHead<'a> {
+    Branch(&'a str),
+    Detached(git2::Oid),
+}
+
+/// Add worktree `name` at `path` with `head` checked out. libgit2 checks a new worktree out with
+/// no way to stop it, so the worktree starts on an empty commit and its files come from a
+/// checkout the deadline can interrupt. A failed or interrupted checkout removes the worktree.
+fn add_worktree(
+    repository: &git2::Repository,
+    name: &str,
+    path: &Path,
+    head: WorktreeHead<'_>,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<(), GitBranchError> {
+    let empty = repository
+        .treebuilder(None)
+        .and_then(|builder| builder.write())
+        .and_then(|tree| repository.find_tree(tree))
+        .map_err(backend)?;
+    let signature = git2::Signature::now("Dust", "dust@localhost").map_err(backend)?;
+    let start = repository
+        .commit(None, &signature, &signature, "worktree start", &empty, &[])
+        .map_err(backend)?;
+    let temporary = format!("refs/heads/dust-worktree/{name}");
+    let starting = repository
+        .reference(&temporary, start, true, "worktree start")
+        .map_err(backend)?;
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&starting));
+    let added = check_request(cancel, expires).and_then(|()| {
+        repository
+            .worktree(name, path, Some(&options))
+            .map_err(backend)
+    });
+    let delete_temporary = || {
+        if let Ok(mut reference) = repository.find_reference(&temporary) {
+            let _ = reference.delete();
+        }
+    };
+    let worktree = match added {
+        Ok(worktree) => worktree,
+        Err(error) => {
+            drop(starting);
+            delete_temporary();
+            return Err(error);
+        }
+    };
+    drop(starting);
+    let checked_out = git2::Repository::open(path)
+        .map_err(backend)
+        .and_then(|linked| {
+            match head {
+                WorktreeHead::Branch(reference) => linked.set_head(reference),
+                WorktreeHead::Detached(oid) => linked.set_head_detached(oid),
+            }
+            .map_err(backend)?;
+            let mut checkout = checkout_options(cancel, expires);
+            checkout.force();
+            linked.checkout_head(Some(&mut checkout)).map_err(backend)
+        })
+        .and_then(|()| check_request(cancel, expires));
+    delete_temporary();
+    if let Err(error) = checked_out {
+        let _ = std::fs::remove_dir_all(path);
+        let mut prune = git2::WorktreePruneOptions::new();
+        prune.valid(true).working_tree(true);
+        let _ = worktree.prune(Some(&mut prune));
+        return Err(check_request(cancel, expires).err().unwrap_or(error));
+    }
+    Ok(())
 }
 
 fn run(
@@ -575,52 +676,15 @@ fn run(
                 .peel_to_commit()
                 .map_err(|_| GitBranchError::UnknownBranch(revision.clone()))?
                 .id();
-            // Git requires a new worktree to START on a branch (libgit2: "reference is not a
-            // branch"), and the main HEAD's branch is already checked out - so a temporary branch
-            // is made for the start, and REMOVED once HEAD is detached. The branch list is
-            // therefore exactly what it was before the review was looked at.
-            let temporary_branch = format!("dust-review/{name}");
-            check_request(cancel, expires)?;
-            let starting = repository
-                .reference(
-                    &format!("refs/heads/{temporary_branch}"),
-                    oid,
-                    true,
-                    "review checkout",
-                )
-                .map_err(backend)?;
-            let mut options = git2::WorktreeAddOptions::new();
-            options.reference(Some(&starting));
-            let created = check_request(cancel, expires).and_then(|()| {
-                repository
-                    .worktree(name, path, Some(&options))
-                    .map_err(backend)
-            });
-            drop(starting);
-            if let Err(error) = created {
-                if let Ok(mut branch) =
-                    repository.find_branch(&temporary_branch, git2::BranchType::Local)
-                {
-                    let _ = branch.delete();
-                }
-                check_request(cancel, expires)?;
-                return Err(error);
-            }
-            // DETACHED: no branch is created and none is moved by looking at a review.
-            let linked = git2::Repository::open(path).map_err(backend)?;
-            linked.set_head_detached(oid).map_err(backend)?;
-            let mut checkout = checkout_options(cancel, expires);
-            checkout.force();
-            let checked_out = linked.checkout_head(Some(&mut checkout));
-            // The starting branch has served its purpose: HEAD is detached now, so it can go and
-            // no branch is left behind by looking at a review.
-            if let Ok(mut branch) =
-                repository.find_branch(&temporary_branch, git2::BranchType::Local)
-            {
-                let _ = branch.delete();
-            }
-            check_request(cancel, expires)?;
-            checked_out.map_err(backend)?;
+            // Detached: no branch is created and none is moved by looking at a review.
+            add_worktree(
+                &repository,
+                name,
+                path,
+                WorktreeHead::Detached(oid),
+                cancel,
+                expires,
+            )?;
             Ok(GitBranchResult::Changed)
         }
         GitBranchRequest::CreateWorktree {
@@ -690,17 +754,23 @@ fn run(
                 }
             };
             let reference = branch.into_reference();
-            let mut options = git2::WorktreeAddOptions::new();
-            options.reference(Some(&reference));
+            let reference = reference
+                .name()
+                .ok_or_else(|| GitBranchError::UnknownBranch(short.to_owned()))?
+                .to_owned();
             let added = check_request(cancel, expires).and_then(|()| {
                 path.parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
                     .map_err(backend)
                     .and_then(|()| {
-                        check_request(cancel, expires)?;
-                        repository
-                            .worktree(name, path, Some(&options))
-                            .map_err(backend)
+                        add_worktree(
+                            &repository,
+                            name,
+                            path,
+                            WorktreeHead::Branch(&reference),
+                            cancel,
+                            expires,
+                        )
                     })
             });
             if let Err(error) = added {
@@ -768,6 +838,84 @@ fn run(
 #[cfg(test)]
 mod exclude_tests {
     use super::*;
+
+    fn repository_with_commit(root: &Path) -> git2::Repository {
+        let repository = git2::Repository::init(root).unwrap();
+        std::fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        repository
+            .commit(Some("HEAD"), &signature, &signature, "one", &tree, &[])
+            .unwrap();
+        drop(tree);
+        repository
+    }
+
+    #[test]
+    fn change_checks_run_git_under_the_request_deadline() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = repository_with_commit(root.path());
+        let cancel = AtomicBool::new(false);
+        let later = Instant::now() + Duration::from_secs(10);
+        assert!(!has_changes(&repository, &cancel, later).unwrap());
+        std::fs::write(root.path().join("untracked.txt"), "new\n").unwrap();
+        assert!(has_changes(&repository, &cancel, later).unwrap());
+        assert!(matches!(
+            has_changes(&repository, &cancel, Instant::now()),
+            Err(GitBranchError::Deadline)
+        ));
+        cancel.store(true, Ordering::Release);
+        assert!(matches!(
+            has_changes(&repository, &cancel, later),
+            Err(GitBranchError::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn a_failed_worktree_checkout_removes_the_new_worktree() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = repository_with_commit(root.path());
+        let path = root.path().join("broken");
+        let cancel = AtomicBool::new(false);
+        let expires = Instant::now() + Duration::from_secs(10);
+        assert!(
+            add_worktree(
+                &repository,
+                "broken",
+                &path,
+                WorktreeHead::Branch("refs/heads/bad..name"),
+                &cancel,
+                expires,
+            )
+            .is_err()
+        );
+        assert!(!path.exists());
+        assert!(repository.find_worktree("broken").is_err());
+        assert!(
+            repository
+                .find_reference("refs/heads/dust-worktree/broken")
+                .is_err()
+        );
+        let head = repository.head().unwrap().target().unwrap();
+        add_worktree(
+            &repository,
+            "broken",
+            &path,
+            WorktreeHead::Detached(head),
+            &cancel,
+            expires,
+        )
+        .unwrap();
+        assert!(path.join("tracked.txt").is_file());
+        assert!(
+            repository
+                .find_reference("refs/heads/dust-worktree/broken")
+                .is_err()
+        );
+    }
 
     #[test]
     fn concurrent_exclude_updates_preserve_patterns_without_duplicates() {
