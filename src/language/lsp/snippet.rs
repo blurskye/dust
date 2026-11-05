@@ -17,11 +17,38 @@ impl SnippetTabstop {
         .expect("snippet tabstop endpoints are ordered")
     }
 }
+/// A transformed copy of a tabstop, such as `${1/(.*)/${1:/upcase}/}`, which follows edits to
+/// the tabstop while the snippet is active.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnippetTransform {
+    pub index: u32,
+    pub start: usize,
+    pub end: usize,
+    pub depth: usize,
+    /// How many tabstops come before it, to order it against a tabstop at the same position.
+    pub order: usize,
+    rule: Transform,
+    maximum_bytes: usize,
+}
+impl SnippetTransform {
+    pub(crate) fn range(&self) -> crate::editor::text::ByteRange {
+        crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(self.start),
+            crate::editor::text::ByteOffset(self.end),
+        )
+        .expect("snippet transform endpoints are ordered")
+    }
+    /// The copy's text for the tabstop's current `value`.
+    pub fn apply(&self, value: &str) -> Result<String, String> {
+        self.rule.apply(value, self.maximum_bytes)
+    }
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedSnippet {
     pub text: String,
     pub first_tabstop: Option<usize>,
     pub tabstops: Vec<SnippetTabstop>,
+    pub transforms: Vec<SnippetTransform>,
 }
 
 pub fn parse_snippet(source: &str, maximum_bytes: usize) -> Result<ParsedSnippet, String> {
@@ -58,16 +85,18 @@ pub fn parse_snippet_with_variables(
     resolver.collect(&pieces);
     let mut text = String::new();
     let mut tabstops = Vec::new();
-    resolver.expand(&pieces, &mut text, &mut tabstops, 0)?;
+    let mut transforms = Vec::new();
+    resolver.expand(&pieces, &mut text, &mut tabstops, &mut transforms, 0)?;
     tabstops.sort_by_key(|stop| (stop.index == 0, stop.index, stop.start));
     Ok(ParsedSnippet {
         first_tabstop: tabstops.first().map(|stop| stop.start),
         text,
         tabstops,
+        transforms,
     })
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum Key {
     Tabstop(u32),
     Variable(String),
@@ -78,7 +107,7 @@ enum Piece {
     Value(Key, Option<Vec<Piece>>),
     Transform(Key, Transform),
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct Transform {
     pattern: String,
     replacement: String,
@@ -322,7 +351,13 @@ impl<'a> Resolver<'a> {
                 self.active.push(*index);
                 let mut value = String::new();
                 if let Some(default) = self.definitions.get(index).copied() {
-                    self.expand(default, &mut value, &mut Vec::new(), depth + 1)?;
+                    self.expand(
+                        default,
+                        &mut value,
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                        depth + 1,
+                    )?;
                 }
                 self.active.pop();
                 self.values.insert(*index, value.clone());
@@ -335,6 +370,7 @@ impl<'a> Resolver<'a> {
         pieces: &[Piece],
         text: &mut String,
         stops: &mut Vec<SnippetTabstop>,
+        transforms: &mut Vec<SnippetTransform>,
         depth: usize,
     ) -> Result<(), String> {
         if depth > 32 {
@@ -345,7 +381,19 @@ impl<'a> Resolver<'a> {
                 Piece::Text(literal) => text.push_str(literal),
                 Piece::Transform(key, transform) => {
                     let value = self.value(key, depth)?;
+                    let start = text.len();
                     text.push_str(&transform.apply(&value, self.maximum_bytes)?);
+                    if let Key::Tabstop(index) = key {
+                        transforms.push(SnippetTransform {
+                            index: *index,
+                            start,
+                            end: text.len(),
+                            depth,
+                            order: stops.len(),
+                            rule: transform.clone(),
+                            maximum_bytes: self.maximum_bytes,
+                        });
+                    }
                 }
                 Piece::Value(key, default) => {
                     let start = text.len();
@@ -360,7 +408,7 @@ impl<'a> Resolver<'a> {
                                 order: stop,
                             });
                             if let Some(default) = default {
-                                self.expand(default, text, stops, depth + 1)?;
+                                self.expand(default, text, stops, transforms, depth + 1)?;
                             } else {
                                 text.push_str(&self.value(key, depth)?);
                             }
@@ -370,7 +418,7 @@ impl<'a> Resolver<'a> {
                             if let Some(value) = self.variables.get(name) {
                                 text.push_str(value);
                             } else if let Some(default) = default {
-                                self.expand(default, text, stops, depth + 1)?;
+                                self.expand(default, text, stops, transforms, depth + 1)?;
                             } else {
                                 // Unknown variables become editable placeholders, as in TextMate.
                                 text.push_str(name);
@@ -423,9 +471,11 @@ impl Transform {
                 _ => return Err("unsupported snippet regex option".into()),
             }
         }
-        let regex = builder
-            .build()
-            .map_err(|error| format!("invalid snippet regex: {error}"))?;
+        // JavaScript-only syntax such as lookaround leaves the value as it is instead of
+        // refusing the whole snippet.
+        let Ok(regex) = builder.build() else {
+            return Ok(value.to_owned());
+        };
         let mut output = String::new();
         let mut end = 0;
         for captures in regex.captures_iter(value) {
@@ -633,6 +683,23 @@ mod tests {
             "$1".repeat(1024)
         );
         assert!(parse_snippet(&source, 4096).is_err());
+    }
+    #[test]
+    fn transformed_tabstop_copies_report_their_ranges() {
+        let parsed = parse_snippet("${1:ab} ${1/(.*)/${1:/upcase}/} ${1/a(?=b)/x/}", 1024).unwrap();
+        assert_eq!(
+            parsed.text, "ab AB ab",
+            "JavaScript-only lookahead keeps the value"
+        );
+        assert_eq!(
+            parsed
+                .transforms
+                .iter()
+                .map(|transform| (transform.index, transform.start, transform.end))
+                .collect::<Vec<_>>(),
+            vec![(1, 3, 5), (1, 6, 8)]
+        );
+        assert_eq!(parsed.transforms[0].apply("cd").unwrap(), "CD");
     }
     #[test]
     fn tabstop_ranges_use_normalized_newlines() {

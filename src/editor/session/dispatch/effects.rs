@@ -7333,6 +7333,7 @@ impl InteractiveApplication {
             }
         };
         let mut tabstops = Vec::new();
+        let mut transforms = Vec::new();
         if snippet {
             let path = &document.path;
             let current_line = buffer.line(line).unwrap_or_default();
@@ -7426,6 +7427,7 @@ impl InteractiveApplication {
                 Ok(parsed) => {
                     edit.new_text = parsed.text;
                     tabstops = parsed.tabstops;
+                    transforms = parsed.transforms;
                 }
                 Err(error) => {
                     self.show_error(error);
@@ -7492,6 +7494,7 @@ impl InteractiveApplication {
                     start,
                     tabstops,
                 );
+                self.input.install_snippet_transforms(start, transforms);
                 self.select_snippet_current();
             }
         }

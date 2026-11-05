@@ -108,6 +108,16 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
                 app.state.buffers[buffer].text.to_string(),
                 expected.replace("bcd", "Xcd")
             );
+            app.navigate_snippet(-1);
+            app.invoke_insert_text("z".into());
+            assert_eq!(
+                app.state.buffers[buffer].text.to_string(),
+                expected
+                    .replace("bcd", "Xcd")
+                    .replace(" a\n", " z\n")
+                    .replace(" A", " Z"),
+                "the transformed copy follows the first tabstop"
+            );
         } else {
             assert!(app.state.views[view].selection.is_none());
         }
@@ -1911,6 +1921,16 @@ fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insert
             assert_eq!(
                 app.state.buffers[buffer].text.to_string(),
                 expected.replace("bcd", "Xcd")
+            );
+            app.navigate_snippet(-1);
+            app.invoke_insert_text("z".into());
+            assert_eq!(
+                app.state.buffers[buffer].text.to_string(),
+                expected
+                    .replace("bcd", "Xcd")
+                    .replace(" a\n", " z\n")
+                    .replace(" A", " Z"),
+                "the transformed copy follows the first tabstop"
             );
         } else {
             assert!(app.state.views[view].selection.is_none());

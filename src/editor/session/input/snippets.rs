@@ -6,7 +6,7 @@ use crate::editor::{
     BufferId, EditorOperation, EditorTransaction, EditorWindowVersion, Selection, SelectionKind,
     ViewId,
 };
-use crate::language::lsp::SnippetTabstop;
+use crate::language::lsp::{SnippetTabstop, SnippetTransform};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(in crate::editor::session) struct SnippetDocument<'a> {
@@ -22,6 +22,7 @@ pub(super) struct SnippetSession {
     buffer: BufferId,
     revision: BufferRevision,
     groups: Vec<Vec<SnippetTabstop>>,
+    transforms: Vec<SnippetTransform>,
     current: usize,
 }
 impl SnippetSession {
@@ -36,6 +37,7 @@ pub(in crate::editor::session) struct SnippetUpdate {
     buffer: BufferId,
     before: BufferRevision,
     groups: Vec<Vec<SnippetTabstop>>,
+    transforms: Vec<SnippetTransform>,
     current: usize,
 }
 impl InputSession {
@@ -78,8 +80,26 @@ impl InputSession {
             buffer: document.buffer,
             revision: document.text.revision(),
             groups: groups.into_iter().map(|(_, ranges)| ranges).collect(),
+            transforms: Vec::new(),
             current: 0,
         });
+    }
+    /// Adds the transformed copies of the snippet just installed at `insertion`.
+    pub(in crate::editor::session) fn install_snippet_transforms(
+        &mut self,
+        insertion: ByteOffset,
+        transforms: Vec<SnippetTransform>,
+    ) {
+        if let Some(session) = &mut self.snippet {
+            session.transforms = transforms
+                .into_iter()
+                .map(|mut transform| {
+                    transform.start = transform.start.saturating_add(insertion.get());
+                    transform.end = transform.end.saturating_add(insertion.get());
+                    transform
+                })
+                .collect();
+        }
     }
     pub(in crate::editor::session) fn accept_snippet_edit(
         &mut self,
@@ -106,6 +126,7 @@ impl InputSession {
             return false;
         }
         session.groups = update.groups;
+        session.transforms = update.transforms;
         session.current = update.current;
         session.revision = document.text.revision();
         true
@@ -284,29 +305,13 @@ impl InputSession {
                 }
             }
         }
-        copies.sort_by_key(|(edit, (group, occurrence))| {
-            (
-                edit.range().start,
-                edit.range().end,
-                session.groups[*group][*occurrence].order,
-            )
-        });
-        let mut replacement_edits: Vec<TextEdit> = Vec::new();
-        for (edit, _) in &copies {
-            if edit.range().is_empty()
-                && let Some(previous) = replacement_edits
-                    .last_mut()
-                    .filter(|previous| previous.range() == edit.range())
-            {
-                *previous = TextEdit::new(
-                    edit.range(),
-                    format!("{}{}", previous.replacement(), edit.replacement()),
-                );
-            } else {
-                replacement_edits.push(edit.clone());
-            }
-        }
-        let replacement_edits = TextEditSet::new(session.revision, replacement_edits);
+        let ordered = copies
+            .iter()
+            .map(|(edit, (group, occurrence))| {
+                (edit.clone(), (session.groups[*group][*occurrence].order, 1))
+            })
+            .collect::<Vec<_>>();
+        let replacement_edits = merge_edits(session.revision, ordered.clone());
         if document.text.validate_edits(&replacement_edits).is_err() {
             self.clear_snippet();
             return None;
@@ -372,6 +377,26 @@ impl InputSession {
                 groups.push(updated);
             }
         }
+        let Some((transforms, transform_edits)) = follow_transforms(
+            session,
+            document.text,
+            &copies,
+            &replacement_edits,
+            &mut groups,
+        ) else {
+            self.clear_snippet();
+            return None;
+        };
+        let replacement_edits = if transform_edits.is_empty() {
+            replacement_edits
+        } else {
+            let edits = merge_edits(session.revision, [ordered, transform_edits].concat());
+            if document.text.validate_edits(&edits).is_err() {
+                self.clear_snippet();
+                return None;
+            }
+            edits
+        };
         let cursor_shift = groups[current][0].start as i128 - primary.start.get() as i128;
         let mut applied = false;
         for operation in &mut transaction.operations {
@@ -393,9 +418,143 @@ impl InputSession {
             buffer: session.buffer,
             before: session.revision,
             groups,
+            transforms,
             current,
         })
     }
+}
+
+/// An edit with the key that orders it against insertions at the same position: the source
+/// order of the tabstop or copy it belongs to, then copies before tabstops.
+type OrderedEdit = (TextEdit, (usize, u8));
+
+/// Builds one edit set from edits ordered by position and then by their key, joining
+/// insertions at the same position in that order.
+fn merge_edits(revision: BufferRevision, mut edits: Vec<OrderedEdit>) -> TextEditSet {
+    edits.sort_by_key(|(edit, key)| (edit.range().start, edit.range().end, *key));
+    let mut merged: Vec<TextEdit> = Vec::new();
+    for (edit, _) in edits {
+        if edit.range().is_empty()
+            && let Some(previous) = merged
+                .last_mut()
+                .filter(|previous| previous.range() == edit.range())
+        {
+            *previous = TextEdit::new(
+                edit.range(),
+                format!("{}{}", previous.replacement(), edit.replacement()),
+            );
+        } else {
+            merged.push(edit);
+        }
+    }
+    TextEditSet::new(revision, merged)
+}
+
+/// Recomputes transformed copies such as `${1/(.*)/${1:/upcase}/}` from the edited tabstops.
+/// `edits` turn `text` into the text with the new tabstop values, whose positions `groups`
+/// holds. Returns the moved copies and the edits that rewrite them, keyed for `merge_edits`,
+/// and moves `groups` past the rewritten copies.
+fn follow_transforms(
+    session: &SnippetSession,
+    text: &TextBuffer,
+    copies: &[(TextEdit, (usize, usize))],
+    edits: &TextEditSet,
+    groups: &mut [Vec<SnippetTabstop>],
+) -> Option<(Vec<SnippetTransform>, Vec<OrderedEdit>)> {
+    if session.transforms.is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    let mut edited = text.clone();
+    edited.apply_edits(edits).ok()?;
+    // Each copy with its position in `edited`, its old text and its new text.
+    let mut moved = Vec::new();
+    for transform in &session.transforms {
+        let old = transform.range();
+        let replaced = copies.iter().any(|(edit, _)| {
+            let range = edit.range();
+            !range.is_empty() && range.start < old.end && old.start < range.end
+        });
+        let value = groups
+            .iter()
+            .find(|group| group[0].index == transform.index)
+            .and_then(|group| edited.slice(group[0].range()).ok());
+        let (false, Some(value), Ok(current)) = (replaced, value, text.slice(old)) else {
+            continue;
+        };
+        let shift = |position: ByteOffset, end: bool| {
+            let mut value = position.get() as i128;
+            for (edit, owner) in copies {
+                let range = edit.range();
+                if range.is_empty() {
+                    // Typing at the edge of a copy's text goes outside it.
+                    let before = if old.is_empty() {
+                        session.groups[owner.0][owner.1].order < transform.order
+                    } else {
+                        !end
+                    };
+                    if range.start < position || (range.start == position && before) {
+                        value += edit.replacement().len() as i128;
+                    }
+                } else if range.end <= position {
+                    value += edit.replacement().len() as i128 - range.len() as i128;
+                }
+            }
+            value.max(0) as usize
+        };
+        // A rule that fails on the new value leaves the copy as it was.
+        let output = transform.apply(&value).unwrap_or_else(|_| current.clone());
+        let mut transform = transform.clone();
+        transform.start = shift(old.start, false);
+        transform.end = shift(old.end, true);
+        moved.push((transform, old, current, output));
+    }
+    let encloses = |stop: &SnippetTabstop, transform: &SnippetTransform| {
+        stop.depth < transform.depth
+            && stop.order < transform.order
+            && stop.start <= transform.start
+            && transform.end <= stop.end
+            && !session.groups.iter().flatten().any(|other| {
+                stop.order < other.order
+                    && other.order < transform.order
+                    && other.depth <= stop.depth
+            })
+    };
+    for stop in groups.iter_mut().flatten() {
+        let shift = |position: usize, end: bool| {
+            let mut value = position as i128;
+            for (transform, _, current, output) in &moved {
+                if transform.end < position
+                    || (transform.end == position
+                        && (stop.order >= transform.order || (end && encloses(stop, transform))))
+                {
+                    value += output.len() as i128 - current.len() as i128;
+                }
+            }
+            value.max(0) as usize
+        };
+        let (start, end) = (shift(stop.start, false), shift(stop.end, true));
+        stop.start = start;
+        stop.end = end;
+    }
+    let mut transforms = Vec::with_capacity(moved.len());
+    let mut rewrites = Vec::new();
+    for (index, (transform, old, current, output)) in moved.iter().enumerate() {
+        let mut start = transform.start as i128;
+        for (other_index, (other, _, other_current, other_output)) in moved.iter().enumerate() {
+            if other.end < transform.start || (other.end == transform.start && other_index < index)
+            {
+                start += other_output.len() as i128 - other_current.len() as i128;
+            }
+        }
+        let mut transform = transform.clone();
+        transform.start = start.max(0) as usize;
+        transform.end = transform.start + output.len();
+        if output != current {
+            rewrites.push((TextEdit::new(*old, output.clone()), (transform.order, 0)));
+        }
+        transforms.push(transform);
+    }
+    Some((transforms, rewrites))
 }
 
 #[cfg(test)]
@@ -456,6 +615,149 @@ mod tests {
         state.apply_transaction(&transaction).unwrap();
         let source = state.window_version();
         assert!(input.accept_snippet_edit(update, Some(document(state, buffer, &source))));
+    }
+    fn install(source: &str) -> (EditorState, BufferId, InputSession) {
+        let parsed = crate::language::lsp::parse_snippet(source, 1024).unwrap();
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, _) = state
+            .open_text(TextBuffer::from_text(&parsed.text), None)
+            .unwrap();
+        let mut input = InputSession::new(100);
+        let version = state.window_version();
+        input.install_snippet(
+            document(&state, buffer, &version),
+            ByteOffset(0),
+            parsed.tabstops,
+        );
+        input.install_snippet_transforms(ByteOffset(0), parsed.transforms);
+        (state, buffer, input)
+    }
+    fn transform_ranges(input: &InputSession) -> Vec<ByteRange> {
+        input
+            .snippet
+            .as_ref()
+            .unwrap()
+            .transforms
+            .iter()
+            .map(SnippetTransform::range)
+            .collect()
+    }
+    #[test]
+    fn transformed_copies_follow_typing_in_their_tabstop() {
+        let (mut state, buffer, mut input) =
+            install("const [${1:state}, set${1/(.*)/${1:/capitalize}/}] = useState($2)");
+        assert_eq!(
+            state.buffers[buffer].text.to_string(),
+            "const [state, setState] = useState()"
+        );
+        edit_snippet(&mut state, buffer, &mut input, 7, 12, "c");
+        edit_snippet(&mut state, buffer, &mut input, 8, 8, "ount");
+        assert_eq!(
+            state.buffers[buffer].text.to_string(),
+            "const [count, setCount] = useState()"
+        );
+        assert_eq!(
+            transform_ranges(&input),
+            vec![ByteRange::new(ByteOffset(17), ByteOffset(22)).unwrap()]
+        );
+        input.navigate_snippet(1);
+        assert_eq!(ranges(&input, 1)[0], ByteRange::empty(ByteOffset(35)));
+        edit_snippet(&mut state, buffer, &mut input, 35, 35, "0");
+        assert_eq!(
+            state.buffers[buffer].text.to_string(),
+            "const [count, setCount] = useState(0)"
+        );
+    }
+    #[test]
+    fn transformed_copies_before_their_tabstop_move_it_and_the_cursor() {
+        let mut state = EditorState::new("/workspace".into());
+        let parsed =
+            crate::language::lsp::parse_snippet("${1/(.*)/${1:/upcase}/}: ${1:x}", 1024).unwrap();
+        let (buffer, view) = state
+            .open_text(TextBuffer::from_text(&parsed.text), None)
+            .unwrap();
+        state.views[view].mode = crate::editor::EditorMode::Insert;
+        let mut input = InputSession::new(100);
+        let source = state.window_version();
+        input.install_snippet(
+            document(&state, buffer, &source),
+            ByteOffset(0),
+            parsed.tabstops,
+        );
+        input.install_snippet_transforms(ByteOffset(0), parsed.transforms);
+        let mut transaction = EditorTransaction::new(TransactionId(1))
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    state.buffers[buffer].text.revision(),
+                    vec![TextEdit::new(
+                        ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
+                        "abc",
+                    )],
+                ),
+            })
+            .with_operation(EditorOperation::SetCursor {
+                view,
+                position: ByteOffset(6),
+            });
+        let update = input
+            .prepare_snippet_mirror(Some(document(&state, buffer, &source)), &mut transaction)
+            .unwrap();
+        state.apply_transaction(&transaction).unwrap();
+        let source = state.window_version();
+        assert!(input.accept_snippet_edit(update, Some(document(&state, buffer, &source))));
+        assert_eq!(state.buffers[buffer].text.to_string(), "ABC: abc");
+        assert_eq!(state.views[view].cursor, ByteOffset(8));
+        assert_eq!(
+            ranges(&input, 0)[0],
+            ByteRange::new(ByteOffset(5), ByteOffset(8)).unwrap()
+        );
+    }
+    #[test]
+    fn empty_transformed_copies_stay_after_an_empty_tabstop() {
+        let (mut state, buffer, mut input) = install("$1${1/(.+)/[$1]/}$0");
+        edit_snippet(&mut state, buffer, &mut input, 0, 0, "x");
+        assert_eq!(state.buffers[buffer].text.to_string(), "x[x]");
+        assert_eq!(
+            ranges(&input, 0)[0],
+            ByteRange::new(ByteOffset(0), ByteOffset(1)).unwrap()
+        );
+        edit_snippet(&mut state, buffer, &mut input, 1, 1, "y");
+        assert_eq!(state.buffers[buffer].text.to_string(), "xy[xy]");
+        assert_eq!(ranges(&input, 1)[0], ByteRange::empty(ByteOffset(6)));
+        edit_snippet(&mut state, buffer, &mut input, 0, 2, "");
+        assert_eq!(state.buffers[buffer].text.to_string(), "");
+        assert_eq!(
+            transform_ranges(&input),
+            vec![ByteRange::empty(ByteOffset(0))]
+        );
+    }
+    #[test]
+    fn replacing_a_placeholder_that_holds_a_transformed_copy_stops_tracking_it() {
+        let (mut state, buffer, mut input) = install("${1:a} ${2:<${1/(.*)/$1/}>}");
+        assert_eq!(state.buffers[buffer].text.to_string(), "a <a>");
+        input.navigate_snippet(1);
+        edit_snippet(&mut state, buffer, &mut input, 2, 5, "z");
+        assert_eq!(state.buffers[buffer].text.to_string(), "a z");
+        assert!(transform_ranges(&input).is_empty());
+        input.navigate_snippet(-1);
+        edit_snippet(&mut state, buffer, &mut input, 0, 1, "b");
+        assert_eq!(state.buffers[buffer].text.to_string(), "b z");
+    }
+    #[test]
+    fn typing_at_the_end_of_a_placeholder_holding_a_transformed_copy_goes_after_it() {
+        let (mut state, buffer, mut input) = install("${1:a} ${2:${1/(.*)/$1/}}");
+        assert_eq!(state.buffers[buffer].text.to_string(), "a a");
+        input.navigate_snippet(1);
+        edit_snippet(&mut state, buffer, &mut input, 3, 3, "!");
+        assert_eq!(state.buffers[buffer].text.to_string(), "a a!");
+        input.navigate_snippet(-1);
+        edit_snippet(&mut state, buffer, &mut input, 0, 1, "bc");
+        assert_eq!(state.buffers[buffer].text.to_string(), "bc bc!");
+        assert_eq!(
+            ranges(&input, 1)[0],
+            ByteRange::new(ByteOffset(3), ByteOffset(6)).unwrap()
+        );
     }
     #[test]
     fn adjacent_nonempty_mirrors_keep_separate_ranges_at_insertion_boundaries() {
