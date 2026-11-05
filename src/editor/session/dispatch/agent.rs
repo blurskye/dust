@@ -530,6 +530,12 @@ impl InteractiveApplication {
     /// shows the one that is running, with the selection pasted into its prompt, or starts it.
     fn ask_terminal_agent(&mut self) {
         let name = self.configuration.settings().agents.default.clone();
+        if name.is_empty() {
+            self.show_error(
+                "Choose the agent to run as Default Agent in Settings (ctrl-,)".to_owned(),
+            );
+            return;
+        }
         self.add_agent_tools(&name);
         let Some(profile) = self.configuration.settings().agents.profiles.get(&name) else {
             self.show_error(format!("agents.default names no agent profile: {name}"));
@@ -688,6 +694,14 @@ impl InteractiveApplication {
         }
         if self.agent.sessions.is_empty() {
             let name = self.configuration.settings().agents.default.clone();
+            // With no default, ask which agent; the question stays to send to it.
+            if name.is_empty() {
+                self.agent.input = question;
+                self.agent.cursor = self.agent.input.len();
+                self.refresh_agent_transcript();
+                self.open_agent_picker();
+                return;
+            }
             if let Err(error) = self.start_agent_session(&name) {
                 // The question stays in the input to send once the agent can start.
                 self.agent.input = question;
@@ -1205,9 +1219,14 @@ impl InteractiveApplication {
         }
     }
 
-    /// `ctrl-t` in the panel: ask which agent the new tab runs. With one agent installed
-    /// there is nothing to ask.
+    /// `ctrl-t` in the panel: a new tab running the default agent. With no default ("ask every
+    /// time") it asks which, unless only one agent is installed.
     pub(super) fn new_agent_tab(&mut self) {
+        let default = self.configuration.settings().agents.default.clone();
+        if !default.is_empty() {
+            self.accept_agent_choice(AgentChoice::Profile(default));
+            return;
+        }
         let installed = self
             .configuration
             .settings()
@@ -2434,10 +2453,15 @@ impl InteractiveApplication {
             None => {
                 let agents = &self.configuration.settings().agents;
                 let name = &agents.default;
+                let ask = if name.is_empty() {
+                    "Type below and pick the agent to ask".to_owned()
+                } else {
+                    format!("Type below to ask {name}, ctrl-n picks another agent")
+                };
                 text.wrapped(
                     &format!(
-                        "No agent session yet. Type below to ask {name}, ctrl-n picks another \
-                         agent, ctrl-r resumes a saved conversation and / lists the commands."
+                        "No agent session yet. {ask}, ctrl-r resumes a saved conversation and / \
+                         lists the commands."
                     ),
                     Some(Highlight::COMMENT),
                     ("", None),
@@ -2656,7 +2680,11 @@ impl InteractiveApplication {
         panel.normal = self.agent.normal;
         panel.scroll = self.agent.scroll;
         panel.context = self.agent.context.iter().map(context_label).collect();
-        panel.placeholder = format!("Ask {name}…  / for commands");
+        panel.placeholder = if name.is_empty() {
+            "Ask an agent…  / for commands".to_owned()
+        } else {
+            format!("Ask {name}…  / for commands")
+        };
         let menu = self.slash_menu();
         self.agent.selected = self.agent.selected.min(menu.len().saturating_sub(1));
         let viewport = self
@@ -3385,6 +3413,27 @@ mod tests {
             .picker()
             .and_then(|picker| picker.selected_item());
         assert_eq!(selected.map(|item| item.id.0.as_str()), Some("agent:pi"));
+    }
+
+    #[test]
+    fn ctrl_t_starts_the_default_agent_and_asks_only_without_one() {
+        let (_dirs, mut app) = test_app_with(|config| {
+            config.agents.default = "claude".into();
+            config.agents.add_tools = false;
+            config.agents.profiles.get_mut("claude").unwrap().program =
+                "/nonexistent/dust-test-agent".into();
+        });
+        app.new_agent_tab();
+        assert!(app.search.picker().is_none(), "the default needs no asking");
+
+        let (_dirs, mut app) = test_app_with(|config| config.agents.default = String::new());
+        app.new_agent_tab();
+        assert_eq!(
+            app.search
+                .picker()
+                .map(|picker| picker.presentation().title),
+            Some("New Agent Session".to_owned())
+        );
     }
 
     fn tab(app: &mut InteractiveApplication) -> usize {

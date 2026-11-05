@@ -85,7 +85,7 @@ settings = [
 [[section]]
 title = "AI Agents"
 settings = [
-  { key = "agents.default", title = "Default Agent", about = "The agent <leader>aa starts.", choices_from = "agents.profiles" },
+  { key = "agents.default", title = "Default Agent", about = "The agent <leader>aa and ctrl-t in the agent panel start; ctrl-shift-t always asks.", choices_from = "agents.profiles", empty = "Ask every time" },
   { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
   { key = "agents.side", title = "Panel Side", about = "The side the agent panel or terminal agent opens on.", choices = ["right", "left"] },
   { key = "agents.panel_width", title = "Panel Width (%)", about = "Share of the editor width the agent panel opens at." },

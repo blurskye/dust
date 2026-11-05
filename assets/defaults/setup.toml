@@ -70,6 +70,11 @@ preview = "agent"
 choices_from = "agents.profiles"
 key = "agents.default"
 
+[[page.choice]]
+label = "Ask every time"
+about = "ctrl-t in the agent panel asks which agent."
+settings = { "agents.default" = "" }
+
 [[page]]
 title = "Agent tools"
 question = "May Dust add its tools, such as subagents, to agents that keep them in their own config?"

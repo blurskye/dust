@@ -6,7 +6,7 @@ use super::InteractiveApplication;
 use super::commands::SetupAction;
 use super::effects::create_user_file;
 use super::settings::lookup;
-use crate::config::{setup_catalog, write_user_setting};
+use crate::config::{SetupChoiceInfo, setup_catalog, write_user_setting};
 use crate::ui::{SetupChoice, SetupPage, SetupState};
 
 impl InteractiveApplication {
@@ -44,20 +44,9 @@ impl InteractiveApplication {
                             settings: vec![(key.clone(), toml::Value::String(name.clone()))],
                             label: name,
                         })
+                        .chain(info.choices.iter().map(setup_choice))
                         .collect(),
-                    _ => info
-                        .choices
-                        .iter()
-                        .map(|choice| SetupChoice {
-                            label: choice.label.clone(),
-                            about: choice.about.clone(),
-                            settings: choice
-                                .settings
-                                .iter()
-                                .map(|(key, value)| (key.clone(), value.clone()))
-                                .collect(),
-                        })
-                        .collect(),
+                    _ => info.choices.iter().map(setup_choice).collect(),
                 };
                 SetupPage {
                     title: info.title.clone(),
@@ -190,5 +179,17 @@ impl InteractiveApplication {
             }
             Err(error) => self.settings_status(error, true),
         }
+    }
+}
+
+fn setup_choice(choice: &SetupChoiceInfo) -> SetupChoice {
+    SetupChoice {
+        label: choice.label.clone(),
+        about: choice.about.clone(),
+        settings: choice
+            .settings
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
     }
 }

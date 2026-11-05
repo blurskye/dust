@@ -13607,7 +13607,11 @@ impl InteractiveApplication {
                 })
                 .collect::<Vec<_>>();
             self.detach_lsp_documents(buffer, stale);
+            // Focusing a panel or terminal leaves the files beside it showing their hints.
+            let mut hints = std::mem::take(&mut self.ui.lsp_inlay_hints);
+            hints.retain(|hint| hint.buffer != buffer);
             self.clear_lsp_ui_projection();
+            self.ui.lsp_inlay_hints = hints;
             self.language.clear_active();
 
             self.language.reset_autostart();

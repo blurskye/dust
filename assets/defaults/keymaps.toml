@@ -5335,6 +5335,13 @@ command = "agent.tab.new"
 desc = "New Agent Tab"
 
 [[keymap]]
+id = "builtin.agent.new.ctrl-shift-t"
+context = "agent"
+keys = "ctrl-shift-t"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
 id = "builtin.agent.scroll-up.shift-up"
 context = "agent"
 keys = "shift-up"
@@ -5602,6 +5609,13 @@ context = "agent_normal"
 keys = "ctrl-t"
 command = "agent.tab.new"
 desc = "New Agent Tab"
+
+[[keymap]]
+id = "builtin.agent-normal.new.ctrl-shift-t"
+context = "agent_normal"
+keys = "ctrl-shift-t"
+command = "agent.new"
+desc = "New Session"
 
 [[keymap]]
 id = "builtin.agent-normal.scroll-up.shift-up"

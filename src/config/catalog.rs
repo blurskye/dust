@@ -40,6 +40,9 @@ pub struct SettingInfo {
     /// A configuration table whose entry names are the choices, such as `agents.profiles`.
     #[serde(default)]
     pub choices_from: Option<String>,
+    /// The first choice, which leaves the setting empty, such as "Ask every time".
+    #[serde(default)]
+    pub empty: Option<String>,
     /// The change applies the next time Dust starts.
     #[serde(default)]
     pub restart: bool,

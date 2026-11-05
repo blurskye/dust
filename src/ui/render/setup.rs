@@ -217,7 +217,10 @@ impl<'a> Scene<'a> {
         let agent = (
             side("agents.side", config.agents.side),
             acp,
-            chosen("agents.default").unwrap_or(&config.agents.default),
+            // "Ask every time" names no agent.
+            Some(chosen("agents.default").unwrap_or(&config.agents.default))
+                .filter(|name| !name.is_empty())
+                .unwrap_or("agent"),
         );
         let terminal = match chosen("ui.terminal_panel.placement") {
             Some("float") => TerminalPlacement::Float,

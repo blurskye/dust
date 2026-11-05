@@ -447,6 +447,43 @@ fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
 }
 
 #[test]
+fn a_file_keeps_its_inlay_hints_while_a_panel_without_a_language_is_focused() {
+    use crate::language::lsp::*;
+    let (_app_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("main.rs");
+    let (file, _) = app
+        .state
+        .open_text(TextBuffer::from_text("let a = f();"), Some(path.clone()))
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.present_lsp_result(
+        "rust-analyzer",
+        1,
+        "textDocument/inlayHint",
+        &file_uri(&path),
+        LspFeatureResult::InlayHints(vec![LspInlayHint {
+            position: LspPosition {
+                line: 0,
+                character: 5,
+            },
+            label: ": Value".into(),
+        }]),
+    );
+    // Like the agent panel or a terminal: a buffer with no file and no language server.
+    app.state
+        .open_text(TextBuffer::from_text("hello"), None)
+        .unwrap();
+    app.sync_lsp_document();
+    assert!(
+        app.ui
+            .lsp_inlay_hints
+            .iter()
+            .any(|hint| hint.buffer == file),
+        "main.rs still shows its hint"
+    );
+}
+
+#[test]
 fn stale_owned_inlay_replies_cannot_replace_the_projection() {
     use crate::language::lsp::*;
     for stale in [false, true] {

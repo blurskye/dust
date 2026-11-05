@@ -307,7 +307,11 @@ impl InteractiveApplication {
         match (page.edit.take(), &row.value) {
             (Some(SettingsEdit::Choice { selected }), SettingsValue::Choice { choices, .. }) => {
                 if let Some(choice) = choices.get(selected) {
-                    let value = typed_like(&row.key, choice);
+                    let empty = settings_catalog()
+                        .setting(&row.key)
+                        .and_then(|info| info.empty.as_ref())
+                        .is_some_and(|empty| empty == choice);
+                    let value = typed_like(&row.key, if empty { "" } else { choice });
                     let _ = self.save_setting(&row.key, Some(value), row.restart);
                 }
             }
@@ -462,7 +466,7 @@ fn setting_value(info: &SettingInfo, current: Option<&toml::Value>, theme: &str)
         .and_then(|current| lookup(current, &info.key))
         .or_else(|| default_setting(&info.key));
     let text = value.as_ref().map_or_else(String::new, plain_text);
-    let choices = match &info.choices_from {
+    let mut choices: Vec<String> = match &info.choices_from {
         Some(table) => current
             .and_then(|current| lookup(current, table))
             .and_then(|value| {
@@ -473,11 +477,15 @@ fn setting_value(info: &SettingInfo, current: Option<&toml::Value>, theme: &str)
             .unwrap_or_default(),
         None => info.choices.clone(),
     };
+    if let Some(empty) = &info.empty {
+        choices.insert(0, empty.clone());
+    }
     if !choices.is_empty() {
-        return SettingsValue::Choice {
-            current: text,
-            choices,
+        let current = match &info.empty {
+            Some(empty) if text.is_empty() => empty.clone(),
+            _ => text,
         };
+        return SettingsValue::Choice { current, choices };
     }
     match default_setting(&info.key).or(value) {
         Some(toml::Value::Boolean(on)) => SettingsValue::Bool(
