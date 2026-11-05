@@ -3097,10 +3097,26 @@ impl InteractiveApplication {
             // Typing keeps the server's colours, moved along with the edit, until it sends new
             // ones; dropping them flashes the text back to tree-sitter's.
             let semantic = std::mem::take(&mut self.ui.lsp_semantic_spans);
+            let mut hints = std::mem::take(&mut self.ui.lsp_inlay_hints);
             self.clear_lsp_ui_rows();
             if change == ProjectionChange::Typed {
                 self.ui.lsp_semantic_spans = semantic;
             }
+            // Each buffer keeps its hints, moved along with edits, as in Neovim: switching back
+            // to a file or typing shows them at once while fresh ones load.
+            hints.retain_mut(|hint| {
+                let Some(buffer) = self.state.buffers.get(hint.buffer) else {
+                    return false;
+                };
+                let Some(position) = buffer.text.map_offset_since(hint.revision, hint.position)
+                else {
+                    return false;
+                };
+                hint.position = position;
+                hint.revision = buffer.text.revision();
+                true
+            });
+            self.ui.lsp_inlay_hints = hints;
             if !self.language.completion_items().is_empty() {
                 self.project_lsp_completion();
             }
@@ -3667,7 +3683,9 @@ impl InteractiveApplication {
                 .and_then(|session| session.capabilities.as_ref())
                 .is_some_and(|capabilities| capabilities.inlay_hints)
         {
-            self.ui.lsp_inlay_hints.clear();
+            self.ui
+                .lsp_inlay_hints
+                .retain(|hint| hint.buffer != owner.buffer);
             return;
         }
         let Some((buffer, document)) = self.active_lsp_document() else {
@@ -4396,7 +4414,13 @@ impl InteractiveApplication {
                     self.language.inlays_received();
                     false
                 };
-                let keep_shown = retrying && !self.ui.lsp_inlay_hints.is_empty();
+                let keep_shown = retrying
+                    && self.state.active_buffer_id().is_some_and(|active| {
+                        self.ui
+                            .lsp_inlay_hints
+                            .iter()
+                            .any(|hint| hint.buffer == active)
+                    });
                 if let Some(path) = path_from_file_uri(uri).filter(|_| !keep_shown)
                     && let Some((buffer_id, buffer)) = self
                         .state
@@ -4406,7 +4430,7 @@ impl InteractiveApplication {
                 {
                     let encoding = self.lsp_position_encoding();
                     let codec = PositionCodec::new(&buffer.text);
-                    self.ui.lsp_inlay_hints = items
+                    let hints = items
                         .into_iter()
                         .filter_map(|item| {
                             Some(UiInlayHint {
@@ -4422,7 +4446,11 @@ impl InteractiveApplication {
                                 label: item.label,
                             })
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
+                    self.ui
+                        .lsp_inlay_hints
+                        .retain(|hint| hint.buffer != buffer_id);
+                    self.ui.lsp_inlay_hints.extend(hints);
                 }
             }
             LspFeatureResult::CodeLens(items) => {

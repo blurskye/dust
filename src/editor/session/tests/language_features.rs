@@ -364,6 +364,89 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
 }
 
 #[test]
+fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
+    use crate::language::lsp::*;
+    let (_app_dirs, mut app) = app();
+    let first_path = app.state.workspace_root.join("first.rs");
+    let second_path = app.state.workspace_root.join("second.rs");
+    let (first, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("let a = f();"),
+            Some(first_path.clone()),
+        )
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    let hint = || {
+        LspFeatureResult::InlayHints(vec![LspInlayHint {
+            position: LspPosition {
+                line: 0,
+                character: 5,
+            },
+            label: ": Value".into(),
+        }])
+    };
+    app.present_lsp_result(
+        "rust-analyzer",
+        1,
+        "textDocument/inlayHint",
+        &file_uri(&first_path),
+        hint(),
+    );
+    let (second, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("let b = g();"),
+            Some(second_path.clone()),
+        )
+        .unwrap();
+    app.present_lsp_result(
+        "rust-analyzer",
+        2,
+        "textDocument/inlayHint",
+        &file_uri(&second_path),
+        hint(),
+    );
+    let hinted = |app: &InteractiveApplication| {
+        app.ui
+            .lsp_inlay_hints
+            .iter()
+            .map(|hint| hint.buffer)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(hinted(&app), [first, second]);
+
+    // Typing before a hint moves it instead of hiding it until the server answers again.
+    let _transport = super::language::fixture_owned_lsp(&mut app, "server", second);
+    app.language.running(
+        "server",
+        LspCapabilities {
+            inlay_hints: true,
+            ..Default::default()
+        },
+    );
+    app.language.select("server");
+    app.refresh_lsp_projection_owner();
+    for key in ["I", "x", "escape"] {
+        app.handle_event(UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: crate::ui::KeyInputKind::Press,
+        });
+    }
+    app.refresh_lsp_projection_owner();
+    assert_eq!(app.state.buffers[second].text.to_string(), "xlet b = g();");
+    let moved = app
+        .ui
+        .lsp_inlay_hints
+        .iter()
+        .find(|hint| hint.buffer == second)
+        .expect("the edited buffer keeps its hint");
+    assert_eq!(moved.revision, app.state.buffers[second].text.revision());
+    assert_eq!(moved.position, ByteOffset("xlet b".len()));
+    assert!(hinted(&app).contains(&first));
+}
+
+#[test]
 fn stale_owned_inlay_replies_cannot_replace_the_projection() {
     use crate::language::lsp::*;
     for stale in [false, true] {
