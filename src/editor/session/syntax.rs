@@ -18,6 +18,8 @@ use crate::{
 pub(crate) const SYNTAX_QUEUE_CAPACITY: usize = 8;
 /// How long typing must pause before a buffer is parsed again.
 const SYNTAX_DEBOUNCE_MS: u64 = 75;
+/// How long a newly opened buffer's first frame waits for its colours before it is drawn plain.
+const FIRST_COLOURS_WAIT_MS: u64 = 200;
 
 pub(super) struct SyntaxDocument<'a> {
     pub buffer: BufferId,
@@ -49,6 +51,7 @@ pub(super) struct SyntaxSession {
     accepted: HashMap<BufferId, (TextVersion, SyntaxResult)>,
     failures: HashMap<BufferId, SyntaxFailure>,
     due: HashMap<BufferId, (BufferRevision, Instant)>,
+    opened: HashMap<BufferId, Instant>,
     next_document: u64,
     next_generation: u64,
     tab_width: usize,
@@ -64,6 +67,7 @@ impl SyntaxSession {
             accepted: HashMap::new(),
             failures: HashMap::new(),
             due: HashMap::new(),
+            opened: HashMap::new(),
             next_document: 1,
             next_generation: 1,
             tab_width: 0,
@@ -79,6 +83,7 @@ impl SyntaxSession {
         self.accepted.remove(&buffer);
         self.failures.remove(&buffer);
         self.due.remove(&buffer);
+        self.opened.remove(&buffer);
     }
 
     /// Returns how many source strings were materialized, for admission-cost checks.
@@ -161,18 +166,25 @@ impl SyntaxSession {
             {
                 continue;
             }
+            // Only edits wait for typing to pause; a buffer that was just opened parses now.
+            let delay = if self.documents.contains_key(&doc.buffer) {
+                Duration::from_millis(SYNTAX_DEBOUNCE_MS)
+            } else {
+                Duration::ZERO
+            };
             let due = self
                 .due
                 .entry(doc.buffer)
-                .or_insert((revision, now + Duration::from_millis(SYNTAX_DEBOUNCE_MS)));
+                .or_insert((revision, now + delay));
             if due.0 != revision {
-                *due = (revision, now + Duration::from_millis(SYNTAX_DEBOUNCE_MS));
+                *due = (revision, now + delay);
                 continue;
             }
             if now < due.1 {
                 continue;
             }
             let document = *self.documents.entry(doc.buffer).or_insert_with(|| {
+                self.opened.insert(doc.buffer, now);
                 let id = SyntaxDocumentId(self.next_document);
                 self.next_document = self.next_document.saturating_add(1);
                 id
@@ -298,6 +310,16 @@ impl SyntaxSession {
         self.accepted
             .iter()
             .map(|(buffer, (_, result))| (buffer, result))
+    }
+    /// Whether a buffer opened moments ago is still waiting for its first parse, so its first
+    /// frame can show colours instead of plain text that colours in a moment later.
+    pub(super) fn awaiting_first_colours(&self, buffer: BufferId, now: Instant) -> bool {
+        !self.accepted.contains_key(&buffer)
+            && !self.failures.contains_key(&buffer)
+            && self
+                .opened
+                .get(&buffer)
+                .is_some_and(|opened| now < *opened + Duration::from_millis(FIRST_COLOURS_WAIT_MS))
     }
     pub(super) fn failure(&self, buffer: BufferId) -> Option<&str> {
         self.failures
@@ -450,9 +472,8 @@ mod tests {
         let config = SyntaxConfig::default();
         let mut session = SyntaxSession::new(2);
         let start = Instant::now();
-        assert_eq!(session.tick(&documents, &config, 4, start, "too large"), 0);
+        assert_eq!(session.tick(&documents, &config, 4, start, "too large"), 1);
         let now = start + std::time::Duration::from_millis(SYNTAX_DEBOUNCE_MS);
-        assert_eq!(session.tick(&documents, &config, 4, now, "too large"), 1);
         for _ in 0..100 {
             assert_eq!(session.tick(&documents, &config, 4, now, "too large"), 0);
         }
@@ -548,8 +569,40 @@ mod tests {
             "large",
         );
         assert!(session.result(buffer).is_none());
-        assert!(session.submitted.is_empty());
-        assert!(session.due.contains_key(&buffer));
+        assert_eq!(
+            session
+                .submitted
+                .get(&buffer)
+                .map(|(revision, ..)| *revision),
+            Some(replacement.revision())
+        );
+    }
+
+    #[test]
+    fn an_opened_buffer_parses_at_once_and_holds_its_first_frame_only_briefly() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let text = TextBuffer::from_text("fn main() {}\n");
+        let documents = [SyntaxDocument {
+            buffer,
+            text: &text,
+            language: Some(SyntaxLanguage::Rust),
+            enabled: true,
+        }];
+        let config = SyntaxConfig::default();
+        let mut session = SyntaxSession::new(2);
+        let start = Instant::now();
+        assert_eq!(session.tick(&documents, &config, 4, start, "large"), 1);
+        assert!(session.awaiting_first_colours(buffer, start));
+        let late = start + Duration::from_millis(FIRST_COLOURS_WAIT_MS);
+        assert!(!session.awaiting_first_colours(buffer, late));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.result(buffer).is_none() {
+            session.tick(&documents, &config, 4, start, "large");
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(!session.awaiting_first_colours(buffer, start));
     }
 
     #[test]

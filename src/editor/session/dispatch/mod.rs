@@ -435,8 +435,11 @@ pub fn run_interactive(
             application.window_session.width(),
             application.window_session.height(),
         );
+        let holding = application.awaiting_first_colours();
         let painted = application.draw_before_startup_reads(|application| {
-            if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+            if holding {
+                Ok(false)
+            } else if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
                 drawn = Some(inputs);
                 let frame = render_frame(
                     &application.state,
@@ -451,7 +454,7 @@ pub fn run_interactive(
                 Ok(false)
             }
         })?;
-        input_arrived = false;
+        input_arrived &= holding;
         application.schedule_recovery_work();
         still_polls = if painted {
             0

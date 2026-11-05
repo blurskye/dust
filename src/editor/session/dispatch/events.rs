@@ -2780,6 +2780,15 @@ impl InteractiveApplication {
         }
     }
 
+    /// A file that was just opened is drawn once it has colours, unless parsing takes longer
+    /// than a moment.
+    pub(super) fn awaiting_first_colours(&self) -> bool {
+        let now = self.clock.monotonic();
+        self.state
+            .active_buffer_id()
+            .is_some_and(|buffer| self.syntax.awaiting_first_colours(buffer, now))
+    }
+
     pub(super) fn process_syntax(&mut self) {
         // Move old fold rows with their text before matching them to a new parse.
         let mut folds_changed = false;
