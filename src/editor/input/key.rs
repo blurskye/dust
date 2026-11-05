@@ -189,10 +189,21 @@ impl fmt::Display for KeyEvent {
         if self.modifiers.alt {
             prefixes.push("alt");
         }
-        if self.modifiers.shift {
+        // A shifted letter is stored as its capital, but `ctrl-L` reads as `ctrl-l`, so chords
+        // with control or alt name the shift as they are written in the keymap.
+        let shifted_letter = match self.code {
+            KeyCode::Char(character)
+                if character.is_ascii_uppercase()
+                    && (self.modifiers.control || self.modifiers.alt) =>
+            {
+                Some(character.to_ascii_lowercase())
+            }
+            _ => None,
+        };
+        if self.modifiers.shift || shifted_letter.is_some() {
             prefixes.push("shift");
         }
-        let key = match self.code {
+        let key = match shifted_letter.map_or_else(|| self.code.clone(), KeyCode::Char) {
             KeyCode::Char(' ') => "space".into(),
             KeyCode::Char(character) => character.to_string(),
             KeyCode::Enter => "enter".into(),
@@ -408,6 +419,9 @@ mod tests {
             "ctrl-w",
             "alt-enter",
             "shift-tab",
+            "H",
+            "ctrl-shift-l",
+            "ctrl-alt-shift-h",
             "mouse-left-down",
             "ctrl-mouse-scroll-down",
         ] {
