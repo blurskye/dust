@@ -25,6 +25,8 @@ use super::{
 
 /// `tags` is in `resolveSupport` because rust-analyzer only advertises resolve, and with it
 /// auto-imports, when the client defers a field it recognises. Dust doesn't read tags.
+/// Pull diagnostics are not advertised: Dust only pulls on an explicit command, and servers such
+/// as rust-analyzer stop pushing their own diagnostics to a client that says it pulls.
 pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Value>) -> Value {
     let mut message = json!({
         "jsonrpc":"2.0", "id":1, "method":"initialize",
@@ -48,7 +50,6 @@ pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Va
                         "overlappingTokenSupport":false,
                         "multilineTokenSupport":false
                     },
-                    "diagnostic":{"dynamicRegistration":false,"relatedDocumentSupport":false},
                     "completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"],"resolveSupport":{"properties":["additionalTextEdits","tags"]}}},
                     "hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},
                     "signatureHelp":{"dynamicRegistration":true},

@@ -743,7 +743,7 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
 }
 
 #[test]
-fn initialization_advertises_supported_semantic_tokens_and_pull_diagnostics() {
+fn initialization_advertises_semantic_tokens_but_not_pull_diagnostics() {
     let initialize = initialize_message(Path::new("/workspace"), None);
     let document = &initialize["params"]["capabilities"]["textDocument"];
     let semantic = &document["semanticTokens"];
@@ -761,10 +761,8 @@ fn initialization_advertises_supported_semantic_tokens_and_pull_diagnostics() {
     assert!(semantic["tokenModifiers"].is_array());
     assert_eq!(semantic["overlappingTokenSupport"], false);
     assert_eq!(semantic["multilineTokenSupport"], false);
-    assert_eq!(
-        document["diagnostic"],
-        json!({"dynamicRegistration":false,"relatedDocumentSupport":false})
-    );
+    // A client that advertises pull diagnostics stops receiving rust-analyzer's pushed ones.
+    assert!(document["diagnostic"].is_null());
     assert_eq!(document["synchronization"]["dynamicRegistration"], false);
 }
 
