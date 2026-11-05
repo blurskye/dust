@@ -163,6 +163,7 @@ impl WindowSession {
         self.terminal_shrunk
     }
     pub(in crate::editor::session) fn set_debugging(&mut self, debugging: bool) {
+        self.debugging = debugging;
         self.terminal_shrunk = debugging && self.height() < SHORT_SCREEN_HEIGHT;
     }
     pub(in crate::editor::session) fn resize_terminal(

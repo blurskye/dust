@@ -48,7 +48,14 @@ impl Tool {
         }
     }
 
-    fn paste_command(self) -> (&'static str, &'static [&'static str]) {
+    fn paste_command(self, primary: bool) -> (&'static str, &'static [&'static str]) {
+        if primary {
+            return match self {
+                Self::Wayland => ("wl-paste", &["--primary", "--no-newline"]),
+                Self::Xclip => ("xclip", &["-o", "-selection", "primary"]),
+                Self::Xsel => ("xsel", &["-o", "-p"]),
+            };
+        }
         match self {
             Self::Wayland => ("wl-paste", &["--no-newline"]),
             Self::Xclip => ("xclip", &["-o", "-selection", "clipboard"]),
@@ -131,6 +138,10 @@ impl ClipboardSession {
         fallback
     }
 
+    pub(super) fn pending(&self) -> bool {
+        !self.pastes.is_empty()
+    }
+
     pub(super) fn pull(
         &mut self,
         invocation: &CommandInvocation,
@@ -139,18 +150,25 @@ impl ClipboardSession {
         if std::mem::take(&mut self.paste_ready) {
             return false;
         }
-        let Some(tool) = self.tool.filter(|_| self.enabled) else {
+        if !self.enabled || self.tool.is_none() {
             return false;
-        };
+        }
         self.pastes.push_back((invocation.clone(), source));
         if self.reading.is_none() {
-            let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || {
-                let _ = sender.send(read(tool));
-            });
-            self.reading = Some(receiver);
+            self.start_read();
         }
         true
+    }
+
+    fn start_read(&mut self) {
+        let Some(tool) = self.tool.filter(|_| self.enabled) else { return };
+        let Some((invocation, _)) = self.pastes.front() else { return };
+        let primary = invocation.register == Some('*');
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(read(tool, primary));
+        });
+        self.reading = Some(receiver);
     }
 
     pub(super) fn finish_pull(
@@ -161,15 +179,16 @@ impl ClipboardSession {
     ) -> Option<CommandInvocation> {
         let text = self.reading.as_ref()?.try_recv().ok()?;
         self.reading = None;
+        let (invocation, source) = self.pastes.pop_front()?;
         if let Some(text) = text {
-            self.import(registers, enabled, text);
+            let primary = invocation.register == Some('*');
+            self.import(registers, enabled, text, primary);
         }
-        while let Some((invocation, source)) = self.pastes.pop_front() {
-            if &source == current {
-                self.paste_ready = true;
-                return Some(invocation);
-            }
+        if &source == current {
+            self.paste_ready = true;
+            return Some(invocation);
         }
+        self.start_read();
         None
     }
 
@@ -183,15 +202,11 @@ impl ClipboardSession {
                 *source = after.clone();
             }
         }
-        if !self.pastes.is_empty() {
-            let (sender, receiver) = mpsc::channel();
-            let _ = sender.send(None);
-            self.reading = Some(receiver);
-        }
+        self.start_read();
     }
 
-    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, text: String) {
-        let cached = registers.get('"').filter(|value| value.text == text);
+    fn import(&mut self, registers: &mut RegisterStore, enabled: bool, text: String, primary: bool) {
+        let cached = registers.get(if primary { '*' } else { '"' }).filter(|value| value.text == text);
         let shape = cached.map_or_else(
             || {
                 if text.ends_with('\n') {
@@ -206,10 +221,14 @@ impl ClipboardSession {
             text: text.clone(),
             shape,
         };
-        registers.set('+', value.clone(), enabled, false);
-        registers.set('"', value, enabled, false);
-        self.synced_text = Some(text);
-        self.synced_generation = registers.generation();
+        if primary {
+            registers.set('*', value, enabled, false);
+        } else {
+            registers.set('+', value.clone(), enabled, false);
+            registers.set('"', value, enabled, false);
+            self.synced_text = Some(text);
+            self.synced_generation = registers.generation();
+        }
     }
 }
 
@@ -249,8 +268,8 @@ fn wait_child(child: &mut std::process::Child, deadline: Instant) -> bool {
     }
 }
 
-fn read(tool: Tool) -> Option<String> {
-    let (program, arguments) = tool.paste_command();
+fn read(tool: Tool, primary: bool) -> Option<String> {
+    let (program, arguments) = tool.paste_command(primary);
     read_command(program, arguments)
 }
 
@@ -289,6 +308,17 @@ fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
 }
 
 #[cfg(test)]
+impl ClipboardSession {
+    pub(super) fn fixture_read(&mut self) -> mpsc::Sender<Option<String>> {
+        let (sender, receiver) = mpsc::channel();
+        self.enabled = true;
+        self.tool = Some(Tool::Wayland);
+        self.reading = Some(receiver);
+        sender
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -319,6 +349,43 @@ mod tests {
     }
 
     #[test]
+    fn primary_selection_reads_populate_the_requested_star_register() {
+        for tool in [Tool::Wayland, Tool::Xclip, Tool::Xsel] {
+            assert_ne!(tool.paste_command(true), tool.paste_command(false));
+        }
+        assert_eq!(Tool::Wayland.paste_command(true).1, &["--primary", "--no-newline"]);
+        assert_eq!(Tool::Xclip.paste_command(true).1, &["-o", "-selection", "primary"]);
+        assert_eq!(Tool::Xsel.paste_command(true).1, &["-o", "-p"]);
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let version = state.window_version();
+        let mut invocation = CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
+        invocation.register = Some('*');
+        let (sender, receiver) = mpsc::channel();
+        let mut session = ClipboardSession {
+            reading: Some(receiver),
+            pastes: VecDeque::from([(invocation.clone(), version.clone())]),
+            ..Default::default()
+        };
+        let mut registers = RegisterStore::default();
+        session.import(&mut registers, true, "clipboard".into(), false);
+        sender.send(Some("primary".into())).unwrap();
+        assert_eq!(session.finish_pull(&mut registers, true, &version), Some(invocation));
+        assert_eq!(registers.get('*').unwrap().text, "primary");
+        assert_eq!(registers.get('+').unwrap().text, "clipboard");
+        assert_eq!(registers.get('"').unwrap().text, "clipboard");
+    }
+
+    #[test]
+    fn primary_reads_do_not_suppress_a_pending_clipboard_yank() {
+        let mut session = ClipboardSession { enabled: true, ..Default::default() };
+        let mut registers = RegisterStore::default();
+        registers.set('"', RegisterValue { text: "new yank".into(), shape: RegisterShape::Character }, true, false);
+        session.import(&mut registers, true, "primary".into(), true);
+        assert_eq!(session.push(&mut registers).as_deref(), Some("new yank"));
+        assert_eq!(registers.get('+').unwrap().text, "new yank");
+    }
+
+    #[test]
     fn cache_hits_populate_plus_and_empty_reads_clear_old_text() {
         let mut session = ClipboardSession::default();
         let mut registers = RegisterStore::default();
@@ -331,10 +398,10 @@ mod tests {
             true,
             false,
         );
-        session.import(&mut registers, true, "line\n".into());
+        session.import(&mut registers, true, "line\n".into(), false);
         assert_eq!(registers.get('+'), registers.get('"'));
         assert_eq!(registers.get('+').unwrap().shape, RegisterShape::Line);
-        session.import(&mut registers, true, String::new());
+        session.import(&mut registers, true, String::new(), false);
         assert_eq!(registers.get('+').unwrap().text, "");
         assert_eq!(registers.get('"').unwrap().text, "");
     }

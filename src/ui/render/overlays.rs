@@ -49,19 +49,21 @@ pub(super) fn render_documentation_popup(
     frame: &mut Frame,
     popup: &DocumentationPopupState,
     config: &Config,
-    editor_left: u16,
-    editor_width: u16,
-    height: u16,
+    bounds: WindowRect,
     completion_menu: Option<WindowRect>,
 ) {
     let enabled = config.ui.documentation_popup.enabled;
+    let editor_left = bounds.x;
+    let editor_width = bounds.width;
     let editor_right = editor_left.saturating_add(editor_width);
-    let available_height = height;
+    let editor_top = bounds.y;
+    let editor_bottom = editor_top.saturating_add(bounds.height);
+    let available_height = bounds.height;
     let line_count = popup.line_count();
     if !enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return;
     }
-    let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, height);
+    let page_rows = crate::ui::geometry::documentation_page_rows(config, editor_width, available_height);
     let display_count = documentation_display_rows(popup, config, editor_width);
     let mut scrollable = display_count > page_rows;
     let widest = (0..line_count)
@@ -100,16 +102,16 @@ pub(super) fn render_documentation_popup(
     let (cursor_x, cursor_y) = frame.cursor.map_or(
         (
             editor_left.saturating_add(editor_width.saturating_sub(box_width) / 2),
-            (available_height.saturating_sub(box_height) / 2).saturating_sub(1),
+            editor_top.saturating_add((available_height.saturating_sub(box_height) / 2).saturating_sub(1)),
         ),
         |(x, y, _)| (x, y),
     );
     let below = cursor_y.saturating_add(1);
-    let room_below = available_height.saturating_sub(below);
-    let top = if room_below >= box_height || cursor_y < box_height {
-        below.min(available_height.saturating_sub(box_height))
+    let room_below = editor_bottom.saturating_sub(below);
+    let top = if room_below >= box_height || cursor_y.saturating_sub(editor_top) < box_height {
+        below.min(editor_bottom.saturating_sub(box_height)).max(editor_top)
     } else {
-        cursor_y.saturating_sub(box_height)
+        cursor_y.saturating_sub(box_height).max(editor_top)
     };
     let left = if popup.kind == DocumentationPopupKind::Completion {
         let midpoint = editor_left.saturating_add(editor_width / 2);
@@ -145,7 +147,8 @@ pub(super) fn render_documentation_popup(
                 .find(|(x, y)| {
                     *x >= editor_left
                         && x.saturating_add(box_width) <= editor_right
-                        && y.saturating_add(box_height) <= available_height
+                        && *y >= editor_top
+                        && y.saturating_add(box_height) <= editor_bottom
                         && !boxes_overlap((*x, *y), (box_width, box_height), menu)
                         && !(*y <= cursor_y && y.saturating_add(box_height) > cursor_y)
                 });
@@ -162,7 +165,7 @@ pub(super) fn render_documentation_popup(
                         }
                         box_width = box_width.min(right_room.max(left_room));
                         let room = if menu.y > cursor_y {
-                            available_height.saturating_sub(menu.y)
+                            editor_bottom.saturating_sub(menu.y)
                         } else {
                             cursor_y.saturating_sub(menu.y)
                         };
@@ -198,7 +201,7 @@ pub(super) fn render_documentation_popup(
     let wanted = u16::try_from(rows.len().min(page_rows).saturating_add(2))
         .unwrap_or(u16::MAX)
         .min(DOCUMENTATION_MAX_HEIGHT)
-        .min(available_height.saturating_sub(top));
+        .min(editor_bottom.saturating_sub(top));
     if wanted > box_height
         && completion_menu
             .filter(|_| popup.kind == DocumentationPopupKind::Completion)
@@ -367,7 +370,7 @@ pub(crate) fn wrap_ranges(
 ) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
-    while text_width(&line[start..], ambiguous) > width.max(1) {
+    while start < line.len() {
         let (mut used, mut end, mut space) = (0, start, None);
         for (offset, grapheme) in line[start..].grapheme_indices(true) {
             let cells = text_width(grapheme, ambiguous).clamp(1, 2);
@@ -380,15 +383,14 @@ pub(crate) fn wrap_ranges(
                 space = Some(end);
             }
         }
-        let cut = space.unwrap_or(end);
+        // The final row needs no word break. Scan only the row being wrapped, not
+        // the entire remaining message on every iteration.
+        let cut = if end == line.len() { end } else { space.unwrap_or(end) };
         rows.push(start..cut);
         start = cut;
-        while line[start..].starts_with(' ') {
-            start += 1;
-        }
     }
-    if start < line.len() || rows.is_empty() {
-        rows.push(start..line.len());
+    if rows.is_empty() {
+        rows.push(0..0);
     }
     rows
 }

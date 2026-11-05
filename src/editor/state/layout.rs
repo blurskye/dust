@@ -265,13 +265,13 @@ pub(super) fn resize_parent(node: &mut LayoutNode, target: PaneId, delta: i16) -
         return true;
     }
     let signed = if contains_pane(first, target) {
-        delta
+        i32::from(delta)
     } else if contains_pane(second, target) {
-        -delta
+        -i32::from(delta)
     } else {
         return false;
     };
-    let adjusted = i32::from(*ratio) + i32::from(signed);
+    let adjusted = i32::from(*ratio) + signed;
     *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
     true
 }
@@ -303,32 +303,10 @@ pub(super) fn resize_parent_on_axis(
     if *axis != requested_axis {
         return false;
     }
-    let signed = if in_first { delta } else { -delta };
-    let adjusted = i32::from(*ratio) + i32::from(signed);
+    let signed = if in_first { i32::from(delta) } else { -i32::from(delta) };
+    let adjusted = i32::from(*ratio) + signed;
     *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
     true
-}
-
-/// Whether a split above `target` divides along `requested_axis`, so resizing on that axis
-/// moves one of its borders.
-pub(super) fn has_split_on_axis(node: &LayoutNode, target: PaneId, requested_axis: Axis) -> bool {
-    let LayoutNode::Split {
-        axis,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return false;
-    };
-    let child = if contains_pane(first, target) {
-        first
-    } else if contains_pane(second, target) {
-        second
-    } else {
-        return false;
-    };
-    *axis == requested_axis || has_split_on_axis(child, target, requested_axis)
 }
 
 pub(super) fn remove_leaf(node: LayoutNode, target: PaneId) -> Option<LayoutNode> {

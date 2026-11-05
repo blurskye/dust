@@ -189,14 +189,14 @@ impl InteractiveApplication {
 
     pub(super) fn process_effect_checked(&mut self, effect: AppEffect) -> bool {
         let effect = match effect {
-            AppEffect::SearchRepeat { reverse } => {
-                return self.perform_search(self.input.search_direction(reverse));
+            AppEffect::SearchRepeat { reverse, count } => {
+                return self.perform_search(self.input.search_direction(reverse), count);
             }
-            AppEffect::SearchWord { forward } => return self.search_word_under_cursor(forward),
-            AppEffect::SearchSelectNext => return self.select_next_search_match(),
+            AppEffect::SearchWord { forward, count } => return self.search_word_under_cursor(forward, count),
+            AppEffect::SearchSelectNext(count) => return self.select_next_search_match(count),
             AppEffect::MacroReplay { register, count } => {
                 self.input.begin_macro_batch();
-                return (0..count).all(|_| self.replay_macro(register));
+                return self.replay_macro(register, count);
             }
             effect => effect,
         };
@@ -2713,7 +2713,7 @@ impl InteractiveApplication {
                     PickerItem {
                         badge: String::new(),
                         kind: crate::workspace::PickerItemKind::Entry,
-                        id: PickerItemId(format!("lsp-log:{}", self.language.log_start().saturating_add(index))),
+                        id: PickerItemId(format!("lsp-log:{}", self.language.log_start().saturating_add(index as u64))),
                         label: line.clone(),
                         detail: String::new(),
                         source: "lsp".into(),
@@ -2938,8 +2938,8 @@ impl InteractiveApplication {
                 self.open_lsp_completion_documentation(true)
             }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::DiagnosticNavigate { direction, filter } => {
-                self.navigate_diagnostic(direction, filter)
+            AppEffect::DiagnosticNavigate { direction, filter, count } => {
+                self.navigate_diagnostic(direction, filter, count);
             }
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
             AppEffect::LspRenamePrompt => self.open_rename_prompt(),
@@ -3304,6 +3304,7 @@ impl InteractiveApplication {
             AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
             AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
             AppEffect::WorkspaceResourceApply => loop {
+                let proposal = self.workspace_edits.next_resource_proposal();
                 let result = match self.workspace_edits.prepare_resource(
                     &self.workspace,
                     self.configuration.binding_revision_ref(),
@@ -3312,11 +3313,13 @@ impl InteractiveApplication {
                     Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
                     Ok(None) => break,
                     Err(error) => {
+                        self.language.cancel_deferred_edits(proposal);
                         self.show_error(error);
                         break;
                     }
                 };
                 if let Err(error) = result {
+                    self.language.cancel_deferred_edits(proposal);
                     self.show_error(error);
                     break;
                 }
@@ -4209,27 +4212,7 @@ impl InteractiveApplication {
             AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
             AppEffect::TerminalClose => {
                 if let Some(id) = self.displayed_terminal() {
-                    if self.terminal_session.stopping(id) {
-                        self.show_error("terminal stop is already pending");
-                    } else if self.terminal_session.requires_close_confirmation(id) {
-                        if self.input.prompt().is_some() {
-                            self.show_error(
-                                "close the active prompt before closing a running terminal",
-                            );
-                        } else if self.terminal_session.begin_close(id) {
-                            self.open_confirmation_actions(
-                                PromptKind::TerminalClose,
-                                format!("Terminal #{} is active", id.0),
-                                "Hide this terminal or stop its process?".into(),
-                                crate::ui::ConfirmationChoice::No,
-                                "Stop",
-                                "Hide",
-                            );
-                        }
-                    } else {
-                        self.terminal_session.cancel_open();
-                        self.retire_terminal(id, true);
-                    }
+                    self.close_terminal(id);
                 } else {
                     self.terminal_session.cancel_open();
                 }
@@ -4327,9 +4310,9 @@ impl InteractiveApplication {
         )
     }
 
-    pub(super) fn repeat_last_change(&mut self) {
+    pub(super) fn repeat_last_change(&mut self, count: Option<std::num::NonZeroU64>) {
         let limit = REPEAT_STEP_LIMIT;
-        match self.input.repeat_plan(limit) {
+        match self.input.repeat_plan(limit, count) {
             Ok(invocations) => {
                 for invocation in invocations {
                     if !self.invoke_checked(invocation) {
@@ -4346,7 +4329,7 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn replay_macro(&mut self, requested: char) -> bool {
+    pub(super) fn replay_macro(&mut self, requested: char, count: u64) -> bool {
         let Ok(register) = self.input.macro_register(requested) else {
             self.show_error(self.message("no_previous_macro", &[]));
             return false;
@@ -4366,26 +4349,58 @@ impl InteractiveApplication {
             ));
             return false;
         }
+        self.macro_replays.push((invocations, 0, count));
+        self.continue_macro_replay()
+    }
+
+    pub(super) fn cancel_macro_replay(&mut self) {
+        for _ in self.macro_replays.drain(..) {
+            self.input.finish_macro_replay();
+        }
+    }
+
+    pub(super) fn continue_macro_replay(&mut self) -> bool {
+        if self.macro_running || self.clipboard.pending() {
+            return true;
+        }
+        self.macro_running = true;
         let mut succeeded = true;
-        for invocation in invocations {
+        while let Some((invocations, next, remaining)) = self.macro_replays.last_mut() {
+            if *next == invocations.len() {
+                if *remaining > 1 && !invocations.is_empty() {
+                    *remaining -= 1;
+                    *next = 0;
+                } else {
+                    self.macro_replays.pop();
+                    self.input.finish_macro_replay();
+                    continue;
+                }
+            }
+            let invocation = invocations[*next].clone();
+            *next += 1;
             let Ok(invocation) = self.input.macro_step(invocation, MACRO_STEP_LIMIT) else {
                 self.show_error(self.message(
                     "macro_step_limit",
                     &[("limit", MACRO_STEP_LIMIT.to_string())],
                 ));
                 succeeded = false;
+                self.cancel_macro_replay();
                 break;
             };
             if !self.invoke_checked(invocation) {
                 succeeded = false;
+                self.cancel_macro_replay();
+                break;
+            }
+            if self.clipboard.pending() {
                 break;
             }
         }
-        self.input.finish_macro_replay();
+        self.macro_running = false;
         succeeded
     }
 
-    pub(super) fn search_word_under_cursor(&mut self, forward: bool) -> bool {
+    pub(super) fn search_word_under_cursor(&mut self, forward: bool, count: u64) -> bool {
         let Some(view_id) = self.state.active_view else {
             return false;
         };
@@ -4410,7 +4425,7 @@ impl InteractiveApplication {
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
         self.input.remember_word_search();
-        self.perform_search(forward)
+        self.perform_search(forward, count)
     }
 
     pub(super) fn apply_authoritative_editor_transaction(
@@ -5162,6 +5177,28 @@ impl InteractiveApplication {
             selected,
         );
     }
+    pub(super) fn close_terminal(&mut self, id: PtyId) {
+        if self.terminal_session.stopping(id) {
+            self.show_error("terminal stop is already pending");
+        } else if self.terminal_session.requires_close_confirmation(id) {
+            if self.input.prompt().is_some() {
+                self.show_error("close the active prompt before closing a running terminal");
+            } else if self.terminal_session.begin_close(id) {
+                self.open_confirmation_actions(
+                    PromptKind::TerminalClose,
+                    format!("Terminal #{} is active", id.0),
+                    "Hide this terminal or stop its process?".into(),
+                    crate::ui::ConfirmationChoice::No,
+                    "Stop",
+                    "Hide",
+                );
+            }
+        } else {
+            self.terminal_session.cancel_open();
+            self.retire_terminal(id, true);
+        }
+    }
+
     pub(super) fn submit_terminal_close(&mut self, selected: crate::ui::ConfirmationChoice) {
         let source = self.terminal_session.take_close();
         // Restore the pre-prompt focus first; Hide or Stop then performs the
@@ -5552,7 +5589,7 @@ impl InteractiveApplication {
                 self.ui.search_query = Some(prompt.input);
                 self.input.remember_search(forward);
                 self.close_prompt();
-                self.perform_search(forward);
+                self.perform_search(forward, 1);
             }
         }
     }
@@ -5605,7 +5642,7 @@ impl InteractiveApplication {
         }
     }
 
-    pub(super) fn perform_search(&mut self, forward: bool) -> bool {
+    pub(super) fn perform_search(&mut self, forward: bool, count: u64) -> bool {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
             return false;
@@ -5620,7 +5657,7 @@ impl InteractiveApplication {
         let buffer = &self.state.buffers[buffer_id];
         let revision = buffer.text.revision();
         let source = buffer.text.to_string();
-        let start = if forward && cursor_offset.get() < buffer.text.len_bytes() {
+        let mut start = if forward && cursor_offset.get() < buffer.text.len_bytes() {
             cursor_offset.get()
                 + source[cursor_offset.get()..]
                     .graphemes(true)
@@ -5629,15 +5666,22 @@ impl InteractiveApplication {
         } else {
             cursor_offset.get()
         };
-        let found = crate::editor::input::search_match(
-            &source,
-            &query,
-            self.configuration.settings().search.smart_case,
-            self.input.whole_word_search(),
-            start,
-            forward,
-            self.configuration.settings().search.wrap,
-        );
+        let mut found = Ok(None);
+        for _ in 0..count {
+            found = crate::editor::input::search_match(
+                &source,
+                &query,
+                self.configuration.settings().search.smart_case,
+                self.input.whole_word_search(),
+                start,
+                forward,
+                self.configuration.settings().search.wrap,
+            );
+            let Ok(Some(matched)) = &found else { break };
+            start = matched.start + if forward {
+                source[matched.start..].graphemes(true).next().map_or(0, str::len)
+            } else { 0 };
+        }
         let target = match found {
             Ok(Some(found)) => found.start,
             Ok(None) => {
@@ -5670,7 +5714,7 @@ impl InteractiveApplication {
 
     /// `gn`: selects the search match under the cursor, else the next one, as Vim does.
     /// Returns false, having said why, when there is none.
-    pub(super) fn select_next_search_match(&mut self) -> bool {
+    pub(super) fn select_next_search_match(&mut self, count: u64) -> bool {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
             return false;
@@ -5707,6 +5751,23 @@ impl InteractiveApplication {
                 return false;
             }
         };
+        let mut found = found;
+        for _ in 1..count {
+            match crate::editor::input::search_match(
+                &source, &query, search.smart_case, whole_word,
+                found.end, true, search.wrap,
+            ) {
+                Ok(Some(next)) => found = next,
+                Ok(None) => {
+                    self.show_error(self.message("pattern_not_found", &[("query", query)]));
+                    return false;
+                }
+                Err(error) => {
+                    self.show_error(error);
+                    return false;
+                }
+            }
+        }
         self.select_text(view_id, found.start, found.end)
     }
 
@@ -5760,27 +5821,6 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
-    pub(super) fn navigate_debug_location(
-        &mut self,
-        location: crate::editor::session::debugger::DebugLocation,
-    ) {
-        let position = crate::language::lsp::LspPosition {
-            line: location.line.saturating_sub(1) as usize,
-            character: location.column.saturating_sub(1) as usize,
-        };
-        self.navigate_location_encoded(
-            &crate::language::lsp::LspLocation {
-                uri: crate::language::lsp::file_uri(&location.path),
-                range: crate::language::lsp::LspRange {
-                    start: position.clone(),
-                    end: position,
-                },
-            },
-            PositionEncoding::Utf16,
-            true,
-        );
-    }
-
     pub(super) fn start_dap_configuration(&mut self, name: &str) {
         match self.debugger_session.request_debug(
             (Some(name), None),
@@ -8327,6 +8367,20 @@ impl InteractiveApplication {
         }
     }
 
+    pub(in crate::editor::session) fn navigate_debug_location(
+        &mut self,
+        location: crate::editor::session::debugger::DebugLocation,
+    ) {
+        let position = crate::language::lsp::LspPosition {
+            line: usize::try_from(location.line.saturating_sub(1)).unwrap_or(usize::MAX),
+            character: usize::try_from(location.column.saturating_sub(1)).unwrap_or(usize::MAX),
+        };
+        self.navigate_location_encoded(&crate::language::lsp::LspLocation {
+            uri: crate::language::lsp::file_uri(&location.path),
+            range: crate::language::lsp::LspRange { start: position.clone(), end: position },
+        }, PositionEncoding::Utf16, true);
+    }
+
     pub(in crate::editor::session) fn navigate_lsp_location_encoded(
         &mut self,
         location: &crate::language::lsp::LspLocation,
@@ -8556,6 +8610,7 @@ impl InteractiveApplication {
         &mut self,
         direction: i8,
         filter: DiagnosticFilter,
+        count: u64,
     ) {
         let Some(view_id) = self.state.active_view else {
             return;
@@ -8570,7 +8625,7 @@ impl InteractiveApplication {
         self.diagnostics.retire_documents(&self.state);
         let Some(key) = self
             .diagnostics
-            .adjacent(&uri, cursor, direction, filter.severities())
+            .adjacent(&uri, cursor, direction, filter.severities(), count)
         else {
             self.show_error(self.message("diagnostic_none", &[]));
             return;
@@ -12948,7 +13003,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn sync_lsp_document(&mut self) {
-        self.language.retry_documents(&self.state);
+        let mut changed = self.language.retry_documents(&self.state);
         let Some(buffer) = self.state.active_buffer_id() else {
             self.language.reset_autostart();
             return;
@@ -13030,7 +13085,6 @@ impl InteractiveApplication {
                     && owner.uri == document.uri()
             });
         self.refresh_lsp_projection_owner();
-        let mut changed = false;
         for server in &sessions {
             if self.language.synced(server, buffer, &revision) {
                 continue;
@@ -13646,6 +13700,7 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn restart_lsp_session(&mut self, key: String) {
+        self.language.retire_documents(&self.state);
         let Some(state) = self.language.sessions().get(&key) else {
             return;
         };
@@ -13656,7 +13711,10 @@ impl InteractiveApplication {
             self.show_workspace_failure(failure);
             return;
         }
-        let Some((&buffer, document)) = state.documents.iter().next() else {
+        let Some((&buffer, document)) = state.documents.iter().find(|(id, document)| {
+            self.state.buffers.get(**id)
+                .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path))
+        }) else {
             return;
         };
         let (definition, launch, root, root_path, document) = (
@@ -14099,7 +14157,7 @@ impl InteractiveApplication {
             AppEffect::NotificationDismiss => {
                 self.clear_notice();
             }
-            AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext => {
+            AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext(_) => {
                 unreachable!("search effects return their status through process_effect_checked")
             }
             AppEffect::SubstituteAll => {
@@ -14107,6 +14165,7 @@ impl InteractiveApplication {
                     self.answer_substitution(true, true);
                 }
             }
+
             AppEffect::Scroll {
                 kind,
                 count,
@@ -14291,8 +14350,8 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            AppEffect::WindowResizeDirectional(direction) => {
-                if let Err(error) = self.resize_focused_window(direction) {
+            AppEffect::WindowResizeDirectional(direction, count) => {
+                if let Err(error) = self.resize_focused_window(direction, count) {
                     self.show_error(error);
                 }
             }
@@ -14307,7 +14366,7 @@ impl InteractiveApplication {
                     self.show_error(error);
                 }
             }
-            AppEffect::RepeatLast => self.repeat_last_change(),
+            AppEffect::RepeatLast(count) => self.repeat_last_change(count),
             AppEffect::MacroRecordStart(register) => {
                 self.input.start_macro_recording(register);
                 self.notify_message(

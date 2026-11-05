@@ -23,6 +23,7 @@ pub enum LayoutAction {
     NewTab,
     CloseTab,
     FocusTab(isize),
+    FocusTabNumber(usize),
     Zoom,
 }
 
@@ -720,6 +721,11 @@ impl WindowSession {
             LayoutAction::CloseTab => EditorOperation::CloseTab,
             LayoutAction::Zoom => EditorOperation::ToggleZoom,
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab { offset, wrap: true },
+            LayoutAction::FocusTabNumber(number) => EditorOperation::FocusTabId {
+                tab: source.tabs().keys().nth(number.saturating_sub(1)).ok_or_else(|| {
+                    LayoutPlanError::Rejected("tab number is out of range".into())
+                })?,
+            },
         });
         plan.hide_dashboard = true;
         Ok(plan)
@@ -763,6 +769,14 @@ impl WindowSession {
                     if candidate.core.graph.focused().is_none() {
                         candidate.dashboard = Some(true);
                     }
+                }
+                commands::NativeAction::ShowEditor(pane, window) => {
+                    candidate.core.editor
+                        .show_editor(&mut candidate.core.graph, pane, window)
+                        .map_err(|error| error.to_string())?;
+                    candidate.core.editor
+                        .rebuild_tiled_layout(&source, &mut candidate.core.graph)
+                        .map_err(|error| error.to_string())?;
                 }
                 commands::NativeAction::SwapEditors(first, second) => {
                     candidate

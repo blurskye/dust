@@ -12,7 +12,7 @@ pub(in crate::editor::session) enum WindowCommand<'a> {
     Show(&'a str),
     Move(&'a str, u16, u16),
     Resize(&'a str, i16),
-    Direction(FocusDirection, Option<NativeSurfaceTarget>),
+    Direction(FocusDirection, Option<NativeSurfaceTarget>, u64),
     Close(&'a str),
     Swap(&'a str, &'a str),
 }
@@ -256,7 +256,14 @@ impl WindowSession {
                             })?;
                     plan.native = Some(NativeAction::Place(native, placement));
                 } else {
-                    plan.native = Some(NativeAction::ShowEditor(pane(window)?, window));
+                    let pane = pane(window)?;
+                    if self.core.editor.restored_placement(pane) == WindowPlacement::Fullscreen {
+                        plan.operations.push(EditorOperation::FocusPaneId { pane });
+                        plan.focus_editor = true;
+                        plan.target = Some(window);
+                    }
+                    plan.hide_dashboard = true;
+                    plan.native = Some(NativeAction::ShowEditor(pane, window));
                 }
             }
             WindowCommand::Move(name, x, y) => {
@@ -341,7 +348,10 @@ impl WindowSession {
                     }
                 }
             }
-            WindowCommand::Direction(direction, explicit) => {
+            WindowCommand::Direction(direction, explicit, count) => {
+                let scaled_step = |step: u16| {
+                    u64::from(step).saturating_mul(count).min(i16::MAX as u64) as i16
+                };
                 let native = if explicit.is_some() {
                     explicit
                 } else if self.terminal_focused() {
@@ -363,7 +373,7 @@ impl WindowSession {
                         self.directional_native_placement(
                             native,
                             direction,
-                            i16::try_from(policy.terminal_step).unwrap_or(i16::MAX),
+                            scaled_step(policy.terminal_step),
                         )?
                         .map_or(NativeAction::None, |p| NativeAction::Place(native, p)),
                     );
@@ -381,7 +391,7 @@ impl WindowSession {
                         .window(window)
                         .ok_or_else(|| CommandError::Rejected("focused window is stale".into()))?
                         .placement;
-                    let step = i16::try_from(policy.pane_step).unwrap_or(i16::MAX);
+                    let step = scaled_step(policy.pane_step);
                     match placement {
                         WindowPlacement::Tiled => {
                             let (axis, grow) = match direction {
@@ -392,10 +402,12 @@ impl WindowSession {
                             };
                             // With no split on that axis the border is a docked terminal's, such
                             // as an agent on the right, so that terminal resizes instead.
-                            let dock = (!source.pane_has_split_on_axis(pane, axis))
-                                .then(|| self.docked_terminal_on(axis))
-                                .flatten();
-                            if let Some(dock) = dock {
+                            let split = self.core.editor.resized_tiled_split(
+                                source, pane, axis, if grow { step } else { -step },
+                            ).map_err(|error| CommandError::Rejected(error.to_string()))?;
+                            if let Some(split) = split {
+                                plan.operations.push(split);
+                            } else if let Some(dock) = self.docked_terminal_on(axis) {
                                 // The editor grows as the terminal shrinks: right grows the code
                                 // and narrows a right dock, up grows it and lowers a bottom one.
                                 let toward = match direction {
@@ -407,15 +419,12 @@ impl WindowSession {
                                     self.directional_native_placement(
                                         dock,
                                         toward,
-                                        i16::try_from(policy.terminal_step).unwrap_or(i16::MAX),
+                                        scaled_step(policy.terminal_step),
                                     )?
                                     .map_or(NativeAction::None, |p| NativeAction::Place(dock, p)),
                                 );
                             } else {
-                                plan.operations.push(EditorOperation::ResizePaneOnAxis {
-                                    axis,
-                                    delta: if grow { step } else { -step },
-                                });
+                                plan.native = Some(NativeAction::None);
                             }
                         }
                         WindowPlacement::Docked { edge, size } => {
@@ -432,7 +441,10 @@ impl WindowSession {
                                 | (crate::ui::window::DockEdge::Right, FocusDirection::Right) => {
                                     false
                                 }
-                                _ => return Ok(plan),
+                                _ => {
+                                    plan.native = Some(NativeAction::None);
+                                    return Ok(plan);
+                                }
                             };
                             plan.native = Some(NativeAction::PlaceEditor(
                                 pane,
@@ -563,20 +575,21 @@ impl WindowSession {
                                 }
                                 _ => {
                                     let focused = self.core.graph.focused();
-                                    if first_placement == WindowPlacement::Fullscreen
-                                        || (focused == Some(first)
-                                            && second_placement == WindowPlacement::Hidden)
+                                    let focus = if first_placement == WindowPlacement::Fullscreen
+                                        || (focused == Some(first) && second_placement == WindowPlacement::Hidden)
                                     {
-                                        plan.operations.push(EditorOperation::FocusPaneId {
-                                            pane: second_pane,
-                                        });
+                                        Some((second_pane, second))
                                     } else if second_placement == WindowPlacement::Fullscreen
-                                        || (focused == Some(second)
-                                            && first_placement == WindowPlacement::Hidden)
+                                        || (focused == Some(second) && first_placement == WindowPlacement::Hidden)
                                     {
-                                        plan.operations.push(EditorOperation::FocusPaneId {
-                                            pane: first_pane,
-                                        });
+                                        Some((first_pane, first))
+                                    } else {
+                                        None
+                                    };
+                                    if let Some((pane, window)) = focus {
+                                        plan.operations.push(EditorOperation::FocusPaneId { pane });
+                                        plan.target = Some(window);
+                                        plan.focus_editor = true;
                                     }
                                     Some(NativeAction::SwapEditors(
                                         (first_pane, first),
@@ -639,6 +652,7 @@ impl WindowSession {
                     .editor
                     .show_editor(&mut candidate.core.graph, pane, window)
                     .map_err(|error| error.to_string())?;
+                candidate.dashboard = Some(false);
                 candidate.core.editor.invalidate_layout();
                 self.commit(candidate)?;
             }

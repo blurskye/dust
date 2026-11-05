@@ -74,8 +74,6 @@ pub enum EditError {
         second_start: usize,
         second_end: usize,
     },
-    #[error("multiple insertions at byte offset {0} are ambiguous")]
-    AmbiguousInsertions(usize),
 }
 
 impl TextBuffer {
@@ -86,10 +84,20 @@ impl TextBuffer {
                 actual: set.base_revision,
             });
         }
-        let mut edits = set.edits.clone();
-        edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
-        for edit in &edits {
+        let mut sorted = set.edits.clone();
+        // Stable sorting retains the supplied order of insertions at the same position.
+        sorted.sort_by_key(|edit| (edit.range.start, edit.range.end));
+        let mut edits: Vec<TextEdit> = Vec::with_capacity(sorted.len());
+        for edit in sorted {
             self.validate_range(edit.range)?;
+            if let Some(previous) = edits.last_mut()
+                && previous.range.is_empty()
+                && previous.range == edit.range
+            {
+                previous.replacement.push_str(&edit.replacement);
+            } else {
+                edits.push(edit);
+            }
         }
         for pair in edits.windows(2) {
             let first = &pair[0];
@@ -102,12 +110,6 @@ impl TextBuffer {
                     second_end: second.range.end.get(),
                 });
             }
-            if first.range.is_empty()
-                && second.range.is_empty()
-                && first.range.start == second.range.start
-            {
-                return Err(EditError::AmbiguousInsertions(first.range.start.get()));
-            }
         }
         Ok(edits)
     }
@@ -115,7 +117,13 @@ impl TextBuffer {
     /// Validate the complete edit set before changing the rope, then apply from
     /// the end of the document toward the beginning.
     pub fn apply_edits(&mut self, set: &TextEditSet) -> Result<EditDelta, EditError> {
-        let edits = self.validate_edits(set)?;
+        let mut edits = self.validate_edits(set)?;
+        // A textually unchanged replacement must not rewrite its original line endings.
+        edits.retain(|edit| {
+            !self.rope.byte_slice(edit.range.start.get()..edit.range.end.get())
+                .bytes()
+                .eq(edit.replacement.bytes())
+        });
         let delta = EditDelta::new(
             edits
                 .iter()
@@ -190,6 +198,50 @@ mod tests {
         buffer.apply_edits(&set).expect("valid edits");
         assert_eq!(buffer.to_string(), "XcdZ");
         assert_eq!(buffer.revision().0, 1);
+    }
+
+    #[test]
+    fn coalesces_same_position_insertions_in_supplied_order() {
+        let mut buffer = TextBuffer::from_text("ab");
+        let set = TextEditSet::new(
+            buffer.revision(),
+            vec![
+                TextEdit::new(ByteRange::empty(ByteOffset(1)), "first"),
+                TextEdit::new(ByteRange::empty(ByteOffset(0)), "prefix"),
+                TextEdit::new(ByteRange::empty(ByteOffset(1)), "second"),
+                TextEdit::new(ByteRange::empty(ByteOffset(1)), "third"),
+                TextEdit::new(ByteRange::new(ByteOffset(1), ByteOffset(2)).unwrap(), "B"),
+            ],
+        );
+        let edits = buffer.validate_edits(&set).unwrap();
+        assert_eq!(edits.len(), 3);
+        assert_eq!(edits[1].replacement(), "firstsecondthird");
+        let delta = buffer.apply_edits(&set).unwrap();
+        assert_eq!(buffer.to_string(), "prefixafirstsecondthirdB");
+        assert_eq!(delta.spans().len(), 3);
+    }
+
+    #[test]
+    fn unchanged_replacements_preserve_mixed_line_endings_and_revision() {
+        let original = b"a\r\nb\nc\n";
+        let mut buffer = TextBuffer::from_bytes(original).unwrap();
+        let revision = buffer.revision();
+        let source = buffer.source_version();
+        let unchanged = TextEdit::new(
+            ByteRange::new(ByteOffset(0), ByteOffset(2)).unwrap(), "a\n",
+        );
+        let delta = buffer.apply_edits(&TextEditSet::new(revision, vec![unchanged.clone()])).unwrap();
+        assert!(delta.spans().is_empty());
+        assert_eq!(buffer.to_bytes(), original);
+        assert_eq!(buffer.revision(), revision);
+        assert_eq!(buffer.source_version(), source);
+
+        let delta = buffer.apply_edits(&TextEditSet::new(revision, vec![
+            unchanged,
+            TextEdit::new(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap(), "B"),
+        ])).unwrap();
+        assert_eq!(buffer.to_bytes(), b"a\r\nB\nc\n");
+        assert_eq!(delta.spans().len(), 1);
     }
 
     #[test]

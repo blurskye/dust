@@ -297,6 +297,18 @@ impl WorkspaceEditSession {
             .and_then(|p| p.origin.as_ref())
             .or_else(|| self.preparing_origin())
     }
+    pub(super) fn resources_pending(&self, proposal: ProposalId) -> bool {
+        self.accepted.iter().any(|request| request.proposal == proposal)
+            || self.applying.values().any(|(_, request)| request.proposal == proposal)
+    }
+    pub(super) fn next_resource_proposal(&self) -> Option<ProposalId> {
+        self.accepted.first().map(|request| request.proposal)
+    }
+    pub(super) fn resource_proposal(&self, reply: &super::documents::WorkspaceIoReply) -> Option<ProposalId> {
+        self.applying.get(&reply.id())
+            .filter(|(worker, _)| reply.is_from(worker))
+            .map(|(_, request)| request.proposal)
+    }
     pub(super) fn resources(&self) -> &[CheckedResourceIntent] {
         self.preview
             .as_ref()

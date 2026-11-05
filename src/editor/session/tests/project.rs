@@ -1452,6 +1452,34 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
 }
 
 #[test]
+fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
+    let mut app = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let git_dir = repo.path().to_path_buf();
+    drop(repo);
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(app.git.status().is_some());
+    assert!(app.ui.operation_bar.is_none());
+    fs::write(git_dir.join("index"), b"invalid index").unwrap();
+    app.project_operation_bar();
+    let bar = app.ui.operation_bar.as_ref().unwrap();
+    assert_eq!(bar.phase, "operation state unavailable");
+    assert!(bar.actions.is_empty());
+    assert!(bar.abort_binding.is_none());
+    assert!(app.ui.notification_error);
+    assert!(app.ui.notification.is_some());
+    fs::remove_file(git_dir.join("index")).unwrap();
+    app.project_operation_bar();
+    assert!(app.ui.operation_bar.is_none());
+}
+
+#[test]
 fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
     let mut app = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
@@ -2654,17 +2682,17 @@ fn search_moves_forward_wraps_and_repeats() {
     ).unwrap();
     app.set_dashboard_visibility(false);
     app.ui.search_query = Some("one".into());
-    app.perform_search(true);
+    app.perform_search(true, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)
     );
-    app.perform_search(true);
+    app.perform_search(true, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(0)
     );
-    app.perform_search(false);
+    app.perform_search(false, 1);
     assert_eq!(
         app.state.views[view].cursor,
         crate::editor::text::ByteOffset(8)
@@ -6402,6 +6430,23 @@ fn palette_finds_commands_by_the_words_people_type() {
         let row = palette_row_for(&mut app, query);
         assert!(row.contains(expected), "`{query}` picked `{row}`");
     }
+}
+
+#[test]
+fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() {
+    let mut app = app();
+    let mut manifest = super::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
+    manifest.commands.get_mut("run").unwrap().title = "Print Hello".into();
+    let index = crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+    app.register_indexed_plugin_commands(&index).unwrap();
+    assert!(!app.configuration.settings().command_labels.contains_key("plugin.demo.run"));
+    assert_eq!(palette_row_for(&mut app, "Print Hello"), "Plugins: Print Hello");
+
+    app.close_picker();
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.command_labels.insert("plugin.demo.run".into(), "Say Goodbye".into());
+    app.configuration.install_fixture(config);
+    assert_eq!(palette_row_for(&mut app, "Say Goodbye"), "Plugins: Say Goodbye");
 }
 
 #[test]

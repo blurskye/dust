@@ -159,11 +159,13 @@ pub enum AppEffect {
     NotificationDismiss,
     SearchRepeat {
         reverse: bool,
+        count: u64,
     },
-    SearchSelectNext,
+    SearchSelectNext(u64),
     SubstituteAll,
     SearchWord {
         forward: bool,
+        count: u64,
     },
     Scroll {
         kind: String,
@@ -209,7 +211,7 @@ pub enum AppEffect {
         target: String,
         amount: i16,
     },
-    WindowResizeDirectional(FocusDirection),
+    WindowResizeDirectional(FocusDirection, u64),
     WindowMove {
         target: String,
         x: u16,
@@ -219,7 +221,7 @@ pub enum AppEffect {
         first: String,
         second: String,
     },
-    RepeatLast,
+    RepeatLast(Option<std::num::NonZeroU64>),
     MacroRecordStart(char),
     MacroRecordStop,
     MacroReplay {
@@ -456,6 +458,7 @@ pub enum AppEffect {
     DiagnosticNavigate {
         direction: i8,
         filter: DiagnosticFilter,
+        count: u64,
     },
     DapStart(Option<PathBuf>),
     DapStop,

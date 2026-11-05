@@ -332,55 +332,28 @@ pub(super) fn register_commands(
             ))
         },
     )?;
+    for (id, title, direction, filter) in [
+        ("diagnostic.next", "Go to next error or warning", 1, DiagnosticFilter::ErrorOrWarning),
+        ("diagnostic.previous", "Go to previous error or warning", -1, DiagnosticFilter::ErrorOrWarning),
+        ("diagnostic.error.next", "Go to next error", 1, DiagnosticFilter::Error),
+        ("diagnostic.error.previous", "Go to previous error", -1, DiagnosticFilter::Error),
+        ("diagnostic.warning.next", "Go to next warning", 1, DiagnosticFilter::Warning),
+        ("diagnostic.warning.previous", "Go to previous warning", -1, DiagnosticFilter::Warning),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |invocation| AppEffect::DiagnosticNavigate {
+                direction,
+                filter,
+                count: invocation.count.map_or(1, |count| count.get()),
+            },
+        )?;
+    }
     for (id, title, effect) in [
-        (
-            "diagnostic.next",
-            "Go to next error or warning",
-            AppEffect::DiagnosticNavigate {
-                direction: 1,
-                filter: DiagnosticFilter::ErrorOrWarning,
-            },
-        ),
-        (
-            "diagnostic.previous",
-            "Go to previous error or warning",
-            AppEffect::DiagnosticNavigate {
-                direction: -1,
-                filter: DiagnosticFilter::ErrorOrWarning,
-            },
-        ),
-        (
-            "diagnostic.error.next",
-            "Go to next error",
-            AppEffect::DiagnosticNavigate {
-                direction: 1,
-                filter: DiagnosticFilter::Error,
-            },
-        ),
-        (
-            "diagnostic.error.previous",
-            "Go to previous error",
-            AppEffect::DiagnosticNavigate {
-                direction: -1,
-                filter: DiagnosticFilter::Error,
-            },
-        ),
-        (
-            "diagnostic.warning.next",
-            "Go to next warning",
-            AppEffect::DiagnosticNavigate {
-                direction: 1,
-                filter: DiagnosticFilter::Warning,
-            },
-        ),
-        (
-            "diagnostic.warning.previous",
-            "Go to previous warning",
-            AppEffect::DiagnosticNavigate {
-                direction: -1,
-                filter: DiagnosticFilter::Warning,
-            },
-        ),
         (
             "completion.select_next",
             "Select next completion",

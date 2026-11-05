@@ -180,9 +180,11 @@ struct InteractiveApplication {
     >,
     /// The last request someone asked for, until their next key.
     lsp_asked: Option<crate::language::lsp::LspFeature>,
+    lsp_asked_generation: Option<u64>,
     /// Asked for before its server could answer, and sent again once it has started and
     /// finished loading.
     lsp_waiting: Option<crate::language::lsp::LspFeature>,
+    lsp_waiting_server: Option<String>,
     /// When the waiting request is sent again after a "content modified" answer that came
     /// before the server reported any loading, and how many times it has been.
     lsp_retry_at: Option<std::time::Instant>,
@@ -243,6 +245,9 @@ struct InteractiveApplication {
         Vec<(crate::editor::BufferId, u64, u64)>,
         Vec<(crate::editor::ViewId, crate::editor::BufferId)>,
     ),
+    syntax_fold_positions: Vec<Option<(
+        crate::editor::BufferId, crate::editor::text::TextVersion, BufferRevision, ByteRange,
+    )>>,
     window_session: WindowSession,
     tooling: super::tooling::ToolingSession,
     language: super::lsp::LspSession,
@@ -253,6 +258,8 @@ struct InteractiveApplication {
     next_transaction: u64,
     git: super::git::GitSession,
     clipboard: super::clipboard::ClipboardSession,
+    macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
+    macro_running: bool,
     explorer: super::explorer::ExplorerSession,
     syntax: SyntaxSession,
     persistence: super::persistence::PersistenceSession,
@@ -473,21 +480,7 @@ pub fn run_interactive(
 
 impl InteractiveApplication {
     fn process_clipboard(&mut self) -> Option<String> {
-        let before_paste = self.state.window_version();
-        let registers_enabled = self.state.policy.registers_enabled;
-        let generation = self.state.registers.generation();
-        let paste = self.clipboard.finish_pull(
-            &mut self.state.value.registers,
-            registers_enabled,
-            &before_paste,
-        );
-        if self.state.registers.generation() != generation {
-            self.state.revision = self.state.revision.wrapping_add(1);
-        }
-        if let Some(invocation) = paste {
-            self.invoke(invocation);
-            self.clipboard.continue_pastes(&before_paste, &self.state.window_version());
-        }
+        self.process_clipboard_pastes();
         let generation = self.state.registers.generation();
         let output = if self.clipboard_shared() {
             self.clipboard.push(&mut self.state.value.registers)

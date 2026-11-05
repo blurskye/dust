@@ -241,6 +241,65 @@ fn bun_bootstrap_is_the_pinned_glibc_baseline_artifact() {
 }
 
 #[test]
+fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
+    use super::{catalog::NixCompatibilityRuntime, compatibility::MANAGED_RUNTIME_MARKER};
+    use std::{fs, sync::mpsc};
+
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = directory.path().join(".runtimes/bun");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    let executable = runtime.join("bin/bun");
+    fs::write(
+        runtime.join(MANAGED_RUNTIME_MARKER),
+        runtime_artifact("bun").unwrap().sha256,
+    )
+    .unwrap();
+    let compatibility = NixCompatibilityRuntime {
+        loader: "/nix/store/new-glibc/lib/ld-linux-x86-64.so.2".into(),
+        nix_ld: "/unused/nix-ld".into(),
+        patchelf: "/unused/patchelf".into(),
+        library_path: String::new(),
+        runtime_path: String::new(),
+    };
+    for (loader, refresh) in [
+        (compatibility.loader.to_str().unwrap(), false),
+        ("/nix/store/old-glibc/lib/ld-linux-x86-64.so.2", true),
+    ] {
+        // A minimal ELF64 with one PT_INTERP header; it is inspected, never executed.
+        let mut elf = vec![0; 120];
+        elf[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes());
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes());
+        elf[56..58].copy_from_slice(&1u16.to_le_bytes());
+        elf[64..68].copy_from_slice(&3u32.to_le_bytes());
+        elf[72..80].copy_from_slice(&120u64.to_le_bytes());
+        elf[96..104].copy_from_slice(&(loader.len() as u64 + 1).to_le_bytes());
+        elf.extend_from_slice(loader.as_bytes());
+        elf.push(0);
+        fs::write(&executable, &elf).unwrap();
+        let (cancel, cancellations) = mpsc::channel();
+        let result = super::runtimes::managed_runtime(
+            directory.path(),
+            "bun",
+            &cancellations,
+            &mut move |phase, _, _| {
+                assert_eq!(phase, "refreshing runtime compatibility");
+                // Stop before downloading, keeping this test offline.
+                cancel.send(()).unwrap();
+            },
+            Some(&compatibility),
+        );
+        if refresh {
+            assert_eq!(result.unwrap_err(), "tool installation cancelled");
+        } else {
+            assert_eq!(result.unwrap(), executable);
+        }
+        assert_eq!(fs::read(&executable).unwrap(), elf);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
 #[ignore = "operator qualification: requires Nix plus upstream artifact network access"]
 fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
     if !super::is_nixos_host() {
@@ -989,6 +1048,72 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn failed_rustup_component_installation_reports_bounded_stderr() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+
+    let directory = tempfile::tempdir().unwrap();
+    let rustup = directory.path().join("rustup");
+    fs::write(
+        &rustup,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' '{}' 'downloading component' 'download failed' 'error: certificate verification failed' >&2\nexit 1\n",
+            "x".repeat(8192)
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
+    let (_cancel, cancellations) = mpsc::channel();
+    let error = super::runtimes::install_path_rustup_component(
+        &definition,
+        &rustup,
+        &proxy,
+        directory.path(),
+        "rust-analyzer",
+        &cancellations,
+        &mut |_, _, _| {},
+    )
+    .unwrap_err();
+    assert!(error.contains("exited with 1"), "{error}");
+    assert!(error.contains("certificate verification failed"), "{error}");
+    assert!(error.len() < 512, "stderr tail must be bounded");
+}
+
+#[cfg(unix)]
+#[test]
+fn rustup_cancellation_terminates_its_process_group() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc, thread, time::{Duration, Instant}};
+    let root = tempfile::tempdir().unwrap();
+    let rustup = root.path().join("rustup");
+    fs::write(&rustup, "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n").unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = root.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = bundled_tool_catalog().into_iter().find(|tool| tool.id == "rust-analyzer").unwrap();
+    let (cancel, cancellations) = mpsc::channel();
+    let cwd = root.path().to_path_buf();
+    let worker = thread::spawn(move || super::runtimes::install_path_rustup_component(
+        &definition, &rustup, &proxy, &cwd, "rust-analyzer", &cancellations, &mut |_, _, _| {},
+    ));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !root.path().join("descendant").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    cancel.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
+    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
+    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+}
+
 #[test]
 fn managed_uninstall_atomically_removes_only_the_selected_tool() {
     let directory = tempfile::tempdir().expect("tool store");
@@ -1027,6 +1152,10 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     ] {
         symlink(&target, profiles.join(name)).expect("profile link");
     }
+    // More than the old inspection limit, including generations beyond its first page.
+    for index in 3..1100 {
+        symlink(&target, profiles.join(format!("rust-analyzer-{index}-link"))).unwrap();
+    }
     let definition = bundled_tool_catalog()
         .into_iter()
         .find(|tool| tool.id == "rust-analyzer")
@@ -1038,6 +1167,20 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     assert!(!profiles.join("rust-analyzer-1-link").exists());
     assert!(!profiles.join("rust-analyzer-2-link").exists());
     assert!(profiles.join("clangd").exists());
+    assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 1);
+}
+
+#[test]
+fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
+    let directory = tempfile::tempdir().unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
+    uninstall_nix_lsp_profile(&definition, directory.path()).unwrap();
+    std::fs::write(directory.path().join("nix-lsp-workspace"), b"not a directory").unwrap();
+    let error = uninstall_nix_lsp_profile(&definition, directory.path()).unwrap_err();
+    assert!(error.contains("cannot inspect Dust Nix environments"), "{error}");
 }
 
 #[cfg(unix)]
@@ -1646,6 +1789,40 @@ fn registry_service_keeps_every_result_under_backpressure() {
 
 #[cfg(unix)]
 #[test]
+fn locked_uv_installation_rejects_another_process_and_uninstall() {
+    use std::{fs, sync::mpsc};
+    let definition = bundled_tool_catalog().into_iter()
+        .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. }))).unwrap();
+    if let Some(root) = std::env::var_os("DUST_TEST_LOCKED_TOOL_ROOT") {
+        let root = std::path::Path::new(&root);
+        let (_cancel, cancellations) = mpsc::channel();
+        let error = super::runtimes::install_uv_tool(
+            &definition, root, &["fixture".into()], &cancellations, &mut |_, _, _| {}, None,
+        ).unwrap_err();
+        assert!(error.contains("cannot lock tool"), "{error}");
+        assert!(uninstall_managed_tool(&definition, root).unwrap_err().contains("cannot lock tool"));
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let tool = root.path().join(&definition.id);
+    fs::create_dir(&tool).unwrap();
+    fs::write(tool.join("existing"), "keep this").unwrap();
+    let file = fs::OpenOptions::new().write(true).create_new(true)
+        .open(root.path().join(format!(".install-{}.lock", definition.id))).unwrap();
+    let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("locked_uv_installation_rejects_another_process_and_uninstall")
+        .env("DUST_TEST_LOCKED_TOOL_ROOT", root.path())
+        .output().unwrap();
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert_eq!(fs::read_to_string(tool.join("existing")).unwrap(), "keep this");
+    drop(lock);
+    uninstall_managed_tool(&definition, root.path()).unwrap();
+    assert!(!tool.exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
     use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
     let root = tempfile::tempdir().unwrap();
@@ -1680,6 +1857,33 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
         fs::read_to_string(old.join("bin").join(&definition.executable)).unwrap(),
         script
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
+    use std::{fs, sync::mpsc, time::{Duration, Instant}};
+    for exit in [0, 1] {
+        let root = tempfile::tempdir().unwrap();
+        let (_cancel, cancellations) = mpsc::channel();
+        let started = Instant::now();
+        let result = super::runtimes::run_managed(
+            std::path::Path::new("/bin/sh"),
+            &["-c".into(), format!("sleep 30 & echo $! > descendant; echo diagnostic >&2; exit {exit}")],
+            root.path(),
+            &std::collections::BTreeMap::from([("PATH".into(), std::env::var("PATH").unwrap())]),
+            &cancellations, None,
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        if exit == 0 {
+            result.unwrap();
+        } else {
+            assert!(result.unwrap_err().contains("diagnostic"));
+        }
+        let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+        let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
+        assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+    }
 }
 
 #[cfg(unix)]

@@ -5,9 +5,7 @@ use super::{
     register_app_commands, register_builtin_commands, validate_configured_commands,
 };
 
-pub(in crate::editor::session) fn base_safe_keymaps(
-    loaded: &LoadedConfig,
-) -> (crate::config::LoadedKeymaps, BTreeSet<String>, bool) {
+pub(super) fn enabled_plugin_owners(loaded: &LoadedConfig) -> BTreeSet<String> {
     let mut enabled = loaded
         .config
         .plugins
@@ -30,10 +28,19 @@ pub(in crate::editor::session) fn base_safe_keymaps(
             })
             .cloned(),
     );
+    enabled
+}
+
+pub(in crate::editor::session) fn base_safe_keymaps(
+    loaded: &LoadedConfig,
+) -> (crate::config::LoadedKeymaps, BTreeSet<String>, bool) {
+    let enabled = enabled_plugin_owners(loaded);
     let mut base = loaded.keymaps.clone();
     let mut entries = base.entries[..base.bundled_count].to_vec();
     let mut spans = Vec::new();
-    let mut deferred = false;
+    let mut deferred = loaded.config.input.command_aliases.values()
+        .chain(loaded.dashboard.action.iter().map(|action| &action.command))
+        .any(|id| plugin_owner_from_id(id).is_some_and(|owner| enabled.contains(owner)));
     for (offset, entry) in base.entries[base.bundled_count..].iter().enumerate() {
         let owner = plugin_owner_from_id(&entry.id)
             .or_else(|| entry.command.as_deref().and_then(plugin_owner_from_id))

@@ -5,8 +5,12 @@ use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 #[test]
 fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     let mut app = app();
-    let (_, first_view) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+    app.state.open_text(TextBuffer::from_text("oldest"), None).unwrap();
     app.set_dashboard_visibility(false);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+        crate::editor::Axis::Horizontal,
+    )));
+    let (_, first_view) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
     app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
@@ -76,6 +80,116 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
 }
 
 #[test]
+fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
+    for reverse in [false, true] {
+        let mut app = app();
+        let (_, original_view) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+        app.set_dashboard_visibility(false);
+        app.reconcile_editor_windows();
+        let original = app.window_session.graph().focused().unwrap();
+        app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(
+            crate::editor::Axis::Horizontal,
+        )));
+        let clone_view = app.state.active_view.unwrap();
+        let clone = app.window_session.graph().focused().unwrap();
+        let (fullscreen, floating, floating_view) = if reverse {
+            (clone, original, original_view)
+        } else {
+            (original, clone, clone_view)
+        };
+        let rect = WindowPlacement::Floating(WindowRect { x: 2, y: 2, width: 30, height: 8 });
+        app.place_graph_window(&format!("window:{}", floating.0), rect).unwrap();
+        app.place_graph_window(&format!("window:{}", fullscreen.0), WindowPlacement::Fullscreen).unwrap();
+        app.swap_graph_windows(&format!("window:{}", original.0), &format!("window:{}", clone.0)).unwrap();
+        assert_eq!(app.window_session.graph().window(floating).unwrap().placement, WindowPlacement::Fullscreen);
+        assert_eq!(app.window_session.graph().window(fullscreen).unwrap().placement, rect);
+        assert_eq!(app.window_session.graph().focused(), Some(floating));
+        assert_eq!(app.state.active_view, Some(floating_view));
+        app.window_session.graph().validate().unwrap();
+    }
+}
+
+#[test]
+fn showing_the_last_editor_dismisses_the_dashboard() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let editor = app.window_session.graph().focused().unwrap();
+    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Hidden).unwrap();
+    assert!(app.window_session.dashboard_visible());
+    app.show_graph_window(&format!("window:{}", editor.0)).unwrap();
+    assert!(!app.window_session.dashboard_visible());
+    assert_eq!(app.active_input_context(), "editor.normal");
+    assert_eq!(app.window_session.graph().focused(), Some(editor));
+    let dashboard = app.window_session.native_ids().dashboard().unwrap().window;
+    assert_eq!(app.window_session.graph().window(dashboard).unwrap().placement, WindowPlacement::Hidden);
+}
+
+#[test]
+fn perpendicular_docked_editor_resizes_do_nothing() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let editor = app.window_session.graph().focused().unwrap();
+    app.place_graph_window(&format!("window:{}", editor.0), WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    let graph = app.window_session.graph().clone();
+    for key in ["ctrl-up", "ctrl-down"] {
+        app.handle_configured_key(key.parse().unwrap());
+        assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+        assert_eq!(app.window_session.graph(), &graph);
+    }
+}
+
+#[test]
+fn tiled_window_resize_accepts_the_minimum_delta() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.resize_graph_window("focused", i16::MIN).unwrap();
+    assert!(matches!(app.state.tabs[app.state.active_tab.unwrap()].root,
+        crate::editor::LayoutNode::Split { ratio: 900, .. }));
+}
+
+#[test]
+fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let first = app.window_session.graph().focused().unwrap();
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.process_effect(AppEffect::Layout(crate::editor::LayoutAction::Split(crate::editor::Axis::Horizontal)));
+    app.place_graph_window("focused", WindowPlacement::Hidden).unwrap();
+    let tab = app.state.active_tab.unwrap();
+    app.handle_configured_key("ctrl-right".parse().unwrap());
+    let crate::editor::LayoutNode::Split { ratio, second, .. } = &app.state.tabs[tab].root else { panic!("outer split"); };
+    assert!(*ratio < 500);
+    assert!(matches!(**second, crate::editor::LayoutNode::Split { ratio: 500, .. }));
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+
+    app.place_graph_window(&format!("window:{}", first.0), WindowPlacement::Hidden).unwrap();
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(20, 20, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.place_graph_window("terminal", WindowPlacement::Docked { edge: DockEdge::Right, size: 20 }).unwrap();
+    app.process_effect(AppEffect::TerminalUnfocus);
+    let root = app.state.tabs[tab].root.clone();
+    app.handle_configured_key("ctrl-right".parse().unwrap());
+    assert_eq!(app.state.tabs[tab].root, root);
+    let terminal = app.window_session.native_ids().terminal(1).unwrap().window;
+    assert_eq!(app.window_session.graph().window(terminal).unwrap().placement,
+        WindowPlacement::Docked { edge: DockEdge::Right, size: 20 - crate::ui::render::TERMINAL_PANEL_RESIZE_STEP });
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+}
+
+#[test]
 fn directional_resize_uses_the_focused_explorer_clone() {
     let mut app = app();
     app.state.open_text(TextBuffer::from_text("editor"), None).unwrap();
@@ -104,6 +218,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
         .placement;
     app.process_effect(AppEffect::WindowResizeDirectional(
         crate::editor::FocusDirection::Right,
+        1,
     ));
     assert_eq!(
         app.window_session
@@ -115,6 +230,13 @@ fn directional_resize_uses_the_focused_explorer_clone() {
     );
     assert!(
         matches!(app.window_session.graph().window(clone).unwrap().placement, WindowPlacement::Floating(rect) if rect.width > 20)
+    );
+    app.process_effect(AppEffect::WindowResizeDirectional(
+        crate::editor::FocusDirection::Left,
+        1_000_000,
+    ));
+    assert!(
+        matches!(app.window_session.graph().window(clone).unwrap().placement, WindowPlacement::Floating(rect) if rect.width == 1)
     );
 }
 
@@ -318,6 +440,20 @@ fn saved_watches_are_listed_without_a_debugger() {
     assert_eq!(picker.rows[0].label, "counter");
     app.accept_picker();
     assert_eq!(app.debugger_session.watches(), ["counter"]);
+}
+
+#[test]
+fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
+    let mut app = app();
+    for index in 0..200 { app.append_lsp_log(format!("message {index}")); }
+    app.show_lsp_logs();
+    app.search.picker_move(-1, false);
+    app.sync_picker_ui();
+    let before = app.search.picker().unwrap().selected_item().unwrap().clone();
+    app.append_lsp_log("new message".into());
+    let after = app.search.picker().unwrap().selected_item().unwrap();
+    assert_eq!(before.id, after.id);
+    assert_eq!(before.label, after.label);
 }
 
 #[test]
@@ -632,13 +768,18 @@ fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
 fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let mut app = app();
     app.state
-        .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None).unwrap();
+        .open_text(crate::editor::text::TextBuffer::from_text("abcdef abcdef abcdef"), None).unwrap();
+    app.set_dashboard_visibility(false);
     let first = app.state.active_view.expect("first view");
     app.state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
     assert_ne!(app.state.active_view, Some(first));
+    let flash_view = app.state.active_view.unwrap();
     app.reconcile_editor_windows();
+    app.begin_flash();
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_some());
     let viewport = crate::ui::pane_viewports(
         &app.state,
         &app.ui,
@@ -666,12 +807,21 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let geometry = app.mouse_pane_geometry().expect("mouse geometry");
     assert_eq!(geometry.0, viewport.pane);
     assert_eq!((geometry.3, geometry.4), (viewport.width, viewport.height));
-    app.apply_mouse_cursor(false);
+    let (column, row) = app.input.mouse_position().unwrap();
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column, row,
+    });
     assert_eq!(app.state.active_view, Some(first));
     assert_eq!(
         app.state.views[first].cursor,
         crate::editor::text::ByteOffset(1)
     );
+    assert!(app.flash.is_none());
+    assert!(app.ui.flash.is_none());
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('l'), kind: crate::ui::KeyInputKind::Press });
+    assert_eq!(app.state.views[first].cursor, ByteOffset(2));
+    assert_eq!(app.state.views[flash_view].cursor, ByteOffset(0));
 }
 
 #[test]
@@ -2138,6 +2288,147 @@ fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
 }
 
 #[test]
+fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
+    let mut app = app();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("abc abc abc"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.open_explorer();
+    app.set_explorer_focus(false);
+    app.reconcile_editor_windows();
+    app.begin_flash();
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('a'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_some());
+    let rect = app.explorer_window_rect().unwrap();
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column: rect.x + 1, row: rect.y + 1,
+    });
+    app.handle_event(UiEvent::Key { key: KeyEvent::character('j'), kind: crate::ui::KeyInputKind::Press });
+    assert!(app.flash.is_none());
+    assert!(app.ui.flash.is_none());
+    assert!(app.window_session.explorer_focused());
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+}
+
+#[test]
+fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
+    let mut app = app();
+    let (first, _) = app.state.open_text(TextBuffer::from_text("first"), None).unwrap();
+    let (second, _) = app.state.open_text(TextBuffer::from_text("second"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    app.process_effect(AppEffect::WindowFloat {
+        target: "terminal".into(), x: 0, y: 0, width: 60, height: 12,
+    });
+    let target = app.window_session.editor_ids().content_for(first).unwrap();
+    let bounds = app.workspace_bounds().unwrap();
+    let column = (0..bounds.width).find(|column| {
+        crate::ui::content_tab_at_column(&app.ui.content_tabs, app.configuration.settings(), bounds.width, *column)
+            .is_some_and(|id| id.0 == target)
+    }).unwrap() + bounds.x;
+    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseRightDown, Default::default()),
+        column, row,
+    });
+    assert!(app.state.buffers.contains_key(first));
+    assert!(app.state.buffers.contains_key(second));
+    assert!(app.window_session.terminal_focused());
+}
+
+#[test]
+fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
+    for running in [false, true] {
+        let mut app = app();
+        app.state.open_text(TextBuffer::from_text("source"), None).unwrap();
+        app.set_dashboard_visibility(false);
+        for id in [PtyId(1), PtyId(2)] {
+            app.terminal_session.fixture(id, crate::editor::session::terminal::TerminalFixture {
+                profile: "shell".into(), screen: PtyScreen::new(40, 8, 100),
+                running, exit_code: (!running).then_some(0), truncated: false,
+            }, app.workspace.version());
+        }
+        app.terminal_session.select(PtyId(1));
+        app.set_terminal_focus(true);
+        app.sync_terminal_panel();
+        app.reconcile_editor_windows();
+        let target = app.window_session.native_ids().terminal(2).unwrap().window;
+        assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
+        app.close_graph_window(&format!("window:{}", target.0)).unwrap();
+        if running {
+            assert!(app.input.prompt().unwrap().confirmation.as_ref().unwrap().title.contains("#2"));
+            app.submit_terminal_close(crate::ui::ConfirmationChoice::Yes);
+        }
+        assert!(app.terminal_session.contains(PtyId(1)));
+        assert!(!app.terminal_session.contains(PtyId(2)));
+        assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
+    }
+}
+
+#[test]
+fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("source.rs");
+    app.state.open_text(TextBuffer::from_text(&"source\n".repeat(15)), Some(path.clone())).unwrap();
+    app.set_dashboard_visibility(false);
+    app.debugger_session.breakpoint(crate::debugger::DapSourceBreakpoint {
+        path: path.clone(), line: 10, column: None,
+        condition: Some("ready".into()), hit_condition: None, log_message: None,
+    }, false).unwrap();
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 9);
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
+    app.debugger_session.set_breakpoint_disabled(&path, 10, true);
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 9);
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::DisabledBreakpoint);
+    app.debugger_session.set_breakpoint_disabled(&path, 10, false);
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].kind, crate::ui::DebugSignKind::ConditionalBreakpoint);
+}
+
+#[test]
+fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
+    let mut app = app();
+    app.state.open_text(TextBuffer::from_text("source"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.terminal_session.fixture(PtyId(1), crate::editor::session::terminal::TerminalFixture {
+        profile: "shell".into(), screen: PtyScreen::new(20, 24, 100),
+        running: true, exit_code: None, truncated: false,
+    }, app.workspace.version());
+    app.terminal_session.select(PtyId(1));
+    app.sync_terminal_panel();
+    app.process_effect(AppEffect::WindowDock { target: "terminal".into(), edge: "right".into(), size: 20 });
+    app.ui.debug_panes = Some(crate::ui::DebugPanesUiState {
+        selected: crate::ui::DebugPane::Sessions, target: String::new(), status: String::new(),
+        threads: Vec::new(), stack: Vec::new(), breakpoints: Vec::new(), variables: Vec::new(),
+        watches: Vec::new(), console: Vec::new(),
+    });
+    app.window_session.set_debugging(true);
+    app.reconcile_editor_windows();
+    let bounds = app.workspace_bounds().unwrap();
+    let top = crate::ui::workspace_top_rows(&app.state, &app.ui, app.configuration.settings());
+    let region = WindowRect { y: bounds.y + top, height: bounds.height - top, ..bounds };
+    let (column, row) = (region.y..region.y + region.height).find_map(|row| {
+        (region.x..region.x + region.width).find(|column| {
+            crate::ui::debug_pane_tab_at(region, crate::ui::DebugPane::Sessions, *column, row)
+                == Some(crate::ui::DebugPane::Threads)
+        }).map(|column| (column, row))
+    }).expect("visible Threads tab");
+    app.handle_event(UiEvent::Mouse {
+        key: KeyEvent::mouse(crate::editor::input::KeyCode::MouseLeftDown, Default::default()),
+        column, row,
+    });
+    assert_eq!(app.ui.debug_panes.as_ref().unwrap().selected, crate::ui::DebugPane::Threads);
+}
+
+#[test]
 fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
     let mut app = app();
     let (first, _) = app.state.open_text(
@@ -2850,6 +3141,9 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
     }
     app.show_graph_window(&format!("window:{}", source_window.0))
         .expect("show hidden editor");
+    assert_eq!(app.state.active_view, Some(source_view));
+    assert_eq!(app.state.tabs[tab].focused, source_pane);
+    assert_eq!(app.window_session.graph().focused(), Some(source_window));
     assert_eq!(
         app.window_session
             .graph()
@@ -4035,14 +4329,14 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.process_effect(crate::editor::AppEffect::TerminalResize(1));
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 11));
-    app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Up,
-    ));
-    assert_eq!(app.window_session.terminal_height(), 14);
-    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 13));
-    app.process_effect(crate::editor::AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Down,
-    ));
+    let mut resize = crate::editor::CommandInvocation::new("window.resize.directional", InvocationSource::Test).unwrap()
+        .with_argument("direction", CommandValue::String("up".into()));
+    resize.count = std::num::NonZeroU64::new(3);
+    app.invoke(resize.clone());
+    assert_eq!(app.window_session.terminal_height(), 18);
+    assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 17));
+    resize.arguments.insert("direction".into(), CommandValue::String("down".into()));
+    app.invoke(resize);
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.workspace_render_height(), 11);
     app.handle_event(crate::ui::UiEvent::Resize(60, 20));
@@ -4702,7 +4996,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
     app.process_effect(crate::editor::AppEffect::TerminalFocus(agent.0));
     assert_eq!(app.window_session.focused_terminal(), Some(agent.0));
     assert!(app.terminal_rect(shell).is_some(), "the shell stays below");
-    app.resize_focused_window(crate::editor::FocusDirection::Left)
+    app.resize_focused_window(crate::editor::FocusDirection::Left, 1)
         .expect("resize");
     let wider = app.terminal_rect(agent).expect("agent");
     assert_eq!(
@@ -5472,6 +5766,113 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
         message.contains("outcome is Unknown")
             && message.contains("shared shutdown deadline expired")
     }));
+}
+
+#[test]
+fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
+    use crate::debugger::{DapControl, DapEvent, DapResponse, DapStackFrame, DapVariable};
+    use crate::editor::session::debugger::{DebugResponse, tests::attach_adapter};
+
+    let mut app = app();
+    let owner = &mut app.debugger_session;
+    owner.begin_stop();
+    let stop = owner.stop_epoch();
+    let adapter = attach_adapter(owner);
+    let DebugResponse::Picker { rows, .. } = owner.response(DapResponse::Stack(vec![DapStackFrame {
+        id: 42,
+        name: "main".into(),
+        path: None,
+        line: 1,
+        column: 1,
+        source_reference: None,
+    }])) else {
+        panic!("expected a frames picker");
+    };
+    assert_eq!(rows.len(), 1);
+    let _frame = owner.take_selection(&rows[0].key).unwrap();
+
+    // Leave an older request pending so the reply must be matched by request ID, not FIFO.
+    app.process_effect(AppEffect::DapEvaluate("older".into()));
+    app.process_effect(AppEffect::DapEvaluate("first".into()));
+    let older_request = adapter.control().expect("the older evaluation was sent");
+    assert!(matches!(
+        &older_request,
+        DapControl::Evaluate { expression, frame_id: Some(42), context }
+            if expression == "older" && context == "repl"
+    ));
+    let request = adapter.control().expect("the evaluation was sent");
+    assert!(matches!(
+        &request,
+        DapControl::Evaluate { expression, frame_id: Some(42), context }
+            if expression == "first" && context == "repl"
+    ));
+
+    app.open_prompt(crate::ui::PromptKind::Command, "dap.evaluate ".into());
+    app.prompt_insert("second");
+    let draft = app.input.prompt().unwrap().clone();
+
+    adapter.event(
+        1,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 1,
+            request_id: 2,
+            request: Some(request),
+            response: DapResponse::Evaluate(DapVariable {
+                name: "result".into(),
+                value: "1".into(),
+                type_name: None,
+                variables_reference: 0,
+            }),
+        },
+    );
+    app.process_dap_events();
+
+    let entries = app.debugger_session.console().cloned().collect::<Vec<_>>();
+    let first = entries.iter().find(|entry| entry.text == "first").unwrap();
+    let older = entries.iter().find(|entry| entry.text == "older").unwrap();
+    let answer = entries.iter().find(|entry| entry.text == "result = 1").unwrap();
+    assert_eq!(first.actor.as_deref(), Some("same-name"));
+    assert_eq!(first.stop, Some(stop));
+    assert_eq!(first.frame, Some(42));
+    assert!(first.submission.is_some());
+    assert_ne!(first.submission, older.submission);
+    assert_eq!(first.result.as_deref(), Some("result = 1"));
+    assert_eq!(answer.submission, first.submission);
+    assert_eq!(answer.actor, first.actor);
+    assert_eq!(answer.stop, first.stop);
+    assert_eq!(answer.frame, first.frame);
+    assert_eq!(older.result, None, "the reply must not update the oldest request");
+    assert_eq!(entries.len(), 3, "the draft has not been submitted");
+
+    let prompt = app.input.prompt().expect("the draft stays open");
+    assert_eq!(prompt.kind, draft.kind);
+    assert_eq!(prompt.input, "dap.evaluate second");
+    assert_eq!(prompt.input, draft.input);
+    assert_eq!(prompt.cursor, draft.cursor);
+
+    // The older request remains independently answerable after the out-of-order reply.
+    adapter.event(
+        1,
+        DapEvent::Response {
+            adapter: "same-name".into(),
+            stop_generation: 1,
+            request_id: 1,
+            request: Some(older_request),
+            response: DapResponse::Evaluate(DapVariable {
+                name: "result".into(),
+                value: "0".into(),
+                type_name: None,
+                variables_reference: 0,
+            }),
+        },
+    );
+    app.process_dap_events();
+    let older = app.debugger_session.console().find(|entry| entry.text == "older").unwrap();
+    assert_eq!(older.result.as_deref(), Some("result = 0"));
+    let prompt = app.input.prompt().expect("the draft stays open after both replies");
+    assert_eq!(prompt.input, draft.input);
+    assert_eq!(prompt.cursor, draft.cursor);
 }
 
 #[cfg(unix)]
@@ -6893,6 +7294,31 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
             );
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn oversized_terminal_paste_reports_its_rejection() {
+    use super::driver::TestSession;
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.config.terminals.profiles.insert("paste".into(), crate::config::TerminalProfileConfig {
+        program: "/bin/sh".into(), arguments: vec!["-c".into(), "printf ready; read line".into()],
+        cwd: None, environment: Default::default(), columns: 40, rows: 8,
+        float: false, close_on_exit: false,
+    });
+    let mut driver = TestSession::new(loaded);
+    driver.new_buffer();
+    driver.trust_owned_terminal_fixture();
+    driver.terminal_open("paste");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while !driver.terminal_lines().iter().any(|line| line.contains("ready")) {
+        driver.pump_terminal();
+        assert!(Instant::now() < deadline, "{:?}", driver.notification());
+        thread::sleep(Duration::from_millis(2));
+    }
+    driver.paste(&"x".repeat(2 * 1024 * 1024));
+    assert_eq!(driver.notification(), Some("terminal paste exceeds the input limit"));
+    driver.terminal_close();
 }
 
 #[test]

@@ -1139,12 +1139,20 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
 #[test]
 fn a_debug_session_shrinks_the_terminal_only_on_a_short_screen_and_gives_it_back() {
     let mut session = WindowSession::new(false, 12);
-    session.observed_size = (80, 24);
+    session.observe_size((80, 24));
     session.set_debugging(true);
+    assert_eq!(session.terminal_height(), 5);
+    session.observe_size((80, 40));
+    assert_eq!(session.terminal_height(), 12);
+    assert!(!session.terminal_shrunk());
+    session.observe_size((80, 24));
     assert_eq!(session.terminal_height(), 5);
     session.set_debugging(false);
     assert_eq!(session.terminal_height(), 12);
-    session.observed_size = (80, 40);
+    session.observe_size((80, 40));
     session.set_debugging(true);
+    assert_eq!(session.terminal_height(), 12);
+    session.set_debugging(false);
+    session.observe_size((80, 24));
     assert_eq!(session.terminal_height(), 12);
 }

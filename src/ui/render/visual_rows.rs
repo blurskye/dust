@@ -291,6 +291,38 @@ impl<'a> VisualRowModel<'a> {
         }
     }
 
+    /// Source text actually painted in the viewport, excluding folds and clipped columns.
+    #[must_use]
+    pub fn visible_text_ranges(
+        &self,
+        start: VisualRowAnchor,
+        height: usize,
+        scroll_column: usize,
+    ) -> Vec<ByteRange> {
+        let mut ranges: Vec<ByteRange> = Vec::new();
+        let mut previous = None;
+        for row in 0..height {
+            let Some(anchor) = self.painted_row(start, row) else { break };
+            if previous == Some(anchor) { continue; }
+            previous = Some(anchor);
+            let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
+            let line = self.text.line(anchor.line).unwrap_or_default();
+            for relative in self.visible_bytes(anchor, scroll_column, self.content_width) {
+                let at = ByteOffset(line_start.get() + relative);
+                let length = line[relative..].graphemes(true).next().map_or(0, str::len);
+                let end = ByteOffset(at.get() + length);
+                if let Some(last) = ranges.last_mut()
+                    && last.end == at
+                {
+                    last.end = end;
+                } else {
+                    ranges.push(ByteRange::new(at, end).expect("visible text range"));
+                }
+            }
+        }
+        ranges
+    }
+
     pub(super) fn inlay_width(&self, position: ByteOffset) -> usize {
         self.inlay_widths.get(&position).copied().unwrap_or(0)
     }
@@ -1122,6 +1154,40 @@ mod tests {
         }
         let model = VisualRowModel::new_for_state(&state, &state.buffers[buffer].text, view, &ui, &config, 20, false);
         assert_eq!(model.visible_bytes(VisualRowAnchor::default(), 0, 20), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn visible_ranges_exclude_hidden_markdown_and_unpainted_table_cells() {
+        use crate::{editor::text::TextBuffer, language::syntax::MarkdownMark, ui::UiMarkdownMark};
+        let source = "cursor\nz hidden\n| a | long text here and more |\n|---|---|\n| b | c |\nlast";
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text(source), None).unwrap();
+        let text = &state.buffers[buffer].text;
+        let revision = text.revision();
+        let mut config = crate::config::load_bundled_config().config;
+        config.editor.line_numbers = LineNumbers::Off;
+        config.editor.git_signs.enabled = false;
+        let mut ui = UiState::default();
+        let mark = |start, end, mark| UiMarkdownMark {
+            buffer, revision, range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+        };
+        let table_start = source.find('|').unwrap();
+        let table_end = source.find("last").unwrap();
+        ui.markdown_marks = source.match_indices('|')
+            .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect();
+        ui.markdown_marks.push(mark(7, 15, MarkdownMark::Hide));
+        ui.markdown_marks.push(mark(table_start, table_end, MarkdownMark::Table));
+        ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+        for wrap in [true, false] {
+            let model = VisualRowModel::new_for_state(&state, text, view, &ui, &config, 20, wrap);
+            assert!(model.visible_text_ranges(VisualRowAnchor { line: 1, wrap_row: 0 }, 1, 0).is_empty());
+            let visible = model.visible_text_ranges(VisualRowAnchor { line: 2, wrap_row: 0 }, 2, 0);
+            let painted = visible.iter().map(|range| text.slice(*range).unwrap()).collect::<String>();
+            assert!(painted.contains('a'), "{painted:?}");
+            assert!(painted.contains("long text"), "{painted:?}");
+            assert!(!painted.contains("more"), "{painted:?}");
+            assert!(!painted.contains('|'), "{painted:?}");
+        }
     }
 
     #[test]

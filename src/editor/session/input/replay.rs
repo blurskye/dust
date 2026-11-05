@@ -86,8 +86,9 @@ impl InputSession {
     }
 
     pub(in crate::editor::session) fn repeat_plan(
-        &self,
+        &mut self,
         limit: usize,
+        count: Option<std::num::NonZeroU64>,
     ) -> Result<Vec<CommandInvocation>, ReplayError> {
         if self.last_change.is_empty() {
             return Err(ReplayError::NoChange);
@@ -95,16 +96,45 @@ impl InputSession {
         if self.last_change.len() > limit {
             return Err(ReplayError::RepeatLimit);
         }
-        Ok(self.last_change.iter().cloned().map(replayed).collect())
+        let mut change = self.last_change.clone();
+        if let Some(count) = count {
+            change[0].count = Some(count);
+        }
+        let plan = if matches!(change[0].id.as_str(), "mode.insert" | "mode.replace") {
+            let repeats = usize::try_from(change[0].count.map_or(1, |count| count.get()))
+                .map_err(|_| ReplayError::RepeatLimit)?;
+            let opens_line = matches!(change[0].arguments.get("placement"),
+                Some(CommandValue::String(placement)) if matches!(placement.as_str(), "open_above" | "open_below"));
+            let body = &change[usize::from(!opens_line)..change.len() - 1];
+            let steps = body.len().checked_mul(repeats)
+                .and_then(|steps| steps.checked_add(if opens_line { 1 } else { 2 }))
+                .filter(|steps| *steps <= limit)
+                .ok_or(ReplayError::RepeatLimit)?;
+            let mut plan = Vec::with_capacity(steps);
+            if !opens_line {
+                plan.push(replayed(change[0].clone()));
+            }
+            for _ in 0..repeats {
+                plan.extend(body.iter().cloned().map(replayed));
+            }
+            plan.push(replayed(change.last().expect("recorded change").clone()));
+            plan
+        } else {
+            change.iter().cloned().map(replayed).collect()
+        };
+        self.last_change = change;
+        Ok(plan)
     }
 
     pub(in crate::editor::session) fn start_macro_recording(&mut self, register: char) {
+        self.modal.set_macro_recording(true);
         self.recording_macro = Some((register, Vec::new()));
     }
 
     pub(in crate::editor::session) fn finish_macro_recording(
         &mut self,
     ) -> Option<(char, Vec<CommandInvocation>)> {
+        self.modal.set_macro_recording(false);
         self.recording_macro.take()
     }
 
@@ -253,7 +283,7 @@ mod tests {
     #[test]
     fn recording_and_repeat_retain_semantics_and_strip_original_targets() {
         let mut input = InputSession::new(100);
-        assert_eq!(input.repeat_plan(10), Err(ReplayError::NoChange));
+        assert_eq!(input.repeat_plan(10, None), Err(ReplayError::NoChange));
         input.start_macro_recording('a');
         for id in ["mode.insert", "edit.insert_text", "mode.normal"] {
             input.record_successful_invocation(&invocation(id), None, false);
@@ -268,8 +298,8 @@ mod tests {
                 .all(|step| step.target == Default::default())
         );
         assert!(input.finish_macro_recording().is_none());
-        assert_eq!(input.repeat_plan(2), Err(ReplayError::RepeatLimit));
-        let plan = input.repeat_plan(3).unwrap();
+        assert_eq!(input.repeat_plan(2, None), Err(ReplayError::RepeatLimit));
+        let plan = input.repeat_plan(3, None).unwrap();
         assert_eq!(plan.len(), 3);
         assert!(plan.iter().all(
             |step| step.source == InvocationSource::Macro && step.target == Default::default()
@@ -278,7 +308,7 @@ mod tests {
             input.record_successful_invocation(step, None, false);
         }
         input.record_successful_invocation(&invocation("edit.operator"), None, true);
-        assert_eq!(input.repeat_plan(3).unwrap(), plan);
+        assert_eq!(input.repeat_plan(3, None).unwrap(), plan);
     }
 
     #[test]
@@ -332,7 +362,7 @@ mod tests {
         ] {
             input.record_successful_invocation(&invocation(id), None, false);
         }
-        let plan = input.repeat_plan(10).unwrap();
+        let plan = input.repeat_plan(10, None).unwrap();
         assert_eq!(
             plan.iter()
                 .map(|invocation| invocation.id.as_str())
@@ -350,7 +380,7 @@ mod tests {
         );
         input.start_macro_recording('a');
         input.record_successful_invocation(&yank, None, false);
-        assert_eq!(input.repeat_plan(10).unwrap(), plan);
+        assert_eq!(input.repeat_plan(10, None).unwrap(), plan);
         assert_eq!(input.finish_macro_recording().unwrap().1.len(), 1);
     }
 }

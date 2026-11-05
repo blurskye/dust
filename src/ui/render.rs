@@ -1378,6 +1378,7 @@ enum PluginRenderable<'a> {
 pub enum DebugSignKind {
     Breakpoint,
     ConditionalBreakpoint,
+    DisabledBreakpoint,
     Execution,
 }
 
@@ -1434,6 +1435,7 @@ pub struct OperationBarState {
     pub phase: String,
     pub blockers: Vec<String>,
     pub actions: Vec<String>,
+    pub abort_binding: Option<String>,
 }
 
 impl OperationBarState {
@@ -1448,47 +1450,61 @@ impl OperationBarState {
     /// phase, because the operation and the actions are what the user must not lose; if even the
     /// actions cannot fit, the cancellation is kept and named.
     #[must_use]
-    pub fn row(&self, width: u16) -> String {
+    pub fn row(&self, width: u16, ambiguous: AmbiguousWidth) -> String {
         let width = usize::from(width);
-        let actions = self.actions.join("/");
-        // Cancellation is the one thing that must survive every width, so it is reserved before
-        // anything else is allowed to occupy the row.
+        let abort = self.abort_binding.as_ref().map_or_else(
+            || "abort".to_owned(),
+            |binding| format!("{binding} abort"),
+        );
+        let actions = self.actions.iter().map(|action| {
+            if action == "abort" { abort.as_str() } else { action.as_str() }
+        }).collect::<Vec<_>>().join("/");
         let tail = if self.actions.iter().any(|action| action == "abort") {
-            "esc cancel"
+            abort.as_str()
         } else {
             ""
         };
-        let mut parts = vec![self.operation.clone(), self.phase.clone()];
+        let brief = format!("{} · {}", self.operation, self.phase);
+        let mut parts = vec![brief.clone()];
         if !self.blockers.is_empty() {
-            // Blockers are named by PATH, which is what tells the user what to go and fix.
             parts.push(self.blockers.join(", "));
         }
-        parts.push(actions);
+        if !actions.is_empty() {
+            parts.push(actions.clone());
+        }
         let full = parts.join(" · ");
-        if full.chars().count() <= width {
+        if text_width(&full, ambiguous) <= width {
             return full;
         }
-        // Drop the blockers first, then shorten the phase, and always keep the cancellation.
-        let brief = format!("{} · {}", self.operation, self.phase);
-        let tail_width = tail.chars().count();
-        let separator = usize::from(!tail.is_empty());
-        if brief.chars().count() + separator + tail_width <= width {
-            return if tail.is_empty() {
-                brief
-            } else {
-                format!("{brief} {tail}")
-            };
-        }
-        let budget = width.saturating_sub(tail_width).saturating_sub(separator);
-        let mut head: String = brief.chars().take(budget).collect();
-        while head.ends_with(' ') {
-            head.pop();
-        }
-        if tail.is_empty() {
-            head
+        let without_blockers = if actions.is_empty() {
+            brief.clone()
         } else {
-            format!("{head} {tail}")
+            format!("{brief} · {actions}")
+        };
+        if text_width(&without_blockers, ambiguous) <= width {
+            return without_blockers;
         }
+        // Reserve the real abort binding, then shorten the phase on grapheme boundaries.
+        let tail_width = text_width(tail, ambiguous);
+        let separator = usize::from(!tail.is_empty());
+        let budget = width.saturating_sub(tail_width + separator);
+        let mut used = 0;
+        let head: String = brief.graphemes(true).take_while(|grapheme| {
+            used += text_width(grapheme, ambiguous);
+            used <= budget
+        }).collect();
+        let compact = if tail.is_empty() {
+            head
+        } else if head.trim_end().is_empty() {
+            tail.to_owned()
+        } else {
+            format!("{} {tail}", head.trim_end())
+        };
+        let mut used = 0;
+        compact.graphemes(true).take_while(|grapheme| {
+            used += text_width(grapheme, ambiguous);
+            used <= width
+        }).collect()
     }
 }
 
@@ -1846,14 +1862,7 @@ fn render_error_notification(
     // A long message wraps instead of losing its end, which is usually the part that says why.
     let ambiguous = config.editor.ambiguous_width;
     let inner = usize::from(rect.width.saturating_sub(4)).max(1);
-    let mut lines: Vec<String> = if text_width(message, ambiguous) <= inner {
-        vec![message.to_owned()]
-    } else {
-        wrap_card_text(message, inner, ambiguous)
-            .into_iter()
-            .map(|runs| runs.into_iter().map(|(piece, _)| piece).collect())
-            .collect()
-    };
+    let mut lines = wrap_plain_text(message, inner, ambiguous);
     // Under a picker only the rows below it are free, so the whole text waits in :messages.
     let shown = if at_bottom {
         1
@@ -1915,7 +1924,15 @@ fn render_error_notification(
     }
 }
 
-/// Words of `text` wrapped to `width`, each line a list of (piece, is a key) runs.
+fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
+    text.split('\n').flat_map(|line| {
+        overlays::wrap_ranges(line, width, ambiguous)
+            .into_iter()
+            .map(|range| line[range].to_owned())
+    }).collect()
+}
+
+/// Tutor text wrapped to `width`, each line a list of (piece, is a key) runs.
 fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Vec<(String, bool)>> {
     let mut lines = Vec::new();
     let mut key = false;
@@ -2167,20 +2184,11 @@ pub fn render(
             .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
             .map(|window| window.rect)
     });
-    let terminal_rect = compositor.and_then(|compositor| {
-        let (_, window) = compositor.surfaces.terminal?;
-        compositor
-            .projection
-            .window(window)
-            .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
-            .map(|window| window.rect)
+    let dashboard_window = compositor.and_then(|compositor| {
+        compositor.projection.window(compositor.surfaces.dashboard?)
     });
-    let dashboard_rect = compositor.and_then(|compositor| {
-        let window = compositor.surfaces.dashboard?;
-        compositor
-            .projection
-            .window(window)
-            .map(|window| window.rect)
+    let dashboard_floating = dashboard_window.is_some_and(|window| {
+        window.layer == crate::ui::window::CompositorLayer::Floating
     });
     // ONE decision, so the regions cannot disagree: the source is whatever the inspectors leave,
     // and the workspace is rendered at that size rather than being squeezed into it.
@@ -2205,48 +2213,39 @@ pub fn render(
                 ..area
             })
         });
-    let content_bounds = if ui.dashboard || state.active_view.is_none() {
-        // The dashboard centres itself in what a docked explorer, or a terminal docked at the
-        // side such as an agent's, leaves free.
-        let beside = |bounds: WindowRect, dock: Option<WindowRect>| match dock {
-            Some(dock) if dock.x <= bounds.x && dock.x + dock.width > bounds.x => {
-                let cut = (dock.x + dock.width - bounds.x).min(bounds.width);
-                WindowRect {
-                    x: bounds.x + cut,
-                    width: bounds.width - cut,
-                    ..bounds
-                }
+    let content_bounds = if (ui.dashboard || state.active_view.is_none()) && !dashboard_floating {
+        // The compositor already subtracts every dock, including top and bottom docks.
+        workspace.map(|bounds| {
+            if let Some(window) = dashboard_window
+                && window.layer != crate::ui::window::CompositorLayer::Overlay
+            {
+                return window.rect;
             }
-            Some(dock) if dock.x > bounds.x && dock.x < bounds.x + bounds.width => WindowRect {
-                width: dock.x - bounds.x,
-                ..bounds
-            },
-            _ => bounds,
-        };
-        // The side terminal may be the focused one or another shown beside it.
-        let side_terminal = terminal_rect
-            .into_iter()
-            .chain(compositor.into_iter().flat_map(|compositor| {
-                ui.other_terminals.iter().filter_map(|(window, _)| {
-                    compositor
-                        .projection
-                        .window(*window)
-                        .filter(|window| {
-                            window.layer != crate::ui::window::CompositorLayer::Floating
-                        })
-                        .map(|window| window.rect)
-                })
-            }))
-            .find(|dock| dock.y <= workspace.map_or(0, |bounds| bounds.y));
-        dashboard_rect
-            .or(workspace)
-            .map(|bounds| beside(beside(bounds, explorer_rect), side_terminal))
+            let rect = dashboard_window.map_or(bounds, |window| window.rect);
+            let x = rect.x.max(bounds.x);
+            let y = rect.y.max(bounds.y);
+            WindowRect {
+                x,
+                y,
+                width: rect.x.saturating_add(rect.width)
+                    .min(bounds.x.saturating_add(bounds.width)).saturating_sub(x),
+                height: rect.y.saturating_add(rect.height)
+                    .min(bounds.y.saturating_add(bounds.height)).saturating_sub(y),
+            }
+        })
     } else {
         workspace
     };
     let content_width = content_bounds.map_or(width, |bounds| bounds.width);
     let content_height = content_bounds.map_or(workspace_height, |bounds| bounds.height);
-    let content = if ui.dashboard || state.active_view.is_none() {
+    let content = if dashboard_floating && (ui.dashboard || state.active_view.is_none()) {
+        Frame {
+            grid: CellGrid::new_with_policy(content_width, content_height,
+                CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT,
+                config.editor.ambiguous_width == AmbiguousWidth::Wide),
+            cursor: None,
+        }
+    } else if ui.dashboard || state.active_view.is_none() {
         render_dashboard(
             &state.workspace_root,
             &ui.dashboard_actions,
@@ -2341,7 +2340,7 @@ pub fn render(
             editor::render_status_line(&mut frame.grid, state, view, ui, config, width, height - 1);
         }
         if ui.operation_bar.is_some() && height > 2 {
-            editor::render_operation_bar(&mut frame.grid, ui, width, height - 2);
+            editor::render_operation_bar(&mut frame.grid, ui, config, width, height - 2);
         }
     }
     if let Some(compositor) = compositor {
@@ -2403,6 +2402,22 @@ pub fn render(
             .filter(|window| window.layer == crate::ui::window::CompositorLayer::Floating)
         {
             if render_non_tiled_editor_window(&mut frame, state, ui, config, projected) {
+                continue;
+            }
+            if compositor.surfaces.dashboard == Some(projected.window) {
+                let rect = projected.rect;
+                let dashboard = render_dashboard(&state.workspace_root, &ui.dashboard_actions,
+                    ui.dashboard_selected, dashboard, config, rect.width, rect.height);
+                for y in 0..rect.height {
+                    for x in 0..rect.width {
+                        if let Some(cell) = dashboard.grid.get(x, y) && !cell.continuation {
+                            frame.grid.set_cell(rect.x + x, rect.y + y, &cell.symbol, cell.style);
+                        }
+                    }
+                }
+                if projected.focused {
+                    frame.cursor = dashboard.cursor.map(|(x, y, shape)| (rect.x + x, rect.y + y, shape));
+                }
                 continue;
             }
             if compositor.surfaces.explorer == Some(projected.window) {
@@ -2487,7 +2502,8 @@ pub fn render(
     {
         render_picker(&mut frame, picker, config, rect, ui.surface_content.picker);
     }
-    let completion_menu = ui.language_completion.as_ref().and_then(|completion| {
+    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
+    let completion_menu = ui.language_completion.as_ref().filter(|_| !modal_open).and_then(|completion| {
         let pane = active_editor_pane_viewport(state, ui)?;
         render_language_completion(
             &mut frame,
@@ -2501,32 +2517,16 @@ pub fn render(
             },
         )
     });
-    if let (Some(text), None) = (&ui.lsp_loading, completion_menu) {
+    if let (Some(text), None) = (&ui.lsp_loading, completion_menu) && !modal_open {
         render_lsp_loading(&mut frame, text, config);
     }
-    if let Some(documentation) = &ui.documentation_popup {
-        render_documentation_popup(
-            &mut frame,
-            documentation,
-            config,
-            workspace.map_or(0, |bounds| bounds.x),
-            content_width,
-            workspace_height,
-            completion_menu,
-        );
+    let overlay_bounds = workspace.unwrap_or(WindowRect { x: 0, y: 0, width, height });
+    if let Some(documentation) = &ui.documentation_popup && !modal_open {
+        render_documentation_popup(&mut frame, documentation, config, overlay_bounds, completion_menu);
     }
     if let Some(key_hints) = &ui.key_hints {
-        render_key_hints(
-            &mut frame,
-            key_hints,
-            workspace.map_or(0, |bounds| bounds.x),
-            content_width,
-            workspace.map_or(0, |bounds| bounds.y),
-            workspace_height,
-            config.editor.ambiguous_width,
-        );
+        render_key_hints(&mut frame, key_hints, overlay_bounds, config.editor.ambiguous_width);
     }
-    let modal_open = ui.picker.is_some() || ui.tool_menu.is_some() || ui.settings.is_some();
     // A modal's footer is at the bottom right too, and its keys matter more.
     if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {
         render_lsp_progress(

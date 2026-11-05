@@ -6,7 +6,7 @@ use crate::{
     ui::{
         CellGrid, Style,
         geometry::text_width,
-        window::{CompositorLayer, ProjectedCompositorWindow},
+        window::{CompositorLayer, ProjectedCompositorWindow, WindowRect},
     },
 };
 
@@ -309,13 +309,12 @@ pub(super) fn dock_terminal_panel(
 pub(super) fn render_key_hints(
     frame: &mut Frame,
     hints: &KeyHintUiState,
-    editor_left: u16,
-    editor_width: u16,
-    editor_top: u16,
-    editor_height: u16,
+    bounds: WindowRect,
     ambiguous: AmbiguousWidth,
 ) {
-    let available_height = editor_height.saturating_sub(1);
+    let editor_left = bounds.x;
+    let editor_width = bounds.width;
+    let available_height = bounds.height.saturating_sub(1);
     if editor_width < 12 || available_height < 4 || hints.rows.is_empty() {
         return;
     }
@@ -363,7 +362,7 @@ pub(super) fn render_key_hints(
         return;
     }
     let left = editor_left.saturating_add(editor_width.saturating_sub(box_width));
-    let top = editor_top.saturating_add(available_height.saturating_sub(box_height));
+    let top = bounds.y.saturating_add(available_height.saturating_sub(box_height));
     let right = left.saturating_add(box_width);
     let bottom = top.saturating_add(box_height).saturating_sub(1);
     for y in top..=bottom {

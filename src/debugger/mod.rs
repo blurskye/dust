@@ -1804,6 +1804,19 @@ mod breakpoint_state_tests {
         assert!(wrong.iter().all(|state| !state.is_verified()));
     }
     #[test]
+    fn verified_breakpoints_without_lines_keep_the_requested_locations() {
+        let asked = requested(&[10, 20, 30]);
+        let states = breakpoint_states(
+            &asked,
+            &[true, false, false],
+            &DapResponse::Breakpoints(vec![(true, None, None), (true, Some(32), None)]),
+        );
+        assert_eq!(states[0], DapBreakpointState::Disabled);
+        assert_eq!(states[1], DapBreakpointState::Verified { line: 20 });
+        assert_eq!(states[2], DapBreakpointState::Verified { line: 32 });
+    }
+
+    #[test]
     fn disabled_rows_do_not_consume_enabled_breakpoint_verdicts() {
         let rows = [10, 20, 30].map(|line| DapSourceBreakpoint {
             path: "/source".into(),

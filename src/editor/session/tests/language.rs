@@ -2002,7 +2002,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     assert!(app.ui.language_completion.is_none());
 }
 
-fn fixture_owned_lsp(
+pub(super) fn fixture_owned_lsp(
     app: &mut InteractiveApplication,
     key: &str,
     buffer: crate::editor::BufferId,
@@ -2040,6 +2040,9 @@ fn fixture_owned_lsp(
                 code_action: true,
                 execute_command: true,
                 selection_ranges: true,
+                hover: true,
+                completion: true,
+                formatting: true,
                 ..Default::default()
             }),
             documents: HashMap::from([(buffer, document)]),
@@ -2080,8 +2083,8 @@ fn overlapping_formatting_saves_wait_for_their_own_results() {
     }
     assert_eq!(app.format_on_save.len(), 2);
     assert!(pending.iter().all(|(_, path, _)| fs::read_to_string(path).unwrap() == "old"));
-    for (buffer, path, (server, generation)) in pending.into_iter().rev() {
-        app.present_lsp_result(&server, generation, "textDocument/formatting",
+    for (transport, (buffer, path, (server, generation))) in transports.into_iter().rev().zip(pending.into_iter().rev()) {
+        app.present_lsp_result_owned(&server, generation, "textDocument/formatting",
             &crate::language::lsp::file_uri(&path),
             crate::language::lsp::LspFeatureResult::WorkspaceEdit(crate::language::lsp::LspWorkspaceEdit {
                 resources: Vec::new(),
@@ -2096,7 +2099,7 @@ fn overlapping_formatting_saves_wait_for_their_own_results() {
                         new_text: " ".into(),
                     }],
                 }],
-            }));
+            }), Some(transport.context()));
         wait_vfs(&mut app);
         assert_eq!(fs::read_to_string(path).unwrap(), "a b");
         assert!(!app.state.buffers[buffer].dirty);
@@ -2127,6 +2130,93 @@ fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
     assert!(app.language.synced("owner", buffer, &app.state.buffers[buffer].text.source_version()));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "newer unsaved text");
     assert!(app.state.buffers[buffer].dirty);
+}
+
+#[test]
+fn active_document_retries_preserve_automatic_completion_after_typing() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), Some(path)).unwrap();
+    app.set_dashboard_visibility(false);
+    let transport = fixture_owned_lsp(&mut app, "server", buffer);
+    app.language.select("server");
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.lsp.auto_completion = true;
+    config.settings.lsp.auto_start = false;
+    app.configuration.install_fixture(config);
+    app.state.views[view].mode = crate::editor::EditorMode::Insert;
+    app.sync_lsp_document();
+    assert!(transport.requested_feature().is_none());
+
+    for typed in ['a', 'b'] {
+        app.handle_key_in_context("editor.insert", KeyEvent::character(typed));
+        app.sync_lsp_document();
+        assert!(matches!(
+            transport.requested_feature(),
+            Some(crate::language::lsp::LspFeature::Completion)
+        ));
+        app.cancel_lsp_completion();
+    }
+}
+
+#[test]
+fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui() {
+    use crate::language::lsp::{LspFeature, LspProgressKind, LspRange, LspPosition};
+    for display_progress in [true, false] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("loading.rs");
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path)).unwrap();
+        app.set_dashboard_visibility(false);
+        let first = fixture_owned_lsp(&mut app, "first", buffer);
+        let second = fixture_owned_lsp(&mut app, "second", buffer);
+        app.language.select("first");
+        let mut fixture = app.configuration.fixture_snapshot();
+        fixture.settings.ui.lsp_progress.enabled = display_progress;
+        app.configuration.install_fixture(fixture);
+        let feature = LspFeature::CodeAction { range: LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 0 } }, diagnostics: Vec::new() };
+        app.request_lsp(feature);
+        assert!(matches!(first.requested_feature(), Some(LspFeature::CodeAction { .. })));
+        assert!(matches!(second.requested_feature(), Some(LspFeature::CodeAction { .. })));
+        for server in ["first", "second"] {
+            app.update_lsp_progress(server.into(), "index".into(), LspProgressKind::Begin, "Indexing".into(), String::new(), None);
+        }
+        app.show_lsp_no_result("first");
+        assert!(app.lsp_waiting.is_some());
+        assert!(app.ui.lsp_loading.is_some());
+        if !display_progress { assert!(app.ui.lsp_progress.is_empty()); }
+        app.update_lsp_progress("first".into(), "index".into(), LspProgressKind::End, String::new(), String::new(), None);
+        assert!(app.language.server_loading("second"));
+        assert!(app.lsp_waiting.is_none());
+        assert!(matches!(first.requested_feature(), Some(LspFeature::CodeAction { .. })));
+    }
+}
+
+#[test]
+fn waiting_lsp_requests_stay_queued_while_their_server_is_starting() {
+    let mut app = app();
+    let path = app.state.workspace_root.join("starting.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path)).unwrap();
+    app.set_dashboard_visibility(false);
+    let endpoint = fixture_owned_lsp(&mut app, "starting", buffer);
+    app.language.select("starting");
+    let capabilities = app.language.sessions()["starting"].capabilities.clone().unwrap();
+    app.language.stopped("starting");
+    app.request_lsp(crate::language::lsp::LspFeature::CodeAction {
+        range: crate::language::lsp::LspRange {
+            start: crate::language::lsp::LspPosition { line: 0, character: 0 },
+            end: crate::language::lsp::LspPosition { line: 0, character: 0 },
+        },
+        diagnostics: Vec::new(),
+    });
+    app.ui.lsp_loading = Some("still starting".into());
+    app.update_lsp_progress_animation();
+    assert_eq!(app.ui.lsp_loading.as_deref(), Some("still starting"));
+    assert!(app.lsp_waiting.is_some());
+    assert!(endpoint.requested_feature().is_none());
+    app.language.running("starting", capabilities);
+    app.update_lsp_progress_animation();
+    assert!(app.lsp_waiting.is_none());
+    assert!(matches!(endpoint.requested_feature(), Some(crate::language::lsp::LspFeature::CodeAction { .. })));
 }
 
 #[test]
@@ -2274,7 +2364,13 @@ fn code_lens_commands_keep_their_originating_session() {
 
 #[test]
 fn code_action_command_waits_for_approval_of_its_edits() {
+    code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure();
+}
+
+#[test]
+fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure() {
     use crate::language::lsp::*;
+    for disconnect in [false, true] {
     let mut app = app();
     let path = app.state.workspace_root.join("action.rs");
     let (buffer, _) = app
@@ -2282,6 +2378,9 @@ fn code_action_command_waits_for_approval_of_its_edits() {
         .open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
     let transport = fixture_owned_lsp(&mut app, "action-server", buffer);
     app.language.select("action-server");
+    let unrelated = app.state.open_text(TextBuffer::from_text("other"),
+        Some(path.with_file_name("unrelated.rs"))).unwrap().0;
+    drop(fixture_owned_lsp(&mut app, "stopped-server", unrelated));
     let uri = file_uri(&path);
     app.present_lsp_result(
         "action-server",
@@ -2320,9 +2419,118 @@ fn code_action_command_waits_for_approval_of_its_edits() {
     );
     app.accept_picker();
     assert_eq!(transport.executed_command(), None);
+    let transport = if disconnect { drop(transport); None } else { Some(transport) };
     app.accept_workspace_proposal();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "new");
-    assert_eq!(transport.executed_command(), Some("finish-action".into()));
+    assert!(app.ui.picker.is_none());
+    if let Some(transport) = transport {
+        assert_eq!(transport.synced_document().unwrap().text, "new");
+        assert_eq!(transport.executed_command(), Some("finish-action".into()));
+    } else {
+        assert!(app.ui.notification_error);
+    }
+    }
+}
+
+#[test]
+fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
+    use crate::language::lsp::*;
+    for fail in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("action.rs");
+        let target = path.with_file_name("renamed.rs");
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        app.set_dashboard_visibility(false);
+        let transport = fixture_owned_lsp(&mut app, "action-server", buffer);
+        app.language.select("action-server");
+        app.present_lsp_result("action-server", 1, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: "rename and command".into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit {
+                    documents: Vec::new(),
+                    resources: vec![LspResourceOperation::Rename {
+                        old_uri: file_uri(&path), new_uri: file_uri(&target),
+                        overwrite: false, ignore_if_exists: false,
+                    }],
+                }),
+                command: Some(LspCommand { command: "after-rename".into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        wait_vfs(&mut app);
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert!(path.exists() && !target.exists());
+        assert_eq!(transport.executed_command(), None, "resource is still staged");
+        // Accepting a resource edit must release its source, and must not delay an
+        // independent text-only action behind the explicitly staged rename.
+        app.present_lsp_result("action-server", 2, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: "independent".into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit::default()),
+                command: Some(LspCommand { command: "independent".into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert_eq!(transport.executed_command(), Some("independent".into()));
+        if fail { fs::write(&target, "conflict").unwrap(); }
+        app.process_effect(AppEffect::WorkspaceResourceApply);
+        wait_vfs(&mut app);
+        if fail {
+            assert!(app.ui.notification_error);
+            assert_eq!(transport.executed_command(), None);
+            assert!(path.exists());
+        } else {
+            assert!(!path.exists());
+            assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
+            assert_eq!(transport.closed_uri(), Some(file_uri(&path)));
+            assert_eq!(transport.synced_document().unwrap().path, target);
+            assert_eq!(transport.executed_command(), Some("after-rename".into()));
+        }
+    }
+}
+
+#[test]
+fn deferred_code_action_commands_belong_to_their_own_resource_proposals() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let mut fixtures = Vec::new();
+    for name in ["first", "second"] {
+        let path = app.state.workspace_root.join(format!("{name}.rs"));
+        let target = path.with_file_name(format!("{name}-renamed.rs"));
+        fs::write(&path, "old").unwrap();
+        let (buffer, _) = app.state.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        let transport = fixture_owned_lsp(&mut app, name, buffer);
+        app.language.select(name);
+        app.present_lsp_result(name, 1, "textDocument/codeAction", &file_uri(&path),
+            LspFeatureResult::CodeActions(vec![LspCodeAction {
+                title: name.into(), kind: None, preferred: false,
+                edit: Some(LspWorkspaceEdit {
+                    documents: Vec::new(),
+                    resources: vec![LspResourceOperation::Rename {
+                        old_uri: file_uri(&path), new_uri: file_uri(&target),
+                        overwrite: false, ignore_if_exists: false,
+                    }],
+                }),
+                command: Some(LspCommand { command: name.into(), arguments: Vec::new() }),
+            }]));
+        app.accept_picker();
+        wait_vfs(&mut app);
+        app.accept_workspace_proposal();
+        assert!(app.ui.picker.is_none());
+        assert_eq!(transport.executed_command(), None);
+        fixtures.push((transport, path, target));
+    }
+    // The first resource fails; the second command must still run after its rename.
+    fs::write(&fixtures[0].2, "conflict").unwrap();
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    wait_vfs(&mut app);
+    assert_eq!(fixtures[0].0.executed_command(), None);
+    assert!(fixtures[0].1.exists());
+    assert_eq!(fixtures[1].0.executed_command(), Some("second".into()));
+    assert!(!fixtures[1].1.exists());
+    assert!(fixtures[1].2.exists());
 }
 
 #[test]

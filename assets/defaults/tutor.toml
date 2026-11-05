@@ -16,6 +16,7 @@
 #   split    - true: at least two windows; false: one window, not zoomed
 #   explorer - show (true) or hide (false) the file explorer
 #   terminal - show (true) or hide (false) the terminal panel
+#   resume_from_previous - replay the preceding lesson first when resuming a fresh project
 #
 # A step is done when, in Normal mode:
 #   line      - a line of the step's file holds this text
@@ -69,12 +70,14 @@ chapter = "Moving around"
 text = "`g` `g` goes back to the first line."
 press = "Press `g` twice."
 done = ["input.motion motion=document_start"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Moving around"
 text = "`ctrl-o` goes back to where you were before a jump like `G` or a search, and `tab` forward again."
 press = "Hold `ctrl` and press `o`."
 done = ["navigation.jump.back"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Moving around"
@@ -153,12 +156,14 @@ chapter = "Changing text"
 text = "`u` undoes the last change."
 press = "Press `u` to bring the line back."
 done = ["history.undo"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Changing text"
 text = "`ctrl-r` redoes what you undid."
 press = "Hold `ctrl` and press `r`."
 done = ["history.redo"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Changing text"
@@ -240,12 +245,14 @@ chapter = "Search"
 text = "`n` jumps to the next match and `.` repeats your last change."
 press = "Press `c` `w`, type `dog`, press `esc`, then `n` `.` twice to change every cat."
 line = "The dog sat. The dog ran. Every dog naps."
+resume_from_previous = true
 
 [[step]]
 chapter = "Search"
 text = "`*` searches for the word under the cursor and `#` backward."
 press = "Press `*`."
 done = ["search.word"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Search"
@@ -359,6 +366,7 @@ chapter = "Tabs and windows"
 text = "`H` and `L` move to the tab on the left and right, and `ctrl-q` closes one."
 press = "Press `H` or `L` (with shift) to switch tabs."
 done = ["buffer.previous", "buffer.next"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Tabs and windows"
@@ -406,6 +414,7 @@ chapter = "Terminal"
 text = "The terminal opens at the bottom, in the project's folder."
 press = "Press `ctrl-/` to open it."
 done = ["terminal.toggle"]
+resume_from_previous = true
 terminal = false
 
 [[step]]
@@ -413,6 +422,7 @@ chapter = "Terminal"
 text = "In the terminal `esc` `esc` switches to Normal mode to scroll and copy with `v` and `y`; `i` types again and `ctrl-/` hides it."
 press = "Press `esc` twice."
 done = ["terminal.mode.normal"]
+resume_from_previous = true
 terminal = true
 
 [[step]]
@@ -431,12 +441,14 @@ chapter = "Code"
 text = "Go to definition opens the file where a name is defined."
 press = "Press `g` `d` to go to where “hello” is defined."
 done = ["lsp.definition"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Code"
 text = "`ctrl-o` comes back from a jump."
 press = "Hold `ctrl` and press `o` to come back."
 done = ["navigation.jump.back"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Code"
@@ -493,24 +505,28 @@ chapter = "Agents"
 text = "Type in the panel and press `enter` to send. After `esc`, `i` types again."
 press = "Press `esc` to go to Normal mode in the panel."
 done = ["agent.input.edit action=normal"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Agents"
 text = "Each agent session is a tab: `H` and `L` switch in Normal mode and `ctrl-q` closes one."
 press = "Press `ctrl-t` to open another agent tab."
 done = ["agent.tab.new", "agent.session.next", "agent.session.previous"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Agents"
 text = "`ctrl-o` sets the mode and `ctrl-r` resumes an earlier conversation."
 press = "Press `ctrl-p` to pick the model, then `esc` `esc` to close it."
 done = ["agent.model"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Agents"
 text = "From your code `<leader>` `a` `a` asks about the selection and `<leader>` `a` `f` adds the file to your next question."
 press = "Press `ctrl-h` to go back to the code."
 done = ["surface.focus.left", "agent.ask", "agent.add_file"]
+resume_from_previous = true
 
 [[step]]
 chapter = "Projects"

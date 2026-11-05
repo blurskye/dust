@@ -655,6 +655,79 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
 }
 
 #[test]
+fn editor_popups_are_suppressed_while_a_modal_owns_input() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(crate::editor::text::TextBuffer::from_text("code"), None).unwrap();
+    let loaded = crate::config::load_bundled_config();
+    for modal in 0..3 {
+        let mut ui = ui_with_editor_layout(&state);
+        match modal {
+            0 => ui.settings = Some(super::SettingsPageState::default()),
+            1 => ui.tool_menu = Some(super::ToolMenuState {
+                category: "lsp".into(), selected: 0, scroll: 0, rows: Vec::new(),
+                runtime_picker: None, query: String::new(), searching: false,
+            }),
+            _ => ui.picker = Some(super::PickerUiState {
+                preview_side_scroll: (0, 0), footer: None, input_hint: String::new(),
+                surface: super::PickerSurfaceKind::Generic, title: "Picker".into(),
+                query: String::new(), rows: Vec::new(), selected: None, scroll: 0,
+                loading: false, preview: None,
+            }),
+        }
+        let expected = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
+        ui.language_completion = Some(super::LanguageCompletionState {
+            typed: 0, items: vec![CompletionItem { icon: None, color: None,
+                label: "candidate".into(), detail: String::new() }], selected: 0, scroll: 0,
+        });
+        ui.documentation_popup = Some(DocumentationPopupState {
+            kind: DocumentationPopupKind::Hover, title: "Hover".into(), provider: String::new(),
+            source_range: None, scroll: 0, sections: vec![DocumentationSection {
+                heading: None, markup: DocumentationMarkupKind::PlainText,
+                lines: vec!["old documentation".into()], spans: Vec::new(),
+            }],
+        });
+        ui.lsp_loading = Some("Loading".into());
+        let actual = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
+        assert_eq!(actual.grid, expected.grid, "modal {modal}");
+    }
+}
+
+#[test]
+fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
+    use crate::ui::{CellGrid, Style, window::WindowRect};
+    let config = crate::config::load_bundled_config().config;
+    let bounds = WindowRect { x: 7, y: 12, width: 60, height: 11 };
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover, title: "Hover".into(), provider: String::new(),
+        source_range: None, scroll: 0, sections: vec![DocumentationSection {
+            heading: None, markup: DocumentationMarkupKind::PlainText,
+            lines: vec!["Documentation".into(); 20], spans: Vec::new(),
+        }],
+    };
+    for cursor_y in [12, 16, 22] {
+        let mut frame = super::Frame {
+            grid: CellGrid::new(80, 24),
+            cursor: Some((10, cursor_y, crossterm::cursor::SetCursorStyle::SteadyBar)),
+        };
+        super::overlays::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
+        assert!((12..23).any(|y| frame.grid.row_text(y).contains("Hover")));
+        super::render_key_hints(&mut frame, &super::KeyHintUiState {
+            prefix: "Space f".into(), rows: vec![super::KeyHintUiRow {
+                next_key: "f".into(), label: "Files".into(), icon: None, group: false,
+            }],
+        }, bounds, crate::config::AmbiguousWidth::Narrow);
+        assert!((12..23).any(|y| frame.grid.row_text(y).contains("Space f")));
+        for y in 0..24 {
+            for x in 0..80 {
+                if x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height {
+                    assert_eq!(frame.grid.get(x, y).unwrap().style, Style::Default, "at {x},{y}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let ui = UiState {
@@ -2050,6 +2123,45 @@ fn a_long_notification_wraps_so_its_end_stays_readable() {
 }
 
 #[test]
+fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
+    let message = "a  b`c 界 e\u{301} ".repeat(10_000);
+    for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        let lines = super::wrap_plain_text(&message, 40, ambiguous);
+        assert_eq!(lines.concat(), message);
+        assert!(lines.iter().all(|line| super::text_width(line, ambiguous) <= 40));
+    }
+    assert_eq!(super::wrap_plain_text("\n", 40, crate::config::AmbiguousWidth::Narrow), ["", ""]);
+}
+
+#[test]
+fn notification_newlines_and_literal_paths_are_preserved() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(crate::editor::text::TextBuffer::from_text(""), None).unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.notification = Some("Build failed\nSee log".into());
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    let first = (0..20).find(|y| frame.grid.row_text(*y).contains("Build failed")).unwrap();
+    assert!(frame.grid.row_text(first + 1).contains("See log"));
+    assert!(!(0..20).any(|y| frame.grid.row_text(y).contains('�')));
+
+    let message = format!("cannot save /workspace/a  b`c.rs {}", "long-path/".repeat(6));
+    ui.notification = Some(message.clone());
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    assert!((0..20).any(|y| frame.grid.row_text(y).contains("/workspace/a  b`c.rs")));
+    for width in [1, 2, 8, 40] {
+        let lines = super::wrap_plain_text(&message, width, loaded.config.editor.ambiguous_width);
+        assert_eq!(lines.concat(), message, "width {width}");
+    }
+    ui.notification = None;
+    let mut prompt = PromptState::new(PromptKind::Command);
+    prompt.error = Some("cannot open /workspace/a  b`c.rs".into());
+    ui.prompt = Some(prompt);
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("/workspace/a  b`c.rs")));
+}
+
+#[test]
 fn a_long_path_in_a_notification_breaks_so_its_name_stays_readable() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let _ = state.open_text(crate::editor::text::TextBuffer::from_text(""), None).unwrap();
@@ -3319,7 +3431,7 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
     for y in 0..40 {
         frame.grid.fill_row(y, crate::ui::Style::TerminalBackground);
     }
-    super::terminal::render_key_hints(&mut frame, &hints, 0, 80, 30, 8, crate::config::AmbiguousWidth::Narrow);
+    super::terminal::render_key_hints(&mut frame, &hints, crate::ui::window::WindowRect { x: 0, y: 30, width: 80, height: 8 }, crate::config::AmbiguousWidth::Narrow);
     for index in 0..8 {
         assert!((30..37).any(|y| frame.grid.row_text(y).contains(&format!("Action {index}"))));
     }
@@ -3340,7 +3452,7 @@ fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
         let mut frame = super::Frame {
             grid: crate::ui::CellGrid::new_with_policy(width, 10, "?", "?", true), cursor: None,
         };
-        super::terminal::render_key_hints(&mut frame, &hints, 0, width, 0, 10, crate::config::AmbiguousWidth::Wide);
+        super::terminal::render_key_hints(&mut frame, &hints, crate::ui::window::WindowRect { x: 0, y: 0, width, height: 10 }, crate::config::AmbiguousWidth::Wide);
         let body = (0..10).find(|y| frame.grid.row_text(*y).contains("[a]")).unwrap();
         let text = frame.grid.row_text(body);
         assert_eq!(text.contains('…'), clipped);
@@ -3385,6 +3497,73 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
 }
 
 #[test]
+fn dashboard_respects_top_docks_and_floating_window_order() {
+    use crate::ui::window::{CompositorLayer, WindowRect};
+    let state = EditorState::new(PathBuf::from("/workspace"));
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = UiState {
+        dashboard: true,
+        terminal_panel: Some(super::TerminalPanelState {
+            id: 7, profile: "shell".into(), tabs: Vec::new(),
+            mode: super::TerminalPanelMode::Input, running: true, exit_code: None,
+            truncated: false, focused: false, columns: 80, rows: 7,
+            cells: Vec::new(), cells_start: 0, cursor: None, selection: None,
+            scrollback_lines: 0, scroll_offset: 0, requested_height: 8,
+        }),
+        ..UiState::default()
+    };
+    attach_test_compositor(&state, &mut ui, &loaded.config, 80, 30);
+    let compositor = ui.compositor_layout.as_mut().unwrap();
+    let terminal = compositor.surfaces.terminal.unwrap().1;
+    let dashboard = compositor.surfaces.dashboard.unwrap();
+    let workspace = WindowRect { x: 0, y: 8, width: 80, height: 22 };
+    compositor.projection.workspace_bounds = workspace;
+    compositor.projection.windows.iter_mut().find(|w| w.window == terminal).unwrap().rect =
+        WindowRect { x: 0, y: 0, width: 80, height: 8 };
+    let actual = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let expected = super::render_dashboard(&state.workspace_root, &[], 0, &loaded.dashboard,
+        &loaded.config, workspace.width, workspace.height);
+    assert!((0..workspace.height).any(|y| !expected.grid.row_text(y).trim().is_empty()));
+    for y in 0..workspace.height {
+        for x in 0..workspace.width {
+            assert_eq!(actual.grid.get(x, workspace.y + y), expected.grid.get(x, y));
+        }
+    }
+
+    let compositor = ui.compositor_layout.as_mut().unwrap();
+    compositor.projection.windows.iter_mut().find(|w| w.window == dashboard).unwrap().layer = CompositorLayer::Docked;
+    compositor.projection.windows.iter_mut().find(|w| w.window == dashboard).unwrap().rect = workspace;
+    compositor.projection.workspace_bounds = WindowRect { x: 80, width: 0, ..workspace };
+    let docked = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    for y in 0..workspace.height {
+        assert_eq!(docked.grid.row_text(workspace.y + y), expected.grid.row_text(y));
+    }
+
+    let rect = WindowRect { x: 10, y: 5, width: 60, height: 20 };
+    let compositor = ui.compositor_layout.as_mut().unwrap();
+    for window in &mut compositor.projection.windows {
+        window.layer = CompositorLayer::Floating;
+        window.rect = rect;
+        window.z_index = u16::from(window.window == dashboard);
+    }
+    compositor.projection.windows.sort_by_key(|window| window.z_index);
+    assert_eq!(compositor.projection.hit_test(rect.x + 1, rect.y + 1), Some(dashboard));
+    let actual = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let expected = super::render_dashboard(&state.workspace_root, &[], 0, &loaded.dashboard,
+        &loaded.config, rect.width, rect.height);
+    for y in 0..rect.height {
+        for x in 0..rect.width {
+            assert_eq!(actual.grid.get(rect.x + x, rect.y + y), expected.grid.get(x, y));
+        }
+    }
+    let compositor = ui.compositor_layout.as_mut().unwrap();
+    compositor.projection.windows.reverse();
+    assert_eq!(compositor.projection.hit_test(rect.x + 1, rect.y + 1), Some(terminal));
+    let terminal_on_top = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    assert_ne!(terminal_on_top.grid.get(rect.x, rect.y), actual.grid.get(rect.x, rect.y));
+}
+
+#[test]
 fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
     use crate::ui::OperationBarState;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -3403,6 +3582,7 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
         phase: "merge: 1 conflicted path(s)".into(),
         blockers: vec!["shared.txt".into()],
         actions: vec!["resolve".into(), "abort".into()],
+        abort_binding: Some("Space g m a".into()),
     };
 
     // WIDE: the bar is drawn on its own row and names the operation, the phase and the actions.
@@ -3436,7 +3616,7 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
         "at a narrow width the operation still shows: {narrow:?}"
     );
     assert!(
-        narrow.iter().any(|row| row.contains("cancel")),
+        narrow.iter().any(|row| row.contains("Space g m a abort")),
         "and a bar that cannot fit still exposes cancellation: {narrow:?}"
     );
     assert!(
@@ -3462,6 +3642,35 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
 }
 
 #[test]
+fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
+    use crate::config::AmbiguousWidth;
+    let mut bar = super::OperationBarState {
+        operation: "merge".into(),
+        phase: "paused".into(),
+        blockers: vec!["界".repeat(30)],
+        actions: vec!["resolve".into(), "abort".into()],
+        abort_binding: Some("ctrl-a".into()),
+    };
+    assert_eq!(bar.row(70, AmbiguousWidth::Narrow), "merge · paused · resolve/ctrl-a abort");
+    for ambiguous in [AmbiguousWidth::Narrow, AmbiguousWidth::Wide] {
+        bar.phase = "e\u{301}界·".repeat(10);
+        for width in 0..90 {
+            let row = bar.row(width, ambiguous);
+            assert!(super::text_width(&row, ambiguous) <= usize::from(width), "{row:?} at {width}");
+            assert!(!row.contains("esc cancel"));
+            if width >= 12 {
+                assert!(row.contains("ctrl-a abort"));
+            }
+        }
+        bar.phase = "paused".into();
+        bar.blockers = vec!["·".repeat(25)];
+        let row = bar.row(70, ambiguous);
+        assert!(row.contains("resolve/ctrl-a abort"));
+        assert!(super::text_width(&row, ambiguous) <= 70);
+    }
+}
+
+#[test]
 fn a_conflict_free_pause_still_shows_the_bar() {
     use crate::ui::OperationBarState;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -3479,6 +3688,7 @@ fn a_conflict_free_pause_still_shows_the_bar() {
             phase: "merge: no textual conflicts remain".into(),
             blockers: Vec::new(),
             actions: vec!["continue".into(), "abort".into()],
+            abort_binding: Some("Space g m a".into()),
         }),
         ..UiState::default()
     };
@@ -3522,6 +3732,7 @@ fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
         phase: "rebase: no textual conflicts remain".into(),
         blockers: Vec::new(),
         actions: vec!["continue".into(), "abort".into()],
+        abort_binding: Some("Space g m a".into()),
     });
     let frame = render(&state, &quiet, &config, &dashboard, 80, 12);
 
@@ -3550,7 +3761,7 @@ fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
         .expect("the bar row is drawn");
     assert_eq!(
         bar_row.trim_end(),
-        "rebase · rebase: no textual conflicts remain · continue/abort",
+        "rebase · rebase: no textual conflicts remain · continue/Space g m a abort",
         "the bar explains nothing unprompted: {bar_row:?}"
     );
 }
@@ -4900,6 +5111,10 @@ fn debugger_markers_survive_disabled_git_signs() {
     }];
     let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
     assert!(frame.grid.row_text(0).contains('●'));
+    ui.debug_signs[0].kind = super::DebugSignKind::DisabledBreakpoint;
+    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
+    assert!(frame.grid.row_text(0).contains('○'));
+    assert!(!frame.grid.row_text(0).contains('●'));
 }
 
 #[test]
@@ -5093,7 +5308,8 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
         grid: crate::ui::CellGrid::new(80, 40),
         cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    super::overlays::render_documentation_popup(&mut frame, &popup, &config, 0, 80, 40, None);
+    super::overlays::render_documentation_popup(&mut frame, &popup, &config,
+        crate::ui::window::WindowRect { x: 0, y: 0, width: 80, height: 40 }, None);
     assert!((0..40).any(|y| frame.grid.row_text(y).contains("THE-END")));
     assert!(
         super::overlays::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()

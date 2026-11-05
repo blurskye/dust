@@ -22,6 +22,7 @@ use crate::ui::window::{
 
 impl InteractiveApplication {
     pub(super) fn begin_flash(&mut self) {
+        self.reconcile_editor_windows();
         let Some(view) = self.state.active_view else {
             return;
         };
@@ -43,7 +44,8 @@ impl InteractiveApplication {
         let Some(mut flash) = self.flash.take() else {
             return;
         };
-        if !self
+        if self.state.active_view != Some(flash.view)
+            || !self
             .state
             .views
             .get(flash.view)
@@ -103,19 +105,13 @@ impl InteractiveApplication {
             wrap_row: view.scroll_wrap_row,
         };
         let horizontal = if wrap { 0 } else { view.scroll_column };
-        let mut visible = HashSet::new();
-        let mut lines = std::collections::BTreeSet::new();
-        for row in 0..usize::from(viewport.height) {
-            let Some(anchor) = model.painted_row(start, row) else { break };
-            let Ok(line_start) = text.line_to_byte(anchor.line) else { continue };
-            lines.insert(anchor.line);
-            if width > 0 {
-                visible.extend(model.visible_bytes(anchor, horizontal, width)
-                    .into_iter().map(|byte| ByteOffset(line_start.get() + byte)));
-            }
-        }
+        let ranges = if width > 0 {
+            model.visible_text_ranges(start, usize::from(viewport.height), horizontal)
+        } else {
+            Vec::new()
+        };
         flash.targets = super::super::flash::flash_targets(
-            text, lines, view.cursor, &flash.query, |at| visible.contains(&at),
+            text, &ranges, view.cursor, &flash.query,
         );
         match flash.targets.as_slice() {
             [] if !flash.query.is_empty() => {
@@ -145,7 +141,16 @@ impl InteractiveApplication {
         self.ensure_cursor_visible();
     }
 
-    fn sync_flash_ui(&mut self) {
+    pub(super) fn sync_flash_ui(&mut self) {
+        if self.flash.as_ref().is_some_and(|flash| {
+            self.state.active_view != Some(flash.view)
+                || self.window_session.graph().focused()
+                    .and_then(|window| self.window_session.editor_ids().pane_for_window(window))
+                    .and_then(|pane| self.state.panes.get(pane))
+                    .is_none_or(|pane| pane.view != flash.view)
+        }) {
+            self.flash = None;
+        }
         self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
             view: flash.view,
             matches: flash.targets.iter().map(|target| target.range).collect(),
@@ -267,15 +272,14 @@ impl InteractiveApplication {
             return false;
         }
         let active = self.displayed_terminal();
-        let Some(id) = self
-            .shown_terminal_windows()
-            .into_iter()
-            .map(|(id, _)| id)
-            .filter(|id| Some(*id) != active)
-            .find(|id| {
-                self.terminal_rect(*id)
-                    .is_some_and(|rect| rect_contains_point(rect, column, row))
+        let Some(id) = self.compositor_projection()
+            .and_then(|projection| projection.hit_test(column, row))
+            .and_then(|window| self.window_session.native_ids().target_for_window(window))
+            .and_then(|target| match target {
+                NativeSurfaceTarget::Terminal(id) => Some(PtyId(id)),
+                _ => None,
             })
+            .filter(|id| Some(*id) != active)
         else {
             return false;
         };
@@ -412,17 +416,9 @@ impl InteractiveApplication {
         };
         let top =
             crate::ui::workspace_top_rows(&self.state, &self.ui, self.configuration.settings());
-        // The same region the renderer gives the panes: above a docked terminal panel.
-        let panel_top = self
-            .ui
-            .terminal_panel
-            .as_ref()
-            .and(self.terminal_window_rect())
-            .map_or(u16::MAX, |panel| panel.y);
-        let end = bounds.y.saturating_add(bounds.height).min(panel_top);
         let region = crate::ui::window::WindowRect {
             y: bounds.y.saturating_add(top),
-            height: end.saturating_sub(bounds.y).saturating_sub(top),
+            height: bounds.height.saturating_sub(top),
             ..bounds
         };
         let Some(pane) = crate::ui::debug_pane_tab_at(region, selected, column, row) else {
@@ -593,13 +589,16 @@ impl InteractiveApplication {
                 self.sync_explorer_ui();
                 self.ensure_cursor_visible();
             }
-            UiEvent::Key { key, kind } => match kind {
-                KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
-                    self.handle_flash_key(&key);
+            UiEvent::Key { key, kind } => {
+                self.sync_flash_ui();
+                match kind {
+                    KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
+                        self.handle_flash_key(&key);
+                    }
+                    KeyInputKind::Press | KeyInputKind::Repeat => self.handle_configured_key(key),
+                    KeyInputKind::Release => self.handle_key_in_context("key_release", key),
                 }
-                KeyInputKind::Press | KeyInputKind::Repeat => self.handle_configured_key(key),
-                KeyInputKind::Release => self.handle_key_in_context("key_release", key),
-            },
+            }
             UiEvent::Paste(text) => self.handle_configured_paste(text),
             UiEvent::FocusGained => {
                 self.send_terminal_focus_report(true);
@@ -660,17 +659,28 @@ impl InteractiveApplication {
                         _ => {}
                     }
                 }
-                if self.handle_debug_tab_mouse(&key, column, row)
-                    || self.handle_content_tab_mouse(&key, column, row)
-                    || self.handle_dock_drag(&key, column, row)
-                    || self.handle_border_drag(&key, column, row)
+                let over_floating = self.compositor_projection().is_some_and(|projection| {
+                    projection.hit_test(column, row)
+                        .and_then(|window| projection.window(window))
+                        .is_some_and(|window| matches!(window.layer,
+                            crate::ui::window::CompositorLayer::Floating
+                                | crate::ui::window::CompositorLayer::Fullscreen))
+                });
+                if (!over_floating
+                    && (self.handle_debug_tab_mouse(&key, column, row)
+                        || self.handle_content_tab_mouse(&key, column, row)
+                        || self.handle_dock_drag(&key, column, row)
+                        || self.handle_border_drag(&key, column, row)))
                     || self.handle_other_terminal_mouse(&key, column, row)
                 {
                     return;
                 }
-                let over_terminal = self
-                    .terminal_window_rect()
-                    .is_some_and(|rect| rect_contains_point(rect, column, row));
+                let hit = self.compositor_projection()
+                    .and_then(|projection| projection.hit_test(column, row));
+                let over_terminal = hit.is_some_and(|window| matches!(
+                    self.window_session.native_ids().target_for_window(window),
+                    Some(NativeSurfaceTarget::Terminal(_))
+                ));
                 let explorer_window = (!over_terminal)
                     .then(|| {
                         self.compositor_projection()
@@ -687,7 +697,7 @@ impl InteractiveApplication {
                         )
                     })
                     .or_else(|| {
-                        (!over_terminal
+                        (!over_floating && !over_terminal
                             && self
                                 .explorer_window_rect()
                                 .is_some_and(|rect| rect_contains_point(rect, column, row)))
@@ -955,6 +965,14 @@ impl InteractiveApplication {
             .active_view
             .and_then(|view| self.state.views.get(view))
             .map_or(EditorMode::Normal, |view| view.mode);
+        if mode == EditorMode::Insert
+            && self.input.snippet_buffer() == self.state.active_buffer_id()
+            && self.input.snippet_buffer().is_some()
+            && self.input.pending_context().is_none()
+            && self.input.mapping_context().is_none_or(|context| context == "snippet")
+        {
+            return "snippet".into();
+        }
         format!("editor.{}", mode_name(mode))
     }
 
@@ -969,14 +987,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
-        let mut context = self.active_input_context();
-        // While a snippet runs its keys come first; anything else is Insert as usual.
-        if context == "editor.insert"
-            && self.input.snippet_buffer().is_some()
-            && self.input.pending_context().is_none()
-        {
-            context = "snippet".into();
-        }
+        let context = self.active_input_context();
         self.handle_key_in_context(&context, key);
     }
 
@@ -989,7 +1000,9 @@ impl InteractiveApplication {
         }
         self.ui.lsp_loading = None;
         self.lsp_asked = None;
+        self.lsp_asked_generation = None;
         self.lsp_waiting = None;
+        self.lsp_waiting_server = None;
         self.lsp_retry_at = None;
         self.lsp_retries = 0;
         if key.terminal_mouse().is_none() {
@@ -1073,6 +1086,7 @@ impl InteractiveApplication {
     /// Returns false when the context takes no text or a key has none.
     fn type_unmapped(&mut self, context: &str, keys: &[KeyEvent]) -> bool {
         let input = &self.configuration.settings().input;
+        let context = if context == "snippet" { "editor.insert" } else { context };
         let Some(command_id) = input
             .character_fallback_commands
             .get(context)
@@ -1097,22 +1111,39 @@ impl InteractiveApplication {
             && let Some(id) = self.keyboard_terminal()
             && self.terminal_session.mode(id) == Some(TerminalPanelMode::Input)
         {
-            if let Err(error) =
-                self.terminal_session
-                    .send(id, TerminalInput::Paste(&text), &self.workspace)
-            {
-                self.show_error(error);
+            match self.terminal_session.send(id, TerminalInput::Paste(&text), &self.workspace) {
+                Ok(true) => {}
+                Ok(false) => self.show_error("terminal paste exceeds the input limit"),
+                Err(error) => self.show_error(error),
             }
             return;
         }
+        let context = self.active_input_context();
+        if self.typing() && matches!(context.as_str(), "editor.insert" | "editor.replace" | "snippet") {
+            match self.input.finish_mapping(&context, self.configuration.binding_revision()) {
+                MappingResolution::Ready(invocation) => self.invoke_mapped(invocation),
+                MappingResolution::ReadyAndReplay(invocation, replay) => {
+                    self.invoke_mapped(invocation);
+                    for key in replay {
+                        self.handle_configured_key(key);
+                    }
+                }
+                MappingResolution::Replay(prefix, replay) => {
+                    self.type_unmapped(&context, &prefix);
+                    self.type_unmapped(&context, &replay);
+                }
+                _ => {}
+            }
+        }
         self.cancel_pending_mapping();
         let context = self.active_input_context();
+        let context = if context == "snippet" { "editor.insert" } else { &context };
         if let Some(command_id) = self
             .configuration
             .settings()
             .input
             .paste_commands
-            .get(&context)
+            .get(context)
             .cloned()
         {
             self.invoke_text_command(&command_id, text);
@@ -1167,6 +1198,12 @@ impl InteractiveApplication {
                     self.handle_configured_key(key);
                 }
             }
+            MappingResolution::ReadyAndReplay(invocation, replay) => {
+                self.invoke_mapped(invocation);
+                for key in replay {
+                    self.handle_configured_key(key);
+                }
+            }
             // A lone `j` with `jk` mapped is typed once the wait is over, as in Vim.
             MappingResolution::Replay(prefix, _)
                 if !context.starts_with("editor.") || self.typing() =>
@@ -1210,6 +1247,7 @@ impl InteractiveApplication {
         crate::editor::ViewId,
         crate::editor::text::BufferRevision,
         usize,
+        TextBuffer,
     )> {
         self.state
             .views
@@ -1223,7 +1261,7 @@ impl InteractiveApplication {
                     .slice(ByteRange::new(ByteOffset(0), view.cursor).ok()?)
                     .ok()?;
                 let non_blank = before.chars().filter(|c| !c.is_whitespace()).count();
-                Some((id, text.revision(), non_blank))
+                Some((id, text.revision(), non_blank, text.clone()))
             })
             .collect()
     }
@@ -1233,9 +1271,10 @@ impl InteractiveApplication {
             crate::editor::ViewId,
             crate::editor::text::BufferRevision,
             usize,
+            TextBuffer,
         )>,
     ) {
-        for (id, revision, non_blank) in positions {
+        for (id, revision, non_blank, content) in positions {
             let Some(view) = self.state.views.get(id) else {
                 continue;
             };
@@ -1244,6 +1283,13 @@ impl InteractiveApplication {
                 continue;
             }
             let text = text.to_string();
+            // Punctuation and other code changes invalidate the ordinal. In that case keep
+            // the cursor already mapped through the edit by the editor transaction.
+            if !text.chars().filter(|c| !c.is_whitespace())
+                .eq(content.to_string().chars().filter(|c| !c.is_whitespace()))
+            {
+                continue;
+            }
             let transaction = EditorTransaction::new(self.transaction_id())
                 .with_operation(EditorOperation::SetCursor {
                     view: id,
@@ -1289,6 +1335,31 @@ impl InteractiveApplication {
     pub(super) fn clipboard_shared(&self) -> bool {
         self.configuration.settings().editor.registers.clipboard
             == crate::config::ClipboardSync::Unnamedplus
+    }
+
+    pub(super) fn process_clipboard_pastes(&mut self) {
+        let before = self.state.window_version();
+        let pending = self.clipboard.pending();
+        let registers_enabled = self.state.policy.registers_enabled;
+        let generation = self.state.registers.generation();
+        let paste = self.clipboard.finish_pull(
+            &mut self.state.value.registers, registers_enabled, &before,
+        );
+        if self.state.registers.generation() != generation {
+            self.state.revision = self.state.revision.wrapping_add(1);
+        }
+        if let Some(invocation) = paste {
+            let succeeded = self.invoke_checked(invocation);
+            self.clipboard.continue_pastes(&before, &self.state.window_version());
+            if succeeded {
+                self.continue_macro_replay();
+            } else {
+                self.cancel_macro_replay();
+            }
+        } else if pending && !self.clipboard.pending() {
+            // The read was discarded because its original view changed.
+            self.cancel_macro_replay();
+        }
     }
 
     pub(super) fn invoke(&mut self, invocation: CommandInvocation) {
@@ -1342,7 +1413,7 @@ impl InteractiveApplication {
                 == Some(&CommandValue::String("search_match".into())))
         .then(|| invocation.clone());
         if search_match.is_some() {
-            if !self.select_next_search_match() {
+            if !self.select_next_search_match(1) {
                 self.set_mode(EditorMode::Normal);
                 return false;
             }
@@ -1450,6 +1521,7 @@ impl InteractiveApplication {
                         return false;
                     }
                 }
+                self.sync_flash_ui();
                 true
             }
             Err(error) => {
@@ -1512,7 +1584,7 @@ impl InteractiveApplication {
         loaded: LoadedConfig,
         automatic: bool,
     ) -> Result<(), String> {
-        let warning = loaded.warning.clone();
+        let mut warning = loaded.warning.clone();
         let candidate =
             self.configuration
                 .prepare(loaded, &self.commands, self.extension.contributions())?;
@@ -1588,7 +1660,14 @@ impl InteractiveApplication {
                     crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(&server_id),
                 );
             }
-            let _ = self.language.configure(&key, configuration);
+            if let Err(error) = self.language.configure(&key, configuration) {
+                let diagnostic = format!("language-server configuration update failed: {error}");
+                if let Some(warning) = &mut warning {
+                    warning.push_str(&format!("; {diagnostic}"));
+                } else {
+                    warning = Some(diagnostic);
+                }
+            }
         }
         self.schedule_lsp_inlay_refresh(true);
         self.explorer.reset_watch_observation();
@@ -1880,22 +1959,52 @@ impl InteractiveApplication {
                     {
                         continue;
                     }
-                    // A file deleted since the crash comes back as a new file at its path.
-                    if let Some(NavigationRead::Recovered(journal, content)) = &pending
-                        && result.is_err()
-                    {
-                        let mut candidate = self.state.draft();
-                        let (buffer, _) = match candidate.open_new_document(path) {
-                            Ok(opened) => opened,
-                            Err(error) => {
+                    if let Some(NavigationRead::Recovered(journal, content)) = &pending {
+                        // A read may finish after another command opened this file. Never
+                        // replace that buffer, and never bind a rejected path to recovered text.
+                        let already_open = self.state.buffers.values()
+                            .any(|buffer| buffer.path.as_ref() == Some(&path));
+                        let missing = matches!(&result, Err(crate::files::VfsError::Io {
+                            operation: "open for reading" | "open scoped path", source, ..
+                        }) if source.kind() == std::io::ErrorKind::NotFound);
+                        let writable = self.workspace.require_path(&path).is_ok();
+                        let (text, destination) = match result {
+                            Ok(bytes) if !already_open && writable => {
+                                match TextBuffer::from_bytes(&bytes) {
+                                    Ok(text) => (text, Some(path)),
+                                    Err(_) => (TextBuffer::from_text(""), None),
+                                }
+                            }
+                            Err(_) if missing && !already_open && writable =>
+                                (TextBuffer::from_text(""), Some(path)),
+                            _ => (TextBuffer::from_text(""), None),
+                        };
+                        if let Some(path) = &destination {
+                            self.record_recent_file(path.clone());
+                        }
+                        let (buffer, _) = if missing && let Some(path) = destination.as_ref() {
+                            let mut candidate = self.state.draft();
+                            let opened = match candidate.open_new_document(path.clone()) {
+                                Ok(opened) => opened,
+                                Err(error) => {
+                                    self.show_error(error);
+                                    continue;
+                                }
+                            };
+                            if let Err(error) = self.commit_editor_draft(candidate, None, true) {
                                 self.show_error(error);
                                 continue;
                             }
+                            opened
+                        } else {
+                            match self.state.open_text(text, destination) {
+                                Ok(opened) => opened,
+                                Err(error) => {
+                                    self.show_error(error);
+                                    continue;
+                                }
+                            }
                         };
-                        if let Err(error) = self.commit_editor_draft(candidate, None, true) {
-                            self.show_error(error);
-                            continue;
-                        }
                         if let Err(error) = self.replace_with_recovered(buffer, content.clone()) {
                             self.show_error(error);
                             continue;
@@ -2084,34 +2193,6 @@ impl InteractiveApplication {
                                 }
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
-                            }
-                            Some(NavigationRead::Recovered(journal, content)) => {
-                                // Scoped reads resolve aliases. Never recover over an existing
-                                // buffer, even when the journal used a different spelling.
-                                let already_open = self.state.buffers.values().any(|buffer| {
-                                    buffer.path.as_ref() == Some(&path)
-                                });
-                                let opened = if already_open {
-                                    self.state.open_text(TextBuffer::from_text(""), None)
-                                } else {
-                                    self.state.open_text(text, Some(path.clone()))
-                                };
-                                let (buffer, _) = match opened {
-                                    Ok(opened) => opened,
-                                    Err(error) => {
-                                        self.show_error(error);
-                                        continue;
-                                    }
-                                };
-                                if !already_open {
-                                    self.state.buffers[buffer].read_only =
-                                        self.workspace.require_path(&path).is_err();
-                                    self.record_recent_file(path);
-                                }
-                                match self.replace_with_recovered(buffer, content) {
-                                    Ok(()) => self.finish_recovery(&journal, "recovery_restored"),
-                                    Err(error) => self.show_error(error),
-                                }
                             }
                             _ => self.show_error(self.message("unexpected_read", &[])),
                         },
@@ -2365,6 +2446,9 @@ impl InteractiveApplication {
             return;
         }
 
+        let Some(proposal) = self.workspace_edits.resource_proposal(&reply) else {
+            return;
+        };
         let Some(result) = self.workspace_edits.resource_finished(
             reply,
             &self.workspace.version(),
@@ -2375,6 +2459,7 @@ impl InteractiveApplication {
         let request = match result {
             Ok(request) => request,
             Err(error) => {
+                self.language.cancel_deferred_edits(Some(proposal));
                 self.show_error(error);
                 return;
             }
@@ -2385,6 +2470,7 @@ impl InteractiveApplication {
                 if let Some(draft) = draft
                     && let Err(error) = self.commit_editor_draft(draft, None, false)
                 {
+                    self.language.cancel_deferred_edits(Some(proposal));
                     self.show_error(error);
                     return;
                 }
@@ -2392,13 +2478,23 @@ impl InteractiveApplication {
                     self.record_recent_file(path);
                 }
             }
-            Err(error) => self.show_error(error),
+            Err(error) => {
+                self.language.cancel_deferred_edits(Some(proposal));
+                self.show_error(error);
+                return;
+            }
+        }
+        if !self.workspace_edits.resources_pending(proposal)
+            && let Err(error) = self.language.finish_deferred_edit(proposal, &self.state)
+        {
+            self.show_error(error);
         }
     }
 }
 
 impl InteractiveApplication {
     pub(in crate::editor::session) fn retire_workspace_resources(&mut self, reason: &str) {
+        self.language.cancel_deferred_edits(None);
         let (notices, requests) = self.workspace_edits.retire_resources(reason);
         for notice in notices {
             self.show_error(notice);
@@ -2419,6 +2515,7 @@ impl InteractiveApplication {
         &mut self,
         reason: &str,
     ) {
+        self.language.cancel_deferred_edits(None);
         for notice in self.workspace_edits.finish_resources(reason) {
             self.show_error(notice);
         }
@@ -2553,6 +2650,34 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_syntax(&mut self) {
+        // Move old fold rows with their text before matching them to a new parse.
+        let mut folds_changed = false;
+        for (fold, source) in self.ui.value.syntax_folds.iter_mut()
+            .zip(&mut self.syntax_fold_positions)
+        {
+            let Some((buffer_id, version, revision, range)) = source else { continue };
+            let Some(buffer) = self.state.buffers.get(*buffer_id).filter(|buffer| {
+                self.state.views.get(fold.view).is_some_and(|view| view.buffer == *buffer_id)
+                    && version.same_incarnation(&buffer.text.source_version())
+            }) else {
+                folds_changed |= fold.collapsed;
+                fold.collapsed = false;
+                continue;
+            };
+            if let Some(mapped) = buffer.text.map_range_since(*revision, *range) {
+                let start = buffer.text.byte_to_line(mapped.start).unwrap_or(fold.start_line);
+                let end = buffer.text.byte_to_line(mapped.end).unwrap_or(fold.end_line);
+                folds_changed |= (fold.start_line, fold.end_line) != (start, end);
+                fold.start_line = start;
+                fold.end_line = end;
+                *range = mapped;
+                *version = buffer.text.source_version();
+                *revision = buffer.text.revision();
+            }
+        }
+        if folds_changed {
+            self.ui.revision = self.ui.revision.wrapping_add(1);
+        }
         let documents = self
             .state
             .buffers
@@ -2580,7 +2705,7 @@ impl InteractiveApplication {
             let revision = BufferRevision(result.revision);
             let stale = self.state.buffers.get(*buffer).is_some_and(|target| {
                 self.syntax.source(*buffer) == Some(&target.text.source_version())
-                    && target.syntax_objects.as_ref().map(|(at, _)| *at) != Some(revision)
+                    && !self.syntax_spans_source.0.contains(&(*buffer, result.generation, result.revision))
             });
             if stale {
                 self.state.buffers[*buffer].syntax_objects =
@@ -2624,16 +2749,32 @@ impl InteractiveApplication {
         let mut syntax_folds = Vec::new();
         for (view_id, view) in self.state.views.iter() {
             if let Some(result) = self.syntax.result(view.buffer) {
+                let text = &self.state.buffers[view.buffer].text;
+                let Some(parsed) = text.text_at(BufferRevision(result.revision)) else { continue };
                 for fold in &result.folds {
+                    let range = parsed.line_to_byte(fold.start_row).ok().zip(
+                        parsed.line_to_byte(fold.end_row).ok(),
+                    ).and_then(|(start, end)| ByteRange::new(start, end).ok())
+                        .and_then(|range| text.map_range_since(BufferRevision(result.revision), range));
+                    let Some((start_line, end_line)) = range.and_then(|range| {
+                        Some((text.byte_to_line(range.start).ok()?, text.byte_to_line(range.end).ok()?))
+                    }) else { continue };
                     syntax_folds.push(UiFold {
                         view: view_id,
-                        start_line: fold.start_row,
-                        end_line: fold.end_row,
-                        collapsed: collapsed.contains(&(view_id, fold.start_row, fold.end_row)),
+                        start_line,
+                        end_line,
+                        collapsed: collapsed.contains(&(view_id, start_line, end_line)),
                     });
                 }
             }
         }
+        self.syntax_fold_positions = syntax_folds.iter().map(|fold| {
+            let buffer = self.state.buffers.get(self.state.views.get(fold.view)?.buffer)?;
+            Some((self.state.views.get(fold.view)?.buffer, buffer.text.source_version(), buffer.text.revision(), ByteRange::new(
+                buffer.text.line_to_byte(fold.start_line).ok()?,
+                buffer.text.line_to_byte(fold.end_line).ok()?,
+            ).ok()?))
+        }).collect();
         self.ui.set(syntax_folds, |ui| &mut ui.syntax_folds);
         self.ui.syntax_spans = self
             .syntax
@@ -2840,11 +2981,15 @@ impl InteractiveApplication {
         message: String,
         percentage: Option<u8>,
     ) {
+        let was_loading = self.language.server_loading(&server);
         self.language.update_progress(
-            (server, token, kind, title, message, percentage),
+            (server.clone(), token, kind, title, message, percentage),
             &self.configuration.settings().ui.lsp_progress,
             Instant::now(),
         );
+        if was_loading && !self.language.server_loading(&server) {
+            self.schedule_lsp_inlay_refresh(true);
+        }
         self.project_lsp_progress();
     }
     pub(in crate::editor::session) fn clear_lsp_progress(&mut self, server: &str) {
@@ -2853,16 +2998,20 @@ impl InteractiveApplication {
     }
     fn project_lsp_progress(&mut self) {
         let (rows, frame) = self.language.progress();
-        let was_loading = self.ui.lsp_progress.iter().any(|row| !row.done);
         if self.ui.lsp_progress != rows {
             self.ui.lsp_progress = rows.to_vec();
         }
-        if was_loading && self.ui.lsp_progress.iter().all(|row| row.done) {
+        if self.lsp_waiting_server.as_ref()
+            .is_some_and(|server| {
+                self.language.sessions().get(server).is_some_and(|session| session.capabilities.is_some())
+                    && !self.language.server_loading(server)
+            })
+        {
+            self.lsp_waiting_server = None;
+            self.lsp_retry_at = None;
             if let Some(feature) = self.lsp_waiting.take() {
                 self.request_lsp(feature);
             }
-            // Hints asked for while the server was indexing or checking come back empty.
-            self.schedule_lsp_inlay_refresh(true);
         }
         self.ui.set(frame, |ui| &mut ui.lsp_progress_frame);
     }
@@ -2880,15 +3029,13 @@ impl InteractiveApplication {
             return;
         }
         self.lsp_retry_at = None;
+        self.lsp_waiting_server = None;
         if let Some(feature) = self.lsp_waiting.take() {
             self.request_lsp(feature);
         }
     }
     fn lsp_server_loading(&self, server: &str) -> bool {
-        self.ui
-            .lsp_progress
-            .iter()
-            .any(|row| row.server_key == server && !row.done)
+        self.language.server_loading(server)
     }
     fn show_lsp_loading(&mut self) {
         self.ui.lsp_loading = Some(self.message("lsp_loading", &[]));
@@ -2898,6 +3045,7 @@ impl InteractiveApplication {
         if self.lsp_server_loading(server) {
             self.show_lsp_loading();
             self.lsp_waiting = self.lsp_asked.clone();
+            self.lsp_waiting_server = Some(server.into());
         } else {
             self.show_error(self.message("lsp_no_result", &[]));
         }
@@ -2914,7 +3062,6 @@ impl InteractiveApplication {
             self.language.retry_breadcrumbs();
             return;
         }
-        self.ui.lsp_loading = None;
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting"
             && let Some(buffer) = self.formatting_save_for_request(&server, generation)
@@ -2933,6 +3080,11 @@ impl InteractiveApplication {
             // for any superseded generation is stale by definition, while a
             // current failure is retried above. Neither is user-actionable.
             return;
+        }
+        let current_asked = self.lsp_asked_generation == Some(generation)
+            && self.lsp_asked.as_ref().is_some_and(|feature| feature.method() == method);
+        if current_asked {
+            self.ui.lsp_loading = None;
         }
         // Colours are background work, and a second server failing a completion
         // must not hide the items the others returned.
@@ -2977,7 +3129,7 @@ impl InteractiveApplication {
         // so the request waits for the load to finish, as an empty answer does.
         // Right after opening a file the server can answer that way before it reports loading;
         // then the request is sent again shortly, a bounded number of times.
-        if message.contains("-32801") && self.lsp_asked.is_some() {
+        if message.contains("-32801") && current_asked {
             let loading = self.lsp_server_loading(&server);
             if loading || self.lsp_retries < LSP_CONTENT_MODIFIED_RETRIES {
                 if !loading {
@@ -2986,8 +3138,13 @@ impl InteractiveApplication {
                 }
                 self.show_lsp_loading();
                 self.lsp_waiting = self.lsp_asked.clone();
+                self.lsp_waiting_server = loading.then_some(server);
                 return;
             }
+        }
+        if !current_asked && message.contains("-32801") {
+            self.language.forget_request(&server, generation);
+            return;
         }
         let server = self.lsp_server_label(&server);
         self.show_error(self.message(
@@ -3001,6 +3158,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_lsp_events(&mut self) {
+        for error in self.language.retry_configurations() {
+            self.show_error(error);
+        }
         for error in self.language.flush_edit_replies() {
             self.show_error(error);
         }
@@ -3025,8 +3185,13 @@ impl InteractiveApplication {
                     if self.language.running(&server, capabilities) {
                         self.schedule_lsp_inlay_startup_refresh();
                     }
-                    if let Some(feature) = self.lsp_waiting.take() {
-                        self.request_lsp(feature);
+                    if self.lsp_waiting_server.as_ref().is_none_or(|waiting| waiting == &server)
+                        && !self.language.server_loading(&server)
+                    {
+                        self.lsp_waiting_server = None;
+                        if let Some(feature) = self.lsp_waiting.take() {
+                            self.request_lsp(feature);
+                        }
                     }
                     self.request_lsp_colors();
                     // Successful lifecycle transitions are reflected by the
@@ -3128,7 +3293,8 @@ impl InteractiveApplication {
                     self.refresh_lsp_projection_owner();
                     if !self
                         .language
-                        .accept_result(&server, generation, &method, &uri, version)
+                        .accept_result(&server, generation, &method, &uri, version,
+                            self.state.active_view.and_then(|id| self.state.views.get(id)).map_or(ByteOffset(0), |view| view.cursor))
                     {
                         continue;
                     }
@@ -3464,6 +3630,7 @@ impl InteractiveApplication {
             {
                 self.show_lsp_loading();
                 self.lsp_waiting = Some(feature);
+                self.lsp_waiting_server = None;
             }
             return;
         };
@@ -3496,6 +3663,7 @@ impl InteractiveApplication {
             if asked {
                 self.show_lsp_loading();
                 self.lsp_waiting = Some(feature);
+                self.lsp_waiting_server = Some(server.clone());
             }
             return;
         }
@@ -3505,6 +3673,7 @@ impl InteractiveApplication {
         }
         if asked {
             self.lsp_asked = Some(feature.clone());
+            self.lsp_asked_generation = None;
         }
         if matches!(feature, LspFeature::CodeAction { .. }) {
             self.language.clear_offered_actions();
@@ -3587,6 +3756,9 @@ impl InteractiveApplication {
             .request_projected(&server, feature, document, offset)
         {
             Ok(()) => {
+                if asked {
+                    self.lsp_asked_generation = Some(self.language.generation());
+                }
                 if formats
                     && let Some(pending) = self
                         .format_on_save
@@ -3713,6 +3885,27 @@ impl InteractiveApplication {
     ) {
         self.ui.lsp_loading = None;
         let server_label = self.lsp_server_label(server);
+        // A null result has the same meaning as an empty list for these features.
+        let result = match (method, result) {
+            ("textDocument/codeAction", LspFeatureResult::Empty) => {
+                LspFeatureResult::CodeActions(Vec::new())
+            }
+            (
+                "textDocument/documentHighlight" | "textDocument/foldingRange"
+                | "textDocument/selectionRange",
+                LspFeatureResult::Empty,
+            ) => LspFeatureResult::Ranges(Vec::new()),
+            ("textDocument/semanticTokens/full" | "textDocument/semanticTokens/full/delta", LspFeatureResult::Empty) => {
+                LspFeatureResult::SemanticTokens(crate::language::lsp::LspSemanticTokens {
+                    result_id: None,
+                    data: Vec::new(),
+                })
+            }
+            ("textDocument/inlayHint", LspFeatureResult::Empty) => {
+                LspFeatureResult::InlayHints(Vec::new())
+            }
+            (_, result) => result,
+        };
         match result {
             // Another server on this file already answered.
             LspFeatureResult::Hover(_) if self.hover_is_showing() => {}
@@ -3802,11 +3995,11 @@ impl InteractiveApplication {
                     "textDocument/formatting" | "textDocument/rangeFormatting"
                 ) {
                     // Typing while the server worked moved the text its edits point at.
-                    let edit_is_current = context.as_ref().is_none_or(|context| {
+                    let edit_is_current = context.as_ref().is_some_and(|context| {
                         self.language.edit_context_current(context)
                             && context
                                 .document_source(uri)
-                                .is_none_or(|(buffer, version)| {
+                                .is_some_and(|(buffer, version)| {
                                     self.state.buffers.get(*buffer).is_some_and(|buffer| {
                                         buffer.text.source_version() == *version
                                     })
@@ -4095,7 +4288,7 @@ impl InteractiveApplication {
             }
             LspFeatureResult::Colors(_) => {}
             // Nothing to change is a normal answer from a formatter.
-            LspFeatureResult::Empty if method == "textDocument/formatting" => {
+            LspFeatureResult::Empty if matches!(method, "textDocument/formatting" | "textDocument/rangeFormatting") => {
                 if let Some(buffer) = self.formatting_save_for_request(server, generation) {
                     self.finish_format_on_save(buffer);
                 }
@@ -4108,7 +4301,9 @@ impl InteractiveApplication {
             LspFeatureResult::Empty
                 if method == "textDocument/completion"
                     && (self.language.request_pending(generation)
-                        || self.language.completion_automatic()) => {}
+                        || self.language.completion_automatic()
+                        || self.ui.language_completion.is_some()) => {}
+            LspFeatureResult::Empty if method == "workspace/executeCommand" => {}
             LspFeatureResult::Empty => self.show_lsp_no_result(server),
         }
     }
@@ -4182,7 +4377,7 @@ impl InteractiveApplication {
             Err(error) => {
                 let _ = self
                     .language
-                    .finish_edit(&plan.key, false, Some(error.clone()));
+                    .finish_edit(&plan.key, false, Some(error.clone()), &self.state);
                 self.show_error(error);
                 return;
             }
@@ -4337,7 +4532,7 @@ impl InteractiveApplication {
         if self.extension.owns_edit(key) {
             self.extension.finish_edit(key)
         } else {
-            self.language.finish_edit(key, applied, reason)
+            self.language.finish_edit(key, applied, reason, &self.state)
         }
     }
     pub(in crate::editor::session) fn abort_workspace_edit(&mut self, reason: String) {
@@ -4437,9 +4632,21 @@ impl InteractiveApplication {
             self.show_error(error);
             return;
         }
-        match self.workspace_edits.accepted(self.state.publication()) {
+        let proposal = self.workspace_edits.proposal().expect("approved preview").id;
+        let accepted = self.workspace_edits.accepted(self.state.publication());
+        if accepted.is_ok() {
+            self.close_picker();
+        }
+        match accepted {
             Ok(Some(origin)) => {
-                if let Err(error) = self.finish_workspace_edit_origin(&origin, true, None) {
+                let result = if !self.extension.owns_edit(&origin)
+                    && self.workspace_edits.resources_pending(proposal)
+                {
+                    self.language.defer_edit(&origin, proposal)
+                } else {
+                    self.finish_workspace_edit_origin(&origin, true, None)
+                };
+                if let Err(error) = result {
                     self.show_error(error);
                     return;
                 }
@@ -4450,7 +4657,6 @@ impl InteractiveApplication {
                 return;
             }
         }
-        self.close_picker();
         self.notify_message(self.message("workspace_edit_applied", &[]), false);
     }
     /// Applies an edit whose positions use `encoding`, the encoding of the server that sent it.

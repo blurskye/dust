@@ -398,6 +398,52 @@ impl EditorWindowBridge {
         Ok(())
     }
 
+    pub(super) fn resized_tiled_split(
+        &self,
+        state: &EditorTopology<'_>,
+        pane: PaneId,
+        axis: crate::editor::Axis,
+        delta: i16,
+    ) -> Result<Option<crate::editor::EditorOperation>, WindowError> {
+        fn contains(node: &TiledLayoutNode, window: WindowId) -> bool {
+            match node {
+                TiledLayoutNode::Window(id) => *id == window,
+                TiledLayoutNode::Split { first, second, .. } => contains(first, window) || contains(second, window),
+            }
+        }
+        fn first_window(node: &TiledLayoutNode) -> WindowId {
+            match node {
+                TiledLayoutNode::Window(id) => *id,
+                TiledLayoutNode::Split { first, .. } => first_window(first),
+            }
+        }
+        fn split(node: &TiledLayoutNode, window: WindowId, wanted: TileAxis, delta: i16) -> Option<(WindowId, WindowId, u16)> {
+            let TiledLayoutNode::Split { axis, ratio, first, second } = node else { return None; };
+            let in_first = contains(first, window);
+            if !in_first && !contains(second, window) { return None; }
+            if let Some(found) = split(if in_first { first } else { second }, window, wanted, delta) {
+                return Some(found);
+            }
+            if *axis != wanted { return None; }
+            let delta = if in_first { i32::from(delta) } else { -i32::from(delta) };
+            Some((first_window(first), first_window(second), (i32::from(*ratio) + delta).clamp(100, 900) as u16))
+        }
+        let Some(tab) = state.active_tab().and_then(|id| state.tabs().get(id)) else { return Ok(None); };
+        let Some(root) = editor_tiled_layout(&tab.root, &self.panes, &self.desired_placements)? else { return Ok(None); };
+        let window = self.window_for(pane).ok_or(WindowError::UnknownWindow)?;
+        let axis = match axis {
+            crate::editor::Axis::Horizontal => TileAxis::Horizontal,
+            crate::editor::Axis::Vertical => TileAxis::Vertical,
+        };
+        split(&root, window, axis, delta).map(|(first, second, ratio)| {
+            Ok(crate::editor::EditorOperation::SetSplitRatio {
+                first: self.pane_for_window(first).ok_or(WindowError::UnknownWindow)?,
+                second: self.pane_for_window(second).ok_or(WindowError::UnknownWindow)?,
+                ratio,
+            })
+        }).transpose()
+    }
+
     pub(super) fn swap_editors(
         &mut self,
         graph: &mut WindowGraph,
@@ -434,6 +480,10 @@ impl EditorWindowBridge {
         Ok(())
     }
 
+    pub(super) fn restored_placement(&self, pane: PaneId) -> WindowPlacement {
+        self.restore_placements.get(&pane).copied().unwrap_or(WindowPlacement::Tiled)
+    }
+
     pub(super) fn show_editor(
         &mut self,
         graph: &mut WindowGraph,
@@ -446,11 +496,7 @@ impl EditorWindowBridge {
         {
             return Err(WindowError::UnknownWindow);
         }
-        let placement = self
-            .restore_placements
-            .get(&pane)
-            .copied()
-            .unwrap_or(WindowPlacement::Tiled);
+        let placement = self.restored_placement(pane);
         self.place_editor(graph, pane, expected_window, placement)
     }
 

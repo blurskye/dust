@@ -1009,6 +1009,33 @@ fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
 }
 
 #[test]
+fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
+    let mut app = app();
+    app.window_session.observe_size((22, 12));
+    let mut config = app.configuration.fixture_snapshot();
+    config.settings.editor.wrap = false;
+    config.settings.editor.line_numbers = crate::config::LineNumbers::Off;
+    app.configuration.install_fixture(config);
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text(&"x".repeat(200)), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.state.views[view].cursor = ByteOffset(40);
+    app.ui.lsp_inlay_hints.push(crate::ui::UiInlayHint {
+        buffer,
+        revision: app.state.buffers[buffer].text.revision(),
+        position: ByteOffset(0),
+        label: "h".repeat(100),
+    });
+    for cursor in [40, 41, 60, 30] {
+        app.state.views[view].cursor = ByteOffset(cursor);
+        app.ensure_cursor_visible();
+        let scroll = app.state.views[view].scroll_column;
+        assert!(scroll <= cursor, "scroll {scroll} passed cursor {cursor}");
+        let frame = render(&app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 22, 12);
+        assert!(frame.cursor.is_some(), "cursor {cursor} hidden at scroll {scroll}");
+    }
+}
+
+#[test]
 fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
     let mut app = app();
     app.window_session.observe_size((80, 24));
@@ -1022,6 +1049,7 @@ fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
         phase: "conflicts".into(),
         blockers: Vec::new(),
         actions: Vec::new(),
+        abort_binding: None,
     });
     app.reconcile_editor_windows();
     let with_bar = app.compositor_projection().unwrap().workspace_bounds.height;

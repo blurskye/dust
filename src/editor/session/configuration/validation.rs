@@ -24,31 +24,15 @@ pub(in crate::editor::session) fn validate_configured_commands(
             None => errors.push(format!("missing command label for `{}`", spec.id)),
         }
     }
+    let enabled_plugins = super::resolve::enabled_plugin_owners(loaded);
     for extra in loaded.config.command_labels.keys().filter(|id| {
         !command_ids.contains(*id)
             && !super::plugin_owner_from_id(id)
-                .is_some_and(|owner| super::resolve::base_safe_keymaps(loaded).1.contains(owner))
+                .is_some_and(|owner| enabled_plugins.contains(owner))
     }) {
         errors.push(format!(
             "command label references unknown command `{extra}`"
         ));
-    }
-    let source = include_str!("mod.rs");
-    let marker = concat!(".", "message(");
-    let mut remainder = source;
-    while let Some(index) = remainder.find(marker) {
-        remainder = &remainder[index + marker.len()..];
-        let trimmed = remainder.trim_start();
-        if let Some(trimmed) = trimmed.strip_prefix('"')
-            && let Some(end) = trimmed.find('"')
-        {
-            let key = &trimmed[..end];
-            if !loaded.config.messages.contains_key(key) {
-                errors.push(format!(
-                    "missing message `{key}` used by application surface"
-                ));
-            }
-        }
     }
     for (kind, configured) in [
         ("text", &loaded.config.input.text_commands),
@@ -70,20 +54,6 @@ pub(in crate::editor::session) fn validate_configured_commands(
             }
         }
     }
-    for (alias, command_id) in &loaded.config.input.command_aliases {
-        if alias.is_empty() || alias.chars().any(char::is_whitespace) || alias.contains('.') {
-            errors.push(format!("invalid command alias `{alias}`"));
-            continue;
-        }
-        let invocation = CommandInvocation::new(command_id, InvocationSource::Startup);
-        if let Err(error) = invocation {
-            errors.push(format!("command alias `{alias}`: {error}"));
-        } else if !commands.specs().any(|spec| spec.id.as_str() == command_id) {
-            errors.push(format!(
-                "command alias `{alias}` references unknown command `{command_id}`"
-            ));
-        }
-    }
     for (context, command_id) in &loaded.config.input.unmatched_commands {
         let invocation = CommandInvocation::new(command_id, InvocationSource::Startup);
         if let Err(error) =
@@ -92,7 +62,45 @@ pub(in crate::editor::session) fn validate_configured_commands(
             errors.push(format!("unmatched command for `{context}`: {error}"));
         }
     }
-    for action in &loaded.dashboard.action {
+    if let Err(error) = validate_command_references(
+        commands, &loaded.config, &loaded.dashboard, &enabled_plugins,
+    ) {
+        errors.push(error);
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+pub(super) fn validate_command_references(
+    commands: &CommandRegistry<AppEffect>,
+    config: &crate::config::Config,
+    dashboard: &crate::config::DashboardConfig,
+    deferred_plugins: &BTreeSet<String>,
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    let registered = commands.specs().map(|spec| spec.id.as_str()).collect::<BTreeSet<_>>();
+    let deferred = |id: &str| !registered.contains(id)
+        && super::plugin_owner_from_id(id).is_some_and(|owner| deferred_plugins.contains(owner));
+    for (alias, command_id) in &config.input.command_aliases {
+        if alias.is_empty() || alias.chars().any(char::is_whitespace) || alias.contains('.') {
+            errors.push(format!("invalid command alias `{alias}`"));
+            continue;
+        }
+        if !config.command_labels.get(command_id).is_some_and(|label| {
+            !label.is_empty() && !label.contains('\u{1b}') && label.len() <= 1_024
+        }) {
+            errors.push(format!("command alias `{alias}` requires a valid command label for `{command_id}`"));
+        }
+        if let Err(error) = CommandInvocation::new(command_id, InvocationSource::Startup) {
+            errors.push(format!("command alias `{alias}`: {error}"));
+        } else if !registered.contains(command_id.as_str()) && !deferred(command_id) {
+            errors.push(format!("command alias `{alias}` references unknown command `{command_id}`"));
+        }
+    }
+    for action in &dashboard.action {
         let invocation = CommandInvocation::new(&action.command, InvocationSource::Startup)
             .and_then(|mut invocation| {
                 for (name, value) in &action.arguments {
@@ -106,7 +114,10 @@ pub(in crate::editor::session) fn validate_configured_commands(
                 Ok(invocation)
             });
         if let Err(error) =
-            invocation.and_then(|invocation| commands.validate_invocation_shape(&invocation))
+            invocation.and_then(|invocation| {
+                if deferred(invocation.id.as_str()) { Ok(()) }
+                else { commands.validate_invocation_shape(&invocation) }
+            })
         {
             errors.push(format!("dashboard action `{}`: {error}", action.label));
         }
