@@ -24,7 +24,11 @@ fn grapheme_boundary(buffer: &TextBuffer, offset: ByteOffset, forward: bool) -> 
         };
         match result {
             Ok(boundary) => {
-                return ByteOffset(boundary.unwrap_or(if forward { buffer.len_bytes() } else { 0 }));
+                return ByteOffset(boundary.unwrap_or(if forward {
+                    buffer.len_bytes()
+                } else {
+                    0
+                }));
             }
             Err(GraphemeIncomplete::NextChunk) => {
                 (chunk, start, _, _) = buffer.rope.chunk_at_byte(start + chunk.len());

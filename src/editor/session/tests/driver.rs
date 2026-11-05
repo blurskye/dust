@@ -792,16 +792,22 @@ impl TestSession {
         let result = self
             .application
             .finish_shutdown_before(Instant::now() - Duration::from_secs(1));
+        // Other workers still running at the deadline (such as a Nix preparation) add their own
+        // diagnostics, so the persistence failure may arrive inside a combined shutdown error.
         assert!(
             matches!(
-                result,
+                &result,
                 Err(super::super::InteractiveError::Vfs(
                     crate::files::VfsError::Io {
-                        operation: "finish persistence shutdown",
+                        operation: "finish persistence shutdown" | "finish shutdown",
                         ..
                     }
                 ))
-            ),
+            ) && result
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("exit snapshot was not saved"),
             "unexpected shutdown result: {result:?}"
         );
         let admitted = self.application.persistence.pending();
