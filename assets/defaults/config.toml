@@ -476,6 +476,7 @@ include_ignored = false
 [lsp]
 enabled = true
 auto_start = true
+auto_install = true
 inlay_hints = true
 inlay_hint_level = "standard"
 auto_completion = true

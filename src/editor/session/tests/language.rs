@@ -1556,6 +1556,55 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
         .check_probe_worker_replacement(&definition, proxy);
 }
 
+#[cfg(unix)]
+#[test]
+fn opening_a_file_whose_server_does_not_work_installs_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_app_dirs, mut app) = app();
+    let directory = tempdir().expect("temporary proxy directory");
+    let rustup = directory.path().join("rustup");
+    fs::write(&rustup, "#!/bin/sh\nexit 0\n").expect("rustup fixture");
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).expect("rustup proxy");
+    let path = app.state.workspace_root.join("main.rs");
+    app.state
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(path))
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone());
+    }
+    app.reconcile_workspace_trust();
+    let mut definition = app
+        .tooling
+        .entries()
+        .iter()
+        .find(|entry| entry.definition.id == "rust-analyzer")
+        .expect("rust-analyzer catalog entry")
+        .definition
+        .clone();
+    definition.executable = proxy.display().to_string();
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
+    app.tooling.fixture_insert(crate::tools::ToolEntry {
+        definition: definition.clone(),
+        status: ToolStatus::Installed(proxy.clone()),
+    });
+    let key = app.tool_version_key(&definition, LspRuntimeSource::Path, Some(&proxy));
+    app.tooling
+        .fixture_version(key, Err("active toolchain has no rust-analyzer".into()));
+    app.sync_lsp_document();
+    assert!(
+        app.tooling.entries().iter().any(|entry| {
+            entry.definition.id == "rust-analyzer"
+                && matches!(entry.status, ToolStatus::Installing { .. })
+        }),
+        "rustup adds the missing rust-analyzer without a key press"
+    );
+}
+
 #[test]
 fn reference_labels_cache_only_bounded_excerpts() {
     let (_app_dirs, mut app) = app();

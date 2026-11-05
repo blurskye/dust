@@ -12511,7 +12511,8 @@ impl InteractiveApplication {
                 self.rebuild_tool_menu(&category, selected.as_deref());
             }
         }
-        if unavailable_rustup {
+        // With automatic installs on, the next autostart pass adds it with rustup instead.
+        if unavailable_rustup && !self.configuration.settings().lsp.auto_install {
             self.show_error(Self::unavailable_rust_analyzer_message());
         }
     }
@@ -12650,6 +12651,25 @@ impl InteractiveApplication {
         self.install_tool_by_id(&id, source);
     }
 
+    /// rustup and its rust-analyzer proxy, when the proxy on PATH fails because the toolchain
+    /// lacks the component, so `rustup component add` can fix it.
+    fn rust_analyzer_rustup_install(
+        &self,
+        definition: &ToolDefinition,
+    ) -> Option<(PathBuf, PathBuf)> {
+        if definition.id != "rust-analyzer" {
+            return None;
+        }
+        let (proxy, rustup_proxy) = self.tooling.path_executable(&definition.executable)?;
+        if !rustup_proxy {
+            return None;
+        }
+        let key = self.tool_version_key(definition, LspRuntimeSource::Path, Some(&proxy));
+        let rustup = proxy.with_file_name("rustup");
+        (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
+            .then_some((rustup, proxy))
+    }
+
     pub(in crate::editor::session) fn install_tool_by_id(
         &mut self,
         id: &str,
@@ -12689,20 +12709,9 @@ impl InteractiveApplication {
         } else {
             base_definition
         };
-        let rustup_install = if definition.id == "rust-analyzer" && source == LspRuntimeSource::Path
-        {
-            discover_executable(&definition.executable).and_then(|proxy| {
-                if !Self::rust_analyzer_is_rustup_proxy(&proxy) {
-                    return None;
-                }
-                let key = self.tool_version_key(&definition, source, Some(&proxy));
-                let rustup = proxy.with_file_name("rustup");
-                (matches!(self.tooling.version(&key), Some(Err(_))) && rustup.is_file())
-                    .then_some((rustup, proxy))
-            })
-        } else {
-            None
-        };
+        let rustup_install = (source == LspRuntimeSource::Path)
+            .then(|| self.rust_analyzer_rustup_install(&definition))
+            .flatten();
         if definition.kind == ToolKind::Lsp {
             match source {
                 LspRuntimeSource::Path if rustup_install.is_none() => {
@@ -13351,7 +13360,8 @@ impl InteractiveApplication {
                     )
             })
             .cloned();
-        // Like mason-lspconfig, point at the server to install when none can start.
+        // Like mason-lspconfig, install the server when none can start, or point at it when
+        // automatic installs are off or this host has no way to install it.
         if launchable.is_empty() && !matching_session && self.configuration.settings().lsp.enabled {
             let installable = self
                 .tooling
@@ -13362,15 +13372,45 @@ impl InteractiveApplication {
                         && entry
                             .definition
                             .automatically_supports_language(&document.language_id)
-                        && entry.status == ToolStatus::Available
-                        && entry.definition.install.is_some()
+                        && (entry.status == ToolStatus::Available
+                            && entry.definition.install.is_some()
+                            || self
+                                .rust_analyzer_rustup_install(&entry.definition)
+                                .is_some())
                 })
                 // The most specific server: zls for Zig, not a spell checker that covers it.
                 .min_by_key(|entry| entry.definition.languages.len())
-                .map(|entry| entry.definition.name.clone());
-            if let Some(server) = installable
+                .map(|entry| {
+                    let source = if self
+                        .rust_analyzer_rustup_install(&entry.definition)
+                        .is_some()
+                    {
+                        Some(LspRuntimeSource::Path)
+                    } else {
+                        Some(self.selected_lsp_runtime_source(&entry.definition)).filter(|source| {
+                            matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+                        })
+                    };
+                    (
+                        entry.definition.id.clone(),
+                        entry.definition.name.clone(),
+                        source,
+                    )
+                });
+            if let Some((id, server, source)) = installable
                 && self.language.hint_install_once(&document.language_id)
             {
+                if source.is_some()
+                    && self.configuration.settings().lsp.auto_install
+                    && self.workspace.execution_allowed().is_ok()
+                    && self
+                        .workspace
+                        .authorize_execution(ExecutionSource::ToolInstall)
+                        .is_ok()
+                {
+                    self.install_tool(&id, source);
+                    return;
+                }
                 self.notify_message(
                     self.message(
                         "lsp_install_hint",

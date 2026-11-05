@@ -13,6 +13,8 @@ pub enum InlayHintLevel {
 pub struct LspConfig {
     pub enabled: bool,
     pub auto_start: bool,
+    /// Install a server for a file's language when none is installed, as mason-lspconfig does.
+    pub auto_install: bool,
     pub inlay_hints: bool,
     pub inlay_hint_level: InlayHintLevel,
     /// Open the completion menu while typing, not only on ctrl-space.
@@ -26,6 +28,7 @@ impl Default for LspConfig {
         Self {
             enabled: true,
             auto_start: true,
+            auto_install: true,
             inlay_hints: true,
             inlay_hint_level: InlayHintLevel::Standard,
             auto_completion: true,

@@ -73,6 +73,7 @@ title = "Code Intelligence"
 settings = [
   { key = "lsp.enabled", title = "Language Servers", about = "Use language servers for completion, diagnostics, hover and go to definition." },
   { key = "lsp.auto_start", about = "Start the language server for a file when it opens." },
+  { key = "lsp.auto_install", about = "Install a language server for a file when none is installed or the one on PATH doesn't work." },
   { key = "lsp.auto_completion", title = "Completion While Typing", about = "Show completions as you type, without ctrl-space." },
   { key = "lsp.inlay_hints", title = "Inlay Hints", about = "Show types and parameter names inside the code." },
   { key = "lsp.inlay_hint_level", about = "standard shows what the server shows by default; max turns on every hint the server has.", choices = ["standard", "max"] },
