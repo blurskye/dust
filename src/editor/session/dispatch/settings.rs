@@ -22,7 +22,7 @@ impl InteractiveApplication {
         self.close_picker();
         self.ui.tool_menu = None;
         self.input.capture_changed();
-        if self.ui.settings.is_none() {
+        if self.ui.settings.as_ref().is_none_or(|page| page.shortcuts) {
             self.ui.settings = Some(SettingsPageState::default());
         }
         self.refresh_settings();
@@ -36,6 +36,41 @@ impl InteractiveApplication {
         let selected = page
             .selected_row()
             .map(|row| (row.key.clone(), row.section));
+        let (sections, rows) = if page.shortcuts {
+            self.shortcut_rows()
+        } else {
+            self.setting_rows()
+        };
+        let Some(page) = self.ui.settings.as_mut() else {
+            return;
+        };
+        page.sections = sections;
+        page.rows = rows;
+        page.saving = false;
+        filter_lines(page);
+        page.selected = selected
+            .as_ref()
+            .and_then(|(key, section)| {
+                page.lines.iter().position(|line| {
+                    matches!(line, SettingsLine::Setting(row)
+                        if page.rows[*row].key == *key && page.rows[*row].section == *section)
+                })
+            })
+            .unwrap_or_else(|| first_setting(page));
+        if page.selected_row().map(|row| (&row.key, row.section))
+            != selected.as_ref().map(|(key, section)| (key, *section))
+        {
+            page.edit = None;
+        }
+        let count = choice_count(page);
+        if let Some(SettingsEdit::Choice { selected }) = &mut page.edit {
+            *selected = (*selected).min(count.saturating_sub(1));
+        }
+        self.scroll_settings();
+    }
+
+    /// Every setting in the catalog, under its section, with its current value.
+    fn setting_rows(&self) -> (Vec<String>, Vec<SettingsRow>) {
         let catalog = settings_catalog();
         let current = toml::Value::try_from(self.configuration.settings()).ok();
         let user_keys = self.configuration.user_setting_keys();
@@ -61,36 +96,12 @@ impl InteractiveApplication {
                 restart: info.restart,
             }));
         }
-        let Some(page) = self.ui.settings.as_mut() else {
-            return;
-        };
-        page.sections = catalog
+        let sections = catalog
             .sections
             .iter()
             .map(|section| section.title.clone())
             .collect();
-        page.rows = rows;
-        page.saving = false;
-        filter_lines(page);
-        page.selected = selected
-            .as_ref()
-            .and_then(|(key, section)| {
-                page.lines.iter().position(|line| {
-                    matches!(line, SettingsLine::Setting(row)
-                        if page.rows[*row].key == *key && page.rows[*row].section == *section)
-                })
-            })
-            .unwrap_or_else(|| first_setting(page));
-        if page.selected_row().map(|row| (&row.key, row.section))
-            != selected.as_ref().map(|(key, section)| (key, *section))
-        {
-            page.edit = None;
-        }
-        let count = choice_count(page);
-        if let Some(SettingsEdit::Choice { selected }) = &mut page.edit {
-            *selected = (*selected).min(count.saturating_sub(1));
-        }
-        self.scroll_settings();
+        (sections, rows)
     }
 
     pub(super) fn settings_status(&mut self, message: String, error: bool) {
@@ -141,15 +152,16 @@ impl InteractiveApplication {
     }
 
     pub(super) fn settings_action(&mut self, action: SettingsAction) {
-        if matches!(action, SettingsAction::Open) {
-            self.open_settings();
-            return;
+        match action {
+            SettingsAction::Open => return self.open_settings(),
+            SettingsAction::Shortcuts => return self.open_shortcuts(),
+            _ => {}
         }
         let Some(page) = self.ui.settings.as_mut() else {
             return;
         };
         match action {
-            SettingsAction::Open => {}
+            SettingsAction::Open | SettingsAction::Shortcuts => {}
             SettingsAction::Close => self.ui.settings = None,
             SettingsAction::Move(by) => {
                 let count = choice_count(page);
@@ -167,6 +179,10 @@ impl InteractiveApplication {
                 return;
             }
             SettingsAction::Activate | SettingsAction::Toggle => self.activate_setting(),
+            SettingsAction::Reset if page.shortcuts => {
+                page.edit = None;
+                self.reset_shortcut();
+            }
             SettingsAction::Reset => {
                 page.edit = None;
                 if let Some(row) = page.selected_row() {
@@ -196,8 +212,13 @@ impl InteractiveApplication {
                 refilter(page);
             }
             SettingsAction::OpenFile => {
+                let path = if page.shortcuts {
+                    crate::config::user_keymaps_path()
+                } else {
+                    crate::config::user_config_path()
+                };
                 self.ui.settings = None;
-                self.process_effect(AppEffect::OpenUserFile(crate::config::user_config_path()));
+                self.process_effect(AppEffect::OpenUserFile(path));
             }
             SettingsAction::Cancel => {
                 if page.edit.take().is_none() {
@@ -313,6 +334,7 @@ impl InteractiveApplication {
                     .unwrap_or(0);
                 page.edit = Some(SettingsEdit::Choice { selected });
             }
+            (_, SettingsValue::Keys(_)) => page.edit = Some(SettingsEdit::Keys(Vec::new())),
             (_, SettingsValue::Theme(_)) => {
                 let _ = self.process_configuration_effect(AppEffect::SelectTheme);
             }
@@ -637,15 +659,20 @@ fn filter_lines(page: &mut SettingsPageState) {
     page.lines.clear();
     let mut section = None;
     for (index, row) in page.rows.iter().enumerate() {
-        let favourites = catalog
-            .sections
-            .get(row.section)
-            .is_some_and(|section| !section.common.is_empty());
+        let favourites = !page.shortcuts
+            && catalog
+                .sections
+                .get(row.section)
+                .is_some_and(|section| !section.common.is_empty());
         if (favourites && !query.trim().is_empty()) || (modified_only && !row.modified) {
             continue;
         }
+        let keys = match &row.value {
+            SettingsValue::Keys(keys) => keys.as_str(),
+            _ => "",
+        };
         let haystack = format!(
-            "{} {} {} {}",
+            "{} {} {} {} {keys}",
             row.title,
             row.key,
             row.about,

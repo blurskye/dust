@@ -1952,6 +1952,112 @@ fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
 }
 
 #[test]
+fn the_shortcuts_page_records_new_keys_and_resets_them() {
+    use crate::editor::session::dispatch::commands::SettingsAction;
+    use crate::ui::SettingsValue;
+    // As above, a child process so the user configuration paths can point at a temporary folder.
+    if std::env::var_os("DUST_TEST_SHORTCUTS").is_none() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("config.toml"), "").unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "editor::session::dispatch::tests::configuration::the_shortcuts_page_records_new_keys_and_resets_them", "--nocapture"])
+            .env("DUST_TEST_SHORTCUTS", "1")
+            .env("DUST_CONFIG_HOME", root.path())
+            .env("DUST_STATE_HOME", root.path().join("state"))
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let root = tempdir().unwrap();
+    let saved = tempdir().unwrap();
+    let mut app = InteractiveApplication::new(
+        StartupTarget::Dashboard {
+            root: root.path().into(),
+        },
+        crate::config::load_user_config(),
+        false,
+        saved.path().into(),
+        false,
+        false,
+        std::sync::Arc::new(crate::clock::SystemClock),
+    )
+    .unwrap();
+    app.window_session.observe_size((120, 40));
+    let reloaded = |app: &mut InteractiveApplication, generation| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.configuration.generation() == generation {
+            app.process_configuration_result();
+            assert!(Instant::now() < deadline, "keymaps were not reloaded");
+            thread::sleep(Duration::from_millis(1));
+        }
+    };
+    let press_keys = |app: &mut InteractiveApplication, keys: &[&str]| {
+        for key in keys {
+            app.handle_event(UiEvent::Key {
+                key: key.parse().unwrap(),
+                kind: crate::ui::KeyInputKind::Press,
+            });
+        }
+    };
+    let selected = |app: &InteractiveApplication| {
+        app.ui
+            .settings
+            .as_ref()
+            .unwrap()
+            .selected_row()
+            .unwrap()
+            .clone()
+    };
+    app.process_effect(AppEffect::Settings(SettingsAction::Shortcuts));
+    app.process_effect(AppEffect::Settings(SettingsAction::Search));
+    app.process_effect(AppEffect::Settings(SettingsAction::Insert(
+        "search-keymaps".into(),
+    )));
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    let row = selected(&app);
+    assert_eq!(row.key, "builtin.global.search-keymaps");
+    assert_eq!(row.value, SettingsValue::Keys("space s k".into()));
+    assert!(!row.modified);
+    // Escape leaves the recording without saving; Backspace takes back a key.
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    press_keys(&mut app, &["x", "escape"]);
+    assert!(app.ui.settings.as_ref().unwrap().edit.is_none());
+    let path = crate::config::user_keymaps_path();
+    assert!(!path.exists());
+    app.process_effect(AppEffect::Settings(SettingsAction::Activate));
+    let generation = app.configuration.generation();
+    press_keys(&mut app, &["space", "s", "x", "backspace", "K", "enter"]);
+    let page = app.ui.settings.as_ref().unwrap();
+    assert_eq!(page.status, Some(("Saved".into(), false)));
+    let source = fs::read_to_string(&path).unwrap();
+    let disk: toml::Value = toml::from_str(&source).unwrap();
+    let entry = &disk["keymap"][0];
+    assert_eq!(entry["id"].as_str(), Some("builtin.global.search-keymaps"));
+    assert_eq!(entry["keys"].as_str(), Some("<leader> s K"));
+    assert_eq!(entry["command"].as_str(), Some("settings.shortcuts"));
+    reloaded(&mut app, generation);
+    let row = selected(&app);
+    assert_eq!(row.value, SettingsValue::Keys("space s K".into()));
+    assert!(row.modified);
+    let generation = app.configuration.generation();
+    app.process_effect(AppEffect::Settings(SettingsAction::Reset));
+    reloaded(&mut app, generation);
+    let row = selected(&app);
+    assert_eq!(row.value, SettingsValue::Keys("space s k".into()));
+    assert!(!row.modified);
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("search-keymaps")
+    );
+}
+
+#[test]
 fn undo_persistence_policy_changes_with_configuration() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();

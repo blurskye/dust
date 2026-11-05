@@ -152,27 +152,8 @@ pub fn write_user_setting(
     key: &str,
     value: Option<toml::Value>,
 ) -> Result<(), String> {
-    let resolved = match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Some(
-            std::fs::canonicalize(path)
-                .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?,
-        ),
-        Ok(_) => None,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
-    };
-    let path = resolved.as_deref().unwrap_or(path);
-    let (source, expectation) = match std::fs::read_to_string(path) {
-        Ok(source) => {
-            let expectation = crate::files::WriteExpectation::Exact(source.as_bytes().to_vec());
-            (source, expectation)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            (String::new(), crate::files::WriteExpectation::Missing)
-        }
-        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
-    };
-    let edited = edited_source(&source, key, value)?;
+    let file = UserFile::read(path)?;
+    let edited = edited_source(&file.source, key, value)?;
     if edited.len() as u64 > super::load::WATCH_FINGERPRINT_BYTE_CEILING {
         return Err("config.toml exceeds the configuration byte ceiling".into());
     }
@@ -188,12 +169,52 @@ pub fn write_user_setting(
             error
         }
     })?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    file.write(&edited)
+}
+
+/// A user configuration file read for editing, following a symlink, and written back only if
+/// nothing changed it in between.
+pub(super) struct UserFile {
+    path: std::path::PathBuf,
+    pub(super) source: String,
+    expectation: crate::files::WriteExpectation,
+}
+
+impl UserFile {
+    pub(super) fn read(path: &Path) -> Result<Self, String> {
+        let path = match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => std::fs::canonicalize(path)
+                .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?,
+            Ok(_) => path.to_path_buf(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+            Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
+        };
+        let (source, expectation) = match std::fs::read_to_string(&path) {
+            Ok(source) => {
+                let expectation = crate::files::WriteExpectation::Exact(source.as_bytes().to_vec());
+                (source, expectation)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                (String::new(), crate::files::WriteExpectation::Missing)
+            }
+            Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+        };
+        Ok(Self {
+            path,
+            source,
+            expectation,
+        })
     }
-    crate::files::checked_atomic_write(path, edited.as_bytes(), &expectation)
-        .map_err(|error| format!("cannot save {}: {error}", path.display()))
+
+    pub(super) fn write(&self, edited: &str) -> Result<(), String> {
+        let path = &self.path;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+        crate::files::checked_atomic_write(path, edited.as_bytes(), &self.expectation)
+            .map_err(|error| format!("cannot save {}: {error}", path.display()))
+    }
 }
 
 pub(super) fn edited_source(

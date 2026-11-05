@@ -2,7 +2,9 @@
 
 mod catalog;
 mod load;
+mod shortcuts;
 pub(crate) use load::SourceFingerprint;
+pub use shortcuts::{DeclaredKeymap, declared_keymaps, remove_user_keymap, write_user_keymap};
 mod themes;
 pub use catalog::{
     SettingInfo, SettingsCatalog, SettingsSection, SetupCatalog, SetupChoiceInfo, SetupPageInfo,

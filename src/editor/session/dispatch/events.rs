@@ -610,6 +610,8 @@ impl InteractiveApplication {
             UiEvent::Key { key, kind } => {
                 self.sync_flash_ui();
                 match kind {
+                    KeyInputKind::Press | KeyInputKind::Repeat
+                        if self.record_shortcut_key(&key) => {}
                     KeyInputKind::Press | KeyInputKind::Repeat if self.flash.is_some() => {
                         self.handle_flash_key(&key);
                     }
@@ -951,6 +953,7 @@ impl InteractiveApplication {
             return match &page.edit {
                 Some(crate::ui::SettingsEdit::Text { .. }) => "settings_edit",
                 Some(crate::ui::SettingsEdit::Choice { .. }) => "settings_choice",
+                Some(crate::ui::SettingsEdit::Keys(_)) => "settings",
                 None if page.searching => "settings_search",
                 None => "settings",
             }

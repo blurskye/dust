@@ -35,6 +35,7 @@ mod pull_requests;
 mod remote;
 mod settings;
 mod setup;
+mod shortcuts;
 mod substitute;
 
 #[cfg(test)]

@@ -4591,6 +4591,13 @@ command = "command_palette.open"
 desc = "Commands"
 
 [[keymap]]
+id = "builtin.global.search-keymaps"
+context = "global"
+keys = "<leader> s k"
+command = "settings.shortcuts"
+desc = "Keymaps"
+
+[[keymap]]
 id = "builtin.global.code-action"
 context = "global"
 keys = "<leader> c a"

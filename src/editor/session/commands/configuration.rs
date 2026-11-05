@@ -23,6 +23,11 @@ pub(super) fn register_commands(
     for (id, title, action) in [
         ("settings.open", "Open Settings", SettingsAction::Open),
         (
+            "settings.shortcuts",
+            "Open Keyboard Shortcuts",
+            SettingsAction::Shortcuts,
+        ),
+        (
             "settings.page.close",
             "Close Settings",
             SettingsAction::Close,

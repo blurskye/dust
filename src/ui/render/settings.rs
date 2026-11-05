@@ -33,6 +33,8 @@ pub struct SettingsPageState {
     pub status: Option<(String, bool)>,
     /// The first-start questions, shown instead of the list while they are open.
     pub setup: Option<SetupState>,
+    /// The page lists key bindings, one section per context, instead of settings.
+    pub shortcuts: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +91,8 @@ pub enum SettingsValue {
     List(String),
     /// The colour theme, chosen in the theme picker with a live preview.
     Theme(String),
+    /// A key binding's keys, changed by pressing the new ones.
+    Keys(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,6 +106,8 @@ pub enum SettingsEdit {
     Choice {
         selected: usize,
     },
+    /// The keys pressed so far for a new binding.
+    Keys(Vec<String>),
 }
 
 impl SettingsPageState {
@@ -347,9 +353,10 @@ fn control_text(value: &SettingsValue) -> (String, Style) {
         SettingsValue::Choice { current, .. } | SettingsValue::Theme(current) => {
             (format!(" {current}  ▾ "), Style::Status)
         }
-        SettingsValue::Number(text) | SettingsValue::Text(text) | SettingsValue::List(text) => {
-            (format!(" {text} "), Style::Status)
-        }
+        SettingsValue::Number(text)
+        | SettingsValue::Text(text)
+        | SettingsValue::List(text)
+        | SettingsValue::Keys(text) => (format!(" {text} "), Style::Status),
     }
 }
 
@@ -419,11 +426,16 @@ pub(super) fn render_settings(
         return;
     };
     let ambiguous = config.editor.ambiguous_width;
+    let (title, noun) = if page.shortcuts {
+        (" Keyboard Shortcuts ", "shortcut")
+    } else {
+        (" Settings ", "setting")
+    };
     let right = layout.left + layout.width;
     draw_box(frame, layout.left, layout.top, layout.width, layout.height);
     frame
         .grid
-        .put_text(layout.left + 2, layout.top, " Settings ", Style::Accent);
+        .put_text(layout.left + 2, layout.top, title, Style::Accent);
     let mut keys: Vec<&str> = page
         .rows
         .iter()
@@ -455,7 +467,7 @@ pub(super) fn render_settings(
     shown.sort_unstable();
     shown.dedup();
     let shown = shown.len();
-    let count = format!("{shown} setting{} ", if shown == 1 { "" } else { "s" });
+    let count = format!("{shown} {noun}{} ", if shown == 1 { "" } else { "s" });
     let count_x = (search_x + search_width).saturating_sub(width_of(&count, ambiguous));
     frame
         .grid
@@ -464,7 +476,7 @@ pub(super) fn render_settings(
         frame.grid.put_text_clipped(
             search_x + 1,
             search_y,
-            "Search settings  (press /)",
+            &format!("Search {noun}s  (press /)"),
             Style::Status,
             count_x,
         );
@@ -605,6 +617,17 @@ pub(super) fn render_settings(
                             frame.cursor = Some((cursor_x, y, cursor_style(PROMPT_CURSOR)));
                             x
                         }
+                        Some(SettingsEdit::Keys(keys)) => {
+                            let text = if keys.is_empty() {
+                                " Press the new keys… ".to_owned()
+                            } else {
+                                format!(" {} ", keys.join(" "))
+                            };
+                            let text = ellipsized(&text, usize::from(control_limit), ambiguous);
+                            let x = list_right.saturating_sub(width_of(&text, ambiguous) + 1);
+                            frame.grid.put_text(x, y, &text, Style::Status);
+                            x
+                        }
                         _ => {
                             let (text, style) = control_text(&row.value);
                             let text = ellipsized(&text, usize::from(control_limit), ambiguous);
@@ -651,9 +674,9 @@ pub(super) fn render_settings(
         .any(|line| matches!(line, SettingsLine::Setting(_)))
     {
         let text = if page.query.is_empty() {
-            "No settings.".to_owned()
+            format!("No {noun}s.")
         } else {
-            format!("No settings match \"{}\".", page.query)
+            format!("No {noun}s match \"{}\".", page.query)
         };
         frame.grid.put_text_clipped(
             layout.list_x + 2,
@@ -716,6 +739,22 @@ pub(super) fn render_settings(
         (Some(SettingsEdit::Choice { .. }), _) => {
             &[("↑↓ choose", 1), ("Enter select", 0), ("Esc cancel", 0)]
         }
+        (Some(SettingsEdit::Keys(_)), _) => &[
+            ("Press the new keys", 1),
+            ("Enter save", 0),
+            ("Backspace undo a key", 2),
+            ("Esc cancel", 0),
+        ],
+        (None, false) if page.shortcuts => &[
+            ("↑↓ move", 4),
+            ("Tab section", 3),
+            ("Enter change keys", 0),
+            ("r reset", 2),
+            ("/ search", 1),
+            ("m modified", 1),
+            ("o keymaps.toml", 1),
+            ("Esc close", 0),
+        ],
         (None, true) => &[
             ("Type to filter", 1),
             ("↑↓ move", 2),

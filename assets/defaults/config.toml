@@ -614,6 +614,7 @@ mason = "tools.menu.open"
 Mason = "tools.menu.open"
 settings = "settings.open"
 setup = "settings.setup"
+shortcuts = "settings.shortcuts"
 keymaps = "keymap.open"
 trust = "workspace.trust"
 untrust = "workspace.untrust"
@@ -922,7 +923,7 @@ hidden = [
   "multi.move", "multi.delete_char", "multi.next", "multi.previous", "multi.skip", "multi.remove",
   "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
   "tools.menu.close", "terminal.mode.", "terminal.send", "macro.", "workspace.edit.",
-  "search.word", "search.repeat", "settings.page.",
+  "search.word", "search.repeat", "settings.page.", "settings.setup.",
   # These act on the tool manager's selected row, so they only work inside it.
   "tools.search", "tools.activate", "tools.install", "tools.uninstall", "tools.lsp.",
   "tools.runtime.",
@@ -1032,6 +1033,7 @@ workspace = "Project"
 "config.explain" = "Explain a resolved configuration value"
 "config.open" = "Open Settings File (config.toml)"
 "settings.open" = "Open Settings (UI)"
+"settings.shortcuts" = "Keyboard Shortcuts"
 "settings.setup" = "Run First-Start Setup (layout, terminal, agent, leader)"
 "settings.setup.move" = "Move through setup choices"
 "settings.setup.next" = "Take the choice and continue"
@@ -1170,7 +1172,7 @@ workspace = "Project"
 "input.macro.replay.begin" = "Select macro for replay"
 "input.macro.replay.select" = "Replay macro register"
 "input.mapping.cancel" = "Cancel pending mapping"
-"input.motion" = "Resolve configured motion"
+"input.motion" = "Move"
 "input.operator.begin" = "Begin operator"
 "input.operator.repeat" = "Repeat pending operator linewise"
 "input.prefix.begin" = "Begin command prefix"

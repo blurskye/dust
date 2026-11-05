@@ -1437,6 +1437,50 @@ fn a_saved_bundled_theme_restores_from_this_build() {
 }
 
 #[test]
+fn rebinding_a_shortcut_writes_one_entry_and_reset_removes_it() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("keymaps.toml");
+    fs::write(&path, "# my keys\n").unwrap();
+    let declared = super::declared_keymaps(Some(&path));
+    let save = declared
+        .iter()
+        .find(|keymap| keymap.entry.id == "builtin.global.search-keymaps")
+        .unwrap();
+    assert!(!save.user);
+    super::write_user_keymap(&path, &save.entry, "<leader> s K").unwrap();
+    super::write_user_keymap(&path, &save.entry, "ctrl-g").unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(source.starts_with("# my keys\n"), "{source}");
+    assert_eq!(source.matches("[[keymap]]").count(), 1, "{source}");
+    let declared = super::declared_keymaps(Some(&path));
+    let rebound: Vec<_> = declared
+        .iter()
+        .filter(|keymap| keymap.entry.id == "builtin.global.search-keymaps")
+        .collect();
+    assert_eq!(rebound.len(), 1);
+    assert!(rebound[0].user);
+    assert_eq!(rebound[0].entry.keys.as_deref(), Some("ctrl-g"));
+    assert_eq!(
+        rebound[0].entry.command.as_deref(),
+        Some("settings.shortcuts")
+    );
+    // Arguments are copied, so the replacement does the same thing.
+    let moving = declared
+        .iter()
+        .find(|keymap| keymap.entry.id == "builtin.settings.move.k")
+        .unwrap();
+    super::write_user_keymap(&path, &moving.entry, "ctrl-k").unwrap();
+    let moved = super::declared_keymaps(Some(&path))
+        .into_iter()
+        .find(|keymap| keymap.entry.id == "builtin.settings.move.k")
+        .unwrap();
+    assert_eq!(moved.entry.arguments, moving.entry.arguments);
+    super::remove_user_keymap(&path, "builtin.global.search-keymaps").unwrap();
+    super::remove_user_keymap(&path, "builtin.settings.move.k").unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "# my keys\n");
+}
+
+#[test]
 fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
     let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());
     for page in &super::setup_catalog().pages {

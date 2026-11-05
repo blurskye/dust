@@ -526,6 +526,8 @@ pub use crate::editor::session::windows::LayoutAction;
 #[derive(Clone, Debug)]
 pub enum SettingsAction {
     Open,
+    /// The page of key bindings.
+    Shortcuts,
     Close,
     /// Move the selection by this many settings.
     Move(i64),
