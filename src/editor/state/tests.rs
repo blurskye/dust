@@ -537,7 +537,7 @@ fn reload_clears_stale_editing_positions() {
         .push(super::ReplaceRecord {
             start: ByteOffset(4),
             original: "e".into(),
-            inserted_len: 1,
+            inserted: "X".into(),
         });
     state.views[view].preferred_column = Some(4);
     assert!(state.replace_buffer_from_disk(buffer, TextBuffer::from_text("x"), "/file".into()));

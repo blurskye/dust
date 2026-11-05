@@ -21,6 +21,7 @@ pub(super) struct NoticeSession {
     logs: StructuredLogs,
     crash_snapshot: CrashSnapshotWriter,
     next_crash_snapshot: Instant,
+    crash_snapshot_pending: bool,
     /// The last snapshot written, without its timestamp: an unchanged one is not rewritten.
     written_crash_snapshot: Option<LiveCrashSnapshot>,
     terminal_capabilities: String,
@@ -37,6 +38,7 @@ impl NoticeSession {
             logs: make_logs(persist),
             crash_snapshot: CrashSnapshotWriter::start(crash_path),
             next_crash_snapshot: now,
+            crash_snapshot_pending: false,
             written_crash_snapshot: None,
             terminal_capabilities: "pending".into(),
         }
@@ -146,17 +148,37 @@ impl NoticeSession {
             return;
         }
         self.next_crash_snapshot = now + Duration::from_secs(1);
-        if self.written_crash_snapshot.as_ref() == Some(&snapshot) {
+        if let Some(result) = self.crash_snapshot.try_result() {
+            self.crash_snapshot_pending = false;
+            match result {
+                Ok(mut written) => {
+                    written.timestamp_ms = 0;
+                    self.written_crash_snapshot = Some(written);
+                }
+                Err(error) => self.record(
+                    LogLevel::Error,
+                    "telemetry",
+                    "crash_snapshot_failed",
+                    BTreeMap::from([("error".into(), error)]),
+                ),
+            }
+        }
+        if self.crash_snapshot_pending || self.written_crash_snapshot.as_ref() == Some(&snapshot) {
             return;
         }
-        let unchanged = snapshot.clone();
         snapshot.timestamp_ms = wall_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis()
             .min(u128::from(u64::MAX)) as u64;
-        if self.crash_snapshot.submit(snapshot).is_ok() {
-            self.written_crash_snapshot = Some(unchanged);
+        match self.crash_snapshot.submit(snapshot) {
+            Ok(()) => self.crash_snapshot_pending = true,
+            Err(error) => self.record(
+                LogLevel::Error,
+                "telemetry",
+                "crash_snapshot_failed",
+                BTreeMap::from([("error".into(), error)]),
+            ),
         }
     }
 }
@@ -189,6 +211,46 @@ fn make_logs(persist: bool) -> StructuredLogs {
 mod tests {
     use super::NoticeSession;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn failed_health_snapshot_is_reported_and_unchanged_health_is_retried() {
+        use crate::telemetry::LiveCrashSnapshot;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("health.json");
+        std::fs::create_dir(&path).unwrap();
+        let start = Instant::now();
+        let mut notices = NoticeSession::new(false, path.clone(), start);
+        let snapshot = LiveCrashSnapshot {
+            timestamp_ms: 0, roots: 1, buffers: 2, dirty_buffers: 1, jobs: 0, ptys: 0,
+            lsp_sessions: 0, dap_running: false, pending_effects: 0,
+            plugins_failed: 0, safe_mode: false,
+        };
+        let mut tick = 0;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            notices.submit_health(snapshot.clone(), start + Duration::from_secs(tick), std::time::UNIX_EPOCH);
+            tick += 1;
+            if notices.logs.snapshot().iter().any(|record| record.event == "crash_snapshot_failed") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "snapshot failure was not reported");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(notices.written_crash_snapshot.is_none());
+        std::fs::remove_dir(&path).unwrap();
+        loop {
+            notices.submit_health(snapshot.clone(), start + Duration::from_secs(tick), std::time::UNIX_EPOCH);
+            tick += 1;
+            if notices.written_crash_snapshot.as_ref() == Some(&snapshot) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "unchanged health was not retried");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let written: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["buffers"], 2);
+        assert_eq!(written["dirty_buffers"], 1);
+    }
 
     #[test]
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {

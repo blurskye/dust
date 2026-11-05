@@ -66,7 +66,7 @@ impl AgentProcess {
     pub fn spawn(
         program: &Path,
         arguments: &[String],
-        environment: &BTreeMap<String, String>,
+        environment: &BTreeMap<String, std::ffi::OsString>,
         cwd: &Path,
     ) -> Result<Self, String> {
         let mut command = Command::new(program);
@@ -126,12 +126,18 @@ impl AgentProcess {
             let log = log.clone();
             thread::spawn(move || {
                 let mut reader = BufReader::new(stderr);
-                let mut line = String::new();
-                while let Ok(count) = read_line(&mut reader, &mut line, LINE_BYTE_CEILING) {
+                let mut line = Vec::new();
+                while let Ok(count) = reader
+                    .by_ref()
+                    .take(LINE_BYTE_CEILING as u64)
+                    .read_until(b'\n', &mut line)
+                {
                     if count == 0 {
                         break;
                     }
-                    *log.lock().unwrap() = Some(line.trim_end().to_owned());
+                    *log.lock().unwrap() =
+                        Some(String::from_utf8_lossy(&line).trim_end().to_owned());
+                    line.clear();
                 }
             });
         }
@@ -192,11 +198,10 @@ impl AgentProcess {
     }
 
     pub fn try_message(&self) -> Option<AgentMessage> {
-        self.failures
+        self.messages
             .try_recv()
             .ok()
-            .map(AgentMessage::Exited)
-            .or_else(|| self.messages.try_recv().ok())
+            .or_else(|| self.failures.try_recv().ok().map(AgentMessage::Exited))
             .or_else(|| self.take_log().map(AgentMessage::Log))
     }
 
@@ -310,13 +315,20 @@ pub fn initialize_params() -> Value {
 
 /// Parameters of `session/new`: `tools` are the MCP servers the session gets and `meta` the
 /// profile's adapter settings, sent as `_meta`.
-#[must_use]
-pub fn new_session_params(cwd: &Path, tools: &Value, meta: Option<&Value>) -> Value {
+pub fn new_session_params(
+    cwd: &Path,
+    tools: &Value,
+    meta: Option<&Value>,
+) -> Result<Value, String> {
+    let cwd = cwd.to_str().ok_or_else(|| {
+        "ACP requires a UTF-8 workspace path; rename the workspace directory or move it to a UTF-8 path"
+            .to_owned()
+    })?;
     let mut params = json!({"cwd": cwd, "mcpServers": tools});
     if let Some(meta) = meta {
         params["_meta"] = meta.clone();
     }
-    params
+    Ok(params)
 }
 
 /// How an agent can pick up one of its earlier sessions, from its `initialize` reply.
@@ -338,11 +350,15 @@ pub fn rejoin_support(initialize: &Value) -> Rejoin {
 }
 
 /// Parameters of `session/resume` and `session/load`.
-#[must_use]
-pub fn rejoin_params(session: &str, cwd: &Path, tools: &Value, meta: Option<&Value>) -> Value {
-    let mut params = new_session_params(cwd, tools, meta);
+pub fn rejoin_params(
+    session: &str,
+    cwd: &Path,
+    tools: &Value,
+    meta: Option<&Value>,
+) -> Result<Value, String> {
+    let mut params = new_session_params(cwd, tools, meta)?;
     params["sessionId"] = json!(session);
-    params
+    Ok(params)
 }
 
 /// One piece of a prompt: text, or a file the agent should look at.
@@ -740,8 +756,8 @@ fn tool_arguments(input: &Value) -> String {
 /// The lines an edit changes, between what it leaves alone at either end.
 fn changed_lines(old: &str, new: &str) -> String {
     const SHOWN: usize = 6;
-    let old: Vec<&str> = old.lines().collect();
-    let new: Vec<&str> = new.lines().collect();
+    let old: Vec<&str> = old.split_inclusive('\n').collect();
+    let new: Vec<&str> = new.split_inclusive('\n').collect();
     let front = old
         .iter()
         .zip(&new)
@@ -756,7 +772,14 @@ fn changed_lines(old: &str, new: &str) -> String {
     let mut text = String::new();
     let mut side = |sign: char, lines: &[&str]| {
         for line in lines.iter().take(SHOWN) {
-            text.push_str(&format!("\n{sign} {line}"));
+            let (line, ending) = if let Some(line) = line.strip_suffix("\r\n") {
+                (line, " [CRLF]")
+            } else if let Some(line) = line.strip_suffix('\n') {
+                (line, "")
+            } else {
+                (*line, " [no final newline]")
+            };
+            text.push_str(&format!("\n{sign} {line}{ending}"));
         }
         if lines.len() > SHOWN {
             text.push_str(&format!("\n{sign} … {} more lines", lines.len() - SHOWN));
@@ -901,6 +924,55 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn agent_buffered_messages_precede_write_failures() {
+        let mut process = fixture("sleep 60");
+        let (messages, receiver) = mpsc::sync_channel(2);
+        let (failures, failure_receiver) = mpsc::sync_channel(1);
+        process.messages = receiver;
+        process.failures = failure_receiver;
+        messages.send(AgentMessage::Notification {
+            method: "session/update".into(),
+            params: json!({"text": "final answer"}),
+        }).unwrap();
+        messages.send(AgentMessage::Response { id: 1, result: Ok(Value::Null) }).unwrap();
+        failures.send("writing to the agent failed".into()).unwrap();
+
+        assert!(matches!(process.try_message(), Some(AgentMessage::Notification { params, .. })
+            if params["text"] == "final answer"));
+        assert!(matches!(process.try_message(), Some(AgentMessage::Response { id: 1, .. })));
+        assert!(matches!(process.try_message(), Some(AgentMessage::Exited(reason))
+            if reason == "writing to the agent failed"));
+        assert!(process.try_message().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_stderr_decodes_invalid_utf8_and_keeps_draining() {
+        let mut process = fixture(
+            r#"printf '\377\n' >&2; read -r line; i=0; while [ "$i" -lt 5000 ]; do echo log >&2; i=$((i+1)); done; echo last >&2; printf '{"id":1,"result":{}}\n'; sleep 60"#,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(line) = process.take_log() {
+                assert_eq!(line, "\u{fffd}");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        process.notify("continue", Value::Null).unwrap();
+        assert!(matches!(
+            process.messages.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            AgentMessage::Response { id: 1, .. }
+        ));
+        while process.log.lock().unwrap().as_deref() != Some("last") {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn agent_stderr_is_coalesced_without_delaying_responses() {
         let process = fixture(
             r#"i=0; while [ "$i" -lt 5000 ]; do echo log >&2; i=$((i+1)); done; echo last >&2; printf '{"id":1,"result":{}}\n'; sleep 60"#,
@@ -943,6 +1015,35 @@ mod tests {
                 "descendant {pid} survived"
             );
             thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn agent_session_parameters_preserve_paths_tools_and_metadata() {
+        let tools = json!([{"name": "dust"}]);
+        let meta = json!({"mode": "plan"});
+        assert_eq!(
+            new_session_params(Path::new("/work/café"), &tools, Some(&meta)).unwrap(),
+            json!({"cwd": "/work/café", "mcpServers": tools, "_meta": meta})
+        );
+        assert_eq!(
+            rejoin_params("earlier", Path::new("/work"), &tools, None).unwrap(),
+            json!({"cwd": "/work", "mcpServers": tools, "sessionId": "earlier"})
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_session_parameters_reject_non_utf8_workspace_paths() {
+        use std::os::unix::ffi::OsStrExt;
+        let cwd = Path::new(std::ffi::OsStr::from_bytes(b"/work/\xff"));
+        for result in [
+            new_session_params(cwd, &json!([]), None),
+            rejoin_params("earlier", cwd, &json!([]), None),
+        ] {
+            let error = result.unwrap_err();
+            assert!(error.contains("UTF-8 workspace path"), "{error}");
+            assert!(error.contains("rename"), "{error}");
         }
     }
 
@@ -1021,6 +1122,26 @@ mod tests {
             permission_detail(&agent),
             "mcp__dust__agent\nagent: reviewer\ncount: 2\ntask: reply ok"
         );
+    }
+
+    #[test]
+    fn permission_previews_show_line_endings_and_final_newlines() {
+        for (old, new, expected) in [
+            ("a\r\n", "a\n", "file\n- a [CRLF]\n+ a"),
+            ("a\n", "a\r\n", "file\n- a\n+ a [CRLF]"),
+            ("a\n", "a", "file\n- a\n+ a [no final newline]"),
+            ("a", "a\n", "file\n- a [no final newline]\n+ a"),
+            ("\n", "", "file\n- "),
+            ("", "\n", "file\n+ "),
+            ("same\nlast\n", "same\nlast", "file\n- last\n+ last [no final newline]"),
+            ("a\n", "a\n", "file"),
+        ] {
+            let edit = json!({"toolCall": {
+                "title": "file",
+                "content": [{"type": "diff", "oldText": old, "newText": new}],
+            }});
+            assert_eq!(permission_detail(&edit), expected);
+        }
     }
 
     #[test]

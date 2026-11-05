@@ -76,11 +76,15 @@ impl EditorWindowBridge {
             .and_then(|tab| state.tabs().get(tab))
             .and_then(|tab| state.panes().get(tab.focused))
             .map(|pane| pane.view);
-        let retain_plugin_focus = self.focused_view == focused_view
-            && graph
-                .focused()
-                .and_then(|window| graph.window(window))
-                .is_some_and(|window| window.owner.starts_with("plugin."));
+        let retained_plugin = graph.focused().filter(|window| {
+            graph.window(*window).is_some_and(|window| {
+                window.owner.starts_with("plugin.")
+                    && (self.focused_view == focused_view
+                        || self.tabs.iter().any(|(tab, universal)| {
+                            *universal == window.tab && !state.tabs().contains_key(*tab)
+                        }))
+            })
+        });
         // Retire absent hosts first so a still-live view may be rehosted by a
         // replacement pane without ever owning two windows.
         let stale_panes = self
@@ -226,8 +230,10 @@ impl EditorWindowBridge {
                     )?;
                 }
             }
-            graph.remove_workspace_tab(universal)?;
-            self.tabs.remove(&tab);
+            if !graph.tab_has_windows(universal) {
+                graph.remove_workspace_tab(universal)?;
+                self.tabs.remove(&tab);
+            }
         }
 
         let stale_buffers = self
@@ -250,10 +256,15 @@ impl EditorWindowBridge {
                     .ok_or(WindowError::UnknownWorkspaceTab)?,
             )?;
         }
+        if let Some(window) = retained_plugin
+            && graph.can_focus(window)
+        {
+            graph.focus(window)?;
+        }
         if let Some(active_tab) = state.active_tab()
             && let Some(tab) = state.tabs().get(active_tab)
             && let Some(window) = self.panes.get(&tab.focused).copied()
-            && !retain_plugin_focus
+            && retained_plugin.is_none()
             && graph
                 .window(window)
                 .is_some_and(|descriptor| descriptor.placement != WindowPlacement::Hidden)
@@ -600,6 +611,7 @@ impl EditorWindowBridge {
 pub(in crate::editor::session) struct NativeSurfaceSignature {
     pub editor_tab: Option<WorkspaceTabId>,
     pub editor_window: Option<WindowId>,
+    pub focused_plugin: Option<WindowId>,
     pub explorer_visible: bool,
     pub explorer_views: Arc<[u64]>,
     pub focused_explorer: Option<u64>,
@@ -684,6 +696,9 @@ impl NativeSurfaceBridge {
         picker_title: &str,
         terminals: &[(u64, String, ContentLifecycle)],
     ) -> Result<(), WindowError> {
+        let explorer_title = sanitize_title(explorer_title);
+        let dashboard_title = sanitize_title(dashboard_title);
+        let picker_title = sanitize_title(picker_title);
         let owner = "builtin.surfaces";
         let generation = 1;
         // Hidden retained native windows still need a host while editor tabs
@@ -737,17 +752,15 @@ impl NativeSurfaceBridge {
         self.terminals.retain(|_, ids| live_ids(*ids, graph));
 
         let previous_tab = self.workspace_tab;
-        let retained_plugin_focus = graph.focused().filter(|window| {
+        let retained_plugin_focus = signature.focused_plugin.or(graph.focused()).filter(|window| {
             graph.window(*window).is_some_and(|descriptor| {
                 descriptor.owner.starts_with("plugin.")
                     && descriptor.focusable
                     && descriptor.placement != WindowPlacement::Hidden
             })
         });
-        let retained_tab = self.workspace_tab.filter(|tab| {
-            graph.workspace_tab(*tab).is_some_and(|descriptor| {
-                signature.editor_tab.is_some() || descriptor.owner == owner
-            })
+        let retained_tab = self.workspace_tab.or(graph.active_tab()).filter(|tab| {
+            graph.workspace_tab(*tab).is_some()
         });
         let tab = if let Some(tab) = signature.editor_tab.or(retained_tab) {
             tab
@@ -986,7 +999,7 @@ impl NativeSurfaceBridge {
             self.terminal_placements.remove(&id);
             self.terminal_restore_placements.remove(&id);
         }
-        for (id, profile, lifecycle) in terminals {
+        let mut placements = terminals.iter().map(|(id, profile, lifecycle)| {
             let placement = if signature.active_terminal == Some(*id)
                 || signature.shown_terminals.contains(id)
             {
@@ -1013,6 +1026,12 @@ impl NativeSurfaceBridge {
                 },
                 placement => placement,
             };
+            (id, profile, lifecycle, placement)
+        }).collect::<Vec<_>>();
+        // Release the outgoing fullscreen host before showing its replacement.
+        placements.sort_by_key(|(_, _, _, placement)| *placement == WindowPlacement::Fullscreen);
+        for (id, profile, lifecycle, placement) in placements {
+            let profile = sanitize_title(profile);
             if let Some(ids) = self.terminals.get(id).copied() {
                 graph.update_content_lifecycle(ids.content, profile.clone(), false, *lifecycle)?;
                 graph.rehost(ids.window, tab, ids.view, placement, true)?;
@@ -1045,6 +1064,7 @@ impl NativeSurfaceBridge {
             && graph
                 .window(picker.window)
                 .is_some_and(|window| window.placement != WindowPlacement::Hidden)
+            && graph.can_focus(picker.window)
         {
             graph.focus(picker.window)?;
             focused = true;
@@ -1081,11 +1101,13 @@ impl NativeSurfaceBridge {
                     }
                 } else if signature.dashboard_visible
                     && let Some(dashboard) = dashboard
+                    && graph.can_focus(dashboard.window)
                 {
                     graph.focus(dashboard.window)?;
                 }
             } else if signature.dashboard_visible
                 && let Some(dashboard) = dashboard
+                && graph.can_focus(dashboard.window)
             {
                 graph.focus(dashboard.window)?;
             }
@@ -1097,6 +1119,7 @@ impl NativeSurfaceBridge {
             && graph
                 .window(plugin)
                 .is_some_and(|descriptor| descriptor.tab == tab)
+            && graph.can_focus(plugin)
         {
             graph.focus(plugin)?;
         }
@@ -1312,12 +1335,15 @@ impl NativeSurfaceBridge {
     ) -> Result<NativeSurfaceIds, WindowError> {
         let placement = match target {
             NativeSurfaceTarget::Explorer => {
-                self.explorer_restore_placement.unwrap_or(explorer_fallback)
+                self.explorer_restore_placement
+                    .or_else(|| self.configured_placements.get("builtin.explorer").copied())
+                    .unwrap_or(explorer_fallback)
             }
             NativeSurfaceTarget::ExplorerView(view) => self
                 .explorer_view_restore_placements
                 .get(&view)
                 .copied()
+                .or_else(|| self.configured_placements.get("builtin.explorer").copied())
                 .unwrap_or(explorer_fallback),
             NativeSurfaceTarget::Terminal(id) => self
                 .terminal_restore_placements

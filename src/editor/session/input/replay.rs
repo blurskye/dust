@@ -143,10 +143,16 @@ impl InputSession {
                 .ok_or(ReplayError::RepeatLimit)?;
             let mut plan = Vec::with_capacity(steps);
             if !opens_line {
-                plan.push(repeated(change[0].clone()));
+                let mut start = repeated(change[0].clone());
+                start.count = None;
+                plan.push(start);
             }
             for _ in 0..repeats {
-                plan.extend(body.iter().cloned().map(repeated));
+                plan.extend(body.iter().cloned().map(|invocation| {
+                    let mut invocation = repeated(invocation);
+                    if invocation.id.as_str() == "mode.insert" { invocation.count = None; }
+                    invocation
+                }));
             }
             plan.push(repeated(change.last().expect("recorded change").clone()));
             plan
@@ -158,14 +164,12 @@ impl InputSession {
     }
 
     pub(in crate::editor::session) fn start_macro_recording(&mut self, register: char) {
-        self.modal.set_macro_recording(true);
         self.recording_macro = Some((register, Vec::new()));
     }
 
     pub(in crate::editor::session) fn finish_macro_recording(
         &mut self,
     ) -> Option<(char, Vec<CommandInvocation>)> {
-        self.modal.set_macro_recording(false);
         self.recording_macro.take()
     }
 
@@ -327,6 +331,38 @@ mod tests {
         let mut invocation = CommandInvocation::new(id, InvocationSource::Test).unwrap();
         invocation.target.buffer = Some(buffers.insert(()));
         invocation
+    }
+
+    #[test]
+    fn cancelling_pending_grammar_keeps_macro_recording() {
+        use crate::editor::{EditorMode, input::{GrammarInput, InputAction}};
+        let mut input = InputSession::new(100);
+        input.feed(EditorMode::Normal, GrammarInput::MacroRecordSelect("a".into())).unwrap();
+        input.start_macro_recording('a');
+        input.cancel_pending();
+        assert!(input.recording_macro.is_some());
+        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+            panic!("stop recording")
+        };
+        assert_eq!(stop.id.as_str(), "macro.record.stop");
+    }
+
+    #[test]
+    fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
+        use crate::editor::{EditorMode, input::{GrammarInput, InputAction, PendingInputContext}};
+        let mut input = InputSession::new(100);
+        input.start_macro_recording('a');
+        input.record_successful_invocation(&invocation("edit.delete_char"), None, false, true);
+        input.cancel_pending();
+        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+            panic!("stop recording");
+        };
+        assert_eq!(stop.id.as_str(), "macro.record.stop");
+        let (register, recorded) = input.finish_macro_recording().unwrap();
+        assert_eq!(register, 'a');
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap(), InputAction::Pending);
+        assert_eq!(input.pending_context(), Some(PendingInputContext::MacroRecord));
     }
 
     #[test]

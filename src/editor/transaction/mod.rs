@@ -82,6 +82,11 @@ pub enum EditorOperation {
         view: ViewId,
         mode: EditorMode,
     },
+    SetInsertRepeat {
+        view: ViewId,
+        count: usize,
+        new_line: bool,
+    },
     PushReplaceRecord {
         view: ViewId,
         record: crate::editor::ReplaceRecord,
@@ -349,13 +354,30 @@ fn apply_operation(
             } else {
                 target
                     .undo
-                    .record(changes, undo_policy == UndoPolicy::Merge);
+                    .record(changes, matches!(undo_policy, UndoPolicy::Merge | UndoPolicy::Boundary));
             }
             for (_, view) in state
                 .views
                 .iter_mut()
                 .filter(|(_, view)| view.buffer == *buffer)
             {
+                if let Some(repeat) = &mut view.insert_repeat {
+                    repeat.start = delta.map_offset(repeat.start, Affinity::Before);
+                }
+                view.replace_history.retain_mut(|record| {
+                    let end = ByteOffset(record.start.get() + record.inserted.len());
+                    if delta.spans().iter().any(|span| {
+                        if span.old.is_empty() {
+                            span.old.start > record.start && span.old.start < end
+                        } else {
+                            span.old.start < end && span.old.end > record.start
+                        }
+                    }) {
+                        return false;
+                    }
+                    record.start = delta.map_offset(record.start, Affinity::After);
+                    true
+                });
                 view.cursor = delta.map_offset(view.cursor, Affinity::After);
                 if let Some(selection) = &mut view.selection {
                     selection.anchor = delta.map_offset(selection.anchor, Affinity::Before);
@@ -400,6 +422,9 @@ fn apply_operation(
                 && matches!(undo_policy, UndoPolicy::Ignore | UndoPolicy::Boundary)
             {
                 target.replace_history.clear();
+            }
+            if target.cursor != *position && undo_policy == UndoPolicy::Boundary {
+                target.insert_repeat = None;
             }
             target.cursor = *position;
             target.preferred_column = None;
@@ -454,26 +479,18 @@ fn apply_operation(
                 .ok_or(TransactionError::MissingView)?;
             target.mode = *mode;
             match mode {
-                EditorMode::VisualChar if target.selection.is_none() => {
-                    target.selection = Some(Selection {
+                EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock => {
+                    let kind = match mode {
+                        EditorMode::VisualLine => crate::editor::SelectionKind::Line,
+                        EditorMode::VisualBlock => crate::editor::SelectionKind::Block,
+                        _ => crate::editor::SelectionKind::Character,
+                    };
+                    let selection = target.selection.get_or_insert(Selection {
                         anchor: target.cursor,
                         head: target.cursor,
-                        kind: crate::editor::SelectionKind::Character,
+                        kind,
                     });
-                }
-                EditorMode::VisualLine if target.selection.is_none() => {
-                    target.selection = Some(Selection {
-                        anchor: target.cursor,
-                        head: target.cursor,
-                        kind: crate::editor::SelectionKind::Line,
-                    });
-                }
-                EditorMode::VisualBlock if target.selection.is_none() => {
-                    target.selection = Some(Selection {
-                        anchor: target.cursor,
-                        head: target.cursor,
-                        kind: crate::editor::SelectionKind::Block,
-                    });
+                    selection.kind = kind;
                 }
                 EditorMode::Normal
                 | EditorMode::Insert
@@ -487,6 +504,7 @@ fn apply_operation(
                 target.replace_history.clear();
             }
             if *mode != EditorMode::Insert {
+                target.insert_repeat = None;
                 target.block_insert.clear();
             }
             if *mode != EditorMode::Multi {
@@ -497,6 +515,14 @@ fn apply_operation(
             if *mode == EditorMode::Normal {
                 target.clear_editing_state();
             }
+        }
+        EditorOperation::SetInsertRepeat { view, count, new_line } => {
+            let target = state.views.get_mut(*view).ok_or(TransactionError::MissingView)?;
+            target.insert_repeat = Some(crate::editor::state::InsertRepeat {
+                start: target.cursor,
+                count: *count,
+                new_line: *new_line,
+            });
         }
         EditorOperation::PushReplaceRecord { view, record } => {
             state
@@ -585,6 +611,8 @@ fn apply_operation(
                     for position in &mut view.block_insert {
                         *position = delta.map_offset(*position, Affinity::After);
                     }
+                    view.block_insert.sort();
+                    view.block_insert.dedup();
                     for mark in &mut view.multi_marks {
                         mark.start = delta.map_offset(mark.start, Affinity::Before);
                         mark.end = delta.map_offset(mark.end, Affinity::After);
@@ -593,6 +621,7 @@ fn apply_operation(
                     view.multi_marks.dedup();
                     view.multi_preferred_columns.clear();
                     view.replace_history.clear();
+                    view.insert_repeat = None;
                 }
             }
             target.refresh_dirty();
@@ -602,6 +631,7 @@ fn apply_operation(
                 && let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer)
             {
                 view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
+                view.preferred_column = None;
             }
         }
         EditorOperation::SplitPane { axis, ratio } => {
@@ -769,6 +799,23 @@ impl EditorDraft {
         for operation in &transaction.operations {
             apply_operation(&mut self.state, operation, transaction.undo_policy)?;
         }
+        for (_, view) in self.state.views.iter_mut().filter(|(_, view)| {
+            view.mode == EditorMode::Normal
+                && dirty_before.iter().any(|(buffer, _)| *buffer == view.buffer)
+        }) {
+            let text = &self.state.buffers[view.buffer].text;
+            let line = text.byte_to_line(view.cursor)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let start = text.line_to_byte(line)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let content = text.line(line)
+                .map_err(|error| TransactionError::Position(error.to_string()))?;
+            let end = ByteOffset(start.get() + content.trim_end_matches('\n').len());
+            if view.cursor >= end && end > start {
+                view.cursor = crate::editor::text::previous_grapheme_boundary(text, end);
+                view.preferred_column = None;
+            }
+        }
         if transaction.undo_policy == UndoPolicy::Boundary {
             for (_, buffer) in &mut self.state.buffers {
                 buffer.undo.boundary();
@@ -838,6 +885,11 @@ impl EditorDraft {
         path: std::path::PathBuf,
         snapshot: (std::sync::Arc<str>, crate::editor::text::FileFormat),
     ) -> bool {
+        if self.state.buffers.get(buffer).is_none_or(|b| {
+            !b.text.source_version().same_incarnation(expected)
+        }) {
+            return false;
+        }
         let changed = self
             .state
             .buffers
@@ -860,6 +912,7 @@ impl EditorDraft {
                 ByteRange::new(ByteOffset(start), ByteOffset(snapshot.len())).expect("save suffix"),
                 &saved_text[start..],
             )]);
+            self.state.buffers[buffer].undo.boundary();
             if apply_operation(
                 &mut self.state,
                 &EditorOperation::ApplyEdits { buffer, edits },
@@ -898,9 +951,6 @@ impl EditorDraft {
             self.state.buffers[buffer].text.format().clone()
         };
         self.state.buffers[buffer].set_saved_snapshot(Some((saved_text.into(), format)));
-        if changed {
-            self.state.set_buffer_dirty(buffer, true);
-        }
         true
     }
     pub(crate) fn set_document_line_ending(
@@ -1135,6 +1185,50 @@ mod tests {
     }
 
     #[test]
+    fn save_acknowledgement_uses_snapshot_contents_after_intervening_edits() {
+        for restore in [false, true] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
+            let expected = state.buffers[buffer].text.source_version();
+            let revision = state.buffers[buffer].text.revision();
+            edit(&mut state, buffer, &[(3, 3, "x")]);
+            if restore {
+                edit(&mut state, buffer, &[(3, 4, "")]);
+            }
+            assert_ne!(state.buffers[buffer].text.source_version(), expected);
+            let mut draft = state.draft();
+            assert!(draft.save_document(buffer, &expected, revision, b"abc".to_vec(), "/workspace/file".into(), ("abc".into(), crate::editor::text::FileFormat::default())));
+            state = draft.accept(&state.version()).unwrap();
+            assert_eq!(state.buffers[buffer].dirty, !restore);
+            assert_eq!(state.buffers[buffer].persisted_bytes(), b"abc");
+        }
+    }
+
+    #[test]
+    fn closing_a_buffer_restores_the_previous_buffers_saved_view() {
+        let mut state = EditorState::new("/workspace".into());
+        let (first, view) = state.open_text(TextBuffer::from_text(&"line\n".repeat(120)), None).unwrap();
+        state.views[view].cursor = ByteOffset(500);
+        state.views[view].scroll_line = 95;
+        state.views[view].scroll_wrap_row = 2;
+        state.views[view].scroll_column = 3;
+        let (second, view) = state.open_text(TextBuffer::from_text("other"), None).unwrap();
+        let pane = state.tabs[state.active_tab.unwrap()].focused;
+        let mut draft = state.draft();
+        assert!(draft.close_document(view, second).unwrap());
+        state = draft.accept(&state.version()).unwrap();
+        let restored = &state.views[state.active_view.unwrap()];
+        assert_eq!(restored.buffer, first);
+        assert_eq!(restored.cursor, ByteOffset(500));
+        assert_eq!(restored.scroll_line, 95);
+        assert_eq!(restored.scroll_wrap_row, 2);
+        assert_eq!(restored.scroll_column, 3);
+        assert_eq!(state.tabs[state.active_tab.unwrap()].focused, pane);
+        assert!(!state.buffers.contains_key(second));
+        state.validate_layout().unwrap();
+    }
+
+    #[test]
     fn failed_late_operation_rolls_back_earlier_edit() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
@@ -1245,7 +1339,12 @@ mod tests {
         let mut state = EditorState::new("/workspace".into());
         let original = b"a\r\nb\n";
         let (buffer, _) = state.open_text(TextBuffer::from_bytes(original).unwrap(), None).unwrap();
-        edit(&mut state, buffer, &[(0, 4, "a\nb\n")]);
+        state.apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::ApplyEdits {
+            buffer,
+            edits: TextEditSet::new(state.buffers[buffer].text.revision(), vec![TextEdit::new(
+                ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap(), "a\nb\n",
+            )]).with_normalized_line_endings(),
+        })).unwrap();
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"a\nb\n");
         history(&mut state, buffer, true);
         assert_eq!(state.buffers[buffer].text.to_bytes(), original);
@@ -1264,6 +1363,44 @@ mod tests {
         assert_eq!(state.buffers[buffer].text.to_bytes(), original);
         history(&mut state, buffer, false);
         assert_eq!(state.buffers[buffer].text.to_bytes(), b"two\nthree\r");
+    }
+
+    #[test]
+    fn history_clears_the_preferred_column_at_the_change_location() {
+        let mut state = EditorState::new("/workspace".into());
+        let (buffer, view) = state.open_text(TextBuffer::from_text("abc\ndef"), None).unwrap();
+        edit(&mut state, buffer, &[(0, 0, "x")]);
+        for undo in [true, false] {
+            state.views[view].cursor = ByteOffset(3);
+            state.views[view].preferred_column = Some(20);
+            history(&mut state, buffer, undo);
+            assert_eq!(state.views[view].cursor, ByteOffset(0));
+            assert_eq!(state.views[view].preferred_column, None);
+        }
+    }
+
+    #[test]
+    fn history_deduplicates_collapsed_block_insert_positions() {
+        for undo in [true, false] {
+            let mut state = EditorState::new("/workspace".into());
+            let (buffer, view) = state.open_text(TextBuffer::from_text(""), None).unwrap();
+            edit(&mut state, buffer, &[(0, 0, "a\nb")]);
+            if !undo {
+                edit(&mut state, buffer, &[(0, 3, "")]);
+                history(&mut state, buffer, true);
+            }
+            state.views[view].mode = crate::editor::EditorMode::Insert;
+            state.views[view].block_insert = vec![ByteOffset(0), ByteOffset(2)];
+            assert_eq!(history(&mut state, buffer, undo), "");
+            assert_eq!(state.views[view].block_insert, [ByteOffset(0)]);
+            let mut registry = crate::editor::CommandRegistry::<()>::default();
+            crate::editor::register_builtin_commands(&mut registry).unwrap();
+            let invocation = crate::editor::CommandInvocation::new("edit.insert_text", crate::editor::InvocationSource::Test)
+                .unwrap().with_argument("text", crate::editor::CommandValue::String("x".into()));
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            state.apply_transaction(&outcome.transaction.unwrap()).unwrap();
+            assert_eq!(state.buffers[buffer].text.to_string(), "x");
+        }
     }
 
     #[test]
@@ -1297,7 +1434,7 @@ mod tests {
             view.block_insert = vec![ByteOffset(8)];
             view.preferred_column = Some(8);
             view.replace_history.push(crate::editor::state::ReplaceRecord {
-                start: ByteOffset(8), original: "t".into(), inserted_len: 1,
+                start: ByteOffset(8), original: "t".into(), inserted: "x".into(),
             });
             view.scroll_line = 10;
             view.scroll_wrap_row = 3;

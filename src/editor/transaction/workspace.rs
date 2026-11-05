@@ -193,7 +193,7 @@ impl EditorState {
                 .push(Precondition::BufferWritable(buffer));
             edits.operations.push(EditorOperation::ApplyEdits {
                 buffer,
-                edits: TextEditSet::new(revision, file.edits.clone()),
+                edits: TextEditSet::new(revision, file.edits.clone()).with_normalized_line_endings(),
             });
         }
         draft = draft.apply_operations(&edits).map_err(|e| e.to_string())?;

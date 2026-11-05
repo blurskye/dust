@@ -86,22 +86,13 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             };
             let disk = (!rejected && !diagnostic_lineage.tracked(uri))
                 .then(|| {
-                    use std::io::Read;
                     let path = super::paths::path_from_file_uri(uri)?;
                     let path = std::fs::canonicalize(path).ok()?;
                     let root = std::fs::canonicalize(root).ok()?;
                     if !path.starts_with(root) {
                         return None;
                     }
-                    let mut bytes = Vec::new();
-                    std::fs::File::open(path)
-                        .ok()?
-                        .take(4 * 1024 * 1024 + 1)
-                        .read_to_end(&mut bytes)
-                        .ok()?;
-                    if bytes.len() > 4 * 1024 * 1024 {
-                        return None;
-                    }
+                    let bytes = crate::files::read_file_with_ceiling(&path, 4 * 1024 * 1024).ok()?;
                     Some((
                         uri.to_owned(),
                         crate::editor::text::TextBuffer::from_text(&String::from_utf8(bytes).ok()?),
@@ -166,10 +157,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             message
                 .pointer("/params/registrations")
                 .and_then(Value::as_array)
+                .filter(|items| items.len() <= 256)
                 .map(|items| {
                     items
                         .iter()
-                        .take(256)
                         .filter_map(|item| {
                             Some((
                                 item.get("id")?.as_str()?.to_owned(),
@@ -192,10 +183,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                 .pointer("/params/unregisterations")
                 .or_else(|| message.pointer("/params/unregistrations"))
                 .and_then(Value::as_array)
+                .filter(|items| items.len() <= 256)
                 .map(|items| {
                     items
                         .iter()
-                        .take(256)
                         .filter_map(|item| item.get("id").and_then(Value::as_str))
                         .for_each(|id| {
                             registrations.remove(id);
@@ -206,7 +197,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             let response = if parsed.is_some() {
                 *capabilities = effective_capabilities(
                     base_capabilities,
-                    registrations.values().map(|(method, _)| method.as_str()),
+                    registrations.values().map(|(method, options)| (method.as_str(), options)),
                 );
                 for (method, options) in registrations.values() {
                     if method == "textDocument/completion" {
@@ -314,7 +305,6 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     .map(|items| {
                         items
                             .iter()
-                            .take(256)
                             .map(|item| {
                                 // Empty rather than null: the CSS server reads null as no
                                 // settings at all and then validates nothing.
@@ -357,38 +347,54 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
 
 pub(super) fn effective_capabilities<'a>(
     base: &LspCapabilities,
-    methods: impl Iterator<Item = &'a str>,
+    registrations: impl Iterator<Item = (&'a str, &'a Value)>,
 ) -> LspCapabilities {
     let mut value = base.clone();
-    for method in methods {
-        match method {
-            "textDocument/diagnostic" => value.pull_diagnostics = true,
-            "textDocument/semanticTokens" | "textDocument/semanticTokens/full" => {
-                value.semantic_tokens = true
-            }
-            "textDocument/inlayHint" => value.inlay_hints = true,
-            "textDocument/documentColor" => value.document_colors = true,
-            "textDocument/codeLens" => value.code_lens = true,
-            "textDocument/documentHighlight" => value.document_highlights = true,
-            "textDocument/foldingRange" => value.folding_ranges = true,
-            "textDocument/selectionRange" => value.selection_ranges = true,
-            "textDocument/completion" => value.completion = true,
-            "textDocument/hover" => value.hover = true,
-            "textDocument/signatureHelp" => value.signature_help = true,
-            "textDocument/definition" => value.definition = true,
-            "textDocument/declaration" => value.declaration = true,
-            "textDocument/typeDefinition" => value.type_definition = true,
-            "textDocument/implementation" => value.implementation = true,
-            "textDocument/references" => value.references = true,
-            "textDocument/documentSymbol" => value.document_symbols = true,
-            "workspace/symbol" => value.workspace_symbols = true,
-            "textDocument/rename" => value.rename = true,
-            "textDocument/formatting" => value.formatting = true,
-            "textDocument/rangeFormatting" => value.range_formatting = true,
-            "textDocument/codeAction" => value.code_action = true,
-            "workspace/executeCommand" => value.execute_command = true,
-            _ => {}
+    let mut methods = HashMap::<&str, Vec<Value>>::new();
+    for (method, options) in registrations {
+        let method = if method == "textDocument/semanticTokens/full" {
+            "textDocument/semanticTokens"
+        } else {
+            method
+        };
+        methods.entry(method).or_default().push(options.clone());
+    }
+    for (method, options) in methods {
+        if method == "textDocument/didChange" {
+            value.sync_registrations = options;
+            continue;
         }
+        let enabled = match method {
+            "textDocument/diagnostic" => &mut value.pull_diagnostics,
+            "textDocument/semanticTokens" | "textDocument/semanticTokens/full" => &mut value.semantic_tokens,
+            "textDocument/inlayHint" => &mut value.inlay_hints,
+            "textDocument/documentColor" => &mut value.document_colors,
+            "textDocument/codeLens" => &mut value.code_lens,
+            "textDocument/documentHighlight" => &mut value.document_highlights,
+            "textDocument/foldingRange" => &mut value.folding_ranges,
+            "textDocument/selectionRange" => &mut value.selection_ranges,
+            "textDocument/completion" => &mut value.completion,
+            "textDocument/hover" => &mut value.hover,
+            "textDocument/signatureHelp" => &mut value.signature_help,
+            "textDocument/definition" => &mut value.definition,
+            "textDocument/declaration" => &mut value.declaration,
+            "textDocument/typeDefinition" => &mut value.type_definition,
+            "textDocument/implementation" => &mut value.implementation,
+            "textDocument/references" => &mut value.references,
+            "textDocument/documentSymbol" => &mut value.document_symbols,
+            "workspace/symbol" => &mut value.workspace_symbols,
+            "textDocument/rename" => &mut value.rename,
+            "textDocument/formatting" => &mut value.formatting,
+            "textDocument/rangeFormatting" => &mut value.range_formatting,
+            "textDocument/codeAction" => &mut value.code_action,
+            "workspace/executeCommand" => &mut value.execute_command,
+            _ => continue,
+        };
+        // Static providers still apply to every document attached to the server.
+        if !*enabled {
+            value.document_selectors.insert(method.into(), options);
+        }
+        *enabled = true;
     }
     value
 }

@@ -484,7 +484,9 @@ fn status_command(
         .ok_or_else(|| backend("git executable not found"))?;
     let maximum_output_bytes = policy.maximum_path_bytes.saturating_mul(2)
         .saturating_add(policy.maximum_files.saturating_mul(128)).clamp(1024, 64 * 1024 * 1024);
-    let mut environment = std::env::vars().collect::<BTreeMap<_, _>>();
+    let mut environment = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value)))
+        .collect::<BTreeMap<_, _>>();
     // Do not let inherited Git directory overrides retarget this repository.
     for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] {
         environment.remove(key);
@@ -495,7 +497,7 @@ fn status_command(
         program,
         argv0: None,
         arguments: ["-c", "core.fsmonitor=false", "-c", "color.ui=false"].into_iter()
-            .chain(arguments.iter().copied()).map(str::to_owned).collect(),
+            .chain(arguments.iter().copied()).map(Into::into).collect(),
         cwd: workdir.to_path_buf(),
         environment,
         root_revision: policy.root_revision,

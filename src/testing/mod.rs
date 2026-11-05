@@ -586,9 +586,21 @@ mod tests {
         assert_eq!(edited("abc,def", "dt,"), ",def");
         assert_eq!(edited("abc,def", "df,"), "def");
         assert_eq!(edited("abc,def", "$F,x"), "abcdef");
-        assert_eq!(edited("abc,def", "$dT,"), "abc,f");
+        assert_eq!(edited("abc,def", "$dT,"), "abc,");
         // `;` after `t` steps past the character the cursor already stands before.
         assert_eq!(edited("a,b,c", "t,;x"), "a,,c");
+    }
+
+    #[test]
+    fn counted_motions_and_word_operators_use_the_bundled_key_paths() {
+        assert_eq!(edited("a\nb\nc", "d2$"), "\nc");
+        assert_eq!(edited("a\nb", "d$"), "\nb");
+        assert_eq!(edited("a\n\nb", "jd$"), "a\n\nb");
+        assert_eq!(edited("one\ntwo\nthree", "d2w"), "three");
+        assert_eq!(edited("one\n  \ntwo", "dw"), "\n  \ntwo");
+        assert_eq!(edited("one\ntwo\nthree\nfour", "50%x"), "one\nwo\nthree\nfour");
+        assert_eq!(edited("one\ntwo\nthree\nfour", "d50%"), "three\nfour");
+        assert_eq!(edited("  one\ntwo", "jggx"), "  ne\ntwo");
     }
 
     #[test]

@@ -35,6 +35,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     app.language
         .fixture_completion_items(vec![LspCompletionItem {
             label: "foo".into(),
+            command: None,
             filter_text: None,
             sort_text: None,
             detail: String::new(),
@@ -484,7 +485,7 @@ fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
     }));
     for (server, label) in [("secondary", "a-retired"), ("primary", "z-kept")] {
         app.language.install_completions(server, vec![LspCompletionItem {
-            label: label.into(), filter_text: None, sort_text: None,
+            label: label.into(), command: None, filter_text: None, sort_text: None,
             detail: String::new(), insert_text: label.into(), text_edit: None,
             additional_edits: Vec::new(), kind: None, snippet: false,
             documentation: None, resolve_item: None, resolved: true,
@@ -540,6 +541,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
                 kind: crate::language::lsp::LspMarkupKind::Markdown,
                 value: "**value docs**".into(),
             }),
+            command: None,
             resolve_item: None,
             resolved: true,
         }]);
@@ -697,11 +699,11 @@ fn formatting_syncs_unsent_edits_before_requesting_the_server() {
     let transport = super::language::fixture_owned_lsp(&mut app, "formatter", buffer);
     app.language.select("formatter");
     app.state.buffers[buffer].text.restore_text("new unsent text").unwrap();
-    app.request_lsp(LspFeature::Formatting);
+    app.request_lsp(LspFeature::Formatting { tab_size: app.state.policy.tab_width, insert_spaces: app.state.policy.expand_tabs });
     let synced = transport.synced_document().expect("sync precedes formatting");
     assert_eq!(synced.text, "new unsent text");
     assert_eq!(synced.version, app.state.buffers[buffer].text.revision().0);
-    assert_eq!(transport.requested_feature(), Some(LspFeature::Formatting));
+    assert_eq!(transport.requested_feature(), Some(LspFeature::Formatting { tab_size: app.state.policy.tab_width, insert_spaces: app.state.policy.expand_tabs }));
 }
 
 #[test]
@@ -891,7 +893,7 @@ fn null_completion_preserves_other_servers_items_without_an_error() {
     let generation = app.language.generation();
     first.publish_result(generation, "textDocument/completion", &document,
         LspFeatureResult::Completion { incomplete: false, items: vec![LspCompletionItem {
-            label: "available".into(), insert_text: "available".into(),
+            label: "available".into(), insert_text: "available".into(), command: None,
             filter_text: None, sort_text: None, detail: String::new(), text_edit: None,
             additional_edits: Vec::new(), kind: None, snippet: false,
             documentation: None, resolve_item: None, resolved: true,
@@ -1363,6 +1365,29 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
 }
 
 #[test]
+fn leaving_the_last_snippet_stop_clears_its_selection() {
+    let (_app_dirs, mut app) = app();
+    let (buffer, view) = app.state.open_text(TextBuffer::from_text("foo"), None).unwrap();
+    let source = app.state.window_version();
+    app.input.install_snippet(
+        crate::editor::session::input::SnippetDocument {
+            editor: &source,
+            buffer,
+            text: &app.state.buffers[buffer].text,
+            view: Some(view),
+        },
+        ByteOffset(0),
+        crate::language::lsp::parse_snippet("${1:foo}", 1024).unwrap().tabstops,
+    );
+    app.select_snippet_current();
+    assert!(app.state.views[view].selection.is_some());
+    app.navigate_snippet(1);
+    assert!(app.input.snippet_buffer().is_none());
+    assert!(app.state.views[view].selection.is_none());
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+}
+
+#[test]
 fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insertion() {
     use crate::language::lsp::{LspCompletionItem, LspPosition, LspRange, LspTextEdit};
     for (snippet, expected, first, second) in [
@@ -1398,6 +1423,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insert
     app.language
         .fixture_completion_items(vec![LspCompletionItem {
             label: "foo".into(),
+            command: None,
             filter_text: None,
             sort_text: None,
             detail: String::new(),

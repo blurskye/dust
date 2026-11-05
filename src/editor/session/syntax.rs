@@ -51,6 +51,7 @@ pub(super) struct SyntaxSession {
     due: HashMap<BufferId, (BufferRevision, Instant)>,
     next_document: u64,
     next_generation: u64,
+    tab_width: usize,
 }
 
 impl SyntaxSession {
@@ -65,6 +66,7 @@ impl SyntaxSession {
             due: HashMap::new(),
             next_document: 1,
             next_generation: 1,
+            tab_width: 0,
         }
     }
 
@@ -80,14 +82,22 @@ impl SyntaxSession {
     }
 
     /// Returns how many source strings were materialized, for admission-cost checks.
-    /// No source snapshot is created before its revision/debounce checks succeed.
+    /// No source snapshot is created before revision, debounce and queue admission succeed.
     pub(super) fn tick(
         &mut self,
         documents: &[SyntaxDocument<'_>],
         config: &SyntaxConfig,
+        tab_width: usize,
         now: Instant,
         too_large: &str,
     ) -> usize {
+        if self.tab_width != tab_width {
+            self.submitted.clear();
+            self.accepted.clear();
+            self.failures.clear();
+            self.due.clear();
+            self.tab_width = tab_width;
+        }
         for doc in documents {
             let source = doc.text.source_version();
             if self
@@ -174,8 +184,8 @@ impl SyntaxSession {
                 maximum_spans: 100_000,
                 maximum_folds: 10_000,
                 maximum_indent_rows: 100_000,
+                tab_width,
             };
-            materialized += 1;
             if self
                 .service
                 .submit(
@@ -183,7 +193,10 @@ impl SyntaxSession {
                     generation,
                     revision.0,
                     language,
-                    doc.text.to_string(),
+                    || {
+                        materialized += 1;
+                        doc.text.to_string()
+                    },
                     policy,
                 )
                 .is_ok()
@@ -191,6 +204,8 @@ impl SyntaxSession {
                 self.submitted
                     .insert(doc.buffer, (revision, generation, language));
                 self.due.remove(&doc.buffer);
+            } else {
+                break;
             }
         }
         while let Ok(Some(event)) = self.service.try_event() {
@@ -338,17 +353,68 @@ mod tests {
         let config = SyntaxConfig::default();
         let mut session = SyntaxSession::new(2);
         let start = Instant::now();
-        session.tick(&documents, &config, start, "large");
+        session.tick(&documents, &config, 4, start, "large");
         let deadline = Instant::now() + Duration::from_secs(5);
         while session.results().count() < documents.len() {
             session.tick(
                 &documents,
                 &config,
+                4,
                 start + Duration::from_millis(100),
                 "large",
             );
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn block_end_rows_keep_indentation_when_a_statement_precedes_the_closer() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let config = SyntaxConfig::default();
+        for (source, levels) in [
+            ("fn f() {\n    foo(); }\n", 1),
+            ("fn f() {\n}\n", 0),
+            ("fn f() {\n    if true {\n    } foo(); }\n", 1),
+        ] {
+            let text = TextBuffer::from_text(source);
+            let mut session = SyntaxSession::new(1);
+            let start = Instant::now();
+            let documents = [SyntaxDocument {
+                buffer, text: &text, language: Some(SyntaxLanguage::Rust), enabled: true,
+            }];
+            session.tick(&documents, &config, 4, start, "large");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while session.result(buffer).is_none() {
+                session.tick(&documents, &config, 4, start + Duration::from_millis(100), "large");
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            let line = if source.contains("if true") { 2 } else { 1 };
+            assert_eq!(session.indentation(buffer, text.revision(), SyntaxLanguage::Rust, line), Ok(levels), "{source}");
+        }
+    }
+
+    #[test]
+    fn changing_tab_width_reparses_indentation_folds() {
+        let mut ids = SlotMap::<BufferId, ()>::with_key();
+        let buffer = ids.insert(());
+        let text = TextBuffer::from_text("void f() {\n    x;\n\ty;\n}\n");
+        let documents = [SyntaxDocument { buffer, text: &text, language: Some(SyntaxLanguage::C), enabled: true }];
+        let config = SyntaxConfig::default();
+        let mut session = SyntaxSession::new(1);
+        let mut now = Instant::now();
+        for (tab_width, folds) in [(4, 1), (8, 2)] {
+            session.tick(&documents, &config, tab_width, now, "large");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while session.result(buffer).is_none() {
+                now += Duration::from_millis(SYNTAX_DEBOUNCE_MS);
+                session.tick(&documents, &config, tab_width, now, "large");
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            assert_eq!(session.result(buffer).unwrap().folds.len(), folds);
         }
     }
 
@@ -366,15 +432,16 @@ mod tests {
         let config = SyntaxConfig::default();
         let mut session = SyntaxSession::new(2);
         let start = Instant::now();
-        assert_eq!(session.tick(&documents, &config, start, "too large"), 0);
+        assert_eq!(session.tick(&documents, &config, 4, start, "too large"), 0);
         let now = start + std::time::Duration::from_millis(SYNTAX_DEBOUNCE_MS);
-        assert_eq!(session.tick(&documents, &config, now, "too large"), 1);
+        assert_eq!(session.tick(&documents, &config, 4, now, "too large"), 1);
         for _ in 0..100 {
-            assert_eq!(session.tick(&documents, &config, now, "too large"), 0);
+            assert_eq!(session.tick(&documents, &config, 4, now, "too large"), 0);
         }
         session.tick(
             &documents,
             &SyntaxConfig { enabled: false },
+            4,
             now,
             "too large",
         );
@@ -398,7 +465,7 @@ mod tests {
                 language: Some(SyntaxLanguage::Rust),
                 enabled: true,
             }];
-            session.tick(&documents, &config, now, "too large");
+            session.tick(&documents, &config, 4, now, "too large");
             if session.result(buffer).is_some() {
                 break;
             }
@@ -413,7 +480,7 @@ mod tests {
             language: Some(SyntaxLanguage::Rust),
             enabled: true,
         }];
-        session.tick(&documents, &config, now, "too large");
+        session.tick(&documents, &config, 4, now, "too large");
         assert_eq!(
             session.result(buffer).map(|result| result.revision),
             Some(parsed)
@@ -437,6 +504,7 @@ mod tests {
                     enabled: true,
                 }],
                 &config,
+                4,
                 now,
                 "large",
             );
@@ -457,6 +525,7 @@ mod tests {
                 enabled: true,
             }],
             &config,
+            4,
             now,
             "large",
         );

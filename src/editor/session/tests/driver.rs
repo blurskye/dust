@@ -793,7 +793,7 @@ impl TestSession {
                     ..
                 }
             ))
-        ));
+        ), "unexpected shutdown result: {result:?}");
         let admitted = self.application.persistence.pending();
         let deadline = Instant::now() + Duration::from_secs(2);
         while self.application.persistence.pending() {

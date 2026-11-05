@@ -312,17 +312,24 @@ impl PickerState {
             self.scroll = self.scroll.min(self.visible.len().saturating_sub(1));
             return;
         }
+        let mut section = None;
         let mut scored = self
             .items
             .iter()
             .enumerate()
             .filter_map(|(index, item)| {
-                fuzzy_score(&self.query, &item.label, &item.detail).map(|score| (index, score))
+                if item.kind == PickerItemKind::Section {
+                    section = Some(index);
+                    return None;
+                }
+                fuzzy_score(&self.query, &item.label, &item.detail)
+                    .map(|score| (section, index, score))
             })
             .collect::<Vec<_>>();
-        scored.sort_by(|(left_index, left_score), (right_index, right_score)| {
-            right_score
-                .cmp(left_score)
+        scored.sort_by(|(left_section, left_index, left_score), (right_section, right_index, right_score)| {
+            left_section
+                .cmp(right_section)
+                .then_with(|| right_score.cmp(left_score))
                 .then_with(|| {
                     self.items[*left_index]
                         .label
@@ -331,7 +338,17 @@ impl PickerState {
                 .then(left_index.cmp(right_index))
         });
         let selected_id = self.selected_item().map(|item| item.id.clone());
-        self.visible = scored.into_iter().map(|(index, _)| index).collect();
+        self.visible.clear();
+        let mut previous_section = None;
+        for (section, index, _) in scored {
+            if section != previous_section {
+                if let Some(header) = section {
+                    self.visible.push(header);
+                }
+                previous_section = section;
+            }
+            self.visible.push(index);
+        }
         self.selected = selected_id
             .and_then(|id| {
                 self.visible
@@ -349,7 +366,7 @@ pub fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
     }
     let haystack = format!("{label} {detail}").to_lowercase();
     let query = query.to_lowercase();
-    let mut previous = None;
+    let mut previous_end = None;
     // The query typed as one piece beats the same letters scattered across the row.
     let mut score = if haystack.contains(&query) {
         1000_i64
@@ -361,11 +378,11 @@ pub fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
         let relative = haystack.get(search_start..)?.find(needle)?;
         let position = search_start + relative;
         score += 100 - i64::try_from(position).unwrap_or(100);
-        if previous.is_some_and(|previous| previous + needle.len_utf8() == position) {
+        if previous_end == Some(position) {
             score += 25;
         }
-        previous = Some(position);
         search_start = position + needle.len_utf8();
+        previous_end = Some(search_start);
     }
     Some(score)
 }

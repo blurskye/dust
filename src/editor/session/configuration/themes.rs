@@ -240,11 +240,13 @@ impl ConfigurationSession {
         };
         interaction.pending = None;
         for choice in result.choices {
-            if !interaction
+            if let Some(index) = interaction
                 .choices
                 .iter()
-                .any(|existing| existing.theme == choice.theme)
+                .position(|existing| existing.theme.name == choice.theme.name)
             {
+                interaction.choices[index] = Arc::new(choice);
+            } else {
                 interaction.choices.push(Arc::new(choice));
             }
         }

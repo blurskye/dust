@@ -85,7 +85,7 @@ impl LspLaunch {
     pub(in crate::editor::session) fn environment(
         &self,
         definition: &ToolDefinition,
-    ) -> Result<BTreeMap<String, String>, String> {
+    ) -> Result<BTreeMap<String, std::ffi::OsString>, String> {
         match self {
             Self::Direct { managed: true, .. } => Ok(tool_launch_environment(definition)),
             Self::Direct { .. } => Ok(BTreeMap::new()),
@@ -272,10 +272,11 @@ impl LspSession {
     pub(super) fn offer_actions(
         &mut self,
         server: &str,
+        uri: &str,
         actions: Vec<LspCodeAction>,
         context: Option<EditContext>,
     ) {
-        self.edits.offer_actions(server, actions, context);
+        self.edits.offer_actions(server, uri, actions, context);
     }
     pub(super) fn clear_offered_actions(&mut self) {
         self.edits.clear_offered_actions();
@@ -300,8 +301,8 @@ impl LspSession {
     pub(super) fn clear_actions(&mut self) {
         self.edits.clear_actions();
     }
-    pub(super) fn take_action(&mut self, key: &CodeActionKey) -> Result<OfferedAction, String> {
-        self.edits.take_action(key, &self.service)
+    pub(super) fn take_action(&mut self, key: &CodeActionKey, current: &[EditDocument<'_>]) -> Result<OfferedAction, String> {
+        self.edits.take_action(key, &self.service, current)
     }
     pub(super) fn poll_event(&self) -> Option<OwnedLspEvent> {
         self.edits.poll_event(&self.service)
@@ -429,25 +430,6 @@ impl LspSession {
     }
     pub(super) fn cancel_deferred_edits(&mut self, proposal: Option<ProposalId>) {
         self.deferred_commands.retain(|(id, _, _)| proposal.is_some_and(|proposal| *id != proposal));
-    }
-    pub(super) fn execute_command(
-        &mut self,
-        server: &str,
-        command: crate::language::lsp::LspCommand,
-    ) -> Result<(), String> {
-        let document = self.sessions.get(server)
-            .and_then(|session| session.documents.values().next())
-            .cloned()
-            .ok_or("command server is no longer attached")?;
-        let generation = self.next_generation()
-            .ok_or("language-server request identity exhausted")?;
-        self.service.request(
-            server,
-            crate::language::lsp::LspFeature::ExecuteCommand(command),
-            document,
-            crate::editor::text::ByteOffset(0),
-            generation,
-        ).map_err(|error| error.to_string())
     }
     pub(super) fn set_edit_command(
         &mut self,

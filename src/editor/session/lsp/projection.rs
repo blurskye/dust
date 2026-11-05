@@ -213,7 +213,7 @@ impl LspSession {
             state
                 .capabilities
                 .as_ref()
-                .is_some_and(|capabilities| feature.capability(capabilities))
+                .is_some_and(|capabilities| feature.capability_for_document(capabilities, document))
         };
         let primary = |state: &super::LspRuntimeState| {
             state
@@ -255,7 +255,7 @@ impl LspSession {
                 state.definition.supports_language(&document.language_id)
                     && state.documents.contains_key(&buffer)
                     && document.path.starts_with(&state.root_path)
-                    && state.capabilities.as_ref().is_some_and(|c| c.formatting)
+                    && state.capabilities.as_ref().is_some_and(|c| c.formatting && c.supports_document("textDocument/formatting", document))
             })
             .map(|(key, _)| key.clone())
             .min()
@@ -298,15 +298,15 @@ impl LspSession {
         }
         let others: Vec<String> = match feature {
             LspFeature::Completion => self
-                .attached_servers(owner.buffer, &owner.language, |c| c.completion)
+                .attached_servers(owner.buffer, &owner.language, |c| LspFeature::Completion.capability_for_document(c, &document))
                 .filter(|key| key != server)
                 .collect(),
             LspFeature::Hover => self
-                .attached_servers(owner.buffer, &owner.language, |c| c.hover)
+                .attached_servers(owner.buffer, &owner.language, |c| LspFeature::Hover.capability_for_document(c, &document))
                 .filter(|key| key != server)
                 .collect(),
             LspFeature::CodeAction { .. } => self
-                .attached_servers(owner.buffer, &owner.language, |c| c.code_action)
+                .attached_servers(owner.buffer, &owner.language, |c| feature.capability_for_document(c, &document))
                 .filter(|key| key != server)
                 .collect(),
             _ => Vec::new(),
@@ -425,7 +425,7 @@ impl LspSession {
         buffer: BufferId,
         document: &LspDocument,
     ) -> Vec<String> {
-        self.attached_servers(buffer, &document.language_id, |c| c.document_colors)
+        self.attached_servers(buffer, &document.language_id, |c| LspFeature::DocumentColors.capability_for_document(c, document))
             .filter(|server| {
                 self.service
                     .request(
@@ -470,7 +470,7 @@ impl LspSession {
                 self.sessions
                     .get(server)
                     .and_then(|state| state.capabilities.as_ref())
-                    .is_some_and(|capabilities| capabilities.document_symbols)
+                    .is_some_and(|capabilities| LspFeature::DocumentSymbols.capability_for_document(capabilities, document))
             })
     }
     pub(in crate::editor::session) fn accept_breadcrumbs(
@@ -1582,6 +1582,7 @@ mod tests {
             kind: None,
             snippet: false,
             documentation: None,
+            command: None,
             resolve_item: None,
             resolved: true,
         }
@@ -1781,6 +1782,21 @@ mod tests {
     }
 
     #[test]
+    fn formatting_server_ignores_dynamic_providers_for_other_documents() {
+        let (_, buffer, document, mut owner) = fixture();
+        let capabilities = owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap();
+        capabilities.formatting = true;
+        capabilities.document_selectors.insert("textDocument/formatting".into(), vec![serde_json::json!({
+            "documentSelector":[{"language":"javascript"}]
+        })]);
+        assert!(owner.formatting_server(buffer, &document).is_none());
+        owner.sessions.get_mut("owned").unwrap().capabilities.as_mut().unwrap()
+            .document_selectors.get_mut("textDocument/formatting").unwrap()
+            .push(serde_json::json!({"documentSelector":[{"language":"rust"}]}));
+        assert_eq!(owner.formatting_server(buffer, &document).as_deref(), Some("owned"));
+    }
+
+    #[test]
     fn code_action_ranges_are_encoded_for_each_receiving_server() {
         let (_, buffer, mut document, mut owner) = fixture();
         document.text = "😀x".into();
@@ -1803,6 +1819,7 @@ mod tests {
             severity: Some(1),
             source: None,
             code: None,
+            related: Vec::new(),
             message: "problem".into(),
             data: None,
         };

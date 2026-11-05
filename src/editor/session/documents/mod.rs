@@ -7,6 +7,8 @@ pub(crate) const LARGE_FILE_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const LARGE_FILE_LINES: usize = 250_000;
 
 mod lifecycle;
+#[cfg(test)]
+pub(in crate::editor::session) use lifecycle::configured_file_bytes;
 mod task_io;
 use crate::editor::text::TextBuffer;
 use crate::editor::{BufferId, EditorWindowVersion, StartupTarget};
@@ -14,8 +16,6 @@ use crate::files::{
     CheckedResourceIntent, ExplorerMutation, RecoveryRecord, RequestId, VfsError, VfsResult,
     VfsWorker,
 };
-#[cfg(test)]
-pub(in crate::editor::session) use lifecycle::configured_file_bytes;
 pub(in crate::editor::session) use lifecycle::{
     DocumentChange, DocumentFailure, DocumentView, FileReply, SaveRequest,
 };
@@ -684,11 +684,11 @@ impl DocumentSession {
     pub(in crate::editor::session) fn list_directory(
         &mut self,
         path: PathBuf,
-        maximum_entries: usize,
         prefix: String,
+        maximum_entries: usize,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
-        let id = self.vfs.list_directory(path, maximum_entries, prefix)?;
+        let id = self.vfs.list_directory(path, prefix, maximum_entries)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }
@@ -819,48 +819,58 @@ impl DocumentSession {
     pub(in crate::editor::session) fn submit_workspace_io(
         &mut self,
         permit: super::workspace_edits::IoPermit<'_>,
-    ) -> Result<(), String> {
-        let result = (|| {
-            self.check_admission().map_err(|e| e.to_string())?;
-            let file = permit.file(&self.owner)?;
-            use super::workspace_edits::InputFile;
-            match file {
-                InputFile::Read(path) => {
+    ) -> Result<bool, String> {
+        match self.check_admission() {
+            Err(VfsError::QueueFull) => return Ok(false),
+            result => result.map_err(|e| e.to_string())?,
+        }
+        let file = permit.file(&self.owner)?;
+        use super::workspace_edits::InputFile;
+        let result = match file {
+                InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
                     self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
                 }
                 InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
                 InputFile::Resource { source, target } => {
                     self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
                 }
-            }
-            .map_err(|e| e.to_string())
-        })();
+        };
+        if matches!(result, Err(VfsError::QueueFull)) {
+            return Ok(false);
+        }
         if let Ok(id) = &result {
             self.pending_legacy.remove(id);
             self.pending_workspace.insert(*id);
         }
         permit.finish(WorkspaceSubmission {
             worker: self.owner.clone(),
-            result,
-        })
+            result: result.map_err(|e| e.to_string()),
+        })?;
+        Ok(true)
     }
     pub(in crate::editor::session) fn submit_workspace_resource(
         &mut self,
-        mut permit: super::workspace_edits::ResourcePermit<'_>,
-    ) -> Result<(), String> {
-        let result = (|| {
-            self.check_admission().map_err(|e| e.to_string())?;
-            let intent = permit.take_intent(&self.owner)?;
-            self.apply_resource(intent).map_err(|e| e.to_string())
-        })();
+        permit: super::workspace_edits::ResourcePermit<'_>,
+    ) -> Result<bool, String> {
+        match self.check_admission() {
+            Err(VfsError::QueueFull) => return Ok(false),
+            result => result.map_err(|e| e.to_string())?,
+        }
+        // Keep the staged intent until the worker accepts it, including when
+        // its own bounded queue is full.
+        let result = self.apply_resource(permit.intent(&self.owner)?.clone());
+        if matches!(result, Err(VfsError::QueueFull)) {
+            return Ok(false);
+        }
         if let Ok(id) = &result {
             self.pending_legacy.remove(id);
             self.pending_workspace.insert(*id);
         }
         permit.finish(WorkspaceSubmission {
             worker: self.owner.clone(),
-            result,
-        })
+            result: result.map_err(|e| e.to_string()),
+        })?;
+        Ok(true)
     }
 }
 

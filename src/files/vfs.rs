@@ -78,8 +78,8 @@ pub enum VfsRequest {
     ListDirectory {
         id: RequestId,
         path: PathBuf,
-        maximum_entries: usize,
         prefix: String,
+        maximum_entries: usize,
     },
     DiscoverRecovery {
         id: RequestId,
@@ -657,11 +657,11 @@ impl VfsWorker {
                                 VfsRequest::ListDirectory {
                                     id,
                                     path,
-                                    maximum_entries,
                                     prefix,
+                                    maximum_entries,
                                 } => VfsResult::Directory {
                                     id,
-                                    result: list_directory(&path, maximum_entries, &prefix),
+                                    result: list_directory(&path, &prefix, maximum_entries),
                                     path,
                                 },
                                 VfsRequest::DiscoverRecovery {
@@ -988,15 +988,15 @@ impl VfsWorker {
     pub fn list_directory(
         &mut self,
         path: PathBuf,
-        maximum_entries: usize,
         prefix: String,
+        maximum_entries: usize,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
         self.submit(VfsRequest::ListDirectory {
             id,
             path,
-            maximum_entries,
             prefix,
+            maximum_entries,
         })?;
         Ok(id)
     }
@@ -1657,17 +1657,18 @@ pub(super) fn canonical_path(path: &Path) -> Result<PathBuf, VfsError> {
 
 pub(super) fn list_directory(
     path: &Path,
-    maximum_entries: usize,
     prefix: &str,
+    maximum_entries: usize,
 ) -> Result<Vec<PathBuf>, VfsError> {
     let entries = fs::read_dir(path).map_err(|source| VfsError::Io {
         operation: "list directory",
         path: path.to_path_buf(),
         source,
     })?;
+    let prefix = prefix.to_lowercase();
     let mut paths = entries
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().to_lowercase().starts_with(prefix))
+        .filter(|entry| entry.file_name().to_string_lossy().to_lowercase().starts_with(&prefix))
         .map(|entry| entry.path())
         .take(maximum_entries.saturating_add(1))
         .collect::<Vec<_>>();

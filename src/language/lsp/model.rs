@@ -280,11 +280,65 @@ pub struct LspCapabilities {
     pub inlay_hints: bool,
     pub pull_diagnostics: bool,
     pub code_lens: bool,
+    pub code_lens_resolve: bool,
     pub document_highlights: bool,
     pub folding_ranges: bool,
     pub selection_ranges: bool,
     pub document_colors: bool,
     pub semantic_token_types: Vec<String>,
+    /// Selectors for providers enabled only by dynamic registration.
+    pub document_selectors: std::collections::HashMap<String, Vec<Value>>,
+    pub sync_registrations: Vec<Value>,
+}
+
+impl LspCapabilities {
+    pub fn supports_document(&self, method: &str, document: &LspDocument) -> bool {
+        self.document_selectors.get(method).is_none_or(|options| {
+            options.iter().any(|options| registration_matches(options, document))
+        })
+    }
+
+    pub(super) fn sync_kind_for_document(&self, document: &LspDocument) -> SyncKind {
+        let mut kinds = self.sync_registrations.iter()
+            .filter(|options| registration_matches(options, document))
+            .filter_map(|options| options.get("syncKind").and_then(Value::as_u64))
+            .peekable();
+        if kinds.peek().is_none() {
+            return self.sync_kind;
+        }
+        kinds.fold(SyncKind::None, |kind, registered| match registered {
+            1 => SyncKind::Full,
+            2 if kind != SyncKind::Full => SyncKind::Incremental,
+            _ => kind,
+        })
+    }
+}
+
+fn registration_matches(options: &Value, document: &LspDocument) -> bool {
+    let selector = options.get("documentSelector").unwrap_or(&Value::Null);
+    if selector.is_null() {
+        return true;
+    }
+    selector.as_array().is_some_and(|filters| filters.iter().any(|filter| {
+        filter.is_object()
+            && filter.get("language").is_none_or(|language| language.as_str() == Some(&document.language_id))
+            && filter.get("scheme").is_none_or(|scheme| scheme.as_str() == Some("file"))
+            && filter.get("pattern").is_none_or(|pattern| {
+                let (pattern, path) = if let Some(pattern) = pattern.as_str() {
+                    (pattern, document.path.as_path())
+                } else {
+                    let Some(base) = pattern.get("baseUri") else { return false };
+                    let Some(base) = base.as_str().or_else(|| base.get("uri").and_then(Value::as_str))
+                        .and_then(super::paths::path_from_file_uri) else { return false };
+                    let (Some(pattern), Ok(path)) = (
+                        pattern.get("pattern").and_then(Value::as_str), document.path.strip_prefix(base),
+                    ) else { return false };
+                    (pattern, path)
+                };
+                globset::GlobBuilder::new(pattern).literal_separator(true).build().ok()
+                    .is_some_and(|glob| glob.compile_matcher().is_match(path))
+            })
+    }))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -341,7 +395,8 @@ pub struct LspWorkspaceEdit {
 pub struct LspDiagnostic {
     pub range: LspRange,
     pub severity: Option<u8>,
-    pub code: Option<String>,
+    pub code: Option<Value>,
+    pub related: Vec<(LspLocation, String)>,
     pub source: Option<String>,
     pub message: String,
     /// Handed back unread in a code action request; gopls and Ruff need it for their fixes.
@@ -386,6 +441,7 @@ pub struct LspCompletionItem {
     pub kind: Option<u8>,
     pub snippet: bool,
     pub documentation: Option<LspMarkupContent>,
+    pub command: Option<LspCommand>,
     pub resolve_item: Option<Value>,
     pub resolved: bool,
 }
@@ -517,6 +573,7 @@ pub struct LspCodeLens {
     pub range: LspRange,
     pub title: String,
     pub command: Option<LspCommand>,
+    pub resolve_item: Option<Value>,
 }
 /// Something a server runs on request, through `workspace/executeCommand`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -576,9 +633,14 @@ pub enum LspFeature {
     Rename {
         new_name: String,
     },
-    Formatting,
+    Formatting {
+        tab_size: usize,
+        insert_spaces: bool,
+    },
     RangeFormatting {
         range: LspRange,
+        tab_size: usize,
+        insert_spaces: bool,
     },
     CodeAction {
         range: LspRange,
@@ -596,6 +658,7 @@ pub enum LspFeature {
         range: LspRange,
     },
     CodeLens,
+    CodeLensResolve { item: Value },
     DocumentHighlights,
     FoldingRanges,
     SelectionRanges,
@@ -617,7 +680,7 @@ impl LspFeature {
             Self::DocumentSymbols => "textDocument/documentSymbol",
             Self::WorkspaceSymbols { .. } => "workspace/symbol",
             Self::Rename { .. } => "textDocument/rename",
-            Self::Formatting => "textDocument/formatting",
+            Self::Formatting { .. } => "textDocument/formatting",
             Self::RangeFormatting { .. } => "textDocument/rangeFormatting",
             Self::CodeAction { .. } => "textDocument/codeAction",
             Self::ExecuteCommand(_) => "workspace/executeCommand",
@@ -626,11 +689,21 @@ impl LspFeature {
             Self::SemanticTokensDelta { .. } => "textDocument/semanticTokens/full/delta",
             Self::InlayHints { .. } => "textDocument/inlayHint",
             Self::CodeLens => "textDocument/codeLens",
+            Self::CodeLensResolve { .. } => "codeLens/resolve",
             Self::DocumentHighlights => "textDocument/documentHighlight",
             Self::FoldingRanges => "textDocument/foldingRange",
             Self::DocumentColors => "textDocument/documentColor",
             Self::SelectionRanges => "textDocument/selectionRange",
         }
+    }
+
+    pub fn capability_for_document(&self, capabilities: &LspCapabilities, document: &LspDocument) -> bool {
+        let method = match self {
+            Self::CompletionResolve { .. } => "textDocument/completion",
+            Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => "textDocument/semanticTokens",
+            _ => self.method(),
+        };
+        self.capability(capabilities) && capabilities.supports_document(method, document)
     }
 
     pub fn capability(&self, capabilities: &LspCapabilities) -> bool {
@@ -647,7 +720,7 @@ impl LspFeature {
             Self::DocumentSymbols => capabilities.document_symbols,
             Self::WorkspaceSymbols { .. } => capabilities.workspace_symbols,
             Self::Rename { .. } => capabilities.rename,
-            Self::Formatting => capabilities.formatting,
+            Self::Formatting { .. } => capabilities.formatting,
             Self::RangeFormatting { .. } => capabilities.range_formatting,
             Self::CodeAction { .. } => capabilities.code_action,
             Self::ExecuteCommand(_) => capabilities.execute_command,
@@ -656,6 +729,7 @@ impl LspFeature {
             Self::SemanticTokensDelta { .. } => capabilities.semantic_tokens_delta,
             Self::InlayHints { .. } => capabilities.inlay_hints,
             Self::CodeLens => capabilities.code_lens,
+            Self::CodeLensResolve { .. } => capabilities.code_lens_resolve,
             Self::DocumentHighlights => capabilities.document_highlights,
             Self::FoldingRanges => capabilities.folding_ranges,
             Self::SelectionRanges => capabilities.selection_ranges,
@@ -676,7 +750,7 @@ impl LspFeature {
             Self::PullDiagnostics { .. } => Some("pull-diagnostics"),
             Self::SemanticTokensFull | Self::SemanticTokensDelta { .. } => Some("semantic-tokens"),
             Self::InlayHints { .. } => Some("inlay-hints"),
-            Self::CodeLens => Some("code-lens"),
+            Self::CodeLens | Self::CodeLensResolve { .. } => Some("code-lens"),
             Self::DocumentHighlights => Some("highlights"),
             Self::FoldingRanges => Some("folds"),
             Self::SelectionRanges => Some("selection-ranges"),
@@ -695,7 +769,7 @@ pub enum LspFeatureResult {
         items: Vec<LspCompletionItem>,
         incomplete: bool,
     },
-    CompletionResolved(LspCompletionItem),
+    CompletionResolved(Box<LspCompletionItem>),
     Signature(LspMarkupContent),
     Locations(Vec<LspLocation>),
     Symbols(Vec<LspSymbol>),

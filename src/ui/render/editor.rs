@@ -21,7 +21,7 @@ use super::{
     visual_rows::{
         VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
         editor_state_content_width, editor_state_gutter_width, git_sign_column,
-        is_indent_guide_column, leading_indentation_width, one_cell_symbol,
+        is_indent_guide_column, leading_indentation_width, one_cell_symbol, projected_inlay_hints,
     },
 };
 
@@ -41,7 +41,6 @@ pub(crate) const STATUS_DIRTY_MARKER: &str = " [+]";
 pub(crate) const STATUS_LSP_FORMAT: &str = "{server}";
 pub(crate) const STATUS_GIT_FORMAT: &str = "{branch}";
 pub(crate) const STATUS_ROOT_FORMAT: &str = "{root}";
-pub(crate) const STATUS_WORKTREE_FORMAT: &str = "{repository} › {worktree}";
 pub(crate) const REPLACE_CURSOR: CursorShape = CursorShape::Underline;
 pub(crate) const VISUAL_CURSOR: CursorShape = CursorShape::Block;
 pub(crate) const OPERATOR_PENDING_CURSOR: CursorShape = CursorShape::Block;
@@ -248,6 +247,14 @@ pub(super) fn render_editor_view(
         .as_ref()
         .filter(|prompt| prompt.kind == crate::ui::PromptKind::Command)
         .and_then(|prompt| crate::editor::input::substitute_pattern(&prompt.input));
+    let search_prompt = ui.prompt.as_ref().is_some_and(|prompt| matches!(
+        prompt.kind, crate::ui::PromptKind::SearchForward | crate::ui::PromptKind::SearchBackward
+    ));
+    let substitute_flags = ui.prompt.as_ref()
+        .and_then(|prompt| crate::editor::input::typed_substitution(&prompt.input))
+        .map(|(_, _, _, flags)| flags)
+        .unwrap_or_default();
+    let whole_word = ui.search_whole_word && !search_prompt && typed_substitute.is_none();
     let highlighted = match ui.prompt.as_ref() {
         Some(prompt)
             if matches!(
@@ -284,14 +291,32 @@ pub(super) fn render_editor_view(
                     .ok()
                     .and_then(|range| buffer.text.slice(range).ok())
                     .unwrap_or_default();
-                crate::editor::input::search_matches(
-                    &source,
-                    query,
-                    config.search.smart_case,
-                    false,
-                )
-                .unwrap_or_default()
-                .into_iter()
+                let matches = if typed_substitute.is_some() && !search_prompt {
+                    crate::editor::input::substitution_regex(query, &substitute_flags)
+                        .map(|regex| {
+                            let mut offset = 0;
+                            let mut matches = Vec::new();
+                            for line in source.split_inclusive('\n') {
+                                for found in regex.find_iter(line.trim_end_matches(['\n', '\r'])) {
+                                    matches.push(offset + found.start()..offset + found.end());
+                                    if !substitute_flags.contains('g') {
+                                        break;
+                                    }
+                                }
+                                offset += line.len();
+                            }
+                            matches
+                        }).unwrap_or_default()
+                } else {
+                    crate::editor::input::search_matches(&source, query, config.search.smart_case, false)
+                        .unwrap_or_default()
+                };
+                matches.into_iter()
+                .filter(|range| {
+                    let word = |ch: char| ch.is_alphanumeric() || ch == '_';
+                    !whole_word || source[..range.start].chars().next_back().is_none_or(|ch| !word(ch))
+                        && source[range.end..].chars().next().is_none_or(|ch| !word(ch))
+                })
                 .filter_map(|range| {
                     ByteRange::new(
                         ByteOffset(first + range.start),
@@ -305,6 +330,19 @@ pub(super) fn render_editor_view(
         Vec::new()
     };
     let mut diagnostic_lines = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
+    let mut diagnostic_ranges = BTreeMap::<usize, Vec<&UiDiagnostic>>::new();
+    let mut visible_lines = Vec::new();
+    let mut anchor = start_anchor;
+    for _ in 0..body_height {
+        if visible_lines.last() != Some(&anchor.line) {
+            visible_lines.push(anchor.line);
+        }
+        let next = visual_rows.next(anchor);
+        if next == anchor {
+            break;
+        }
+        anchor = next;
+    }
     if !large_file && let Some(path) = &buffer.path {
         for diagnostic in ui
             .diagnostics
@@ -314,9 +352,18 @@ pub(super) fn render_editor_view(
         {
             if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
                 diagnostic_lines.entry(line).or_default().push(diagnostic);
+                let mut end_line = buffer.text.byte_to_line(diagnostic.range.end).unwrap_or(line);
+                if !diagnostic.range.is_empty()
+                    && buffer.text.line_to_byte(end_line).ok() == Some(diagnostic.range.end)
+                {
+                    end_line = end_line.saturating_sub(1);
+                }
+                for &row in visible_lines.iter().filter(|&&row| row >= line && row <= end_line) {
+                    diagnostic_ranges.entry(row).or_default().push(diagnostic);
+                }
             }
         }
-        for diagnostics in diagnostic_lines.values_mut() {
+        for diagnostics in diagnostic_lines.values_mut().chain(diagnostic_ranges.values_mut()) {
             diagnostics.sort_unstable_by_key(|diagnostic| {
                 (
                     diagnostic.severity,
@@ -360,14 +407,7 @@ pub(super) fn render_editor_view(
         .and_then(|card| card.line)
         .filter(|(target, _)| *target == view.buffer)
         .map(|(_, line)| line);
-    let mut inlay_hints = ui
-        .lsp_inlay_hints
-        .iter()
-        .chain(&ui.substitute_preview)
-        .filter(|hint| hint.buffer == view.buffer && hint.revision == buffer.text.revision())
-        .take(10_000)
-        .collect::<Vec<_>>();
-    inlay_hints.sort_unstable_by_key(|hint| hint.position);
+    let inlay_hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
     let mut inlay_cursor = 0usize;
     let color_spans = ui
         .lsp_colors
@@ -375,6 +415,26 @@ pub(super) fn render_editor_view(
         .filter(|span| span.buffer == view.buffer && span.revision == buffer.text.revision())
         .collect::<Vec<_>>();
     let mut color_cursor = 0usize;
+    let width_policy = DisplayWidthPolicy {
+        tab_width: config.editor.tab_width,
+        ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
+    };
+    let selection_lines = view.selection.map(|selection| {
+        let anchor = buffer.text.byte_to_line(selection.anchor).unwrap_or(0);
+        let head = buffer.text.byte_to_line(selection.head).unwrap_or(0);
+        anchor.min(head)..=anchor.max(head)
+    });
+    let block_columns = view.selection
+        .filter(|selection| selection.kind == SelectionKind::Block)
+        .and_then(|selection| {
+            let column = |offset| {
+                let line = buffer.text.byte_to_line(offset).ok()?;
+                let start = buffer.text.line_to_byte(line).ok()?;
+                let source = buffer.text.line(line).ok()?;
+                Some(display_column_at(source.trim_end_matches('\n'), offset.get().saturating_sub(start.get()), width_policy))
+            };
+            Some((column(selection.anchor)?, column(selection.head)?))
+        });
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
     // The empty line after a final newline is drawn only while the cursor is on it.
@@ -460,7 +520,7 @@ pub(super) fn render_editor_view(
                         .any(|sign| buffer.path.as_deref() == Some(sign.path.as_path())))
                 .then(|| gutter_width - 1)
             })
-            .filter(|_| first_line_row == 0)
+            .filter(|_| gutter_width > 0 && first_line_row == 0)
         {
             grid.set_cell(
                 git_sign_column,
@@ -514,6 +574,29 @@ pub(super) fn render_editor_view(
             .unwrap_or(ByteOffset(0));
         let line = buffer.text.line(line_index).unwrap_or_default();
         let full_content = line.strip_suffix('\n').unwrap_or(&line);
+        // Resolve the selection once per source line, not once per painted grapheme.
+        let selected_bytes = view.selection.and_then(|selection| {
+            match selection.kind {
+                SelectionKind::Character => {
+                    let start = selection.anchor.min(selection.head);
+                    let mut end = selection.anchor.max(selection.head);
+                    if view.mode == EditorMode::Insert {
+                        if end == start { return None; }
+                        end = ByteOffset(end.get() - 1);
+                    }
+                    Some(start..=end)
+                }
+                SelectionKind::Line if selection_lines.as_ref()?.contains(&line_index) => {
+                    Some(line_start..=ByteOffset(line_start.get() + full_content.len()))
+                }
+                SelectionKind::Block if selection_lines.as_ref()?.contains(&line_index) => {
+                    let (anchor, head) = block_columns?;
+                    let (start, end) = byte_range_for_display_columns(full_content, anchor, head, width_policy)?;
+                    Some(ByteOffset(line_start.get() + start)..=ByteOffset(line_start.get() + end - 1))
+                }
+                _ => None,
+            }
+        });
         let markdown_line = visual_rows.markdown_line(line_index);
         let table = markdown_line
             .as_ref()
@@ -578,6 +661,13 @@ pub(super) fn render_editor_view(
         let mut source_column = skipped_column;
         let mut visual_row_index = first_line_row;
         for (relative, grapheme) in visible_content.grapheme_indices(true) {
+            let grapheme_column = source_column;
+            let cells = if grapheme == "\t" {
+                config.editor.tab_width - (source_column % config.editor.tab_width)
+            } else {
+                text_width(grapheme, config.editor.ambiguous_width).max(1)
+            };
+            source_column = source_column.saturating_add(cells);
             let source_relative = skipped_bytes.saturating_add(relative);
             if let Some(table) = table {
                 let at = ByteOffset(line_start.get() + relative);
@@ -613,7 +703,7 @@ pub(super) fn render_editor_view(
                 .min(width);
             while let Some(hint) = inlay_hints
                 .get(inlay_cursor)
-                .filter(|hint| hint.position == global)
+                .filter(|hint| hint.position <= global)
             {
                 if rendered_inlays < 32 {
                     x = grid.put_text_clipped(
@@ -640,16 +730,7 @@ pub(super) fn render_editor_view(
                     None => {}
                 }
             }
-            let style = if is_selected(
-                view.selection,
-                view.mode,
-                global,
-                &buffer.text,
-                DisplayWidthPolicy {
-                    tab_width: config.editor.tab_width,
-                    ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
-                },
-            ) || view
+            let style = if selected_bytes.as_ref().is_some_and(|range| range.contains(&global)) || view
                 .multi_marks
                 .iter()
                 .any(|mark| mark.contains(global) || (mark.is_empty() && mark.start == global))
@@ -662,7 +743,7 @@ pub(super) fn render_editor_view(
                 || tutor_target.is_some_and(|target| target.range.contains(global))
             {
                 Style::Search
-            } else if let Some(style) = diagnostic_lines.get(&line_index).and_then(|diagnostics| {
+            } else if let Some(style) = diagnostic_ranges.get(&line_index).and_then(|diagnostics| {
                 diagnostics
                     .iter()
                     .filter(|diagnostic| {
@@ -733,13 +814,10 @@ pub(super) fn render_editor_view(
             let style = markdown_line
                 .as_ref()
                 .map_or(style, |markdown| markdown.restyle(global, style));
-            let grapheme_column = source_column;
-            let cells = if grapheme == "\t" {
-                config.editor.tab_width - (source_column % config.editor.tab_width)
-            } else {
-                text_width(grapheme, config.editor.ambiguous_width).max(1)
-            };
-            let visible_cells = if can_wrap {
+            let visible_cells = if table.is_some() && grapheme == "\t" {
+                // Table layout treats a tab as one space within its column.
+                1
+            } else if can_wrap {
                 cells.min(content_width)
             } else {
                 cells
@@ -748,7 +826,6 @@ pub(super) fn render_editor_view(
             if !can_wrap && x.saturating_add(advance) > width {
                 break;
             }
-            source_column = source_column.saturating_add(cells);
             if grapheme == "\t" {
                 for cell in 0..visible_cells {
                     if x >= width {
@@ -828,6 +905,11 @@ pub(super) fn render_editor_view(
                 x = x.saturating_add(advance);
             }
         }
+        if full_content.is_empty() && x < width
+            && selected_bytes.as_ref().is_some_and(|range| range.contains(&line_start))
+        {
+            grid.set_cell(x, screen_row, " ", Style::Selection);
+        }
         if let Some(table) = table {
             let last = table.frames.len().saturating_sub(1);
             screen_row = table_row
@@ -857,19 +939,15 @@ pub(super) fn render_editor_view(
                 }
             }
             if let Some(fill) = markdown.fill {
-                while x < width {
-                    grid.set_cell(x, screen_row, " ", fill);
-                    x = x.saturating_add(1);
+                for column in x..width {
+                    grid.set_cell(column, screen_row, " ", fill);
                 }
             }
         }
-        if let Some(fold) = ui
-            .lsp_folds
-            .iter()
-            .chain(ui.syntax_folds.iter())
-            .find(|fold| fold.view == view_id && fold.collapsed && fold.start_line == line_index)
+        if let Some((start, end)) = visual_rows.containing_fold(line_index.saturating_add(1))
+            .filter(|(start, _)| *start == line_index)
         {
-            let hidden = fold.end_line.saturating_sub(fold.start_line);
+            let hidden = end.saturating_sub(start);
             x = grid.put_text_clipped(
                 x,
                 screen_row,
@@ -1294,9 +1372,7 @@ pub(crate) fn workspace_title(state: &EditorState) -> String {
         .unwrap_or(state.workspace_root.as_os_str())
         .to_string_lossy();
     match &state.workspace_repository {
-        Some(repository) => STATUS_WORKTREE_FORMAT
-            .replace("{repository}", repository)
-            .replace("{worktree}", &folder),
+        Some(repository) => format!("{repository} › {folder}"),
         None => folder.into_owned(),
     }
 }
@@ -1359,21 +1435,12 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
             .line_to_byte(point.line)
             .unwrap_or(ByteOffset(0));
         let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
-        let mut hints = ui
-            .lsp_inlay_hints
-            .iter()
-            .chain(&ui.substitute_preview)
-            .filter(|hint| {
-                hint.buffer == view.buffer
-                    && hint.revision == buffer.text.revision()
-                    && hint.position >= visible_start
-                    && hint.position <= view.cursor
-            })
-            .collect::<Vec<_>>();
-        hints.sort_unstable_by_key(|hint| hint.position);
+        let hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
         let virtual_cells = hints
             .into_iter()
+            .filter(|hint| hint.position >= line_start && hint.position <= ByteOffset(line_start.get() + content.len()))
             .take(32)
+            .filter(|hint| hint.position >= visible_start && hint.position <= view.cursor)
             .map(|hint| cell_text_width(&hint.label, config.editor.ambiguous_width))
             .fold(0usize, usize::saturating_add);
         let visible_column = column
@@ -1466,75 +1533,6 @@ pub(super) fn byte_column(text: &crate::editor::text::TextBuffer, offset: ByteOf
     PositionCodec::new(text)
         .byte_to_point(offset)
         .map_or(0, |point| point.byte_column)
-}
-
-pub(super) fn is_selected(
-    selection: Option<crate::editor::Selection>,
-    mode: EditorMode,
-    offset: ByteOffset,
-    text: &crate::editor::text::TextBuffer,
-    width_policy: DisplayWidthPolicy,
-) -> bool {
-    let Some(selection) = selection else {
-        return false;
-    };
-    match selection.kind {
-        SelectionKind::Character => {
-            let start = selection.anchor.min(selection.head);
-            let end = selection.anchor.max(selection.head);
-            offset >= start && if mode == EditorMode::Insert { offset < end } else { offset <= end }
-        }
-        SelectionKind::Line => {
-            let line = text.byte_to_line(offset).unwrap_or(usize::MAX);
-            let anchor = text.byte_to_line(selection.anchor).unwrap_or(0);
-            let head = text.byte_to_line(selection.head).unwrap_or(0);
-            (anchor.min(head)..=anchor.max(head)).contains(&line)
-        }
-        SelectionKind::Block => {
-            let point_line = text.byte_to_line(offset).unwrap_or(usize::MAX);
-            let anchor_line = text.byte_to_line(selection.anchor).unwrap_or(0);
-            let head_line = text.byte_to_line(selection.head).unwrap_or(0);
-            if !(anchor_line.min(head_line)..=anchor_line.max(head_line)).contains(&point_line) {
-                return false;
-            }
-            let Ok(anchor_start) = text.line_to_byte(anchor_line) else {
-                return false;
-            };
-            let Ok(head_start) = text.line_to_byte(head_line) else {
-                return false;
-            };
-            let Ok(anchor_text) = text.line(anchor_line) else {
-                return false;
-            };
-            let Ok(head_text) = text.line(head_line) else {
-                return false;
-            };
-            let anchor_content = anchor_text.strip_suffix('\n').unwrap_or(&anchor_text);
-            let head_content = head_text.strip_suffix('\n').unwrap_or(&head_text);
-            let anchor_column = display_column_at(
-                anchor_content,
-                selection.anchor.get().saturating_sub(anchor_start.get()),
-                width_policy,
-            );
-            let head_column = display_column_at(
-                head_content,
-                selection.head.get().saturating_sub(head_start.get()),
-                width_policy,
-            );
-            let Ok(point_start) = text.line_to_byte(point_line) else {
-                return false;
-            };
-            let Ok(point_text) = text.line(point_line) else {
-                return false;
-            };
-            let point_content = point_text.strip_suffix('\n').unwrap_or(&point_text);
-            byte_range_for_display_columns(point_content, anchor_column, head_column, width_policy)
-                .is_some_and(|(start, end)| {
-                    let relative = offset.get().saturating_sub(point_start.get());
-                    (start..end).contains(&relative)
-                })
-        }
-    }
 }
 
 pub(super) fn mode_name(mode: EditorMode) -> &'static str {

@@ -3327,10 +3327,20 @@ impl InteractiveApplication {
                         break;
                     }
                 };
-                if let Err(error) = result {
-                    self.language.cancel_deferred_edits(proposal);
-                    self.show_error(error);
-                    break;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.notify_message(
+                            "Document queue is full; remaining resources are still staged. Apply them again after pending work finishes.".into(),
+                            false,
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        self.language.cancel_deferred_edits(proposal);
+                        self.show_error(error);
+                        break;
+                    }
                 }
             },
             effect => return Err(effect),
@@ -4443,6 +4453,7 @@ impl InteractiveApplication {
         self.ui.search_query = Some(source[start..end].to_owned());
         self.input.remember_search(forward);
         self.input.remember_word_search();
+        self.ui.search_whole_word = true;
         self.perform_search(forward, count)
     }
 
@@ -5416,7 +5427,7 @@ impl InteractiveApplication {
         ) && !self.input.completion_read_pending()
             && let Ok(id) = self
                 .documents
-                .list_directory(request.directory, request.limit, request.prefix)
+                .list_directory(request.directory, request.key.prefix.clone(), request.limit)
         {
             self.input.register_completion_read(id, request.key);
         }
@@ -5617,6 +5628,7 @@ impl InteractiveApplication {
                 }
                 let forward = prompt.kind == PromptKind::SearchForward;
                 self.ui.search_query = Some(prompt.input);
+                self.ui.search_whole_word = false;
                 self.input.remember_search(forward);
                 self.close_prompt();
                 self.perform_search(forward, 1);
@@ -6203,26 +6215,27 @@ impl InteractiveApplication {
                     name.into(),
                     crate::config::TaskConfig {
                         kind: crate::config::TaskKind::Formatter,
-                        executable: tool.executable,
-                        arguments: tool.arguments,
+                        executable: tool.executable.clone(),
+                        arguments: Vec::new(),
                         cwd: None,
-                        environment: tool.environment,
+                        environment: BTreeMap::new(),
                         dependencies: Vec::new(),
                         timeout_ms: Some(10_000),
                         stdin: true,
                         matcher: None,
                     },
                 );
-                Some(config)
+                Some((config, tool))
             }
             _ => None,
         };
         match self.tasks.plan(
             name,
             &adapter,
-            managed.as_ref().unwrap_or(self.configuration.settings()),
+            managed.as_ref().map_or(self.configuration.settings(), |(config, _)| config),
             &self.workspace,
             self.configuration.binding_revision(),
+            managed.as_ref().map(|(_, tool)| tool.clone()),
         ) {
             Ok(()) => {}
             Err(error) => {
@@ -6779,6 +6792,7 @@ impl InteractiveApplication {
                 ) {
                     Ok(()) => {
                         if let Some(reply) = reply {
+                            self.terminal_session.set_debugger_owned(id);
                             self.debugger_session.register_terminal(id, reply);
                             self.close_debug_terminal();
                             self.debug_terminal = Some(id);
@@ -7176,6 +7190,10 @@ impl InteractiveApplication {
         let mut edit = match item.text_edit {
             // The range was the server's at request time; what was typed since goes too.
             Some(mut edit) => {
+                if (edit.range.start.line, edit.range.start.character) > (edit.range.end.line, edit.range.end.character) {
+                    self.show_error("completion edit range is reversed");
+                    return;
+                }
                 if edit.range.end.line == line && edit.range.end.character < character {
                     edit.range.end = here;
                 }
@@ -7287,7 +7305,9 @@ impl InteractiveApplication {
                 edits,
             }],
         };
-        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit, encoding) {
+        let applied = self.apply_lsp_workspace_edit(workspace_edit, encoding);
+        let succeeded = applied.is_ok();
+        if let Err(error) = applied {
             self.show_error(error);
         } else {
             if let Some(start) = insertion_start
@@ -7302,15 +7322,35 @@ impl InteractiveApplication {
                         view: self.state.active_view,
                     },
                     start,
-                    tabstops
-                        .into_iter()
-                        .map(|stop| (stop.index, stop.start, stop.end)),
+                    tabstops,
                 );
                 self.select_snippet_current();
             }
         }
         self.language.clear_completion();
         self.ui.language_completion = None;
+        if succeeded && let Some(command) = item.command {
+            self.execute_lsp_command(&server, command);
+        }
+    }
+
+    pub(in crate::editor::session) fn execute_lsp_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+    ) {
+        self.sync_lsp_document();
+        self.refresh_lsp_projection_owner();
+        if let Some((_, document)) = self.active_lsp_document()
+            && let Err(error) = self.language.request_projected(
+                server,
+                LspFeature::ExecuteCommand(command),
+                document,
+                ByteOffset(0),
+            )
+        {
+            self.show_error(error);
+        }
     }
 
     pub(in crate::editor::session) fn select_snippet_current(&mut self) {
@@ -7343,7 +7383,18 @@ impl InteractiveApplication {
         }
     }
     pub(in crate::editor::session) fn navigate_snippet(&mut self, direction: i8) {
-        self.input.navigate_snippet(direction);
+        let buffer = self.input.snippet_buffer();
+        if self.input.navigate_snippet(direction)
+            && let Some(view) = self.state.active_view
+            && Some(self.state.views[view].buffer) == buffer
+        {
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_undo_policy(UndoPolicy::Ignore)
+                .with_operation(EditorOperation::SetSelection { view, selection: None });
+            if let Err(error) = self.state.apply_transaction(&transaction) {
+                self.show_error(error);
+            }
+        }
         self.select_snippet_current();
     }
 }
@@ -9839,7 +9890,17 @@ impl InteractiveApplication {
             _ => None,
         };
         let code_action = match &payload {
-            Some(PickerPayload::CodeAction(key)) => Some(self.language.take_action(key)),
+            Some(PickerPayload::CodeAction(key)) => {
+                let documents = self.state.buffers.iter().filter_map(|(id, buffer)| {
+                    Some(crate::editor::session::lsp_edits::EditDocument {
+                        id,
+                        path: buffer.path.as_deref()?,
+                        text: &buffer.text,
+                        dirty: buffer.dirty,
+                    })
+                }).collect::<Vec<_>>();
+                Some(self.language.take_action(key, &documents))
+            },
             _ => None,
         };
         let debug_selection = match &payload {
@@ -9906,13 +9967,25 @@ impl InteractiveApplication {
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
-            Some(PickerPayload::LspCommand { server, context, command }) => {
+            Some(PickerPayload::LspCodeLens { server, context, lens }) => {
                 if !self.language.edit_context_current(&context) {
                     self.show_error("code-lens source retired");
                     return;
                 }
-                if let Err(error) = self.language.execute_command(&server, command) {
-                    self.show_error(error);
+                if let Some(command) = lens.command {
+                    self.execute_lsp_command(&server, command);
+                } else if let Some(item) = lens.resolve_item {
+                    self.refresh_lsp_projection_owner();
+                    if let Some((_, document)) = self.active_lsp_document()
+                        && let Err(error) = self.language.request_projected(
+                            &server,
+                            LspFeature::CodeLensResolve { item },
+                            document,
+                            ByteOffset(0),
+                        )
+                    {
+                        self.show_error(error);
+                    }
                 }
             }
             Some(PickerPayload::Buffer(buffer)) => {
@@ -12801,7 +12874,11 @@ impl InteractiveApplication {
         }
     }
     pub(super) fn process_package_events(&mut self) {
-        let updates = self.extension.poll_packages(self.plugin_limits(), !self.workspace.safe_mode());
+        let updates = self.extension.poll_packages(
+            self.plugin_limits(),
+            &self.configuration.settings().plugins,
+            self.workspace.safe_mode(),
+        );
         self.apply_extension_updates(updates);
     }
     pub(in crate::editor::session) fn apply_extension_updates(
@@ -14724,7 +14801,10 @@ impl InteractiveApplication {
         if managed {
             self.start_pending_save_formatters();
         } else {
-            self.request_lsp(LspFeature::Formatting);
+            self.request_lsp(LspFeature::Formatting {
+                tab_size: self.state.policy.tab_width,
+                insert_spaces: self.state.policy.expand_tabs,
+            });
         }
         true
     }

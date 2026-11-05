@@ -207,6 +207,15 @@ impl InteractiveApplication {
 }
 
 impl InteractiveApplication {
+    pub(super) fn draw_before_startup_reads(
+        &mut self,
+        draw: impl FnOnce(&Self) -> Result<bool, crate::ui::TerminalError>,
+    ) -> Result<bool, crate::ui::TerminalError> {
+        let painted = draw(self)?;
+        self.queue_startup_reads();
+        Ok(painted)
+    }
+
     pub(super) fn queue_startup_reads(&mut self) {
         self.documents.startup_activation(&self.state, &self.window_session);
         for error in self

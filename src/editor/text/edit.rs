@@ -34,6 +34,7 @@ impl TextEdit {
 pub struct TextEditSet {
     base_revision: BufferRevision,
     edits: Vec<TextEdit>,
+    normalize_line_endings: bool,
 }
 
 impl TextEditSet {
@@ -42,7 +43,14 @@ impl TextEditSet {
         Self {
             base_revision,
             edits,
+            normalize_line_endings: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_normalized_line_endings(mut self) -> Self {
+        self.normalize_line_endings = true;
+        self
     }
 
     #[must_use]
@@ -111,19 +119,19 @@ impl TextBuffer {
                 });
             }
         }
+        edits.retain(|edit| {
+            !self.rope.byte_slice(edit.range.start.get()..edit.range.end.get())
+                .bytes().eq(edit.replacement.bytes())
+                || (set.normalize_line_endings && self.line_endings(edit.range).iter()
+                    .any(|ending| *ending != self.format.preferred_line_ending))
+        });
         Ok(edits)
     }
 
     /// Validate the complete edit set before changing the rope, then apply from
     /// the end of the document toward the beginning.
     pub fn apply_edits(&mut self, set: &TextEditSet) -> Result<EditDelta, EditError> {
-        let mut edits = self.validate_edits(set)?;
-        // A textually unchanged replacement must not rewrite its original line endings.
-        edits.retain(|edit| {
-            !self.rope.byte_slice(edit.range.start.get()..edit.range.end.get())
-                .bytes()
-                .eq(edit.replacement.bytes())
-        });
+        let edits = self.validate_edits(set)?;
         let delta = EditDelta::new(
             edits
                 .iter()

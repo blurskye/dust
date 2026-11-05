@@ -191,27 +191,54 @@ pub(super) fn natural_name_key(value: &str) -> String {
 
 /// Git's linked worktrees for a repository root, kept in `.worktree/`. Git ignores that folder,
 /// but from the repository's root the tree, the finder and grep still show what's in it.
-pub(super) fn root_worktrees(root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root.join(WORKTREE_DIRECTORY)) else {
-        return Vec::new();
-    };
-    let mut worktrees = entries
+pub(super) fn root_worktrees(
+    root: &Path,
+    mut keep_scanning: impl FnMut() -> bool,
+) -> impl Iterator<Item = PathBuf> {
+    // Do not follow either the special directory or its children through symlinks.
+    let canonical_root = std::fs::canonicalize(root).ok();
+    let directory = root.join(WORKTREE_DIRECTORY);
+    let entries = canonical_root.as_ref().and_then(|_| {
+        std::fs::symlink_metadata(&directory)
+            .ok()
+            .filter(|metadata| metadata.is_dir())
+            .and_then(|_| std::fs::read_dir(&directory).ok())
+    });
+    entries
+        .into_iter()
         .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.join(".git").is_file())
-        .collect::<Vec<_>>();
-    worktrees.sort();
-    worktrees
+        .take_while(move |_| keep_scanning())
+        .filter_map(move |entry| {
+            let entry = entry.ok()?;
+            if !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+            let path = entry.path();
+            let canonical = std::fs::canonicalize(&path).ok()?;
+            if !canonical.starts_with(canonical_root.as_ref()?) || !path.join(".git").is_file() {
+                return None;
+            }
+            Some(path)
+        })
 }
 
 /// The repository a folder is a linked worktree of: Git leaves a `.git` file there pointing at
 /// `<repository>/.git/worktrees/<name>`.
 #[must_use]
 pub fn linked_worktree_repository(root: &Path) -> Option<String> {
-    let bytes = super::vfs::read_file_with_ceiling(&root.join(".git"), 4096).ok()?;
+    let bytes = super::vfs::read_file_with_ceiling(&root.join(".git"), 16 * 1024).ok()?;
     let link = std::str::from_utf8(&bytes).ok()?;
     let git_directory = Path::new(link.strip_prefix("gitdir:")?.trim());
-    let repository = git_directory.ancestors().nth(3)?;
+    let git_directory = std::path::absolute(root.join(git_directory)).ok()?;
+    let mut normalized = PathBuf::new();
+    for component in git_directory.components() {
+        match component {
+            std::path::Component::ParentDir => { normalized.pop(); }
+            std::path::Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    let repository = normalized.ancestors().nth(3)?;
     Some(repository.file_name()?.to_string_lossy().into_owned())
 }
 
@@ -261,15 +288,29 @@ pub(super) fn list_scoped_directory(
         });
     }
     let worktrees = directory.join(WORKTREE_DIRECTORY);
-    if roots.contains(&directory)
-        && !root_worktrees(&directory).is_empty()
+    if !truncated && roots.contains(&directory)
         && !entries.iter().any(|entry| entry.path == worktrees)
     {
-        entries.push(DirectoryEntry {
-            name: WORKTREE_DIRECTORY.to_owned(),
-            path: worktrees,
-            kind: DirectoryEntryKind::Directory,
-        });
+        let mut scanned = 0;
+        let found = root_worktrees(&directory, || {
+            if scanned >= maximum_entries {
+                truncated = true;
+                return false;
+            }
+            scanned += 1;
+            true
+        }).next().is_some();
+        if found {
+            if entries.len() >= maximum_entries {
+                truncated = true;
+            } else {
+                entries.push(DirectoryEntry {
+                    name: WORKTREE_DIRECTORY.to_owned(),
+                    path: worktrees,
+                    kind: DirectoryEntryKind::Directory,
+                });
+            }
+        }
     }
     let mut keyed_entries = entries
         .into_iter()

@@ -259,7 +259,9 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
     documents.submit_workspace_io(permit).unwrap();
     let permit = io.prepare_io(1, &workspace, &1, &editor).unwrap();
-    assert!(documents.submit_workspace_io(permit).is_err());
+    assert!(!documents.submit_workspace_io(permit).unwrap());
+    assert!(matches!(io.next_file(), Some((1, InputFile::Create(path))) if path == &created));
+    assert_eq!(documents.pending_count(), 1);
     let retired = io.reject();
     assert_eq!(retired.requests.len(), 1);
     assert!(documents.cancel_request(retired.requests[0]));
@@ -733,6 +735,81 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
     assert!(published.buffers[buffer].dirty);
 }
 
+#[test]
+fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let scope = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = crate::editor::session::workspace::WorkspaceSession::new(
+        scope.clone(),
+        root.path().join("trust"),
+        1,
+        false,
+        false,
+        1,
+    );
+    let mut editor = EditorState::new(root.path().into());
+    let path = root.path().join("old");
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+    for kind in [
+        ResourceIntentKind::Rename {
+            target: root.path().join("new"),
+            parent_device: 1,
+            parent_inode: 1,
+        },
+        ResourceIntentKind::Delete,
+    ] {
+    let mut owner = WorkspaceEditSession::default();
+    let ticket = owner
+        .begin(
+            workspace.version(),
+            1,
+            editor.workspace_edit_sources().unwrap(),
+        )
+        .unwrap();
+    let prepared = PreparedEdits {
+        ticket,
+        label: "combined".into(),
+        drafts: vec![WorkspaceEditDraft {
+            canonical_path: path.clone(),
+            expected_revision: Some(editor.buffers[buffer].text.revision()),
+            edits: vec![TextEdit::new(
+                ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+                "new",
+            )],
+        }],
+        snapshots: vec![FileSnapshot {
+            canonical_path: path.clone(),
+            revision: Some(editor.buffers[buffer].text.revision()),
+            bytes: b"old".to_vec(),
+        }],
+        resources: vec![CheckedResourceIntent {
+            source: path.clone(),
+            source_device: 1,
+            source_inode: 1,
+            source_bytes: b"old".to_vec(),
+            canonical_roots: vec![root.path().into()],
+            maximum_bytes: 1024,
+            kind,
+        }],
+    };
+    assert!(
+        owner
+            .build(prepared, &scope, &workspace.version(), 1)
+            .is_err()
+    );
+    assert_eq!(editor.buffers[buffer].text.to_string(), "old");
+    assert!(owner.proposal().is_none());
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn combined_text_and_rename_is_rejected_before_publication() {
     let root = tempfile::tempdir().unwrap();

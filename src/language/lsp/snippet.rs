@@ -5,6 +5,16 @@ pub struct SnippetTabstop {
     pub index: u32,
     pub start: usize,
     pub end: usize,
+    pub depth: usize,
+    pub order: usize,
+}
+impl SnippetTabstop {
+    pub(crate) fn range(&self) -> crate::editor::text::ByteRange {
+        crate::editor::text::ByteRange::new(
+            crate::editor::text::ByteOffset(self.start),
+            crate::editor::text::ByteOffset(self.end),
+        ).expect("snippet tabstop endpoints are ordered")
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedSnippet {
@@ -250,12 +260,14 @@ impl<'a> Resolver<'a> {
                     let start = text.len();
                     match key {
                         Key::Tabstop(index) => {
+                            let stop = stops.len();
+                            stops.push(SnippetTabstop { index: *index, start, end: start, depth, order: stop });
                             if let Some(default) = default {
                                 self.expand(default, text, stops, depth + 1)?;
                             } else {
                                 text.push_str(&self.value(key, depth)?);
                             }
-                            stops.push(SnippetTabstop { index: *index, start, end: text.len() });
+                            stops[stop].end = text.len();
                         }
                         Key::Variable(name) => {
                             if let Some(value) = self.variables.get(name) {
@@ -270,7 +282,7 @@ impl<'a> Resolver<'a> {
                                     self.unknown_variables.insert(name.clone(), self.highest_index);
                                     self.highest_index
                                 };
-                                stops.push(SnippetTabstop { index, start, end: text.len() });
+                                stops.push(SnippetTabstop { index, start, end: text.len(), depth, order: stops.len() });
                             }
                         }
                     }

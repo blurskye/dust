@@ -43,13 +43,13 @@ pub(super) fn register_commands(
         },
     )?;
     for (id, description, initial) in [
-        ("test.run.prompt", "Run test by name", "test name="),
+        ("test.run.prompt", "Run test by name", "test.run name="),
         (
             "test.list.prompt",
             "Show test results by name",
-            "tests name=",
+            "test.list name=",
         ),
-        ("test.stop.prompt", "Stop test by name", "teststop name="),
+        ("test.stop.prompt", "Stop test by name", "test.stop name="),
     ] {
         register(
             registry,
@@ -164,4 +164,25 @@ pub(super) fn register_commands(
         },
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::{CommandInvocation, EditorState, InvocationSource};
+
+    #[test]
+    fn test_prompts_use_stable_command_ids() {
+        let root = tempfile::tempdir().unwrap();
+        let state = EditorState::new(root.path().into());
+        let mut registry = CommandRegistry::default();
+        register_commands(&mut registry).unwrap();
+        for command in ["test.run", "test.list", "test.stop"] {
+            let invocation = CommandInvocation::new(
+                &format!("{command}.prompt"), InvocationSource::Test,
+            ).unwrap();
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            assert!(matches!(outcome.effects.as_slice(), [AppEffect::OpenPrompt { kind: PromptKind::Command, initial }] if initial == &format!("{command} name=")));
+        }
+    }
 }

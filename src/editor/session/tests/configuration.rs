@@ -143,6 +143,38 @@ fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
 }
 
 #[test]
+fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
+    let (_app_dirs, mut app) = app();
+    let root = app.state.workspace_root.clone();
+    let mut installed = app.configuration.theme().clone();
+    installed.styles.accent.foreground = crate::config::ThemeColor::Red;
+    fs::create_dir(root.join("themes")).unwrap();
+    fs::write(
+        root.join("themes").join(format!("{}.toml", installed.name)),
+        toml::to_string(&installed).unwrap(),
+    ).unwrap();
+    let mut configuration = app.configuration.fixture_snapshot();
+    configuration.sources.settings = root.join("config.toml");
+    app.configuration.install_fixture(configuration);
+    app.process_effect(AppEffect::SelectTheme);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.ui.picker.as_ref().unwrap().loading {
+        app.process_theme_results();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    let label = crate::config::theme_display_name(&installed.name);
+    let rows = &app.ui.picker.as_ref().unwrap().rows;
+    assert_eq!(rows.iter().filter(|row| row.label == label).count(), 1);
+    let key = match app.selected_picker_payload().unwrap() {
+        crate::editor::session::search::PickerPayload::Theme(key) => key.clone(),
+        _ => panic!("theme key"),
+    };
+    assert_eq!(app.configuration.apply_theme(&key).unwrap(), installed.name);
+    assert_eq!(app.configuration.theme(), &installed);
+}
+
+#[test]
 fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();
@@ -436,7 +468,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let (_app_dirs, app) = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
-    let config_source = "editor = { tab_width = 7, markdown = { glyphs = { bullets = ['*'] } } }\n";
+    let config_source = "editor = { tab_width = 7, markdown = { glyphs = { bullets = ['*'] } } }\n[command_labels]\n\"view.cursor.move\" = \"MOVE\"\n";
     fs::write(&config_path, config_source).expect("config");
     let mut loaded = crate::config::load_config(&config_path);
 
@@ -457,6 +489,11 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let (resolved, diagnostic) =
         super::resolve_configuration(&app.commands, loaded, true).expect("resolve");
     assert!(diagnostic.is_none());
+    let label = resolved
+        .explain(r#"command_labels."view.cursor.\u006dove""#)
+        .expect("escaped command label");
+    assert_eq!(label.value, "\"MOVE\"");
+    assert!(label.source.starts_with(&config_path.display().to_string()));
     let setting = resolved.explain("editor.tab_width").expect("setting");
     assert!(
         setting
@@ -1820,6 +1857,70 @@ fn disabled_plugin_command_references_are_not_deferred() {
     loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
     loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
     assert!(super::resolve_configuration(&app.commands, loaded, true).is_err());
+}
+
+#[test]
+fn direct_motion_binding_preserves_an_explicit_count_of_one() {
+    let (_app_dirs, mut app) = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.keymaps.entries.push(toml::from_str(r#"
+        id = "user.direct-end"
+        context = "editor"
+        mode = "normal"
+        keys = "Z"
+        command = "view.cursor.move"
+        arguments = { motion = "document_end" }
+    "#).unwrap());
+    app.apply_configuration_candidate(loaded, false).unwrap();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\nthird"), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.handle_configured_key(KeyEvent::character('Z'));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(13));
+    for key in ['1', 'Z'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+}
+
+#[test]
+fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
+    let (_app_dirs, mut app) = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.installed_plugins.insert("demo".into());
+    loaded.keymaps.entries.push(toml::from_str(r#"
+        id = "user.demo"
+        context = "editor"
+        mode = "normal"
+        keys = "<leader> j x"
+        command = "plugin.demo.run"
+    "#).unwrap());
+    let group: crate::config::KeyGroupEntry = toml::from_str(r#"
+        id = "user.group"
+        context = "editor"
+        mode = "normal"
+        prefix = "space j"
+        label = "Demo"
+    "#).unwrap();
+    loaded.keymaps.groups.push(group.clone());
+    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
+    assert!(diagnostic.is_none());
+    assert!(resolved.deferred_plugin_keymaps);
+    assert!(resolved.base_keymaps.groups.iter().all(|group| group.id != "user.group"));
+    assert!(resolved.raw_keymaps.groups.iter().any(|group| group.id == "user.group"));
+
+    let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
+    spec.source = crate::editor::CommandSource::Plugin("demo".into());
+    app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
+    let (compiled, diagnostic) = compile_keymaps(&app.commands, &resolved.raw_keymaps, &resolved.settings.input.keymaps);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    assert!(compiled.groups.iter().any(|group| group.id == "user.group"));
+    assert!(compiled.inspect_id("user.demo").is_some());
+
+    let mut unreachable = group;
+    unreachable.id = "user.unreachable".into();
+    unreachable.prefix = Some("<leader> j z".into());
+    loaded.keymaps.groups.push(unreachable);
+    assert!(super::resolve_configuration(&app.commands, loaded, true).err().expect("unreachable group").contains("user.unreachable"));
 }
 
 #[test]

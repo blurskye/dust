@@ -37,31 +37,22 @@ pub(super) fn motion_target(
             })?;
             target = find_on_line(text, cursor, motion, character, count)?;
         }
-        "left" => {
-            for _ in 0..count {
-                let previous = previous_grapheme_boundary(text, target);
-                if text
-                    .slice(ByteRange::new(previous, target).map_err(failed)?)
-                    .map_err(failed)?
-                    == "\n"
-                {
-                    break;
+        "left" | "right" => {
+            let line = text.byte_to_line(cursor).map_err(failed)?;
+            let start = text.line_to_byte(line).map_err(failed)?.get();
+            let value = text.line(line).map_err(failed)?;
+            let relative = cursor.get() - start;
+            if motion == "left" {
+                for (index, _) in value[..relative].grapheme_indices(true).rev().take(count) {
+                    target = ByteOffset(start + index);
                 }
-                target = previous;
-            }
-        }
-        "right" => {
-            for _ in 0..count {
-                let next = next_grapheme_boundary(text, target);
-                if next == target
-                    || text
-                        .slice(ByteRange::new(target, next).map_err(failed)?)
-                        .map_err(failed)?
-                        == "\n"
-                {
-                    break;
+            } else {
+                for (index, grapheme) in value[relative..].grapheme_indices(true).take(count) {
+                    if grapheme == "\n" {
+                        break;
+                    }
+                    target = ByteOffset(cursor.get() + index + grapheme.len());
                 }
-                target = next;
             }
         }
         "up" | "down" => {
@@ -97,7 +88,9 @@ pub(super) fn motion_target(
             target = first_nonblank(text, text.byte_to_line(cursor).map_err(failed)?)?;
         }
         "line_end" => {
-            let line = text.byte_to_line(cursor).map_err(failed)?;
+            let line = text.byte_to_line(cursor).map_err(failed)?
+                .saturating_add(count.saturating_sub(1))
+                .min(text.visible_lines().saturating_sub(1));
             let end = line_content_end(text, line)?;
             target = if end == text.line_to_byte(line).map_err(failed)? {
                 end
@@ -105,44 +98,38 @@ pub(super) fn motion_target(
                 previous_grapheme_boundary(text, end)
             };
         }
-        "word_forward" => {
-            for _ in 0..count {
-                target = word_forward(text, target);
-            }
-        }
-        "word_backward" => {
-            for _ in 0..count {
-                target = word_backward(text, target);
-            }
-        }
-        "big_word_forward" => {
-            for _ in 0..count {
-                target = big_word_forward(text, target);
-            }
-        }
-        "big_word_backward" => {
-            for _ in 0..count {
-                target = big_word_backward(text, target);
-            }
-        }
-        "word_end" => {
+        "word_forward" | "word_backward" | "big_word_forward" | "big_word_backward"
+        | "word_end" | "big_word_end" => {
+            let source = text.to_string();
+            let step = match motion {
+                "word_forward" => word_forward,
+                "word_backward" => word_backward,
+                "big_word_forward" => big_word_forward,
+                "big_word_backward" => big_word_backward,
+                "word_end" => word_end,
+                _ => big_word_end,
+            };
             for index in 0..count {
-                if index > 0 || word_end(text, target) == target {
-                    target = next_grapheme_boundary(text, target);
+                let previous = target;
+                if motion.ends_with("_end") && (index > 0 || step(&source, target) == target) {
+                    target = ByteOffset(target.get() + source[target.get()..]
+                        .graphemes(true).next().map_or(0, str::len));
                 }
-                target = word_end(text, target);
-            }
-        }
-        "big_word_end" => {
-            for index in 0..count {
-                if index > 0 || big_word_end(text, target) == target {
-                    target = next_grapheme_boundary(text, target);
+                target = step(&source, target);
+                if target == previous {
+                    break;
                 }
-                target = big_word_end(text, target);
             }
         }
         "matching_pair" => target = matching_pair(text, target)?,
-        "document_start" => target = ByteOffset(0),
+        "document_start" => target = first_nonblank(text, 0)?,
+        "percentage" => {
+            if !(1..=100).contains(&count) {
+                return Err(CommandError::InvalidArguments("percentage must be between 1 and 100".into()));
+            }
+            let line = text.visible_lines().saturating_mul(count).div_ceil(100).saturating_sub(1);
+            target = first_nonblank(text, line)?;
+        }
         "line_number" => {
             let last = text.visible_lines().saturating_sub(1);
             target = first_nonblank(text, count.saturating_sub(1).min(last))?;
@@ -241,23 +228,24 @@ pub(super) fn repeat_visual_ranges(
     match shape {
         "character" => {
             let first_line = text.byte_to_line(view.cursor).map_err(failed)?;
+            if first_line.saturating_add(height) > text.visible_lines() {
+                return Ok((
+                    vec![ByteRange::new(view.cursor, ByteOffset(text.len_bytes())).map_err(failed)?],
+                    RegisterShape::Character,
+                ));
+            }
             let last_line = first_line.saturating_add(height - 1);
-            let end = if last_line >= text.visible_lines() {
-                ByteOffset(text.len_bytes())
+            let start = if height == 1 {
+                view.cursor
             } else {
-                let start = if height == 1 {
-                    view.cursor
-                } else {
-                    text.line_to_byte(last_line).map_err(failed)?
-                };
-                let line_end = text.line_to_byte(last_line).map_err(failed)?.get()
-                    + text.line(last_line).map_err(failed)?.len();
-                let remaining = text
-                    .slice(ByteRange::new(start, ByteOffset(line_end)).map_err(failed)?)
-                    .map_err(failed)?;
-                ByteOffset(start.get() + remaining.grapheme_indices(true).nth(width)
-                    .map_or(remaining.len(), |(offset, _)| offset))
+                text.line_to_byte(last_line).map_err(failed)?
             };
+            let line = text.line(last_line).map_err(failed)?;
+            let line_start = text.line_to_byte(last_line).map_err(failed)?;
+            let relative = start.get() - line_start.get();
+            let extent = line[relative..].grapheme_indices(true).nth(width)
+                .map_or(line.len() - relative, |(index, _)| index);
+            let end = ByteOffset(start.get() + extent);
             Ok((
                 vec![ByteRange::new(view.cursor, end).map_err(failed)?],
                 RegisterShape::Character,
@@ -293,7 +281,7 @@ pub(super) fn repeat_visual_ranges(
             );
             let last_column = first_column.saturating_add(width.saturating_sub(1));
             let mut ranges = Vec::new();
-            for line_index in first_line..first_line.saturating_add(height).min(text.len_lines()) {
+            for line_index in first_line..first_line.saturating_add(height).min(text.visible_lines()) {
                 let start = text.line_to_byte(line_index).map_err(failed)?;
                 let line = text.line(line_index).map_err(failed)?;
                 let content = line.strip_suffix('\n').unwrap_or(&line);
@@ -457,9 +445,9 @@ pub(super) fn operator_range(
     }
     let target = if change_word {
         let first = if motion == "big_word_end" {
-            big_word_end(text, cursor)
+            big_word_end(&text.to_string(), cursor)
         } else {
-            word_end(text, cursor)
+            word_end(&text.to_string(), cursor)
         };
         motion_target(
             text,
@@ -472,6 +460,32 @@ pub(super) fn operator_range(
         )?
     } else {
         motion_target(text, cursor, motion, count, character, policy, None)?
+    };
+    // `dw`/`dW` stop at the end of the last word's line, even when whitespace-only
+    // lines follow it. Counted motions spanning whole lines keep those lines whole.
+    let target = if matches!(motion, "word_forward" | "big_word_forward") && target > cursor {
+        let target_line = text.byte_to_line(target).map_err(failed)?;
+        let cursor_line = text.byte_to_line(cursor).map_err(failed)?;
+        let line_start = text.line_to_byte(target_line).map_err(failed)?;
+        let prefix = text.slice(ByteRange::new(line_start, target).map_err(failed)?).map_err(failed)?;
+        if target_line > cursor_line && prefix.trim().is_empty() {
+            let last_step = motion_target(text, cursor, motion, count.saturating_sub(1), character, policy, None)?;
+            let last_line = text.byte_to_line(last_step).map_err(failed)?;
+            let end = line_content_end(text, last_line)?;
+            if last_step < target && last_line > cursor_line && cursor <= first_nonblank(text, cursor_line)? {
+                return ByteRange::new(text.line_to_byte(cursor_line).map_err(failed)?,
+                    text.line_to_byte(last_line + 1).map_err(failed)?).map_err(failed);
+            }
+            if last_step < target && (last_line > cursor_line || last_step < end) {
+                end
+            } else {
+                target
+            }
+        } else {
+            target
+        }
+    } else {
+        target
     };
     let (start, mut end) = if target < cursor {
         (target, cursor)
@@ -488,7 +502,9 @@ pub(super) fn operator_range(
             | "find_backward"
             | "till_forward"
             | "till_forward_again"
-    ) {
+            | "till_backward"
+            | "till_backward_again"
+    ) && !(motion == "line_end" && end == line_content_end(text, text.byte_to_line(end).map_err(failed)?)?) {
         end = next_grapheme_boundary(text, end);
     }
     ByteRange::new(start, end).map_err(failed)
@@ -526,14 +542,14 @@ fn find_on_line(
     };
     let neighbour = if forward {
         content[relative..]
-            .chars()
+            .graphemes(true)
             .next()
-            .map(|current| relative + current.len_utf8())
+            .map(|current| relative + current.len())
     } else {
         content[..relative]
-            .chars()
+            .graphemes(true)
             .next_back()
-            .map(|previous| relative - previous.len_utf8())
+            .map(|previous| relative - previous.len())
     };
     let skip = usize::from(motion.ends_with("_again") && candidates.first() == neighbour.as_ref());
     let index = candidates
@@ -611,8 +627,7 @@ pub(super) fn cursor_display_column(
     ))
 }
 
-pub(super) fn word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+fn word_forward(source: &str, cursor: ByteOffset) -> ByteOffset {
     if cursor.get() >= source.len() {
         return cursor;
     }
@@ -622,6 +637,10 @@ pub(super) fn word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset 
     });
     let mut seen_other = false;
     for (relative, character) in iter {
+        let index = cursor.get() + relative;
+        if character == "\n" && (index == 0 || source.as_bytes()[index - 1] == b'\n') {
+            return ByteOffset(index);
+        }
         let class = word_class(character.chars().next().unwrap_or(' '));
         if !seen_other && class != current {
             seen_other = true;
@@ -633,14 +652,17 @@ pub(super) fn word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset 
     ByteOffset(source.len())
 }
 
-pub(super) fn big_word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+fn big_word_forward(source: &str, cursor: ByteOffset) -> ByteOffset {
     let starts_in_space = source[cursor.get()..]
         .chars()
         .next()
         .is_some_and(char::is_whitespace);
     let mut separator_seen = starts_in_space;
     for (relative, character) in source[cursor.get()..].grapheme_indices(true) {
+        let index = cursor.get() + relative;
+        if relative > 0 && character == "\n" && (index == 0 || source.as_bytes()[index - 1] == b'\n') {
+            return ByteOffset(index);
+        }
         if character.chars().all(char::is_whitespace) {
             separator_seen = true;
         } else if separator_seen {
@@ -650,11 +672,13 @@ pub(super) fn big_word_forward(text: &TextBuffer, cursor: ByteOffset) -> ByteOff
     ByteOffset(source.len())
 }
 
-pub(super) fn big_word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+fn big_word_backward(source: &str, cursor: ByteOffset) -> ByteOffset {
     let mut target = 0;
     let mut seen_nonspace = false;
     for (index, character) in source[..cursor.get()].grapheme_indices(true).rev() {
+        if character == "\n" && (index == 0 || source.as_bytes()[index - 1] == b'\n') {
+            return if seen_nonspace { ByteOffset(target) } else { ByteOffset(index) };
+        }
         if character.chars().all(char::is_whitespace) {
             if seen_nonspace {
                 break;
@@ -667,14 +691,16 @@ pub(super) fn big_word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOf
     ByteOffset(target)
 }
 
-pub(super) fn word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+fn word_backward(source: &str, cursor: ByteOffset) -> ByteOffset {
     let before = &source[..cursor.get()];
     let mut iter = before.grapheme_indices(true).rev();
     let Some((mut target, mut character)) = iter.next() else {
         return ByteOffset(0);
     };
     while character.chars().all(char::is_whitespace) {
+        if character == "\n" && (target == 0 || source.as_bytes()[target - 1] == b'\n') {
+            return ByteOffset(target);
+        }
         let Some((index, next)) = iter.next() else {
             return ByteOffset(0);
         };
@@ -691,8 +717,7 @@ pub(super) fn word_backward(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset
     ByteOffset(target)
 }
 
-pub(super) fn big_word_end(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+fn big_word_end(source: &str, cursor: ByteOffset) -> ByteOffset {
     let mut end = cursor.get();
     let mut seen_nonspace = false;
     for (relative, character) in source[cursor.get()..].grapheme_indices(true) {
@@ -715,13 +740,11 @@ pub(super) fn matching_pair(
     let source = text.to_string();
     let line = text.byte_to_line(cursor).map_err(failed)?;
     let line_end = line_content_end(text, line)?.get();
-    let (at, character) = source[cursor.get()..line_end]
-        .char_indices()
-        .find_map(|(relative, character)| {
-            "()[]{}"
-                .contains(character)
-                .then_some((cursor.get() + relative, character))
-        })
+    let delimiters = pair_delimiters(&source);
+    let mut following = delimiters.clone();
+    let (at, character) = following.by_ref()
+        .take_while(|(index, _)| *index < line_end)
+        .find(|(index, _)| *index >= cursor.get())
         .ok_or_else(|| CommandError::Unavailable("no matching pair on line".into()))?;
     let (mate, forward) = match character {
         '(' => (')', true),
@@ -732,20 +755,9 @@ pub(super) fn matching_pair(
         '}' => ('{', false),
         _ => unreachable!(),
     };
-    let mut depth = 0_usize;
     if forward {
-        for (relative, candidate) in source[at..].char_indices() {
-            if candidate == character {
-                depth += 1;
-            } else if candidate == mate {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(ByteOffset(at + relative));
-                }
-            }
-        }
-    } else {
-        for (index, candidate) in source[..=at].char_indices().rev() {
+        let mut depth = 1_usize;
+        for (index, candidate) in following {
             if candidate == character {
                 depth += 1;
             } else if candidate == mate {
@@ -755,12 +767,60 @@ pub(super) fn matching_pair(
                 }
             }
         }
+    } else {
+        // Two forward passes preserve quote handling without storing every delimiter.
+        let prefix = delimiters.take_while(|(index, _)| *index < at);
+        let change = |candidate| if candidate == mate { 1_isize } else if candidate == character { -1 } else { 0 };
+        let wanted = prefix.clone().map(|(_, candidate)| change(candidate)).sum::<isize>() - 1;
+        let (mut depth, mut opening) = (0, None);
+        for (index, candidate) in prefix {
+            if candidate == mate && depth == wanted {
+                opening = Some(ByteOffset(index));
+            }
+            depth += change(candidate);
+        }
+        if let Some(opening) = opening {
+            return Ok(opening);
+        }
     }
     Err(CommandError::Unavailable("matching pair not found".into()))
 }
 
-pub(super) fn word_end(text: &TextBuffer, cursor: ByteOffset) -> ByteOffset {
-    let source = text.to_string();
+/// Skip complete, same-line quoted strings, not apostrophes or Rust lifetimes.
+fn pair_delimiters(source: &str) -> impl Iterator<Item = (usize, char)> + Clone + '_ {
+    let mut characters = source.char_indices().peekable();
+    std::iter::from_fn(move || {
+        while let Some((index, character)) = characters.next() {
+            if character == '\\' {
+                characters.next();
+            } else if matches!(character, '\'' | '"' | '`')
+                && !(character == '\'' && source[..index].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_'))
+            {
+                let mut closing = characters.clone();
+                while let Some((_, next)) = closing.next() {
+                    if next == '\n' {
+                        break;
+                    }
+                    if next == '\\' {
+                        if closing.next().is_some_and(|(_, c)| c == '\n') {
+                            break;
+                        }
+                    } else if next == character {
+                        if !(character == '\'' && closing.peek().is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_')) {
+                            characters = closing;
+                        }
+                        break;
+                    }
+                }
+            } else if "()[]{}".contains(character) {
+                return Some((index, character));
+            }
+        }
+        None
+    })
+}
+
+fn word_end(source: &str, cursor: ByteOffset) -> ByteOffset {
     let mut iter = source[cursor.get()..].grapheme_indices(true).peekable();
     while iter
         .peek()

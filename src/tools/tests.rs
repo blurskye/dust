@@ -205,8 +205,10 @@ fn javascript_tools_prepend_their_private_bun_backed_node_runtime() {
 fn nixos_host_detection_accepts_only_the_exact_os_release_id() {
     let directory = tempfile::tempdir().expect("os release directory");
     let os_release = directory.path().join("os-release");
-    std::fs::write(&os_release, "NAME=NixOS\nID=\"nixos\"\n").expect("NixOS release");
-    assert!(nixos_os_release_at(&os_release));
+    for value in ["nixos", "\"nixos\"", "'nixos'"] {
+        std::fs::write(&os_release, format!("NAME=NixOS\nID={value}\n")).expect("NixOS release");
+        assert!(nixos_os_release_at(&os_release));
+    }
     std::fs::write(&os_release, "ID_LIKE=nixos\nID=ubuntu\n").expect("other release");
     assert!(!nixos_os_release_at(&os_release));
 }
@@ -334,7 +336,7 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
         id: definition.id,
         executable: installed,
         arguments: vec!["--version".into()],
-        environment: runtime.environment(),
+        environment: runtime.environment().into_iter().map(|(key, value)| (key, value.into())).collect(),
         current_directory: Some(directory.path().into()),
         timeout: std::time::Duration::from_secs(10),
         cancelled: Default::default(),
@@ -438,7 +440,9 @@ fn probe_isolated_tool_version(mut request: ToolVersionRequest) -> Result<String
     let env = discover_executable("env").ok_or("env executable unavailable")?;
     let env = std::path::absolute(env).map_err(|error| error.to_string())?;
     let mut arguments = vec!["-i".into()];
-    arguments.extend(request.environment.iter().map(|(key, value)| format!("{key}={value}")));
+    arguments.extend(request.environment.iter().map(|(key, value)| {
+        value.to_str().map(|value| format!("{key}={value}")).ok_or("non-UTF-8 fixture environment")
+    }).collect::<Result<Vec<_>, _>>()?);
     arguments.push(request.executable.to_str().ok_or("non-UTF-8 tool path")?.into());
     arguments.append(&mut request.arguments);
     request.executable = env;
@@ -1618,6 +1622,24 @@ fn package_atomic_writes_remove_staging_files_when_rename_fails() {
     assert!(super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err());
     assert!(target.is_dir());
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn package_commits_preserve_plugin_ownership_and_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    let installed = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let mut renamed = plugin.clone();
+    renamed.id = "other".into();
+    assert!(matches!(manager.commit_prepared(&manifest, &renamed, &object), Err(super::PackageError::Activation(_))));
+    let mut unrelated = manifest.clone();
+    unrelated.name = "other".into();
+    assert!(matches!(manager.commit_prepared(&unrelated, &plugin, &object), Err(super::PackageError::Activation(_))));
+    assert_eq!(manager.read_lock().unwrap(), installed);
+    assert_eq!(manager.activations().unwrap()[0].0.id, "demo");
+    assert!(matches!(manager.rollback(), Err(super::PackageError::NoRollback)));
 }
 
 #[test]

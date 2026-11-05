@@ -8,6 +8,7 @@ mod keymap;
 mod search;
 
 pub use command_line::{ExParseError, parse_ex, substitute_pattern, typed_substitution};
+pub(crate) use command_line::substitution_pattern;
 pub use context::{
     InputContextDescriptor, InputContextError, InputContextLayer, InputContextPolicy,
     InputContextRegistry,
@@ -20,4 +21,4 @@ pub use key::{
 };
 pub use keymap::{Keymap, KeymapLayer, KeymapResolver, MappingResolution};
 pub(crate) use keymap::{KeymapBindings, KeymapSequence};
-pub use search::{SearchPatternError, search_match, search_matches};
+pub use search::{SearchPatternError, search_match, search_matches, substitution_regex};

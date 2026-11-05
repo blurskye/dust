@@ -4,7 +4,7 @@ use crate::editor::{
     state::{EditorMode, EditorState, RegisterShape, ReplaceRecord},
     text::{
         ByteOffset, ByteRange, DisplayWidthPolicy, TextEdit, TextEditSet, display_column_at,
-        insertion_at_display_column, next_grapheme_boundary, previous_grapheme_boundary,
+        grapheme_cell_width, insertion_at_display_column, next_grapheme_boundary, previous_grapheme_boundary,
     },
     transaction::{EditorOperation, UndoPolicy},
 };
@@ -13,7 +13,7 @@ use super::{
     super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
     comment::build_comment_toggle,
     motion::{
-        block_start_column, cursor_display_column, motion_target, on_last_character,
+        block_start_column, cursor_display_column, line_content_end, motion_target, on_last_character,
         operator_range, repeat_visual_ranges, visual_ranges,
     },
     multi,
@@ -42,6 +42,9 @@ pub(super) fn execute_builtin<E>(
         .get(view_id)
         .ok_or_else(|| CommandError::Unavailable("target view is stale".into()))?;
     let buffer_id = invocation.target.buffer.unwrap_or(view.buffer);
+    if buffer_id != view.buffer {
+        return Err(CommandError::Unavailable("target view displays a different buffer".into()));
+    }
     let buffer = state
         .buffers
         .get(buffer_id)
@@ -134,7 +137,28 @@ pub(super) fn execute_builtin<E>(
         }
         "mode.normal" => {
             transaction.undo_policy = UndoPolicy::Boundary;
-            if matches!(view.mode, EditorMode::Insert | EditorMode::Replace)
+            let repeated = if view.mode == EditorMode::Insert {
+                view.insert_repeat.as_ref().filter(|repeat| repeat.count > 1 && repeat.start <= view.cursor)
+                    .map(|repeat| {
+                        let text = buffer.text.slice(ByteRange::new(repeat.start, view.cursor).map_err(failed)?)
+                            .map_err(failed)?;
+                        let text = if repeat.new_line { format!("\n{text}") } else { text };
+                        Ok::<_, CommandError>(text.repeat(repeat.count - 1))
+                    }).transpose()?
+            } else {
+                None
+            };
+            if let Some(text) = repeated.filter(|text| !text.is_empty()) {
+                let last = text.grapheme_indices(true).next_back().map_or(0, |(offset, _)| offset);
+                transaction.operations.push(EditorOperation::ApplyEdits {
+                    buffer: buffer_id,
+                    edits: TextEditSet::new(buffer.text.revision(), vec![TextEdit::new(ByteRange::empty(view.cursor), &text)]),
+                });
+                transaction.operations.push(EditorOperation::SetCursor {
+                    view: view_id,
+                    position: ByteOffset(view.cursor.get() + last),
+                });
+            } else if matches!(view.mode, EditorMode::Insert | EditorMode::Replace)
                 && view.cursor.get() > 0
             {
                 let previous = previous_grapheme_boundary(&buffer.text, view.cursor);
@@ -234,6 +258,13 @@ pub(super) fn execute_builtin<E>(
                 view.cursor,
                 placement,
             )?;
+            if count > 1 {
+                transaction.operations.push(EditorOperation::SetInsertRepeat {
+                    view: view_id,
+                    count,
+                    new_line: matches!(placement, "open_above" | "open_below"),
+                });
+            }
         }
         "edit.insert_text" => {
             transaction.undo_policy = if state.policy.undo_break_on_text_commit {
@@ -369,7 +400,7 @@ pub(super) fn execute_builtin<E>(
                     record: ReplaceRecord {
                         start: view.cursor,
                         original,
-                        inserted_len: replacement.len(),
+                        inserted: replacement.to_owned(),
                     },
                 });
         }
@@ -380,7 +411,10 @@ pub(super) fn execute_builtin<E>(
                 UndoPolicy::Merge
             };
             let Some(record) = view.replace_history.last().filter(|record| {
-                record.start.get().saturating_add(record.inserted_len) == view.cursor.get()
+                let end = ByteOffset(record.start.get().saturating_add(record.inserted.len()));
+                end == view.cursor
+                    && buffer.text.slice(ByteRange::new(record.start, end).expect("ordered range"))
+                        .is_ok_and(|text| text == record.inserted)
             }) else {
                 return Ok(CommandOutcome {
                     transaction: None,
@@ -389,7 +423,8 @@ pub(super) fn execute_builtin<E>(
                     follow_up: Vec::new(),
                 });
             };
-            let end = ByteOffset(record.start.get().saturating_add(record.inserted_len));
+            let end = ByteOffset(record.start.get().saturating_add(record.inserted.len()));
+            transaction.operations.push(EditorOperation::PopReplaceRecord { view: view_id });
             transaction.operations.push(EditorOperation::ApplyEdits {
                 buffer: buffer_id,
                 edits: TextEditSet::new(
@@ -404,9 +439,6 @@ pub(super) fn execute_builtin<E>(
                 view: view_id,
                 position: record.start,
             });
-            transaction
-                .operations
-                .push(EditorOperation::PopReplaceRecord { view: view_id });
         }
         "edit.backspace" => {
             transaction.undo_policy = if state.policy.undo_break_on_text_commit {
@@ -551,7 +583,11 @@ pub(super) fn execute_builtin<E>(
             }
         }
         "edit.replace" => {
-            let replacement = string_argument(invocation, "text")?;
+            let normalized = TextEdit::new(
+                ByteRange::empty(view.cursor),
+                string_argument(invocation, "text")?,
+            );
+            let replacement = normalized.replacement();
             let mut end = view.cursor;
             let mut replaced = 0;
             for _ in 0..count {
@@ -568,20 +604,22 @@ pub(super) fn execute_builtin<E>(
                 end = next;
                 replaced += 1;
             }
-            if replaced > 0 {
+            if replaced == count {
+                let replacement = replacement.repeat(count);
+                let last = replacement.grapheme_indices(true).next_back().map_or(0, |(offset, _)| offset);
                 transaction.operations.push(EditorOperation::ApplyEdits {
                     buffer: buffer_id,
                     edits: TextEditSet::new(
                         buffer.text.revision(),
                         vec![TextEdit::new(
                             ByteRange::new(view.cursor, end).map_err(failed)?,
-                            replacement.repeat(replaced),
+                            replacement,
                         )],
                     ),
                 });
                 transaction.operations.push(EditorOperation::SetCursor {
                     view: view_id,
-                    position: view.cursor,
+                    position: ByteOffset(view.cursor.get() + last),
                 });
             }
         }
@@ -632,7 +670,7 @@ pub(super) fn execute_builtin<E>(
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
                 let original_motion = motion;
                 let motion = change_word_motion(operator, motion, &buffer.text, view.cursor);
-                let requested_linewise = bool_argument(invocation, "linewise")?;
+                let requested_linewise = bool_argument(invocation, "linewise")? || motion == "percentage";
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
                 } else {
@@ -645,7 +683,10 @@ pub(super) fn execute_builtin<E>(
                             count,
                             motion != original_motion,
                             requested_linewise,
-                            character_argument(invocation, "character")?,
+                            character_argument(
+                                invocation,
+                                if operator == "surround_add" { "find_character" } else { "character" },
+                            )?,
                             state.policy,
                         )?],
                         if requested_linewise {
@@ -821,14 +862,15 @@ pub(super) fn execute_builtin<E>(
                         "pasting over a block selection is not supported".into(),
                     ));
                 }
+                let text = if register.shape == RegisterShape::Line && !register.text.ends_with('\n') {
+                    format!("{}\n", register.text).repeat(count)
+                } else {
+                    register.text.repeat(count)
+                };
                 let put = match (shape, register.shape) {
-                    (RegisterShape::Line, RegisterShape::Character) => {
-                        format!("{}\n", register.text)
-                    }
-                    (RegisterShape::Character, RegisterShape::Line) => {
-                        format!("\n{}", register.text)
-                    }
-                    _ => register.text.clone(),
+                    (RegisterShape::Line, RegisterShape::Character) => format!("{text}\n"),
+                    (RegisterShape::Character, RegisterShape::Line) => format!("\n{text}"),
+                    _ => text,
                 };
                 let replaced = buffer.text.slice(whole_range).map_err(failed)?;
                 transaction.operations.push(EditorOperation::ApplyEdits {
@@ -867,11 +909,7 @@ pub(super) fn execute_builtin<E>(
                 .iter()
                 .map(|range| buffer.text.slice(*range).map_err(failed))
                 .collect::<Result<Vec<_>, _>>()?
-                .join(if shape == RegisterShape::Block {
-                    "\n"
-                } else {
-                    ""
-                });
+                .join(if shape == RegisterShape::Block { "\n" } else { "" });
             transaction.operations.push(EditorOperation::SetRegister {
                 name: invocation.register.unwrap_or('"'),
                 text,
@@ -932,6 +970,12 @@ pub(super) fn execute_builtin<E>(
                 });
             } else {
                 transaction.undo_policy = UndoPolicy::Ignore;
+                if matches!(view.mode, EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock) {
+                    transaction.operations.push(EditorOperation::SetCursor {
+                        view: view_id,
+                        position: first_range.start,
+                    });
+                }
             }
             transaction.operations.push(EditorOperation::SetMode {
                 view: view_id,
@@ -990,7 +1034,30 @@ pub(super) fn execute_builtin<E>(
                         .saturating_sub(line_start.get())
                 };
                 let column = display_column_at(source_content, cursor_relative, width_policy);
-                let rows = register.text.split('\n').collect::<Vec<_>>();
+                let mut rows = register.text.split('\n').map(str::to_owned).collect::<Vec<_>>();
+                if count > 1 {
+                    // Preserve raw yanks and single puts; only repeated copies need padding.
+                    let mut widths = Vec::with_capacity(rows.len());
+                    for row in &mut rows {
+                        let mut end_column = column;
+                        let mut expanded = String::new();
+                        for grapheme in row.graphemes(true) {
+                            let cells = grapheme_cell_width(grapheme, end_column, width_policy);
+                            if grapheme == "\t" {
+                                expanded.push_str(&" ".repeat(cells));
+                            } else {
+                                expanded.push_str(grapheme);
+                            }
+                            end_column = end_column.saturating_add(cells);
+                        }
+                        widths.push(end_column.saturating_sub(column));
+                        *row = expanded;
+                    }
+                    let width = widths.iter().copied().max().unwrap_or(0);
+                    for (row, row_width) in rows.iter_mut().zip(widths) {
+                        row.push_str(&" ".repeat(width.saturating_sub(row_width)));
+                    }
+                }
                 let mut edits = Vec::new();
                 let mut extra = String::new();
                 for (row, text) in rows.iter().enumerate() {
@@ -1044,7 +1111,9 @@ pub(super) fn execute_builtin<E>(
             let at = match (register.shape, before) {
                 (RegisterShape::Character, true) => view.cursor,
                 (RegisterShape::Character, false) => {
+                    let line = buffer.text.byte_to_line(view.cursor).map_err(failed)?;
                     next_grapheme_boundary(&buffer.text, view.cursor)
+                        .min(line_content_end(&buffer.text, line)?)
                 }
                 (RegisterShape::Line, true) => {
                     let line = buffer.text.byte_to_line(view.cursor).map_err(failed)?;
@@ -1078,29 +1147,33 @@ pub(super) fn execute_builtin<E>(
             } else {
                 text = text.repeat(count);
             }
+            let edit = TextEdit::new(ByteRange::empty(at), text);
+            if register.shape == RegisterShape::Character && !edit.replacement().contains('\n') {
+                let last = edit.replacement().grapheme_indices(true).next_back()
+                    .map_or(0, |(offset, _)| offset);
+                cursor = ByteOffset(at.get().saturating_add(last));
+            }
             transaction.operations.push(EditorOperation::ApplyEdits {
                 buffer: buffer_id,
-                edits: TextEditSet::new(
-                    buffer.text.revision(),
-                    vec![TextEdit::new(ByteRange::empty(at), text)],
-                ),
+                edits: TextEditSet::new(buffer.text.revision(), vec![edit]),
             });
             transaction.operations.push(EditorOperation::SetCursor {
                 view: view_id,
                 position: cursor,
             });
         }
-        "history.undo" => {
+        "history.undo" | "history.redo" => {
             transaction.undo_policy = UndoPolicy::Ignore;
-            transaction
-                .operations
-                .push(EditorOperation::Undo { buffer: buffer_id });
-        }
-        "history.redo" => {
-            transaction.undo_policy = UndoPolicy::Ignore;
-            transaction
-                .operations
-                .push(EditorOperation::Redo { buffer: buffer_id });
+            let undo = invocation.id.as_str() == "history.undo";
+            // Keep the normal empty-history error, but stop counted commands at the boundary.
+            let steps = buffer.undo.available_steps(undo, count).max(1);
+            for _ in 0..steps {
+                transaction.operations.push(if undo {
+                    EditorOperation::Undo { buffer: buffer_id }
+                } else {
+                    EditorOperation::Redo { buffer: buffer_id }
+                });
+            }
         }
         other => {
             return Err(CommandError::Unknown(CommandId::new(other)?));
@@ -1168,10 +1241,12 @@ fn character_argument(
     }
 }
 
-/// `3G` and `3gg` go to line 3; without a count they go to the end or start.
+/// Counts turn `G`/`gg` into line navigation and `%` into percentage navigation.
 fn counted_motion<'a>(motion: &'a str, invocation: &CommandInvocation) -> &'a str {
     if invocation.count.is_some() && matches!(motion, "document_start" | "document_end") {
         "line_number"
+    } else if invocation.count.is_some() && motion == "matching_pair" {
+        "percentage"
     } else {
         motion
     }

@@ -69,7 +69,7 @@ pub fn decode_utf8(bytes: &[u8]) -> Result<DecodedText, EncodingError> {
         None => (false, bytes),
     };
     let source = std::str::from_utf8(payload).map_err(|error| EncodingError::InvalidUtf8 {
-        valid_up_to: error.valid_up_to(),
+        valid_up_to: bytes.len() - payload.len() + error.valid_up_to(),
     })?;
 
     let mut text = String::with_capacity(source.len());
@@ -174,6 +174,18 @@ mod tests {
             vec![LineEnding::CrLf, LineEnding::Lf, LineEnding::Cr]
         );
         assert_eq!(encode_utf8(&decoded.text, &decoded.format), input);
+    }
+
+    #[test]
+    fn invalid_utf8_offsets_include_the_bom() {
+        for input in [b"\xEF\xBB\xBF\xFF".as_slice(), b"\xEF\xBB\xBFabc\xFF"] {
+            assert_eq!(
+                decode_utf8(input),
+                Err(super::EncodingError::InvalidUtf8 {
+                    valid_up_to: input.len() - 1,
+                })
+            );
+        }
     }
 
     #[test]

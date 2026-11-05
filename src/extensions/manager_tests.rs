@@ -1613,6 +1613,129 @@ fn component_activation_and_each_command_have_their_own_deadline() {
 }
 
 #[test]
+fn component_storage_driver_validates_each_reply_before_advancing() {
+    let limits = PluginLimits {
+        epoch_deadline_ticks: 1000,
+        ..Default::default()
+    };
+    let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
+    let mut request = empty_execution_request();
+    request.command = "storage".into();
+    let mut execution = super::index::execute_component(request, &mut runtime).unwrap();
+    let revision = 17;
+    for phase in 1..=6 {
+        let token = execution.storage_requests[0].token;
+        let mut result = PluginStorageResult {
+            plugin: "demo".into(),
+            load: PluginLoadId(1),
+            token,
+            value: None,
+            revision: None,
+            entries: Vec::new(),
+            truncated: false,
+            error: None,
+        };
+        match phase {
+            1 | 5 => result.revision = Some(revision),
+            2 => {
+                result.value = Some(b"value".to_vec());
+                result.revision = Some(revision);
+            }
+            3 => {
+                result.error = Some(PluginStorageError::new(
+                    PluginStorageErrorCode::StaleRevision,
+                    "expected stale CAS",
+                ));
+            }
+            4 => result.entries.push(PluginStorageEntry {
+                key: "item.one".into(),
+                revision,
+                value: b"value".to_vec(),
+            }),
+            _ => {}
+        }
+        let mut invalid = vec![Vec::new(), vec![result.clone(), result.clone()]];
+        let mut wrong = result.clone();
+        wrong.token += 1;
+        invalid.push(vec![wrong]);
+        let mut wrong = result.clone();
+        wrong.truncated = true;
+        invalid.push(vec![wrong]);
+        let mut wrong = result.clone();
+        wrong.error = if phase == 3 {
+            None
+        } else {
+            Some(PluginStorageError::new(PluginStorageErrorCode::Unavailable, "failed"))
+        };
+        invalid.push(vec![wrong]);
+        let mut wrong = result.clone();
+        wrong.revision = Some(0);
+        invalid.push(vec![wrong]);
+        let mut wrong = result.clone();
+        wrong.value = Some(b"wrong".to_vec());
+        invalid.push(vec![wrong]);
+        let mut wrong = result.clone();
+        wrong.entries.push(PluginStorageEntry {
+            key: "unexpected".into(),
+            revision,
+            value: Vec::new(),
+        });
+        invalid.push(vec![wrong]);
+        if phase == 2 {
+            let mut wrong = result.clone();
+            wrong.value = None;
+            wrong.revision = None;
+            invalid.push(vec![wrong]);
+        }
+        if phase == 4 {
+            let mut wrong = result.clone();
+            wrong.entries.clear();
+            invalid.push(vec![wrong]);
+            for field in 0..3 {
+                let mut wrong = result.clone();
+                match field {
+                    0 => wrong.entries[0].key = "wrong".into(),
+                    1 => wrong.entries[0].revision += 1,
+                    _ => wrong.entries[0].value = b"stale".to_vec(),
+                }
+                invalid.push(vec![wrong]);
+            }
+        }
+        for replies in invalid {
+            let mut request = empty_execution_request();
+            request.command = "storage".into();
+            request.storage_results = replies;
+            let error = super::index::execute_component(request, &mut runtime)
+                .expect_err("invalid storage reply must fail");
+            assert!(
+                matches!(error, PluginError::Execution(ref detail)
+                    if detail.starts_with(&format!("storage:{phase}:"))),
+                "{error}"
+            );
+            assert!(runtime.store.data().storage_requests.is_empty());
+        }
+        let mut request = empty_execution_request();
+        request.command = "storage".into();
+        request.storage_results = vec![result];
+        execution = super::index::execute_component(request, &mut runtime).unwrap();
+        if phase == 6 {
+            assert_eq!(execution.result, "storage:done:missing=true");
+            assert!(execution.storage_requests.is_empty());
+        } else {
+            assert!(execution.result.starts_with(&format!("storage:{phase}:")));
+            assert_eq!(execution.storage_requests.len(), 1);
+            if phase == 4 {
+                assert!(matches!(
+                    execution.storage_requests[0].kind,
+                    PluginStorageRequestKind::Delete { expected_revision, .. }
+                        if expected_revision == revision
+                ));
+            }
+        }
+    }
+}
+
+#[test]
 fn component_storage_inbox_retains_unread_results_and_reserves_capacity() {
     use component_api::dust::plugin::host::{Host, StorageRequest};
     let limits = PluginLimits {

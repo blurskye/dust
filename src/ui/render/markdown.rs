@@ -807,6 +807,7 @@ fn cell_graphemes(
             }
             let mark = marks.peek().copied().filter(|mark| mark.range.contains(at));
             let width = match mark {
+                None if grapheme == "\t" => 1,
                 None => text_width(grapheme, ambiguous),
                 Some(mark) if mark.range.start != at => 0,
                 Some(mark) => match mark.mark {

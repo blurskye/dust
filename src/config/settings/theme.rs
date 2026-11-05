@@ -337,7 +337,7 @@ impl ThemeConfig {
         style
     }
 
-    fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
+    pub(in crate::config) fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
         // Links can loop in a hand-written theme.
         for _ in 0..32 {
             match self

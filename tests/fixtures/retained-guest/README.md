@@ -19,11 +19,11 @@ Copy `target/wasm32-unknown-unknown/release/dust_retained_guest.wasm` to
 `retained-guest.core.wasm`. Expected SHA-256:
 
 ```text
-3773ae204a9b1fe0436f2252161663562be895aea2392b1b4bd187c43af74416
+9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48
 ```
 
 The fixture has no WASI imports. It drives retained open/full-tree replacement,
 placement, focus, close, private open/local-geometry/full-snapshot/patch/action/close,
 typed queue exhaustion, asynchronous event draining, a trap after enqueue, and
-fuel/epoch interruption after enqueue, bounded later-execution host-event delivery/acknowledgement, queued private-storage CAS/get/stale-CAS/list/delete/missing-result feedback, picker-source request/two-chunk/completion/late-cancellation flow, read-only virtual-document initial Unicode/full plus exact-revision patch requests, and the two-step confirmation example: one command opens a retained button view, its real action requests the host dialog, and a result-only execution replaces that existing view with Yes/No/Cancelled state. Its capacity probe consumes result-only callbacks without issuing another request and emits a guest-owned ordinary invocation ordinal, so the 65th ordinary probe unambiguously observes typed `queue-full` from the actual aggregate 64-item host lane. Fixture source and WIT/SDK artifacts are licensed
+fuel/epoch interruption after enqueue, bounded later-execution host-event delivery/acknowledgement, queued private-storage CAS/get/stale-CAS/list/delete/missing-result feedback (validating each reply's token, value, revision, entries, truncation and error before advancing), picker-source request/two-chunk/completion/late-cancellation flow, read-only virtual-document initial Unicode/full plus exact-revision patch requests, and the two-step confirmation example: one command opens a retained button view, its real action requests the host dialog, and a result-only execution replaces that existing view with Yes/No/Cancelled state. Its capacity probe consumes result-only callbacks without issuing another request and emits a guest-owned ordinary invocation ordinal, so the 65th ordinary probe unambiguously observes typed `queue-full` from the actual aggregate 64-item host lane. Fixture source and WIT/SDK artifacts are licensed
 under Apache-2.0; the repository test harness remains GPL-3.0-or-later.

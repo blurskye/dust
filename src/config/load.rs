@@ -1068,47 +1068,6 @@ pub(super) struct ConsistentCandidate<F> {
 
 pub(super) const CONFIGURATION_CONSISTENCY_ATTEMPTS: usize = 3;
 
-#[cfg(test)]
-pub(super) fn load_consistent_candidate_with<F, L, P>(
-    use_user_configuration: bool,
-    initial_theme: &str,
-    mut load: L,
-    mut fingerprint: P,
-) -> Result<ConsistentCandidate<F>, String>
-where
-    F: Eq,
-    L: FnMut() -> CandidateAttempt,
-    P: FnMut(&str) -> F,
-{
-    if !use_user_configuration {
-        let attempt = load();
-        return Ok(ConsistentCandidate {
-            candidate: attempt.candidate,
-            theme: attempt.theme,
-            fingerprint: None,
-        });
-    }
-    let mut theme = initial_theme.to_owned();
-    for _ in 0..CONFIGURATION_CONSISTENCY_ATTEMPTS {
-        let before = fingerprint(&theme);
-        let attempt = load();
-        if attempt.theme != theme {
-            theme = attempt.theme;
-            continue;
-        }
-        let after = fingerprint(&theme);
-        if before == after {
-            return Ok(ConsistentCandidate {
-                candidate: attempt.candidate,
-                theme,
-                fingerprint: Some(after),
-            });
-        }
-    }
-    Err("configuration sources changed while a complete candidate was loading; no snapshot was applied"
-        .into())
-}
-
 pub(super) fn captured_bundle_is_stable<F: Eq>(before: &F, captured: &F, after: &F) -> bool {
     before == captured && captured == after
 }
@@ -1116,16 +1075,28 @@ pub(super) fn captured_bundle_is_stable<F: Eq>(before: &F, captured: &F, after: 
 pub(super) fn capture_consistent_configuration_bundle(
     initial_theme: &str,
 ) -> Result<(ConfigurationSourceBundle, Vec<SourceFingerprint>), String> {
+    capture_consistent_configuration_bundle_with(
+        initial_theme,
+        capture_configuration_bundle,
+        configuration_fingerprint,
+    )
+}
+
+pub(super) fn capture_consistent_configuration_bundle_with(
+    initial_theme: &str,
+    mut capture: impl FnMut(&str) -> ConfigurationSourceBundle,
+    mut fingerprint: impl FnMut(&str) -> Vec<SourceFingerprint>,
+) -> Result<(ConfigurationSourceBundle, Vec<SourceFingerprint>), String> {
     let mut theme = initial_theme.to_owned();
     for _ in 0..CONFIGURATION_CONSISTENCY_ATTEMPTS {
-        let before = configuration_fingerprint(&theme);
-        let bundle = capture_configuration_bundle(&theme);
+        let before = fingerprint(&theme);
+        let bundle = capture(&theme);
         if bundle.selected_theme != theme {
             theme = bundle.selected_theme.clone();
             continue;
         }
         let captured = bundle.identity();
-        let after = configuration_fingerprint(&theme);
+        let after = fingerprint(&theme);
         if captured_bundle_is_stable(&before, &captured, &after) {
             return Ok((bundle, captured));
         }

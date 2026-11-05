@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     io::{BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -87,7 +87,7 @@ pub struct LspSessionLaunch<'a> {
     pub document: Option<LspDocument>,
     pub policy: LspPolicy,
     pub configuration: LspServerConfiguration,
-    pub environment: BTreeMap<String, String>,
+    pub environment: BTreeMap<String, std::ffi::OsString>,
 }
 
 impl LspService {
@@ -421,7 +421,7 @@ pub(super) fn run_session(
     initial_document: Option<LspDocument>,
     policy: LspPolicy,
     mut configuration: LspServerConfiguration,
-    environment: BTreeMap<String, String>,
+    environment: BTreeMap<String, std::ffi::OsString>,
     commands: Receiver<SessionCommand>,
     mut events: EventSender,
     initial_source: Option<(crate::editor::BufferId, crate::editor::text::TextVersion)>,
@@ -568,7 +568,7 @@ pub(super) fn run_session(
         documents.insert(document.uri(), document);
     }
     let mut apply_requests = HashMap::<ServerRequestId, std::sync::Arc<()>>::new();
-    let mut opened_documents = HashSet::new();
+    let mut opened_documents = HashMap::new();
     let mut pending = HashMap::<i64, PendingRequest>::new();
     let mut next_request_id = 2_i64;
     let mut logs = VecDeque::<String>::with_capacity(MAX_LOG_LINES);
@@ -602,7 +602,7 @@ pub(super) fn run_session(
                         &events,
                         &mut stopping,
                         &mut configuration,
-                    ) {
+                    ) && !stopping {
                         send_event(&events, LspEvent::Failed {
                             server: server.clone(),
                             message: format!("language server synchronization failed: {error}"),
@@ -670,7 +670,7 @@ pub(super) fn run_session(
                     )?;
                     for document in documents.values() {
                         send_open(&mut stdin, document)?;
-                        opened_documents.insert(document.uri());
+                        opened_documents.insert(document.uri(), document.version);
                     }
                     Ok::<_, crate::process::ProtocolError>(())
                     })();
@@ -889,7 +889,7 @@ pub(super) fn handle_command(
     >,
     diagnostic_lineage: &mut super::origins::DiagnosticLineage,
     apply_requests: &mut HashMap<ServerRequestId, std::sync::Arc<()>>,
-    opened_documents: &mut HashSet<String>,
+    opened_documents: &mut HashMap<String, u64>,
     pending: &mut HashMap<i64, PendingRequest>,
     next_request_id: &mut i64,
     request_timeout: Duration,
@@ -933,11 +933,25 @@ pub(super) fn handle_command(
     match command {
         SessionCommand::SyncOwned { .. } => unreachable!("normalized owned sync"),
         SessionCommand::Sync(document) => {
-            sync_document(stdin, &document, initialized, capabilities, documents, opened_documents)?;
+            if let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
+                send_event(events, LspEvent::Failed { server: server.into(), message: format!("language server synchronization write failed: {error}") });
+                *stopping = true;
+                return Err(error);
+            }
         }
         SessionCommand::Save(document) => {
-            // The saved snapshot may predate already synchronized edits. didSave describes
-            // disk contents; it must not replace the current document or its source.
+            // An older disk snapshot must not rewind already synchronized edits.
+            let uri = document.uri();
+            if documents.get(&uri).is_none_or(|old| old.version <= document.version) {
+                if documents.get(&uri).is_none_or(|old| old.version != document.version || old.text != document.text) {
+                    document_sources.remove(&uri);
+                }
+                if let Err(error) = sync_document(stdin, &document, initialized, capabilities, documents, opened_documents) {
+                    send_event(events, LspEvent::Failed { server: server.into(), message: format!("language server synchronization write failed: {error}") });
+                    *stopping = true;
+                    return Err(error);
+                }
+            }
             if initialized {
                 send_save(stdin, &document)?;
             }
@@ -945,7 +959,7 @@ pub(super) fn handle_command(
         SessionCommand::Close(uri) => {
             document_sources.remove(&uri);
             documents.remove(&uri);
-            if initialized && opened_documents.remove(&uri) {
+            if initialized && opened_documents.remove(&uri).is_some() {
                 send_close(stdin, &uri)?;
             }
         }
@@ -989,7 +1003,7 @@ pub(super) fn handle_command(
                 );
                 return Ok(());
             }
-            if !feature.capability(capabilities) {
+            if !feature.capability_for_document(capabilities, &document) {
                 send_event(
                     events,
                     LspEvent::Unsupported {
@@ -1077,7 +1091,7 @@ pub(super) fn handle_command(
                 let edit_sources = if matches!(
                     feature,
                     LspFeature::Rename { .. }
-                        | LspFeature::Formatting
+                        | LspFeature::Formatting { .. }
                         | LspFeature::RangeFormatting { .. }
                         | LspFeature::CodeAction { .. }
                         | LspFeature::CompletionResolve { .. }
@@ -1176,17 +1190,23 @@ fn sync_document(
     initialized: bool,
     capabilities: &LspCapabilities,
     documents: &mut HashMap<String, LspDocument>,
-    opened_documents: &mut HashSet<String>,
+    opened_documents: &mut HashMap<String, u64>,
 ) -> Result<(), crate::process::ProtocolError> {
     let uri = document.uri();
     if initialized {
-        if !opened_documents.contains(&uri) {
+        if let Some(version) = opened_documents.get(&uri) {
+            let previous = documents.get(&uri).filter(|previous| previous.version == *version);
+            if previous.is_none_or(|previous| {
+                previous.version != document.version || previous.text != document.text
+            }) {
+                send_change(stdin, previous, document, capabilities)?;
+                if capabilities.sync_kind_for_document(document) != super::model::SyncKind::None {
+                    opened_documents.insert(uri.clone(), document.version);
+                }
+            }
+        } else {
             send_open(stdin, document)?;
-            opened_documents.insert(uri.clone());
-        } else if documents.get(&uri).is_none_or(|previous| {
-            previous.version != document.version || previous.text != document.text
-        }) {
-            send_change(stdin, documents.get(&uri), document, capabilities)?;
+            opened_documents.insert(uri.clone(), document.version);
         }
     }
     // Only advance the snapshot after its notification was written successfully.
@@ -1342,7 +1362,7 @@ while True:
             version: 0, text: "old".into(),
         };
         let mut documents = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         let capabilities = LspCapabilities { sync_kind: super::super::SyncKind::Incremental, ..Default::default() };
         let mut wire = Vec::new();
         sync_document(&mut wire, &document, true, &capabilities, &mut documents, &mut opened).unwrap();
@@ -1362,7 +1382,7 @@ while True:
         assert_eq!(documents[&document.uri()].version, 1);
 
         let mut documents = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         assert!(sync_document(&mut std::io::sink(), &LspDocument {
             text: "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING), ..document
         }, true, &capabilities, &mut documents, &mut opened).is_err());
@@ -1381,7 +1401,7 @@ while True:
         let mut service = LspService::new();
         let endpoint = service.replace_edit_source_fixture(document.uri(), (buffer, text.source_version()), PositionEncoding::Utf16);
         let mut documents = HashMap::from([(document.uri(), document.clone())]);
-        let mut opened = HashSet::from([document.uri()]);
+        let mut opened = HashMap::from([(document.uri(), document.version)]);
         let mut sources = HashMap::new();
         let mut lineage = super::super::origins::DiagnosticLineage::default();
         let mut apply = HashMap::new();
@@ -1469,7 +1489,7 @@ while True:
         let endpoint = service.replace_edit_source_fixture("file:///fixture/main.rs".into(), (buffer, text.source_version()), PositionEncoding::Utf16);
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
         let mut lineage = super::super::origins::DiagnosticLineage::default();
@@ -1507,7 +1527,7 @@ while True:
         let endpoint = service.replace_edit_source_fixture(document.uri(), source.clone(), PositionEncoding::Utf16);
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
         let mut lineage = super::super::origins::DiagnosticLineage::default();
@@ -1537,6 +1557,61 @@ while True:
     }
 
     #[test]
+    fn resumed_incremental_sync_replaces_snapshots_skipped_while_disabled() {
+        use crate::editor::EditorState;
+        for save in [false, true] {
+            let mut editor = EditorState::new("/fixture".into());
+            let text = TextBuffer::from_text("a");
+            let (buffer, _) = editor.open_text(text.clone(), None).unwrap();
+            let mut service = LspService::new();
+            let endpoint = service.replace_edit_source_fixture(
+                "file:///fixture/main.rs".into(), (buffer, text.source_version()), PositionEncoding::Utf16,
+            );
+            let base = LspCapabilities { sync_kind: super::super::model::SyncKind::None, ..Default::default() };
+            let options = json!({"documentSelector":[{"language":"rust"}],"syncKind":2});
+            let active = super::super::server_message::effective_capabilities(
+                &base, [("textDocument/didChange", &options)].into_iter(),
+            );
+            let mut documents = HashMap::new();
+            let mut sources = HashMap::new();
+            let mut lineage = super::super::origins::DiagnosticLineage::default();
+            let mut apply = HashMap::new();
+            let mut opened = HashMap::new();
+            let mut pending = HashMap::new();
+            let mut next = 2;
+            let mut stopping = false;
+            let mut config = LspServerConfiguration::standard();
+            let mut output = Vec::new();
+            for (version, text) in ["a", "longer", "longer!", "longer!!"].into_iter().enumerate() {
+                let document = LspDocument {
+                    path: "/fixture/main.rs".into(), language_id: "rust".into(),
+                    version: version as u64, text: text.into(),
+                };
+                let command = if save && version >= 2 {
+                    SessionCommand::Save(document)
+                } else {
+                    SessionCommand::Sync(document)
+                };
+                handle_command(
+                    command, "owned-edit-fixture", Path::new("/fixture"), Path::new("/server"),
+                    &mut output, true, if version >= 2 { &active } else { &base },
+                    &mut documents, &mut sources, &mut lineage, &mut apply, &mut opened,
+                    &mut pending, &mut next, Duration::from_secs(1), 0,
+                    &endpoint.events, &mut stopping, &mut config,
+                ).unwrap();
+            }
+            let mut input = std::io::Cursor::new(output);
+            let changes = std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap())
+                .filter(|message| message["method"] == "textDocument/didChange").collect::<Vec<_>>();
+            assert_eq!(changes.len(), 2);
+            assert_eq!(changes[0]["params"]["textDocument"]["version"], 2);
+            assert_eq!(changes[0]["params"]["contentChanges"], json!([{"text":"longer!"}]));
+            assert_eq!(changes[1]["params"]["contentChanges"][0]["text"], "!");
+            assert!(changes[1]["params"]["contentChanges"][0]["range"].is_object());
+        }
+    }
+
+    #[test]
     fn reopening_a_document_retires_the_old_diagnostic_transport() {
         use crate::editor::{EditorState, text::TextBuffer};
         let mut editor = EditorState::new("/fixture".into());
@@ -1557,7 +1632,7 @@ while True:
         let mut lineage = super::super::origins::DiagnosticLineage::default();
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
-        let mut opened = HashSet::new();
+        let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
         let mut stopping = false;

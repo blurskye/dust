@@ -143,10 +143,12 @@ pub fn migrate_config_source(source: &str) -> Result<(String, bool), String> {
     let mut document = source
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| error.to_string())?;
-    let version = document
-        .get("schema_version")
-        .and_then(toml_edit::Item::as_integer)
-        .unwrap_or(0);
+    let version = match document.get("schema_version") {
+        None => 0,
+        Some(version) => version
+            .as_integer()
+            .ok_or("configuration schema_version must be an integer")?,
+    };
     if version < 0
         || u32::try_from(version)
             .ok()
@@ -307,32 +309,13 @@ pub struct ConfigExplanation {
 }
 
 pub(crate) fn config_key_segments(key: &str) -> Option<Vec<String>> {
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let mut quoted = false;
-    let mut escaped = false;
-    for character in key.chars() {
-        if escaped {
-            current.push(character);
-            escaped = false;
-        } else if quoted && character == '\\' {
-            escaped = true;
-        } else if character == '"' {
-            quoted = !quoted;
-        } else if character == '.' && !quoted {
-            if current.is_empty() {
-                return None;
-            }
-            segments.push(std::mem::take(&mut current));
-        } else {
-            current.push(character);
-        }
-    }
-    if quoted || escaped || current.is_empty() {
-        return None;
-    }
-    segments.push(current);
-    Some(segments)
+    Some(
+        toml_edit::Key::parse(key)
+            .ok()?
+            .into_iter()
+            .map(|key| key.get().to_owned())
+            .collect(),
+    )
 }
 
 impl LoadedConfig {

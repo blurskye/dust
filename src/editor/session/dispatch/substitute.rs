@@ -5,7 +5,7 @@ use super::{
     ByteOffset, ByteRange, EditorMode, EditorOperation, EditorTransaction, InteractiveApplication,
     Precondition, PromptKind, TextEdit, TextEditSet,
 };
-use crate::editor::text::TextBuffer;
+use crate::editor::{input::substitution_pattern, text::TextBuffer};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A replacement in regex-crate template form.
@@ -80,29 +80,6 @@ fn range_lines(
     Ok((start.min(end), start.max(end)))
 }
 
-/// Translate Vim's directional word boundaries without changing escaped backslashes.
-fn substitute_pattern(pattern: &str) -> String {
-    let mut translated = String::new();
-    let mut characters = pattern.chars();
-    while let Some(character) = characters.next() {
-        if character != '\\' {
-            translated.push(character);
-            continue;
-        }
-        match characters.next() {
-            Some('<') => translated.push_str(r"\b{start}"),
-            Some('>') => translated.push_str(r"\b{end}"),
-            escaped => {
-                translated.push('\\');
-                if let Some(escaped) = escaped {
-                    translated.push(escaped);
-                }
-            }
-        }
-    }
-    translated
-}
-
 /// The edits for lines `start..=end`, and how many lines changed.
 fn substitution_edits(
     text: &TextBuffer,
@@ -114,14 +91,7 @@ fn substitution_edits(
     if pattern.is_empty() {
         return Err("no previous search pattern".into());
     }
-    if flags.chars().any(|flag| !"gicn".contains(flag)) {
-        return Err("unsupported substitute flag".into());
-    }
-    let pattern = substitute_pattern(pattern);
-    let regex = regex::RegexBuilder::new(&pattern)
-        .case_insensitive(flags.contains('i'))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let regex = crate::editor::input::substitution_regex(pattern, flags)?;
     let template = replacement_template(replacement);
     let every = flags.contains('g');
     let mut edits = Vec::new();
@@ -183,7 +153,7 @@ fn global_lines(
         .map(|selection| (line_of(selection.anchor), line_of(selection.head)));
     let last = text.visible_lines().saturating_sub(1);
     let (start, end) = range_lines(range, line_of(view.cursor), selection, last)?;
-    let pattern = substitute_pattern(pattern);
+    let pattern = substitution_pattern(pattern);
     let regex = regex::Regex::new(&pattern).map_err(|error| error.to_string())?;
     let mut lines = Vec::new();
     for number in start..=end {
@@ -629,6 +599,29 @@ mod tests {
             out.replace_range(range.start.get()..range.end.get(), edit.replacement());
         }
         out
+    }
+
+    #[test]
+    fn escaped_word_boundaries_match_literal_backslashes_in_preview_and_execution() {
+        use crate::editor::input::{parse_ex, substitute_pattern, search_matches};
+        for (command, source, expected) in [
+            (r"s/\\</x/g", r"\< \b", r"x \b"),
+            (r"s/\\>/x/g", r"\> \b", r"x \b"),
+            (r"s/\\\<cat/x/g", r"\cat \scatter", r"x \scatter"),
+            ("s/a/b ", "a", "b "),
+        ] {
+            let invocation = parse_ex(command, &Default::default()).unwrap();
+            let string = |name| match &invocation.arguments[name] {
+                crate::editor::CommandValue::String(value) => value.as_str(),
+                _ => panic!("expected string"),
+            };
+            assert_eq!(applied(source, (0, 0), string("pattern"), string("replacement"), string("flags")), expected);
+            let preview = substitute_pattern(command).unwrap();
+            let buffer = TextBuffer::from_text(source);
+            let (edits, _) = substitution_edits(&buffer, (0, 0), string("pattern"), string("replacement"), string("flags")).unwrap();
+            let ranges: Vec<_> = edits.iter().map(|edit| edit.range().start.get()..edit.range().end.get()).collect();
+            assert_eq!(search_matches(source, &preview, false, true).unwrap(), ranges);
+        }
     }
 
     #[test]

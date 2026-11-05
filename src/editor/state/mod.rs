@@ -6,7 +6,7 @@ pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::UNIVERSAL_LAYOUT_DEPTH_CEILING;
 pub const MAXIMUM_LAYOUT_PANES: usize = crate::UNIVERSAL_LAYOUT_WINDOW_CEILING;
 mod model;
 pub use model::{
-    Axis, Buffer, BufferOrigin, EditingPolicy, EditorMode, FocusDirection, LayoutNode, Pane,
+    Axis, Buffer, BufferOrigin, EditingPolicy, EditorMode, FocusDirection, InsertRepeat, LayoutNode, Pane,
     RegisterShape, RegisterStore, RegisterValue, ReplaceRecord, Selection, SelectionKind, Tab,
     View,
 };

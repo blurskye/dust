@@ -150,6 +150,28 @@ impl PackageManager {
     pub fn store_root(&self) -> PathBuf {
         self.root.join("store")
     }
+    fn check_plugin_owner(
+        &self,
+        manifest: &PackageManifest,
+        plugin: &PluginManifest,
+    ) -> Result<(), PackageError> {
+        for package in self.read_lock()?.packages {
+            let installed = self.activation_manifest(&package)?;
+            if package.name == manifest.name && installed.id != plugin.id {
+                return Err(PackageError::Activation(format!(
+                    "package {} cannot change plugin ID from {} to {}; plugin {} belongs to package {}",
+                    manifest.name, installed.id, plugin.id, installed.id, package.name
+                )));
+            }
+            if package.name != manifest.name && installed.id == plugin.id {
+                return Err(PackageError::Activation(format!(
+                    "plugin {} is already owned by package {}; plugin {} belongs to package {}",
+                    installed.id, package.name, installed.id, package.name
+                )));
+            }
+        }
+        Ok(())
+    }
     pub fn commit_prepared(
         &self,
         manifest: &PackageManifest,
@@ -157,6 +179,7 @@ impl PackageManager {
         object: &Path,
     ) -> Result<PackageLock, PackageError> {
         let _transaction = self.transaction()?;
+        self.check_plugin_owner(manifest, plugin)?;
         let expected = manifest.source_digest().to_ascii_lowercase();
         if !valid_digest(&expected)
             || object.file_name().and_then(|value| value.to_str()) != Some(expected.as_str())
@@ -179,7 +202,6 @@ impl PackageManager {
             .join(format!("{activation_sha256}.toml"));
         write_protected_atomic(&activation, activation_bytes.as_bytes(), 1024 * 1024)?;
         let mut lock = self.read_lock()?;
-        self.validate_plugin_identity(&lock, manifest, plugin)?;
         lock.packages
             .retain(|package| package.name != manifest.name);
         let mut source = manifest.source.clone();
@@ -205,17 +227,17 @@ impl PackageManager {
         self.replace_lock(&lock)?;
         Ok(lock)
     }
-    fn plugin_manifest(&self, package: &LockedPackage) -> Result<PluginManifest, PackageError> {
+    fn activation_manifest(&self, package: &LockedPackage) -> Result<PluginManifest, PackageError> {
         if !valid_digest(&package.content_sha256)
             || package.activation_sha256.as_ref().is_some_and(|digest| !valid_digest(digest))
         {
             return Err(PackageError::InvalidManifest);
         }
-        let manifest_path = self.root.join("activations").join(format!(
+        let path = self.root.join("activations").join(format!(
             "{}.toml",
             package.activation_sha256.as_ref().unwrap_or(&package.content_sha256)
         ));
-        let bytes = read_bounded_regular(&manifest_path, 1024 * 1024)?;
+        let bytes = read_bounded_regular(&path, 1024 * 1024)?;
         if let Some(expected) = &package.activation_sha256
             && format!("{:x}", Sha256::digest(&bytes)) != *expected
         {
@@ -229,28 +251,6 @@ impl PackageManager {
         }
         Ok(plugin)
     }
-    fn validate_plugin_identity(
-        &self,
-        lock: &PackageLock,
-        manifest: &PackageManifest,
-        plugin: &PluginManifest,
-    ) -> Result<(), PackageError> {
-        for package in &lock.packages {
-            let installed = self.plugin_manifest(package)?;
-            if package.name == manifest.name && installed.id != plugin.id {
-                return Err(PackageError::Activation(format!(
-                    "package {} cannot change plugin ID from {} to {}",
-                    manifest.name, installed.id, plugin.id
-                )));
-            }
-            if package.name != manifest.name && installed.id == plugin.id {
-                return Err(PackageError::Activation(format!(
-                    "plugin {} is already owned by package {}", plugin.id, package.name
-                )));
-            }
-        }
-        Ok(())
-    }
     fn activations_for_lock(
         &self,
         lock: &PackageLock,
@@ -260,7 +260,7 @@ impl PackageManager {
         config.wasm_component_model(true);
         let engine = wasmtime::Engine::new(&config).map_err(|_| PackageError::InvalidManifest)?;
         for package in &lock.packages {
-            let plugin = self.plugin_manifest(package)?;
+            let plugin = self.activation_manifest(package)?;
             let object = self.root.join("store").join(&package.content_sha256);
             let component = read_bounded_regular(&object, self.maximum_object_bytes as u64)?;
             let object_lock = protect_object(&object)?;
@@ -549,6 +549,9 @@ impl PackageService {
                                 ..
                             } => {
                                 let _transaction = manager.transaction()?;
+                                if !prepared.is_empty() {
+                                    return Err(PackageError::Busy);
+                                }
                                 let package_manifest =
                                     fs::canonicalize(package_manifest).map_err(PackageError::Io)?;
                                 let plugin_manifest =
@@ -575,7 +578,7 @@ impl PackageService {
                                         .map_err(|_| PackageError::InvalidManifest)?,
                                 )
                                 .map_err(|_| PackageError::InvalidManifest)?;
-                                manager.validate_plugin_identity(&manager.read_lock()?, &package, &plugin)?;
+                                manager.check_plugin_owner(&package, &plugin)?;
                                 let object =
                                     manager.stage_verified_object(&package, &component_bytes)?;
                                 if !plugin
@@ -613,6 +616,10 @@ impl PackageService {
                                 limits,
                             } => {
                                 let _transaction = manager.transaction()?;
+                                if !prepared.is_empty() {
+                                    return Err(PackageError::Busy);
+                                }
+                                manager.check_plugin_owner(&metadata.package, &metadata.plugin)?;
                                 if metadata.package.name
                                     != format!("{}/{}", metadata.publisher, metadata.name)
                                     || !metadata
@@ -625,7 +632,6 @@ impl PackageService {
                                 {
                                     return Err(PackageError::InvalidManifest);
                                 }
-                                manager.validate_plugin_identity(&manager.read_lock()?, &metadata.package, &metadata.plugin)?;
                                 let object =
                                     manager.stage_verified_object(&metadata.package, &component)?;
                                 activate_candidate(
@@ -673,8 +679,16 @@ impl PackageService {
                             }
                             PackageOperation::List => output.lock = Some(manager.read_lock()?),
                             PackageOperation::Verify => output.verified = Some(manager.verify()?),
-                            PackageOperation::Rollback => output.lock = Some(manager.rollback()?),
+                            PackageOperation::Rollback => {
+                                if !prepared.is_empty() {
+                                    return Err(PackageError::Busy);
+                                }
+                                output.lock = Some(manager.rollback()?);
+                            }
                             PackageOperation::Remove(package) => {
+                                if !prepared.is_empty() {
+                                    return Err(PackageError::Busy);
+                                }
                                 output.lock = Some(manager.remove(&package)?);
                                 output.collect_garbage(&manager);
                             }

@@ -4,7 +4,7 @@
   (argument_list
     (argument
       (unquoted_argument)) @constant)
-  (#lua-match? @constant "^[%u@][%u%d_]+$"))
+  (#match? @constant "^[A-Z@][A-Z0-9_]+$"))
 
 [
   (quoted_argument)
@@ -219,4 +219,4 @@
 ((source_file
   .
   (line_comment) @keyword.directive @nospell)
-  (#lua-match? @keyword.directive "^#!/"))
+  (#match? @keyword.directive "^#!/"))

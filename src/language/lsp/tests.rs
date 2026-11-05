@@ -199,10 +199,198 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
 fn a_server_can_register_formatting_after_it_starts() {
     let registered = super::server_message::effective_capabilities(
         &super::LspCapabilities::default(),
-        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter(),
+        ["textDocument/formatting", "textDocument/rangeFormatting"].into_iter().map(|method| (method, &Value::Null)),
     );
     assert!(registered.formatting && registered.range_formatting);
     assert!(!registered.rename);
+}
+
+fn server_message_replies(
+    message: Value,
+    base: &super::LspCapabilities,
+    capabilities: &mut super::LspCapabilities,
+    registrations: &mut std::collections::HashMap<String, (String, Value)>,
+    documents: &std::collections::HashMap<String, LspDocument>,
+) -> Vec<Value> {
+    use std::sync::{Arc, mpsc};
+    let (channel, _events) = mpsc::sync_channel(8);
+    let (commands, _requests) = mpsc::sync_channel(1);
+    let events = super::origins::EventSender {
+        channel,
+        commands,
+        context: super::origins::EditContext {
+            session: Arc::new(()),
+            server: Arc::from("fixture"),
+            encoding: PositionEncoding::Utf16,
+            diagnostic_ambiguous: false,
+            sources: Arc::new(Default::default()),
+            disk: None,
+        },
+        cancelled: Arc::new(false.into()),
+        stop_requested: Arc::new(false.into()),
+    };
+    let mut output = Vec::new();
+    super::server_message::handle_server_message(super::server_message::ServerMessageContext {
+        server: "fixture",
+        root: Path::new("/fixture"),
+        stdin: &mut output,
+        events: &events,
+        logs: &mut Default::default(),
+        base_capabilities: base,
+        capabilities,
+        registrations,
+        configuration: &super::LspServerConfiguration::standard(),
+        sources: &Default::default(),
+        diagnostic_lineage: &Default::default(),
+        documents,
+        apply_requests: &mut Default::default(),
+    }, &message);
+    let mut input = std::io::Cursor::new(output);
+    std::iter::from_fn(|| crate::process::read_content_length_message(&mut input).unwrap()).collect()
+}
+
+#[test]
+fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
+    use super::{
+        origins::{EditContext, EventSender},
+        server_message::{ServerMessageContext, handle_server_message},
+        LspServerConfiguration,
+    };
+    use std::sync::{Arc, mpsc};
+    use nix::{sys::stat::Mode, unistd::mkfifo};
+    let root = tempfile::tempdir().unwrap();
+    mkfifo(&root.path().join("fifo"), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    std::fs::create_dir(root.path().join("directory")).unwrap();
+    std::fs::write(root.path().join("large"), vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
+    std::fs::write(root.path().join("regular"), "source").unwrap();
+    let (channel, receiver) = mpsc::sync_channel(1);
+    let (commands, _requests) = mpsc::sync_channel(1);
+    let events = EventSender {
+        channel, commands,
+        cancelled: Default::default(), stop_requested: Default::default(),
+        context: EditContext {
+            session: Arc::new(()), server: "fixture".into(),
+            encoding: Default::default(), diagnostic_ambiguous: false,
+            sources: Arc::new(Default::default()), disk: None,
+        },
+    };
+    let worker_root = root.path().to_path_buf();
+    let worker = std::thread::spawn(move || {
+        for name in ["fifo", "directory", "large", "regular"] {
+            let uri = file_uri(&worker_root.join(name));
+            handle_server_message(ServerMessageContext {
+                server: "fixture", root: &worker_root, stdin: &mut Vec::new(),
+                events: &events, logs: &mut Default::default(),
+                base_capabilities: &Default::default(), capabilities: &mut Default::default(),
+                registrations: &mut Default::default(), configuration: &LspServerConfiguration::standard(),
+                sources: &Default::default(), diagnostic_lineage: &Default::default(),
+                documents: &Default::default(), apply_requests: &mut Default::default(),
+            }, &json!({"method":"textDocument/publishDiagnostics", "params":{"uri":uri,"diagnostics":[]}}));
+        }
+    });
+    for name in ["fifo", "directory", "large", "regular"] {
+        let packet = receiver.recv_timeout(Duration::from_secs(3))
+            .expect("diagnostic snapshot read blocked");
+        let uri = file_uri(&root.path().join(name));
+        assert!(matches!(packet.event, LspEvent::Diagnostics { .. }));
+        assert_eq!(packet.context.disk_document(&uri).map(ToString::to_string),
+            (name == "regular").then(|| "source".to_owned()));
+    }
+    worker.join().unwrap();
+}
+
+#[test]
+fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
+    let base = super::LspCapabilities::default();
+    let mut capabilities = base.clone();
+    let mut registrations = std::collections::HashMap::from([
+        ("keep".into(), ("textDocument/hover".into(), Value::Null)),
+    ]);
+    let original = registrations.clone();
+    for (method, key) in [
+        ("client/registerCapability", "registrations"),
+        ("client/unregisterCapability", "unregisterations"),
+        ("client/unregisterCapability", "unregistrations"),
+    ] {
+        let items = (0..257).map(|_| json!({"id":"keep","method":"textDocument/formatting"})).collect::<Vec<_>>();
+        let reply = server_message_replies(json!({"id":1,"method":method,"params":{key:items}}), &base, &mut capabilities, &mut registrations, &Default::default()).remove(0);
+        assert_eq!(reply["error"]["code"], -32602);
+        assert_eq!(registrations, original);
+        assert_eq!(capabilities, base);
+    }
+}
+
+#[test]
+fn configuration_replies_preserve_every_requested_position() {
+    let base = super::LspCapabilities::default();
+    let items = (0..257).map(|_| json!({"section":"missing"})).collect::<Vec<_>>();
+    let reply = server_message_replies(json!({"id":1,"method":"workspace/configuration","params":{"items":items}}), &base, &mut base.clone(), &mut Default::default(), &Default::default()).remove(0);
+    let values = reply["result"].as_array().unwrap();
+    assert_eq!(values.len(), 257);
+    assert!(values.iter().all(Value::is_object));
+}
+
+#[test]
+fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
+    let formatting = LspFeature::Formatting { tab_size: 2, insert_spaces: true };
+    let base = super::LspCapabilities::default();
+    let options = json!({"documentSelector":[{"language":"javascript","scheme":"file","pattern":"**/*.js"}]});
+    let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+    let js = LspDocument { path: "/fixture/a.js".into(), language_id: "javascript".into(), version: 0, text: String::new() };
+    assert!(formatting.capability_for_document(&capabilities, &js));
+    let ts = LspDocument { path: "/fixture/a.ts".into(), language_id: "typescript".into(), ..js.clone() };
+    assert!(!formatting.capability_for_document(&capabilities, &ts));
+    assert!(!formatting.capability_for_document(&capabilities, &LspDocument { path: "/fixture/a.jsx".into(), ..js.clone() }));
+    let static_base = super::LspCapabilities { formatting: true, ..base.clone() };
+    let capabilities = super::server_message::effective_capabilities(&static_base, [("textDocument/formatting", &options)].into_iter());
+    assert!(formatting.capability_for_document(&capabilities, &ts));
+    for base_uri in [json!("file:///fixture"), json!({"uri":"file:///fixture","name":"fixture"})] {
+        let options = json!({"documentSelector":[{"pattern":{"baseUri":base_uri,"pattern":"*.js"}}]});
+        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+        assert!(formatting.capability_for_document(&capabilities, &js));
+        assert!(!formatting.capability_for_document(&capabilities, &ts));
+        assert!(!formatting.capability_for_document(&capabilities, &LspDocument { path: "/elsewhere/a.js".into(), ..js.clone() }));
+    }
+    for selector in [json!([]), json!([{"scheme":"untitled"}])] {
+        let options = json!({"documentSelector":selector});
+        let capabilities = super::server_message::effective_capabilities(&base, [("textDocument/formatting", &options)].into_iter());
+        assert!(!formatting.capability_for_document(&capabilities, &js));
+    }
+}
+
+#[test]
+fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_policy() {
+    let base = super::LspCapabilities { sync_kind: SyncKind::None, ..Default::default() };
+    let mut capabilities = base.clone();
+    let mut registrations = Default::default();
+    let old = LspDocument { path: "/fixture/main.rs".into(), language_id: "rust".into(), version: 3, text: "abc".into() };
+    let documents = std::collections::HashMap::from([
+        (old.uri(), old.clone()),
+        ("file:///fixture/main.py".into(), LspDocument { path: "/fixture/main.py".into(), language_id: "python".into(), ..old.clone() }),
+    ]);
+    let replies = server_message_replies(json!({"id":1,"method":"client/registerCapability","params":{"registrations":[{
+        "id":"changes","method":"textDocument/didChange","registerOptions":{"documentSelector":[{"language":"rust"}],"syncKind":2}
+    }]}}), &base, &mut capabilities, &mut registrations, &documents);
+    // Registration itself must not emit a change with an unchanged document version.
+    assert_eq!(replies.len(), 1);
+    let reply = &replies[0];
+    assert!(reply.get("result").is_some());
+    let new = LspDocument { version: 4, text: "abcd".into(), ..old.clone() };
+    let mut output = Vec::new();
+    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output)).unwrap().unwrap();
+    assert_eq!(change["params"]["contentChanges"][0]["text"], "d");
+    assert!(change["params"]["contentChanges"][0]["range"].is_object());
+    let mut output = Vec::new();
+    super::protocol::send_change(&mut output, None, &LspDocument { language_id: "python".into(), ..new.clone() }, &capabilities).unwrap();
+    assert!(output.is_empty());
+    let replies = server_message_replies(json!({"id":2,"method":"client/unregisterCapability","params":{"unregisterations":[{"id":"changes","method":"textDocument/didChange"}]}}), &base, &mut capabilities, &mut registrations, &documents);
+    assert_eq!(replies.len(), 1);
+    let reply = &replies[0];
+    assert!(reply.get("result").is_some());
+    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    assert!(output.is_empty());
+    assert_eq!(capabilities, base);
 }
 
 #[test]
@@ -233,7 +421,7 @@ fn work_done_progress_preserves_token_kind_and_bounded_one_line_content() {
             message,
             percentage: Some(72),
         } if server == "root:1:rust-analyzer"
-            && token == "cargo-check"
+            && token == "\"cargo-check\""
             && title == "Building crate"
             && message == "ring[31m (lib)"
     ));
@@ -247,6 +435,32 @@ fn work_done_progress_preserves_token_kind_and_bounded_one_line_content() {
 }
 
 #[test]
+fn progress_token_identity_distinguishes_numbers_from_strings_across_updates() {
+    let mut identities = Vec::new();
+    for kind in ["begin", "report", "end"] {
+        let tokens = [json!(1), json!("1"), json!("\"1\"")]
+            .into_iter()
+            .map(|token| {
+                let event = lsp_progress_event(
+                    "server",
+                    &json!({"params":{"token":token,"value":{"kind":kind}}}),
+                )
+                .expect("progress event");
+                let LspEvent::Progress { token, .. } = event else {
+                    panic!("expected progress");
+                };
+                token
+            })
+            .collect::<Vec<_>>();
+        assert_ne!(tokens[0], tokens[1]);
+        assert_ne!(tokens[1], tokens[2]);
+        identities.push(tokens);
+    }
+    assert_eq!(identities[0], identities[1]);
+    assert_eq!(identities[1], identities[2]);
+}
+
+#[test]
 fn hover_markup_kind_sections_and_range_are_preserved_and_sanitized() {
     let hover = hover_result(&json!({
         "contents":{"kind":"markdown","value":"**type**\u{001b}[31m"},
@@ -256,6 +470,25 @@ fn hover_markup_kind_sections_and_range_are_preserved_and_sanitized() {
     assert_eq!(hover.sections[0].kind, LspMarkupKind::Markdown);
     assert_eq!(hover.sections[0].value, "**type**");
     assert_eq!(hover.range.unwrap().start.line, 1);
+}
+
+#[test]
+fn language_tagged_hover_strings_preserve_literal_code_in_mixed_sections() {
+    let hover = hover_result(&json!({"contents":[
+        "**Documentation**",
+        {"language":"python","value":"__init__(self)\n`literal` *code*\u{001b}[31m"}
+    ]}));
+    assert_eq!(hover.sections.len(), 2);
+    assert_eq!(hover.sections[0].kind, LspMarkupKind::Markdown);
+    assert_eq!(hover.sections[1].kind, LspMarkupKind::PlainText);
+    assert_eq!(hover.sections[1].value, "__init__(self)\n`literal` *code*");
+
+    let hover = hover_result(&json!({
+        "contents":{"language":"python","value":"__init__(self)"}
+    }));
+    assert_eq!(hover.sections.len(), 1);
+    assert_eq!(hover.sections[0].kind, LspMarkupKind::PlainText);
+    assert_eq!(hover.sections[0].value, "__init__(self)");
 }
 
 #[test]
@@ -374,6 +607,87 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
 }
 
 #[test]
+fn initialization_advertises_supported_semantic_tokens_and_pull_diagnostics() {
+    let initialize = initialize_message(Path::new("/workspace"), None);
+    let document = &initialize["params"]["capabilities"]["textDocument"];
+    let semantic = &document["semanticTokens"];
+    assert_eq!(semantic["requests"], json!({"full":{"delta":true},"range":false}));
+    assert_eq!(semantic["formats"], json!(["relative"]));
+    assert!(semantic["tokenTypes"].as_array().unwrap().contains(&json!("function")));
+    assert!(semantic["tokenModifiers"].is_array());
+    assert_eq!(semantic["overlappingTokenSupport"], false);
+    assert_eq!(semantic["multilineTokenSupport"], false);
+    assert_eq!(document["diagnostic"], json!({"dynamicRegistration":false,"relatedDocumentSupport":false}));
+    assert_eq!(document["synchronization"]["dynamicRegistration"], false);
+}
+
+#[test]
+fn absent_change_support_does_not_enable_document_changes() {
+    for sync in [Value::Null, json!({"openClose":true}), json!(0)] {
+        let capabilities = initialize_capabilities(Some(&json!({"capabilities":{"textDocumentSync":sync}}))).unwrap();
+        assert_eq!(capabilities.sync_kind, SyncKind::None);
+        let mut output = Vec::new();
+        super::protocol::send_change(&mut output, None, &LspDocument {
+            path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "changed".into(),
+        }, &capabilities).unwrap();
+        assert!(output.is_empty());
+    }
+    assert_eq!(initialize_capabilities(Some(&json!({"capabilities":{}}))).unwrap().sync_kind, SyncKind::None);
+}
+
+#[test]
+fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
+    let range = super::LspRange {
+        start: super::LspPosition { line: 0, character: 0 },
+        end: super::LspPosition { line: 2, character: 0 },
+    };
+    for (tab_size, insert_spaces) in [(2, true), (8, false)] {
+        for feature in [
+            LspFeature::Formatting { tab_size, insert_spaces },
+            LspFeature::RangeFormatting { range: range.clone(), tab_size, insert_spaces },
+        ] {
+            let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+            assert_eq!(params["options"], json!({"tabSize":tab_size,"insertSpaces":insert_spaces}));
+        }
+    }
+}
+
+#[test]
+fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
+    use std::collections::HashMap;
+    use crate::editor::{EditorState, text::TextBuffer};
+    use super::session::{SessionCommand, handle_command};
+    let old = LspDocument {
+        path: "/workspace/main.rs".into(), language_id: "rust".into(), version: 1, text: "old".into(),
+    };
+    let new = LspDocument { version: 2, text: "x".repeat(16 * 1024 * 1024), ..old.clone() };
+    let mut editor = EditorState::new("/workspace".into());
+    let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(old.path.clone())).unwrap();
+    let mut service = LspService::new();
+    let endpoint = service.replace_edit_source_fixture(old.uri(), (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16);
+    for opened in [true, false] {
+        for command in [SessionCommand::Sync(new.clone()), SessionCommand::Save(new.clone())] {
+            let mut documents = HashMap::from([(old.uri(), old.clone())]);
+            let mut opened_documents = if opened { HashMap::from([(old.uri(), old.version)]) } else { HashMap::new() };
+            let mut stopping = false;
+            handle_command(
+                command, "fixture", Path::new("/workspace"), Path::new("/server"),
+                &mut std::io::sink(), true,
+                &super::LspCapabilities { sync_kind: SyncKind::Incremental, ..Default::default() },
+                &mut documents, &mut HashMap::new(), &mut Default::default(),
+                &mut HashMap::new(), &mut opened_documents, &mut HashMap::new(), &mut 2,
+                Duration::from_secs(5), 0, &endpoint.events, &mut stopping,
+                &mut super::LspServerConfiguration::standard(),
+            ).unwrap_err();
+            assert!(stopping);
+            assert_eq!(documents.get(&old.uri()), Some(&old));
+            assert_eq!(opened_documents.get(&old.uri()).copied(), opened.then_some(old.version));
+            assert!(matches!(service.try_event(), Some(LspEvent::Failed { message, .. }) if message.contains("synchronization write failed")));
+        }
+    }
+}
+
+#[test]
 fn initialization_negotiates_utf32_and_incremental_sync() {
     let capabilities = initialize_capabilities(Some(&json!({"capabilities":{
         "positionEncoding":"utf-32","textDocumentSync":{"change":2},
@@ -402,6 +716,89 @@ fn incremental_sync_uses_the_negotiated_unicode_units() {
     assert_eq!(change.pointer("/range/start/character"), Some(&json!(3)));
     assert_eq!(change.pointer("/range/end/character"), Some(&json!(4)));
     assert_eq!(change.get("text"), Some(&json!("yz")));
+}
+
+#[test]
+fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
+    let range = json!({"start":{"line":0,"character":0},"end":{"line":0,"character":1}});
+    for code in [json!("001"), json!("123"), json!(123)] {
+        let related = json!([{"location":{"uri":"file:///other.rs","range":range},"message":"other declaration"}]);
+        let diagnostics = super::protocol::diagnostics(&json!([{
+            "range":range,"message":"duplicate","code":code,"relatedInformation":related,
+        }]));
+        assert_eq!(diagnostics[0].code, Some(code.clone()));
+        assert_eq!(diagnostics[0].related[0].0.uri, "file:///other.rs");
+        assert_eq!(diagnostics[0].related[0].1, "other declaration");
+        let feature = LspFeature::CodeAction { range: diagnostics[0].range.clone(), diagnostics };
+        let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+        assert_eq!(params["context"]["diagnostics"][0]["code"], code);
+    }
+}
+
+#[test]
+fn signature_help_selects_the_active_overload_with_a_safe_fallback() {
+    for (active, expected) in [(json!(1), "second"), (json!(99), "first"), (Value::Null, "first"), (json!(-1), "first")] {
+        let result = normalize_result(&LspFeature::SignatureHelp, &json!({
+            "signatures":[{"label":"first"},{"label":"second"}],"activeSignature":active,
+        })).unwrap();
+        assert!(matches!(result, LspFeatureResult::Signature(content) if content.value == expected));
+    }
+    assert_eq!(super::protocol::signature_text(&json!({"signatures":[]})), "no signature information");
+}
+
+#[test]
+fn null_results_clear_persistent_document_projections() {
+    for feature in [LspFeature::DocumentHighlights, LspFeature::FoldingRanges, LspFeature::SelectionRanges] {
+        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::Ranges(items) if items.is_empty()));
+    }
+    for feature in [LspFeature::SemanticTokensFull, LspFeature::SemanticTokensDelta { previous_result_id: "old".into() }] {
+        assert!(matches!(normalize_result(&feature, &Value::Null).unwrap(), LspFeatureResult::SemanticTokens(tokens) if tokens.data.is_empty() && tokens.result_id.is_none()));
+    }
+}
+
+#[test]
+fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
+    let item = json!({"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"data":{"id":42}});
+    let lenses = super::protocol::code_lenses(&json!([item]));
+    assert_eq!(lenses[0].resolve_item, Some(item.clone()));
+    assert!(lenses[0].command.is_none());
+    let feature = LspFeature::CodeLensResolve { item: item.clone() };
+    assert_eq!(feature.method(), "codeLens/resolve");
+    assert_eq!(super::protocol::feature_params(&feature, "file:///main.rs", 0, 0), item);
+    let caps = initialize_capabilities(Some(&json!({"capabilities":{"codeLensProvider":{"resolveProvider":true}}}))).unwrap();
+    assert!(feature.capability(&caps));
+    let mut resolved = item;
+    resolved["command"] = json!({"title":"Run test","command":"run.test","arguments":[42]});
+    let LspFeatureResult::CodeLens(lenses) = normalize_result(&feature, &resolved).unwrap() else {
+        panic!("resolved code lens must be presented as an executable choice");
+    };
+    assert_eq!(lenses[0].title, "Run test");
+    assert_eq!(lenses[0].command.as_ref().unwrap().arguments, vec![json!(42)]);
+}
+
+#[test]
+fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
+    let label = "é".repeat(5000);
+    for resolved in [false, true] {
+        let item = super::protocol::completion_item(&json!({"label":label}), resolved).unwrap();
+        assert_eq!(item.label.chars().count(), 4096);
+        assert_eq!(item.insert_text, label);
+        let item = super::protocol::completion_item(
+            &json!({"label":label,"insertText":"explicit"}), resolved,
+        ).unwrap();
+        assert_eq!(item.insert_text, "explicit");
+    }
+}
+
+#[test]
+fn completion_commands_survive_initial_and_resolved_items() {
+    let item = json!({"label":"example","command":{"title":"Import","command":"add.import","arguments":["example"]}});
+    for resolved in [false, true] {
+        let parsed = super::protocol::completion_item(&item, resolved).unwrap();
+        let command = parsed.command.unwrap();
+        assert_eq!(command.command, "add.import");
+        assert_eq!(command.arguments, vec![json!("example")]);
+    }
 }
 
 #[test]
@@ -443,6 +840,53 @@ fn completion_and_workspace_edits_are_bounded_typed_data() {
 }
 
 #[test]
+fn workspace_edits_reject_malformed_resource_operations_without_partial_results() {
+    for operation in [
+        json!({"kind":"create"}),
+        json!({"kind":"create","uri":42}),
+        json!({"kind":"delete"}),
+        json!({"kind":"delete","uri":null}),
+        json!({"kind":"rename","oldUri":"file:///old"}),
+        json!({"kind":"rename","newUri":"file:///new"}),
+        json!({"kind":"unknown","uri":"file:///new"}),
+        json!({"uri":"file:///new"}),
+    ] {
+        assert!(workspace_edit(&json!({
+            "changes":{"file:///valid":[{
+                "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                "newText":"valid"
+            }]},
+            "documentChanges":[operation]
+        })).is_err(), "accepted {operation}");
+    }
+    let edit = workspace_edit(&json!({"documentChanges":[
+        {"kind":"create","uri":"file:///new","options":{"overwrite":true}},
+        {"kind":"rename","oldUri":"file:///old","newUri":"file:///renamed"},
+        {"kind":"delete","uri":"file:///deleted"}
+    ]})).unwrap();
+    assert_eq!(edit.resources.len(), 3);
+}
+
+#[test]
+fn workspace_edits_reject_invalid_non_null_document_versions() {
+    for version in [json!(-1), json!(1.5), json!("1"), json!(false), json!({})] {
+        assert!(workspace_edit(&json!({"documentChanges":[{
+            "textDocument":{"uri":"file:///a","version":version},"edits":[]
+        }]})).is_err(), "accepted {version}");
+    }
+    for (version, expected) in [(Value::Null, None), (json!(0), Some(0)), (json!(42), Some(42))] {
+        let edit = workspace_edit(&json!({"documentChanges":[{
+            "textDocument":{"uri":"file:///a","version":version},"edits":[]
+        }]})).unwrap();
+        assert_eq!(edit.documents[0].version, expected);
+    }
+    let edit = workspace_edit(&json!({"documentChanges":[{
+        "textDocument":{"uri":"file:///a"},"edits":[]
+    }]})).unwrap();
+    assert_eq!(edit.documents[0].version, None);
+}
+
+#[test]
 fn canonical_launch_preserves_the_requested_multicall_name() {
     let definition = ToolDefinition {
         id: "rust-analyzer".into(),
@@ -465,10 +909,8 @@ fn canonical_launch_preserves_the_requested_multicall_name() {
 }
 
 #[test]
-fn server_that_never_initializes_fails_within_the_request_timeout() {
-    let Some(sleep) = crate::tools::discover_executable("sleep") else {
-        return;
-    };
+fn initialization_timeout_honors_the_one_second_minimum_and_longer_policy() {
+    let sleep = crate::tools::discover_executable("sleep").expect("sleep fixture is required");
     let workspace = tempfile::tempdir().expect("workspace");
     let definition = ToolDefinition {
         id: "sleeping-server".into(),
@@ -478,7 +920,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
         executable: sleep.display().to_string(),
         version: None,
         release: None,
-        launch_args: vec!["2".into()],
+        launch_args: vec!["10".into()],
         format_arguments: Vec::new(),
         probe_args: Vec::new(),
         debug_program_policy: crate::tools::DebugProgramPolicy::default(),
@@ -487,50 +929,53 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
         install: None,
         pins: Vec::new(),
     };
-    let mut service = LspService::new();
-    service
-        .start_session_absolute_with_policy(super::LspSessionLaunch {
-            session_key: &definition.id,
-            definition: &definition,
-            executable: sleep,
-            arguments: definition.launch_args.clone(),
-            root: workspace.path().into(),
-            document: None,
-            policy: LspPolicy {
-                request_timeout: Duration::from_millis(100),
-                maximum_log_lines: 20,
-            },
-            configuration: super::LspServerConfiguration::standard(),
-            environment: tool_launch_environment(&definition),
-        })
-        .expect("start");
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let failed = loop {
-        if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
-            break message;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "initialize timeout event missing"
-        );
-        thread::sleep(Duration::from_millis(10));
-    };
-    assert!(failed.contains("initialize request timed out"));
-    service
-        .stop(&definition.id)
-        .expect("stop timed-out session");
+    for (requested, expected) in [
+        (Duration::from_millis(100), Duration::from_secs(1)),
+        (Duration::from_millis(1500), Duration::from_millis(1500)),
+    ] {
+        let mut service = LspService::new();
+        let started = Instant::now();
+        service
+            .start_session_absolute_with_policy(super::LspSessionLaunch {
+                session_key: &definition.id,
+                definition: &definition,
+                executable: sleep.clone(),
+                arguments: definition.launch_args.clone(),
+                root: workspace.path().into(),
+                document: None,
+                policy: LspPolicy {
+                    request_timeout: requested,
+                    maximum_log_lines: 20,
+                },
+                configuration: super::LspServerConfiguration::standard(),
+                environment: tool_launch_environment(&definition),
+            })
+            .expect("start");
+        let deadline = started + expected + Duration::from_secs(2);
+        let failed = loop {
+            if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
+                break message;
+            }
+            assert!(Instant::now() < deadline, "initialize timeout event missing");
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(failed.contains("initialize request timed out"));
+        let elapsed = started.elapsed();
+        assert!(elapsed >= expected && elapsed < expected + Duration::from_secs(2),
+            "expected initialization timeout near {expected:?}, got {elapsed:?}");
+        service.stop(&definition.id).expect("stop timed-out session");
+    }
 }
 
 #[cfg(target_os = "linux")]
 #[cfg(unix)]
 #[test]
 fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
-    let Some(shell) = crate::tools::discover_executable("sh") else {
-        return;
-    };
+    let shell = crate::tools::discover_executable("sh").expect("sh fixture is required");
     let workspace = tempfile::tempdir().expect("workspace");
     let script = workspace.path().join("server.sh");
-    std::fs::write(&script, "sleep 6 &\nexec sleep 6\n").expect("script");
+    // Removing the temporary workspace releases the daemon, even if the test panics.
+    std::fs::write(&script, "(printf ready > daemon-ready; while test -d \"$PWD\"; do sleep 0.05; done) &\nexec sleep 30\n").expect("script");
     let definition = ToolDefinition {
         id: "daemonizing".into(),
         name: "Daemonizing".into(),
@@ -558,28 +1003,83 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
             root: workspace.path().into(),
             document: None,
             policy: LspPolicy {
-                request_timeout: Duration::from_millis(100),
+                request_timeout: Duration::from_secs(10),
                 maximum_log_lines: 20,
             },
             configuration: super::LspServerConfiguration::standard(),
             environment: tool_launch_environment(&definition),
         })
         .expect("start");
-    thread::sleep(Duration::from_millis(200));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let origin = loop {
+        if let Some(event) = service.try_owned_event() {
+            break std::sync::Arc::downgrade(&event.context.session);
+        }
+        assert!(Instant::now() < deadline, "session did not start");
+        thread::sleep(Duration::from_millis(5));
+    };
+    while !workspace.path().join("daemon-ready").exists() {
+        assert!(Instant::now() < deadline, "daemon did not inherit the pipes");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(origin.upgrade().is_some(), "session stopped before the test could stop it");
     let started = Instant::now();
     service.stop("daemonizing").expect("stop");
-    assert!(
-        started.elapsed() < Duration::from_secs(3),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < Duration::from_millis(200), "stop admission blocked");
+    // The origin is held by the session handle and its workers until cleanup finishes.
+    while origin.upgrade().is_some() {
+        while service.try_event().is_some() {}
+        assert!(started.elapsed() < Duration::from_secs(3), "session workers did not finish cleanup");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn an_unanswered_feature_request_expires_at_its_configured_deadline() {
+    let script = BOUNDARY_SERVER
+        .split("m=read()\nsend(")
+        .next()
+        .unwrap()
+        .to_owned()
+        + r#"
+m=read()
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'definitionProvider':True}}})
+while read() is not None: pass
+"#;
+    let timeout = Duration::from_millis(100);
+    let (_root, mut service, document) = boundary_service_with_policy(&script, LspPolicy { request_timeout: timeout, ..Default::default() });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(Instant::now() < deadline, "server did not initialize");
+        match service.try_event() {
+            Some(LspEvent::Running { .. }) => break,
+            Some(LspEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    let started = Instant::now();
+    service.request("boundary", LspFeature::Definition, document,
+        crate::editor::text::ByteOffset(0), 13).expect("definition");
+    loop {
+        assert!(started.elapsed() < Duration::from_secs(2), "request did not expire");
+        match service.try_event() {
+            Some(LspEvent::RequestFailed { generation: 13, method, message, .. }) => {
+                assert_eq!(method, "textDocument/definition");
+                assert!(message.contains("timed out"));
+                assert!(started.elapsed() >= timeout, "request expired too early");
+                break;
+            }
+            Some(LspEvent::Failed { message, .. }) => panic!("{message}"),
+            _ => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    service.stop("boundary").expect("stop");
 }
 
 #[test]
 fn deterministic_fake_server_proves_lifecycle_sync_and_features() {
-    let Some(python) = crate::tools::discover_executable("python3") else {
-        return;
-    };
+    let python = crate::tools::discover_executable("python3")
+        .expect("python3 is required for the fake LSP server fixture");
     let workspace = tempfile::tempdir().expect("workspace");
     let script = workspace.path().join("fake_lsp.py");
     let trace_path = workspace.path().join("trace.jsonl");
@@ -664,7 +1164,7 @@ while True:
             root: workspace.path().into(),
             document: Some(document.clone()),
             policy: LspPolicy {
-                request_timeout: Duration::from_millis(100),
+                request_timeout: Duration::from_secs(5),
                 maximum_log_lines: 20,
             },
             configuration: super::LspServerConfiguration::standard(),
@@ -766,6 +1266,7 @@ while True:
             },
         )
         .expect("sync");
+    let deadline = Instant::now() + Duration::from_secs(5);
     let mut hover = false;
     let mut completion = false;
     let mut inlay = false;
@@ -803,7 +1304,7 @@ while True:
             13,
         )
         .expect("definition");
-    let timeout_deadline = Instant::now() + Duration::from_secs(2);
+    let timeout_deadline = Instant::now() + Duration::from_secs(7);
     let mut timed_out = false;
     while Instant::now() < timeout_deadline && !timed_out {
         if let Some(LspEvent::RequestFailed {
@@ -1169,7 +1670,7 @@ while True:
 fn a_server_that_stops_reading_is_failed_and_reaped_without_manual_stop() {
     let script = BOUNDARY_SERVER.split("m=read()\nsend(").next().unwrap().to_owned() + r#"
 m=read()
-send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{}}})
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'textDocumentSync':2}}})
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;
@@ -1274,7 +1775,7 @@ fn stop_cancels_a_blocked_write_even_with_a_full_command_queue() {
         .to_owned()
         + r#"
 m=read()
-send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True}}})
+send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':True,'textDocumentSync':1}}})
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;
@@ -1362,4 +1863,62 @@ time.sleep(30)
         }
     }
     service.stop("boundary").unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn server_that_never_initializes_fails_within_the_request_timeout() {
+    let Some(sleep) = crate::tools::discover_executable("sleep") else {
+        return;
+    };
+    let workspace = tempfile::tempdir().expect("workspace");
+    let definition = ToolDefinition {
+        id: "sleeping-server".into(),
+        name: "Sleeping Server".into(),
+        kind: ToolKind::Lsp,
+        languages: vec!["rust".into()],
+        executable: sleep.display().to_string(),
+        version: None,
+        release: None,
+        launch_args: vec!["2".into()],
+        format_arguments: Vec::new(),
+        probe_args: Vec::new(),
+        debug_program_policy: crate::tools::DebugProgramPolicy::default(),
+        project_root_markers: vec!["Cargo.toml".into()],
+        project_root_strategy: crate::files::ProjectRootStrategy::Cargo,
+        install: None,
+        pins: Vec::new(),
+    };
+    let mut service = LspService::new();
+    service
+        .start_session_absolute_with_policy(super::LspSessionLaunch {
+            session_key: &definition.id,
+            definition: &definition,
+            executable: sleep,
+            arguments: definition.launch_args.clone(),
+            root: workspace.path().into(),
+            document: None,
+            policy: LspPolicy {
+                request_timeout: Duration::from_millis(100),
+                maximum_log_lines: 20,
+            },
+            configuration: super::LspServerConfiguration::standard(),
+            environment: tool_launch_environment(&definition),
+        })
+        .expect("start");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let failed = loop {
+        if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
+            break message;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "initialize timeout event missing"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(failed.contains("initialize request timed out"));
+    service
+        .stop(&definition.id)
+        .expect("stop timed-out session");
 }

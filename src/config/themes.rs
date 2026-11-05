@@ -152,10 +152,7 @@ pub(super) fn discover(request: ThemeRead) {
                 None => serde_json::from_value(saved)
                     .map_err(|e| format!("invalid saved theme: {e}"))?,
             };
-            if theme.name.is_empty()
-                || theme.name.len() > 96
-                || theme.name.chars().any(|c| c.is_control())
-            {
+            if !valid_theme_name(&theme.name) {
                 return Err("invalid saved theme name".into());
             }
             theme.validate()?;
@@ -225,7 +222,10 @@ pub(super) fn discover(request: ThemeRead) {
                         break;
                     }
                     match read_theme(&path) {
-                        Ok(theme) => catalog.choices.push(ThemeChoice { theme, path }),
+                        Ok(theme) => {
+                            catalog.choices.retain(|choice| choice.theme.name != theme.name);
+                            catalog.choices.push(ThemeChoice { theme, path });
+                        }
                         Err(error) => catalog
                             .diagnostics
                             .push(format!("{}: {error}", path.display())),
@@ -249,18 +249,22 @@ pub(super) fn discover(request: ThemeRead) {
         let _ = request.reply.try_send(catalog);
     }
 }
+pub(super) fn valid_theme_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 96
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
+}
+
 fn read_theme(path: &Path) -> Result<ThemeConfig, String> {
     let name = path
         .file_stem()
         .and_then(|s| s.to_str())
         .ok_or("theme filename is not UTF-8")?;
-    if name.is_empty()
-        || name.len() > 96
-        || !name
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_'))
+    if !valid_theme_name(name)
     {
-        return Err("theme filename must be a bounded name using letters, digits, - or _".into());
+        return Err("theme filename must be a bounded lowercase ASCII identifier".into());
     }
     if !fs::symlink_metadata(path)
         .map_err(|e| e.to_string())?
@@ -300,6 +304,34 @@ fn read_theme(path: &Path) -> Result<ThemeConfig, String> {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+    #[test]
+    fn discovery_replaces_bundled_names_and_rejects_unsavable_names() {
+        let root = tempfile::tempdir().unwrap();
+        let mut installed = super::super::load::bundled_theme();
+        installed.styles.accent.foreground = super::super::ThemeColor::Red;
+        fs::write(root.path().join("dust.toml"), toml::to_string(&installed).unwrap()).unwrap();
+        for name in ["Solar", "solár"] {
+            let mut theme = installed.clone();
+            theme.name = name.into();
+            fs::write(root.path().join(format!("{name}.toml")), toml::to_string(&theme).unwrap()).unwrap();
+            let mut config = super::super::load::load_bundled_config().config;
+            config.ui.theme = name.into();
+            assert!(config.validate().is_err());
+        }
+        let (reply, receiver) = mpsc::sync_channel(1);
+        discover(ThemeRead {
+            source: ThemeReadSource::Directory(Some(root.path().into())),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            reply,
+        });
+        let catalog = receiver.try_recv().unwrap();
+        assert_eq!(catalog.choices.len(), BUNDLED.len());
+        let dust = catalog.choices.iter().find(|choice| choice.theme.name == "dust").unwrap();
+        assert_eq!(dust.theme, installed);
+        assert_eq!(dust.path, root.path().join("dust.toml"));
+        assert_eq!(catalog.diagnostics.len(), 2);
+    }
+
     #[test]
     fn discovery_validates_bounds_names_styles_and_cancellation() {
         let root = tempfile::tempdir().unwrap();

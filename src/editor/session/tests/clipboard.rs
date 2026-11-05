@@ -25,8 +25,11 @@ fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
         if macro_commands {
             app.invoke(CommandInvocation::new("view.cursor.move", InvocationSource::Macro).unwrap()
                 .with_argument("motion", CommandValue::String("left".into())));
+            app.invoke(CommandInvocation::new("view.cursor.move", InvocationSource::Macro).unwrap()
+                .with_argument("motion", CommandValue::String("left".into())));
             app.invoke(CommandInvocation::new("edit.delete_char", InvocationSource::Macro).unwrap());
         } else {
+            press(&mut app, 'h');
             press(&mut app, 'h');
             press(&mut app, 'x');
         }

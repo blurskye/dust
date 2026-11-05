@@ -402,7 +402,7 @@ pub fn run_interactive(
         application.process_lsp_breadcrumbs();
         application.sync_lsp_status_ui();
         application.sync_status_summary_ui();
-        application.update_lsp_progress_animation();
+        application.update_lsp_progress_animation(Instant::now());
         application.flush_keymap_timeout();
         application.update_key_hint_ui();
         application.update_notification_timer();
@@ -427,22 +427,23 @@ pub fn run_interactive(
             application.window_session.width(),
             application.window_session.height(),
         );
-        let painted = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
-            drawn = Some(inputs);
-            let frame = render_frame(
-                &application.state,
-                &application.ui,
-                application.configuration.settings(),
-                application.configuration.dashboard(),
-                application.window_session.width(),
-                application.window_session.height(),
-            );
-            terminal.draw(&frame)?
-        } else {
-            false
-        };
+        let painted = application.draw_before_startup_reads(|application| {
+            if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+                drawn = Some(inputs);
+                let frame = render_frame(
+                    &application.state,
+                    &application.ui,
+                    application.configuration.settings(),
+                    application.configuration.dashboard(),
+                    application.window_session.width(),
+                    application.window_session.height(),
+                );
+                terminal.draw(&frame)
+            } else {
+                Ok(false)
+            }
+        })?;
         input_arrived = false;
-        application.queue_startup_reads();
         application.schedule_recovery_work();
         still_polls = if painted {
             0

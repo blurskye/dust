@@ -691,7 +691,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         include_bytes!("../../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "3773ae204a9b1fe0436f2252161663562be895aea2392b1b4bd187c43af74416"
+        "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)

@@ -576,7 +576,7 @@ fn run_bytes(&self, cwd: &Path, program: &str, arguments: &[&str]) -> Result<Vec
         .ok_or_else(|| format!("{program} is not installed"))?;
     let executable = std::path::absolute(executable).map_err(|error| error.to_string())?;
     let mut environment: std::collections::BTreeMap<_, _> = std::env::vars_os()
-        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value)))
         .collect();
     for (key, value) in [
         ("GH_PROMPT_DISABLED", "1"),
@@ -593,7 +593,7 @@ fn run_bytes(&self, cwd: &Path, program: &str, arguments: &[&str]) -> Result<Vec
     jobs.start(JobRequest {
         program: executable,
         argv0: None,
-        arguments: arguments.iter().map(|argument| (*argument).to_owned()).collect(),
+        arguments: arguments.iter().map(|argument| (*argument).into()).collect(),
         cwd: cwd.into(),
         environment,
         root_revision: 0,

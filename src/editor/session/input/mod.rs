@@ -62,6 +62,7 @@ pub(super) struct InputSession {
     command_history: Vec<String>,
     search_history: Vec<String>,
     history_index: Option<usize>,
+    history_draft: Option<(String, usize)>,
     previous_mode: Option<(
         crate::editor::EditorWindowVersion,
         crate::editor::ViewId,
@@ -152,6 +153,7 @@ impl InputSession {
             command_history: Vec::new(),
             search_history: Vec::new(),
             history_index: None,
+            history_draft: None,
             previous_mode: None,
             capture: None,
             capture_epoch: std::sync::Arc::new(()),
@@ -272,6 +274,12 @@ impl InputSession {
         mode: EditorMode,
         input: GrammarInput,
     ) -> Result<InputAction, InputError> {
+        if input == GrammarInput::MacroRecordToggle && self.recording_macro.is_some() {
+            return Ok(InputAction::Invoke(CommandInvocation::new(
+                "macro.record.stop",
+                crate::editor::InvocationSource::Keymap,
+            )?));
+        }
         let pending = self.modal.has_pending_grammar();
         let result = self.modal.feed(mode, input);
         if !pending && self.modal.has_pending_grammar() {

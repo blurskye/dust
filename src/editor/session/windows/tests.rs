@@ -103,6 +103,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                 signature: super::NativeSurfaceSignature {
                     editor_tab: Some(tab),
                     editor_window: None,
+                    focused_plugin: None,
                     explorer_visible: true,
                     explorer_views: std::sync::Arc::from([1]),
                     focused_explorer: None,
@@ -189,6 +190,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
     let signature = super::bridge::NativeSurfaceSignature {
         editor_tab: None,
         editor_window: None,
+        focused_plugin: None,
         explorer_visible: true,
         explorer_views: (1..=crate::UNIVERSAL_LAYOUT_WINDOW_CEILING as u64)
             .collect::<Vec<_>>()
@@ -904,6 +906,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
         signature: super::bridge::NativeSurfaceSignature {
             editor_tab: None,
             editor_window: None,
+            focused_plugin: None,
             explorer_visible: false,
             explorer_views: vec![1].into(),
             focused_explorer: None,
@@ -1142,15 +1145,16 @@ fn a_debug_session_shrinks_the_terminal_only_on_a_short_screen_and_gives_it_back
     session.observe_size((80, 24));
     session.set_debugging(true);
     assert_eq!(session.terminal_height(), 5);
-    session.observe_size((80, 40));
-    assert_eq!(session.terminal_height(), 12);
+    session.observe_size((120, 40));
     assert!(!session.terminal_shrunk());
+    assert_eq!(session.terminal_height(), 12);
     session.observe_size((80, 24));
+    assert!(session.terminal_shrunk());
     assert_eq!(session.terminal_height(), 5);
     session.set_debugging(false);
     assert_eq!(session.terminal_height(), 12);
-    session.observe_size((80, 40));
-    session.set_debugging(true);
+    session.observe_size((120, 40));
+    session.observe_size((80, 24));
     assert_eq!(session.terminal_height(), 12);
     session.set_debugging(false);
     session.observe_size((80, 24));

@@ -671,7 +671,11 @@ pub(super) fn read_hunks_owned(
         return Err(GitHunkError::StaleIndex);
     }
     check_hunk_request(p, cancel, started)?;
-    let worktree_sha256 = worktree_hash(&root.join(&p.file)).ok().map(|value| value.0);
+    let worktree_sha256 = if p.layer == GitDiffLayer::Unstaged {
+        worktree_hash(&root.join(&p.file)).ok().map(|value| value.0)
+    } else {
+        None
+    };
     check_hunk_request(p, cancel, started)?;
     Ok(GitHunkSnapshot {
         generation,

@@ -857,6 +857,61 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
 }
 
 #[test]
+fn visual_line_selection_paints_empty_lines() {
+    use crate::editor::{Selection, SelectionKind, text::{ByteOffset, TextBuffer}};
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("a\n\nb"), None).unwrap();
+    state.views[view].mode = crate::editor::EditorMode::VisualLine;
+    state.views[view].selection = Some(Selection { anchor: ByteOffset(0), head: ByteOffset(3), kind: SelectionKind::Line });
+    state.views[view].cursor = ByteOffset(3);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
+    assert_eq!(frame.grid.get(0, 1).unwrap().style, crate::ui::Style::Selection);
+    assert_eq!(frame.grid.get(1, 1).unwrap().style, crate::ui::Style::Default);
+}
+
+#[test]
+fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
+    use crate::editor::text::TextBuffer;
+    use crate::ui::Style;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("foo foobar foo\n123 abc ABC\n123 abc ABC"), None).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.wrap = false;
+    config.ui.status_line.enabled = false;
+    let mut ui = UiState { search_query: Some("foo".into()), search_whole_word: true, ..Default::default() };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    for (column, selected) in [(0, true), (4, false), (11, true)] {
+        assert_eq!(frame.grid.get(column, 0).unwrap().style == Style::Search, selected);
+    }
+    // A freshly typed ordinary search doesn't inherit the previous word-search policy.
+    let mut prompt = PromptState::new(PromptKind::SearchForward);
+    prompt.input = "foo".into();
+    ui.prompt = Some(prompt);
+    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    assert_eq!(frame.grid.get(4, 0).unwrap().style, Style::Search);
+    for (input, expected) in [
+        ("%s/[0-9]+/x/g", [true, false, false]),
+        ("%s/abc/x/g", [false, true, false]),
+        ("%s/ABC/x/gi", [false, true, true]),
+        ("%s/^123/x/g", [true, false, false]),
+    ] {
+        let mut prompt = PromptState::new(PromptKind::Command);
+        prompt.input = input.into();
+        ui.prompt = Some(prompt);
+        let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+        for row in [1, 2] {
+            for (column, selected) in [0, 4, 8].into_iter().zip(expected) {
+                assert_eq!(frame.grid.get(column, row).unwrap().style == Style::Search, selected, "{input} row {row} column {column}");
+            }
+        }
+    }
+}
+
+#[test]
 fn block_selection_projection_uses_shared_display_cell_ranges() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (_, view) = state.open_text(
@@ -887,6 +942,33 @@ fn block_selection_projection_uses_shared_display_cell_ranges() {
         frame.grid.get(gutter, 1).expect("wide cell").style,
         crate::ui::Style::Selection
     );
+}
+
+#[test]
+fn block_selection_on_long_lines_is_resolved_once_per_line() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let text = format!("{}\n0123456789", "x".repeat(500_000));
+    let (_, view) = state.open_text(TextBuffer::from_text(&text), None).unwrap();
+    state.views[view].mode = crate::editor::EditorMode::VisualBlock;
+    state.views[view].selection = Some(crate::editor::Selection {
+        anchor: ByteOffset(500_006),
+        head: ByteOffset(2),
+        kind: crate::editor::SelectionKind::Block,
+    });
+    state.views[view].cursor = ByteOffset(2);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.wrap = false;
+    config.ui.status_line.enabled = false;
+    let ui = UiState::default();
+    let frame = super::render_editor_view(&state, view, &ui, &config, 80, 2);
+    for row in 0..2 {
+        for column in 0..80 {
+            assert_eq!(frame.grid.get(column, row).unwrap().style == crate::ui::Style::Selection,
+                (2..=5).contains(&column), "row {row}, column {column}");
+        }
+    }
 }
 
 #[test]
@@ -1647,6 +1729,9 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
         line: 1,
         wrap_row: 0,
     };
+    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 30, 5);
+    assert!(frame.grid.row_text(1).contains("one ⋯ 3 lines"));
+    assert!(frame.grid.row_text(2).contains("five"));
     let after = model.next(fold_start);
     assert_eq!(after.line, 5);
     assert_eq!(model.previous(after), fold_start);
@@ -1738,6 +1823,59 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
             .cursor
             .is_some_and(|(x, y, _)| x == ": Result ".len() as u16 && y == 1)
     );
+}
+
+#[test]
+fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text("e\u{301} x!"), None).unwrap();
+    state.views[view].cursor = ByteOffset(5);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let ui = UiState {
+        substitute_preview: [1, 5].into_iter().map(|position| super::UiInlayHint {
+            buffer, revision: state.buffers[buffer].text.revision(), position: ByteOffset(position), label: ">".into(),
+        }).collect(),
+        ..Default::default()
+    };
+    for wrap in [false, true] {
+        config.editor.wrap = wrap;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 2);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x>!");
+        assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((5, 0)));
+        config.editor.wrap = true;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 3);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x");
+        assert_eq!(frame.grid.row_text(1).trim_end(), ">!");
+    }
+}
+
+#[test]
+fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    for text in ["", "a", "a\n"] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        let (buffer, view) = state.open_text(TextBuffer::from_text(text), None).unwrap();
+        state.views[view].cursor = ByteOffset(text.len());
+        state.views[view].mode = crate::editor::EditorMode::Insert;
+        let mut config = crate::config::load_bundled_config().config;
+        config.editor.line_numbers = crate::config::LineNumbers::Off;
+        config.editor.wrap = false;
+        config.ui.status_line.enabled = false;
+        let ui = UiState {
+            lsp_inlay_hints: vec![super::UiInlayHint {
+                buffer, revision: state.buffers[buffer].text.revision(),
+                position: ByteOffset(text.len()), label: ">".into(),
+            }],
+            ..Default::default()
+        };
+        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 3);
+        let (column, row) = if text == "a" { (2, 0) } else if text.is_empty() { (1, 0) } else { (1, 1) };
+        assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((column, row)), "{text:?}");
+        assert!(frame.grid.row_text(row).contains('>'));
+    }
 }
 
 #[test]
@@ -2107,6 +2245,20 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     );
     let tiny = render(&state, &ui, &loaded.config, &loaded.dashboard, 1, 3);
     assert_eq!(tiny.grid.width(), 1);
+}
+
+#[test]
+fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(crate::editor::text::TextBuffer::from_text("\ntext"), None).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = true;
+    config.ui.status_line.enabled = false;
+    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "");
+    assert_eq!(frame.grid.row_text(1).trim_end(), "text");
+    assert_eq!(super::git_sign_column(0, &config.editor), None);
 }
 
 #[test]
@@ -2983,6 +3135,75 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
         before,
         "stale dimensions draw nothing"
     );
+}
+
+#[test]
+fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::ui::Style;
+    let path = PathBuf::from("/workspace/file.rs");
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("abc\ndef\nghi\njkl"), Some(path.clone())).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.ui.status_line.enabled = false;
+    let ui = UiState { diagnostics: vec![super::UiDiagnostic {
+        path, range: ByteRange::new(ByteOffset(1), ByteOffset(12)).unwrap(),
+        severity: crate::workspace::DiagnosticSeverity::Error,
+        source: String::new(), code: None, message: "problem".into(),
+    }], ..Default::default() };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
+    let gutter = super::editor_state_gutter_width(&state, &state.buffers[state.views[view].buffer].text, &config.editor, 40);
+    assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Default);
+    assert_eq!(frame.grid.get(gutter + 1, 0).unwrap().style, Style::Error);
+    for row in [1, 2] {
+        assert_eq!(frame.grid.get(gutter, row).unwrap().style, Style::Error);
+        assert!(!frame.grid.row_text(row).contains("problem"));
+    }
+    assert_eq!(frame.grid.get(gutter, 3).unwrap().style, Style::Default);
+    assert!(frame.grid.row_text(0).contains("problem"));
+    // Starting the viewport inside the diagnostic still paints its continuation.
+    state.views[view].cursor = ByteOffset(8);
+    state.views[view].scroll_line = 1;
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Error);
+    assert!(!frame.grid.row_text(0).contains("problem"));
+}
+
+#[test]
+fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::ui::Style;
+    let path = PathBuf::from("/workspace/file.rs");
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("abc\ndef\nghé\njkl"), Some(path.clone())).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    for end in [12, 13] {
+        let ui = UiState { diagnostics: vec![super::UiDiagnostic {
+            path: path.clone(), range: ByteRange::new(ByteOffset(1), ByteOffset(end)).unwrap(),
+            severity: crate::workspace::DiagnosticSeverity::Error,
+            source: String::new(), code: None, message: "problem".into(),
+        }], ..Default::default() };
+        let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
+        assert_eq!(frame.grid.get(2, 2).unwrap().style, Style::Error, "end {end}");
+        assert_eq!(frame.grid.get(0, 3).unwrap().style, Style::Default, "end {end}");
+    }
+    let source = format!("start\n{}last", "line\n".repeat(10_000));
+    let buffer = state.views[view].buffer;
+    state.buffers[buffer].text = TextBuffer::from_text(&source);
+    let ui = UiState {
+        diagnostics: vec![super::UiDiagnostic {
+            path, range: ByteRange::new(ByteOffset(0), ByteOffset(source.len())).unwrap(),
+            severity: crate::workspace::DiagnosticSeverity::Error,
+            source: String::new(), code: None, message: "problem".into(),
+        }],
+        syntax_folds: vec![super::UiFold { view, start_line: 0, end_line: 10_000, collapsed: true }],
+        ..Default::default()
+    };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    assert!(frame.grid.row_text(1).starts_with("last"));
+    assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::Error);
 }
 
 #[test]
@@ -5121,6 +5342,10 @@ fn the_status_line_names_a_worktree_with_its_repository() {
     let ui = ui_with_editor_layout(&state);
     let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
     assert!(frame.grid.row_text(4).contains("repo › feature"));
+    state.workspace_repository = Some("repo{worktree}{repository}".into());
+    state.workspace_root = PathBuf::from("/tmp/repo/.worktree/feature{repository}");
+    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 120, 5);
+    assert!(frame.grid.row_text(4).contains("repo{worktree}{repository} › feature{repository}"));
 }
 
 #[test]
@@ -5282,6 +5507,32 @@ fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
     let frame = super::editor::render_editor_view(&state, view, &ui, &config, 4, 1);
     assert_eq!(frame.grid.get(2, 0).unwrap().symbol, "a");
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((2, 0)));
+}
+
+#[test]
+fn nonwrapped_cursor_uses_the_painted_inlay_budget_after_horizontal_scrolling() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text(&format!("{}Z", "x".repeat(50))), None).unwrap();
+    state.views[view].scroll_column = 20;
+    state.views[view].cursor = ByteOffset(50);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.wrap = false;
+    config.ui.status_line.enabled = false;
+    let ui = UiState {
+        lsp_inlay_hints: (0..40).map(|at| super::UiInlayHint {
+            buffer,
+            revision: state.buffers[buffer].text.revision(),
+            position: ByteOffset(at),
+            label: "h".into(),
+        }).collect(),
+        ..UiState::default()
+    };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 64, 1);
+    assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((42, 0)));
+    assert_eq!(frame.grid.get(42, 0).unwrap().symbol, "Z");
+    assert_eq!(frame.grid.row_text(0).matches('h').count(), 12);
 }
 
 #[test]
@@ -5726,8 +5977,12 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
 #[test]
 fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusive() {
     use crate::editor::{EditorMode, Selection, SelectionKind};
-    use crate::editor::text::{ByteOffset, DisplayWidthPolicy, TextBuffer};
-    let text = TextBuffer::from_text("abc");
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/workspace".into());
+    let (_, view) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
     for (anchor, head) in [(0, 2), (2, 0)] {
         let selection = Some(Selection {
             anchor: ByteOffset(anchor),
@@ -5738,15 +5993,34 @@ fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusiv
             (EditorMode::Insert, [true, true, false]),
             (EditorMode::VisualChar, [true, true, true]),
         ] {
-            let selected = std::array::from_fn(|offset| super::editor::is_selected(
-                selection,
-                mode,
-                ByteOffset(offset),
-                &text,
-                DisplayWidthPolicy { tab_width: 4, ambiguous_wide: false },
-            ));
+            state.views[view].selection = selection;
+            state.views[view].mode = mode;
+            let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 8, 2);
+            let selected = std::array::from_fn(|offset| frame.grid.get(offset as u16, 0).unwrap().style == crate::ui::Style::Selection);
             assert_eq!(selected, expected);
         }
+    }
+}
+
+#[test]
+fn concealed_markdown_preserves_source_tab_columns() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::language::syntax::MarkdownMark;
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text("*a*\tb\nlast"), None).unwrap();
+    state.views[view].cursor = ByteOffset(6);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.tab_width = 4;
+    config.ui.status_line.enabled = false;
+    let ui = UiState { markdown_marks: [0, 2].into_iter().map(|at| super::UiMarkdownMark {
+        buffer, revision: state.buffers[buffer].text.revision(),
+        range: ByteRange::new(ByteOffset(at), ByteOffset(at + 1)).unwrap(), mark: MarkdownMark::Hide,
+    }).collect(), ..Default::default() };
+    for wrap in [true, false] {
+        config.editor.wrap = wrap;
+        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 2);
+        assert_eq!(frame.grid.row_text(0).trim_end(), "a b");
     }
 }
 
@@ -5820,6 +6094,73 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     state.views[view].mode = crate::editor::EditorMode::Insert;
     let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 3);
     assert_eq!(frame.grid.row_text(1).trim_end(), "- item [x](u)");
+}
+
+#[test]
+fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::language::syntax::MarkdownMark;
+    let text = "# Title\n```\nbody\nend\n```\nlast";
+    let path = PathBuf::from("/tmp/test.md");
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text(text), Some(path.clone())).unwrap();
+    state.views[view].cursor = ByteOffset(text.find("last").unwrap());
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let mark = |start, end, mark| super::UiMarkdownMark {
+        buffer, revision: state.buffers[buffer].text.revision(),
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+    };
+    let ui = UiState {
+        markdown_marks: vec![mark(0, 2, MarkdownMark::Heading(1)), mark(0, 7, MarkdownMark::HeadingLine(1)),
+            mark(8, text.find("last").unwrap(), MarkdownMark::Code)],
+        diagnostics: vec![super::UiDiagnostic {
+            path, range: ByteRange::empty(ByteOffset(0)),
+            severity: crate::workspace::DiagnosticSeverity::Warning,
+            source: String::new(), code: None, message: "heading warning".into(),
+        }],
+        syntax_folds: vec![super::UiFold { view, start_line: 2, end_line: 3, collapsed: true }],
+        ..UiState::default()
+    };
+    let frame = super::render_editor_view(&state, view, &ui, &config, 60, 6);
+    assert!(frame.grid.row_text(0).contains("Title  ●● heading warning"));
+    assert!(frame.grid.row_text(2).contains("body ⋯ 1 lines"));
+    assert!(matches!(frame.grid.get(59, 0).unwrap().style, crate::ui::Style::MarkdownHeading(_)));
+    assert!(matches!(frame.grid.get(59, 2).unwrap().style, crate::ui::Style::MarkdownCode(_)));
+}
+
+#[test]
+fn table_tabs_are_single_spaces_and_do_not_overwrite_column_borders() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::language::syntax::MarkdownMark;
+    let text = "| a\tb |\n|---|\n| c\td |\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(TextBuffer::from_text(text), None).unwrap();
+    let last = text.find("last").unwrap();
+    state.views[view].cursor = ByteOffset(last);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.tab_width = 8;
+    config.ui.status_line.enabled = false;
+    let mark = |start, end, mark| super::UiMarkdownMark {
+        buffer, revision: state.buffers[buffer].text.revision(),
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(), mark,
+    };
+    let mut ui = UiState {
+        markdown_marks: text.match_indices('|').map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe)).collect(),
+        ..UiState::default()
+    };
+    ui.markdown_marks.push(mark(0, last, MarkdownMark::Table));
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    for wrap in [false, true] {
+        config.editor.wrap = wrap;
+        for width in [7, 20] {
+            let frame = super::render_editor_view(&state, view, &ui, &config, width, 6);
+            let rows = (0..6).map(|row| frame.grid.row_text(row).trim_end().to_owned()).collect::<Vec<_>>();
+            assert_eq!(rows, ["┌─────┐", "│ a b │", "├─────┤", "│ c d │", "└─────┘", "last"], "wrap {wrap}, width {width}");
+        }
+    }
 }
 
 #[test]

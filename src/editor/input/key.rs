@@ -99,6 +99,22 @@ impl KeyEvent {
         Self::plain(KeyCode::Char(character))
     }
 
+    /// Use the translated character as the identity for ordinary shifted letters and symbols.
+    #[must_use]
+    pub fn normalized_shift(mut self) -> Self {
+        if self.modifiers.shift && let KeyCode::Char(character) = &mut self.code {
+            if (self.modifiers.control || self.modifiers.alt) && character.is_ascii_lowercase() {
+                *character = character.to_ascii_uppercase();
+            }
+            if character.is_uppercase()
+                || (!character.is_alphanumeric() && !character.is_whitespace())
+            {
+                self.modifiers.shift = false;
+            }
+        }
+        self
+    }
+
     #[must_use]
     pub const fn focus_gained() -> Self {
         Self::plain(KeyCode::FocusGained)
@@ -246,10 +262,13 @@ impl FromStr for KeyEvent {
         if input.is_empty() {
             return Err(KeyParseError::Empty);
         }
-        let mut named_input = input;
+        let named_lowercase = input.to_ascii_lowercase();
+        let mut named_input = named_lowercase.as_str();
         let mut named_modifiers = Modifiers::default();
         loop {
-            if let Some(rest) = named_input.strip_prefix("ctrl-") {
+            if let Some(rest) = named_input.strip_prefix("ctrl-")
+                .or_else(|| named_input.strip_prefix("control-"))
+            {
                 named_modifiers.control = true;
                 named_input = rest;
             } else if let Some(rest) = named_input.strip_prefix("alt-") {
@@ -266,7 +285,7 @@ impl FromStr for KeyEvent {
             return Ok(Self {
                 code,
                 modifiers: named_modifiers,
-            });
+            }.normalized_shift());
         }
         let parts: Vec<_> = input.split('-').collect();
         let (key_name, modifier_names) = parts.split_last().ok_or(KeyParseError::Empty)?;
@@ -313,10 +332,14 @@ impl FromStr for KeyEvent {
                 if characters.next().is_some() {
                     return Err(KeyParseError::UnknownKey((*key_name).into()));
                 }
-                KeyCode::Char(character)
+                KeyCode::Char(if modifiers.shift {
+                    character.to_ascii_uppercase()
+                } else {
+                    character
+                })
             }
         };
-        Ok(Self { code, modifiers })
+        Ok(Self { code, modifiers }.normalized_shift())
     }
 }
 
@@ -335,6 +358,34 @@ mod tests {
     use std::str::FromStr;
 
     use super::KeyEvent;
+
+    #[test]
+    fn hyphenated_keys_accept_modifier_aliases_and_case() {
+        for (alias, canonical) in [
+            ("control--", "ctrl--"),
+            ("CTRL--", "ctrl--"),
+            ("CTRL-mouse-left-down", "ctrl-mouse-left-down"),
+            ("Control-ALT-SHIFT-mouse-left-down", "ctrl-alt-shift-mouse-left-down"),
+        ] {
+            assert_eq!(alias.parse::<KeyEvent>().unwrap(), canonical.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn shifted_character_notation_uses_translated_identity() {
+        for (shifted, translated) in [
+            ("ctrl-shift-h", "ctrl-H"),
+            ("shift-h", "H"),
+            ("alt-shift-H", "alt-H"),
+            ("shift-!", "!"),
+            ("shift--", "-"),
+        ] {
+            assert_eq!(shifted.parse::<KeyEvent>().unwrap(), translated.parse().unwrap());
+        }
+        for notation in ["shift-tab", "shift-left", "shift-1", "shift-space"] {
+            assert!(notation.parse::<KeyEvent>().unwrap().modifiers.shift);
+        }
+    }
 
     #[test]
     fn notation_round_trips() {

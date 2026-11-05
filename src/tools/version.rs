@@ -23,7 +23,7 @@ pub struct ToolVersionRequest {
     pub id: String,
     pub executable: PathBuf,
     pub arguments: Vec<String>,
-    pub environment: BTreeMap<String, String>,
+    pub environment: BTreeMap<String, std::ffi::OsString>,
     pub current_directory: Option<PathBuf>,
     pub timeout: Duration,
     pub cancelled: Arc<AtomicBool>,

@@ -475,10 +475,12 @@ fn interactive_pty_output_has_no_lifetime_quota() {
 fn pty_resize_ack_precedes_the_childs_resize_output() {
     let root = tempfile::tempdir().unwrap();
     let mut service = PtyService::start(1);
-    let request = request(
-        root.path(),
-        r#"trap 'printf "\033[1;999HX"' WINCH; printf '\033[?1049hREADY'; while :; do :; done"#,
-    );
+    let script = root.path().join("resize.py");
+    std::fs::write(&script, "import os,signal,time\ndef resized(*_): os.write(1, b'\\x1b[1;999HX')\nsignal.signal(signal.SIGWINCH, resized)\nos.write(1, b'\\x1b[?1049hREADY')\ntime.sleep(30)\n").unwrap();
+    let mut request = request(root.path(), "");
+    request.program =
+        crate::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
+    request.arguments = vec![script.as_os_str().to_owned()];
     let id = service.open(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut screen = crate::ui::PtyScreen::new(80, 8, 8);
@@ -519,4 +521,30 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
     }
     service.close(id).unwrap();
     drain(&mut service, id);
+}
+
+#[cfg(unix)]
+#[test]
+fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
+    let root = tempfile::tempdir().unwrap();
+    let invocation = root.path().join("custom-sh");
+    std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
+    let mut service = PtyService::start(1);
+    let mut request = request(root.path(), "printf '%s' \"$0\"");
+    request.program = invocation.canonicalize().unwrap();
+    request.argv0 = Some(invocation.clone());
+    request.policy.maximum_output_bytes = 0;
+    let id = service.open(request).unwrap();
+    let mut output = Vec::new();
+    for event in drain(&mut service, id) {
+        match event {
+            PtyEvent::Output { bytes, .. } => output.extend(bytes),
+            PtyEvent::IoComplete { result, .. } => result.unwrap(),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        String::from_utf8(output).unwrap().trim_end(),
+        invocation.to_str().unwrap()
+    );
 }

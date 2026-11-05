@@ -988,7 +988,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
     let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "3773ae204a9b1fe0436f2252161663562be895aea2392b1b4bd187c43af74416"
+        "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)
@@ -1022,7 +1022,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         let deadline = Instant::now() + Duration::from_secs(15);
         while !app.extension.is_active_generation("demo", load) {
             app.process_plugin_events();
-            assert!(Instant::now() < deadline, "fixture activation timed out");
+            assert!(Instant::now() < deadline, "fixture activation timed out: {:?}; {:?}", app.ui.notification, app.extension.statuses());
             thread::yield_now();
         }
         app.process_effect(AppEffect::PluginExecute {
@@ -1185,7 +1185,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
     let deadline = Instant::now() + Duration::from_secs(15);
     while !app.extension.is_active_generation("demo", load) {
         app.process_plugin_events();
-        assert!(Instant::now() < deadline, "fixture activation timed out");
+        assert!(Instant::now() < deadline, "fixture activation timed out: {:?}; {:?}", app.ui.notification, app.extension.statuses());
         thread::yield_now();
     }
     app.process_effect(AppEffect::PluginExecute {
@@ -2921,6 +2921,7 @@ fn rejected_package_commands_schedule_the_installed_version_for_reload() {
         activated_commands: Vec::new(),
     });
     app.process_plugin_events();
+    app.process_package_events();
     assert!(app.extension.fixture_package_reload_pending());
     assert!(app.extension.take_prepared("demo", PluginLoadId(1)).is_none());
     assert!(!app.extension.is_active_generation("demo", PluginLoadId(1)));
