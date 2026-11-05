@@ -2405,14 +2405,14 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             frame.grid.get(sign_column, 0).unwrap().symbol.as_str(),
             frame.grid.get(sign_column, 0).unwrap().style,
         ),
-        ("│", crate::ui::Style::GitSignAdded)
+        ("┃", crate::ui::Style::GitSignAdded)
     );
     assert_eq!(
         (
             frame.grid.get(sign_column, 1).unwrap().symbol.as_str(),
             frame.grid.get(sign_column, 1).unwrap().style,
         ),
-        ("│", crate::ui::Style::GitSignChanged)
+        ("┃", crate::ui::Style::GitSignChanged)
     );
     assert_eq!(
         (

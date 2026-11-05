@@ -369,6 +369,49 @@ impl InteractiveApplication {
             }
         });
     }
+    /// Light up what a transaction yanked for a moment, as LazyVim does.
+    pub(super) fn highlight_yank(&mut self, transaction: &crate::editor::EditorTransaction) {
+        const SHOWN: std::time::Duration = std::time::Duration::from_millis(150);
+        let Some((view, ranges)) =
+            transaction
+                .operations
+                .iter()
+                .find_map(|operation| match operation {
+                    crate::editor::EditorOperation::Yanked { view, ranges } => {
+                        Some((*view, ranges.clone()))
+                    }
+                    _ => None,
+                })
+        else {
+            return;
+        };
+        let Some(buffer) = self
+            .state
+            .views
+            .get(view)
+            .and_then(|view| self.state.buffers.get(view.buffer))
+        else {
+            return;
+        };
+        self.ui.yanked = Some(crate::ui::YankHighlight {
+            view,
+            revision: buffer.text.revision().0,
+            ranges,
+            until: self.clock.monotonic() + SHOWN,
+        });
+    }
+
+    pub(super) fn update_yank_highlight(&mut self) {
+        if self
+            .ui
+            .yanked
+            .as_ref()
+            .is_some_and(|yanked| yanked.until <= self.clock.monotonic())
+        {
+            self.ui.yanked = None;
+        }
+    }
+
     pub(super) fn update_notification_timer(&mut self) {
         if self.notices.tick(self.clock.monotonic()) {
             self.project_notice();

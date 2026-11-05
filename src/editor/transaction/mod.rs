@@ -109,6 +109,12 @@ pub enum EditorOperation {
         text: String,
         shape: RegisterShape,
     },
+    /// Text that was just yanked, which the editor lights up for a moment as Vim's
+    /// `vim.hl.on_yank` does. It changes nothing.
+    Yanked {
+        view: ViewId,
+        ranges: Vec<ByteRange>,
+    },
     Undo {
         buffer: BufferId,
     },
@@ -569,6 +575,7 @@ fn apply_operation(
                 .ok_or(TransactionError::MissingView)?
                 .block_insert = positions.clone();
         }
+        EditorOperation::Yanked { .. } => {}
         EditorOperation::SetRegister { name, text, shape } => state.registers.set(
             *name,
             RegisterValue {

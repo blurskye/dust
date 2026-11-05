@@ -2136,7 +2136,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         .collect::<Vec<_>>();
     assert_eq!(added_cells.len(), 1);
     let (sign_x, sign_y) = added_cells[0];
-    assert_eq!(frame.grid.get(sign_x, sign_y).unwrap().symbol, "│");
+    assert_eq!(frame.grid.get(sign_x, sign_y).unwrap().symbol, "┃");
     assert!(sign_y > 0);
     let normal_sign_cell = frame.grid.get(sign_x, sign_y - 1).unwrap();
     assert_eq!(normal_sign_cell.symbol, "│");

@@ -7,6 +7,7 @@ use crate::ui::{Style, geometry::text_width};
 
 use super::{
     Frame,
+    editor::{END_OF_BUFFER_MARKER, GIT_SIGN_ADDED, GIT_SIGN_UNCHANGED, GUTTER_PADDING},
     settings::{SetupState, draw_box, fill, settings_layout},
     surfaces::ellipsized,
 };
@@ -295,6 +296,8 @@ const CODE: &[&[Token]] = &[
 
 /// The sample lines added since the last commit, for the git signs.
 const ADDED_LINES: [usize; 2] = [5, 6];
+/// The line the cursor is on, which the status line names too.
+const CURSOR_LINE: usize = 5;
 
 fn render_preview(frame: &mut Frame, scene: &Scene, config: &Config, area: Area) {
     framed(frame, area, Style::Border, Style::Default);
@@ -500,16 +503,28 @@ fn render_code(frame: &mut Frame, area: Area) {
     );
     let x = line(frame, area, 0, area.x, " main.rs ", Style::BufferLineActive);
     line(frame, area, 0, x, " lib.rs ", Style::BufferLineInactive);
-    for (row, tokens) in (1..area.height).zip(CODE) {
+    // The gutter as the editor draws it: relative line numbers, the cursor's line in full,
+    // then the git sign column and `~` past the end.
+    for row in 1..area.height {
         let number = usize::from(row);
-        let sign = if ADDED_LINES.contains(&number) {
-            "▎"
-        } else {
-            " "
+        let tokens = CODE.get(number - 1).copied();
+        let (label, style) = match tokens {
+            Some(_) if number == CURSOR_LINE => (format!("{number:>2} "), Style::Accent),
+            Some(_) => (
+                format!("{:>2} ", number.abs_diff(CURSOR_LINE)),
+                Style::Muted,
+            ),
+            None => (format!("{:>2} ", END_OF_BUFFER_MARKER), Style::Muted),
         };
-        let x = line(frame, area, row, area.x, sign, Style::GitSignAdded);
-        let mut x = line(frame, area, row, x, &format!("{number:>2} "), Style::Muted);
-        for &(text, highlight) in *tokens {
+        let x = line(frame, area, row, area.x, &label, style);
+        let (sign, style) = if ADDED_LINES.contains(&number) {
+            (GIT_SIGN_ADDED, Style::GitSignAdded)
+        } else {
+            (GIT_SIGN_UNCHANGED, Style::Muted)
+        };
+        let x = line(frame, area, row, x, sign, style);
+        let mut x = x + GUTTER_PADDING;
+        for &(text, highlight) in tokens.unwrap_or_default() {
             let style = highlight.map_or(Style::Default, Style::Syntax);
             x = line(frame, area, row, x, text, style);
         }

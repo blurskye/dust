@@ -32,8 +32,9 @@ pub(crate) const END_OF_BUFFER_MARKER: &str = "~";
 pub(crate) const LINE_NUMBER_SEPARATOR: &str = " ";
 pub(crate) const GUTTER_PADDING: u16 = 1;
 pub(crate) const GIT_SIGN_UNCHANGED: &str = "│";
-pub(crate) const GIT_SIGN_ADDED: &str = "│";
-pub(crate) const GIT_SIGN_CHANGED: &str = "│";
+// Heavier than the unchanged line beside it, so a change stands out as LazyVim's bar does.
+pub(crate) const GIT_SIGN_ADDED: &str = "┃";
+pub(crate) const GIT_SIGN_CHANGED: &str = "┃";
 pub(crate) const GIT_SIGN_DELETED: &str = "_";
 pub(crate) const GIT_SIGN_STAGED: &str = "┊";
 pub(crate) const INDENT_GUIDE: &str = "│";
@@ -253,6 +254,10 @@ pub(super) fn render_editor_view(
         configured_start
     };
     let flash = ui.flash.as_ref().filter(|flash| flash.view == view_id);
+    let yanked = ui
+        .yanked
+        .as_ref()
+        .filter(|yanked| yanked.view == view_id && yanked.revision == buffer.text.revision().0);
     // What is being typed in `/` or `:s` shows as you type, as with Vim's incsearch.
     let typed_substitute = ui
         .prompt
@@ -789,6 +794,8 @@ pub(super) fn render_editor_view(
             } else if search_ranges.iter().any(|range| range.contains(global))
                 || flash
                     .is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
+                || yanked
+                    .is_some_and(|yanked| yanked.ranges.iter().any(|range| range.contains(global)))
                 || tutor_target.is_some_and(|target| target.range.contains(global))
             {
                 Style::Search

@@ -1545,6 +1545,16 @@ pub struct FlashOverlay {
     pub labels: Vec<(crate::editor::text::ByteOffset, char)>,
 }
 
+/// Text just yanked, drawn in the search colour until `until`, as LazyVim's highlight on yank.
+#[derive(Clone, Debug)]
+pub struct YankHighlight {
+    pub view: crate::editor::ViewId,
+    /// The buffer revision the ranges belong to; an edit ends the highlight.
+    pub revision: u64,
+    pub ranges: Vec<crate::editor::text::ByteRange>,
+    pub until: std::time::Instant,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
     pub surface_content: crate::ui::geometry::SurfaceContentGeometry,
@@ -1557,6 +1567,7 @@ pub struct UiState {
     pub search_whole_word: bool,
     /// The `s` jump's matches and labels while it is active.
     pub flash: Option<FlashOverlay>,
+    pub yanked: Option<YankHighlight>,
     pub config_diagnostic: Option<String>,
     pub dashboard_actions: Vec<DashboardAction>,
     /// The dashboard item under the cursor.

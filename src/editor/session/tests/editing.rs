@@ -279,6 +279,48 @@ fn dot_repeats_semantic_insert_session() {
 }
 
 #[test]
+fn a_yank_lights_up_the_yanked_text_for_a_moment() {
+    let (_app_dirs, mut app) = app();
+    app.state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("one\ntwo\n"),
+            None,
+        )
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    press_keys(&mut app, &["y", "y"]);
+    let yanked = app.ui.yanked.clone().expect("the line lights up");
+    assert_eq!(
+        yanked.ranges,
+        vec![crate::editor::text::ByteRange::new(ByteOffset(0), ByteOffset(4)).unwrap()]
+    );
+    app.handle_event(UiEvent::Resize(40, 6));
+    app.reconcile_editor_windows();
+    let frame = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.configuration.settings(),
+        app.configuration.dashboard(),
+        40,
+        6,
+    );
+    let lit = (0..6)
+        .flat_map(|y| (0..40).map(move |x| (x, y)))
+        .filter(|(x, y)| frame.grid.get(*x, *y).unwrap().style == crate::ui::Style::Search)
+        .count();
+    assert_eq!(lit, 3, "the three letters of `one`");
+    app.update_yank_highlight();
+    assert!(app.ui.yanked.is_some(), "it stays for a moment");
+    std::thread::sleep(
+        yanked
+            .until
+            .saturating_duration_since(std::time::Instant::now()),
+    );
+    app.update_yank_highlight();
+    assert!(app.ui.yanked.is_none());
+}
+
+#[test]
 fn counted_dot_overrides_the_recorded_count_and_keeps_it_for_later_repeats() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app

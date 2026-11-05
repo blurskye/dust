@@ -1007,6 +1007,10 @@ pub(super) fn execute_builtin<E>(
                 });
             } else {
                 transaction.undo_policy = UndoPolicy::Ignore;
+                transaction.operations.push(EditorOperation::Yanked {
+                    view: view_id,
+                    ranges,
+                });
                 if matches!(
                     view.mode,
                     EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock

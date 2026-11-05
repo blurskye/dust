@@ -47,6 +47,10 @@ use crate::{
 pub(in crate::editor::session) const TRANSCRIPT_OWNER: &str = "Agent";
 /// Messages handled per session and tick, so a chatty agent cannot stall input.
 const MESSAGES_PER_TICK: usize = 256;
+/// How long a question typed while the agent started waits once its session exists, so the
+/// text some agents send just after, such as pi's list of its context and extensions, comes
+/// before the question rather than inside the answer.
+const STARTUP_TEXT_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 /// Files larger than this are not read for the agent.
 const READ_BYTE_CEILING: u64 = 16 * 1024 * 1024;
 /// The option category ACP uses for reasoning effort.
@@ -146,6 +150,8 @@ struct AgentSession {
     id: Option<String>,
     /// Questions asked before the session was ready, sent in order.
     queued: VecDeque<Vec<PromptPart>>,
+    /// When the agent created the session.
+    created: Option<std::time::Instant>,
     /// The agent's last stderr line, shown if it exits.
     last_log: String,
     entries: Vec<Entry>,
@@ -242,7 +248,12 @@ impl AgentSession {
     }
 
     fn send_next_prompt(&mut self) {
-        if self.phase != Phase::Ready || !self.requests.is_empty() {
+        if self.phase != Phase::Ready
+            || !self.requests.is_empty()
+            || self
+                .created
+                .is_some_and(|created| created.elapsed() < STARTUP_TEXT_WAIT)
+        {
             return;
         }
         let Some(id) = self.id.clone() else {
@@ -1440,6 +1451,7 @@ impl InteractiveApplication {
             turn_result: None,
             id: None,
             queued: VecDeque::new(),
+            created: None,
             last_log: String::new(),
             entries,
             options: Vec::new(),
@@ -1897,6 +1909,7 @@ impl InteractiveApplication {
                 session.id = result["sessionId"].as_str().map(str::to_owned);
                 session.options = agent::session_options(&result);
                 session.phase = Phase::Ready;
+                session.created = Some(std::time::Instant::now());
                 if let Err(error) = session.choose_subagent_model() {
                     session.stop(&error);
                     return false;
@@ -3659,6 +3672,36 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn startup_text_comes_before_a_question_typed_while_the_agent_started() {
+        let (_directories, mut app) = test_app();
+        let index = echo_agent(&mut app);
+        app.agent.active = index;
+        app.agent.sessions[index].phase = Phase::Creating(7);
+        app.agent_ask("hello".into());
+        app.handle_agent_response(index, 7, Ok(json!({"sessionId": "s"})));
+        let session = &mut app.agent.sessions[index];
+        apply_update(session, SessionUpdate::AgentText("pi v1.4.0\n".into()));
+        assert_eq!(session.phase, Phase::Ready, "the question waits");
+        std::thread::sleep(STARTUP_TEXT_WAIT);
+        session.send_next_prompt();
+        assert!(matches!(session.phase, Phase::Prompting(_)));
+        apply_update(session, SessionUpdate::AgentText("Hi!".into()));
+        assert_eq!(
+            session.entries,
+            vec![
+                Entry::Agent("pi v1.4.0\n".into()),
+                Entry::User {
+                    text: "hello".into(),
+                    context: vec![],
+                    attachments: vec![]
+                },
+                Entry::Agent("Hi!".into()),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn agent_queued_questions_start_new_transcript_turns_only_when_sent() {
         let (_directories, mut app) = test_app();
         let index = echo_agent(&mut app);
@@ -4276,6 +4319,9 @@ mod tests {
                 "currentValue": "a", "options": [{"value": "a"}, {"value": "b"}],
             }]})),
         );
+        // The task waits for any startup text, then goes on a later tick.
+        std::thread::sleep(STARTUP_TEXT_WAIT);
+        app.agent.sessions[index].send_next_prompt();
         let session = &app.agent.sessions[index];
         assert!(matches!(session.phase, Phase::Prompting(_)));
         assert!(session.requests.is_empty());
@@ -4317,6 +4363,7 @@ mod tests {
             } else {
                 Err("model rejected".into())
             };
+            std::thread::sleep(STARTUP_TEXT_WAIT);
             app.handle_agent_message(
                 index,
                 AgentMessage::Response {
@@ -5053,6 +5100,7 @@ mod tests {
             turn_result: None,
             id: Some("s".into()),
             queued: VecDeque::new(),
+            created: None,
             last_log: String::new(),
             entries: Vec::new(),
             options: agent::session_options(&options),
@@ -5118,6 +5166,7 @@ mod tests {
             turn_result: None,
             id: Some("s".into()),
             queued: VecDeque::new(),
+            created: None,
             last_log: String::new(),
             entries: Vec::new(),
             options: agent::session_options(&json!({

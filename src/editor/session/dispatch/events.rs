@@ -1591,6 +1591,7 @@ impl InteractiveApplication {
                         self.show_error(error);
                         return false;
                     }
+                    self.highlight_yank(&transaction);
                     // Map marks before a long typing session or macro evicts the edit history.
                     self.persistence.reconcile_marks(&self.state);
                     if let Some(update) = update {

@@ -417,6 +417,7 @@ pub fn run_interactive(
         application.flush_keymap_timeout();
         application.update_key_hint_ui();
         application.update_notification_timer();
+        application.update_yank_highlight();
         application.update_live_crash_snapshot();
         application.reconcile_editor_windows();
         application.reconcile_git_signs();
