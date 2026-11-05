@@ -24,9 +24,11 @@ pub struct AgentProfileConfig {
     /// Claude Code may use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
-    /// Shown at the top of a new session, for setup the agent needs outside Dust.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    /// The command that adds Dust's tools to an agent that reads MCP servers only from its own
+    /// config, such as `pi mcp add`; `{dust}` stands for this Dust program. Dust runs it before
+    /// the agent starts when `agents.add_tools` is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_tools: Vec<String>,
     /// The agent's own command-line program and its arguments, run in a terminal on the
     /// right when `agents.connection` is `terminal`.
     #[serde(default)]
@@ -58,12 +60,19 @@ pub struct AgentsConfig {
     /// The side the agent panel, or a terminal agent, opens on.
     #[serde(default = "default_agent_side")]
     pub side: super::ui::PanelSide,
+    /// Run each profile's `add_tools` command, which changes the agent's own config.
+    #[serde(default = "default_add_tools")]
+    pub add_tools: bool,
     #[serde(default)]
     pub profiles: BTreeMap<String, AgentProfileConfig>,
 }
 
 const fn default_panel_width() -> u16 {
     35
+}
+
+const fn default_add_tools() -> bool {
+    true
 }
 
 const fn default_agent_side() -> super::ui::PanelSide {
@@ -77,6 +86,7 @@ impl Default for AgentsConfig {
             connection: AgentConnection::default(),
             panel_width: default_panel_width(),
             side: default_agent_side(),
+            add_tools: default_add_tools(),
             profiles: BTreeMap::new(),
         }
     }

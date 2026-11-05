@@ -367,6 +367,11 @@ impl SearchSession {
             _ => None,
         }
     }
+    pub(in crate::editor::session) fn select_picker_item(&mut self, id: &PickerItemId) {
+        if let Some(picker) = self.picker.interaction.as_mut() {
+            picker.state.select_id(id);
+        }
+    }
     pub(in crate::editor::session) fn picker(&self) -> Option<&PickerState> {
         self.picker.interaction.as_ref().map(|picker| &picker.state)
     }

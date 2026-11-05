@@ -5436,6 +5436,21 @@ keys = "alt-["
 command = "agent.session.previous"
 desc = "Previous Session"
 
+# As in the editor and the terminal, ctrl-pagedown and ctrl-pageup switch tabs while typing.
+[[keymap]]
+id = "builtin.agent.session-next.ctrl-pagedown"
+context = "agent"
+keys = "ctrl-pagedown"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent.session-previous.ctrl-pageup"
+context = "agent"
+keys = "ctrl-pageup"
+command = "agent.session.previous"
+desc = "Previous Session"
+
 [[keymap]]
 id = "builtin.agent.new.ctrl-n"
 context = "agent"
@@ -5687,6 +5702,21 @@ desc = "Next Session"
 id = "builtin.agent-normal.session-previous.alt-bracket-left"
 context = "agent_normal"
 keys = "alt-["
+command = "agent.session.previous"
+desc = "Previous Session"
+
+# As in the editor and the terminal, ctrl-pagedown and ctrl-pageup switch tabs while typing.
+[[keymap]]
+id = "builtin.agent-normal.session-next.ctrl-pagedown"
+context = "agent_normal"
+keys = "ctrl-pagedown"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.ctrl-pageup"
+context = "agent_normal"
+keys = "ctrl-pageup"
 command = "agent.session.previous"
 desc = "Previous Session"
 

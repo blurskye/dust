@@ -71,6 +71,21 @@ choices_from = "agents.profiles"
 key = "agents.default"
 
 [[page]]
+title = "Agent tools"
+question = "May Dust add its tools, such as subagents, to agents that keep them in their own config?"
+preview = "agent"
+
+[[page.choice]]
+label = "Yes, add them"
+about = "For pi, Dust runs pi mcp add dust … before pi starts."
+settings = { "agents.add_tools" = true }
+
+[[page.choice]]
+label = "No"
+about = "Each new session says the command to run yourself."
+settings = { "agents.add_tools" = false }
+
+[[page]]
 title = "Leader key"
 question = "Which key is the leader, the one that starts shortcuts such as <leader> f f?"
 preview = "leader"

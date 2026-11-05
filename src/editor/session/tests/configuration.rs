@@ -1584,16 +1584,16 @@ fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_comma
 }
 
 #[test]
-fn the_pi_profile_says_how_to_give_pi_subagents() {
+fn the_pi_profile_adds_dust_tools_to_pi() {
     let (_app_dirs, app) = app();
     let agents = &app.configuration.settings().agents;
-    let note = agents.profiles["pi"].note.as_deref().unwrap_or_default();
-    assert!(
-        note.contains("pi mcp add dust --exposure direct -- dust --agent-tools"),
-        "{note}"
-    );
+    assert!(agents.add_tools);
     assert_eq!(
-        agents.profiles["claude"].note, None,
+        agents.profiles["pi"].add_tools.join(" "),
+        "pi mcp add dust --exposure direct -- {dust} --agent-tools"
+    );
+    assert!(
+        agents.profiles["claude"].add_tools.is_empty(),
         "Dust gives other agents the tool itself"
     );
 }

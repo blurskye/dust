@@ -386,6 +386,10 @@ connection = "acp"
 panel_width = 35
 # "left" or "right": the side the agent panel or terminal agent opens on.
 side = "right"
+# Agents such as pi read MCP servers only from their own config, so Dust gives them its tools,
+# such as subagents, by running the profile's `add_tools` command before they start. It
+# changes that agent's config; with false each new session says what to run instead.
+add_tools = true
 
 [agents.profiles.claude]
 program = "claude-agent-acp"
@@ -416,8 +420,8 @@ arguments = []
 # screen readers follow.
 environment = { PI_HARDWARE_CURSOR = "1" }
 options = {}
-# pi reads MCP servers only from its own config, so Dust cannot hand it the `agent` tool.
-note = "To give pi Dust's subagents, run this once: pi mcp add dust --exposure direct -- dust --agent-tools"
+# pi reads MCP servers only from its own config; `mcp add` replaces an entry of the same name.
+add_tools = ["pi", "mcp", "add", "dust", "--exposure", "direct", "--", "{dust}", "--agent-tools"]
 
 [agents.profiles.opencode]
 program = "opencode"

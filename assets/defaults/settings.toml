@@ -89,6 +89,7 @@ settings = [
   { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
   { key = "agents.side", title = "Panel Side", about = "The side the agent panel or terminal agent opens on.", choices = ["right", "left"] },
   { key = "agents.panel_width", title = "Panel Width (%)", about = "Share of the editor width the agent panel opens at." },
+  { key = "agents.add_tools", title = "Add Dust's Tools", about = "Give agents that keep their tools in their own config, such as pi, Dust's tools and subagents, by running their add_tools command before they start." },
 ]
 
 [[section]]

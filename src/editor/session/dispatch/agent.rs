@@ -12,7 +12,7 @@
 
 use crate::ui::render::overlays::{AGENT_ICON, SPINNER_FRAMES};
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -92,6 +92,8 @@ pub(super) struct AgentPanel {
     active: usize,
     /// Tab numbers are never reused, so a late permission answer cannot reach the wrong tab.
     started: u64,
+    /// Agents whose `add_tools` command ran in this run of Dust.
+    tools_added: HashSet<String>,
     buffer: Option<BufferId>,
     /// Files, selections and diagnostics to send with the next question.
     context: Vec<PromptPart>,
@@ -517,6 +519,7 @@ impl InteractiveApplication {
     /// shows the one that is running, with the selection pasted into its prompt, or starts it.
     fn ask_terminal_agent(&mut self) {
         let name = self.configuration.settings().agents.default.clone();
+        self.add_agent_tools(&name);
         let Some(profile) = self.configuration.settings().agents.profiles.get(&name) else {
             self.show_error(format!("agents.default names no agent profile: {name}"));
             return;
@@ -813,6 +816,7 @@ impl InteractiveApplication {
     /// `<leader>an`: pick an agent to start in a new tab.
     pub(super) fn open_agent_picker(&mut self) {
         let agents = &self.configuration.settings().agents;
+        let default = PickerItemId(format!("agent:{}", agents.default));
         let items = agents
             .profiles
             .iter()
@@ -835,6 +839,8 @@ impl InteractiveApplication {
             })
             .collect();
         self.install_picker("New Agent Session".to_owned(), items);
+        // It starts on the default agent, not on whichever was picked last.
+        self.search.select_picker_item(&default);
         self.search
             .set_picker_footer("Enter Start in a new tab · Esc Esc Close".to_owned());
         self.sync_picker_ui();
@@ -1368,14 +1374,25 @@ impl InteractiveApplication {
 
     fn start_agent_session(&mut self, name: &str) -> Result<(), String> {
         let root = self.state.workspace_root.clone();
+        self.add_agent_tools(name);
         let spawned = self.spawn_agent(name, &root, Some(self.agent.started + 1))?;
-        let note = self
-            .configuration
-            .settings()
-            .agents
+        let agents = &self.configuration.settings().agents;
+        let note = agents
             .profiles
             .get(name)
-            .and_then(|profile| profile.note.clone().map(Entry::Notice));
+            .and_then(add_tools_command)
+            .filter(|_| !agents.add_tools)
+            .map(|command| {
+                let command = command
+                    .iter()
+                    .map(|word| word.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Entry::Notice(format!(
+                    "To give {name} Dust's subagents, turn on Add Dust's Tools in Settings \
+                     (ctrl-,) or run this once: {command}"
+                ))
+            });
         let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None)?;
         self.agent.active = index;
         self.agent.sessions[index].attach(spawned);
@@ -1451,6 +1468,7 @@ impl InteractiveApplication {
         };
         let (name, root, tab) = (session.name.clone(), session.root.clone(), session.number);
         let tab = session.parent.is_none().then_some(tab);
+        self.add_agent_tools(&name);
         let spawned = self.spawn_agent(&name, &root, tab)?;
         // A restarted process can reuse JSON-RPC IDs, but must not receive replies
         // to filesystem requests made by the previous process in this tab.
@@ -1471,6 +1489,32 @@ impl InteractiveApplication {
 
     /// Start the agent of profile `name`. `tab` is the session's tab number, for agents that
     /// start Dust's MCP server from their own config; subagents get none.
+    /// Run the agent's `add_tools` command once per run of Dust when `agents.add_tools` is on, so
+    /// an agent that reads MCP servers only from its own config gets Dust's tools before it
+    /// starts. A failure is shown and not retried until Dust starts again.
+    fn add_agent_tools(&mut self, name: &str) {
+        let agents = &self.configuration.settings().agents;
+        let Some(command) = agents.profiles.get(name).and_then(add_tools_command) else {
+            return;
+        };
+        if !agents.add_tools || !self.agent.tools_added.insert(name.to_owned()) {
+            return;
+        }
+        let Some((program, arguments)) = command.split_first() else {
+            return;
+        };
+        let output = std::process::Command::new(program)
+            .args(arguments)
+            .stdin(std::process::Stdio::null())
+            .output();
+        let error = match output {
+            Ok(output) if output.status.success() => return,
+            Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            Err(error) => error.to_string(),
+        };
+        self.show_error(format!("could not add Dust's tools to {name}: {error}"));
+    }
+
     fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
         let profile = self
             .configuration
@@ -2966,6 +3010,27 @@ fn age(seconds: u64) -> String {
     }
 }
 
+/// The profile's `add_tools` command with `{dust}` replaced by this Dust program, or `None`
+/// when it has none.
+fn add_tools_command(
+    profile: &crate::config::AgentProfileConfig,
+) -> Option<Vec<std::ffi::OsString>> {
+    if profile.add_tools.is_empty() {
+        return None;
+    }
+    let dust = std::env::current_exe().map_or_else(|_| "dust".into(), PathBuf::into_os_string);
+    Some(
+        profile
+            .add_tools
+            .iter()
+            .map(|word| match word.as_str() {
+                "{dust}" => dust.clone(),
+                word => word.into(),
+            })
+            .collect(),
+    )
+}
+
 fn picker_row(id: String, label: String, detail: String, badge: String) -> PickerItem {
     PickerItem {
         badge,
@@ -3236,10 +3301,20 @@ mod tests {
         (tempfile::TempDir, tempfile::TempDir),
         InteractiveApplication,
     ) {
+        test_app_with(|_| {})
+    }
+
+    fn test_app_with(
+        change: impl FnOnce(&mut crate::config::Config),
+    ) -> (
+        (tempfile::TempDir, tempfile::TempDir),
+        InteractiveApplication,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let mut loaded = crate::config::load_bundled_config();
         loaded.config.persistence.enabled = false;
+        change(&mut loaded.config);
         let mut app = InteractiveApplication::new(
             crate::editor::StartupTarget::Dashboard {
                 root: root.path().into(),
@@ -3254,6 +3329,49 @@ mod tests {
         .unwrap();
         app.window_session.observe_size((80, 24));
         ((root, state), app)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_tools_runs_once_with_this_dust_and_only_when_allowed() {
+        let marker = tempfile::tempdir().unwrap();
+        let file = marker.path().join("added");
+        let command = vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "printf '%s\\n' \"$1\" >> \"$0\"".to_owned(),
+            file.display().to_string(),
+            "{dust}".to_owned(),
+        ];
+        let set = |allowed: bool| {
+            let command = command.clone();
+            move |config: &mut crate::config::Config| {
+                config.agents.add_tools = allowed;
+                config.agents.profiles.get_mut("pi").unwrap().add_tools = command;
+            }
+        };
+        let (_dirs, mut app) = test_app_with(set(true));
+        app.add_agent_tools("pi");
+        app.add_agent_tools("pi");
+        app.add_agent_tools("claude");
+        let dust = std::env::current_exe().unwrap().display().to_string();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{dust}\n"));
+
+        std::fs::remove_file(&file).unwrap();
+        let (_dirs, mut app) = test_app_with(set(false));
+        app.add_agent_tools("pi");
+        assert!(!file.exists(), "nothing runs when add_tools is off");
+    }
+
+    #[test]
+    fn the_agent_picker_starts_on_the_default_agent() {
+        let (_dirs, mut app) = test_app_with(|config| config.agents.default = "pi".into());
+        app.open_agent_picker();
+        let selected = app
+            .search
+            .picker()
+            .and_then(|picker| picker.selected_item());
+        assert_eq!(selected.map(|item| item.id.0.as_str()), Some("agent:pi"));
     }
 
     fn tab(app: &mut InteractiveApplication) -> usize {
