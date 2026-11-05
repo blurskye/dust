@@ -455,7 +455,9 @@ impl<'a> Resolver<'a> {
 
 impl Transform {
     fn apply(&self, value: &str, maximum_bytes: usize) -> Result<String, String> {
-        let mut builder = regex::RegexBuilder::new(&self.pattern);
+        // Snippet transforms use JavaScript regex syntax, which has lookaround and
+        // backreferences.
+        let mut builder = fancy_regex::RegexBuilder::new(&self.pattern);
         for option in self.options.chars() {
             match option {
                 'g' | 'u' => {}
@@ -471,14 +473,17 @@ impl Transform {
                 _ => return Err("unsupported snippet regex option".into()),
             }
         }
-        // JavaScript-only syntax such as lookaround leaves the value as it is instead of
-        // refusing the whole snippet.
+        // A pattern it cannot compile or run leaves the value as it is instead of refusing the
+        // whole snippet.
         let Ok(regex) = builder.build() else {
             return Ok(value.to_owned());
         };
         let mut output = String::new();
         let mut end = 0;
         for captures in regex.captures_iter(value) {
+            let Ok(captures) = captures else {
+                return Ok(value.to_owned());
+            };
             let matched = captures.get(0).expect("whole match");
             output.push_str(&value[end..matched.start()]);
             output.push_str(&format_capture(
@@ -504,7 +509,7 @@ impl Transform {
 
 fn format_capture(
     format: &str,
-    captures: &regex::Captures<'_>,
+    captures: &fancy_regex::Captures<'_, str>,
     maximum_bytes: usize,
 ) -> Result<String, String> {
     let mut parser = Parser {
@@ -686,10 +691,14 @@ mod tests {
     }
     #[test]
     fn transformed_tabstop_copies_report_their_ranges() {
-        let parsed = parse_snippet("${1:ab} ${1/(.*)/${1:/upcase}/} ${1/a(?=b)/x/}", 1024).unwrap();
+        let parsed = parse_snippet(
+            "${1:ab} ${1/(.*)/${1:/upcase}/} ${1/a(?=b)/x/} ${1/(?<=a)b/X/} ${1/(/x/}",
+            1024,
+        )
+        .unwrap();
         assert_eq!(
-            parsed.text, "ab AB ab",
-            "JavaScript-only lookahead keeps the value"
+            parsed.text, "ab AB xb aX ab",
+            "lookaround works, and an invalid pattern keeps the value"
         );
         assert_eq!(
             parsed
@@ -697,7 +706,7 @@ mod tests {
                 .iter()
                 .map(|transform| (transform.index, transform.start, transform.end))
                 .collect::<Vec<_>>(),
-            vec![(1, 3, 5), (1, 6, 8)]
+            vec![(1, 3, 5), (1, 6, 8), (1, 9, 11), (1, 12, 14)]
         );
         assert_eq!(parsed.transforms[0].apply("cd").unwrap(), "CD");
     }

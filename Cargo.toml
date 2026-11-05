@@ -17,6 +17,7 @@ clap = { version = "4.5.28", features = ["derive"] }
 # Keep unread SIGWINCH readiness pending when input and resize arrive together.
 # Crossterm 0.29's default Mio backend can discard the second edge-triggered event.
 crossterm = { version = "0.29.0", features = ["use-dev-tty"] }
+fancy-regex = "0.20.0"
 flate2 = "1.1.5"
 globset = "0.4.16"
 # The https and ssh transports are enabled by an explicit owner decision, recorded as the one
