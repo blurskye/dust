@@ -331,6 +331,28 @@ fn native_signature(tab: crate::ui::window::WorkspaceTabId) -> NativeSurfaceSign
 }
 
 #[test]
+fn native_display_titles_are_sanitized_before_graph_reconciliation() {
+    let mut graph = WindowGraph::default();
+    let tab = graph.create_workspace_tab("fixture", 1).unwrap();
+    let mut native = NativeSurfaceBridge::default();
+    let mut signature = native_signature(tab);
+    signature.explorer_visible = true;
+    signature.dashboard_visible = true;
+    signature.picker_rect = Some(WindowRect { x: 1, y: 1, width: 30, height: 10 });
+    signature.picker_surface = Some(crate::ui::PickerSurfaceKind::Generic);
+    let terminals = [(1, "Terminal\nprofile".into(), ContentLifecycle::Running)];
+    for title in ["Action\nname\t\u{1b}", &"é".repeat(1024)] {
+        native.reconcile(&mut graph, signature.clone(), title, title, title, &terminals).unwrap();
+        for ids in [native.explorer.unwrap(), native.dashboard.unwrap(), native.picker().unwrap()] {
+            let actual = &graph.content(ids.content).unwrap().title;
+            assert_eq!(actual, &super::sanitize_title(title));
+            assert!(!actual.chars().any(char::is_control));
+        }
+        assert_eq!(graph.content(native.terminals[&1].content).unwrap().title, "Terminal\u{fffd}profile");
+    }
+}
+
+#[test]
 fn fullscreen_terminal_switch_hides_the_outgoing_host_before_showing_a_picker() {
     let mut graph = WindowGraph::default();
     let tab = graph.create_workspace_tab("builtin.editor", 1).unwrap();

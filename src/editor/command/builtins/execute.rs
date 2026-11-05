@@ -42,6 +42,9 @@ pub(super) fn execute_builtin<E>(
         .get(view_id)
         .ok_or_else(|| CommandError::Unavailable("target view is stale".into()))?;
     let buffer_id = invocation.target.buffer.unwrap_or(view.buffer);
+    if buffer_id != view.buffer {
+        return Err(CommandError::Unavailable("target view displays a different buffer".into()));
+    }
     let buffer = state
         .buffers
         .get(buffer_id)

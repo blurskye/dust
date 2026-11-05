@@ -185,14 +185,9 @@ impl LspEditSources {
             .nth(key.index)
             .expect("checked action index"))
     }
-    // Reserve space for the active request's eventual response. Stop draining the
-    // bounded backend event channel rather than dropping critical reply obligations.
+    // Each worker bounds outstanding apply-edit requests until it sends their replies.
+    // Keep draining events so a backpressured worker can reach those reply commands.
     pub(super) fn poll_event(&self, service: &LspService) -> Option<OwnedLspEvent> {
-        if self.replies.len() + usize::from(self.active.as_ref().is_some_and(|r| r.reply.is_some()))
-            >= 128
-        {
-            return None;
-        }
         service.try_owned_event()
     }
     pub(super) fn flush(&mut self) -> Vec<String> {
@@ -725,6 +720,48 @@ mod tests {
         assert_eq!(plan.files.len(), 1);
         assert!(matches!(plan.files[0], InputFile::Create(_)));
     }
+    #[test]
+    fn pending_edit_replies_do_not_stop_draining_backpressured_events() {
+        use std::{sync::mpsc, thread, time::Duration};
+        let mut editor = EditorState::new("/workspace".into());
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("source"), None);
+        let mut service = LspService::new();
+        let uri = "file:///workspace/source.rs";
+        let mut endpoint = service.replace_edit_source_fixture_for("fixture", uri.into(),
+            (buffer, editor.buffers[buffer].text.source_version()), PositionEncoding::Utf16, 1);
+        let mut sources = LspEditSources::default();
+        for id in 0..128 {
+            assert!(endpoint.request(ServerRequestId::Number(id), LspWorkspaceEdit::default()));
+            let packet = sources.poll_event(&service).unwrap();
+            sources.reject_reply(packet.reply, "busy".into());
+        }
+        assert_eq!(sources.replies.len(), 128);
+        endpoint.block_responses();
+        assert!(sources.flush().is_empty());
+        // Fill the shared event channel, then block a producer just as the session
+        // worker can block before it reaches queued reply commands.
+        for _ in 0..256 {
+            endpoint.publish_disk_diagnostics(uri, "source", Vec::new());
+        }
+        let (done, completion) = mpsc::sync_channel(1);
+        let producer = thread::spawn(move || {
+            endpoint.publish_disk_diagnostics(uri, "source", Vec::new());
+            done.send(endpoint).unwrap_or_else(|_| panic!("test receiver stopped"));
+        });
+        assert!(matches!(completion.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(sources.poll_event(&service).is_some(), "reply pressure stopped event draining");
+        let mut endpoint = completion.recv_timeout(Duration::from_secs(3)).unwrap();
+        producer.join().unwrap();
+        while sources.poll_event(&service).is_some() {}
+        endpoint.unblock_responses();
+        for id in 0..128 {
+            assert!(sources.flush().is_empty());
+            assert_eq!(endpoint.response(), Some((ServerRequestId::Number(id), false)));
+        }
+        assert!(sources.flush().is_empty());
+        assert!(!sources.pending_replies());
+    }
+
     #[test]
     fn requesting_edit_origin_preserves_encoding_incarnation_and_acknowledges_only_its_endpoint() {
         let root = tempfile::tempdir().unwrap();

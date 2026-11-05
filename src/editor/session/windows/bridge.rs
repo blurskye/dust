@@ -650,6 +650,9 @@ impl NativeSurfaceBridge {
         picker_title: &str,
         terminals: &[(u64, String, ContentLifecycle)],
     ) -> Result<(), WindowError> {
+        let explorer_title = sanitize_title(explorer_title);
+        let dashboard_title = sanitize_title(dashboard_title);
+        let picker_title = sanitize_title(picker_title);
         let owner = "builtin.surfaces";
         let generation = 1;
         // Hidden retained native windows still need a host while editor tabs
@@ -966,6 +969,7 @@ impl NativeSurfaceBridge {
         // Release the outgoing fullscreen host before showing its replacement.
         placements.sort_by_key(|(_, _, _, placement)| *placement == WindowPlacement::Fullscreen);
         for (id, profile, lifecycle, placement) in placements {
+            let profile = sanitize_title(profile);
             if let Some(ids) = self.terminals.get(id).copied() {
                 graph.update_content_lifecycle(ids.content, profile.clone(), false, *lifecycle)?;
                 graph.rehost(ids.window, tab, ids.view, placement, true)?;

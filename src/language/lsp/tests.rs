@@ -216,6 +216,56 @@ fn server_message_replies(
 }
 
 #[test]
+fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
+    use super::{
+        origins::{EditContext, EventSender},
+        server_message::{ServerMessageContext, handle_server_message},
+        LspServerConfiguration,
+    };
+    use std::sync::{Arc, mpsc};
+    use nix::{sys::stat::Mode, unistd::mkfifo};
+    let root = tempfile::tempdir().unwrap();
+    mkfifo(&root.path().join("fifo"), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    std::fs::create_dir(root.path().join("directory")).unwrap();
+    std::fs::write(root.path().join("large"), vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
+    std::fs::write(root.path().join("regular"), "source").unwrap();
+    let (channel, receiver) = mpsc::sync_channel(1);
+    let (commands, _requests) = mpsc::sync_channel(1);
+    let events = EventSender {
+        channel, commands,
+        cancelled: Default::default(), stop_requested: Default::default(),
+        context: EditContext {
+            session: Arc::new(()), server: "fixture".into(),
+            encoding: Default::default(), diagnostic_ambiguous: false,
+            sources: Arc::new(Default::default()), disk: None,
+        },
+    };
+    let worker_root = root.path().to_path_buf();
+    let worker = std::thread::spawn(move || {
+        for name in ["fifo", "directory", "large", "regular"] {
+            let uri = file_uri(&worker_root.join(name));
+            handle_server_message(ServerMessageContext {
+                server: "fixture", root: &worker_root, stdin: &mut Vec::new(),
+                events: &events, logs: &mut Default::default(),
+                base_capabilities: &Default::default(), capabilities: &mut Default::default(),
+                registrations: &mut Default::default(), configuration: &LspServerConfiguration::standard(),
+                sources: &Default::default(), diagnostic_lineage: &Default::default(),
+                documents: &Default::default(), apply_requests: &mut Default::default(),
+            }, &json!({"method":"textDocument/publishDiagnostics", "params":{"uri":uri,"diagnostics":[]}}));
+        }
+    });
+    for name in ["fifo", "directory", "large", "regular"] {
+        let packet = receiver.recv_timeout(Duration::from_secs(3))
+            .expect("diagnostic snapshot read blocked");
+        let uri = file_uri(&root.path().join(name));
+        assert!(matches!(packet.event, LspEvent::Diagnostics { .. }));
+        assert_eq!(packet.context.disk_document(&uri).map(ToString::to_string),
+            (name == "regular").then(|| "source".to_owned()));
+    }
+    worker.join().unwrap();
+}
+
+#[test]
 fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
     let base = super::LspCapabilities::default();
     let mut capabilities = base.clone();

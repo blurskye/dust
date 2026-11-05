@@ -48,6 +48,22 @@ fn movement_and_edit_commands_apply_through_registry_transactions() {
     );
 }
 
+#[test]
+fn explicit_buffer_target_must_match_the_view_before_moving() {
+    let (mut state, _, view) = editing("abcdef", 4);
+    let other = state.buffers.insert(crate::editor::state::Buffer::new(TextBuffer::from_text("x"), None));
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    let mut invocation = CommandInvocation::new("view.cursor.move", InvocationSource::Test)
+        .unwrap().with_argument("motion", CommandValue::String("right".into()));
+    invocation.target.view = Some(view);
+    invocation.target.buffer = Some(other);
+    assert!(matches!(registry.execute(&state, &invocation),
+        Err(crate::editor::CommandError::Unavailable(message)) if message.contains("different buffer")));
+    assert_eq!(state.views[view].cursor.get(), 4);
+    assert_eq!(state.buffers[other].text.to_string(), "x");
+}
+
 fn apply(state: &mut EditorState, id: &str, arguments: &[(&str, &str)], count: u64) {
     let mut registry = CommandRegistry::<()>::default();
     register_builtin_commands(&mut registry).unwrap();

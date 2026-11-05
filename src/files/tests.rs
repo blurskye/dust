@@ -760,6 +760,23 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
 }
 
 #[test]
+fn linked_worktree_metadata_rejects_nonregular_and_oversized_files() {
+    use nix::{sys::stat::Mode, unistd::mkfifo};
+    let root = tempdir().unwrap();
+    let git = root.path().join(".git");
+    mkfifo(&git, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    fs::remove_file(&git).unwrap();
+    std::os::unix::fs::symlink("/dev/zero", &git).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    fs::remove_file(&git).unwrap();
+    fs::write(&git, format!("gitdir: /repo/.git/worktrees/{}", "x".repeat(16 * 1024))).unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    fs::write(&git, "gitdir: /repo/.git/worktrees/feature\n").unwrap();
+    assert_eq!(super::linked_worktree_repository(root.path()).as_deref(), Some("repo"));
+}
+
+#[test]
 fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
     let root = tempdir().unwrap();
     for index in 0..20 {

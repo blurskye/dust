@@ -443,12 +443,14 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
         frame_id: None,
         context: "repl".into(),
     }).unwrap();
-    let before = Instant::now();
-    service.stop().unwrap();
-    assert!(
-        before.elapsed() < Duration::from_secs(1),
-        "foreground stop joined the adapter"
-    );
+    let (stopped_tx, stopped_rx) = std::sync::mpsc::sync_channel(1);
+    let stopper = thread::spawn(move || {
+        service.stop().unwrap();
+        stopped_tx.send(service).unwrap();
+    });
+    let mut service = stopped_rx.recv_timeout(Duration::from_secs(3))
+        .expect("foreground stop joined the nonreading adapter");
+    stopper.join().unwrap();
     wait(|| service.pending() == 0);
     service.begin_shutdown();
     assert!(

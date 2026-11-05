@@ -434,6 +434,7 @@ impl JobEngine {
         };
         let readers = Arc::new(AtomicUsize::new(0));
         let io_failed = Arc::new(AtomicBool::new(false));
+        let setup_io = (|| -> io::Result<()> {
         if let Some(bytes) = request.stdin
             && let Some(mut stdin) = stdin
         {
@@ -442,13 +443,13 @@ impl JobEngine {
             let failed = io_failed.clone();
             let cancelled = cancel.clone();
             pending.fetch_add(1, Ordering::AcqRel);
-            thread::spawn(move || {
+            thread::Builder::new().name("dust-job-stdin".into()).spawn(move || {
                 let _lease = lease;
                 if stdin.write_all(&bytes).is_err() && !cancelled.load(Ordering::Acquire) {
                     failed.store(true, Ordering::Release);
                 }
                 pending.fetch_sub(1, Ordering::AcqRel);
-            });
+            })?;
         }
         let total = Arc::new(AtomicUsize::new(0));
         if let Some(stdout) = stdout {
@@ -460,7 +461,7 @@ impl JobEngine {
                 total.clone(),
                 request.policy.clone(),
                 (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
-            );
+            )?;
         }
         if let Some(stderr) = stderr {
             stream_reader(
@@ -471,7 +472,15 @@ impl JobEngine {
                 total,
                 request.policy.clone(),
                 (readers.clone(), io_failed.clone(), slot.clone(), cancel.clone()),
-            );
+            )?;
+        }
+        Ok(())
+        })();
+        if let Err(error) = setup_io {
+            cancel.store(true, Ordering::Release);
+            terminate_tree(&mut child, false);
+            let _ = child.wait();
+            return Err(JobError::Spawn(error));
         }
         self.jobs.insert(
             id,
@@ -494,9 +503,9 @@ impl JobEngine {
     fn expire(&mut self) {
         for running in self.jobs.values_mut() {
             if running.status.is_none()
-                && let Ok(Some(status)) = running.child.try_wait()
+                && let Ok(Some(status)) = job_exit_status(&mut running.child)
             {
-                running.status = Some(status.code());
+                running.status = Some(status);
             }
             let expired = running.started.elapsed() >= running.timeout;
             running.timed_out |= running.status.is_none() && expired;
@@ -523,10 +532,13 @@ impl JobEngine {
         let mut terminals = Vec::new();
         for (id, running) in &mut self.jobs {
             if running.status.is_none() {
-                match running.child.try_wait() {
-                    Ok(Some(status)) => running.status = Some(status.code()),
+                match job_exit_status(&mut running.child) {
+                    Ok(Some(status)) => running.status = Some(status),
                     Ok(None) => {}
                     Err(error) => {
+                        running.cancel.store(true, Ordering::Release);
+                        terminate_tree(&mut running.child, false);
+                        let _ = running.child.wait();
                         events.push(JobEvent::Failed {
                             job: *id,
                             message: error.to_string(),
@@ -539,6 +551,8 @@ impl JobEngine {
             if let Some(code) = running.status
                 && running.readers.load(Ordering::Acquire) == 0
             {
+                // No later cleanup can signal this group once the leader is reaped.
+                let _ = running.child.wait();
                 terminals.push(if running.io_failed.load(Ordering::Acquire) {
                     JobEvent::Failed {
                         job: *id,
@@ -578,9 +592,7 @@ impl Drop for JobEngine {
             if !job.killed {
                 terminate_tree(&mut job.child, job.status.is_some());
             }
-            if job.status.is_none() {
-                let _ = job.child.wait();
-            }
+            let _ = job.child.wait();
         }
     }
 }
@@ -592,10 +604,10 @@ fn stream_reader(
     total: Arc<AtomicUsize>,
     policy: JobPolicy,
     completion: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<JobSlot>, Arc<AtomicBool>),
-) {
+) -> io::Result<()> {
     let (readers, failed, slot, cancel) = completion;
     readers.fetch_add(1, Ordering::AcqRel);
-    thread::spawn(move || {
+    thread::Builder::new().name("dust-job-output".into()).spawn(move || {
         struct End(Arc<AtomicUsize>);
         impl Drop for End {
             fn drop(&mut self) {
@@ -674,7 +686,7 @@ fn stream_reader(
                 }
             }
         }
-    });
+    }).map(|_| ())
 }
 fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usize {
     let mut current = total.load(Ordering::Relaxed);
@@ -689,6 +701,26 @@ fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usiz
             Ok(_) => return allowed,
             Err(actual) => current = actual,
         }
+    }
+}
+
+fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
+    #[cfg(unix)]
+    {
+        use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+        // Keep the exited leader reserved while descendants can still hold pipes.
+        match waitid(
+            Id::Pid(nix::unistd::Pid::from_raw(child.id() as i32)),
+            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
+        ).map_err(io::Error::from)? {
+            WaitStatus::Exited(_, code) => Ok(Some(Some(code))),
+            WaitStatus::Signaled(..) => Ok(Some(None)),
+            _ => Ok(None),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        child.try_wait().map(|status| status.map(|status| status.code()))
     }
 }
 
@@ -884,9 +916,13 @@ mod tests {
         let mut engine = JobEngine::new(16);
         engine.start(queued).unwrap();
         let running = engine.jobs.get_mut(&JobId(1)).unwrap();
-        assert!(running.child.wait().unwrap().success());
-        running.started = Instant::now() - Duration::from_secs(1);
         let deadline = Instant::now() + Duration::from_secs(3);
+        while job_exit_status(&mut running.child).unwrap().is_none() {
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert_eq!(job_exit_status(&mut running.child).unwrap(), Some(Some(0)));
+        running.started = Instant::now() - Duration::from_secs(1);
         let mut exited = false;
         while !engine.jobs.is_empty() {
             for event in engine.poll() {
@@ -1017,12 +1053,18 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         assert_ne!(engine.jobs[&JobId(1)].readers.load(Ordering::Acquire), 0);
+        let running = engine.jobs.get_mut(&JobId(1)).unwrap();
+        let pid = nix::unistd::Pid::from_raw(running.child.id() as i32);
+        // Observation must not reap the leader while cleanup can still signal its group.
+        assert_eq!(job_exit_status(&mut running.child).unwrap(), Some(Some(0)));
         cancel.store(true, Ordering::Release);
         while !engine.jobs.is_empty() || residents.load(Ordering::Acquire) != 0 {
             engine.poll();
             assert!(Instant::now() < deadline, "descendant retained job readers");
             thread::sleep(Duration::from_millis(2));
         }
+        use nix::sys::wait::{Id, WaitPidFlag, waitid};
+        assert_eq!(waitid(Id::Pid(pid), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG), Err(nix::errno::Errno::ECHILD));
     }
 
     #[test]

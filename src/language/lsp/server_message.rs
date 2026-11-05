@@ -86,22 +86,13 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             };
             let disk = (!rejected && !diagnostic_lineage.tracked(uri))
                 .then(|| {
-                    use std::io::Read;
                     let path = super::paths::path_from_file_uri(uri)?;
                     let path = std::fs::canonicalize(path).ok()?;
                     let root = std::fs::canonicalize(root).ok()?;
                     if !path.starts_with(root) {
                         return None;
                     }
-                    let mut bytes = Vec::new();
-                    std::fs::File::open(path)
-                        .ok()?
-                        .take(4 * 1024 * 1024 + 1)
-                        .read_to_end(&mut bytes)
-                        .ok()?;
-                    if bytes.len() > 4 * 1024 * 1024 {
-                        return None;
-                    }
+                    let bytes = crate::files::read_file_with_ceiling(&path, 4 * 1024 * 1024).ok()?;
                     Some((
                         uri.to_owned(),
                         crate::editor::text::TextBuffer::from_text(&String::from_utf8(bytes).ok()?),
