@@ -206,6 +206,50 @@ pub struct GitStatusSnapshot {
     pub truncated: bool,
     pub revision: u64,
 }
+impl GitStatusSnapshot {
+    /// Update editor-only changes without re-reading or changing the disk status revision.
+    pub(crate) fn reconcile_unsaved_documents(
+        &mut self,
+        documents: &[GitUnsavedDocument],
+        maximum_files: usize,
+        maximum_path_bytes: usize,
+    ) {
+        self.entries.retain(|entry| entry.sources.staged || entry.sources.unstaged);
+        for entry in &mut self.entries {
+            entry.sources.unsaved_document_revision = None;
+        }
+        let mut bytes: usize = self.entries.iter().map(|entry| entry.relative_path.as_os_str().len()).sum();
+        for document in documents {
+            let position = match self.entries.binary_search_by(|entry| {
+                entry.relative_path.as_path().cmp(&document.relative_path)
+            }) {
+                Ok(position) => {
+                    self.entries[position].sources.unsaved_document_revision = Some(document.document_revision);
+                    continue;
+                }
+                Err(position) => position,
+            };
+            let cost = document.relative_path.as_os_str().len();
+            if self.entries.len() >= maximum_files || bytes.saturating_add(cost) > maximum_path_bytes {
+                self.truncated = true;
+                continue;
+            }
+            bytes += cost;
+            self.entries.insert(position, GitStatusEntry {
+                relative_path: document.relative_path.clone(),
+                original_path: None,
+                status: GitFileStatus::Modified,
+                staged_status: None,
+                unstaged_status: None,
+                sources: GitChangeSources {
+                    staged: false,
+                    unstaged: false,
+                    unsaved_document_revision: Some(document.document_revision),
+                },
+            });
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct GitStatusPolicy {
     pub root: PathBuf,
@@ -647,7 +691,7 @@ pub(super) fn read_status(
         });
     }
     let entries = entries.into_values().collect();
-    Ok(GitStatusSnapshot {
+    let mut snapshot = GitStatusSnapshot {
         generation,
         root_revision: p.root_revision,
         repository: workdir,
@@ -658,7 +702,9 @@ pub(super) fn read_status(
         entries,
         truncated,
         revision: 0,
-    })
+    };
+    snapshot.reconcile_unsaved_documents(unsaved, p.maximum_files, p.maximum_path_bytes);
+    Ok(snapshot)
 }
 
 #[cfg(all(test, unix))]

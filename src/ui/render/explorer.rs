@@ -99,7 +99,7 @@ pub(super) fn render_explorer_window(
         width: body.width,
         height: body.height,
     };
-    render_explorer_dock(
+    let search_cursor = render_explorer_dock(
         &mut local,
         explorer,
         config,
@@ -123,14 +123,7 @@ pub(super) fn render_explorer_window(
     }
     if focused && explorer.searching {
         // Typing goes to the search box.
-        let typed = text_width(EXPLORER_FOCUS_MARKER, config.editor.ambiguous_width)
-            + 1
-            + text_width(&explorer.query, config.editor.ambiguous_width);
-        let x = u16::try_from(typed)
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .min(panel_width.saturating_sub(2));
-        frame.cursor = (rect.height > 1).then(|| {
+        frame.cursor = search_cursor.map(|x| {
             (
                 rect.x.saturating_add(x),
                 rect.y.saturating_add(1),
@@ -162,12 +155,14 @@ pub(super) fn render_explorer_dock(
     panel_width: u16,
     height: u16,
     body: WindowRect,
-) {
+) -> Option<u16> {
     if panel_width == 0 || height == 0 {
-        return;
+        return None;
     }
     let panel_height = height;
-    let border = if config.ui.explorer.icon_mode == crate::config::ExplorerIconMode::Ascii {
+    let border = if config.ui.explorer.icon_mode == crate::config::ExplorerIconMode::Ascii
+        || grid.display_width("│") != 1
+    {
         "|"
     } else {
         "│"
@@ -179,9 +174,11 @@ pub(super) fn render_explorer_dock(
         grid.set_cell(panel_width, y, border, Style::ExplorerBorder);
     }
 
-    if body.y >= 3 {
-        render_explorer_search_box(grid, explorer, config, panel_width);
-    }
+    let search_cursor = if body.y >= 3 {
+        render_explorer_search_box(grid, explorer, config, panel_width)
+    } else {
+        None
+    };
 
     let body_top = body.y;
     let available_rows = usize::from(body.height);
@@ -245,6 +242,7 @@ pub(super) fn render_explorer_dock(
             panel_width.saturating_sub(1),
         );
     }
+    search_cursor
 }
 
 /// The titled box at the top of the panel: the prompt, the query and how many rows match.
@@ -253,12 +251,16 @@ fn render_explorer_search_box(
     explorer: &ExplorerUiState,
     config: &Config,
     panel_width: u16,
-) {
+) -> Option<u16> {
     if panel_width < 4 {
-        return;
+        return None;
     }
     let (horizontal, vertical, top_left, top_right, bottom_left, bottom_right) =
-        crate::config::BorderStyle::Rounded.glyphs();
+        if grid.display_width("─") == 1 {
+            crate::config::BorderStyle::Rounded.glyphs()
+        } else {
+            ('-', '|', '+', '+', '+', '+')
+        };
     let last = panel_width - 1;
     for x in 1..last {
         grid.set_cell(x, 0, &horizontal.to_string(), Style::ExplorerBorder);
@@ -291,13 +293,16 @@ fn render_explorer_search_box(
     let count_x = last.saturating_sub(count_width).saturating_sub(1);
     grid.put_text_clipped(count_x, 1, &count, Style::ExplorerCount, last);
     let x = grid.put_text_clipped(2, 1, EXPLORER_FOCUS_MARKER, Style::ExplorerHeader, count_x);
-    grid.put_text_clipped(
-        x.saturating_add(1),
-        1,
+    let right = count_x.saturating_sub(1);
+    let start = x.saturating_add(1).min(right);
+    let (query, cursor) = super::surfaces::prompt_viewport(
         &explorer.query,
-        Style::ExplorerHeader,
-        count_x.saturating_sub(1),
+        explorer.query.len(),
+        usize::from(right.saturating_sub(start)),
+        grid,
     );
+    grid.put_text_clipped(start, 1, query, Style::ExplorerHeader, right);
+    Some(start.saturating_add(u16::try_from(cursor).unwrap_or(0)))
 }
 
 pub(crate) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
@@ -318,5 +323,89 @@ pub(crate) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
         ExplorerSegmentRole::Loading => Style::ExplorerDecoration,
         ExplorerSegmentRole::Git => Style::ExplorerGit,
         ExplorerSegmentRole::Diagnostic => Style::ExplorerDiagnostic,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn explorer(query: &str) -> ExplorerUiState {
+        ExplorerUiState {
+            title: "Explorer".into(),
+            rows: Vec::new(),
+            scroll: 0,
+            loading: false,
+            total: 1,
+            matches: 1,
+            query: query.into(),
+            searching: true,
+        }
+    }
+
+    fn render_search(query: &str, ambiguous: AmbiguousWidth) -> Frame {
+        let mut config = Config::default();
+        config.editor.ambiguous_width = ambiguous;
+        config.ui.explorer.icon_mode = crate::config::ExplorerIconMode::Unicode;
+        let mut frame = Frame {
+            grid: CellGrid::new_with_policy(
+                29,
+                8,
+                CONTROL_CHARACTER_REPLACEMENT,
+                ZERO_WIDTH_REPLACEMENT,
+                ambiguous == AmbiguousWidth::Wide,
+            ),
+            cursor: None,
+        };
+        render_explorer_window(
+            &mut frame,
+            &explorer(query),
+            &config,
+            WindowRect { x: 0, y: 0, width: 29, height: 8 },
+            true,
+        );
+        frame
+    }
+
+    #[test]
+    fn wide_explorer_separator_fits_the_final_column() {
+        let frame = render_search("", AmbiguousWidth::Wide);
+        for y in 0..8 {
+            let cell = frame.grid.get(28, y).unwrap();
+            assert_eq!(cell.symbol, "|");
+            assert!(!cell.continuation);
+        }
+    }
+
+    #[test]
+    fn wide_search_box_borders_stay_within_the_panel() {
+        let frame = render_search("", AmbiguousWidth::Wide);
+        for y in [0, 2] {
+            assert_eq!(frame.grid.get(0, y).unwrap().symbol, "+");
+            assert_eq!(frame.grid.get(27, y).unwrap().symbol, "+");
+        }
+        assert_eq!(frame.grid.row_text(2), format!("+{}+|", "-".repeat(26)));
+        assert_eq!(frame.grid.get(27, 1).unwrap().symbol, "|");
+        let narrow = render_search("", AmbiguousWidth::Narrow);
+        assert_eq!(narrow.grid.get(0, 0).unwrap().symbol, "╭");
+        assert_eq!(narrow.grid.get(28, 1).unwrap().symbol, "│");
+    }
+
+    #[test]
+    fn search_query_scrolls_with_the_cursor_before_the_count() {
+        for ambiguous in [AmbiguousWidth::Narrow, AmbiguousWidth::Wide] {
+            for tail in ["z", "界", "e\u{301}", "·"] {
+                let query = format!("{}{tail}", "a".repeat(40));
+                let frame = render_search(&query, ambiguous);
+                let line = frame.grid.row_text(1);
+                assert!(line.contains(tail), "{line}");
+                let (x, y, _) = frame.cursor.unwrap();
+                assert_eq!(y, 1);
+                assert!(x < 25, "{x}: {line}");
+                assert_eq!(frame.grid.get(x, y).unwrap().symbol, " ");
+                assert_eq!(frame.grid.get(25, y).unwrap().symbol, "1");
+                assert_eq!(frame.grid.get(x - 1, y).unwrap().style, Style::ExplorerHeader);
+            }
+        }
     }
 }

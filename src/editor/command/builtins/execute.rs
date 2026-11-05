@@ -181,11 +181,11 @@ pub(super) fn execute_builtin<E>(
             multi::begin_insert(
                 &mut transaction,
                 view_id,
-                buffer_id,
                 view,
                 &buffer.text,
                 string_argument(invocation, "placement")?,
                 &block,
+                state.policy,
             )?;
         }
         "multi.delete" => multi::delete(&mut transaction, view_id, buffer_id, view, &buffer.text),

@@ -8,7 +8,7 @@ use crate::{
         EditorState,
         text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
     },
-    ui::geometry::text_width,
+    ui::geometry::{cell_text_width, text_width},
     ui::render::editor::{GUTTER_PADDING, LINE_NUMBER_SEPARATOR},
 };
 
@@ -111,7 +111,7 @@ impl<'a> VisualRowModel<'a> {
                 }
                 *count = count.saturating_add(1);
                 labels.entry(hint.position).or_default().push(&hint.label);
-                let width = text_width(&hint.label, config.editor.ambiguous_width);
+                let width = cell_text_width(&hint.label, config.editor.ambiguous_width);
                 inlay_widths
                     .entry(hint.position)
                     .and_modify(|current| *current = current.saturating_add(width))
@@ -132,14 +132,24 @@ impl<'a> VisualRowModel<'a> {
             let line = text.byte_to_line(*position).unwrap_or(0);
             let line_start = text.line_to_byte(line).unwrap_or(ByteOffset(0));
             let source = text.line(line).unwrap_or_default();
+            let relative = position.get().saturating_sub(line_start.get());
             let source_width = source
-                .get(position.get().saturating_sub(line_start.get())..)
+                .get(relative..)
                 .unwrap_or_default()
                 .graphemes(true)
                 .next()
                 .map_or(0, |g| {
                     if g == "\t" {
-                        config.editor.tab_width.max(1)
+                        let tab_width = config.editor.tab_width.max(1);
+                        let column = display_column_at(
+                            &source,
+                            relative,
+                            DisplayWidthPolicy {
+                                tab_width,
+                                ambiguous_wide: config.editor.ambiguous_width == AmbiguousWidth::Wide,
+                            },
+                        );
+                        tab_width - (column % tab_width)
                     } else {
                         text_width(g, config.editor.ambiguous_width).max(1)
                     }
@@ -148,7 +158,7 @@ impl<'a> VisualRowModel<'a> {
             let mut used = 0;
             for label in &labels[position] {
                 for grapheme in label.graphemes(true) {
-                    let cells = text_width(grapheme, config.editor.ambiguous_width).clamp(1, 2);
+                    let cells = cell_text_width(grapheme, config.editor.ambiguous_width);
                     if used + cells > limit {
                         break;
                     }
@@ -244,6 +254,11 @@ impl<'a> VisualRowModel<'a> {
     /// What a markdown line draws in place of its source, `None` when it shows its source.
     pub(super) fn markdown_line(&self, line: usize) -> Option<super::markdown::MarkdownLine<'a>> {
         self.markdown.as_ref()?.line(line)
+    }
+
+    #[must_use]
+    pub fn is_table_line(&self, line: usize) -> bool {
+        self.markdown_line(line).is_some_and(|markdown| markdown.table.is_some())
     }
 
     /// The cells a grapheme takes as drawn, with what markdown draws before it.
@@ -560,23 +575,41 @@ impl<'a> VisualRowModel<'a> {
         let end = row.byte_end.min(content.len());
         let line_start = self.text.line_to_byte(anchor.line).unwrap_or(ByteOffset(0));
         let markdown = self.markdown_line(anchor.line);
-        if !self.wrap && markdown.as_ref().is_none_or(|line| line.table.is_none()) {
+        if let Some(markdown) = &markdown
+            && let Some(table) = &markdown.table
+        {
+            return content.grapheme_indices(true)
+                .filter_map(|(relative, grapheme)| {
+                    let at = ByteOffset(line_start.get() + relative);
+                    let (wrap_row, column) = table.place(at)?;
+                    let width = markdown.drawn_width(
+                        at, cell_text_width(grapheme, self.ambiguous_width), self.ambiguous_width,
+                    );
+                    if width == 0 {
+                        return None;
+                    }
+                    let distance = column.saturating_sub(cell).max(
+                        cell.saturating_sub(column.saturating_add(width).saturating_sub(1)),
+                    );
+                    Some(((wrap_row.abs_diff(anchor.wrap_row), distance), relative))
+                })
+                .min_by_key(|(distance, _)| *distance)
+                .map_or(row.byte_start, |(_, relative)| relative);
+        }
+        if !self.wrap {
             row.byte_start = super::editor::byte_offset_at_display_column(
-                content,
-                scroll_column,
-                self.tab_width,
-                self.ambiguous_width,
+                content, scroll_column, self.tab_width, self.ambiguous_width,
             );
             row.source_column_start = display_column(
-                &content[..row.byte_start],
-                self.tab_width,
-                self.ambiguous_width,
+                &content[..row.byte_start], self.tab_width, self.ambiguous_width,
             );
         }
         let mut source_column = row.source_column_start;
         let mut used = 0usize;
+        let mut last_grapheme = row.byte_start;
         for (relative, grapheme) in content[row.byte_start..end].grapheme_indices(true) {
             let relative = row.byte_start.saturating_add(relative);
+            last_grapheme = relative;
             let virtual_width = self.inlay_width(ByteOffset(line_start.get() + relative))
                 .min(self.content_width);
             if cell < used.saturating_add(virtual_width) {
@@ -593,7 +626,11 @@ impl<'a> VisualRowModel<'a> {
             used = used.saturating_add(visible_width);
             source_column = source_column.saturating_add(source_width);
         }
-        row.byte_end
+        if row.byte_end < content.len() {
+            last_grapheme
+        } else {
+            row.byte_end
+        }
     }
 
     /// Source graphemes that can receive an overlay in this painted row. Horizontal scrolling
@@ -736,26 +773,38 @@ impl<'a> VisualRowModel<'a> {
     }
 
     #[must_use]
-    pub fn forward(&self, mut anchor: VisualRowAnchor, count: usize) -> VisualRowAnchor {
+    pub fn forward(&self, mut anchor: VisualRowAnchor, mut count: usize) -> VisualRowAnchor {
         anchor = self.normalize(anchor);
-        for _ in 0..count {
+        while count > 0 {
             let next = self.next(anchor);
-            if next == anchor {
+            let step = 1 + if next.line != anchor.line {
+                self.diagnostic_rows(anchor.line).len()
+            } else {
+                0
+            };
+            if next == anchor || step > count {
                 break;
             }
+            count -= step;
             anchor = next;
         }
         anchor
     }
 
     #[must_use]
-    pub fn backward(&self, mut anchor: VisualRowAnchor, count: usize) -> VisualRowAnchor {
+    pub fn backward(&self, mut anchor: VisualRowAnchor, mut count: usize) -> VisualRowAnchor {
         anchor = self.normalize(anchor);
-        for _ in 0..count {
+        while count > 0 {
             let previous = self.previous(anchor);
-            if previous == anchor {
+            let step = 1 + if previous.line != anchor.line {
+                self.diagnostic_rows(previous.line).len()
+            } else {
+                0
+            };
+            if previous == anchor || step > count {
                 break;
             }
+            count -= step;
             anchor = previous;
         }
         anchor
@@ -1221,4 +1270,20 @@ mod tests {
         assert_eq!(unwrapped.rows_for_line(0), 1);
         assert!(unwrapped.rows.borrow().is_empty());
     }
+    #[test]
+    fn wrapped_row_padding_hits_stay_on_the_clicked_row() {
+        let text = crate::editor::text::TextBuffer::from_text("abc界");
+        let mut config = Config::default();
+        config.editor.line_numbers = LineNumbers::Off;
+        let ui = UiState::default();
+        let model = VisualRowModel::new(
+            &text, crate::editor::ViewId::default(), &ui, &config, 4, true,
+        );
+        assert_eq!(model.byte_at_cell(VisualRowAnchor::default(), 3), 2);
+        let second = VisualRowAnchor { line: 0, wrap_row: 1 };
+        assert_eq!(model.byte_at_cell(second, 0), 3);
+        assert_eq!(model.byte_at_cell(second, 1), 3);
+        assert_eq!(model.byte_at_cell(second, 3), text.len_bytes());
+    }
+
 }

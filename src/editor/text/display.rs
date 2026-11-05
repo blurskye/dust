@@ -172,4 +172,14 @@ mod tests {
             Some((0, "·".len()))
         );
     }
+    #[test]
+    fn display_columns_stream_prefixes_and_snap_inside_graphemes() {
+        let policy = DisplayWidthPolicy::default();
+        let text = format!("\t界e\u{301}{}", "x".repeat(1 << 20));
+        for (offset, column) in [(0, 0), (1, 4), (2, 4), (4, 6), (5, 6), (6, 6), (7, 7)] {
+            assert_eq!(display_column_at(&text, offset, policy), column);
+        }
+        assert_eq!(display_column_at("x", usize::MAX, policy), 1);
+    }
+
 }

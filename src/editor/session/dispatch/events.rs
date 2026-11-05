@@ -2064,8 +2064,7 @@ impl InteractiveApplication {
                             .find(|buffer| buffer.path.as_ref() == Some(&path));
                         let unchanged = current.map_or_else(
                             || result.as_deref().is_ok_and(|bytes| bytes == snapshot.as_ref()),
-                            |buffer| crate::editor::text::decode_utf8(snapshot)
-                                .is_ok_and(|snapshot| buffer.text.to_string() == snapshot.text),
+                            |buffer| buffer.text.matches_encoded_text(snapshot),
                         );
                         if !unchanged {
                             self.show_error(self.message("workspace_search_stale_result", &[]));
@@ -2207,13 +2206,15 @@ impl InteractiveApplication {
                                 self.set_dashboard_visibility(false);
                                 self.ensure_cursor_visible();
                             }
-                            Some(NavigationRead::ByteRange(range, _)) => {
+                            Some(NavigationRead::ByteRange(range, snapshot)) => {
                                 let start = range.start;
                                 let end = range.end;
                                 let target = self.state.buffers.values()
                                     .find(|buffer| buffer.path.as_ref() == Some(&path))
                                     .map_or(&text, |buffer| &buffer.text);
-                                if target.validate_offset(start).is_err()
+                                if snapshot.as_ref().is_some_and(|snapshot| {
+                                    !text.matches_encoded_text(snapshot) || !target.matches_encoded_text(snapshot)
+                                }) || target.validate_offset(start).is_err()
                                     || target.validate_offset(end).is_err()
                                 {
                                     self.show_error(

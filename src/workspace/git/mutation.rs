@@ -330,9 +330,9 @@ impl Drop for GitMutationService {
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
     use sha2::{Digest, Sha256};
-    let path = path.canonicalize().map_err(|_| GitMutationError::Backend)?;
-    let bytes = crate::files::read_file_with_ceiling(&path, 8 * 1024 * 1024)
+    let bytes = crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024)
         .map_err(|error| match error {
+            crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
             crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
             _ => GitMutationError::Backend,
         })?;
@@ -665,6 +665,9 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
     }
     let whole_file =
         plan.hunk_id.is_none() && plan.selected.is_none() && plan.selected_lines.is_empty();
+    // Buffer-only hunks have no disk hash. They can still reach the worker's unsaved
+    // refusal, which offers save-and-stage without applying buffer coordinates to disk.
+    let unsaved = unsaved_document_revision(&plan.unsaved_documents, &plan.policy.file).is_some();
     match plan.kind {
         GitMutationKind::StageFile | GitMutationKind::UnstageFile => {
             if !whole_file {
@@ -678,7 +681,7 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || !plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none() && !unsaved)
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -701,7 +704,7 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none() && !unsaved)
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -1096,7 +1099,9 @@ pub(super) fn apply_change_plan(
     if from_worktree {
         match (&worktree, p.expected_worktree) {
             (WorktreeState::Regular { sha256 }, Some(expected)) if *sha256 == expected => {}
-            (WorktreeState::Missing, None) if p.kind == GitMutationKind::StageFile => {}
+            // Whole-file staging reads its input on this worker, like git add. Hunk plans
+            // still require the worktree hash captured with their preview.
+            (_, None) if p.kind == GitMutationKind::StageFile => {}
             _ => return Err(GitMutationError::StaleWorktree),
         }
     }
@@ -1179,27 +1184,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cancellation_suppresses_a_completion_delivered_after_cancel() {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let cancellation = Arc::new(AtomicBool::new(false));
-        let mut service = GitMutationService {
-            next: 1,
-            active: Some(GitMutationGeneration(1)),
-            cancel: Some(Arc::clone(&cancellation)),
-            receiver: Some(rx),
-            accepted: None,
-        };
-        let (release, wait) = mpsc::sync_channel(0);
-        let worker = thread::spawn(move || {
-            wait.recv().unwrap();
-            tx.send(GitMutationEvent::Complete(Err(GitMutationError::StaleWorktree)))
-        });
-        service.cancel();
-        assert!(cancellation.load(Ordering::Acquire));
-        release.send(()).unwrap();
-        assert!(worker.join().unwrap().is_err(), "cancel drops the result receiver");
-        assert!(service.poll().unwrap().is_none());
-        assert_eq!(service.next, 1);
+    fn worktree_hash_rejects_special_files_and_bounds_regular_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, "regular\n").unwrap();
+        assert_eq!(worktree_hash(&file).unwrap().1, b"regular\n");
+        let symlink = dir.path().join("link");
+        std::os::unix::fs::symlink(&file, &symlink).unwrap();
+        assert!(worktree_hash(&symlink).is_err(), "even regular-file links are not followed");
+        let fifo = dir.path().join("fifo");
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).unwrap();
+        assert_eq!(worktree_hash(&fifo), Err(GitMutationError::UnsupportedPath));
+        let large = std::fs::File::create(&file).unwrap();
+        large.set_len(8 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(worktree_hash(&file), Err(GitMutationError::Invalid));
     }
 
     #[test]
@@ -1228,4 +1226,28 @@ mod tests {
         assert!(index.get_path(Path::new("a"), 0).is_some());
         assert!(index.get_path(Path::new("b"), 0).is_some());
     }
+    #[test]
+    fn cancellation_suppresses_a_completion_delivered_after_cancel() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut service = GitMutationService {
+            next: 1,
+            active: Some(GitMutationGeneration(1)),
+            cancel: Some(Arc::clone(&cancellation)),
+            receiver: Some(rx),
+            accepted: None,
+        };
+        let (release, wait) = mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            wait.recv().unwrap();
+            tx.send(GitMutationEvent::Complete(Err(GitMutationError::StaleWorktree)))
+        });
+        service.cancel();
+        assert!(cancellation.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err(), "cancel drops the result receiver");
+        assert!(service.poll().unwrap().is_none());
+        assert_eq!(service.next, 1);
+    }
+
 }

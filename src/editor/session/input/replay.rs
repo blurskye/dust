@@ -361,6 +361,48 @@ mod tests {
     }
 
     #[test]
+    fn visual_repeat_keeps_surround_delimiters_and_comment_tokens() {
+        use crate::editor::{
+            CommandRegistry, CommandValue, EditorMode, EditorState, Selection, SelectionKind,
+            register_builtin_commands,
+            text::{ByteOffset, DisplayWidthPolicy, TextBuffer},
+        };
+        for (operator, name, value, expected) in [
+            ("surround_add", "character", ")", "(one)\n(two)"),
+            ("comment", "comment", "//", "// one\n// two"),
+        ] {
+            let mut input = InputSession::new(100);
+            let mut state = EditorState::new(Default::default());
+            let (buffer, view) = state.open_text(TextBuffer::from_text("one\ntwo"), None).unwrap();
+            let selection = Selection {
+                anchor: ByteOffset(0), head: ByteOffset(2), kind: SelectionKind::Character,
+            };
+            state.views[view].mode = EditorMode::VisualChar;
+            state.views[view].selection = Some(selection);
+            let invocation = CommandInvocation::new("edit.operator", InvocationSource::Test).unwrap()
+                .with_argument("operator", CommandValue::String(operator.into()))
+                .with_argument("motion", CommandValue::String("visual".into()))
+                .with_argument("linewise", CommandValue::Bool(false))
+                .with_argument(name, CommandValue::String(value.into()));
+            let repeat = input.normalized_visual_repeat(
+                &invocation, &state.buffers[buffer].text, selection, DisplayWidthPolicy::default(),
+            ).unwrap();
+            assert_eq!(repeat.arguments.get(name), invocation.arguments.get(name));
+            let mut registry = CommandRegistry::<()>::default();
+            register_builtin_commands(&mut registry).unwrap();
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+            input.record_successful_invocation(&invocation, Some(&repeat), false, true);
+            state.views[view].cursor = state.buffers[buffer].text.line_to_byte(1).unwrap();
+            for step in input.repeat_plan(10, None).unwrap() {
+                let outcome = registry.execute(&state, &step).unwrap();
+                state.apply_transaction(outcome.transaction.as_ref().unwrap()).unwrap();
+            }
+            assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        }
+    }
+
+    #[test]
     fn nested_macro_batches_share_step_budget_and_unwind_without_losing_last_register() {
         let mut input = InputSession::new(100);
         assert_eq!(input.macro_register('@'), Err(ReplayError::NoMacro));

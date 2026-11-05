@@ -915,12 +915,7 @@ pub(crate) fn execute_component(
         .bindings
         .call_execute_command(&mut runtime.store, &command, &arguments);
     drop(deadline);
-    let result = result
-        .map_err(|error| PluginError::Execution(format!("{error:#}")))?
-        .map_err(PluginError::Execution)?;
-    if result.len() > 1024 * 1024 {
-        return Err(PluginError::InvalidInvocation);
-    }
+    // Drain effects even on traps and interruptions; failed executions publish none of them.
     let state = runtime.store.data_mut();
     let messages = std::mem::take(&mut state.messages);
     let ui_requests = std::mem::take(&mut state.ui_requests);
@@ -944,6 +939,12 @@ pub(crate) fn execute_component(
                 .collect(),
         })
         .collect();
+    let result = result
+        .map_err(|error| PluginError::Execution(format!("{error:#}")))?
+        .map_err(PluginError::Execution)?;
+    if result.len() > 1024 * 1024 {
+        return Err(PluginError::InvalidInvocation);
+    }
     Ok(PluginExecution {
         plugin,
         command,

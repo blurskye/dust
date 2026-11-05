@@ -1508,7 +1508,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
             context: "editor".into(),
             workspace_revision: Some(app.workspace.root_revision()),
             buffer_revision: None,
-        })
+        }, &app.state)
         .expect("request");
     app.extension
         .provider_chunk(
@@ -2440,7 +2440,7 @@ fn provider_chunks_use_the_revision_after_virtual_publication() {
         plugin: "demo".into(), load: PluginLoadId(1), provider: "plugin.demo.provider.files".into(),
         query: String::new(), context: "dashboard".into(),
         workspace_revision: Some(app.workspace.root_revision()), buffer_revision: None,
-    }).unwrap();
+    }, &app.state).unwrap();
     app.process_effect(AppEffect::PluginExecute { plugin: "demo".into(), command: "run".into(), arguments: Vec::new() });
     fixture.reply_with(&fixture.take(), |execution| {
         execution.virtual_document_proposals.push(crate::extensions::PluginVirtualDocumentProposal {
@@ -2674,7 +2674,7 @@ fn provider_selection_delivers_request_item_and_action_data() {
             context: String::new(),
             workspace_revision: None,
             buffer_revision: None,
-        })
+        }, &app.state)
         .unwrap();
     app.extension
         .provider_chunk(
@@ -3052,4 +3052,465 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
         });
         fixture.assert_no_requests();
     }
+}
+
+#[test]
+fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5() {
+    let (_app_dirs, mut app) = app();
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::PickerProviders);
+    manifest.contributions.providers = vec![crate::extensions::PluginProviderContribution {
+        id: "plugin.demo.provider.files".into(),
+        kind: crate::extensions::PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(),
+        maximum_concurrent_requests: 1,
+        maximum_items: 16,
+        maximum_bytes: 8_192,
+        deadline_milliseconds: 30_000,
+        provenance: None,
+    }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 77, "provider manifest".into())
+            .expect("provider index");
+    app.extension
+        .fixture_contribution(index.clone())
+        .expect("catalog");
+    app.extension
+        .fixture_provider_install(&index)
+        .expect("provider owner");
+    let request = app
+        .extension
+        .fixture_provider_start(crate::extensions::PluginProviderStart {
+            plugin: "demo".into(),
+            load: PluginLoadId(77),
+            provider: "plugin.demo.provider.files".into(),
+            query: "be".into(),
+            context: "editor".into(),
+            workspace_revision: Some(app.workspace.root_revision()),
+            buffer_revision: None,
+        }, &app.state)
+        .expect("request");
+    app.extension
+        .provider_chunk(
+            "demo",
+            PluginLoadId(77),
+            (Some(app.workspace.root_revision()), None),
+            crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 1,
+                items: vec![
+                    crate::extensions::PluginPickerItem {
+                        id: "z".into(),
+                        primary: "Zebra".into(),
+                        secondary: None,
+                        action_data: vec![1],
+                    },
+                    crate::extensions::PluginPickerItem {
+                        id: "b".into(),
+                        primary: "Beta".into(),
+                        secondary: Some("ranked first".into()),
+                        action_data: vec![2],
+                    },
+                ],
+                terminal: crate::extensions::PluginProviderTerminal::More,
+            },
+        )
+        .expect("chunk");
+    app.extension.picker_installed(Some(request));
+    app.present_plugin_picker(request);
+    assert_eq!(app.search.picker_surface(), PickerSurfaceKind::Generic);
+    assert_eq!(
+        app.search
+            .picker()
+            .and_then(crate::workspace::PickerState::selected_item)
+            .map(|item| item.label.as_str()),
+        Some("Beta")
+    );
+    app.picker_insert("e");
+    app.input.set_picker_normal(true);
+    let selected = app
+        .search
+        .picker()
+        .unwrap()
+        .selected_item()
+        .unwrap()
+        .id
+        .clone();
+    app.extension
+        .provider_chunk(
+            "demo",
+            PluginLoadId(77),
+            (Some(app.workspace.root_revision()), None),
+            crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 2,
+                items: vec![crate::extensions::PluginPickerItem {
+                    id: "better".into(),
+                    primary: "Better".into(),
+                    secondary: None,
+                    action_data: Vec::new(),
+                }],
+                terminal: crate::extensions::PluginProviderTerminal::Complete,
+            },
+        )
+        .unwrap();
+    app.present_plugin_picker(request);
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "e");
+    assert_eq!(
+        app.search.picker().unwrap().selected_item().unwrap().id,
+        selected
+    );
+    assert!(app.input.picker_normal());
+    let stable = app.extension.provider_projection(request);
+    let stable_ui = app.ui.picker.clone();
+    for _ in 0..256 {
+        assert_eq!(app.extension.provider_projection(request), stable);
+        assert_eq!(app.ui.picker, stable_ui);
+    }
+    app.install_picker("Another picker".into(), Vec::new());
+    let replacement_ui = app.ui.picker.clone();
+    assert!(!app.extension.provider_visible(request));
+    app.extension.picker_installed(Some(request)); // cancelled sources cannot reactivate
+    app.present_plugin_picker(request);
+    assert_eq!(app.ui.picker, replacement_ui);
+    assert!(!app.extension.provider_visible(request));
+    app.close_picker();
+    assert_eq!(
+        app.extension
+            .provider_chunk(
+                "demo",
+                PluginLoadId(77),
+                (Some(app.workspace.root_revision()), None),
+                crate::extensions::PluginPickerChunk {
+                    request,
+                    sequence: 2,
+                    items: Vec::new(),
+                    terminal: crate::extensions::PluginProviderTerminal::Complete,
+                },
+            )
+            .unwrap_err()
+            .code,
+        crate::extensions::PluginProviderErrorCode::UnknownRequest
+    );
+    // Reopening a one-request provider reserves new metadata without destroying
+    // the displayed source if subsequent picker admission is refused.
+    let mut broker = crate::extensions::PluginProviderBroker::default();
+    broker.install(&index).unwrap();
+    let start = || crate::extensions::PluginProviderStart {
+        plugin: "demo".into(),
+        load: PluginLoadId(77),
+        provider: "plugin.demo.provider.files".into(),
+        query: String::new(),
+        context: "editor".into(),
+        workspace_revision: None,
+        buffer_revision: None,
+    };
+    let old = broker.start(start()).unwrap();
+    let next = broker.reserve_replacing(start(), Some(old)).unwrap();
+    assert!(broker.presentable(old) && broker.presentable(next));
+    assert_eq!(
+        broker
+            .reserve_replacing(start(), Some(old))
+            .unwrap_err()
+            .code,
+        crate::extensions::PluginProviderErrorCode::QueueFull
+    );
+    broker.cancel(next);
+    assert!(broker.presentable(old));
+    let next = broker.reserve_replacing(start(), Some(old)).unwrap();
+    broker.cancel(old);
+    assert!(broker.presentable(next));
+}
+
+fn provider_selection_fixture() -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication, crate::extensions::ExecutionFixture, u64) {
+    let (_app_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("provider.txt");
+    app.state.open_text(TextBuffer::from_text("original"), Some(path)).unwrap();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::PickerProviders);
+    manifest.contributions.providers = vec![crate::extensions::PluginProviderContribution {
+        id: "plugin.demo.provider.files".into(),
+        kind: crate::extensions::PluginProviderKind::PickerSource,
+        command: "plugin.demo.run".into(),
+        maximum_concurrent_requests: 1,
+        maximum_items: 16,
+        maximum_bytes: 8192,
+        deadline_milliseconds: 30_000,
+        provenance: None,
+    }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "picker fixture".into())
+            .unwrap();
+    app.extension.fixture_contribution(index.clone()).unwrap();
+    app.extension.fixture_provider_install(&index).unwrap();
+    let request = app
+        .extension
+        .fixture_provider_start(crate::extensions::PluginProviderStart {
+            plugin: "demo".into(),
+            load: PluginLoadId(1),
+            provider: "plugin.demo.provider.files".into(),
+            query: String::new(),
+            context: String::new(),
+            workspace_revision: None,
+            buffer_revision: None,
+        }, &app.state)
+        .unwrap();
+    app.extension
+        .provider_chunk(
+            "demo",
+            PluginLoadId(1),
+            (None, None),
+            crate::extensions::PluginPickerChunk {
+                request,
+                sequence: 1,
+                items: vec![crate::extensions::PluginPickerItem {
+                    id: "selected".into(),
+                    primary: "Selected item".into(),
+                    secondary: None,
+                    action_data: vec![0, 255],
+                }],
+                terminal: crate::extensions::PluginProviderTerminal::Complete,
+            },
+        )
+        .unwrap();
+    app.extension.picker_installed(Some(request));
+    app.present_plugin_picker(request);
+    (_app_dirs, app, fixture, request)
+}
+
+#[test]
+fn provider_selection_delivers_request_item_and_action_data_slot5() {
+    let (_app_dirs, mut app, fixture, request) = provider_selection_fixture();
+    app.accept_picker();
+    assert_eq!(
+        fixture.take().arguments(),
+        &[request.to_string(), "selected".into(), "[0,255]".into()]
+    );
+    assert!(app.extension.provider_projection(request).is_none());
+}
+
+#[test]
+fn provider_selection_survives_a_discarded_replacement() {
+    let (_app_dirs, mut app, fixture, request) = provider_selection_fixture();
+    let replacement = app.extension.start_provider(
+        "plugin.demo.provider.files",
+        String::new(),
+        app.workspace.root_revision(),
+        &app.state,
+    ).unwrap();
+    assert_ne!(replacement.request, request);
+    app.extension.discard_unpresented_provider(replacement.request);
+    assert!(app.extension.provider_projection(replacement.request).is_none());
+    assert!(app.extension.provider_visible(request));
+    app.accept_picker();
+    assert_eq!(
+        fixture.take().arguments(),
+        &[request.to_string(), "selected".into(), "[0,255]".into()]
+    );
+}
+
+#[test]
+fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
+    let (_app_dirs, mut app, fixture, _) = provider_selection_fixture();
+    let buffer = app.state.active_buffer_id().unwrap();
+    let path = app.state.buffers[buffer].path.clone().unwrap();
+    assert_eq!(app.state.buffers[buffer].text.revision().0, 0);
+    assert!(app.state.replace_buffer_from_disk(buffer, TextBuffer::from_text("reloaded"), path));
+    assert_eq!(app.state.buffers[buffer].text.revision().0, 0);
+    app.accept_picker();
+    assert!(fixture.is_empty(), "stale action data must not reach the plugin");
+}
+
+#[test]
+fn provider_selection_rejects_a_different_buffer_with_the_same_revision() {
+    let (_app_dirs, mut app, fixture, _) = provider_selection_fixture();
+    app.state.open_text(TextBuffer::from_text("other"), None).unwrap();
+    app.accept_picker();
+    assert!(fixture.is_empty(), "a different buffer cannot use the old provider items");
+}
+
+fn virtual_document_fixture(capacity: usize) -> ((tempfile::TempDir, tempfile::TempDir), InteractiveApplication, crate::extensions::ExecutionFixture, crate::extensions::PluginContributionIndex) {
+    let (_app_dirs, mut app) = app();
+    let (manager, fixture) = crate::extensions::ExecutionFixture::new(capacity);
+    app.extension.fixture_manager(manager);
+    let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    manifest
+        .capabilities
+        .insert(crate::extensions::PluginCapability::VirtualDocuments);
+    manifest.contributions.virtual_documents =
+        vec![crate::extensions::PluginVirtualDocumentContribution {
+            id: "plugin.demo.virtual.help".into(),
+            title: "Help".into(),
+            language: "markdown".into(),
+            mode: crate::extensions::PluginVirtualDocumentMode::ReadOnly,
+            maximum_concurrent_documents: 2,
+            maximum_document_bytes: 4096,
+            maximum_document_lines: 128,
+            maximum_patch_bytes: 256,
+            maximum_patches_per_request: 8,
+            deadline_milliseconds: 30_000,
+            command: "plugin.demo.run".into(),
+            context: "dashboard".into(),
+            provenance: None,
+        }];
+    let index =
+        crate::extensions::index_manifest_contributions(&manifest, 1, "virtual fixture".into())
+            .unwrap();
+    app.extension.install_index(index.clone()).unwrap();
+    (_app_dirs, app, fixture, index)
+}
+
+#[test]
+fn repeated_virtual_open_does_not_dispatch_an_empty_callback_slot5() {
+    let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    assert_eq!(fixture.take().virtual_documents().len(), 1);
+    for _ in 0..2 {
+        assert!(matches!(
+            app.extension.open_virtual("plugin.demo.virtual.help", "help".into(), &app.state),
+            Err(error) if error == "virtual document is already opening"
+        ));
+    }
+}
+
+fn publish_virtual_fixture(
+    app: &mut InteractiveApplication,
+    request: &crate::extensions::PluginVirtualDocumentRequest,
+) {
+    let (publication, candidate) = app.extension.prepare_virtual(
+        "demo", PluginLoadId(1),
+        crate::extensions::PluginVirtualDocumentProposal {
+            request: request.request,
+            document: request.document,
+            cancellation_generation: request.cancellation_generation,
+            kind: crate::extensions::PluginVirtualDocumentProposalKind::Full(
+                crate::extensions::PluginVirtualDocumentFull {
+                    expected_revision: None, revision: 1, title: "Help".into(),
+                    language: "markdown".into(), text: "# Help".into(),
+                },
+            ),
+        },
+        true,
+        crate::editor::session::extensions::VirtualContext {
+            editor: &app.state, windows: &app.window_session, scratch: "scratch",
+        },
+    ).unwrap();
+    let accepted = app.window_session.accept_editor_transition(
+        candidate, publication.before(), publication.catalog(),
+    ).unwrap();
+    *app.state = publication.finish(accepted).unwrap();
+    app.reconcile_editor_windows();
+}
+
+#[test]
+fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
+    let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+    });
+    let open = || AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    };
+    app.process_effect(open());
+    fixture.take();
+    app.process_effect(open());
+    let execution = fixture.take();
+    assert_eq!(execution.virtual_documents().len(), 1);
+    assert_eq!(execution.virtual_documents()[0].kind, crate::extensions::PluginVirtualDocumentRequestKind::Open);
+}
+
+#[test]
+fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
+    let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    let execution = fixture.take();
+    publish_virtual_fixture(&mut app, &execution.virtual_documents()[0]);
+    app.process_effect(AppEffect::PluginExecute {
+        plugin: "demo".into(), command: "run".into(), arguments: Vec::new(),
+    });
+    app.process_effect(AppEffect::VirtualDocumentRefresh);
+    fixture.take();
+    app.process_effect(AppEffect::VirtualDocumentRefresh);
+    let execution = fixture.take();
+    assert_eq!(execution.virtual_documents().len(), 1);
+    assert_eq!(execution.virtual_documents()[0].kind, crate::extensions::PluginVirtualDocumentRequestKind::Refresh);
+}
+
+#[test]
+fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
+    let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    let execution = fixture.take();
+    publish_virtual_fixture(&mut app, &execution.virtual_documents()[0]);
+    let buffer = app.state.active_buffer_id().unwrap();
+    // Closing also supersedes an outstanding refresh.
+    app.extension.refresh_virtual(buffer, &app.state).unwrap();
+    app.close_active_buffer(true);
+    assert!(!app.state.buffers.contains_key(buffer));
+    let execution = fixture.take();
+    assert_eq!(execution.virtual_documents().len(), 1);
+    let close = &execution.virtual_documents()[0];
+    assert_eq!(close.kind, crate::extensions::PluginVirtualDocumentRequestKind::CloseNotice);
+    assert_eq!(close.current_revision, Some(1));
+    assert!(app.window_session.dashboard_visible());
+    fixture.reply_virtual(
+        &execution,
+        crate::extensions::PluginVirtualDocumentProposal {
+            request: close.request, document: close.document,
+            cancellation_generation: close.cancellation_generation,
+            kind: crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged,
+        },
+    );
+    app.process_plugin_events();
+    assert!(!app.state.buffers.contains_key(buffer));
+    assert!(app.window_session.dashboard_visible());
+    assert!(app.ui.dashboard);
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    let reopened = fixture.take();
+    assert_ne!(reopened.virtual_documents()[0].document, close.document);
+}
+
+#[test]
+fn virtual_error_returns_the_broker_error_and_releases_the_open_request() {
+    let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    let execution = fixture.take();
+    let request = &execution.virtual_documents()[0];
+    let result = app.extension.prepare_virtual(
+        "demo", PluginLoadId(1),
+        crate::extensions::PluginVirtualDocumentProposal {
+            request: request.request, document: request.document,
+            cancellation_generation: request.cancellation_generation,
+            kind: crate::extensions::PluginVirtualDocumentProposalKind::Error(
+                crate::extensions::PluginVirtualDocumentError::new(
+                    crate::extensions::PluginVirtualDocumentErrorCode::Internal, "provider failed",
+                ),
+            ),
+        },
+        true,
+        crate::editor::session::extensions::VirtualContext {
+            editor: &app.state, windows: &app.window_session, scratch: "scratch",
+        },
+    );
+    assert!(matches!(result, Err(error) if error == "provider failed"));
+    app.process_effect(AppEffect::VirtualDocumentOpen {
+        source: "plugin.demo.virtual.help".into(), key: "help".into(),
+    });
+    assert_eq!(fixture.take().virtual_documents().len(), 1);
 }

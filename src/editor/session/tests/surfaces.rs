@@ -1976,6 +1976,64 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
 }
 
 #[test]
+fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
+    let (_app_dirs, mut app) = app();
+    app.project_configuration();
+    app.ui.dashboard_selected = app.ui.dashboard_actions.len() - 1;
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.dashboard.action.truncate(2);
+    let expected = fixture.dashboard.action[1].command.clone();
+    app.configuration.install_fixture(fixture);
+    app.project_configuration();
+    assert_eq!(app.ui.dashboard_selected, 1);
+    assert_eq!(app.configuration.dashboard_invocation(app.ui.dashboard_selected).unwrap().id.as_str(), expected);
+    let mut fixture = app.configuration.fixture_snapshot();
+    fixture.dashboard.action.clear();
+    app.configuration.install_fixture(fixture);
+    app.project_configuration();
+    assert_eq!(app.ui.dashboard_selected, 0);
+    assert!(app.configuration.dashboard_invocation(app.ui.dashboard_selected).is_none());
+}
+
+#[test]
+fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() {
+    let (_app_dirs, mut app) = app();
+    app.state.open_text(TextBuffer::from_text(&"line\n".repeat(30)), None).unwrap();
+    app.set_dashboard_visibility(false);
+    app.handle_event(crate::ui::UiEvent::Resize(80, 24));
+    app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
+        typed: 0,
+        items: (0..16).map(|_| crate::ui::CompletionItem {
+            icon: None,
+            color: None,
+            label: "completion".into(),
+            detail: "detail".repeat(12),
+        }).collect(),
+        selected: 0,
+        scroll: 0,
+    });
+    app.input.present_documentation(
+        crate::ui::DocumentationPopupKind::Completion,
+        "Completion".into(),
+        String::new(),
+        None,
+        [(crate::ui::DocumentationMarkupKind::PlainText, format!("{}THE-END", "x".repeat(2000)))],
+        app.configuration.settings(),
+        80,
+    );
+    app.project_input_documentation();
+    for _ in 0..100 {
+        app.process_effect(AppEffect::LspDocumentationScroll(1));
+    }
+    let (frame, geometry) = crate::ui::render::render_with_documentation_geometry(
+        &app.state, &app.ui, app.configuration.settings(), app.configuration.dashboard(), 80, 24,
+    );
+    let (visible, total) = geometry.unwrap();
+    assert_eq!(app.input.documentation().unwrap().scroll, total - visible);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
+}
+
+#[test]
 fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() {
     let (_app_dirs, mut app) = app();
     app.project_configuration();

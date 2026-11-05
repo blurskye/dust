@@ -69,6 +69,7 @@ pub(super) enum Request {
         path: PathBuf,
         manifest: PluginManifest,
         limits: PluginLimits,
+        object_lock: Option<Arc<fs::File>>,
     },
     Execute {
         load: PluginLoadId,
@@ -199,6 +200,7 @@ pub(super) struct IndexedCandidate {
     component_path: PathBuf,
     manifest: PluginManifest,
     limits: PluginLimits,
+    _object_lock: Option<Arc<fs::File>>,
 }
 pub struct PluginManager {
     pub(super) owner: std::sync::Arc<()>,
@@ -254,6 +256,7 @@ impl PluginManager {
                                         component_path,
                                         manifest,
                                         limits,
+                                        _object_lock: None,
                                     },
                                 );
                                 WorkerEvent::Indexed {
@@ -327,6 +330,7 @@ impl PluginManager {
                             path,
                             manifest,
                             limits,
+                            object_lock,
                         } => {
                             let plugin = manifest.id.clone();
                             let prepared = (|| {
@@ -354,6 +358,7 @@ impl PluginManager {
                                             component_path: path,
                                             manifest,
                                             limits,
+                                            _object_lock: object_lock,
                                         },
                                     );
                                     WorkerEvent::Indexed {
@@ -642,6 +647,16 @@ impl PluginManager {
         manifest: PluginManifest,
         limits: PluginLimits,
     ) -> Result<PluginLoadId, PluginError> {
+        self.load_protected(store, path, manifest, limits, None)
+    }
+    pub(crate) fn load_protected(
+        &mut self,
+        store: PathBuf,
+        path: PathBuf,
+        manifest: PluginManifest,
+        limits: PluginLimits,
+        object_lock: Option<Arc<fs::File>>,
+    ) -> Result<PluginLoadId, PluginError> {
         validate_manifest(&manifest, &limits)?;
         let plugin = manifest.id.clone();
         self.require_disable_order()?;
@@ -658,6 +673,7 @@ impl PluginManager {
             path,
             manifest,
             limits,
+            object_lock,
         })?;
         self.loads.insert(plugin.clone(), load);
         self.statuses.insert(plugin, PluginStatus::Loading);

@@ -46,15 +46,15 @@ impl StartupTarget {
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::Dashboard { root } => format!("dashboard\t{}", root.display()),
+            Self::Dashboard { root } => format!("dashboard\t{}", root.to_string_lossy().escape_debug()),
             Self::File {
                 workspace_root,
                 path,
                 additional_files,
             } => format!(
                 "file\t{}\t{}\t{}",
-                workspace_root.display(),
-                path.display(),
+                workspace_root.to_string_lossy().escape_debug(),
+                path.to_string_lossy().escape_debug(),
                 additional_files.len()
             ),
         }
@@ -178,6 +178,19 @@ mod tests {
             resolve_startup(&[], &nested).expect("startup"),
             StartupTarget::Dashboard { root: nested }
         );
+    }
+
+    #[test]
+    fn startup_description_escapes_path_controls() {
+        let root = std::path::PathBuf::from("/workspace\x1b]0;title\x07");
+        let dashboard = StartupTarget::Dashboard { root: root.clone() };
+        let file = StartupTarget::File {
+            workspace_root: root,
+            path: "name\n\t.rs".into(),
+            additional_files: Vec::new(),
+        };
+        assert_eq!(dashboard.describe(), "dashboard\t/workspace\\u{1b}]0;title\\u{7}");
+        assert_eq!(file.describe(), "file\t/workspace\\u{1b}]0;title\\u{7}\tname\\n\\t.rs\t0");
     }
 
     #[test]

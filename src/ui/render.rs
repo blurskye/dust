@@ -2149,6 +2149,18 @@ pub fn render(
     width: u16,
     height: u16,
 ) -> Frame {
+    render_with_documentation_geometry(state, ui, config, dashboard, width, height).0
+}
+
+/// Also returns the documentation's visible and wrapped row counts for scrolling.
+pub(crate) fn render_with_documentation_geometry(
+    state: &EditorState,
+    ui: &UiState,
+    config: &Config,
+    dashboard: &DashboardConfig,
+    width: u16,
+    height: u16,
+) -> (Frame, Option<(usize, usize)>) {
     let compositor = active_compositor(state, ui, width, height);
     if compositor.is_none() {
         let mut frame = Frame {
@@ -2166,7 +2178,7 @@ pub fn render(
         if let Some(prompt) = &ui.prompt {
             render_prompt(&mut frame, prompt, config, width, height);
         }
-        return frame;
+        return (frame, None);
     }
     let terminal_geometry = compositor.and_then(|compositor| {
         let (_, window) = compositor.surfaces.terminal?;
@@ -2521,9 +2533,9 @@ pub fn render(
         render_lsp_loading(&mut frame, text, config);
     }
     let overlay_bounds = workspace.unwrap_or(WindowRect { x: 0, y: 0, width, height });
-    if let Some(documentation) = &ui.documentation_popup && !modal_open {
-        render_documentation_popup(&mut frame, documentation, config, overlay_bounds, completion_menu);
-    }
+    let documentation_geometry = ui.documentation_popup.as_ref().filter(|_| !modal_open).and_then(|documentation| {
+        render_documentation_popup(&mut frame, documentation, config, overlay_bounds, completion_menu)
+    });
     if let Some(key_hints) = &ui.key_hints {
         render_key_hints(&mut frame, key_hints, overlay_bounds, config.editor.ambiguous_width);
     }
@@ -2607,7 +2619,7 @@ pub fn render(
         });
         render_prompt(&mut frame, prompt, config, width, prompt_height);
     }
-    frame
+    (frame, documentation_geometry)
 }
 
 #[cfg(test)]

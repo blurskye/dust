@@ -444,6 +444,11 @@ fn bounded_drain_publishes_only_the_final_accepted_store_disposition() {
         } else {
             assert!(matches!(&updates[0], SearchUpdate::Complete { .. }));
             assert_eq!(owner.matches().len(), 1);
+            let snapshot = owner.matches()[0].snapshot.clone();
+            owner.close_picker();
+            assert!(owner.matches().is_empty());
+            assert!(owner.workflow().is_none());
+            assert_eq!(Arc::strong_count(&snapshot), 1);
         }
         assert!(owner.poll(source.clone(), 1).is_empty());
     }
@@ -716,4 +721,37 @@ fn crlf_previews_use_the_normalized_match_offset() {
     let text = preview.as_text().unwrap();
     assert!(text.lines().iter().any(|line| line == "needle"));
     assert_eq!(text.highlight_line, Some(300_000));
+}
+
+#[test]
+fn rejected_live_query_retires_previous_results() {
+    let root = tempfile::tempdir().unwrap();
+    let source = scope(root.path());
+    let mut owner = SearchSession::default();
+    owner.open_live();
+    owner.set_query("needle".into());
+    owner.generation = Some(9);
+    owner.scope = Some((source.clone(), 1));
+    owner.matches.push(found());
+    owner.grep = WorkspaceSearchService::events_for_test(vec![WorkspaceSearchEvent::Batch {
+        generation: 9,
+        matches: vec![found()],
+    }]);
+    let query = "a".repeat(65_537);
+    owner.set_query(query.clone());
+    let policy = WorkspaceSearchPolicy {
+        roots: vec![root.path().into()], query: query.clone(), regex: false,
+        smart_case: true, whole_word: false, include_globs: Vec::new(),
+        exclude_globs: Vec::new(), include_hidden: false, include_ignored: false,
+        maximum_files: 10, maximum_results: 10, maximum_file_bytes: 1024,
+        maximum_total_bytes: 4096, maximum_preview_bytes: 100,
+        batch_size: 10, event_queue_capacity: 8,
+    };
+    assert!(owner.start(policy, source.clone(), 1, None).is_err());
+    assert!(owner.live());
+    assert_eq!(owner.query(), query);
+    assert!(!owner.pending());
+    assert!(owner.matches().is_empty());
+    assert!(owner.workflow().is_none());
+    assert!(owner.poll(source, 1).is_empty());
 }

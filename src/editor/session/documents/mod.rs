@@ -81,6 +81,9 @@ pub(super) struct DocumentSession {
     closing: bool,
     stopped: bool,
     primary: Option<BufferId>,
+    primary_path: Option<PathBuf>,
+    startup_navigation: Option<super::windows::NavigationStamp>,
+    startup_activate: bool,
     editor: EditorWindowVersion,
     root_revision: u64,
     policy_editor: EditorWindowVersion,
@@ -95,6 +98,10 @@ impl DocumentSession {
         root_revision: u64,
         maximum_pending: usize,
     ) -> Self {
+        let primary_path = match startup {
+            StartupTarget::File { path, .. } => Some(path.clone()),
+            StartupTarget::Dashboard { .. } => None,
+        };
         let startup = match startup {
             StartupTarget::Dashboard { .. } => VecDeque::new(),
             StartupTarget::File {
@@ -121,12 +128,44 @@ impl DocumentSession {
             closing: false,
             stopped: false,
             primary: None,
+            primary_path,
+            startup_navigation: None,
+            startup_activate: true,
             policy_editor: editor.clone(),
             editor,
             root_revision,
             overrides: HashMap::new(),
             restored_overrides: HashMap::new(),
         }
+    }
+    pub(in crate::editor::session) fn startup_activation(
+        &mut self,
+        editor: &crate::editor::EditorState,
+        windows: &super::windows::WindowSession,
+    ) -> bool {
+        if let Some(stamp) = &self.startup_navigation {
+            self.startup_activate &= windows.navigation_current(
+                stamp, &editor.window_version(), editor.active_view,
+            );
+        } else {
+            // New startup files were opened synchronously and need no read receipt.
+            self.primary = self.primary_path.as_ref().and_then(|path| {
+                editor.buffers.iter().find_map(|(id, buffer)| {
+                    (buffer.path.as_ref() == Some(path)).then_some(id)
+                })
+            });
+            self.startup_activated(editor, windows);
+        }
+        self.startup_activate
+    }
+    pub(in crate::editor::session) fn startup_activated(
+        &mut self,
+        editor: &crate::editor::EditorState,
+        windows: &super::windows::WindowSession,
+    ) {
+        self.startup_navigation = Some(windows.navigation_stamp(
+            editor.window_version(), editor.active_view,
+        ));
     }
     fn startup_current(&self, editor: &EditorWindowVersion, root_revision: u64) -> bool {
         editor.revision().is_some()

@@ -248,6 +248,7 @@ impl LspSession {
             || !lane.current(&context.workspace)
             || !lane.discovery_available()
         {
+            self.reset_autostart();
             return Err("language-server root admission is retired or busy".into());
         }
         let source = Source::capture(value.buffer, &value.document.path, &context)?;
@@ -407,7 +408,12 @@ impl LspSession {
             Err(crate::language::lsp::LspError::NotRunning(_)) => return Ok(()),
             result => result.map_err(|error| error.to_string())?,
         }
-        if editor.active_buffer_id() == Some(buffer) {
+        let primary_attached = self
+            .active
+            .as_ref()
+            .and_then(|active| self.sessions.get(active))
+            .is_some_and(|active| active.documents.contains_key(&buffer));
+        if editor.active_buffer_id() == Some(buffer) && !primary_attached {
             self.select(key);
         }
         Ok(())
@@ -614,6 +620,104 @@ impl LspSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn busy_root_discovery_allows_the_same_autostart_observation_to_retry() {
+        use super::super::LspAutostartObservation;
+        use crate::editor::text::TextBuffer;
+        let root = tempfile::tempdir().unwrap();
+        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let state = crate::workspace::WorkspaceState::new(
+            crate::workspace::WorkspaceId(1),
+            [("root".into(), identity)],
+        ).unwrap();
+        let mut workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let identity = workspace.roots()[0].identity.clone();
+        workspace.fixture_identity(crate::workspace::RootId(1), identity.clone()).unwrap();
+        workspace.fixture_trust_identity(identity);
+        workspace.reconcile_trust();
+        let mut editor = EditorState::new(root.path().into());
+        let path = root.path().join("source.rs");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        let definition = crate::tools::bundled_tool_catalog().into_iter().find(|d| d.id == "rust-analyzer").unwrap();
+        let value = PendingLspProjectRoot {
+            asked: false,
+            definition,
+            launch_source: LspLaunchSource::Direct { executable: "/server".into(), managed: false },
+            root_id: crate::workspace::RootId(1),
+            workspace_root: root.path().into(),
+            buffer,
+            document: LspDocument { path: path.clone(), language_id: "rust".into(), version: 0, text: "old".into() },
+        };
+        let context = LaunchContext { editor: &editor, workspace: workspace.version(), configuration: 1 };
+        let mut owner = LspSession::default();
+        owner.preparation.root = Some((1, Pending {
+            source: Source::capture(buffer, &path, &context).unwrap(),
+            value: value.clone(),
+        }));
+        let observation = LspAutostartObservation {
+            buffer,
+            path,
+            language: "rust".into(),
+            root_revision: 1,
+            trust: crate::workspace::WorkspaceTrust::Trusted,
+            enabled: true,
+            auto_start: true,
+            nix_workspace_fallback: false,
+            launchable_server: Some("another-server".into()),
+        };
+        assert_eq!(owner.observe(observation.clone(), false).as_deref(), Some("another-server"));
+        assert!(workspace.execution_lane(
+            crate::editor::session::workspace::DiscoveryKind::Language,
+        ).current(&context.workspace));
+        assert!(owner.discover_launch(value, context, workspace.execution_lane(
+            crate::editor::session::workspace::DiscoveryKind::Language,
+        )).unwrap_err().contains("busy"));
+        owner.preparation.root = None;
+        assert_eq!(owner.observe(observation, false).as_deref(), Some("another-server"));
+    }
+
+    #[test]
+    fn attaching_existing_servers_preserves_the_documents_primary() {
+        use crate::editor::text::TextBuffer;
+        let mut editor = EditorState::new("/fixture".into());
+        let path = PathBuf::from("/fixture/source.rs");
+        let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone())).unwrap();
+        let document = LspDocument { path, language_id: "rust".into(), version: 0, text: "old".into() };
+        let definition = crate::tools::bundled_tool_catalog().into_iter().find(|d| d.id == "rust-analyzer").unwrap();
+        let mut owner = LspSession::default();
+        let mut transports = Vec::new();
+        for key in ["primary", "secondary"] {
+            owner.fixture_session(key.into(), super::super::LspRuntimeState {
+                root: crate::workspace::RootId(1),
+                root_path: "/fixture".into(),
+                server_id: key.into(),
+                definition: definition.clone(),
+                launch: super::super::LspLaunch::Direct { executable: "/server".into(), managed: false },
+                capabilities: None,
+                documents: HashMap::new(),
+                restart_count: 0,
+                restart_due: None,
+                circuit_open: false,
+                desired_running: true,
+                activate_on_restart: false,
+            });
+            transports.push(owner.fixture_transport(key, &document, (buffer, editor.buffers[buffer].text.source_version())));
+            owner.attach_launch_document(key, buffer, document.clone(), &editor).unwrap();
+            assert_eq!(owner.active().map(String::as_str), Some("primary"));
+        }
+        assert!(owner.sessions()["secondary"].documents.contains_key(&buffer));
+        assert!(owner.sessions()["primary"].activate_on_restart);
+        assert!(!owner.sessions()["secondary"].activate_on_restart);
+
+        // The first attachment to a different active buffer may become primary.
+        let path = PathBuf::from("/fixture/other.rs");
+        let (other, _) = editor.open_text(TextBuffer::from_text("new"), Some(path.clone())).unwrap();
+        owner.attach_launch_document("secondary", other, LspDocument {
+            path, language_id: "rust".into(), version: 0, text: "new".into(),
+        }, &editor).unwrap();
+        assert_eq!(owner.active().map(String::as_str), Some("secondary"));
+    }
+
     #[test]
     fn launch_source_allows_edits_but_rejects_foreign_text_editor_and_configuration() {
         use crate::editor::text::TextBuffer;

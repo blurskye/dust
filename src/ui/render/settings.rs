@@ -23,6 +23,8 @@ pub struct SettingsPageState {
     /// Keys type into the search box.
     pub searching: bool,
     pub edit: Option<SettingsEdit>,
+    /// A saved change is waiting for configuration reload.
+    pub saving: bool,
     /// What happened to the last change, and whether it failed.
     pub status: Option<(String, bool)>,
 }

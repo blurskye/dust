@@ -70,6 +70,7 @@ impl InteractiveApplication {
             .map(|section| section.title.clone())
             .collect();
         page.rows = rows;
+        page.saving = false;
         filter_lines(page);
         page.selected = selected
             .as_ref()
@@ -94,6 +95,7 @@ impl InteractiveApplication {
 
     pub(super) fn settings_status(&mut self, message: String, error: bool) {
         if let Some(page) = self.ui.settings.as_mut() {
+            page.saving = false;
             page.status = Some((message, error));
         }
     }
@@ -334,6 +336,9 @@ impl InteractiveApplication {
         value: Option<toml::Value>,
         restart: bool,
     ) -> Result<(), String> {
+        if self.ui.settings.as_ref().is_some_and(|page| page.saving) {
+            return Err("Configuration reload is still pending".into());
+        }
         let result = match self.configuration.user_settings_path() {
             None => {
                 Err("Dust started without a user configuration, so nothing can be saved".into())
@@ -350,6 +355,7 @@ impl InteractiveApplication {
             Err(error) => (error.clone(), true),
         };
         if let Some(page) = self.ui.settings.as_mut() {
+            page.saving = result.is_ok();
             page.status = Some(status);
         }
         result

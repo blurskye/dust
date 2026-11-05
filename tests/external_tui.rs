@@ -13,6 +13,7 @@ use dust::{
 };
 use std::{
     collections::BTreeMap,
+    io::{Read, Write},
     path::PathBuf,
     thread,
     time::{Duration, Instant},
@@ -210,10 +211,50 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
 }
 
 #[test]
-fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
-    let executable = PathBuf::from(env!("CARGO_BIN_EXE_dust"))
-        .canonicalize()
+fn external_tui_fixture() {
+    if std::env::var("DUST_TEST_EXTERNAL_TUI_FIXTURE").as_deref() != Ok("1") {
+        return;
+    }
+    crossterm::terminal::enable_raw_mode().unwrap();
+    let mut out = std::io::stdout();
+    out.write_all(b"PRIMARY_START\r\n\x1b[?1049hALT_READY\r\n\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[38;5;255;48;2;1;2;3;1;4mX\x1b[0m").unwrap();
+    out.flush().unwrap();
+    let mut input = [0u8; 4096];
+    let mut used = 0;
+    loop {
+        assert!(used < input.len(), "fixture input exceeded its limit");
+        let read = std::io::stdin().read(&mut input[used..]).unwrap();
+        assert_ne!(read, 0, "fixture input closed");
+        used += read;
+        let bytes = &input[..used];
+        if bytes.windows(3).any(|w| w == b"\x1bOA")
+            && bytes.windows(19).any(|w| w == b"\x1b[200~fixture\x1b[201~")
+        {
+            break;
+        }
+    }
+    let (columns, rows) = crossterm::terminal::size().unwrap();
+    write!(out, "SIZE:{columns}x{rows}\r\n").unwrap();
+    out.write_all(b"INPUT_OK\r\n\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b[?1049lPRIMARY_OK\r\n").unwrap();
+    out.flush().unwrap();
+    crossterm::terminal::disable_raw_mode().unwrap();
+}
+
+#[test]
+fn production_binary_ignores_external_tui_fixture_environment() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+        .arg("--version")
+        .env("DUST_TEST_EXTERNAL_TUI_FIXTURE", "1")
+        .output()
         .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("dust "));
+    assert!(!output.stdout.contains(&0x1b));
+}
+
+#[test]
+fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
+    let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
     let cwd = std::env::temp_dir().canonicalize().unwrap();
     let mut preflight = ExecutionPreflightService::start(2);
     preflight
@@ -234,7 +275,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
         .open(PtyRequest {
             program: ready.executable,
             argv0: None,
-            arguments: vec![],
+            arguments: vec!["--exact".into(), "external_tui_fixture".into(), "--nocapture".into()],
             cwd: ready.cwd,
             environment,
             columns: 40,

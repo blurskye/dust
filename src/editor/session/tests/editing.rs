@@ -2554,3 +2554,47 @@ fn operator_arrow_motions_are_linewise_like_j_and_k() {
         );
     }
 }
+
+#[test]
+fn a_new_primary_startup_file_stays_selected_after_existing_files_load() {
+    let (_app_dirs, mut app) = app();
+    let primary = app.state.workspace_root.join("new.rs");
+    let additional = app.state.workspace_root.join("existing.rs");
+    fs::write(&additional, "existing").unwrap();
+    let startup = StartupTarget::File {
+        workspace_root: app.state.workspace_root.clone(),
+        path: primary.clone(),
+        additional_files: vec![additional],
+    };
+    app.documents = crate::editor::session::documents::DocumentSession::new(
+        crate::files::VfsWorker::start(2), &startup, app.state.window_version(),
+        app.workspace.root_revision(), 2,
+    );
+    app.edit_path(primary.clone());
+    let new_buffer = app.state.active_buffer_id().unwrap();
+    app.queue_startup_reads();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers.len(), 2);
+    assert_eq!(app.state.active_buffer_id(), Some(new_buffer));
+    assert_eq!(app.state.buffers[new_buffer].path.as_ref(), Some(&primary));
+}
+
+#[test]
+fn startup_reads_load_without_changing_focus_after_user_navigation() {
+    let (_app_dirs, mut app) = app();
+    let primary = app.state.workspace_root.join("primary.txt");
+    let additional = app.state.workspace_root.join("additional.txt");
+    fs::write(&primary, "primary").unwrap();
+    fs::write(&additional, "additional").unwrap();
+    app.documents.enqueue_startup_fixture(primary, true);
+    app.documents.enqueue_startup_fixture(additional, false);
+    app.queue_startup_reads();
+    app.edit_path(app.state.workspace_root.join("chosen.txt"));
+    let chosen = app.state.active_buffer_id();
+    let focus = app.window_session.graph().focused();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers.len(), 3);
+    assert_eq!(app.state.active_buffer_id(), chosen);
+    assert_eq!(app.window_session.graph().focused(), focus);
+    assert!(!app.documents.has_startup_work());
+}

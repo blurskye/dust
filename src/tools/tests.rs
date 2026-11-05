@@ -1089,7 +1089,7 @@ fn failed_rustup_component_installation_reports_bounded_stderr() {
 #[cfg(unix)]
 #[test]
 fn rustup_cancellation_terminates_its_process_group() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc, thread, time::{Duration, Instant}};
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc, thread};
     let root = tempfile::tempdir().unwrap();
     let rustup = root.path().join("rustup");
     fs::write(&rustup, "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n").unwrap();
@@ -1102,16 +1102,10 @@ fn rustup_cancellation_terminates_its_process_group() {
     let worker = thread::spawn(move || super::runtimes::install_path_rustup_component(
         &definition, &rustup, &proxy, &cwd, "rust-analyzer", &cancellations, &mut |_, _, _| {},
     ));
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !root.path().join("descendant").exists() {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    let pid = wait_for_descendant(&root.path().join("descendant"));
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
-    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
-    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+    assert_descendant_stopped(pid);
 }
 
 #[test]
@@ -1467,7 +1461,7 @@ fn package_activation_identity_is_independent_of_component() {
     assert_eq!(
         plugins
             .iter()
-            .map(|(plugin, _)| plugin.id.as_str())
+            .map(|(plugin, _, _)| plugin.id.as_str())
             .collect::<Vec<_>>(),
         ["one", "two"]
     );
@@ -1871,7 +1865,7 @@ fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
             std::path::Path::new("/bin/sh"),
             &["-c".into(), format!("sleep 30 & echo $! > descendant; echo diagnostic >&2; exit {exit}")],
             root.path(),
-            &std::collections::BTreeMap::from([("PATH".into(), std::env::var("PATH").unwrap())]),
+            &std::collections::BTreeMap::from([("PATH".into(), std::env::var_os("PATH").unwrap())]),
             &cancellations, None,
         );
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -1901,7 +1895,7 @@ fn installer_cancellation_terminates_descendant_processes() {
                 "trap '' TERM; sleep 30 & echo $! > descendant; wait".into(),
             ],
             &cwd,
-            &std::collections::BTreeMap::from([("PATH".into(), std::env::var("PATH").unwrap())]),
+            &std::collections::BTreeMap::from([("PATH".into(), std::env::var_os("PATH").unwrap())]),
             &cancellations,
             None,
         )
@@ -1920,4 +1914,181 @@ fn rustfmt_is_available_as_a_stdin_formatter() {
         .unwrap();
     assert_eq!(tool.kind, ToolKind::Formatter);
     assert_eq!(tool.format_arguments, ["--emit", "stdout"]);
+}
+
+#[test]
+fn package_failed_commit_preserves_rollback() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, mut plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    plugin.version = "2.0.0".into();
+    let current = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    let backup_path = root.path().join("dust-packages.lock.previous.json");
+    let backup = std::fs::read(&backup_path).unwrap();
+    let limited = super::PackageManager::new(
+        root.path().into(), serde_json::to_vec_pretty(&current).unwrap().len(), 1024,
+    ).unwrap();
+    let (additional, plugin, _) = package_fixture("extra");
+    assert!(matches!(limited.commit_prepared(&additional, &plugin, &object), Err(super::PackageError::LockTooLarge)));
+    assert_eq!(std::fs::read(backup_path).unwrap(), backup);
+    assert_eq!(manager.activations().unwrap()[0].0.version, "2.0.0");
+    manager.rollback().unwrap();
+    assert_eq!(manager.activations().unwrap()[0].0.version, "1.0.0");
+}
+
+#[test]
+fn package_missing_removal_preserves_rollback() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, mut plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    plugin.version = "2.0.0".into();
+    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    assert!(matches!(manager.remove("typo"), Err(super::PackageError::PackageNotFound(_))));
+    manager.rollback().unwrap();
+    assert_eq!(manager.activations().unwrap()[0].0.version, "1.0.0");
+}
+
+#[test]
+fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, plugin, bytes) = package_fixture("demo");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    let mut lock = manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    lock.packages[0].dependencies.push("demo".into());
+    super::write_lock_atomic(&root.path().join("dust-packages.lock.json"), &lock, 1024 * 1024).unwrap();
+    let (other, plugin, _) = package_fixture("dependent");
+    let mut lock = manager.commit_prepared(&other, &plugin, &object).unwrap();
+    lock.packages[1].dependencies.push("demo".into());
+    super::write_lock_atomic(&root.path().join("dust-packages.lock.json"), &lock, 1024 * 1024).unwrap();
+    assert!(matches!(manager.remove("demo"), Err(super::PackageError::PackageRequired(_))));
+    manager.remove("dependent").unwrap();
+    assert!(manager.remove("demo").unwrap().packages.is_empty());
+}
+
+#[test]
+fn package_commit_rejects_changed_or_shared_plugin_ids() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let (manifest, mut plugin, bytes) = package_fixture("alpha");
+    let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
+    manager.commit_prepared(&manifest, &plugin, &object).unwrap();
+    plugin.id = "new-id".into();
+    assert!(manager.commit_prepared(&manifest, &plugin, &object).unwrap_err().to_string().contains("cannot change plugin ID"));
+    let (other, mut plugin, _) = package_fixture("beta");
+    plugin.id = "alpha".into();
+    assert!(manager.commit_prepared(&other, &plugin, &object).unwrap_err().to_string().contains("already owned"));
+    let activations = manager.activations().unwrap();
+    assert_eq!(activations.len(), 1);
+    assert_eq!(activations[0].0.id, "alpha");
+}
+
+#[cfg(unix)]
+#[test]
+fn go_install_preserves_non_utf8_environment_paths() {
+    use std::{ffi::OsStr, fs, os::unix::{ffi::OsStrExt, fs::PermissionsExt}, sync::mpsc};
+    // A ZFS temp directory may require UTF-8 names; tmpfs accepts raw bytes.
+    let directory = if cfg!(target_os = "linux") {
+        tempfile::tempdir_in("/dev/shm")
+    } else {
+        tempfile::tempdir()
+    }.unwrap();
+    let root = directory.path().join(OsStr::from_bytes(b"state-\xff"));
+    let runtime = root.join(".runtimes/go");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    let go = runtime.join("bin/go");
+    fs::write(&go, "#!/bin/sh\nset -eu\n[ \"$GOBIN\" = \"$HOME/bin\" ]\n[ \"$GOPATH\" = \"$HOME/gopath\" ]\n[ \"$GOCACHE\" = \"$HOME/gocache\" ]\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/fixture\"\n").unwrap();
+    fs::set_permissions(go, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER), runtime_artifact("go").unwrap().sha256).unwrap();
+    let mut definition = bundled_tool_catalog().into_iter().find(|tool| matches!(tool.install, Some(ToolInstall::GoPackage { .. }))).unwrap();
+    definition.id = "fixture".into();
+    definition.executable = "fixture".into();
+    let (_cancel, cancellations) = mpsc::channel();
+    let installed = install_tool(&definition, &root, &cancellations, &mut |_, _, _| {}, None).unwrap().unwrap();
+    assert!(installed.is_file());
+    assert!(installed.starts_with(&root));
+}
+
+#[cfg(unix)]
+#[test]
+fn npm_install_patches_native_dependencies_before_activation() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    fn elf(interpreter: &str) -> Vec<u8> {
+        let mut bytes = vec![0; 120];
+        bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        bytes[32..40].copy_from_slice(&64_u64.to_le_bytes());
+        bytes[54..56].copy_from_slice(&56_u16.to_le_bytes());
+        bytes[56..58].copy_from_slice(&1_u16.to_le_bytes());
+        bytes[64..68].copy_from_slice(&3_u32.to_le_bytes());
+        bytes[72..80].copy_from_slice(&120_u64.to_le_bytes());
+        bytes[96..104].copy_from_slice(&(interpreter.len() as u64 + 1).to_le_bytes());
+        bytes.extend_from_slice(interpreter.as_bytes());
+        bytes.push(0);
+        bytes
+    }
+    fn shell_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("\\{byte:03o}")).collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let runtime = root.path().join(".runtimes/bun");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    let bun = runtime.join("bin/bun");
+    fs::write(&bun, format!("#!/bin/sh\nset -eu\nmkdir -p \"$BUN_INSTALL/node_modules/native\"\nprintf '{}' > \"$BUN_INSTALL/node_modules/native/fixture\"\nchmod 700 \"$BUN_INSTALL/node_modules/native/fixture\"\nln -s ../node_modules/native/fixture \"$BUN_INSTALL/bin/fixture\"\n", shell_bytes(&elf("/lib64/ld-linux-x86-64.so.2")))).unwrap();
+    fs::set_permissions(&bun, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER), runtime_artifact("bun").unwrap().sha256).unwrap();
+    let patchelf = root.path().join("patchelf");
+    let loader = "/private/ld.so";
+    fs::write(&patchelf, format!("#!/bin/sh\nprintf '{}' > \"$5\"\n", shell_bytes(&elf(loader)))).unwrap();
+    fs::set_permissions(&patchelf, fs::Permissions::from_mode(0o700)).unwrap();
+    let compatibility = super::catalog::NixCompatibilityRuntime {
+        loader: loader.into(), nix_ld: "/private/nix-ld".into(), patchelf,
+        library_path: String::new(), runtime_path: std::env::var("PATH").unwrap(),
+    };
+    let mut definition = bundled_tool_catalog().into_iter().find(|tool| matches!(tool.install, Some(ToolInstall::NpmPackage { .. }))).unwrap();
+    definition.id = "fixture".into();
+    definition.executable = "fixture".into();
+    let (_cancel, cancellations) = mpsc::channel();
+    let installed = install_tool(&definition, root.path(), &cancellations, &mut |_, _, _| {}, Some(&compatibility)).unwrap().unwrap();
+    assert_eq!(elf_interpreter(&installed).unwrap().as_deref(), Some(loader));
+}
+
+#[cfg(unix)]
+#[test]
+fn installer_cancellation_terminates_descendant_processes_slot5() {
+    use std::{
+        fs,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let (cancel, cancellations) = mpsc::channel();
+    let cwd = root.path().to_path_buf();
+    let worker = thread::spawn(move || {
+        super::runtimes::run_managed(
+            std::path::Path::new("/bin/sh"),
+            &[
+                "-c".into(),
+                "trap '' TERM; sleep 30 & echo $! > descendant; wait".into(),
+            ],
+            &cwd,
+            &std::collections::BTreeMap::from([("PATH".into(), std::env::var_os("PATH").unwrap())]),
+            &cancellations,
+            None,
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !root.path().join("descendant").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    cancel.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
+    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
+    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
 }

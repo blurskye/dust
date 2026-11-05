@@ -919,6 +919,43 @@ fn static_events_providers_and_storage_are_capability_gated_and_bounded() {
 }
 
 #[test]
+fn coalesced_host_events_keep_observation_order() {
+    let mut candidate = manifest();
+    candidate.capabilities.insert(PluginCapability::EventSubscriptions);
+    candidate.contributions.subscriptions = [
+        ("workspace", PluginSubscriptionKind::WorkspaceMetadataChanged),
+        ("surface", PluginSubscriptionKind::ActiveSurfaceChanged),
+    ]
+    .into_iter()
+    .map(|(name, kind)| PluginSubscriptionContribution {
+        id: format!("plugin.demo.subscription.{name}"),
+        kind,
+        maximum_queued: 1,
+        maximum_rate_per_second: 30,
+        coalesce: true,
+        provenance: None,
+    })
+    .collect();
+    let index = index_manifest_contributions(&candidate, 9, "manifest.toml".into()).unwrap();
+    let mut queue = PluginHostEventQueue::default();
+    queue.install(&index).unwrap();
+    for (kind, revision) in [
+        (PluginSubscriptionKind::WorkspaceMetadataChanged, 1),
+        (PluginSubscriptionKind::ActiveSurfaceChanged, 1),
+        (PluginSubscriptionKind::WorkspaceMetadataChanged, 2),
+    ] {
+        queue.observe("demo", PluginLoadId(9), kind, revision, "changed").unwrap();
+    }
+    let events = queue.deliver("demo", PluginLoadId(9));
+    assert_eq!(events.iter().map(|event| event.sequence).collect::<Vec<_>>(), [2, 3]);
+    assert_eq!(events[0].kind, PluginSubscriptionKind::ActiveSurfaceChanged);
+    assert_eq!(events[1].kind, PluginSubscriptionKind::WorkspaceMetadataChanged);
+    assert_eq!(events[1].coalesced, 1);
+    queue.acknowledge("demo", PluginLoadId(9), &events.iter().map(|event| event.id).collect::<Vec<_>>());
+    assert_eq!(queue.pending("demo", PluginLoadId(9)), 0);
+}
+
+#[test]
 fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
     let mut candidate = manifest();
     candidate
@@ -1187,6 +1224,9 @@ impl CapturedExecution {
     pub(crate) fn arguments(&self) -> &[String] {
         &self.request.arguments
     }
+    pub(crate) fn virtual_documents(&self) -> &[super::PluginVirtualDocumentRequest] {
+        &self.request.virtual_document_requests
+    }
     pub(crate) fn snapshot(&self) -> Option<&PluginSnapshot> {
         self.request.snapshot.as_ref()
     }
@@ -1217,7 +1257,10 @@ impl ExecutionFixture {
         (manager, Self { requests, events })
     }
     pub(crate) fn assert_no_requests(&self) {
-        assert!(matches!(self.requests.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(self.is_empty());
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        matches!(self.requests.try_recv(), Err(mpsc::TryRecvError::Empty))
     }
     pub(crate) fn take(&self) -> CapturedExecution {
         match self
@@ -1299,6 +1342,32 @@ impl ExecutionFixture {
                     storage_requests: Vec::new(),
                     provider_chunks: Vec::new(),
                     virtual_document_proposals: Vec::new(),
+                },
+            })
+            .unwrap();
+    }
+    pub(crate) fn reply_virtual(
+        &self,
+        captured: &CapturedExecution,
+        proposal: super::PluginVirtualDocumentProposal,
+    ) {
+        self.events
+            .try_send(WorkerEvent::Executed {
+                load: captured.load,
+                origin: captured.origin.clone(),
+                execution: PluginExecution {
+                    plugin: captured.request.plugin.clone(),
+                    command: captured.request.command.clone(),
+                    generation: captured.request.generation,
+                    result: String::new(),
+                    messages: Vec::new(),
+                    proposals: Vec::new(),
+                    ui_requests: Vec::new(),
+                    confirmation_requests: Vec::new(),
+                    host_event_acknowledgements: Vec::new(),
+                    storage_requests: Vec::new(),
+                    provider_chunks: Vec::new(),
+                    virtual_document_proposals: vec![proposal],
                 },
             })
             .unwrap();

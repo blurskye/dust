@@ -1891,3 +1891,23 @@ fn reload_preserves_plugin_window_rules() {
     let window = app.extension.window_snapshots()[0].window;
     assert_eq!(app.window_session.graph().window(window).unwrap().placement, WindowPlacement::Docked { edge: DockEdge::Right, size: 20 });
 }
+
+#[test]
+fn settings_toggles_wait_for_the_saved_configuration_to_reload() {
+    use crate::editor::session::dispatch::commands::SettingsAction;
+    let (_app_dirs, mut app) = app();
+    app.open_settings();
+    let page = app.ui.settings.as_mut().unwrap();
+    assert_eq!(page.selected_row().unwrap().key, "editor.wrap");
+    page.saving = true;
+    page.status = Some(("Saved".into(), false));
+    app.settings_action(SettingsAction::Toggle);
+    let page = app.ui.settings.as_ref().unwrap();
+    assert!(page.saving);
+    assert_eq!(page.status, Some(("Saved".into(), false)));
+    app.refresh_settings();
+    assert!(!app.ui.settings.as_ref().unwrap().saving);
+    app.ui.settings.as_mut().unwrap().saving = true;
+    app.settings_status("Reload rejected".into(), true);
+    assert!(!app.ui.settings.as_ref().unwrap().saving);
+}

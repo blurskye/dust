@@ -117,21 +117,23 @@ impl InteractiveApplication {
         self.project_input_documentation();
     }
     pub(super) fn project_input_documentation(&mut self) {
-        if let Some(popup) = self.input.documentation() {
-            let total_rows = crate::ui::render::overlays::documentation_display_rows(
-                popup,
-                self.configuration.settings(),
-                self.window_session.width(),
-            );
-            self.input.scroll_documentation(
-                0,
-                0,
-                self.window_session.content().documentation_rows.max(1),
-                total_rows,
-            );
-        }
         let popup = self.input.documentation().cloned();
         self.ui.set(popup, |ui| &mut ui.documentation_popup);
+        if self.ui.documentation_popup.is_some() {
+            let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                &self.state,
+                &self.ui,
+                self.configuration.settings(),
+                self.configuration.dashboard(),
+                self.window_session.width(),
+                self.window_session.height(),
+            );
+            if let Some((visible, total)) = geometry {
+                self.input.scroll_documentation(0, 0, visible, total);
+                let popup = self.input.documentation().cloned();
+                self.ui.set(popup, |ui| &mut ui.documentation_popup);
+            }
+        }
     }
     pub(super) fn restore_input_focus(&mut self) {
         let Some(capture) = self.input.released_focus() else {
@@ -169,6 +171,8 @@ impl InteractiveApplication {
 
     pub(super) fn project_configuration(&mut self) {
         self.ui.dashboard_actions = self.configuration.dashboard_actions();
+        self.ui.dashboard_selected = self.ui.dashboard_selected
+            .min(self.ui.dashboard_actions.len().saturating_sub(1));
     }
     pub(super) fn project_input_hints(&mut self) {
         let hints = self.input.hints().cloned();
@@ -1380,7 +1384,7 @@ impl InteractiveApplication {
                 hints.iter()
                     .filter(|hint| hint.position.get() >= visible_start)
                     .take(32)
-                    .map(|hint| crate::ui::geometry::text_width(
+                    .map(|hint| crate::ui::geometry::cell_text_width(
                         &hint.label, self.configuration.settings().editor.ambiguous_width,
                     ))
                     .fold(0usize, usize::saturating_add)

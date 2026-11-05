@@ -656,6 +656,9 @@ impl InteractiveApplication {
     }
 
     pub(in crate::editor::session) fn process_plugin_events(&mut self) {
+        if let Some(request) = self.extension.expire_providers() {
+            self.present_plugin_picker(request);
+        }
         if self.persistence.restoring() {
             return;
         }
@@ -975,6 +978,7 @@ impl InteractiveApplication {
             }
             let workspace_revision = Some(self.workspace.root_revision());
             for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
+                let closing = matches!(proposal.kind, crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged);
                 let result = self
                     .extension
                     .prepare_virtual(
@@ -994,7 +998,9 @@ impl InteractiveApplication {
                 match result {
                     Ok(state) => {
                         *self.state = state;
-                        self.set_dashboard_visibility(false);
+                        if !closing {
+                            self.set_dashboard_visibility(false);
+                        }
                         self.reconcile_editor_windows();
                     }
                     Err(error) => self.show_error(error),
@@ -1181,12 +1187,10 @@ impl InteractiveApplication {
     }
     fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
         match result {
-            Ok(VirtualOpen::Execute { plugin, command }) => {
-                self.process_effect(AppEffect::PluginExecute {
-                    plugin,
-                    command,
-                    arguments: Vec::new(),
-                })
+            Ok(VirtualOpen::Execute { plugin, load, command, document }) => {
+                if !self.execute_plugin_command(plugin.clone(), command, Vec::new()) {
+                    self.extension.cancel_virtual_request(&plugin, load, document);
+                }
             }
             Ok(VirtualOpen::Existing(buffer)) => {
                 let mut draft = self.state.draft();
@@ -2919,18 +2923,23 @@ impl InteractiveApplication {
             }
             AppEffect::LspDocumentationScroll(direction) => {
                 self.reconcile_editor_windows();
-                self.input.scroll_documentation(
-                    direction,
-                    crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
-                    self.window_session.content().documentation_rows.max(1),
-                    self.input.documentation().map_or(0, |popup| {
-                        crate::ui::render::overlays::documentation_display_rows(
-                            popup,
-                            self.configuration.settings(),
-                            self.window_session.width(),
-                        )
-                    }),
+                // Use the same final layout as painting, including a narrowed completion box.
+                let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                    &self.state,
+                    &self.ui,
+                    self.configuration.settings(),
+                    self.configuration.dashboard(),
+                    self.window_session.width(),
+                    self.window_session.height(),
                 );
+                if let Some((visible, total)) = geometry {
+                    self.input.scroll_documentation(
+                        direction,
+                        crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
+                        visible,
+                        total,
+                    );
+                }
                 self.project_input_documentation();
             }
             AppEffect::LspDocumentationClose => self.close_documentation(),
@@ -3542,11 +3551,16 @@ impl InteractiveApplication {
                 SearchUpdate::Complete {
                     intent: Intent::Find,
                     files,
-                    ..
+                    truncated,
                 } => {
                     if self.search.live() || !self.search.matches().is_empty() {
                         self.open_workspace_search_picker();
-                        if self.search.live() {
+                        if truncated {
+                            self.notify_message(
+                                format!("Workspace search was truncated; showing {} matches", self.search.matches().len()),
+                                false,
+                            );
+                        } else if self.search.live() {
                             self.clear_notice();
                         } else {
                             self.notify_message(
@@ -4875,19 +4889,27 @@ impl InteractiveApplication {
             line: view.scroll_line,
             wrap_row: view.scroll_wrap_row,
         });
-        let first_anchor = if kind.ends_with("up") {
-            visual_rows.backward(old_start_anchor, amount)
-        } else {
-            visual_rows.forward(old_start_anchor, amount)
+        // Scroll past an expanded diagnostic block even when it is taller than a page.
+        // Viewport fitting still uses forward/backward's strict screen-row budget.
+        let advance = |anchor| {
+            let target = if kind.ends_with("up") {
+                visual_rows.backward(anchor, amount)
+            } else {
+                visual_rows.forward(anchor, amount)
+            };
+            if target != anchor {
+                target
+            } else if kind.ends_with("up") {
+                visual_rows.previous(anchor)
+            } else {
+                visual_rows.next(anchor)
+            }
         };
+        let first_anchor = advance(old_start_anchor);
         let cursor_anchor = visual_rows.cursor_anchor(view.cursor);
         let last_anchor = visual_rows.forward(first_anchor, body.saturating_sub(1));
         let cursor_anchor = if kind.starts_with("half_") {
-            if kind.ends_with("up") {
-                visual_rows.backward(cursor_anchor, amount)
-            } else {
-                visual_rows.forward(cursor_anchor, amount)
-            }
+            advance(cursor_anchor)
         } else {
             cursor_anchor
         };
@@ -5072,6 +5094,9 @@ impl InteractiveApplication {
         self.close_prompt_with_editor_close(true);
     }
     fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
+        if self.input.prompt().is_some_and(|prompt| prompt.kind == PromptKind::GitDestructive) {
+            self.git.cancel_destructive();
+        }
         if let Some((view, cursor, line, wrap_row, column)) = self.input.take_search_origin() {
             self.move_search_cursor(view, cursor);
             if let Some(view) = self.state.views.get_mut(view) {
@@ -5484,6 +5509,7 @@ impl InteractiveApplication {
                 let replacement = self.git.take_pending_replacement();
                 let action = self.git.take_pending_destructive();
                 self.close_prompt();
+                // Rebuild the replacement against current repository state before applying it.
                 if let Some(replacement) = replacement {
                     self.apply_git_replacement(replacement, selected);
                     return;
@@ -7383,7 +7409,7 @@ impl InteractiveApplication {
             .and_then(|id| self.state.buffers[id].path.as_deref());
         if let Err(error) =
             self.git
-                .start_hunks(path, self.workspace.root_revision(), action, layer)
+                .start_hunks(&self.state, path, self.workspace.root_revision(), action, layer)
         {
             self.show_error(error);
         }
@@ -7451,7 +7477,9 @@ impl InteractiveApplication {
         let result = self
             .git
             .start_worktree_create(&repository, &name, &path, &branch);
-        self.git.show_worktrees_after_change();
+        if result.is_ok() {
+            self.git.show_worktrees_after_change();
+        }
         self.report_branch_request(result);
     }
     fn confirm_git_destructive(
@@ -7467,17 +7495,17 @@ impl InteractiveApplication {
         };
         let result = match action {
             crate::editor::session::git::GitDestructiveAction::RemoveWorktree(name) => {
-                self.git.show_worktrees_after_change();
-                self.git.start_worktree_remove(&status.repository, &name)
+                self.git.start_worktree_remove(&self.state, &status.repository, &name)
             }
         };
-        if let Err(error) = result {
-            self.show_error(error);
+        match result {
+            Ok(()) => self.git.show_worktrees_after_change(),
+            Err(error) => self.show_error(error),
         }
     }
     pub(in crate::editor::session) fn process_git_branch_events(&mut self) {
         // One poll per handler call: the service is one shot.
-        let outcome = match self.git.poll_branch_outcome(self.workspace.root_revision()) {
+        let outcome = match self.git.poll_branch_outcome(self.workspace.root_revision(), &self.state.workspace_root) {
             Ok(Some(outcome)) => Some(outcome),
             Ok(None) => None,
             Err(error) => {
@@ -7592,7 +7620,7 @@ impl InteractiveApplication {
         if self.search.poll_diff_preview(self.workspace.version(), self.configuration.binding_revision()) {
             self.sync_picker_ui();
         }
-        match self.git.poll_hunks() {
+        match self.git.poll_hunks(&self.state) {
             Ok(Some(ready)) => {
                 if let Some(action) = ready.action {
                     if let GitHunkAction::Stage(line) | GitHunkAction::StageLines(line, _) = action
@@ -7733,7 +7761,7 @@ impl InteractiveApplication {
             .and_then(|id| self.state.buffers[id].path.as_deref())
             .is_some_and(|path| {
                 self.git
-                    .hunks_match(path, layer, self.workspace.root_revision())
+                    .hunks_match(&self.state, path, layer, self.workspace.root_revision())
             })
     }
     pub(in crate::editor::session) fn navigate_git_hunk(&mut self, direction: i8) {
@@ -8003,6 +8031,7 @@ impl InteractiveApplication {
                     _ => GitHunkAction::Stage(line),
                 };
                 self.git.start_hunks(
+                    &self.state,
                     Some(path),
                     self.workspace.root_revision(),
                     Some(action),
@@ -8109,6 +8138,7 @@ impl InteractiveApplication {
         self.project_debug_panes();
     }
     pub(in crate::editor::session) fn open_git_status_picker(&mut self) {
+        self.git.reconcile_status_documents(&self.state);
         self.git.open_changes_when_ready = false;
         let root = self
             .workspace
@@ -8309,8 +8339,7 @@ impl InteractiveApplication {
             .buffers
             .values()
             .find(|buffer| buffer.path.as_ref() == Some(&found.canonical_path))
-            && !crate::editor::text::decode_utf8(&found.snapshot)
-                .is_ok_and(|snapshot| buffer.text.to_string() == snapshot.text)
+            && !buffer.text.matches_encoded_text(&found.snapshot)
         {
             self.show_error(self.message("workspace_search_stale_result", &[]));
             return;
@@ -9633,15 +9662,11 @@ impl InteractiveApplication {
         provider: String,
         query: String,
     ) {
-        let buffer_revision = self
-            .state
-            .active_buffer_id()
-            .and_then(|buffer| self.state.buffers.get(buffer))
-            .map(|buffer| buffer.text.revision().0);
         let invocation = match self.extension.start_provider(
             &provider,
             query,
-            (self.workspace.root_revision(), buffer_revision),
+            self.workspace.root_revision(),
+            &self.state,
         ) {
             Ok(invocation) => invocation,
             Err(error) => {
@@ -9669,14 +9694,14 @@ impl InteractiveApplication {
         }
     }
 
-    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) {
+    fn execute_plugin_command(&mut self, plugin: String, command: String, arguments: Vec<String>) -> bool {
         let Some(load) = self.extension.load_id(&plugin) else {
             self.show_error(crate::extensions::PluginError::NotActive);
-            return;
+            return false;
         };
         if !self.extension.is_active_generation(&plugin, load) {
             self.show_error(crate::extensions::PluginError::NotActive);
-            return;
+            return false;
         }
         self.refresh_plugin_host_events();
         self.retire_plugin_edit_sources();
@@ -9710,7 +9735,9 @@ impl InteractiveApplication {
         );
         if let Err(error) = result {
             self.show_error(error);
+            return false;
         }
+        true
     }
 
     pub(in crate::editor::session) fn present_plugin_picker(&mut self, request: u64) {
@@ -9828,7 +9855,7 @@ impl InteractiveApplication {
                 action_command,
             }) => self
                 .extension
-                .provider_selection(plugin, *load, *request, item, action_command),
+                .provider_selection(plugin, *load, *request, item, action_command, &self.state),
             _ => None,
         };
         self.close_picker();
@@ -12904,6 +12931,13 @@ impl InteractiveApplication {
         if self.workspace.require_path(&document.path).is_err() {
             return;
         }
+        // Wait before recording an observation or copying a launch document: another
+        // language's discovery can still own the shared lane.
+        if !self.workspace.execution_lane(
+            crate::editor::session::workspace::DiscoveryKind::Language,
+        ).discovery_available() {
+            return;
+        }
         // Every matching server attaches, as in VS Code and Neovim: Tailwind runs
         // beside the HTML or TypeScript server. They start one at a time because
         // project-root discovery takes one launch at a time.
@@ -13845,6 +13879,17 @@ impl InteractiveApplication {
         &mut self,
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
+        // Refuse before replacing the save-and-stage intent owned by the running mutation.
+        if self.git.mutation_pending()
+            && matches!(effect,
+                AppEffect::GitFileStage | AppEffect::GitFileUnstage
+                    | AppEffect::GitHunkStage | AppEffect::GitHunkUnstage
+                    | AppEffect::GitLinesStage { .. } | AppEffect::GitConflictStage
+                    | AppEffect::GitHunkReset)
+        {
+            self.show_error("a Git mutation is already running");
+            return Ok(());
+        }
         match effect {
             AppEffect::Quit { force } => {
                 if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
@@ -14968,7 +15013,11 @@ impl InteractiveApplication {
         {
             self.documents.cancel_request(id);
         }
-        self.extension.close_virtual_buffer(buffer_id);
+        match self.extension.close_virtual_buffer(buffer_id) {
+            Ok(Some(request)) => self.route_virtual_open(Ok(request)),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
         let documents = self
             .language
             .sessions()

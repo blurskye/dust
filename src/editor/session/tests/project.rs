@@ -768,12 +768,10 @@ fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let lock = crate::files::lock_file(&path.with_extension("lock")).unwrap();
     app.revoke_workspace_trust();
-    assert!(matches!(
-        app.finish_shutdown_before(Instant::now()),
-        Err(super::super::InteractiveError::Vfs(crate::files::VfsError::Io {
-            operation: "finish workspace trust shutdown", ..
-        }))
-    ));
+    let error = app.finish_shutdown_before(Instant::now()).unwrap_err();
+    // The shared shutdown result may wrap trust failure with other unfinished work.
+    assert!(error.to_string().contains("finish workspace trust shutdown"), "{error}");
+    assert!(matches!(error, super::super::InteractiveError::Vfs(crate::files::VfsError::Io { .. })));
     assert!(app.workspace.persist_pending());
     drop(lock);
     wait_trust(&mut app);
@@ -7154,4 +7152,537 @@ fn failed_save_and_stage_does_not_leak_into_a_later_save() {
         )
         .unwrap();
     assert_eq!(blob.content(), b"one\ntwo\nthree\nfour\nfive\n");
+}
+
+#[test]
+fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
+    for open in [false, true] {
+        let (_app_dirs, mut app) = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        assert_eq!(app.search.matches().len(), 1);
+        if open {
+            app.state.open_text(TextBuffer::from_text("prefix needle\n"), Some(path.clone())).unwrap();
+        } else {
+            fs::write(&path, "prefix needle\n").unwrap();
+        }
+        let before = app.state.active_buffer_id();
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), before);
+        assert!(app.ui.notification_error);
+        assert_eq!(app.ui.notification.as_deref(), Some(app.message("workspace_search_stale_result", &[]).as_str()));
+        assert!(app.search.matches().is_empty());
+        assert!(app.search.workflow().is_none());
+    }
+}
+
+#[test]
+fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
+    for changed in [false, true] {
+        let (_app_dirs, mut app) = app();
+        let path = app.state.workspace_root.join("match.txt");
+        fs::write(&path, "head needle\n").unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        let before = app.state.active_buffer_id();
+        app.accept_picker();
+        let buffer = app.state.load_hidden_text(
+            TextBuffer::from_text(if changed { "prefix head needle\n" } else { "head needle\n" }),
+            path,
+        );
+        wait_vfs(&mut app);
+        if changed {
+            assert_eq!(app.state.active_buffer_id(), before);
+            assert!(app.ui.notification_error);
+            assert_eq!(app.ui.notification.as_deref(), Some(app.message("workspace_search_stale_result", &[]).as_str()));
+        } else {
+            assert_eq!(app.state.active_buffer_id(), Some(buffer));
+            assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
+        }
+    }
+}
+
+#[test]
+fn workspace_search_accepts_unchanged_encoded_snapshots() {
+    for open in [false, true] {
+        let (_app_dirs, mut app) = app();
+        let path = app.state.workspace_root.join("match.txt");
+        let bytes = b"\xef\xbb\xbfhead\r\nneedle\r\n";
+        fs::write(&path, bytes).unwrap();
+        app.start_workspace_search("needle".into(), None);
+        wait_workspace_search(&mut app);
+        if open {
+            app.state.open_text(TextBuffer::from_bytes(bytes).unwrap(), Some(path.clone())).unwrap();
+        }
+        app.accept_picker();
+        wait_vfs(&mut app);
+        let buffer = app.state.active_buffer_id().unwrap();
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+        assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(5));
+    }
+}
+
+#[test]
+fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
+    fn index_bytes(root: &std::path::Path, name: &str) -> String {
+        let repo = git2::Repository::open(root).unwrap();
+        let index = repo.index().unwrap();
+        let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
+        String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
+    }
+    let (_app_dirs, mut app) = app();
+    let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
+    let path = app.state.workspace_root.join("choice.txt");
+    fs::write(&path, "disk\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("choice.txt")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+        .unwrap();
+    drop(tree);
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    app.start_open(path.clone());
+    wait_vfs(&mut app);
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+
+    // The buffer holds text that is not on disk, at a non-zero revision.
+    let id = app.state.active_buffer_id().expect("buffer");
+    app.state.buffers[id].text = crate::editor::text::TextBuffer::from_text("buffer\n");
+    app.state.buffers[id].dirty = true;
+    app.state.buffers[id]
+        .text
+        .bump_revision()
+        .expect("revision bump");
+    assert!(app.state.buffers[id].text.revision().0 > 0);
+
+    let wait_for_choice = |app: &mut InteractiveApplication| {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            app.process_git_mutation_events();
+            if app
+                .input
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::GitStageUnsaved)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no save-and-stage choice appeared"
+            );
+            thread::yield_now()
+        }
+    };
+
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
+            .expect("stage command"),
+    );
+    wait_for_choice(&mut app);
+    assert_eq!(
+        app.input
+            .prompt()
+            .unwrap()
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .selected,
+        crate::ui::ConfirmationChoice::No,
+        "the choice defaults to No"
+    );
+    assert_eq!(
+        index_bytes(&app.state.workspace_root, "choice.txt"),
+        "disk\n"
+    );
+
+    // Negative branch: nothing is saved and nothing is staged.
+    app.submit_prompt();
+    assert_eq!(
+        index_bytes(&app.state.workspace_root, "choice.txt"),
+        "disk\n"
+    );
+    assert!(app.state.buffers[id].dirty);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "disk\n");
+
+    // Positive branch: save, then stage the saved revision rather than the old disk bytes.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
+            .expect("stage command"),
+    );
+    // A second request must not erase the first request's save-and-stage intent.
+    app.invoke(
+        crate::editor::CommandInvocation::new("workspace.git.file.unstage", InvocationSource::Test)
+            .expect("unstage command"),
+    );
+    assert_eq!(app.ui.notification.as_deref(), Some("a Git mutation is already running"));
+    wait_for_choice(&mut app);
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    wait_vfs(&mut app);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.mutation_pending() || app.git.status_pending() {
+        app.process_git_mutation_events();
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "buffer\n",
+        "the save reached disk"
+    );
+    assert_eq!(
+        index_bytes(&app.state.workspace_root, "choice.txt"),
+        "buffer\n",
+        "the saved revision was staged, not the previous disk content"
+    );
+    assert!(!app.state.buffers[id].dirty);
+}
+
+#[test]
+fn document_paths_identify_their_worktrees_independently_of_open_requests() {
+    let (_app_dirs, mut app) = app();
+    let repo = history_fixture(&app.state.workspace_root, &["base", "tip"]);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    // Two linked worktrees, both OUTSIDE the main worktree so the main worktree stays clean.
+    let outside = tempfile::tempdir().unwrap().keep();
+    let mut roots = Vec::new();
+    for name in ["alpha", "beta"] {
+        let branch = repo.branch(name, &head, false).unwrap();
+        let reference = branch.into_reference();
+        let mut options = git2::WorktreeAddOptions::new();
+        options.reference(Some(&reference));
+        let path = outside.join(name);
+        repo.worktree(name, &path, Some(&options)).unwrap();
+        fs::write(path.join("note.txt"), name).unwrap();
+        roots.push(path);
+    }
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    let identities = app
+        .workspace
+        .roots()
+        .iter()
+        .map(|root| root.identity.clone())
+        .collect::<Vec<_>>();
+
+    let alpha_file = roots[0].join("note.txt");
+    let beta_file = roots[1].join("note.txt");
+    app.documents
+        .open_explorer(alpha_file.clone(), identities.clone())
+        .expect("open the alpha document");
+    wait_vfs(&mut app);
+    let alpha = git2::Repository::discover(&alpha_file)
+        .expect("the alpha path belongs to a worktree");
+    assert_eq!(
+        alpha.workdir().unwrap(),
+        std::fs::canonicalize(&roots[0]).unwrap(),
+        "the identity names the worktree the document was opened in"
+    );
+
+    app.documents
+        .open_explorer(beta_file.clone(), identities)
+        .expect("open the beta document");
+    wait_vfs(&mut app);
+    let beta = git2::Repository::discover(&beta_file)
+        .expect("the beta path belongs to a worktree");
+    assert_eq!(beta.workdir().unwrap(), std::fs::canonicalize(&roots[1]).unwrap());
+    assert_ne!(
+        alpha.path(), beta.path(),
+        "two linked worktrees carry distinct identities"
+    );
+    assert_eq!(
+        git2::Repository::discover(&alpha_file)
+            .expect("the alpha identity is unchanged").path(),
+        alpha.path(),
+        "opening another worktree never retargets an existing buffer"
+    );
+
+    // A path that cannot be canonicalized has no identity rather than a fabricated one.
+    assert!(
+        git2::Repository::discover(std::path::Path::new(
+            "/nonexistent-dust/orphan.txt"
+        ))
+        .is_err(),
+        "a document that does not exist has no worktree"
+    );
+    let unopened = roots[0].join("never-opened.txt");
+    fs::write(&unopened, "x").unwrap();
+    let identity = git2::Repository::discover(&unopened).unwrap();
+    assert_eq!(identity.workdir(), alpha.workdir());
+    assert_eq!(identity.path(), alpha.path());
+    assert!(unopened.starts_with(identity.workdir().unwrap()));
+}
+
+#[test]
+fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
+    let (_app_dirs, mut app) = app();
+    let root = app.state.workspace_root.clone();
+    let (our_tip, _their_tip) = {
+        let repo = history_fixture(&root, &["base"]);
+        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        let base_tip = repo.head().unwrap().target().unwrap();
+        let base_commit = repo.find_commit(base_tip).unwrap();
+        repo.branch("theirs", &base_commit, false).unwrap();
+        {
+            let mut builder = repo
+                .treebuilder(Some(&base_commit.tree().unwrap()))
+                .unwrap();
+            let blob = repo.blob(b"THEIR VERSION\n").unwrap();
+            builder.insert("h0.txt", blob, 0o100644).unwrap();
+            let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+            repo.commit(
+                Some("refs/heads/theirs"),
+                &sig,
+                &sig,
+                "theirs",
+                &tree,
+                &[&base_commit],
+            )
+            .unwrap();
+        }
+        fs::write(root.join("h0.txt"), "OUR VERSION\n").unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("h0.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "ours", &tree, &[&base_commit])
+                .unwrap();
+        }
+        let our_tip = repo.head().unwrap().target().unwrap();
+        let their_tip = repo
+            .find_reference("refs/heads/theirs")
+            .unwrap()
+            .target()
+            .unwrap();
+        let their_commit = repo.find_commit(their_tip).unwrap();
+        let annotated = repo.find_annotated_commit(their_commit.id()).unwrap();
+        repo.merge(&[&annotated], None, None).unwrap();
+        repo.reference("ORIG_HEAD", our_tip, true, "fixture")
+            .unwrap();
+        (our_tip, their_tip)
+    };
+
+    prepare_trust_identity(&mut app);
+    for root in app.workspace.roots().to_vec() {
+        app.workspace.fixture_trust_identity(root.identity.clone())
+    }
+    app.reconcile_workspace_trust();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    app.start_git_status_refresh();
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now()
+    }
+    let target = root.join("h0.txt");
+    let before = fs::read(&target).unwrap();
+    let index_before = crate::workspace::git::git_index_fingerprint(&root).unwrap();
+
+    // PREVIEW: a confirmation naming the file and the side, and nothing written yet.
+    app.invoke(
+        crate::editor::CommandInvocation::new(
+            "workspace.git.conflict.replace",
+            InvocationSource::Test,
+        )
+        .expect("command id")
+        .with_argument("side", CommandValue::String("theirs".into()))
+        .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.project_input_prompt();
+    let confirmation = app
+        .ui
+        .prompt
+        .as_ref()
+        .and_then(|prompt| prompt.confirmation.as_ref())
+        .expect("the preview asks for confirmation");
+    assert!(
+        confirmation.message.contains("h0.txt") && confirmation.message.contains("theirs"),
+        "the preview names the file and the side: {:?}",
+        confirmation.message
+    );
+    assert_eq!(
+        confirmation.selected,
+        crate::ui::ConfirmationChoice::No,
+        "the confirmation defaults to No"
+    );
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        before,
+        "nothing is written while the question is open"
+    );
+    assert!(app.git.has_pending_replacement());
+
+    // CANCEL: answering No writes nothing at all.
+    app.submit_prompt();
+    assert!(
+        !app.git.has_pending_replacement(),
+        "the question is answered once"
+    );
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        before,
+        "a cancelled preview leaves the file byte-identical"
+    );
+    assert_eq!(
+        crate::workspace::git::git_index_fingerprint(&root).unwrap(),
+        index_before,
+        "and the index untouched"
+    );
+    assert!(
+        app.ui
+            .notification
+            .as_deref()
+            .is_some_and(|notice| notice.contains("cancelled")),
+        "and says so: {:?}",
+        app.ui.notification
+    );
+
+    // Escape must retire the preview, and neither kind of destructive confirmation
+    // may inherit the other kind's target.
+    app.invoke(
+        crate::editor::CommandInvocation::new(
+            "workspace.git.conflict.replace", InvocationSource::Test,
+        ).unwrap()
+        .with_argument("side", CommandValue::String("theirs".into()))
+        .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    let replacement = app.git.take_pending_replacement().unwrap();
+    app.git.set_pending_replacement(replacement.clone());
+    app.git.set_pending_destructive(crate::editor::session::git::GitDestructiveAction::RemoveWorktree("missing".into()));
+    assert!(!app.git.has_pending_replacement());
+    app.git.set_pending_replacement(replacement);
+    assert!(app.git.take_pending_destructive().is_none());
+    app.close_prompt();
+    assert!(!app.git.has_pending_replacement(), "Escape cancels the replacement");
+    app.git.set_pending_destructive(crate::editor::session::git::GitDestructiveAction::RemoveWorktree("missing".into()));
+    app.open_confirmation(
+        crate::ui::PromptKind::GitDestructive,
+        "Remove worktree".into(), "Remove missing?".into(), crate::ui::ConfirmationChoice::Yes,
+    );
+    app.submit_prompt();
+    assert_eq!(fs::read(&target).unwrap(), before, "the later confirmation cannot replace the file");
+
+    // CONFIRM: the file is replaced with the chosen side's content.
+    app.invoke(
+        crate::editor::CommandInvocation::new(
+            "workspace.git.conflict.replace",
+            InvocationSource::Test,
+        )
+        .expect("command id")
+        .with_argument("side", CommandValue::String("theirs".into()))
+        .with_argument("files", CommandValue::String("h0.txt".into())),
+    );
+    app.input
+        .select_confirmation(crate::ui::ConfirmationChoice::Yes);
+    app.submit_prompt();
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        b"THEIR VERSION\n",
+        "the confirmed replacement wrote exactly the chosen side's content"
+    );
+    assert!(!app.git.has_pending_replacement());
+    let _ = (our_tip, index_before);
+}
+
+#[test]
+fn opening_changes_refreshes_cached_unsaved_document_information() {
+    let (_app_dirs, mut app) = app();
+    history_fixture(&app.state.workspace_root, &["base"]);
+    let path = app.state.workspace_root.join("h0.txt");
+    app.start_open(path);
+    wait_vfs(&mut app);
+    app.start_git_status_refresh();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while app.git.status_pending() {
+        app.process_git_status_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    let id = app.state.active_buffer_id().unwrap();
+    app.state.buffers[id].text = TextBuffer::from_text("unsaved\n");
+    app.state.buffers[id].text.bump_revision().unwrap();
+    app.state.buffers[id].dirty = true;
+    let status_revision = app.git.status().unwrap().revision;
+    app.open_git_status_picker();
+    assert!(!app.git.status_pending(), "editor-only changes need no disk refresh");
+    assert_eq!(app.git.status().unwrap().revision, status_revision);
+    let projection = app.search.picker_projection().unwrap();
+    assert!(projection.rows.iter().any(|row| row.label == "h0.txt"));
+    let entry = app.git.status().unwrap().entries.iter().find(|entry| entry.relative_path == std::path::Path::new("h0.txt")).unwrap();
+    assert!(entry.sources.unsaved_document_revision.is_some());
+    app.close_picker();
+    app.state.buffers[id].dirty = false;
+    app.open_git_status_picker();
+    assert!(app.git.status().unwrap().entries.iter().all(|entry| entry.sources.unsaved_document_revision.is_none()));
+    assert!(!app.search.picker_projection().unwrap().rows.iter().any(|row| row.label == "h0.txt"));
+}
+
+#[test]
+fn help_filters_do_not_restart_the_suspended_live_grep() {
+    let (_app_dirs, mut app) = app();
+    fs::write(app.state.workspace_root.join("match.txt"), "needle\n").unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    assert!(app.search.live());
+    let sequence = app.search.sequence();
+    app.open_contextual_help();
+    assert!(!app.search.live());
+    app.picker_insert("help");
+    app.picker_backspace();
+    assert!(app.search.help_is_open());
+    assert_eq!(app.search.query(), "needle");
+    assert_eq!(app.search.sequence(), sequence);
+    assert_eq!(app.search.matches().len(), 1);
+    app.close_picker();
+    assert!(app.search.live());
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "needle");
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert_eq!(app.state.views[app.state.active_view.unwrap()].cursor, ByteOffset(0));
+}
+
+#[test]
+fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
+    for replacement in [None, Some("changed".into())] {
+        let replacing = replacement.is_some();
+        let (_app_dirs, mut app) = app();
+        fs::write(app.state.workspace_root.join("many.txt"), "needle".repeat(2500)).unwrap();
+        app.start_workspace_search("needle".into(), replacement);
+        wait_workspace_search(&mut app);
+        assert!(!app.search.matches().is_empty());
+        assert!(app.search.matches().len() < 2500);
+        let snapshot = app.search.workflow().unwrap().snapshot_if_changed(0).unwrap();
+        assert!(snapshot.complete);
+        assert_eq!(snapshot.items.len(), app.search.matches().len());
+        assert!(app.workspace_edits.proposal().is_none());
+        assert!(app.ui.notification.as_ref().unwrap().contains("truncated"));
+        if !replacing {
+            assert!(app.ui.picker.is_some());
+            app.accept_picker();
+            wait_vfs(&mut app);
+            assert!(app.state.buffers[app.state.active_buffer_id().unwrap()].path.as_ref().unwrap().ends_with("many.txt"));
+        }
+    }
 }

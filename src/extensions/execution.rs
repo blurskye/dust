@@ -477,11 +477,12 @@ impl PluginHostEventQueue {
         registration
             .observed
             .insert(kind, (revision, payload.clone()));
-        if let Some(existing) = registration
+        if let Some(index) = registration
             .events
-            .iter_mut()
-            .find(|event| event.kind == kind)
+            .iter()
+            .position(|event| event.kind == kind)
         {
+            let mut existing = registration.events.remove(index).expect("queued event");
             existing.id = registration.next_id;
             registration.next_id = registration
                 .next_id
@@ -495,6 +496,7 @@ impl PluginHostEventQueue {
             existing.revision = revision;
             existing.payload = payload;
             existing.coalesced = existing.coalesced.saturating_add(1);
+            registration.events.push_back(existing);
             return Ok(true);
         }
         let capacity = usize::from(maximum).min(MAXIMUM_PLUGIN_EVENT_QUEUE);

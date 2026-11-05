@@ -13,7 +13,7 @@ use crate::{
             byte_range_for_display_columns, display_column_at,
         },
     },
-    ui::{CellGrid, Style, geometry::text_width},
+    ui::{CellGrid, Style, geometry::{cell_text_width, text_width}},
 };
 
 use super::{
@@ -1374,7 +1374,7 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
         let virtual_cells = hints
             .into_iter()
             .take(32)
-            .map(|hint| text_width(&hint.label, config.editor.ambiguous_width))
+            .map(|hint| cell_text_width(&hint.label, config.editor.ambiguous_width))
             .fold(0usize, usize::saturating_add);
         let visible_column = column
             .checked_sub(snapped_scroll)?

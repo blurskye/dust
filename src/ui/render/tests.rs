@@ -1,7 +1,7 @@
 use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
+use crate::ui::render::overlays::{BUFFER_OVERFLOW_LEFT, BUFFER_OVERFLOW_RIGHT, BUFFER_SEPARATOR};
 use crate::ui::window::{PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::editor::EditorState;
 
@@ -6047,4 +6047,447 @@ fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
         frame.grid.row_text(4).trim_end(),
         "│ c         │           │"
     );
+}
+
+#[test]
+fn documentation_popup_clamps_scroll_after_widening() {
+    let config = crate::config::load_bundled_config().config;
+    let mut popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover,
+        title: "Hover".into(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}THE-END", "x".repeat(300))],
+        }],
+        scroll: 0,
+    };
+    let mut frame = super::Frame { grid: crate::ui::CellGrid::new(16, 24), cursor: None };
+    let (visible, total) = super::overlays::render_documentation_popup(
+        &mut frame, &popup, &config, crate::ui::window::WindowRect { x: 0, y: 0, width: 16, height: 24 }, None,
+    ).unwrap();
+    popup.scroll = total - visible;
+    assert!(popup.scroll > 0);
+    let mut frame = super::Frame { grid: crate::ui::CellGrid::new(80, 24), cursor: None };
+    super::overlays::render_documentation_popup(&mut frame, &popup, &config, crate::ui::window::WindowRect { x: 0, y: 0, width: 80, height: 24 }, None);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
+}
+
+#[test]
+fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside() {
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover,
+        title: String::new(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}END", "\t\u{200b}".repeat(12))],
+        }],
+        scroll: 0,
+    };
+    let mut frame = super::Frame {
+        grid: crate::ui::CellGrid::new_with_policy(30, 24, "�", "◌", true),
+        cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    let (_, total) = super::overlays::render_documentation_popup(
+        &mut frame, &popup, &config, crate::ui::window::WindowRect { x: 0, y: 0, width: 16, height: 24 }, None,
+    ).unwrap();
+    assert!(total > 1);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("END")));
+    assert_eq!(frame.grid.get(15, 1).unwrap().symbol, "+");
+    assert_eq!(frame.grid.get(15, 2).unwrap().symbol, "|");
+    assert_eq!(frame.grid.get(5, 1).unwrap().symbol, "-");
+    for y in 0..24 {
+        assert_eq!(frame.grid.get(16, y).unwrap().symbol, " ");
+    }
+}
+
+#[test]
+fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
+    let config = crate::config::load_bundled_config().config;
+    let entries = ["a{dirty}.rs".to_owned(), format!("a{}.rs", "\u{200b}".repeat(10)), "last.rs".into()]
+        .into_iter().enumerate().map(|(index, title)| super::ContentTabEntry {
+            identity: super::ContentTabIdentity(crate::ui::window::ContentId(index as u64)),
+            kind: super::ContentTabKind::Text,
+            title,
+            active: index == 0,
+            dirty: false,
+            pinned: false,
+            diagnostic: None,
+            icon: "R".into(),
+            closeable: false,
+        }).collect::<Vec<_>>();
+    let mut grid = crate::ui::CellGrid::new(120, 1);
+    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).contains("a{dirty}.rs"));
+    let separators = (0..120).filter(|x| grid.get(*x, 0).unwrap().symbol == BUFFER_SEPARATOR).collect::<Vec<_>>();
+    let mut start = 0;
+    for (entry, separator) in entries.iter().zip(separators) {
+        assert_eq!(usize::from(separator + 1 - start), super::content_tab_width(entry, &config));
+        for column in start..=separator {
+            assert_eq!(super::content_tab_at_column(&entries, &config, 120, column), Some(entry.identity));
+        }
+        start = separator + 1;
+    }
+    // The last two cells are painted over the clipped first tab by the overflow marker.
+    let mut grid = crate::ui::CellGrid::new(12, 1);
+    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).ends_with(BUFFER_OVERFLOW_RIGHT));
+    for column in 10..12 {
+        assert_eq!(super::content_tab_at_column(&entries, &config, 12, column), None);
+    }
+}
+
+#[test]
+fn content_tabs_follow_the_last_of_many_entries() {
+    let config = crate::config::load_bundled_config().config;
+    let entries = (0..1000).map(|index| super::ContentTabEntry {
+        identity: super::ContentTabIdentity(crate::ui::window::ContentId(index)),
+        kind: super::ContentTabKind::Text,
+        title: format!("file-{index}.rs"),
+        active: index == 999,
+        dirty: false,
+        pinned: false,
+        diagnostic: None,
+        icon: "R".into(),
+        closeable: false,
+    }).collect::<Vec<_>>();
+    let mut grid = crate::ui::CellGrid::new(40, 1);
+    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).contains("file-999.rs"));
+    let column = (0..40).rev().find(|x| grid.get(*x, 0).unwrap().symbol == "9").unwrap();
+    assert_eq!(super::content_tab_at_column(&entries, &config, 40, column), Some(entries[999].identity));
+}
+
+#[test]
+fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("fn main() {}"),
+        Some(PathBuf::from("/workspace/main.rs")),
+    ).unwrap();
+    let mut ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        explorer: Some(super::ExplorerUiState {
+            title: "Explorer".into(),
+            rows: Vec::new(),
+            scroll: 0,
+            loading: false,
+            total: 0,
+            matches: 0,
+            query: String::new(),
+            searching: false,
+        }),
+        lsp_progress: vec![
+            super::UiLspProgress {
+                server_key: "root:1:rust-analyzer".into(),
+                token: "roots".into(),
+                server: "rust-analyzer".into(),
+                title: "Roots Scanned".into(),
+                message: String::new(),
+                percentage: None,
+                done: true,
+                completed_at: Some(std::time::Instant::now()),
+            },
+            super::UiLspProgress {
+                server_key: "root:1:rust-analyzer".into(),
+                token: "cargo-check".into(),
+                server: "rust-analyzer".into(),
+                title: "Building".into(),
+                message: "ring (lib)".into(),
+                percentage: Some(72),
+                done: false,
+                completed_at: None,
+            },
+        ],
+        lsp_progress_frame: 8,
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let row = (0..10)
+        .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
+        .unwrap_or_else(|| {
+            panic!(
+                "progress row: {:?}",
+                (0..10)
+                    .map(|row| frame.grid.row_text(row))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert!(!frame.grid.row_text(row).contains("root:1"));
+    assert!((panel.saturating_add(1)..79).any(|x| {
+        frame
+            .grid
+            .get(x, row)
+            .is_some_and(|cell| cell.symbol == "⠇" && cell.style == crate::ui::Style::Accent)
+    }));
+    assert_eq!(frame.grid.get(78, row).unwrap().symbol, "r");
+    for x in 66..79 {
+        assert_eq!(frame.grid.get(x, row).unwrap().style, crate::ui::Style::Accent);
+    }
+    assert_eq!(frame.grid.get(79, row).unwrap().symbol, " ");
+    let completed_row = (0..10)
+        .find(|row| frame.grid.row_text(*row).contains("Roots Scanned"))
+        .expect("completed progress row");
+    assert!((panel.saturating_add(1)..79).any(|x| {
+        frame
+            .grid
+            .get(x, completed_row)
+            .is_some_and(|cell| cell.symbol == "✓")
+    }));
+
+    ui.lsp_progress_frame = 4;
+    let next = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    assert!(
+        (panel.saturating_add(1)..79)
+            .any(|x| next.grid.get(x, row).is_some_and(|cell| cell.symbol == "⠼"))
+    );
+}
+
+#[test]
+fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap() {
+    let config = crate::config::load_bundled_config().config;
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Completion,
+        title: "Completion".into(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}THE-END", "x".repeat(400))],
+        }],
+        scroll: usize::MAX,
+    };
+    let mut frame = super::Frame {
+        grid: crate::ui::CellGrid::new(80, 24),
+        cursor: Some((21, 20, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    let (visible, total) = super::overlays::render_documentation_popup(
+        &mut frame, &popup, &config, crate::ui::window::WindowRect { x: 0, y: 0, width: 80, height: 24 },
+        Some(crate::ui::window::WindowRect { x: 20, y: 4, width: 53, height: 16 }),
+    ).unwrap();
+    let expected = super::overlays::wrap_ranges(&popup.sections[0].lines[0], 16, config.editor.ambiguous_width).len();
+    assert_eq!(total, expected);
+    assert!(visible <= 14);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
+    assert!(!(0..80).any(|x| frame.grid.get(x, 20).unwrap().style == crate::ui::Style::DocumentationBackground));
+
+    let mut frame = super::Frame {
+        grid: crate::ui::CellGrid::new(80, 3),
+        cursor: Some((21, 2, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    assert!(super::overlays::render_documentation_popup(
+        &mut frame, &popup, &config, crate::ui::window::WindowRect { x: 0, y: 0, width: 80, height: 3 },
+        Some(crate::ui::window::WindowRect { x: 20, y: 0, width: 53, height: 2 }),
+    ).is_none());
+    assert!((0..3).all(|y| frame.grid.row_text(y).trim().is_empty()));
+}
+
+#[test]
+fn dashboard_labels_leave_a_gap_before_shortcut_keys() {
+    let loaded = crate::config::load_bundled_config();
+    let mut dashboard = loaded.dashboard;
+    dashboard.minimum_width = 1;
+    dashboard.minimum_height = 1;
+    let actions = vec![super::DashboardAction {
+        command: "recovery.open".into(),
+        icon: String::new(),
+        label: "Recover Unsaved Work".into(),
+        key: Some("R".into()),
+    }];
+    let frame = super::overlays::render_dashboard(Path::new("/tmp"), &actions, 0, &dashboard, &loaded.config, 20, 24);
+    let (x, y, _) = frame.cursor.unwrap();
+    assert!(frame.grid.row_text(y).contains("Recover Unsave R"));
+    assert_eq!(frame.grid.get(x + 14, y).unwrap().symbol, " ");
+}
+
+#[test]
+fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text("x"), None).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.ui.status_line.enabled = false;
+    let mut ui = ui_with_editor_layout(&state);
+    for preview in [false, true] {
+        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+            config.editor.ambiguous_width = ambiguous;
+            let hint = super::UiInlayHint {
+                buffer,
+                revision: state.buffers[buffer].text.revision(),
+                position: ByteOffset(0),
+                label: "a\u{200b}\tb".into(),
+            };
+            ui.lsp_inlay_hints.clear();
+            ui.substitute_preview.clear();
+            if preview {
+                ui.substitute_preview.push(hint);
+            } else {
+                ui.lsp_inlay_hints.push(hint);
+            }
+            for wrap in [false, true] {
+                config.editor.wrap = wrap;
+                let mut expected = crate::ui::CellGrid::new_with_policy(
+                    32, 1, super::CONTROL_CHARACTER_REPLACEMENT, super::ZERO_WIDTH_REPLACEMENT,
+                    ambiguous == crate::config::AmbiguousWidth::Wide,
+                );
+                let end = expected.put_text(0, 0, "a\u{200b}\tb", crate::ui::Style::Muted);
+                expected.put_text(end, 0, "x", crate::ui::Style::Default);
+                let frame = super::editor::render_editor_view(&state, view, &ui, &config, 32, 1);
+                assert_eq!(frame.grid.row_text(0), expected.row_text(0));
+                assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((end, 0)));
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_inlays_reserve_only_the_following_tabs_actual_source_width() {
+    use crate::editor::text::{ByteOffset, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let (buffer, view) = state.open_text(TextBuffer::from_text("aaa\tz"), None).unwrap();
+    state.views[view].cursor = ByteOffset(3);
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.tab_width = 4;
+    config.editor.wrap = true;
+    config.ui.status_line.enabled = false;
+    let mut ui = ui_with_editor_layout(&state);
+    ui.lsp_inlay_hints.push(super::UiInlayHint {
+        buffer,
+        revision: state.buffers[buffer].text.revision(),
+        position: ByteOffset(3),
+        label: "123456".into(),
+    });
+    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 8, 2);
+    assert_eq!(frame.grid.row_text(0).trim_end(), "aaa");
+    assert_eq!(frame.grid.row_text(1), "123456 z");
+    assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((6, 1)));
+}
+
+#[test]
+fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    let mut state = EditorState::new("/tmp".into());
+    let path = PathBuf::from("/tmp/file");
+    let (buffer, view) = state.open_text(TextBuffer::from_text("a\nb\nc\nd"), Some(path.clone())).unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.ui.status_line.enabled = false;
+    let mut ui = ui_with_editor_layout(&state);
+    ui.diagnostics = vec![super::UiDiagnostic {
+        path: path.clone(),
+        range: ByteRange::empty(ByteOffset(0)),
+        severity: crate::workspace::DiagnosticSeverity::Error,
+        source: String::new(),
+        code: None,
+        message: "bad".into(),
+    }];
+    ui.expanded_diagnostic = Some(super::ExpandedDiagnosticState {
+        path,
+        line: 0,
+        severities: vec![crate::workspace::DiagnosticSeverity::Error],
+    });
+    let model = super::VisualRowModel::new_for_state(
+        &state,
+        &state.buffers[buffer].text,
+        view,
+        &ui,
+        &config,
+        80,
+        false,
+    );
+    let first = super::VisualRowAnchor::default();
+    assert_eq!(model.painted_row(first, 1).unwrap().line, 0);
+    assert_eq!(model.painted_row(first, 3).unwrap().line, 1);
+    let second = super::VisualRowAnchor { line: 1, wrap_row: 0 };
+    assert_eq!(model.forward(first, 1), first);
+    assert_eq!(model.forward(first, 3), second);
+    assert_eq!(model.backward(second, 1), second);
+    assert_eq!(model.backward(second, 3), first);
+    assert_eq!(
+        model.screen_row(
+            first,
+            super::VisualRowAnchor {
+                line: 1,
+                wrap_row: 0
+            },
+            10
+        ),
+        Some(3)
+    );
+    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 80, 6);
+    assert!(frame.grid.row_text(3).contains('b'));
+}
+
+#[test]
+fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_without_wrap_slot5() {
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::language::syntax::MarkdownMark;
+    let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let (buffer, view) = state.open_text(crate::editor::text::TextBuffer::from_text(text), None).unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
+    let revision = state.buffers[buffer].text.revision();
+    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+        buffer,
+        revision,
+        range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
+        mark,
+    };
+    let mut ui = ui_with_editor_layout(&state);
+    ui.markdown_marks = text
+        .match_indices('|')
+        .map(|(at, _)| mark(at, at + 1, MarkdownMark::TablePipe))
+        .collect();
+    let table_end = text.find("\n\nlast").expect("table end") + 1;
+    ui.markdown_marks
+        .push(mark(1, table_end, MarkdownMark::Table));
+    ui.markdown_marks.sort_by_key(|mark| mark.range.start);
+    // Neovim draws tables to fit the window even when lines don't wrap.
+    for wrap in [true, false] {
+        config.editor.wrap = wrap;
+        let model = super::VisualRowModel::new_for_state(
+            &state, &state.buffers[buffer].text, view, &ui, &config, 20, wrap,
+        );
+        for (wrap_row, word) in [(0, "long"), (1, "here"), (2, "more")] {
+            let relative = model.byte_at_cell(super::VisualRowAnchor { line: 1, wrap_row }, 6);
+            assert_eq!(&text[1 + relative..1 + relative + word.len()], word);
+        }
+        let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
+        let rows = (0..8)
+            .map(|row| frame.grid.row_text(row).trim_end().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                "┌───┬──────────────┐",
+                "│ a │ long text    │",
+                "│   │ here and     │",
+                "│   │ more         │",
+                "├───┼──────────────┤",
+                "│ b │ c            │",
+                "└───┴──────────────┘",
+                "last",
+            ],
+            "wrap {wrap}"
+        );
+    }
 }

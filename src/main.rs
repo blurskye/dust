@@ -98,37 +98,6 @@ struct Cli {
     agent_tools: Option<Option<u64>>,
 }
 
-fn external_tui_fixture() -> ExitCode {
-    if crossterm::terminal::enable_raw_mode().is_err() {
-        return ExitCode::from(2);
-    }
-    let mut out = std::io::stdout();
-    if out.write_all(b"PRIMARY_START\r\n\x1b[?1049hALT_READY\r\n\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[38;5;255;48;2;1;2;3;1;4mX\x1b[0m").and_then(|_|out.flush()).is_err(){return ExitCode::from(2)}
-    let mut input = [0u8; 4096];
-    let mut used = 0;
-    while used < input.len() {
-        match std::io::stdin().read(&mut input[used..]) {
-            Ok(0) | Err(_) => return ExitCode::from(2),
-            Ok(n) => {
-                used += n;
-                let bytes = &input[..used];
-                if bytes.windows(3).any(|w| w == b"\x1bOA")
-                    && bytes.windows(19).any(|w| w == b"\x1b[200~fixture\x1b[201~")
-                {
-                    break;
-                }
-            }
-        }
-    }
-    let Ok((columns, rows)) = crossterm::terminal::size() else {
-        return ExitCode::from(2);
-    };
-    if write!(out, "SIZE:{columns}x{rows}\r\n").is_err() {
-        return ExitCode::from(2);
-    }
-    if out.write_all(b"INPUT_OK\r\n\x1b[?1006l\x1b[?1003l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b[?1049lPRIMARY_OK\r\n").and_then(|_|out.flush()).is_err(){ExitCode::from(2)}else{ExitCode::SUCCESS}
-}
-
 fn main() -> ExitCode {
     #[cfg(unix)]
     {
@@ -146,7 +115,7 @@ fn main() -> ExitCode {
             return match dust::debugger::bridge_adapter_socket(&program, &rest) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    eprintln!("dust: {error}");
+                    eprintln!("dust: {}", error.to_string().escape_debug());
                     ExitCode::FAILURE
                 }
             };
@@ -161,21 +130,18 @@ fn main() -> ExitCode {
             };
             let rest: Vec<_> = arguments.collect();
             let error = dust::debugger::exec_in_own_session(&program, &rest);
-            eprintln!("dust: {error}");
+            eprintln!("dust: {}", error.to_string().escape_debug());
             return ExitCode::FAILURE;
         }
         if let Ok(binary) = std::env::current_exe() {
             dust::debugger::use_adapter_session_launcher(binary);
         }
     }
-    if std::env::var("DUST_TEST_EXTERNAL_TUI_FIXTURE").as_deref() == Ok("1") {
-        return external_tui_fixture();
-    }
     install_crash_hook();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("dust: {error}");
+            eprintln!("dust: {}", error.to_string().escape_debug());
             ExitCode::FAILURE
         }
     }
@@ -237,11 +203,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(path) = &cli.migrate_config {
         let path = fs::canonicalize(path)?;
-        let metadata = fs::metadata(&path)?;
-        if metadata.len() > 16 * 1024 * 1024 {
+        if !fs::metadata(&path)?.is_file() {
+            return Err("configuration must be a regular file".into());
+        }
+        let file = fs::File::open(&path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err("configuration must be a regular file".into());
+        }
+        const MAXIMUM: u64 = 16 * 1024 * 1024;
+        if metadata.len() > MAXIMUM {
             return Err("configuration exceeds migration ceiling".into());
         }
-        let source = fs::read_to_string(&path)?;
+        let mut bytes = Vec::new();
+        file.take(MAXIMUM + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAXIMUM {
+            return Err("configuration exceeds migration ceiling".into());
+        }
+        let source = String::from_utf8(bytes)?;
         let (migrated, changed) = dust::config::migrate_config_source(&source)
             .map_err(|error| format!("migration failed: {error}"))?;
         if cli.apply_migration && changed {
@@ -308,13 +287,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn previous_crash_count(path: &Path) -> u64 {
-    let Ok(metadata) = fs::metadata(path) else {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
         return 0;
     };
-    if metadata.len() > 1024 * 1024 {
+    if !metadata.is_file() {
         return 0;
     }
-    let Ok(bytes) = fs::read(path) else { return 0 };
+    let Ok(file) = fs::File::open(path) else { return 0 };
+    let Ok(metadata) = file.metadata() else { return 0 };
+    const MAXIMUM: u64 = 1024 * 1024;
+    if !metadata.is_file() || metadata.len() > MAXIMUM {
+        return 0;
+    }
+    let mut bytes = Vec::new();
+    if file.take(MAXIMUM + 1).read_to_end(&mut bytes).is_err()
+        || bytes.len() as u64 > MAXIMUM
+    {
+        return 0;
+    }
     serde_json::from_slice::<serde_json::Value>(&bytes)
         .ok()
         .and_then(|value| value.get("crash_count").and_then(serde_json::Value::as_u64))
@@ -380,4 +370,37 @@ fn install_crash_hook() {
         }
         previous(info);
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_counts_accept_bounded_regular_reports() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("last-crash.json");
+        assert_eq!(previous_crash_count(&path), 0);
+        fs::write(&path, r#"{"crash_count":3}"#).unwrap();
+        assert_eq!(previous_crash_count(&path), 3);
+        fs::write(&path, "invalid report").unwrap();
+        assert_eq!(previous_crash_count(&path), 1);
+        fs::File::create(&path).unwrap().set_len(1024 * 1024 + 1).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        assert_eq!(previous_crash_count(root.path()), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn crash_counts_reject_special_files_and_symlinks() {
+        use nix::{sys::stat::Mode, unistd::mkfifo};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("last-crash.json");
+        std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        fs::remove_file(&path).unwrap();
+        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        assert_eq!(previous_crash_count(&path), 0);
+        assert_eq!(previous_crash_count(Path::new("/dev/zero")), 0);
+    }
 }

@@ -1892,4 +1892,14 @@ mod tests {
         assert!(!shown.starts_with('\u{301}'));
         assert_eq!(prompt_viewport(&input, 0, 8, &grid), (input.as_str(), 0));
     }
+    #[test]
+    fn ellipsis_width_is_included_in_the_budget() {
+        for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+            for maximum in 0..20 {
+                let shown = ellipsized("abcdefghijklmnopqrst", maximum, ambiguous);
+                assert!(text_width(&shown, ambiguous) <= maximum, "{maximum}: {shown}");
+            }
+        }
+    }
+
 }

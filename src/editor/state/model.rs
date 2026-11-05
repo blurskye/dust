@@ -223,6 +223,9 @@ pub struct View {
     pub block_insert: Vec<ByteOffset>,
     /// The ranges marked in `EditorMode::Multi`, in order. Empty ranges are plain cursors.
     pub multi_marks: Vec<crate::editor::text::ByteRange>,
+    pub multi_whole_word: bool,
+    /// Wanted display columns, in mark order; empty after nonvertical movement.
+    pub multi_preferred_columns: Vec<usize>,
 }
 
 impl View {
@@ -230,6 +233,8 @@ impl View {
         self.replace_history.clear();
         self.block_insert.clear();
         self.multi_marks.clear();
+        self.multi_whole_word = true;
+        self.multi_preferred_columns.clear();
         self.preferred_column = None;
     }
 
@@ -247,6 +252,8 @@ impl View {
             replace_history: Vec::new(),
             block_insert: Vec::new(),
             multi_marks: Vec::new(),
+            multi_whole_word: true,
+            multi_preferred_columns: Vec::new(),
         }
     }
 }
