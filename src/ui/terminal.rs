@@ -469,6 +469,10 @@ fn queue_style(
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
         Style::Warning => &theme.styles.warning,
+        Style::DiagnosticError | Style::DiagnosticWarning | Style::DiagnosticHint => {
+            derived = diagnostic_text_style(style, theme);
+            &derived
+        }
         Style::Border => &theme.styles.border,
         Style::BufferLineBackground => &theme.styles.buffer_line_background,
         Style::BufferLineActive => &theme.styles.buffer_line_active,
@@ -587,6 +591,18 @@ fn queue_colors(
 
 /// The status bar's blocks are mixed from colours every theme already has, so a mode shows in
 /// its own colour without a theme naming each block.
+fn diagnostic_text_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
+    let mut derived = match style {
+        Style::DiagnosticError => theme.styles.error.clone(),
+        Style::DiagnosticWarning => theme.styles.warning.clone(),
+        _ => theme.styles.muted.clone(),
+    };
+    if !derived.attributes.contains(&ThemeAttribute::Underlined) {
+        derived.attributes.push(ThemeAttribute::Underlined);
+    }
+    derived
+}
+
 fn status_bar_style(style: Style, theme: &ThemeConfig) -> ThemeStyle {
     type Colour = (ThemeColor, Option<ThemeColor>, Option<ThemeColor>);
     let text = |style: &ThemeStyle| (style.foreground, style.foreground_256, style.foreground_16);

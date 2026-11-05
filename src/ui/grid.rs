@@ -28,6 +28,11 @@ pub enum Style {
     Search,
     Error,
     Warning,
+    /// Text a diagnostic covers: its severity's colour, underlined as Neovim marks it, so a
+    /// link inside keeps its underline.
+    DiagnosticError,
+    DiagnosticWarning,
+    DiagnosticHint,
     Border,
     BufferLineBackground,
     BufferLineActive,

@@ -50,6 +50,15 @@ pub(crate) const OPERATOR_PENDING_CURSOR: CursorShape = CursorShape::Block;
 pub(crate) const COMMAND_CURSOR: CursorShape = CursorShape::Bar;
 pub(crate) const PROMPT_CURSOR: CursorShape = CursorShape::Bar;
 
+fn diagnostic_text_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
+    match severity {
+        crate::workspace::DiagnosticSeverity::Error => Style::DiagnosticError,
+        crate::workspace::DiagnosticSeverity::Warning => Style::DiagnosticWarning,
+        crate::workspace::DiagnosticSeverity::Information
+        | crate::workspace::DiagnosticSeverity::Hint => Style::DiagnosticHint,
+    }
+}
+
 fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
     match severity {
         crate::workspace::DiagnosticSeverity::Error => Style::Error,
@@ -790,7 +799,7 @@ pub(super) fn render_editor_view(
                         diagnostic.range.contains(global)
                             || (diagnostic.range.is_empty() && diagnostic.range.start == global)
                     })
-                    .map(|diagnostic| diagnostic_style(diagnostic.severity))
+                    .map(|diagnostic| diagnostic_text_style(diagnostic.severity))
                     .next()
             }) {
                 style

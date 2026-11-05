@@ -3438,9 +3438,15 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
         40,
     );
     assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Default);
-    assert_eq!(frame.grid.get(gutter + 1, 0).unwrap().style, Style::Error);
+    assert_eq!(
+        frame.grid.get(gutter + 1, 0).unwrap().style,
+        Style::DiagnosticError
+    );
     for row in [1, 2] {
-        assert_eq!(frame.grid.get(gutter, row).unwrap().style, Style::Error);
+        assert_eq!(
+            frame.grid.get(gutter, row).unwrap().style,
+            Style::DiagnosticError
+        );
         assert!(!frame.grid.row_text(row).contains("problem"));
     }
     assert_eq!(frame.grid.get(gutter, 3).unwrap().style, Style::Default);
@@ -3449,7 +3455,10 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     state.views[view].cursor = ByteOffset(8);
     state.views[view].scroll_line = 1;
     let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
-    assert_eq!(frame.grid.get(gutter, 0).unwrap().style, Style::Error);
+    assert_eq!(
+        frame.grid.get(gutter, 0).unwrap().style,
+        Style::DiagnosticError
+    );
     assert!(!frame.grid.row_text(0).contains("problem"));
 }
 
@@ -3483,7 +3492,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
         let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
         assert_eq!(
             frame.grid.get(2, 2).unwrap().style,
-            Style::Error,
+            Style::DiagnosticError,
             "end {end}"
         );
         assert_eq!(
@@ -3514,7 +3523,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     };
     let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
     assert!(frame.grid.row_text(1).starts_with("last"));
-    assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::Error);
+    assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::DiagnosticError);
 }
 
 #[test]
@@ -3567,7 +3576,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     );
     assert_eq!(
         frame.grid.get(gutter, 0).expect("diagnostic text").style,
-        crate::ui::Style::Error
+        crate::ui::Style::DiagnosticError
     );
     assert!(frame.grid.row_text(0).contains("●● problem [E0001]"));
     assert!((0..10).any(|row| frame.grid.row_text(row).contains("better")));
