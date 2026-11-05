@@ -457,10 +457,18 @@ pub(super) fn install_path_rustup_component(
         command.process_group(0);
     }
     // A toolchain installed with only some components lacks the compiler libraries
-    // rust-analyzer loads and the cargo it runs to read the workspace. Adding components
-    // that are already there does nothing.
+    // rust-analyzer loads, the standard library build scripts compile against, and the
+    // cargo it runs to read the workspace. Adding components already there does nothing.
     let mut child = command
-        .args(["component", "add", component, "rust-src", "rustc", "cargo"])
+        .args([
+            "component",
+            "add",
+            component,
+            "rust-src",
+            "rustc",
+            "rust-std",
+            "cargo",
+        ])
         .current_dir(&cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

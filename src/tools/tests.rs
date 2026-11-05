@@ -1207,7 +1207,7 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
     assert_eq!(result.result.expect("rustup install"), Some(proxy));
     assert_eq!(
         std::fs::read_to_string(directory.path().join(".rustup-args")).expect("rustup arguments"),
-        "component\nadd\nrust-analyzer\nrust-src\nrustc\ncargo\n"
+        "component\nadd\nrust-analyzer\nrust-src\nrustc\nrust-std\ncargo\n"
     );
 }
 
@@ -1282,7 +1282,7 @@ fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_ru
     .unwrap_err();
     assert_eq!(
         fs::read_to_string(directory.path().join("added")).unwrap(),
-        "component add rust-analyzer rust-src rustc cargo\n"
+        "component add rust-analyzer rust-src rustc rust-std cargo\n"
     );
     assert!(error.contains("does not run"), "{error}");
     assert!(error.contains("cannot open shared object file"), "{error}");
