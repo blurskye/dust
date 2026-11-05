@@ -4330,6 +4330,10 @@ impl InteractiveApplication {
     }
 
     pub(super) fn replay_macro(&mut self, requested: char, count: u64) -> bool {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::MacroReplay(requested, count));
+            return true;
+        }
         let Ok(register) = self.input.macro_register(requested) else {
             self.show_error(self.message("no_previous_macro", &[]));
             return false;
@@ -4360,7 +4364,7 @@ impl InteractiveApplication {
     }
 
     pub(super) fn continue_macro_replay(&mut self) -> bool {
-        if self.macro_running || self.clipboard.pending() {
+        if self.macro_running || self.clipboard.waiting() {
             return true;
         }
         self.macro_running = true;
@@ -4392,7 +4396,7 @@ impl InteractiveApplication {
                 self.cancel_macro_replay();
                 break;
             }
-            if self.clipboard.pending() {
+            if self.clipboard.waiting() {
                 break;
             }
         }
@@ -5293,7 +5297,7 @@ impl InteractiveApplication {
                         self.state
                             .buffers
                             .get(*id)
-                            .map(|buffer| (*id, buffer.path.clone()))
+                            .map(|buffer| (*id, buffer.path.clone(), !buffer.dirty))
                     })
                     .collect::<Vec<_>>();
                 let plan = self.window_session.plan_accepted_editor_close(
@@ -5307,8 +5311,8 @@ impl InteractiveApplication {
                         if let Err(error) = self.apply_window_plan(plan) {
                             self.show_error(error);
                         } else {
-                            for (id, path) in closed {
-                                self.retire_closed_buffer(id, path.as_deref());
+                            for (id, path, clean) in closed {
+                                self.retire_closed_buffer(id, path.as_deref(), clean);
                             }
                             self.cancel_pending_mapping();
                             self.input.cancel_pending();
@@ -10748,7 +10752,7 @@ impl InteractiveApplication {
             let mut candidate = self.state.draft();
             candidate.remove_hidden_document(buffer);
             match self.commit_editor_draft(candidate, None, false) {
-                Ok(()) => self.retire_closed_buffer(buffer, closed_path.as_deref()),
+                Ok(()) => self.retire_closed_buffer(buffer, closed_path.as_deref(), true),
                 Err(error) => self.show_error(error),
             }
         }
@@ -14956,7 +14960,8 @@ impl InteractiveApplication {
         }
         self.close_buffer_target(view, buffer);
     }
-    fn retire_closed_buffer(&mut self, buffer_id: crate::editor::BufferId, path: Option<&Path>) {
+    fn retire_closed_buffer(&mut self, buffer_id: crate::editor::BufferId, path: Option<&Path>, clean: bool) {
+        self.recovery.retire_buffer(buffer_id, clean);
         self.documents.retire_buffer(buffer_id, path);
         if let Some(path) = path
             && let Some(id) = self.explorer.retire_buffer_path(path)
@@ -14982,6 +14987,7 @@ impl InteractiveApplication {
         view_id: crate::editor::ViewId,
         buffer_id: crate::editor::BufferId,
     ) {
+        let clean = self.state.buffers.get(buffer_id).is_some_and(|buffer| !buffer.dirty);
         let closed_path = self
             .state
             .buffers
@@ -15007,7 +15013,7 @@ impl InteractiveApplication {
             return;
         }
         if removed {
-            self.retire_closed_buffer(buffer_id, closed_path.as_deref());
+            self.retire_closed_buffer(buffer_id, closed_path.as_deref(), clean);
         }
         self.set_dashboard_visibility(self.state.active_view.is_none());
         if !self.window_session.dashboard_visible() {

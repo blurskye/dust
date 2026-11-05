@@ -3,7 +3,7 @@ use crate::editor::session::ViewToggle;
 
 #[test]
 fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let original = app.configuration.theme().clone();
     let mut saved = original.clone();
     saved.name = "remembered".into();
@@ -96,7 +96,7 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
 #[test]
 fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
     use crate::persistence::{PersistedBreakpoint, PersistedState, PersistedWatch, PersistenceService};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let saved = tempdir().unwrap();
     let path = app.state.workspace_root.join("main.rs");
     let mut state = PersistedState::default();
@@ -396,7 +396,7 @@ fn stale_configuration_generations_are_never_applied() {
 
 #[test]
 fn complete_configuration_reload_is_atomic() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let original_theme = app.configuration.theme().clone();
     let explanation = app
         .configuration
@@ -433,10 +433,10 @@ fn complete_configuration_reload_is_atomic() {
 
 #[test]
 fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
-    let config_source = "editor = { tab_width = 7 }\n";
+    let config_source = "editor = { tab_width = 7, markdown = { glyphs = { bullets = ['*'] } } }\n";
     fs::write(&config_path, config_source).expect("config");
     let mut loaded = crate::config::load_config(&config_path);
 
@@ -465,6 +465,12 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     );
     assert_eq!(setting.contributors[0], "bundled defaults");
     assert_eq!(setting.contributors[1], setting.source);
+    let bullet = resolved.explain("editor.markdown.glyphs.bullets.0").expect("bullet");
+    assert_eq!(bullet.value, "\"*\"");
+    assert!(bullet.source.starts_with(&config_path.display().to_string()));
+    assert_eq!(bullet.contributors, ["bundled defaults", &bullet.source]);
+    let inherited = resolved.explain("editor.indent_width").expect("inherited");
+    assert_eq!(inherited.source, "bundled defaults");
 
     let dashboard = resolved
         .explain("dashboard.identity")
@@ -505,7 +511,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
 
 #[test]
 fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::SystemTime::now(), Instant::now(),
     ));
@@ -543,7 +549,7 @@ fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
 
 #[test]
 fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None).unwrap();
     app.set_dashboard_visibility(false);
@@ -622,7 +628,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
 
 #[test]
 fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let bundled_count = loaded.entries.len();
     loaded.entries.push(crate::config::KeymapEntry {
@@ -681,7 +687,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
 
 #[test]
 fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let mapping = |id: &str, keys: &str| crate::config::KeymapEntry {
         id: id.into(),
@@ -712,7 +718,7 @@ fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
 
 #[test]
 fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let original_policy = app.configuration.settings().input.keymaps.clone();
     let original_binding = app
         .configuration
@@ -739,7 +745,7 @@ fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
 
 #[test]
 fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let target = "builtin.global.files-buffers.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
@@ -803,7 +809,7 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
 
 #[test]
 fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let target = "builtin.global.files-explorer.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
@@ -857,7 +863,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
 
 #[test]
 fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let target = "builtin.global.files-explorer.editor-normal";
     for (id, context, expected) in [
         (
@@ -897,7 +903,7 @@ fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
 
 #[test]
 fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let original = app
         .configuration
         .keymaps()
@@ -938,7 +944,7 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
 
 #[test]
 fn invalid_user_keymap_set_is_rejected_transactionally() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut current = crate::config::load_bundled_config();
     current.keymaps.entries.push(crate::config::KeymapEntry {
         id: "user.test.retained-health".into(),
@@ -1000,7 +1006,7 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
 
 #[test]
 fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let id = "builtin.global.files-explorer.editor-normal";
     app.process_effect(crate::editor::AppEffect::InspectKeymap {
         id: Some(id.into()),
@@ -1021,7 +1027,7 @@ fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
 
 #[test]
 fn keymap_inspection_reports_real_user_path_and_byte_range() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = tempdir().expect("tempdir");
     let path = root.path().join("keymaps.toml");
     fs::write(
@@ -1056,7 +1062,7 @@ fn keymap_inspection_reports_real_user_path_and_byte_range() {
 
 #[test]
 fn duplicate_user_ids_are_rejected_transactionally() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
     let mapping = crate::config::KeymapEntry {
@@ -1088,7 +1094,7 @@ fn duplicate_user_ids_are_rejected_transactionally() {
 
 #[test]
 fn configured_focus_loss_cancels_pending_mapping() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
         id: "user.test.configured-focus-loss-cancels-pending-mapping".into(),
@@ -1117,7 +1123,7 @@ fn configured_focus_loss_cancels_pending_mapping() {
 
 #[test]
 fn prompt_special_keys_are_remappable_from_configuration() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.extend([
         crate::config::KeymapEntry {
@@ -1161,7 +1167,7 @@ fn prompt_special_keys_are_remappable_from_configuration() {
 
 #[test]
 fn confirmation_keys_and_hints_follow_accepted_remaps() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.extend([
         crate::config::KeymapEntry {
@@ -1298,7 +1304,7 @@ fn documented_key_reaches(
 
 #[test]
 fn the_agent_keys_each_reach_their_command() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     for (keys, command) in [
         ("<leader> a a", "agent.ask"),
@@ -1326,7 +1332,7 @@ fn the_agent_keys_each_reach_their_command() {
 /// a key it marks as having no command must not be bound to something else.
 #[test]
 fn the_documented_git_and_debugger_keys_each_reach_their_command() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let cases = [
         ("<leader> g g", "terminal.open"),
@@ -1382,7 +1388,7 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
 
 #[test]
 fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let document = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/experience.md"))
         .expect("the experience document is part of the checkout");
@@ -1432,7 +1438,7 @@ fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_comma
 
 #[test]
 fn the_pi_profile_says_how_to_give_pi_subagents() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let agents = &app.configuration.settings().agents;
     let note = agents.profiles["pi"].note.as_deref().unwrap_or_default();
     assert!(
@@ -1447,7 +1453,7 @@ fn the_pi_profile_says_how_to_give_pi_subagents() {
 
 #[test]
 fn agents_own_subagents_are_off_over_acp_only() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let profiles = &app.configuration.settings().agents.profiles;
     assert_eq!(profiles["codex"].cli, ["codex"]);
     let codex: serde_json::Value = serde_json::from_str(&profiles["codex"].acp_environment["CODEX_CONFIG"]).unwrap();
@@ -1464,7 +1470,7 @@ fn agents_own_subagents_are_off_over_acp_only() {
 
 #[test]
 fn the_agent_panel_opens_over_the_dashboard() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     assert!(app.window_session.dashboard_visible());
     for key in [' ', 'a', 't'] {
         app.handle_configured_key(KeyEvent::character(key));
@@ -1499,7 +1505,7 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
         assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         return;
     }
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut fixture = app.configuration.fixture_snapshot();
     let agents = &mut fixture.settings.agents;
     agents.connection = crate::config::AgentConnection::Acp;
@@ -1546,7 +1552,7 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
 
 #[test]
 fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.path = root.path().join("config.toml");
@@ -1573,7 +1579,7 @@ fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
 fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
     use crate::editor::session::dispatch::commands::SettingsAction;
     use crate::ui::{SettingsEdit, SettingsValue};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.process_effect(AppEffect::Settings(SettingsAction::Open));
     assert_eq!(app.active_input_context(), "settings");
     let page = app.ui.settings.as_ref().expect("settings page");
@@ -1685,7 +1691,7 @@ fn the_settings_page_saves_and_reloads_user_configuration() {
 
 #[test]
 fn undo_persistence_policy_changes_with_configuration() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.persistence.enabled = true;
     loaded.config.persistence.undo_history = true;
@@ -1703,7 +1709,7 @@ fn undo_persistence_policy_changes_with_configuration() {
 
 #[test]
 fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_settings();
     let page = app.ui.settings.as_mut().unwrap();
     page.query = "@modified".into();
@@ -1718,7 +1724,7 @@ fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
 
 #[test]
 fn reload_preserves_zen_exit_and_plugin_command_titles() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.state.open_text(TextBuffer::from_text("a"), None).unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
@@ -1742,7 +1748,7 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
 
 #[test]
 fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
     spec.source = crate::editor::CommandSource::Plugin("demo".into());
     app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
@@ -1763,7 +1769,7 @@ fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
 
 #[test]
 fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
     manifest.commands.get_mut("drive").unwrap().arguments.insert("text".into(), crate::extensions::PluginArgumentDeclaration {
         kind: crate::extensions::PluginArgumentKind::String,
@@ -1809,7 +1815,7 @@ fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
 
 #[test]
 fn disabled_plugin_command_references_are_not_deferred() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.input.command_aliases.insert("Demo".into(), "plugin.demo.run".into());
     loaded.config.command_labels.insert("plugin.demo.run".into(), "Run demo".into());
@@ -1818,7 +1824,7 @@ fn disabled_plugin_command_references_are_not_deferred() {
 
 #[test]
 fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
-    let app = app();
+    let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
     loaded.keymaps.entries.push(crate::config::KeymapEntry {
@@ -1841,7 +1847,7 @@ fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
 
 #[test]
 fn reload_preserves_plugin_window_rules() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let manifest = crate::editor::session::extensions::fixture_manifest("0".repeat(64));
     let index =
         crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();

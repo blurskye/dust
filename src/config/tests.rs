@@ -1209,6 +1209,25 @@ fn highlight_groups_resolve_like_neovim() {
 }
 
 #[test]
+fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
+    use crate::language::syntax::{Highlight, SyntaxLanguage, highlight};
+    let fallback = super::themes::bundled_named("dust").unwrap().theme;
+    let expected = fallback.highlight(Highlight::FUNCTION).unwrap().clone();
+    // Existing syntax spans must honor a theme loaded later without another edit.
+    let spans = highlight(SyntaxLanguage::Rust, "fn custom() {}\n");
+    let mut value = serde_json::to_value(&fallback).unwrap();
+    value["highlights"]["@function.rust"] = serde_json::json!({ "fg": "#123456" });
+    let theme: super::ThemeConfig = serde_json::from_value(value).unwrap();
+    let group = Highlight::named("@function.rust").unwrap();
+    assert!(spans.iter().any(|span| span.role == group));
+    assert_eq!(theme.highlight(group).unwrap().foreground, super::ThemeColor::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(fallback.highlight(group), Some(&expected));
+    // Use a unique group so parallel syntax tests cannot register it before the cache.
+    let late = Highlight::register("@function.late_theme_test").unwrap();
+    assert_eq!(fallback.highlight(late), Some(&expected));
+}
+
+#[test]
 fn a_saved_bundled_theme_restores_from_this_build() {
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     // Saved by an older build, with a style field that no longer exists.

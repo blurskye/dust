@@ -480,7 +480,7 @@ pub fn run_interactive(
 
 impl InteractiveApplication {
     fn process_clipboard(&mut self) -> Option<String> {
-        self.process_clipboard_pastes();
+        self.process_clipboard_paste();
         let generation = self.state.registers.generation();
         let output = if self.clipboard_shared() {
             self.clipboard.push(&mut self.state.value.registers)

@@ -2,7 +2,11 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    },
     thread,
     time::Duration,
 };
@@ -85,7 +89,6 @@ pub(super) enum ExplorerWatchCommand {
         roots: Vec<PathBuf>,
         directories: Vec<PathBuf>,
     },
-    Cancel,
 }
 pub(super) struct ExplorerWatchSet {
     generation: ExplorerWatchGeneration,
@@ -104,15 +107,20 @@ impl ExplorerWatchSet {
         }
         for (directory, fingerprint) in previous.fingerprints {
             if self.directories.contains(&directory) {
+                self.pending.remove(&directory);
                 self.fingerprints.insert(directory, fingerprint);
             }
         }
-        self.pending = previous
+        self.pending.extend(previous
             .pending
             .into_iter()
-            .filter(|directory| self.directories.contains(directory))
-            .collect();
-        self.changed_at = previous.changed_at;
+            .filter(|directory| self.directories.contains(directory)));
+        if let Some(changed_at) = previous.changed_at {
+            self.changed_at = Some(changed_at);
+        }
+        if self.pending.is_empty() {
+            self.changed_at = None;
+        }
     }
 
     fn publish(&mut self, events: &SyncSender<ExplorerWatchEvent>, maximum: usize) {
@@ -198,23 +206,36 @@ pub fn explorer_directory_fingerprint(
     }
     entries.sort();
     let mut ignore_rules = Sha256::new();
-    // A parent's ignore rules also filter every expanded descendant listing.
-    for ancestor in canonical.ancestors() {
-        for name in [".gitignore", ".ignore", ".git/info/exclude"] {
-            let path = ancestor.join(name);
-            match super::vfs::read_file_with_ceiling(&path, 512 * 1024) {
-                Ok(bytes) => {
-                    ignore_rules.update(watch_name_bytes(path.as_os_str()));
-                    ignore_rules.update((bytes.len() as u64).to_le_bytes());
-                    ignore_rules.update(bytes);
-                }
-                Err(super::VfsError::Io { source, .. })
-                    if matches!(
-                        source.kind(),
-                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                    ) => {}
-                Err(_) => return Err(ExplorerWatchError::WorkerUnavailable),
+    // Use the same global ignore source as WalkBuilder's directory listings.
+    let ignore_paths = canonical
+        .ancestors()
+        .flat_map(|ancestor| {
+            [".gitignore", ".ignore", ".git/info/exclude"]
+                .map(|name| ancestor.join(name))
+        })
+        .chain(ignore::gitignore::gitconfig_excludes_path());
+    for path in ignore_paths {
+        // Ignore files may be symlinks; the bounded reader still checks that
+        // the resolved target is a regular file and opens it without following links.
+        let contents = fs::canonicalize(&path)
+            .map_err(|source| super::VfsError::Io {
+                operation: "resolve ignore file",
+                path: path.clone(),
+                source,
+            })
+            .and_then(|target| super::vfs::read_file_with_ceiling(&target, 512 * 1024));
+        match contents {
+            Ok(bytes) => {
+                ignore_rules.update(watch_name_bytes(path.as_os_str()));
+                ignore_rules.update((bytes.len() as u64).to_le_bytes());
+                ignore_rules.update(bytes);
             }
+            Err(super::VfsError::Io { source, .. })
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) => {}
+            Err(_) => return Err(ExplorerWatchError::WorkerUnavailable),
         }
     }
     Ok(ExplorerDirectoryFingerprint {
@@ -270,6 +291,8 @@ pub struct ExplorerWatchService {
     receiver: Option<Receiver<ExplorerWatchEvent>>,
     generation: u64,
     reconcile_count: u64,
+    active: Option<(ExplorerWatchGeneration, u64, Vec<PathBuf>)>,
+    cancelled_through: Arc<AtomicU64>,
 }
 impl ExplorerWatchService {
     pub fn start(policy: ExplorerWatchPolicy) -> Result<Self, ExplorerWatchError> {
@@ -289,14 +312,18 @@ impl ExplorerWatchService {
                 receiver: None,
                 generation: 0,
                 reconcile_count: 0,
+                active: None,
+                cancelled_through: Arc::new(AtomicU64::new(0)),
             });
         }
         let (sender, commands) = mpsc::sync_channel(policy.queue_capacity);
         let (events, receiver) = mpsc::sync_channel(policy.queue_capacity);
         let worker_policy = policy.clone();
+        let cancelled_through = Arc::new(AtomicU64::new(0));
+        let worker_cancelled = Arc::clone(&cancelled_through);
         thread::Builder::new()
             .name("dust-explorer-watch".into())
-            .spawn(move || explorer_watch_worker(worker_policy, commands, events))
+            .spawn(move || explorer_watch_worker(worker_policy, commands, events, worker_cancelled))
             .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
         Ok(Self {
             policy,
@@ -304,6 +331,8 @@ impl ExplorerWatchService {
             receiver: Some(receiver),
             generation: 0,
             reconcile_count: 0,
+            active: None,
+            cancelled_through,
         })
     }
     pub fn reconcile(
@@ -338,17 +367,17 @@ impl ExplorerWatchService {
                 generation,
                 root_revision,
                 roots,
-                directories,
+                directories: directories.clone(),
             })
             .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        self.active = Some((generation, root_revision, directories));
         self.reconcile_count = self.reconcile_count.saturating_add(1);
         Ok(Some(generation))
     }
     pub fn cancel(&mut self) {
         self.generation = self.generation.saturating_add(1);
-        if let Some(sender) = &self.sender {
-            let _ = sender.try_send(ExplorerWatchCommand::Cancel);
-        }
+        self.cancelled_through.store(self.generation, Ordering::Relaxed);
+        self.active = None;
         self.reconcile_count = self.reconcile_count.saturating_add(1);
     }
     pub fn poll(&self) -> Vec<ExplorerWatchEvent> {
@@ -358,6 +387,23 @@ impl ExplorerWatchService {
         };
         while events.len() < self.policy.maximum_events {
             match receiver.try_recv() {
+                Ok(ExplorerWatchEvent::Batch(mut batch)) => {
+                    let Some((generation, root_revision, directories)) = &self.active else {
+                        continue;
+                    };
+                    if batch.root_revision != *root_revision
+                        || batch.generation.0 <= self.cancelled_through.load(Ordering::Relaxed)
+                    {
+                        continue;
+                    }
+                    batch.directories.retain(|path| directories.contains(path));
+                    if !batch.directories.is_empty() {
+                        // Queued changes remain valid for directories retained by
+                        // a newer reconciliation, even after their old set published them.
+                        batch.generation = *generation;
+                        events.push(ExplorerWatchEvent::Batch(batch));
+                    }
+                }
                 Ok(event) => events.push(event),
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
@@ -374,17 +420,37 @@ pub(super) fn explorer_watch_worker(
     policy: ExplorerWatchPolicy,
     commands: Receiver<ExplorerWatchCommand>,
     events: SyncSender<ExplorerWatchEvent>,
+    cancelled_through: Arc<AtomicU64>,
 ) {
     let mut active: Option<ExplorerWatchSet> = None;
+    let mut failure: Option<(ExplorerWatchGeneration, u64)> = None;
     loop {
+        let cancelled = cancelled_through.load(Ordering::Relaxed);
+        if active.as_ref().is_some_and(|set| set.generation.0 <= cancelled) {
+            active = None;
+        }
+        if let Some((generation, root_revision)) = failure {
+            if generation.0 <= cancelled {
+                failure = None;
+            } else {
+                match events.try_send(ExplorerWatchEvent::Failed { generation, root_revision }) {
+                    Ok(()) => failure = None,
+                    Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => return,
+                }
+            }
+        }
         match commands.recv_timeout(policy.poll_interval) {
-            Ok(ExplorerWatchCommand::Cancel) => active = None,
             Ok(ExplorerWatchCommand::Reconcile {
                 generation,
                 root_revision,
                 roots,
                 directories,
             }) => {
+                if generation.0 <= cancelled_through.load(Ordering::Relaxed) {
+                    continue;
+                }
+                failure = None;
                 let fingerprints = directories
                     .iter()
                     .map(|directory| {
@@ -403,10 +469,12 @@ pub(super) fn explorer_watch_worker(
                             generation,
                             root_revision,
                             roots,
+                            // Refresh new watches after their baseline is established:
+                            // the displayed listing may predate this fingerprint.
+                            pending: directories.iter().cloned().collect(),
+                            changed_at: Some(std::time::Instant::now()),
                             directories,
                             fingerprints,
-                            pending: BTreeSet::new(),
-                            changed_at: None,
                         };
                         if let Some(previous) = active.take() {
                             next.retain_previous(previous);
@@ -414,10 +482,7 @@ pub(super) fn explorer_watch_worker(
                         active = Some(next);
                     }
                     Err(_) => {
-                        let _ = events.try_send(ExplorerWatchEvent::Failed {
-                            generation,
-                            root_revision,
-                        });
+                        failure = Some((generation, root_revision));
                         active = None
                     }
                 }
@@ -425,12 +490,13 @@ pub(super) fn explorer_watch_worker(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let Some(set) = active.as_mut() else { continue };
+                if set.generation.0 <= cancelled_through.load(Ordering::Relaxed) {
+                    active = None;
+                    continue;
+                }
                 let current = collect_explorer_fingerprints(&set.directories, &set.roots, &policy);
                 let Ok(current) = current else {
-                    let _ = events.try_send(ExplorerWatchEvent::Failed {
-                        generation: set.generation,
-                        root_revision: set.root_revision,
-                    });
+                    failure = Some((set.generation, set.root_revision));
                     active = None;
                     continue;
                 };
@@ -451,10 +517,7 @@ pub(super) fn explorer_watch_worker(
                         }
                     }
                     Err(_) => {
-                        let _ = events.try_send(ExplorerWatchEvent::Failed {
-                            generation: set.generation,
-                            root_revision: set.root_revision,
-                        });
+                        failure = Some((set.generation, set.root_revision));
                         active = None;
                     }
                 }
@@ -477,6 +540,164 @@ mod tests {
             pending: BTreeSet::new(),
             changed_at: None,
         }
+    }
+
+    fn service_channels() -> (
+        ExplorerWatchService,
+        Receiver<ExplorerWatchCommand>,
+        SyncSender<ExplorerWatchEvent>,
+    ) {
+        let (sender, commands) = mpsc::sync_channel(2);
+        let (events, receiver) = mpsc::sync_channel(2);
+        (
+            ExplorerWatchService {
+                policy: ExplorerWatchPolicy::default(),
+                sender: Some(sender),
+                receiver: Some(receiver),
+                generation: 0,
+                reconcile_count: 0,
+                active: None,
+                cancelled_through: Arc::new(AtomicU64::new(0)),
+            },
+            commands,
+            events,
+        )
+    }
+
+    #[test]
+    fn queued_changes_survive_reconciliation_only_for_retained_directories() {
+        let (mut service, _commands, events) = service_channels();
+        let a = PathBuf::from("a");
+        let b = PathBuf::from("b");
+        let first = service.reconcile(1, vec![], vec![a.clone(), b.clone()]).unwrap().unwrap();
+        events.send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+            generation: first,
+            root_revision: 1,
+            directories: vec![a.clone(), b],
+        })).unwrap();
+        let second = service.reconcile(1, vec![], vec![a.clone()]).unwrap().unwrap();
+        assert_eq!(service.poll(), vec![ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+            generation: second,
+            root_revision: 1,
+            directories: vec![a],
+        })]);
+    }
+
+    #[test]
+    fn cancellation_is_observable_even_with_a_full_command_queue() {
+        let (mut service, commands, events) = service_channels();
+        // Both queued sets are invalid, so either being processed would fail.
+        for _ in 0..2 {
+            service.reconcile(1, vec![], vec![PathBuf::from("missing")]).unwrap();
+        }
+        service.cancel();
+        let cancelled = Arc::clone(&service.cancelled_through);
+        assert_eq!(cancelled.load(Ordering::Relaxed), 3);
+        let worker = thread::spawn(move || explorer_watch_worker(
+            ExplorerWatchPolicy { poll_interval: Duration::from_millis(10), ..ExplorerWatchPolicy::default() },
+            commands,
+            events,
+            cancelled,
+        ));
+        // A later invalid set still reports failure; neither cancelled set may do so.
+        service.sender.as_ref().unwrap().send(ExplorerWatchCommand::Reconcile {
+            generation: ExplorerWatchGeneration(4),
+            root_revision: 1,
+            roots: vec![],
+            directories: vec![PathBuf::from("missing")],
+        }).unwrap();
+        assert_eq!(service.receiver.as_ref().unwrap().recv_timeout(Duration::from_secs(2)).unwrap(),
+            ExplorerWatchEvent::Failed { generation: ExplorerWatchGeneration(4), root_revision: 1 });
+        drop(service);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn watch_failures_are_retried_when_the_event_queue_is_full() {
+        let (sender, commands) = mpsc::sync_channel(1);
+        let (events, receiver) = mpsc::sync_channel(1);
+        let stale = ExplorerWatchEvent::Failed { generation: ExplorerWatchGeneration(1), root_revision: 1 };
+        events.send(stale.clone()).unwrap();
+        let worker = thread::spawn(move || explorer_watch_worker(
+            ExplorerWatchPolicy { poll_interval: Duration::from_millis(10), ..ExplorerWatchPolicy::default() },
+            commands,
+            events,
+            Arc::new(AtomicU64::new(0)),
+        ));
+        sender.send(ExplorerWatchCommand::Reconcile {
+            generation: ExplorerWatchGeneration(2),
+            root_revision: 1,
+            roots: vec![],
+            directories: vec![PathBuf::from("missing")],
+        }).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(receiver.recv().unwrap(), stale);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+            ExplorerWatchEvent::Failed { generation: ExplorerWatchGeneration(2), root_revision: 1 });
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn global_ignore_changes_invalidate_fingerprints() {
+        const CHILD_ROOT: &str = "DUST_TEST_GLOBAL_IGNORE_ROOT";
+        let Some(root) = std::env::var_os(CHILD_ROOT) else {
+            let root = tempfile::tempdir().unwrap();
+            let excludes = root.path().join("excludes");
+            let config = root.path().join("gitconfig");
+            fs::write(&config, format!("[core]\nexcludesFile = {:?}\n", excludes)).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "files::watch::tests::global_ignore_changes_invalidate_fingerprints", "--nocapture"])
+                .env(CHILD_ROOT, root.path())
+                .env("HOME", root.path())
+                .env("XDG_CONFIG_HOME", root.path())
+                .env("GIT_CONFIG_GLOBAL", config)
+                .env("GIT_CONFIG_SYSTEM", root.path().join("no-system-config"))
+                .status().unwrap();
+            assert!(status.success());
+            return;
+        };
+        let root = PathBuf::from(root);
+        let directory = root.join("workspace");
+        fs::create_dir(&directory).unwrap();
+        let excludes = root.join("excludes");
+        assert_eq!(ignore::gitignore::gitconfig_excludes_path(), Some(excludes.clone()));
+        let roots = vec![fs::canonicalize(&directory).unwrap()];
+        fs::write(&excludes, "one.txt\n").unwrap();
+        let before = explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap();
+        fs::write(&excludes, "two.txt\n").unwrap();
+        let after = explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap();
+        assert_eq!(before.entries, after.entries);
+        assert_ne!(before.ignore_rules, after.ignore_rules);
+        // Changing the configured source is observed even with no directory changes.
+        let replacement = root.join("replacement");
+        fs::write(&replacement, "three.txt\n").unwrap();
+        fs::write(root.join("gitconfig"), format!("[core]\nexcludesFile = {:?}\n", replacement)).unwrap();
+        assert_ne!(after.ignore_rules, explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap().ignore_rules);
+    }
+
+    #[test]
+    fn newly_watched_directories_are_invalidated_after_the_initial_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = fs::canonicalize(root.path()).unwrap();
+        // The displayed listing was empty; the file appears before watching starts.
+        fs::write(root.path().join("new"), "new").unwrap();
+        let mut service = ExplorerWatchService::start(ExplorerWatchPolicy {
+            poll_interval: Duration::from_millis(10),
+            debounce: Duration::ZERO,
+            ..ExplorerWatchPolicy::default()
+        }).unwrap();
+        let generation = service.reconcile(1, vec![root_path.clone()], vec![root_path.clone()]).unwrap().unwrap();
+        assert_eq!(service.receiver.as_ref().unwrap().recv_timeout(Duration::from_secs(2)).unwrap(),
+            ExplorerWatchEvent::Batch(ExplorerWatchBatch {
+                generation,
+                root_revision: 1,
+                directories: vec![root_path.clone()],
+            }));
+        // Retaining an unchanged watch must not trigger another initial refresh.
+        service.reconcile(1, vec![root_path.clone()], vec![root_path]).unwrap();
+        assert!(matches!(service.receiver.as_ref().unwrap().recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)));
     }
 
     #[test]

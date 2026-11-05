@@ -715,7 +715,9 @@ pub(super) fn execute_builtin<E>(
                     whole_range,
                     operator == "indent",
                     // In Visual mode the count is how many levels; otherwise it counts lines.
-                    if string_argument(invocation, "motion").ok() == Some("visual") {
+                    if invocation.id.as_str() == "edit.repeat_visual"
+                        || string_argument(invocation, "motion").ok() == Some("visual")
+                    {
                         count
                     } else {
                         1

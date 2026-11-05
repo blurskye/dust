@@ -101,7 +101,10 @@ impl<'a> PositionCodec<'a> {
         character: usize,
         encoding: PositionEncoding,
     ) -> Result<ByteOffset, PositionError> {
-        // The protocol says a position past the end of a line means the end of that line.
+        // Protocol positions past the document or line end are clamped to that end.
+        if line >= self.buffer.len_lines() {
+            return Ok(ByteOffset(self.buffer.len_bytes()));
+        }
         let text = self.buffer.line(line)?;
         let content = text.strip_suffix('\n').unwrap_or(&text);
         let mut units = 0_usize;
@@ -147,6 +150,28 @@ mod tests {
             let offset = ByteOffset(offset);
             let point = codec.byte_to_point(offset).expect("boundary");
             assert_eq!(codec.point_to_byte(point).expect("round trip"), offset);
+        }
+    }
+
+    #[test]
+    fn lsp_positions_past_the_last_line_clamp_to_document_end() {
+        for text in ["", "a😀é", "a😀é\n", "first\nlast"] {
+            let buffer = TextBuffer::from_text(text);
+            let codec = PositionCodec::new(&buffer);
+            for encoding in [
+                PositionEncoding::Utf8,
+                PositionEncoding::Utf16,
+                PositionEncoding::Utf32,
+            ] {
+                for line in [buffer.len_lines(), 999, usize::MAX] {
+                    for character in [0, 1, usize::MAX] {
+                        assert_eq!(
+                            codec.lsp_to_byte(line, character, encoding).unwrap(),
+                            ByteOffset(text.len()),
+                        );
+                    }
+                }
+            }
         }
     }
 

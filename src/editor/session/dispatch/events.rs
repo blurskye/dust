@@ -561,6 +561,10 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_event(&mut self, event: UiEvent) {
+        if self.clipboard.waiting() && !matches!(event, UiEvent::Resize(_, _)) {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Event(event));
+            return;
+        }
         if matches!(event, UiEvent::Key { .. }) {
             self.last_key_at = Some(Instant::now());
         }
@@ -840,7 +844,7 @@ impl InteractiveApplication {
                     };
                     match self.terminal_session.send(
                         id,
-                        TerminalInput::Mouse(event, column, row, rect),
+                        TerminalInput::Mouse(event, key.modifiers, column, row, rect),
                         &self.workspace,
                     ) {
                         Ok(true) => return,
@@ -987,6 +991,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Event(UiEvent::Key {
+                key,
+                kind: KeyInputKind::Press,
+            }));
+            return;
+        }
         let context = self.active_input_context();
         self.handle_key_in_context(&context, key);
     }
@@ -1184,6 +1195,9 @@ impl InteractiveApplication {
         self.project_input_hints();
     }
     pub(super) fn flush_keymap_timeout(&mut self) {
+        if self.clipboard.waiting() {
+            return;
+        }
         let context = self.active_input_context();
         let resolution = self.input.flush_timeout(
             &context,
@@ -1337,28 +1351,47 @@ impl InteractiveApplication {
             == crate::config::ClipboardSync::Unnamedplus
     }
 
-    pub(super) fn process_clipboard_pastes(&mut self) {
-        let before = self.state.window_version();
-        let pending = self.clipboard.pending();
-        let registers_enabled = self.state.policy.registers_enabled;
+    pub(super) fn process_clipboard_paste(&mut self) {
+        let source = self.state.window_version();
+        let enabled = self.state.policy.registers_enabled;
+        let was_waiting = self.clipboard.waiting();
         let generation = self.state.registers.generation();
         let paste = self.clipboard.finish_pull(
-            &mut self.state.value.registers, registers_enabled, &before,
+            &mut self.state.value.registers,
+            enabled,
+            &source,
         );
         if self.state.registers.generation() != generation {
             self.state.revision = self.state.revision.wrapping_add(1);
         }
-        if let Some(invocation) = paste {
-            let succeeded = self.invoke_checked(invocation);
-            self.clipboard.continue_pastes(&before, &self.state.window_version());
-            if succeeded {
-                self.continue_macro_replay();
-            } else {
-                self.cancel_macro_replay();
+        let cancelled = match paste {
+            Ok(Some(invocation)) => {
+                let succeeded = self.invoke_checked(invocation);
+                if succeeded {
+                    self.continue_macro_replay();
+                }
+                !succeeded
             }
-        } else if pending && !self.clipboard.pending() {
-            // The read was discarded because its original view changed.
+            Ok(None) => was_waiting && !self.clipboard.waiting(),
+            Err(error) => {
+                self.show_error(error);
+                true
+            }
+        };
+        if cancelled {
             self.cancel_macro_replay();
+        }
+        while let Some(input) = self.clipboard.next_input() {
+            // Commands expanded by this input must finish before later queued input.
+            let later = self.clipboard.take_deferred();
+            match input {
+                super::super::clipboard::DeferredInput::Event(event) => self.handle_event(event),
+                super::super::clipboard::DeferredInput::Invocation(invocation) => self.invoke(invocation),
+                super::super::clipboard::DeferredInput::MacroReplay(register, count) => {
+                    self.replay_macro(register, count);
+                }
+            }
+            self.clipboard.append_deferred(later);
         }
     }
 
@@ -1366,6 +1399,10 @@ impl InteractiveApplication {
         self.invoke_checked(invocation);
     }
     pub(super) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
+        if self.clipboard.waiting() {
+            self.clipboard.defer(super::super::clipboard::DeferredInput::Invocation(invocation));
+            return true;
+        }
         if !invocation.id.as_str().starts_with("lsp.documentation.") {
             self.close_documentation();
         }
@@ -1377,10 +1414,16 @@ impl InteractiveApplication {
         }
         if invocation.id.as_str() == "edit.put"
             && matches!(invocation.register, None | Some('"' | '+' | '*'))
-            && self.clipboard_shared()
-            && self
-                .clipboard
-                .pull(&invocation, self.state.window_version())
+            && (self.clipboard_shared() || matches!(invocation.register, Some('+' | '*')))
+            && {
+                let shared = self.clipboard_shared();
+                self.clipboard.pull(
+                    &invocation,
+                    self.state.window_version(),
+                    &mut self.state.value.registers,
+                    shared,
+                )
+            }
         {
             return true;
         }
@@ -1501,19 +1544,20 @@ impl InteractiveApplication {
                 }
 
                 self.keep_cursor_off_final_newline();
-                if invocation.target.buffer.and_then(|buffer| {
+                let text_changed = invocation.target.buffer.and_then(|buffer| {
                     self.state
                         .buffers
                         .get(buffer)
                         .map(|buffer| buffer.text.source_version())
-                }) != text_before
-                {
+                }) != text_before;
+                if text_changed {
                     self.push_change_location();
                 }
                 self.input.record_successful_invocation(
                     &invocation,
                     repeat_override.as_ref(),
                     suppress_repeat,
+                    text_changed,
                 );
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
@@ -1804,6 +1848,7 @@ impl InteractiveApplication {
                         self.navigation_reads.remove(&id);
                         self.recovery.take_read(id, self.workspace.version());
                     }
+                    self.fail_agent_files(&error);
                     self.recovery.stopped();
                     self.search.clear_preview();
                     self.explorer.transport_stopped();
@@ -1874,6 +1919,7 @@ impl InteractiveApplication {
                 }
                 Continue(result) => result,
             };
+            let Some(result) = self.accept_agent_file(result) else { continue; };
             let result = match self.recovery.accept(result) {
                 Break(update) => {
                     use crate::editor::session::recovery::RecoveryUpdate;
@@ -1899,7 +1945,8 @@ impl InteractiveApplication {
                 Continue(result) => result,
             };
             match result {
-                VfsResult::RecoveryDiscovered { .. }
+                VfsResult::PathsResolved { .. }
+                | VfsResult::RecoveryDiscovered { .. }
                 | VfsResult::RecoveryCleaned { .. }
                 | VfsResult::RecoveryWritten { .. } => {
                     self.show_error(self.message("unexpected_completion", &[]))

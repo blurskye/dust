@@ -240,14 +240,24 @@ pub(super) fn repeat_visual_ranges(
     }
     match shape {
         "character" => {
-            let mut end = view.cursor;
-            for _ in 0..width {
-                let next = next_grapheme_boundary(text, end);
-                if next == end {
-                    break;
-                }
-                end = next;
-            }
+            let first_line = text.byte_to_line(view.cursor).map_err(failed)?;
+            let last_line = first_line.saturating_add(height - 1);
+            let end = if last_line >= text.visible_lines() {
+                ByteOffset(text.len_bytes())
+            } else {
+                let start = if height == 1 {
+                    view.cursor
+                } else {
+                    text.line_to_byte(last_line).map_err(failed)?
+                };
+                let line_end = text.line_to_byte(last_line).map_err(failed)?.get()
+                    + text.line(last_line).map_err(failed)?.len();
+                let remaining = text
+                    .slice(ByteRange::new(start, ByteOffset(line_end)).map_err(failed)?)
+                    .map_err(failed)?;
+                ByteOffset(start.get() + remaining.grapheme_indices(true).nth(width)
+                    .map_or(remaining.len(), |(offset, _)| offset))
+            };
             Ok((
                 vec![ByteRange::new(view.cursor, end).map_err(failed)?],
                 RegisterShape::Character,

@@ -542,6 +542,29 @@ mod tests {
             .collect()
     }
     #[test]
+    fn whole_document_edit_accepts_an_end_beyond_the_last_line() {
+        let text = TextBuffer::from_text("a😀é");
+        let edits = decode_edits(
+            vec![LspTextEdit {
+                range: LspRange {
+                    start: LspPosition { line: 0, character: 0 },
+                    end: LspPosition { line: 999, character: 0 },
+                },
+                new_text: "replacement".into(),
+            }],
+            &text,
+            PositionEncoding::Utf16,
+        )
+        .unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            edits[0].range(),
+            ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes())).unwrap(),
+        );
+        assert_eq!(edits[0].replacement(), "replacement");
+    }
+
+    #[test]
     fn create_and_populate_uses_only_the_create_snapshot() {
         let root = tempfile::tempdir().unwrap();
         let uri = crate::language::lsp::file_uri(&root.path().join("new.rs"));
@@ -961,7 +984,8 @@ impl LspEditSources {
         let reported = behind
             .then(|| version.and_then(|v| current_text.text_at(BufferRevision(v))))
             .flatten();
-        let codec = PositionCodec::new(reported.as_ref().unwrap_or(current_text));
+        let reported_text = reported.as_ref().unwrap_or(current_text);
+        let codec = PositionCodec::new(reported_text);
         let onto_current = |offset: ByteOffset| match &reported {
             Some(old) => current_text
                 .map_offset_since(old.revision(), offset)
@@ -976,9 +1000,10 @@ impl LspEditSources {
             version.map(BufferRevision)
         };
         let fits = |position: &crate::language::lsp::LspPosition| {
-            codec
-                .lsp_to_byte(position.line, position.character, context.encoding())
-                .is_ok()
+            position.line < reported_text.len_lines()
+                && codec
+                    .lsp_to_byte(position.line, position.character, context.encoding())
+                    .is_ok()
         };
         let items = diagnostics
             .into_iter()

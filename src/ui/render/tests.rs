@@ -189,6 +189,22 @@ fn attach_test_compositor(
     };
     let top = super::workspace_top_rows(state, ui, config);
     let screen_bottom = super::screen_foot_rows(state, ui, config, height);
+    let preliminary = snapshot.project_with_tiled_insets(
+        bounds,
+        PANE_MINIMUM_WIDTH,
+        PANE_MINIMUM_HEIGHT,
+        crate::ui::window::TiledInsets {
+            screen_bottom,
+            ..Default::default()
+        },
+    );
+    let (left, right, bottom) = ui.debug_panes.as_ref()
+        .filter(|_| !ui.dashboard && state.active_view.is_some())
+        .and_then(|_| super::debug_pane_insets(
+            preliminary.workspace_bounds.width,
+            preliminary.workspace_bounds.height.saturating_sub(top),
+        ))
+        .unwrap_or_default();
     ui.window_graph_revision = Some(1);
     ui.compositor_layout = Some(super::CompositorLayoutState {
         source_revision: state.window_revision().expect("test revision"),
@@ -200,7 +216,9 @@ fn attach_test_compositor(
             crate::ui::window::TiledInsets {
                 screen_bottom,
                 top,
-                ..Default::default()
+                left,
+                right,
+                bottom,
             },
         ),
         surfaces: super::NativeSurfaceWindowBinding {
@@ -885,31 +903,196 @@ fn missing_application_window_snapshot_fails_closed() {
     assert!(frame.cursor.is_none());
     assert!(!(0..8).any(|row| frame.grid.row_text(row).contains("not rendered")));
 
-    let stale = ui_with_editor_layout(&state);
+    let mut stale = ui_with_editor_layout(&state);
+    attach_test_compositor(&state, &mut stale, &loaded.config, 40, 8);
+    assert_eq!(super::pane_viewports(&state, &stale, &loaded.config, 40, 7).len(), 1);
+    let valid = super::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
+    assert!(valid.cursor.is_some());
+    assert!((0..8).any(|row| valid.grid.row_text(row).contains("not rendered")));
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("change source layout");
-    assert!(super::pane_viewports(&state, &stale, &loaded.config, 40, 8).is_empty());
+    assert!(super::pane_viewports(&state, &stale, &loaded.config, 40, 7).is_empty());
     let frame = super::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
     assert!(frame.cursor.is_none());
+    assert!(!(0..8).any(|row| frame.grid.row_text(row).contains("not rendered")));
 }
 
 #[test]
 fn split_tree_and_tab_line_render_real_independent_views() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
-    state.open_text(
-        crate::editor::text::TextBuffer::from_text("left\nright"),
-        None,
+    let text = format!("left\n{}right", "filler\n".repeat(12));
+    let (_, first_view) = state.open_text(
+        crate::editor::text::TextBuffer::from_text(&text),
+        Some(PathBuf::from("/workspace/main.rs")),
     ).unwrap();
-    state
+    let first_tab = state.active_tab.expect("first tab");
+    state.new_tab().expect("second tab");
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("other tab"),
+        Some(PathBuf::from("/workspace/other.rs")),
+    ).unwrap();
+    state.activate_tab(first_tab).expect("return to split tab");
+    let second_view = state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("split");
+    state.views[second_view].scroll_line = 13;
+    state.views[second_view].cursor = crate::editor::text::ByteOffset(text.find("right").unwrap());
+    assert_eq!(state.views[first_view].scroll_line, 0);
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
-    let ui = ui_with_editor_layout(&state);
-    let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);
-    assert_eq!(frame.grid.get(9, 2).expect("split border").symbol, "│");
-    assert!(frame.cursor.is_some_and(|(x, _, _)| x > 9));
+    let mut ui = ui_with_editor_layout(&state);
+    attach_test_compositor(&state, &mut ui, &config, 60, 8);
+    let panes = super::pane_viewports(&state, &ui, &config, 60, 7);
+    let frame = super::render(&state, &ui, &config, &loaded.dashboard, 60, 8);
+    assert!(frame.grid.row_text(0).contains("[main.rs]"));
+    assert!(frame.grid.row_text(0).contains("other.rs"));
+    for (view, label) in [(first_view, "left"), (second_view, "right")] {
+        let pane = panes.iter().find(|pane| pane.view == view).expect("pane");
+        let (x, y) = drawn_at(&frame, label).expect("independent pane content");
+        assert!(x >= pane.x && x + label.len() as u16 <= pane.x + pane.width);
+        assert_eq!(y, pane.y);
+    }
+    assert_eq!(frame.grid.get(29, 2).expect("split border").symbol, "│");
+    assert!(frame.cursor.is_some_and(|(x, y, _)| x > 29 && y == 1));
+}
+
+#[test]
+fn workspace_tab_line_keeps_the_active_label_visible() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("first"),
+        Some(PathBuf::from("/workspace/an-earlier-long-filename.rs")),
+    ).unwrap();
+    let first = state.active_tab.unwrap();
+    let second = state.new_tab().unwrap();
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("second"),
+        Some(PathBuf::from("/workspace/界界.rs")),
+    ).unwrap();
+    let third = state.new_tab().unwrap();
+    state.open_text(
+        crate::editor::text::TextBuffer::from_text("third"),
+        Some(PathBuf::from("/workspace/last.rs")),
+    ).unwrap();
+    let loaded = crate::config::load_bundled_config();
+    for (tab, label) in [(first, "an-earlier"), (second, "界界.rs"), (third, "last.rs")] {
+        state.activate_tab(tab).unwrap();
+        let ui = ui_with_editor_layout(&state);
+        let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 16, 6);
+        let line = frame.grid.row_text(0);
+        assert!(line.starts_with('['), "{line:?}");
+        assert!(line.contains(label), "{line:?}");
+        assert_eq!(frame.grid.get(0, 0).unwrap().style, crate::ui::Style::StatusAccent);
+    }
+}
+
+#[test]
+fn workspace_tab_line_measures_sanitized_labels() {
+    let loaded = crate::config::load_bundled_config();
+    for ambiguous in [crate::config::AmbiguousWidth::Narrow, crate::config::AmbiguousWidth::Wide] {
+        let mut config = loaded.config.clone();
+        config.editor.ambiguous_width = ambiguous;
+        for title in ["\n".repeat(20), "\t".repeat(20), "\u{200b}".repeat(20)] {
+            let mut state = EditorState::new(PathBuf::from("/workspace"));
+            state.open_text(
+                crate::editor::text::TextBuffer::from_text("first"),
+                Some(PathBuf::from(format!("/workspace/{title}"))),
+            ).unwrap();
+            state.new_tab().unwrap();
+            state.open_text(
+                crate::editor::text::TextBuffer::from_text("second"),
+                Some(PathBuf::from("/workspace/active.rs")),
+            ).unwrap();
+            let ui = ui_with_editor_layout(&state);
+            let frame = render(&state, &ui, &config, &loaded.dashboard, 16, 6);
+            assert!(frame.grid.row_text(0).starts_with("[active.rs]"));
+            assert_eq!(frame.grid.get(0, 0).unwrap().style, crate::ui::Style::StatusAccent);
+        }
+    }
+}
+
+#[test]
+fn workspace_editor_cursor_follows_compositor_focus() {
+    use crate::ui::window::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
+
+    let loaded = crate::config::load_bundled_config();
+    for split in [false, true] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(crate::editor::text::TextBuffer::from_text("editor"), None).unwrap();
+        if split {
+            state.split_active(crate::editor::Axis::Horizontal, 500).unwrap();
+        }
+        let mut ui = ui_with_editor_layout(&state);
+        attach_test_compositor(&state, &mut ui, &loaded.config, 60, 8);
+        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        assert!(frame.cursor.is_some());
+
+        let windows = &mut ui.compositor_layout.as_mut().unwrap().projection.windows;
+        for window in windows.iter_mut() {
+            window.focused = false;
+        }
+        windows.push(ProjectedCompositorWindow {
+            window: WindowId(99),
+            rect: WindowRect { x: 50, y: 0, width: 10, height: 3 },
+            layer: CompositorLayer::Overlay,
+            z_index: 1,
+            focused: true,
+            focusable: true,
+        });
+        ui.plugin_surfaces.push(super::PluginSurfaceUiState {
+            handle: 9,
+            window: WindowId(99),
+            tree_revision: 1,
+            scroll: 0,
+            rows: vec![super::PluginSurfaceRow {
+                node: 1,
+                depth: 0,
+                text: "plugin".into(),
+                style: crate::ui::Style::Accent,
+                actionable: true,
+                focused: true,
+            }],
+        });
+        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        assert!(frame.grid.row_text(0).contains("plugin"));
+        assert!(frame.cursor.is_none());
+    }
+}
+
+#[test]
+fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
+    use crate::ui::window::TileAxis;
+
+    let loaded = crate::config::load_bundled_config();
+    let mut config = loaded.config;
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    for axis in [crate::editor::Axis::Horizontal, crate::editor::Axis::Vertical] {
+        let mut state = EditorState::new(PathBuf::from("/workspace"));
+        state.open_text(crate::editor::text::TextBuffer::from_text("pane"), None).unwrap();
+        state.split_active(axis, 500).unwrap();
+        let mut ui = ui_with_editor_layout(&state);
+        attach_test_compositor(&state, &mut ui, &config, 60, 10);
+        let frame = super::render(&state, &ui, &config, &loaded.dashboard, 60, 10);
+        let projection = &ui.compositor_layout.as_ref().unwrap().projection;
+        assert!(!projection.borders.is_empty());
+        for border in &projection.borders {
+            for offset in 0..border.length {
+                let (x, y, expected) = match border.axis {
+                    TileAxis::Horizontal => (border.x, border.y + offset, "|"),
+                    TileAxis::Vertical => (border.x + offset, border.y, "-"),
+                };
+                let cell = frame.grid.get(x, y).unwrap();
+                assert_eq!(cell.symbol, expected);
+                assert!(!cell.continuation);
+            }
+        }
+        for pane in super::pane_viewports(&state, &ui, &config, 60, 9) {
+            assert_eq!(frame.grid.get(pane.x, pane.y).unwrap().symbol, "p");
+            assert!(!frame.grid.get(pane.x, pane.y).unwrap().continuation);
+        }
+    }
 }
 
 #[test]
@@ -1367,6 +1550,10 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
         "\t界e\u{301}z",
     ];
     for sample in samples {
+        let boundaries = unicode_segmentation::UnicodeSegmentation::grapheme_indices(sample, true)
+            .map(|(byte, _)| byte)
+            .chain(std::iter::once(sample.len()))
+            .collect::<Vec<_>>();
         for width in 1..=4 {
             let mut state = EditorState::new(PathBuf::from("/tmp"));
             let (buffer, view) =
@@ -1386,8 +1573,8 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
             assert_eq!(rows.last().unwrap().byte_end, sample.len());
             for (index, row) in rows.iter().enumerate() {
                 assert!(row.used_cells <= usize::from(width));
-                assert!(sample.is_char_boundary(row.byte_start));
-                assert!(sample.is_char_boundary(row.byte_end));
+                assert!(boundaries.contains(&row.byte_start));
+                assert!(boundaries.contains(&row.byte_end));
                 if let Some(next) = rows.get(index + 1) {
                     assert_eq!(row.byte_end, next.byte_start);
                     let current = super::VisualRowAnchor {
@@ -1409,7 +1596,7 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                 assert!(bytes.iter().all(|byte| {
                     *byte >= row.byte_start
                         && *byte <= row.byte_end
-                        && sample.is_char_boundary(*byte)
+                        && boundaries.contains(byte)
                 }));
             }
             let last = super::VisualRowAnchor {
@@ -2513,6 +2700,8 @@ fn completion_is_clipped_to_the_focused_split() {
     let pane =
         super::active_pane_viewport(&state, &ui, &loaded.config, 80, 19).expect("active pane");
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 20);
+    assert!(drawn_at(&frame, "selected-completion").is_some());
+    let mut selected_cells = 0;
     for row in 0..20 {
         for column in 0..80 {
             if frame
@@ -2520,11 +2709,13 @@ fn completion_is_clipped_to_the_focused_split() {
                 .get(column, row)
                 .is_some_and(|cell| cell.style == crate::ui::Style::Selection)
             {
+                selected_cells += 1;
                 assert!(column >= pane.x && column < pane.x.saturating_add(pane.width));
                 assert!(row >= pane.y && row < pane.y.saturating_add(pane.height));
             }
         }
     }
+    assert!(selected_cells > 0, "the completion selection must be painted");
 }
 
 #[test]
@@ -3480,6 +3671,12 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
         let loaded = crate::config::load_bundled_config();
         let config = loaded.config;
         let dashboard_config = loaded.dashboard;
+        ui.dashboard_actions = vec![super::DashboardAction {
+            command: "workspace.file.find".into(),
+            label: "Find File".into(),
+            icon: String::new(),
+            key: Some("f".into()),
+        }];
         let dashboard = render(&state, &ui, &config, &dashboard_config, width, height);
         assert_eq!(dashboard.grid.width(), width);
         assert!(
@@ -3487,6 +3684,15 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
                 >= usize::from(width.saturating_sub(2))
                 || width < 3
         );
+        let rows = (0..height).map(|y| dashboard.grid.row_text(y)).collect::<Vec<_>>();
+        if width >= dashboard_config.minimum_width && height >= dashboard_config.minimum_height {
+            assert!(rows.iter().any(|row| row.contains("Find File")), "{rows:?}");
+            assert!(rows.iter().any(|row| row.contains("dust-workspace")), "{rows:?}");
+            assert!(dashboard.cursor.is_some());
+        } else {
+            assert!(rows.iter().any(|row| row.contains("Dust — resize")), "{rows:?}");
+            assert!(dashboard.cursor.is_none());
+        }
         ui.prompt = Some(PromptState::new(PromptKind::Command));
         let prompt = render(&state, &ui, &config, &dashboard_config, width, height);
         let geometry = prompt_geometry(width, height, false);
@@ -3742,16 +3948,15 @@ fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
         "the bar leaves the focus exactly where it was: {:?} vs {:?}",
         frame.cursor, quiet_cursor
     );
-    // NO AUTOMATIC EXPLANATORY CONTENT: rendering opened no prompt, popup or picker of its own.
-    assert!(
-        quiet.prompt.is_none(),
-        "rendering a paused operation opens no prompt"
-    );
-    assert!(
-        quiet.documentation_popup.is_none(),
-        "and no documentation popup"
-    );
-    assert!(quiet.picker.is_none(), "and no picker");
+    // Only the bar's row changes: no popup or picker may cover the editor or status line.
+    for y in 0..12 {
+        if y == 10 {
+            continue;
+        }
+        for x in 0..80 {
+            assert_eq!(frame.grid.get(x, y), quiet_frame.grid.get(x, y), "cell {x},{y}");
+        }
+    }
 
     // The bar's own text carries NOTHING beyond the operation, phase, blockers and actions: the
     // row is asserted exactly rather than by substring.
@@ -4102,7 +4307,19 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         requested_height: 5,
     });
 
-    let frame = render(&state, &ui, &config, &dashboard, width, height);
+    attach_test_compositor(&state, &mut ui, &config, width, height);
+    let frame = super::render(&state, &ui, &config, &dashboard, width, height);
+    let region = ui.compositor_layout.as_ref().unwrap().projection.workspace_bounds;
+    let layout = super::debug::debug_layout_in(region).expect("debug layout");
+    let source = layout.source;
+    let pane = super::active_editor_pane_viewport(&state, &ui).expect("source viewport");
+    assert_eq!((pane.x, pane.y, pane.width, pane.height),
+        (source.x, source.y, source.width, source.height));
+    let (x, y) = drawn_at(&frame, "fn main() {}").expect("source is visible");
+    assert!(x >= source.x && x + 12 <= source.x + source.width);
+    assert!(y >= source.y && y < source.y + source.height);
+    assert!(frame.cursor.is_some_and(|(x, y, _)|
+        x >= source.x && x < source.x + source.width && y >= source.y && y < source.y + source.height));
 
     // (b) The panel IS present: rendering no panel must not satisfy this test.
     let panel_row = (0..height)
@@ -4160,11 +4377,34 @@ fn drawn_at(frame: &super::Frame, needle: &str) -> Option<(u16, u16)> {
     for y in 0..frame.grid.height() {
         let text = frame.grid.row_text(y);
         if let Some(byte) = text.find(needle) {
-            let column = u16::try_from(text[..byte].chars().count()).unwrap_or(u16::MAX);
-            return Some((column, y));
+            let mut offset = 0;
+            for column in 0..frame.grid.width() {
+                let cell = frame.grid.get(column, y).expect("grid cell");
+                if cell.continuation {
+                    continue;
+                }
+                if offset == byte {
+                    return Some((column, y));
+                }
+                offset += cell.symbol.len();
+            }
         }
     }
     None
+}
+
+#[test]
+fn drawn_at_locates_display_cells_after_wide_and_combining_graphemes() {
+    for wide in [false, true] {
+        let mut grid = crate::ui::CellGrid::new_with_policy(
+            20, 1, CONTROL_CHARACTER_REPLACEMENT, "◌", wide,
+        );
+        grid.put_text(0, 0, "界e\u{301}·target", crate::ui::Style::Default);
+        let frame = super::Frame { grid, cursor: None };
+        let expected = if wide { 5 } else { 4 };
+        assert_eq!(drawn_at(&frame, "target"), Some((expected, 0)));
+        assert_eq!(frame.grid.get(expected, 0).unwrap().symbol, "t");
+    }
 }
 
 /// U-15: a row carries per-cell text, per-cell style and glyph cells, and the columns line
@@ -5420,6 +5660,8 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         watches: Vec::new(),
         console: vec!["latest output".into()],
     });
+    let mut screen = crate::ui::PtyScreen::new(40, 20, 0);
+    screen.feed_bytes(b"terminal output");
     ui.terminal_panel = Some(super::TerminalPanelState {
         id: 1,
         profile: "shell".into(),
@@ -5431,7 +5673,7 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         focused: false,
         columns: 40,
         rows: 20,
-        cells: Vec::new(),
+        cells: vec![screen.history_row(0).expect("terminal output row")],
         cells_start: 0,
         cursor: None,
         selection: None,
@@ -5459,8 +5701,26 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         width: 80,
         height: 39,
     };
+    let layout = super::debug::debug_layout_in(compositor.projection.workspace_bounds)
+        .expect("side-docked debug layout");
+    // Moving the dock also changes the tiled source rectangle and debugger insets.
+    let source_window = ui.editor_window_layout.as_ref().unwrap().bindings[0].window;
+    compositor.projection.windows.iter_mut()
+        .find(|window| window.window == source_window)
+        .expect("source window").rect = layout.source;
     let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
-    assert!((0..40).any(|row| frame.grid.row_text(row).contains("Console")));
+    let (x, y) = drawn_at(&frame, "source").expect("source remains visible beside the terminal");
+    assert!(x >= layout.source.x && x + 6 <= layout.source.x + layout.source.width);
+    assert!(y >= layout.source.y && y < layout.source.y + layout.source.height);
+    assert!(frame.cursor.is_some_and(|(x, y, _)|
+        x >= layout.source.x && x < layout.source.x + layout.source.width
+            && y >= layout.source.y && y < layout.source.y + layout.source.height));
+    let inspector = layout.console.expect("inspector strip");
+    let (x, y) = drawn_at(&frame, "latest output").expect("selected console content");
+    assert!(x >= inspector.x && x + 13 <= inspector.x + inspector.width);
+    assert!(y >= inspector.y && y < inspector.y + inspector.height);
+    let (x, y) = drawn_at(&frame, "terminal output").expect("terminal body is rendered");
+    assert!((80..120).contains(&x) && y < 39);
 }
 
 #[test]

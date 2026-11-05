@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -55,6 +55,7 @@ pub enum AgentMessage {
 pub struct AgentProcess {
     child: Child,
     writes: SyncSender<String>,
+    responses: VecDeque<String>,
     messages: Receiver<AgentMessage>,
     failures: Receiver<String>,
     log: Arc<Mutex<Option<String>>>,
@@ -137,6 +138,7 @@ impl AgentProcess {
         Ok(Self {
             child,
             writes,
+            responses: VecDeque::new(),
             messages,
             failures,
             log,
@@ -164,7 +166,29 @@ impl AgentProcess {
                 json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}})
             }
         };
-        self.write(&message)
+        self.flush_responses()?;
+        if self.responses.len() >= MESSAGE_CAPACITY {
+            return Err("the agent response queue is full".into());
+        }
+        self.responses.push_back(format!("{message}\n"));
+        self.flush_responses()
+    }
+
+    /// Retry replies without blocking the editor when the writer is busy.
+    pub fn flush_responses(&mut self) -> Result<(), String> {
+        while let Some(line) = self.responses.pop_front() {
+            match self.writes.try_send(line) {
+                Ok(()) => {}
+                Err(TrySendError::Full(line)) => {
+                    self.responses.push_front(line);
+                    break;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    return Err("the agent input is closed".into());
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn try_message(&self) -> Option<AgentMessage> {
@@ -181,6 +205,10 @@ impl AgentProcess {
     }
 
     fn write(&mut self, message: &Value) -> Result<(), String> {
+        self.flush_responses()?;
+        if !self.responses.is_empty() {
+            return Err("the agent input queue is full".into());
+        }
         let mut line = message.to_string();
         line.push('\n');
         self.writes.try_send(line).map_err(|error| match error {
@@ -819,6 +847,30 @@ mod tests {
         }
         assert!(full, "a stalled reader must bound pending writes");
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_responses_retry_in_order_and_report_closed_writers() {
+        let mut process = fixture("sleep 60");
+        let (writes, incoming) = mpsc::sync_channel(1);
+        process.writes = writes;
+        process.notify("busy", Value::Null).unwrap();
+        process.respond(json!(1), Ok(json!({"content": "first"}))).unwrap();
+        process.respond(json!(2), Err("second".into())).unwrap();
+        assert_eq!(process.responses.len(), 2);
+        incoming.recv().unwrap();
+        process.flush_responses().unwrap();
+        let first: Value = serde_json::from_str(&incoming.recv().unwrap()).unwrap();
+        assert_eq!(first["id"], 1);
+        assert_eq!(first["result"]["content"], "first");
+        process.flush_responses().unwrap();
+        let second: Value = serde_json::from_str(&incoming.recv().unwrap()).unwrap();
+        assert_eq!(second["id"], 2);
+        assert_eq!(second["error"]["message"], "second");
+        assert!(process.responses.is_empty());
+        drop(incoming);
+        assert_eq!(process.respond(json!(3), Ok(Value::Null)), Err("the agent input is closed".into()));
     }
 
     #[cfg(unix)]

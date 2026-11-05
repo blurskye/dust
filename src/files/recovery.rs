@@ -45,17 +45,6 @@ pub(super) fn read_bounded_bytes(
     Ok((bytes.len() as u64 <= maximum_bytes).then_some(bytes))
 }
 
-pub(super) fn read_bounded_utf8(
-    reader: impl Read,
-    maximum_bytes: u64,
-    kind: &str,
-) -> Result<String, String> {
-    let bytes = read_bounded_bytes(reader, maximum_bytes)
-        .map_err(|error| format!("cannot read {kind}: {error}"))?
-        .ok_or_else(|| format!("{kind} exceeds {maximum_bytes} byte safety ceiling"))?;
-    String::from_utf8(bytes).map_err(|error| format!("{kind} is not UTF-8: {error}"))
-}
-
 pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
     let bytes = super::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
         .map_err(|error| format!("cannot read recovery journal: {error}"))?;
@@ -290,6 +279,7 @@ pub fn cleanup_recovery(
     maximum_records: usize,
     maximum_age_days: u64,
     now: SystemTime,
+    protected: &[PathBuf],
 ) -> RecoveryCleanup {
     // Keep retention decisions and deletion under the same lock as journal replacement.
     let _lock = match lock_file(&directory.join(".recovery.lock")) {
@@ -303,6 +293,9 @@ pub fn cleanup_recovery(
     let mut records = Vec::new();
     // Retention needs only paths and timestamps; drop each payload before reading the next.
     let diagnostics = visit_recovery(directory, |path, _, modified| {
+        if protected.contains(&path) {
+            return true;
+        }
         records.push((path, modified));
         true
     });

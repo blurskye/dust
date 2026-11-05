@@ -30,6 +30,8 @@ pub struct RequestId(pub u64);
 
 #[derive(Debug)]
 pub enum VfsRequest {
+    ResolvePaths { id: RequestId, paths: Vec<PathBuf> },
+    AgentWrite { id: RequestId, path: PathBuf, root: PathBuf, bytes: Vec<u8> },
     Read {
         id: RequestId,
         path: PathBuf,
@@ -94,6 +96,7 @@ pub enum VfsRequest {
         directory: PathBuf,
         maximum_records: usize,
         maximum_age_days: u64,
+        protected: Vec<PathBuf>,
     },
     Delete {
         id: RequestId,
@@ -159,6 +162,7 @@ pub enum WriteExpectation {
 
 #[derive(Debug)]
 pub enum VfsResult {
+    PathsResolved { id: RequestId, paths: Vec<PathBuf> },
     ResourceResolved {
         id: RequestId,
         result: Result<CheckedResourceIntent, VfsError>,
@@ -215,7 +219,8 @@ pub enum VfsResult {
 impl VfsResult {
     pub(crate) fn request_id(&self) -> RequestId {
         match self {
-            Self::ResourceResolved { id, .. }
+            Self::PathsResolved { id, .. }
+            | Self::ResourceResolved { id, .. }
             | Self::ResourceApplied { id, .. }
             | Self::ExplorerMutated { id, .. }
             | Self::CreateTarget { id, .. }
@@ -251,7 +256,9 @@ impl Drop for WorkerFinished {
 impl VfsRequest {
     fn id(&self) -> Option<RequestId> {
         match self {
-            Self::Read { id, .. }
+            Self::ResolvePaths { id, .. }
+            | Self::AgentWrite { id, .. }
+            | Self::Read { id, .. }
             | Self::ReadScoped { id, .. }
             | Self::ReadScopedBounded { id, .. }
             | Self::ResolveCreate { id, .. }
@@ -438,6 +445,13 @@ impl VfsWorker {
                             }
                         } else {
                             match request {
+                                VfsRequest::ResolvePaths { id, paths } => VfsResult::PathsResolved {
+                                    id, paths: paths.iter().map(|path| resolve_existing_prefix(path)).collect(),
+                                },
+                                VfsRequest::AgentWrite { id, path, root, bytes } => {
+                                    let result = agent_atomic_write(&root, &path, &bytes);
+                                    VfsResult::Write { id, path, result }
+                                }
                                 VfsRequest::Read { id, path } => match canonical_path(&path) {
                                     Ok(path) => VfsResult::Read {
                                         id,
@@ -679,6 +693,7 @@ impl VfsWorker {
                                     directory,
                                     maximum_records,
                                     maximum_age_days,
+                                    protected,
                                 } => VfsResult::RecoveryCleaned {
                                     id,
                                     cleanup: cleanup_recovery(
@@ -686,6 +701,7 @@ impl VfsWorker {
                                         maximum_records,
                                         maximum_age_days,
                                         crate::clock::system_time(),
+                                        &protected,
                                     ),
                                 },
                                 VfsRequest::Delete { id, path } => {
@@ -917,6 +933,18 @@ impl VfsWorker {
         Ok(id)
     }
 
+    pub(crate) fn resolve_paths(&mut self, paths: Vec<PathBuf>) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::ResolvePaths { id, paths })?;
+        Ok(id)
+    }
+
+    pub(crate) fn agent_write(&mut self, path: PathBuf, root: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
+        let id = self.next_request_id()?;
+        self.submit(VfsRequest::AgentWrite { id, path, root, bytes })?;
+        Ok(id)
+    }
+
     pub fn write(&mut self, path: PathBuf, bytes: Vec<u8>) -> Result<RequestId, VfsError> {
         self.write_checked(path, bytes, WriteExpectation::Any)
     }
@@ -1002,6 +1030,7 @@ impl VfsWorker {
         directory: PathBuf,
         maximum_records: usize,
         maximum_age_days: u64,
+        protected: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
         self.submit(VfsRequest::CleanupRecovery {
@@ -1009,6 +1038,7 @@ impl VfsWorker {
             directory,
             maximum_records,
             maximum_age_days,
+            protected,
         })?;
         Ok(id)
     }
@@ -1169,6 +1199,21 @@ impl Drop for VfsWorker {
     fn drop(&mut self) {
         self.begin_shutdown();
         self.thread.take();
+    }
+}
+
+/// Resolve symlinks in the existing prefix of a possibly new file path.
+fn resolve_existing_prefix(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            return rest.iter().rev().fold(resolved, |path, part| path.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => { rest.push(name.to_owned()); existing = parent; }
+            _ => return path.to_path_buf(),
+        }
     }
 }
 
@@ -1801,6 +1846,81 @@ pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
         .map_err(|(_, error)| io::Error::from(error))
 }
 
+/// Agent paths are already resolved. Open each directory without following
+/// symlinks and keep the parent descriptor for creation, rename and cleanup.
+fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, openat, renameat, statat, unlinkat};
+    use std::{path::Component, sync::atomic::AtomicU64};
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+    let relative = path.strip_prefix(root).map_err(|_| VfsError::OutsideScope(path.into()))?;
+    if !root.is_absolute() || root.components().chain(relative.components())
+        .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err(VfsError::OutsideScope(path.into()));
+    }
+    let name = relative.file_name().ok_or_else(|| VfsError::OutsideScope(path.into()))?;
+    let result = (|| -> io::Result<()> {
+        // Ancestors need search permission, not directory-listing permission.
+        let flags = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let mut directory = File::from(openat(rustix::fs::CWD, "/", flags, Mode::empty())?);
+        // Walk the root too: an ancestor substituted since resolution must not
+        // redirect the initial directory open outside the resolved workspace.
+        for part in root.components() {
+            if let Component::Normal(name) = part {
+                directory = openat(&directory, name, flags, Mode::empty())?.into();
+            }
+        }
+        for part in relative.parent().unwrap_or(Path::new("")).components() {
+            if let Component::Normal(name) = part {
+                match mkdirat(&directory, name, Mode::from_raw_mode(0o777)) {
+                    Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                directory = openat(&directory, name, flags, Mode::empty())?.into();
+            }
+        }
+        let directory = File::from(openat(&directory, ".",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty())?);
+        let permissions = match statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile =>
+                Some(Mode::from_raw_mode(stat.st_mode)),
+            Ok(_) => return Err(io::Error::other("not a regular file")),
+            Err(rustix::io::Errno::NOENT) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let mut attempts = 0;
+        let (temporary_name, mut temporary) = loop {
+            attempts += 1;
+            let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+            let temporary_name = format!(".dust-{}-{sequence}.tmp", std::process::id());
+            if std::ffi::OsStr::new(&temporary_name) == name { continue; }
+            match openat(&directory, &temporary_name,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR)
+            {
+                Ok(fd) => break (temporary_name, File::from(fd)),
+                Err(rustix::io::Errno::EXIST) if attempts < 16 => continue,
+                Err(error) => return Err(error.into()),
+            }
+        };
+        let result = (|| -> io::Result<()> {
+            if let Some(permissions) = permissions { fchmod(&temporary, permissions)?; }
+            temporary.write_all(bytes)?;
+            temporary.sync_all()?;
+            renameat(&directory, &temporary_name, &directory, name)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = unlinkat(&directory, &temporary_name, AtFlags::empty());
+        }
+        result?;
+        directory.sync_all()
+    })();
+    result.map_err(|source| VfsError::Io { operation: "agent write", path: path.into(), source })
+}
+
 /// Write through a same-directory temporary file, sync it, then atomically
 /// replace the destination through tempfile's platform-specific persistence.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
@@ -1929,6 +2049,70 @@ mod lifecycle_tests {
                 assert!(!owned.exists());
             }
         }
+    }
+
+    #[test]
+    fn agent_writes_reject_symlinks_substituted_after_path_resolution() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let parent = root.join("nested");
+        fs::create_dir(&parent).unwrap();
+        let path = resolve_existing_prefix(&parent.join("new/file"));
+        fs::remove_dir(&parent).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &parent).unwrap();
+        assert!(agent_atomic_write(&root, &path, b"escape").is_err());
+        assert!(!outside.path().join("new").exists());
+        fs::remove_file(&parent).unwrap();
+        agent_atomic_write(&root, &path, b"inside").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"inside");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        let target = outside.path().join("target");
+        fs::write(&target, "untouched").unwrap();
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(agent_atomic_write(&root, &path, b"escape").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"untouched");
+        assert!(agent_atomic_write(&root, &root.join("../escape"), b"escape").is_err());
+
+        // The root itself may also be replaced after validation.
+        let moved = root.with_extension("moved");
+        fs::rename(&root, &moved).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &root).unwrap();
+        assert!(agent_atomic_write(&root, &root.join("escape"), b"escape").is_err());
+        assert!(!outside.path().join("escape").exists());
+        fs::remove_file(&root).unwrap();
+        fs::rename(&moved, &root).unwrap();
+    }
+
+    #[test]
+    fn agent_writes_traverse_search_only_ancestors() {
+        use std::os::unix::fs::PermissionsExt;
+        let temporary = tempfile::tempdir().unwrap();
+        let ancestor = temporary.path().join("search-only");
+        let workspace = ancestor.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let root = fs::canonicalize(&workspace).unwrap();
+        let path = root.join("file");
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o111)).unwrap();
+        let result = agent_atomic_write(&root, &path, b"inside");
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o700)).unwrap();
+        result.unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"inside");
+    }
+
+    #[test]
+    fn agent_writes_replace_regular_files_and_preserve_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let path = root.join("file");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        agent_atomic_write(&root, &path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
     }
 
     #[test]

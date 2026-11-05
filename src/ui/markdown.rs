@@ -762,7 +762,7 @@ mod tests {
                 .replace('\n', "")
                 .contains("    let identifier = 1234567890;")
         );
-        assert!(styled(&out, Highlight::KEYWORD).contains(&"let"));
+        assert!(styled(&out, Highlight::named("@keyword.rust").unwrap()).contains(&"let"));
     }
 
     #[test]
@@ -896,7 +896,7 @@ mod tests {
             out.text,
             "── rust ────────────\nfn main() {}\n────────────────────\nafter\n"
         );
-        assert!(styled(&out, Highlight::KEYWORD).contains(&"fn"));
+        assert!(styled(&out, Highlight::named("@keyword.rust").unwrap()).contains(&"fn"));
     }
 
     #[test]

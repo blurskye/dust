@@ -495,6 +495,9 @@ fn convert(
     let uri = crate::language::lsp::file_uri(path);
     raw.into_iter()
         .map(|raw| {
+            if raw.line >= text.len_lines() {
+                return Err("linter line is outside its source".into());
+            }
             let start = crate::editor::text::PositionCodec::new(text)
                 .lsp_to_byte(raw.line, raw.column, raw.encoding)
                 .map_err(|_| "linter column is outside its source or splits UTF-8")?;

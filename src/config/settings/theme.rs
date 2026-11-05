@@ -269,10 +269,20 @@ pub struct ThemeConfig {
     pub styles: ThemeStyles,
     /// Neovim highlight groups, such as `"@function" = { fg = "#7aa2f7" }` or
     /// `"@lsp.type.property" = { link = "@property" }`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_highlights")]
     pub highlights: BTreeMap<String, HighlightDefinition>,
     #[serde(skip)]
     resolved: ResolvedHighlights,
+}
+
+fn deserialize_highlights<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, HighlightDefinition>, D::Error> {
+    let highlights = BTreeMap::<String, HighlightDefinition>::deserialize(deserializer)?;
+    for name in highlights.keys() {
+        Highlight::register(name).ok_or_else(|| de::Error::custom("too many highlight groups"))?;
+    }
+    Ok(highlights)
 }
 
 impl ThemeConfig {
@@ -281,15 +291,25 @@ impl ThemeConfig {
     /// `None` when nothing colours it.
     #[must_use]
     pub fn highlight(&self, group: Highlight) -> Option<&ThemeStyle> {
-        self.resolved
-            .0
-            .get_or_init(|| {
-                Highlight::all()
-                    .map(|group| self.resolve(group.name()))
-                    .collect()
-            })
-            .get(group.index())?
-            .as_ref()
+        let styles = self.resolved.0.get_or_init(|| {
+            for name in self.highlights.keys() {
+                Highlight::register(name);
+            }
+            Highlight::all()
+                .map(|group| self.resolve(group.name()))
+                .collect()
+        });
+        if let Some(style) = styles.get(group.index()) {
+            return style.as_ref();
+        }
+        // A group registered by another theme after this cache was built inherits its parent.
+        let mut name = group.name();
+        loop {
+            name = name.rsplit_once('.')?.0;
+            if let Some(style) = Highlight::named(name).and_then(|group| styles.get(group.index())) {
+                return style.as_ref();
+            }
+        }
     }
 
     /// A markdown heading's bar: the theme's background for its group, or the heading's colour

@@ -1,29 +1,35 @@
 //! Requests to a running Dust from programs it starts. Dust listens on a Unix socket named
 //! in `DUST_SERVER`. `dust --remote FILE` (lazygit's edit key) sends one line per file,
-//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits. `dust --agent-tools`
+//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits after admission
+//! is acknowledged. `dust --agent-tools`
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
 use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
+    os::fd::AsFd,
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    sync::mpsc,
+    net::Shutdown,
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use serde_json::{Value, json};
 
 /// The variable terminals started by Dust find the socket in.
 pub const SERVER_VARIABLE: &str = "DUST_SERVER";
 const REQUEST_BYTE_CEILING: u64 = 1024 * 1024;
 const AGENT_PREFIX: &str = "agent\t";
+const REQUEST_QUEUE_CEILING: usize = 64;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteOpen {
@@ -79,6 +85,11 @@ pub enum RemoteRequest {
 pub struct RemoteServer {
     path: PathBuf,
     requests: mpsc::Receiver<RemoteRequest>,
+    stopping: Arc<AtomicBool>,
+    reading: Arc<Mutex<Option<UnixStream>>>,
+    writing: Arc<Mutex<Option<UnixStream>>>,
+    wake: UnixStream,
+    workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl RemoteServer {
@@ -89,28 +100,98 @@ impl RemoteServer {
         let _ = fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-        let (sender, requests) = mpsc::channel();
-        let (replies, pending) = mpsc::sync_channel(8);
-        thread::Builder::new()
+        listener.set_nonblocking(true)?;
+        let (wake, wake_reader) = UnixStream::pair()?;
+        let (sender, requests) = mpsc::sync_channel(REQUEST_QUEUE_CEILING);
+        let (replies, pending) = mpsc::sync_channel::<(UnixStream, Result<String, String>)>(8);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let reading = Arc::new(Mutex::new(None));
+        let writing = Arc::new(Mutex::new(None));
+        let reply_writing = writing.clone();
+        let reply_stop = stopping.clone();
+        let reply_worker = thread::Builder::new()
             .name("dust-remote-replies".into())
             .spawn(move || {
-                while let Ok((stream, answer)) = pending.recv() {
-                    // Failed delivery closes the socket and lets the next answer proceed.
-                    let _ = send_reply(stream, answer);
+                while !reply_stop.load(Ordering::Acquire) {
+                    match pending.recv_timeout(Duration::from_millis(100)) {
+                        Ok((stream, answer)) => {
+                            {
+                                let mut writing = reply_writing.lock().unwrap();
+                                if reply_stop.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                *writing = stream.try_clone().ok();
+                            }
+                            // Failed delivery closes the socket and lets the next answer proceed.
+                            let _ = send_reply(stream, answer);
+                            *reply_writing.lock().unwrap() = None;
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             })?;
-        thread::Builder::new()
+        let listener_stop = stopping.clone();
+        let listener_reading = reading.clone();
+        let listener_worker = thread::Builder::new()
             .name("dust-remote".into())
             .spawn(move || {
-                for stream in listener.incoming().flatten() {
-                    // A client that never writes must not hold up the next one.
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                loop {
+                    let mut ready = [
+                        PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                        PollFd::new(wake_reader.as_fd(), PollFlags::POLLIN),
+                    ];
+                    match poll(&mut ready, PollTimeout::NONE) {
+                        Err(nix::errno::Errno::EINTR) => continue,
+                        Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    if listener_stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let mut stream = match listener.accept() {
+                        Ok((stream, _)) => stream,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                        Err(_) => break,
+                    };
+                    {
+                        let mut reading = listener_reading.lock().unwrap();
+                        if listener_stop.load(Ordering::Acquire) {
+                            break;
+                        }
+                        *reading = stream.try_clone().ok();
+                    }
+                    let deadline = Instant::now() + REQUEST_TIMEOUT;
                     let Ok(reader) = stream.try_clone() else {
                         continue;
                     };
-                    let reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
-                    for line in reader.lines().map_while(Result::ok) {
-                        let request = match line.strip_prefix(AGENT_PREFIX) {
+                    let mut reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
+                    let mut line = Vec::new();
+                    let mut complete = false;
+                    loop {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+                            break;
+                        }
+                        // fill_buf performs at most one socket read, so each read
+                        // gets the remaining overall deadline, even for partial lines.
+                        let Ok(buffer) = reader.fill_buf() else { break };
+                        let eof = buffer.is_empty();
+                        if eof {
+                            complete = line.is_empty();
+                            if complete { break; }
+                        } else {
+                            let end = buffer.iter().position(|byte| *byte == b'\n');
+                            let length = end.map_or(buffer.len(), |end| end + 1);
+                            line.extend_from_slice(&buffer[..length]);
+                            reader.consume(length);
+                            if end.is_none() { continue; }
+                        }
+                        let Ok(text) = std::str::from_utf8(&line) else { break };
+                        let text = text.strip_suffix('\n')
+                            .map(|text| text.strip_suffix('\r').unwrap_or(text))
+                            .unwrap_or(text);
+                        let request = match text.strip_prefix(AGENT_PREFIX) {
                             Some(body) => stream.try_clone().ok().and_then(|reply| {
                                 parse_agent(
                                     body,
@@ -120,22 +201,46 @@ impl RemoteServer {
                                     },
                                 )
                             }),
-                            None => parse(&line).map(RemoteRequest::Open),
+                            None => parse(text).map(RemoteRequest::Open),
                         };
                         let asked_for_agent = matches!(request, Some(RemoteRequest::Agent(_)));
-                        if let Some(request) = request
-                            && sender.send(request).is_err()
-                        {
-                            return;
+                        if let Some(request) = request {
+                            match sender.try_send(request) {
+                                Ok(()) => {}
+                                // Reject this connection rather than block admission or
+                                // retain more requests while the editor catches up.
+                                Err(mpsc::TrySendError::Full(_)) => break,
+                                Err(mpsc::TrySendError::Disconnected(_)) => return,
+                            }
                         }
+                        line.clear();
                         // The asker now waits for the answer instead of writing more.
                         if asked_for_agent {
                             break;
                         }
+                        if eof {
+                            complete = true;
+                            break;
+                        }
                     }
+                    // A successful socket write alone does not mean the bounded
+                    // request queue accepted every file in a bulk open.
+                    if complete && stream.set_write_timeout(Some(REQUEST_TIMEOUT)).is_ok() {
+                        let _ = stream.write_all(b"ok\n");
+                    }
+                    *listener_reading.lock().unwrap() = None;
                 }
-            })?;
-        Ok(Self { path, requests })
+            });
+        let listener_worker = match listener_worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                stopping.store(true, Ordering::Release);
+                let _ = reply_worker.join();
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+        };
+        Ok(Self { path, requests, stopping, reading, writing, wake, workers: vec![listener_worker, reply_worker] })
     }
 
     #[must_use]
@@ -151,6 +256,17 @@ impl RemoteServer {
 
 impl Drop for RemoteServer {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        for active in [&self.reading, &self.writing] {
+            if let Some(stream) = active.lock().unwrap().as_ref() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        }
+        // Wake the listener even if its socket path has already been removed.
+        let _ = self.wake.shutdown(Shutdown::Both);
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
         let _ = fs::remove_file(&self.path);
     }
 }
@@ -204,23 +320,39 @@ pub fn ask_agent(server: &Path, request: &Value) -> io::Result<Value> {
 
 /// Ask the Dust at `server` to open `paths`; `line` applies to the first.
 pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result<()> {
-    let mut stream = UnixStream::connect(server)?;
     let mut message = String::new();
     for (index, path) in paths.iter().enumerate() {
         let line = if index == 0 { line.unwrap_or(0) } else { 0 };
         let path = std::path::absolute(path)?;
         let encoded =
             serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
-        message.push_str(&format!("{line}\t{encoded}\n"));
+        let entry = format!("{line}\t{encoded}\n");
+        if message.len().saturating_add(entry.len()) > REQUEST_BYTE_CEILING as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "remote request exceeds 1 MiB"));
+        }
+        message.push_str(&entry);
     }
-    stream.write_all(message.as_bytes())
+    let mut stream = UnixStream::connect(server)?;
+    stream.set_write_timeout(Some(REQUEST_TIMEOUT))?;
+    stream.set_read_timeout(Some(REQUEST_TIMEOUT * 2))?;
+    stream.write_all(message.as_bytes())?;
+    stream.shutdown(Shutdown::Write)?;
+    let mut answer = [0; 3];
+    stream.read_exact(&mut answer).map_err(|error| {
+        io::Error::new(error.kind(), format!("Dust did not accept all remote files: {error}"))
+    })?;
+    if &answer != b"ok\n" {
+        return Err(io::Error::other("Dust did not accept all remote files"));
+    }
+    Ok(())
 }
 
 /// Write a lazygit config whose edit keys open files in this Dust, and return the
 /// `LG_CONFIG_FILE` value that layers it over the user's own lazygit config.
 pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
-    let program = format!("\"{}\"", dust.display()).replace('\'', "''");
-    let overlay = directory.join("lazygit.yml");
+    let program = format!("'{}'", dust.display().to_string().replace('\'', "'\\''"))
+        .replace('\'', "''");
+    let overlay = directory.join(format!("lazygit-{}.yml", std::process::id()));
     fs::write(
         &overlay,
         format!(
@@ -289,6 +421,187 @@ mod tests {
             ]
         );
         assert!(parse("3\trelative.rs").is_none());
+    }
+
+    #[test]
+    fn request_admission_is_bounded_without_blocking_the_listener() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        for _ in 0..=REQUEST_QUEUE_CEILING {
+            writeln!(client, "0\t/file.rs").unwrap();
+        }
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).unwrap(), 0);
+        let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
+        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        send(server.path(), &[PathBuf::from("/next.rs")], None).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(RemoteRequest::Open(open)) = server.try_request() {
+                assert_eq!(open.path, Path::new("/next.rs"));
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn bulk_opens_report_rejected_admission_instead_of_silent_success() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING];
+        send(server.path(), &paths, None).unwrap();
+        assert!(send(server.path(), &[PathBuf::from("/rejected.rs")], None).is_err());
+        let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
+        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        assert!(send(server.path(), &[PathBuf::from("/next.rs")], None).is_ok());
+
+        let server = RemoteServer::start(&directory.path().join("bulk")).unwrap();
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING + 1];
+        assert!(send(server.path(), &paths, None).is_err());
+    }
+
+    #[test]
+    fn final_unterminated_remote_lines_and_trailing_carriage_returns_are_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(b"0\t/first\r\r\n0\t/last\r").unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let mut answer = String::new();
+        client.read_to_string(&mut answer).unwrap();
+        assert_eq!(answer, "ok\n");
+        for expected in ["/first\r", "/last\r"] {
+            let Some(RemoteRequest::Open(open)) = server.try_request() else { panic!("missing file") };
+            assert_eq!(open.path, Path::new(expected));
+        }
+    }
+
+    #[test]
+    fn trickling_clients_cannot_extend_the_request_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut writer = client.try_clone().unwrap();
+        let trickling = thread::spawn(move || {
+            while writer.write_all(b"x").is_ok() {
+                thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let started = Instant::now();
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).unwrap(), 0);
+        assert!(started.elapsed() < REQUEST_TIMEOUT + Duration::from_secs(2));
+        trickling.join().unwrap();
+        assert!(server.try_request().is_none());
+    }
+
+    #[test]
+    fn dropping_the_server_stops_idle_and_reading_workers() {
+        for active in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let server = RemoteServer::start(directory.path()).unwrap();
+            let workers = Arc::downgrade(&server.stopping);
+            let path = server.path().to_owned();
+            let _client = active.then(|| {
+                let mut stream = UnixStream::connect(&path).unwrap();
+                stream.write_all(b"unfinished").unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                while server.reading.lock().unwrap().is_none() {
+                    assert!(std::time::Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(1));
+                }
+                stream
+            });
+            drop(server);
+            assert!(workers.upgrade().is_none(), "both workers released their stop flag");
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn dropping_the_server_after_its_socket_is_removed_still_stops_workers() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let workers = Arc::downgrade(&server.stopping);
+        fs::remove_file(server.path()).unwrap();
+        drop(server);
+        assert!(workers.upgrade().is_none());
+    }
+
+    #[test]
+    fn dropping_the_server_interrupts_a_stalled_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let server = RemoteServer::start(directory.path()).unwrap();
+        let mut client = UnixStream::connect(server.path()).unwrap();
+        writeln!(client, "agent\t{}", json!({"parent": 1, "prompt": "task"})).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let request = loop {
+            if let Some(RemoteRequest::Agent(request)) = server.try_request() {
+                break request;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        };
+        request.reply.send(Ok("x".repeat(4 * 1024 * 1024)));
+        while server.writing.lock().unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        let started = std::time::Instant::now();
+        drop(server);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn oversized_bulk_requests_are_rejected_before_connecting() {
+        let paths = vec![PathBuf::from(format!("/{}", "a".repeat(1024))); 400];
+        let error = send(Path::new("/no-such-dust.sock"), &paths, None).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn lazygit_commands_quote_shell_paths_separately_from_yaml() {
+        let directory = tempfile::tempdir().unwrap();
+        let dust = directory.path().join("dust '\"$HOME`echo expanded`\\binary");
+        fs::write(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&dust, fs::Permissions::from_mode(0o700)).unwrap();
+        lazygit_config(directory.path(), &dust).unwrap();
+        let overlay = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let yaml = fs::read_to_string(overlay).unwrap();
+        let command = yaml.lines().find_map(|line| line.trim().strip_prefix("edit: '")).unwrap()
+            .strip_suffix('\'').unwrap().replace("''", "'")
+            .replace("{{filename}}", "sample.rs");
+        let output = std::process::Command::new("sh").args(["-c", &command]).output().unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert_eq!(output.stdout, b"--remote\nsample.rs\n");
+    }
+
+    #[test]
+    fn lazygit_overlays_are_per_process() {
+        const CHILD_DIRECTORY: &str = "DUST_TEST_LAZYGIT_DIRECTORY";
+        if let Some(directory) = std::env::var_os(CHILD_DIRECTORY) {
+            lazygit_config(Path::new(&directory), Path::new("/second/dust")).unwrap();
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        lazygit_config(directory.path(), Path::new("/first/dust")).unwrap();
+        let first = directory.path().join(format!("lazygit-{}.yml", std::process::id()));
+        let original = fs::read_to_string(&first).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "remote::tests::lazygit_overlays_are_per_process"])
+            .env(CHILD_DIRECTORY, directory.path())
+            .status().unwrap();
+        assert!(status.success());
+        let overlays: Vec<_> = fs::read_dir(directory.path()).unwrap().map(Result::unwrap).collect();
+        assert_eq!(overlays.len(), 2);
+        assert_eq!(fs::read_to_string(first).unwrap(), original);
+        assert!(overlays.iter().any(|entry| fs::read_to_string(entry.path()).unwrap().contains("/second/dust")));
     }
 
     #[test]

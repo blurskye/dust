@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use super::InteractiveApplication;
 use crate::{
     editor::session::search::PickerPayload,
-    forge::{ForgeJobs, ForgeReply},
+    forge::{ForgeJobs, ForgeReply, ReviewCommentTarget},
     language::lsp::{LspLocation, LspPosition, LspRange, file_uri},
     ui::PromptKind,
     workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind},
@@ -19,8 +19,9 @@ pub(super) struct PullRequests {
     source: Option<crate::editor::session::workspace::WorkspaceVersion>,
     generation: u64,
     comment_body: Option<String>,
-    /// The file and 1-based line the open comment prompt is about.
-    comment_target: Option<(PathBuf, usize, String)>,
+    comment_sending: bool,
+    comment_loading: bool,
+    comment_target: Option<ReviewCommentTarget>,
 }
 
 impl PullRequests {
@@ -31,6 +32,8 @@ impl PullRequests {
             self.source = Some(source);
             self.comment_target = None;
             self.comment_body = None;
+            self.comment_sending = false;
+            self.comment_loading = false;
         }
     }
 }
@@ -67,6 +70,10 @@ impl InteractiveApplication {
 
     pub(super) fn begin_review_comment(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
+        if self.pull_requests.comment_sending || self.pull_requests.comment_loading {
+            self.notify_message("a review comment request is still running".into(), false);
+            return;
+        }
         if let Some(body) = self.pull_requests.comment_body.clone() {
             self.open_prompt(PromptKind::ReviewComment, body);
             return;
@@ -85,13 +92,22 @@ impl InteractiveApplication {
             .byte_to_line(self.state.views[view].cursor)
             .unwrap_or(0)
             + 1;
-        self.pull_requests.comment_target =
-            Some((path, line, self.state.buffers[buffer].text.to_string()));
-        self.open_prompt(PromptKind::ReviewComment, String::new());
+        self.pull_requests.comment_loading = true;
+        self.pull_requests.jobs.comment_target(
+            self.state.workspace_root.clone(),
+            self.pull_requests.generation,
+            path,
+            line,
+            self.state.buffers[buffer].text.to_string(),
+        );
+        self.notify_message("loading pull request for review comment…".into(), false);
     }
 
     pub(super) fn submit_review_comment(&mut self, body: String) {
-        let Some((path, line, text)) = self.pull_requests.comment_target.clone() else {
+        if self.pull_requests.comment_sending {
+            return;
+        }
+        let Some(target) = self.pull_requests.comment_target.clone() else {
             return;
         };
         if body.trim().is_empty() {
@@ -102,13 +118,12 @@ impl InteractiveApplication {
             return;
         }
         self.pull_requests.comment_body = Some(body.clone());
+        self.pull_requests.comment_sending = true;
         self.pull_requests.jobs.comment(
             self.state.workspace_root.clone(),
             self.pull_requests.generation,
-            path,
-            line,
+            target,
             body,
-            text,
         );
         self.notify_message("sending comment…".into(), false);
     }
@@ -156,7 +171,22 @@ impl InteractiveApplication {
                 ForgeReply::List(Err(error))
                 | ForgeReply::CheckedOut(Err(error))
                 | ForgeReply::Comments(Err(error)) => self.show_error(error),
+                ForgeReply::CommentTarget(Err(error)) => {
+                    self.pull_requests.comment_loading = false;
+                    self.show_error(error);
+                }
+                ForgeReply::CommentTarget(Ok(target)) => {
+                    self.pull_requests.comment_loading = false;
+                    self.pull_requests.comment_target = Some(target);
+                    self.pull_requests.comment_body = Some(String::new());
+                    if self.input.prompt().is_none() {
+                        self.open_prompt(PromptKind::ReviewComment, String::new());
+                    } else {
+                        self.notify_message("review comment ready; open it again when finished with this prompt".into(), false);
+                    }
+                }
                 ForgeReply::Commented(Err(error)) => {
+                    self.pull_requests.comment_sending = false;
                     if self.input.prompt().is_none()
                         && let Some(body) = self.pull_requests.comment_body.clone()
                     {
@@ -290,6 +320,7 @@ impl InteractiveApplication {
                     self.sync_picker_ui();
                 }
                 ForgeReply::Commented(Ok(())) => {
+                    self.pull_requests.comment_sending = false;
                     self.pull_requests.comment_target = None;
                     self.pull_requests.comment_body = None;
                     self.notify_message("comment sent".into(), false);
@@ -357,11 +388,61 @@ mod tests {
     }
 
     #[test]
+    fn sending_review_comments_cannot_reopen_the_prompt() {
+        let mut app = app();
+        app.pull_requests.prepare(app.workspace.version());
+        app.pull_requests.comment_body = Some("sending draft".into());
+        app.pull_requests.comment_sending = true;
+        app.begin_review_comment();
+        assert!(app.input.prompt().is_none());
+        assert_eq!(app.pull_requests.comment_body.as_deref(), Some("sending draft"));
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::Commented(Ok(())),
+        );
+        app.process_pull_request_events();
+        assert!(!app.pull_requests.comment_sending);
+        assert!(app.pull_requests.comment_body.is_none());
+    }
+
+    #[test]
+    fn loading_review_comments_does_not_replace_another_prompt() {
+        let mut app = app();
+        app.pull_requests.prepare(app.workspace.version());
+        app.pull_requests.comment_loading = true;
+        app.open_prompt(PromptKind::Command, "workspace.replace query=draft".into());
+        let target = ReviewCommentTarget {
+            path: app.state.workspace_root.join("file.txt"),
+            line: 3,
+            text: "source".into(),
+            head: crate::forge::PullRequestHead { number: 7, commit: "abc".into() },
+        };
+        app.pull_requests.jobs.reply_for_test(
+            app.state.workspace_root.clone(),
+            app.pull_requests.generation,
+            ForgeReply::CommentTarget(Ok(target)),
+        );
+        app.process_pull_request_events();
+        let prompt = app.input.prompt().unwrap();
+        assert_eq!(prompt.kind, PromptKind::Command);
+        assert_eq!(prompt.input, "workspace.replace query=draft");
+        app.close_prompt();
+        app.begin_review_comment();
+        assert_eq!(app.input.prompt().unwrap().kind, PromptKind::ReviewComment);
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().head.number, 7);
+        assert!(!app.pull_requests.comment_loading);
+    }
+
+    #[test]
     fn failed_review_comments_restore_the_body_and_target() {
         let mut app = app();
         app.pull_requests.prepare(app.workspace.version());
         let path = app.state.workspace_root.join("file.txt");
-        app.pull_requests.comment_target = Some((path.clone(), 3, "source".into()));
+        app.pull_requests.comment_target = Some(ReviewCommentTarget {
+            path: path.clone(), line: 3, text: "source".into(),
+            head: crate::forge::PullRequestHead { number: 7, commit: "abc".into() },
+        });
         app.pull_requests.comment_body = Some("my draft".into());
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
@@ -370,8 +451,8 @@ mod tests {
         );
         app.process_pull_request_events();
         assert_eq!(app.input.prompt().unwrap().input, "my draft");
-        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().0, path);
-        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().1, 3);
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().path, path);
+        assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().line, 3);
     }
     #[test]
     fn retired_forge_replies_and_picker_payloads_cannot_change_the_workspace() {

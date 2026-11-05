@@ -377,6 +377,87 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
 }
 
 #[test]
+fn component_output_queues_enforce_cumulative_byte_budgets() {
+    use component_api::dust::plugin::host::{
+        Host, PickerProviderChunk, PickerProviderItem, ProviderTerminal, ProviderTerminalKind,
+        ProviderErrorCode, VirtualDocumentFull, VirtualDocumentPatch, VirtualDocumentPatchSet,
+        VirtualDocumentProposal, VirtualDocumentProposalKind, VirtualDocumentErrorCode,
+    };
+    let mut host = ComponentHostState {
+        runtime_epoch: 0,
+        limits: super::component::ComponentLimits::new(wasmtime::StoreLimitsBuilder::new().build(), 64 * 1024 * 1024),
+        capabilities: [PluginCapability::PickerProviders, PluginCapability::VirtualDocuments].into_iter().collect(),
+        declared_content_types: BTreeSet::new(),
+        snapshot: None,
+        proposals: Vec::new(),
+        messages: Vec::new(),
+        config: BTreeMap::new(),
+        ui_revision: None,
+        confirmation_available: true,
+        confirmation_result_only: false,
+        ui_requests: Vec::new(),
+        ui_events: Vec::new(),
+        next_ui_token: 1,
+        pending_ui_tokens: BTreeSet::new(),
+        confirmation_requests: Vec::new(),
+        confirmation_results: Vec::new(),
+        next_confirmation_token: 1,
+        host_events: Vec::new(),
+        delivered_host_event_ids: BTreeSet::new(),
+        host_event_acknowledgements: Vec::new(),
+        execution_available: true,
+        pending_storage: BTreeMap::new(),
+        storage_policy: None,
+        storage_requests: Vec::new(),
+        storage_results: Vec::new(),
+        next_storage_token: 1,
+        provider_requests: Vec::new(),
+        delivered_provider_requests: BTreeSet::from([1]),
+        provider_chunks: Vec::new(),
+        virtual_document_requests: Vec::new(),
+        delivered_virtual_document_requests: BTreeSet::from([1]),
+        virtual_document_proposals: Vec::new(),
+    };
+    let chunk = || PickerProviderChunk {
+        request: 1, sequence: 1,
+        items: (0..128).map(|id| PickerProviderItem {
+            id: id.to_string(), primary: "p".repeat(1024), secondary: None,
+            action_data: vec![0; 4096],
+        }).collect(),
+        terminal: ProviderTerminal { kind: ProviderTerminalKind::More, error: None },
+    };
+    host.queue_picker_provider_chunk(chunk()).unwrap();
+    assert_eq!(host.queue_picker_provider_chunk(chunk()).unwrap_err().code, ProviderErrorCode::ByteCeiling);
+    assert_eq!(host.provider_chunks.len(), 1);
+    host.provider_chunks.clear();
+    host.queue_picker_provider_chunk(chunk()).unwrap();
+
+    let full = || VirtualDocumentProposal {
+        request: 1, document: 1, cancellation_generation: 1,
+        kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
+            expected_revision: None, revision: 1, title: "Document".into(), language: "text".into(),
+            text: "x".repeat(1024 * 1024),
+        }),
+    };
+    for _ in 0..3 { host.queue_virtual_document_proposal(full()).unwrap(); }
+    assert_eq!(host.queue_virtual_document_proposal(full()).unwrap_err().code, VirtualDocumentErrorCode::ByteCeiling);
+    assert_eq!(host.virtual_document_proposals.len(), 3);
+    host.virtual_document_proposals.clear();
+    let patches = || VirtualDocumentProposal {
+        request: 1, document: 1, cancellation_generation: 1,
+        kind: VirtualDocumentProposalKind::Patches(VirtualDocumentPatchSet {
+            expected_revision: 1, revision: 2,
+            patches: vec![VirtualDocumentPatch { start: 0, end: 0, replacement: "x".repeat(256 * 1024) }],
+        }),
+    };
+    for _ in 0..16 { host.queue_virtual_document_proposal(patches()).unwrap(); }
+    assert_eq!(host.queue_virtual_document_proposal(patches()).unwrap_err().code, VirtualDocumentErrorCode::ByteCeiling);
+    assert_eq!(host.virtual_document_proposals.len(), 16);
+    host.virtual_document_proposals.clear();
+    host.queue_virtual_document_proposal(full()).unwrap();
+}
+
+#[test]
 fn static_manifest_contribution_index_is_namespaced_deterministic_and_pure() {
     let manifest = manifest();
     let index =
@@ -609,6 +690,33 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
         assert!(std::time::Instant::now() < deadline, "activation timed out");
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn execution_before_activation_removes_the_workers_indexed_candidate() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("manifest.toml"), toml::to_string(&manifest()).unwrap()).unwrap();
+    let mut manager = PluginManager::start(4);
+    let load = manager.index_from_store(
+        "demo".into(), root.path().into(), "manifest.toml".into(),
+        "missing-component.wasm".into(), PluginLimits::default(),
+    ).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if manager.poll().unwrap().iter().any(|event| matches!(event, PluginEvent::Indexed { .. })) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    manager.execute(empty_execution_request()).unwrap();
+    assert!(matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+        WorkerEvent::Failed { load: failed, error: PluginError::NotActive, .. } if failed == load));
+    // Foreground has not polled the failure yet. Activation must not find a
+    // candidate, rather than trying to load its missing component.
+    manager.activate_indexed("demo", load, "0".repeat(64)).unwrap();
+    assert!(matches!(manager.receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+        WorkerEvent::Failed { load: failed, error: PluginError::IndexNotAccepted, .. } if failed == load));
 }
 
 #[test]
@@ -1107,6 +1215,9 @@ impl ExecutionFixture {
             .insert("demo".into(), PluginStatus::Active(vec!["run".into()]));
         manager.next_load = 2;
         (manager, Self { requests, events })
+    }
+    pub(crate) fn assert_no_requests(&self) {
+        assert!(matches!(self.requests.try_recv(), Err(mpsc::TryRecvError::Empty)));
     }
     pub(crate) fn take(&self) -> CapturedExecution {
         match self

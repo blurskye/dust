@@ -24,6 +24,7 @@ fn movement_and_edit_commands_apply_through_registry_transactions() {
     assert_eq!(state.views[view].cursor.get(), 4);
 
     state.policy = crate::editor::EditingPolicy {
+        tab_width: 2,
         indent_width: 2,
         expand_tabs: false,
         ..crate::editor::EditingPolicy::default()
@@ -40,11 +41,9 @@ fn movement_and_edit_commands_apply_through_registry_transactions() {
     state
         .apply_transaction(outcome.transaction.as_ref().expect("transaction"))
         .expect("apply");
-    assert!(
-        state.buffers[state.views[view].buffer]
-            .text
-            .to_string()
-            .starts_with('\t')
+    assert_eq!(
+        state.buffers[state.views[view].buffer].text.to_string(),
+        "\tone two"
     );
 }
 
@@ -320,7 +319,7 @@ fn indentation_and_joins_accept_multibyte_endpoints() {
         ],
         1,
     );
-    assert!(state.buffers[buffer].text.to_string().ends_with('é'));
+    assert_eq!(state.buffers[buffer].text.to_string(), "    é");
     let (mut state, buffer, view) = editing("a   \né\n", 3);
     apply(&mut state, "edit.join_lines", &[], 1);
     assert_eq!(state.buffers[buffer].text.to_string(), "a é\n");
@@ -343,6 +342,166 @@ fn indentation_and_joins_accept_multibyte_endpoints() {
         1,
     );
     assert_eq!(state.buffers[buffer].text.to_string(), "a é\n");
+}
+
+#[test]
+fn joins_preserve_the_final_newline_without_joining_a_synthetic_line() {
+    for (source, cursor, count, expected, expected_cursor) in [
+        ("a\n", 0, 1, "a\n", 0),
+        ("a\nb\n", 2, 1, "a\nb\n", 2),
+        ("a\nb\n", 0, 99, "a b\n", 1),
+        ("a\nb", 0, 99, "a b", 1),
+        ("", 0, 1, "", 0),
+    ] {
+        let (mut state, buffer, view) = editing(source, cursor);
+        apply(&mut state, "edit.join_lines", &[], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.views[view].cursor.get(), expected_cursor);
+    }
+}
+
+#[test]
+fn joins_keep_trailing_whitespace_on_only_the_final_joined_line() {
+    for (source, count, expected) in [
+        ("a\nb  \nc", 1, "a b  \nc"),
+        ("a  \n  b \t\n c  \n", 3, "a b c  \n"),
+        ("a\n \t\nb", 1, "a\nb"),
+    ] {
+        let (mut state, buffer, _) = editing(source, 0);
+        apply(&mut state, "edit.join_lines", &[], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+    }
+}
+
+#[test]
+fn joining_an_empty_line_keeps_the_cursor_on_the_last_grapheme() {
+    for source in ["a\n\nb", "é\n\nb", "e\u{301}\n\nb"] {
+        let (mut state, buffer, view) = editing(source, 0);
+        apply(&mut state, "edit.join_lines", &[], 1);
+        assert_eq!(state.views[view].cursor.get(), 0);
+        assert_eq!(state.buffers[buffer].text.to_string(), source.replacen("\n\n", "\n", 1));
+        apply(&mut state, "edit.delete_char", &[], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), "\nb");
+    }
+}
+
+#[test]
+fn toggle_case_advances_over_replacement_bytes_and_stays_on_the_line() {
+    let (mut state, buffer, view) = editing("ab", 0);
+    apply(&mut state, "edit.toggle_case", &[], 1);
+    assert_eq!(state.views[view].cursor.get(), 1);
+    apply(&mut state, "edit.toggle_case", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "AB");
+    assert_eq!(state.views[view].cursor.get(), 1);
+
+    for (source, count, expected, expected_cursor) in [
+        ("éx", 1, "Éx", 2),
+        ("ßx", 1, "SSx", 2),
+        ("ß\nx", 1, "SS\nx", 1),
+        ("e\u{301}x\ny", 99, "E\u{301}X\ny", 3),
+        ("e\u{301}\nx", 99, "E\u{301}\nx", 0),
+        ("\nx", 99, "\nx", 0),
+        ("", 1, "", 0),
+    ] {
+        let (mut state, buffer, view) = editing(source, 0);
+        apply(&mut state, "edit.toggle_case", &[], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.views[view].cursor.get(), expected_cursor);
+    }
+}
+
+#[test]
+fn counted_toggle_case_traverses_a_long_line_in_a_large_document() {
+    let line = "e\u{301}".repeat(8192);
+    let rest = "unchanged\n".repeat(8192);
+    let (mut state, buffer, view) = editing(&format!("{line}\n{rest}"), 0);
+    apply(&mut state, "edit.toggle_case", &[], 8192);
+    assert_eq!(
+        state.buffers[buffer].text.to_string(),
+        format!("{}\n{rest}", "E\u{301}".repeat(8192))
+    );
+    assert_eq!(state.views[view].cursor.get(), 8191 * 3);
+}
+
+#[test]
+fn indentation_shifts_display_columns_with_independent_tab_and_indent_widths() {
+    for (source, indent, expand_tabs, tab_width, indent_width, expected) in [
+        ("foo", true, false, 8, 4, "    foo"),
+        ("    foo", true, false, 8, 4, "\tfoo"),
+        ("\tfoo", false, false, 8, 4, "    foo"),
+        ("  \tfoo", false, false, 8, 4, "    foo"),
+        ("\t  foo", false, false, 8, 4, "      foo"),
+        ("  foo", false, false, 8, 4, "foo"),
+        ("\tfoo", true, true, 8, 4, "            foo"),
+        ("\tfoo", false, true, 8, 4, "    foo"),
+        ("foo", true, false, 2, 4, "\t\tfoo"),
+        ("\n", true, false, 8, 4, "\n"),
+    ] {
+        let (mut state, buffer, view) = editing(source, 0);
+        state.policy.tab_width = tab_width;
+        state.policy.indent_width = indent_width;
+        state.policy.expand_tabs = expand_tabs;
+        apply(
+            &mut state,
+            "edit.operator",
+            &[
+                ("operator", if indent { "indent" } else { "unindent" }),
+                ("motion", "line"),
+                ("linewise", "true"),
+            ],
+            1,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected, "{source:?}");
+        let expected_cursor = expected.find('f').unwrap_or(0);
+        assert_eq!(state.views[view].cursor.get(), expected_cursor);
+    }
+}
+
+#[test]
+fn visual_indentation_shifts_each_line_by_the_requested_number_of_levels() {
+    let (mut state, buffer, view) = editing("foo\n\tbar\n\n", 0);
+    state.policy.tab_width = 8;
+    state.policy.indent_width = 4;
+    state.policy.expand_tabs = false;
+    for (operator, expected, cursor) in [
+        ("indent", "\t    foo\n\t\t    bar\n\n", 5),
+        ("unindent", "foo\n\tbar\n\n", 0),
+    ] {
+        state.views[view].mode = crate::editor::EditorMode::VisualLine;
+        state.views[view].selection = Some(crate::editor::Selection {
+            anchor: crate::editor::text::ByteOffset(0),
+            head: crate::editor::text::ByteOffset(state.buffers[buffer].text.len_bytes() - 1),
+            kind: crate::editor::SelectionKind::Line,
+        });
+        apply(
+            &mut state,
+            "edit.operator",
+            &[("operator", operator), ("motion", "visual"), ("linewise", "true")],
+            3,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.views[view].cursor.get(), cursor);
+    }
+}
+
+#[test]
+fn indentation_positions_the_cursor_on_the_first_affected_nonblank() {
+    for (source, operator, expected, cursor) in [
+        ("before\nfoo\n", "indent", "before\n    foo\n", 11),
+        ("before\n        foo\n", "unindent", "before\n    foo\n", 11),
+    ] {
+        let (mut state, buffer, view) = editing(source, 7);
+        apply(
+            &mut state,
+            "edit.operator",
+            &[("operator", operator), ("motion", "line"), ("linewise", "true")],
+            1,
+        );
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.views[view].cursor.get(), cursor);
+        apply(&mut state, "edit.delete_char", &[], 1);
+        assert_eq!(state.buffers[buffer].text.to_string(), "before\n    oo\n");
+    }
 }
 
 #[test]

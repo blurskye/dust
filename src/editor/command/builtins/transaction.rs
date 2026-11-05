@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::editor::{
     state::{BufferId, EditingPolicy, EditorMode, TransactionId, ViewId},
     text::{
@@ -129,8 +131,8 @@ pub(super) fn build_join_lines(
     let first_line = text.byte_to_line(cursor).map_err(failed)?;
     let last_line = first_line
         .saturating_add(count)
-        .min(text.len_lines().saturating_sub(1));
-    if last_line == first_line {
+        .min(text.visible_lines().saturating_sub(1));
+    if last_line <= first_line {
         return Ok(());
     }
     let start = text.line_to_byte(first_line).map_err(failed)?;
@@ -144,14 +146,22 @@ pub(super) fn build_join_lines(
             joined.push_str(content.trim_end());
             boundary = joined.len();
         } else {
-            let content = content.trim();
+            let content = if line == last_line {
+                content.trim_start()
+            } else {
+                content.trim()
+            };
             if !joined.is_empty() && !content.is_empty() {
                 joined.push(' ');
             }
             joined.push_str(content);
         }
     }
-    let target = ByteOffset(start.get() + boundary);
+    let last_character = joined
+        .grapheme_indices(true)
+        .next_back()
+        .map_or(0, |(index, _)| index);
+    let target = ByteOffset(start.get() + boundary.min(last_character));
     transaction.operations.push(EditorOperation::ApplyEdits {
         buffer,
         edits: TextEditSet::new(
@@ -177,19 +187,16 @@ pub(super) fn build_toggle_case(
     cursor: ByteOffset,
     count: usize,
 ) -> Result<(), CommandError> {
+    let line = text.byte_to_line(cursor).map_err(failed)?;
+    let line_start = text.line_to_byte(line).map_err(failed)?;
+    let source = text.line(line).map_err(failed)?;
+    let content = source.strip_suffix('\n').unwrap_or(&source);
     let mut end = cursor;
     let mut replacement = String::new();
-    for _ in 0..count {
-        let next = next_grapheme_boundary(text, end);
-        if next == end {
-            break;
-        }
-        let grapheme = text
-            .slice(ByteRange::new(end, next).map_err(failed)?)
-            .map_err(failed)?;
-        if grapheme == "\n" {
-            break;
-        }
+    for grapheme in content[cursor.get() - line_start.get()..]
+        .graphemes(true)
+        .take(count)
+    {
         for character in grapheme.chars() {
             if character.is_lowercase() {
                 replacement.extend(character.to_uppercase());
@@ -199,9 +206,17 @@ pub(super) fn build_toggle_case(
                 replacement.push(character);
             }
         }
-        end = next;
+        end = ByteOffset(end.get() + grapheme.len());
     }
     if end != cursor {
+        let advance = if end.get() < line_start.get() + content.len() {
+            replacement.len()
+        } else {
+            replacement
+                .grapheme_indices(true)
+                .next_back()
+                .map_or(0, |(index, _)| index)
+        };
         transaction.operations.push(EditorOperation::ApplyEdits {
             buffer,
             edits: TextEditSet::new(
@@ -214,7 +229,7 @@ pub(super) fn build_toggle_case(
         });
         transaction.operations.push(EditorOperation::SetCursor {
             view,
-            position: cursor,
+            position: ByteOffset(cursor.get() + advance),
         });
     }
     Ok(())
@@ -252,33 +267,38 @@ pub(super) fn build_indent(
         // Empty lines stay empty, as in Vim.
         if indent && line.trim_end_matches(['\r', '\n']).is_empty() {
             replacement.push_str(line);
-        } else if indent {
-            for _ in 0..levels {
-                if policy.expand_tabs {
-                    replacement.push_str(&" ".repeat(policy.indent_width));
-                } else {
-                    replacement.push('\t');
-                }
-            }
-            replacement.push_str(line);
         } else {
-            let mut rest = line;
-            for _ in 0..levels {
-                rest = match rest.strip_prefix('\t') {
-                    Some(rest) => rest,
-                    None => {
-                        let spaces = rest
-                            .bytes()
-                            .take_while(|byte| *byte == b' ')
-                            .take(policy.indent_width)
-                            .count();
-                        &rest[spaces..]
-                    }
-                };
+            let tab_width = policy.tab_width.max(1);
+            let mut columns = 0;
+            let mut prefix_len = 0;
+            for byte in line.bytes() {
+                match byte {
+                    b' ' => columns += 1,
+                    b'\t' => columns += tab_width - columns % tab_width,
+                    _ => break,
+                }
+                prefix_len += 1;
             }
-            replacement.push_str(rest);
+            let shift = policy.indent_width.saturating_mul(levels);
+            let columns = if indent {
+                columns.saturating_add(shift)
+            } else {
+                columns.saturating_sub(shift)
+            };
+            if policy.expand_tabs {
+                replacement.push_str(&" ".repeat(columns));
+            } else {
+                replacement.push_str(&"\t".repeat(columns / tab_width));
+                replacement.push_str(&" ".repeat(columns % tab_width));
+            }
+            replacement.push_str(&line[prefix_len..]);
         }
     }
+    let first_line = replacement.split('\n').next().unwrap_or_default();
+    let first_nonblank = first_line
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(0, |(index, _)| index);
     transaction.operations.push(EditorOperation::ApplyEdits {
         buffer,
         edits: TextEditSet::new(
@@ -291,7 +311,7 @@ pub(super) fn build_indent(
     });
     transaction.operations.push(EditorOperation::SetCursor {
         view,
-        position: start,
+        position: ByteOffset(start.get() + first_nonblank),
     });
     Ok(())
 }

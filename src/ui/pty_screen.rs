@@ -104,6 +104,7 @@ pub struct PtyScreen {
     term: Term<Replies>,
     parser: Processor,
     replies: Replies,
+    pending_replies: Vec<u8>,
     scrollback_bytes: Option<usize>,
     default_colors: (crate::config::ThemeColor, crate::config::ThemeColor),
 }
@@ -119,9 +120,10 @@ impl PtyScreen {
             term: Term::new(config, &size(columns, rows), replies.clone()),
             parser: Processor::new(),
             replies,
+            pending_replies: Vec::new(),
             scrollback_bytes: None,
             default_colors: (
-                theme.styles.terminal_background.foreground,
+                theme.styles.terminal_text.foreground,
                 theme.styles.terminal_background.background,
             ),
         }
@@ -137,7 +139,11 @@ impl PtyScreen {
                 + std::mem::size_of::<alacritty_terminal::grid::Row<Cell>>())
     }
     pub fn feed_bytes(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        // OSC queries end at BEL or ST. Answer before later sequences can change the palette.
+        for part in bytes.split_inclusive(|byte| matches!(byte, b'\x07' | b'\\' | 0x9c)) {
+            self.parser.advance(&mut self.term, part);
+            self.resolve_replies();
+        }
         self.expire_sync(std::time::Instant::now());
     }
     pub fn feed_bytes_tracked(
@@ -197,6 +203,7 @@ impl PtyScreen {
     pub fn expire_sync(&mut self, now: std::time::Instant) -> bool {
         if self.sync_deadline().is_some_and(|deadline| deadline <= now) {
             self.parser.stop_sync(&mut self.term);
+            self.resolve_replies();
             true
         } else {
             false
@@ -204,13 +211,15 @@ impl PtyScreen {
     }
     /// Bytes the terminal owes the program, such as answers to cursor-position queries.
     pub fn take_replies(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending_replies)
+    }
+    fn resolve_replies(&mut self) {
         let events = self
             .replies
             .0
             .lock()
             .map(|mut events| std::mem::take(&mut *events))
             .unwrap_or_default();
-        let mut replies = Vec::new();
         for event in events {
             let text = match event {
                 Event::PtyWrite(text) => text,
@@ -235,25 +244,31 @@ impl PtyScreen {
                 }
                 _ => continue,
             };
-            replies.extend_from_slice(text.as_bytes());
+            self.pending_replies.extend_from_slice(text.as_bytes());
         }
-        replies
     }
     pub fn set_theme(&mut self, theme: &crate::config::ThemeConfig) {
         self.default_colors = (
-            theme.styles.terminal_background.foreground,
+            theme.styles.terminal_text.foreground,
             theme.styles.terminal_background.background,
         );
     }
 
     pub fn resize(&mut self, columns: u16, rows: u16) {
-        if let Some(bytes) = self.scrollback_bytes {
+        let history = self.scrollback_bytes.map(|bytes| Self::scrollback_lines(columns, bytes));
+        if history.is_some_and(|_| usize::from(columns) < self.term.columns()) {
             self.term.set_options(Config {
-                scrolling_history: Self::scrollback_lines(columns, bytes),
+                scrolling_history: history.unwrap(),
                 ..Config::default()
             });
         }
         self.term.resize(size(columns, rows));
+        if let Some(scrolling_history) = history {
+            self.term.set_options(Config {
+                scrolling_history,
+                ..Config::default()
+            });
+        }
     }
     #[must_use]
     pub fn dimensions(&self) -> (usize, usize) {
@@ -381,7 +396,9 @@ fn pty_cell(cell: &Cell, colors: &alacritty_terminal::term::color::Colors) -> Pt
         } else {
             cell.c.to_string()
         };
-    text.extend(cell.zerowidth().into_iter().flatten());
+    if !flags.contains(Flags::HIDDEN) {
+        text.extend(cell.zerowidth().into_iter().flatten());
+    }
     PtyCell {
         text,
         style,
@@ -468,6 +485,7 @@ pub fn encode_focus(focused: bool, enabled: bool) -> Option<&'static [u8]> {
 }
 pub struct TerminalMouseEncoding {
     pub event: crate::editor::input::TerminalMouseInput,
+    pub modifiers: crate::editor::input::Modifiers,
     pub column: u16,
     pub row: u16,
     pub left: u16,
@@ -482,6 +500,7 @@ pub struct TerminalMouseEncoding {
 pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u8>> {
     let TerminalMouseEncoding {
         event,
+        modifiers,
         column,
         row,
         left,
@@ -515,7 +534,7 @@ pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u
         crate::editor::input::TerminalMouseInput::ScrollLeft => PtyMouseEvent::Press(66),
         crate::editor::input::TerminalMouseInput::ScrollRight => PtyMouseEvent::Press(67),
     };
-    let bytes = encode_sgr_mouse(event, column - left, row - top, mode, sgr)?;
+    let bytes = encode_sgr_mouse(event, column - left, row - top, mode, sgr, modifiers)?;
     (bytes.len() <= ceiling).then_some(bytes)
 }
 
@@ -525,6 +544,7 @@ pub fn encode_sgr_mouse(
     row: u16,
     mode: PtyMouseMode,
     sgr: bool,
+    modifiers: crate::editor::input::Modifiers,
 ) -> Option<Vec<u8>> {
     if mode == PtyMouseMode::Off {
         return None;
@@ -532,17 +552,23 @@ pub fn encode_sgr_mouse(
     let (button, final_byte) = match event {
         PtyMouseEvent::Press(b) => (b, 'M'),
         PtyMouseEvent::Release(button) => (button, 'm'),
-        PtyMouseEvent::Move(b) if matches!(mode, PtyMouseMode::Drag | PtyMouseMode::Any) => {
+        PtyMouseEvent::Move(b)
+            if mode == PtyMouseMode::Any || (mode == PtyMouseMode::Drag && b != 3) =>
+        {
             (b.saturating_add(32), 'M')
         }
         PtyMouseEvent::Move(_) => return None,
     };
+    let modifier_bits = (u8::from(modifiers.shift) * 4)
+        | (u8::from(modifiers.alt) * 8)
+        | (u8::from(modifiers.control) * 16);
+    let button = button | modifier_bits;
     if !sgr {
         if column > 222 || row > 222 {
             return None;
         }
         let button = if matches!(event, PtyMouseEvent::Release(_)) {
-            3
+            3 | modifier_bits
         } else {
             button
         };
@@ -602,6 +628,19 @@ mod tests {
     }
 
     #[test]
+    fn widening_reflows_history_before_reducing_its_byte_budget() {
+        let bytes = 6 * (10 * std::mem::size_of::<alacritty_terminal::term::cell::Cell>()
+            + std::mem::size_of::<alacritty_terminal::grid::Row<alacritty_terminal::term::cell::Cell>>());
+        let mut screen = PtyScreen::with_scrollback_bytes(10, 2, bytes);
+        let text = format!("A{}", "x".repeat(79));
+        screen.feed_bytes(text.as_bytes());
+        assert_eq!(screen.scrollback_len(), 6);
+        screen.resize(20, 2);
+        assert_eq!(screen.lines().concat(), text);
+        assert!(screen.scrollback_len() <= PtyScreen::scrollback_lines(20, bytes));
+    }
+
+    #[test]
     fn quiet_synchronized_output_expires_without_more_bytes() {
         let mut screen = PtyScreen::new(10, 2, 4);
         screen.feed_bytes(b"\x1b[?2026hframe");
@@ -635,6 +674,70 @@ mod tests {
     }
 
     #[test]
+    fn color_queries_observe_the_palette_at_each_query() {
+        for terminator in ["\x07", "\x1b\\"] {
+            let mut screen = PtyScreen::new(10, 2, 4);
+            screen.feed_bytes(format!(
+                "\x1b]11;rgb:12/34/56{terminator}\x1b]11;?{terminator}\x1b]11;rgb:ab/cd/ef{terminator}\x1b]11;?{terminator}"
+            ).as_bytes());
+            assert_eq!(String::from_utf8(screen.take_replies()).unwrap(), format!(
+                "\x1b]11;rgb:1212/3434/5656{terminator}\x1b]11;rgb:abab/cdcd/efef{terminator}"
+            ));
+        }
+    }
+
+    #[test]
+    fn default_foreground_queries_use_the_terminal_text_style() {
+        let mut theme = crate::config::load_bundled_config().theme;
+        theme.styles.terminal_text.foreground = crate::config::ThemeColor::Rgb(0x12, 0x34, 0x56);
+        theme.styles.terminal_background.foreground = crate::config::ThemeColor::Rgb(0xab, 0xcd, 0xef);
+        let mut screen = PtyScreen::new(10, 2, 4);
+        screen.set_theme(&theme);
+        screen.feed_bytes(b"\x1b]10;?\x07");
+        assert_eq!(screen.take_replies(), b"\x1b]10;rgb:1212/3434/5656\x07");
+        let screen = PtyScreen::new(10, 2, 4);
+        assert_eq!(screen.default_colors.0, crate::config::load_bundled_config().theme.styles.terminal_text.foreground);
+    }
+
+    #[test]
+    fn mouse_modifiers_survive_clicks_releases_drags_and_wheel_reports() {
+        use crate::editor::input::{Modifiers, TerminalMouseInput};
+        for (event, mode, button, suffix) in [
+            (TerminalMouseInput::LeftDown, PtyMouseMode::Click, 0, 'M'),
+            (TerminalMouseInput::RightUp, PtyMouseMode::Click, 2, 'm'),
+            (TerminalMouseInput::MiddleDrag, PtyMouseMode::Drag, 33, 'M'),
+            (TerminalMouseInput::ScrollDown, PtyMouseMode::Click, 65, 'M'),
+        ] {
+            for (modifiers, bits) in [
+                (Modifiers { shift: true, ..Default::default() }, 4),
+                (Modifiers { alt: true, ..Default::default() }, 8),
+                (Modifiers { control: true, ..Default::default() }, 16),
+                (Modifiers { shift: true, alt: true, control: true }, 28),
+            ] {
+                let report = super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
+                    event: event.clone(), modifiers,
+                    column: 12, row: 23, left: 10, top: 20, width: 8, height: 6,
+                    mode, sgr: true, ceiling: 64,
+                }).unwrap();
+                assert_eq!(report, format!("\x1b[<{};3;4{suffix}", button | bits).as_bytes());
+            }
+        }
+        let modifiers = Modifiers { control: true, ..Default::default() };
+        assert_eq!(encode_sgr_mouse(PtyMouseEvent::Release(0), 2, 3, PtyMouseMode::Click, false, modifiers).unwrap(), b"\x1b[M\x33\x23\x24");
+    }
+
+    #[test]
+    fn drag_tracking_ignores_motion_without_a_pressed_button() {
+        for sgr in [false, true] {
+            assert!(encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Drag, sgr, Default::default()).is_none());
+            assert!(encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Any, sgr, Default::default()).is_some());
+            for button in 0..=2 {
+                assert!(encode_sgr_mouse(PtyMouseEvent::Move(button), 0, 0, PtyMouseMode::Drag, sgr, Default::default()).is_some());
+            }
+        }
+    }
+
+    #[test]
     fn mouse_releases_preserve_buttons_and_legacy_reports_are_bounded() {
         for button in 0..=2 {
             assert_eq!(
@@ -643,25 +746,26 @@ mod tests {
                     2,
                     3,
                     PtyMouseMode::Click,
-                    true
+                    true,
+                    Default::default()
                 )
                 .unwrap(),
                 format!("\x1b[<{button};3;4m").as_bytes(),
             );
         }
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Press(2), 2, 3, PtyMouseMode::Click, false).unwrap(),
+            encode_sgr_mouse(PtyMouseEvent::Press(2), 2, 3, PtyMouseMode::Click, false, Default::default()).unwrap(),
             b"\x1b[M\x22\x23\x24"
         );
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Release(2), 2, 3, PtyMouseMode::Click, false).unwrap(),
+            encode_sgr_mouse(PtyMouseEvent::Release(2), 2, 3, PtyMouseMode::Click, false, Default::default()).unwrap(),
             b"\x1b[M\x23\x23\x24"
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Press(0), 223, 0, PtyMouseMode::Click, false).is_none()
+            encode_sgr_mouse(PtyMouseEvent::Press(0), 223, 0, PtyMouseMode::Click, false, Default::default()).is_none()
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Click, false).is_none()
+            encode_sgr_mouse(PtyMouseEvent::Move(3), 0, 0, PtyMouseMode::Click, false, Default::default()).is_none()
         );
     }
 
@@ -717,6 +821,14 @@ mod tests {
             }
         );
         assert!(row(&screen, 0)[7].continuation);
+    }
+
+    #[test]
+    fn concealed_cells_hide_combining_characters_too() {
+        let mut screen = PtyScreen::new(10, 2, 4);
+        screen.feed_bytes("\x1b[8me\u{301}\x1b[0mX".as_bytes());
+        assert_eq!(row(&screen, 0)[0].text, " ");
+        assert_eq!(screen.lines()[0], " X");
     }
 
     #[test]
@@ -800,15 +912,16 @@ mod tests {
         assert_eq!(encode_focus(true, true), Some(&b"\x1b[I"[..]));
         assert!(encode_focus(false, false).is_none());
         assert_eq!(
-            encode_sgr_mouse(PtyMouseEvent::Press(0), 2, 3, PtyMouseMode::Click, true).unwrap(),
+            encode_sgr_mouse(PtyMouseEvent::Press(0), 2, 3, PtyMouseMode::Click, true, Default::default()).unwrap(),
             b"\x1b[<0;3;4M"
         );
         assert!(
-            encode_sgr_mouse(PtyMouseEvent::Move(0), 1, 1, PtyMouseMode::Click, true).is_none()
+            encode_sgr_mouse(PtyMouseEvent::Move(0), 1, 1, PtyMouseMode::Click, true, Default::default()).is_none()
         );
         assert_eq!(
             super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
                 event: crate::editor::input::TerminalMouseInput::LeftDown,
+                modifiers: Default::default(),
                 column: 12,
                 row: 23,
                 left: 10,
@@ -825,6 +938,7 @@ mod tests {
         assert!(
             super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
                 event: crate::editor::input::TerminalMouseInput::Move,
+                modifiers: Default::default(),
                 column: 9,
                 row: 20,
                 left: 10,

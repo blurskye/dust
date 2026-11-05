@@ -567,7 +567,7 @@ impl PromptMove {
     pub fn apply(self, text: &str, cursor: usize) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
         let class = |grapheme: &str| {
-            let character = grapheme.chars().next().unwrap();
+            let character = grapheme.chars().next().unwrap_or(' ');
             if character.is_whitespace() {
                 0
             } else if character.is_alphanumeric() || character == '_' {
@@ -960,5 +960,8 @@ mod tests {
         let text = "👩‍💻! next";
         assert_eq!(PromptMove::WordRight.apply(text, 0), "👩‍💻! ".len());
         assert_eq!(PromptMove::WordLeft.apply(text, "👩‍💻!".len()), 0);
+        assert_eq!(PromptMove::WordRight.apply("e\u{301}.x", 0), 3);
+        assert_eq!(PromptMove::WordLeft.apply("e\u{301}.x", 3), 0);
+        assert_eq!(PromptMove::WordLeft.apply("👩‍💻 x", 12), 0);
     }
 }

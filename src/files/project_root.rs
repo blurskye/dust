@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{error::VfsError, recovery::read_bounded_utf8, vfs::canonical_path};
+use super::{error::VfsError, vfs::{canonical_path, read_file_with_ceiling}};
 
 pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
 pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;
@@ -204,14 +204,11 @@ pub(super) fn regular_project_marker(directory: &Path, marker: &str) -> Option<f
 }
 
 pub(super) fn bounded_project_marker(directory: &Path, marker: &str) -> Option<String> {
-    let metadata = regular_project_marker(directory, marker)?;
-    metadata.file_type().is_file().then(|| {
-        fs::File::open(directory.join(marker))
-            .ok()
-            .and_then(|file| {
-                read_bounded_utf8(file, PROJECT_ROOT_MANIFEST_BYTE_CEILING, "project marker").ok()
-            })
-    })?
+    let bytes = read_file_with_ceiling(
+        &directory.join(marker),
+        PROJECT_ROOT_MANIFEST_BYTE_CEILING,
+    ).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 pub(super) fn project_root_evidence(
@@ -284,10 +281,11 @@ pub(super) fn project_root_is_valid(
             })
             .any(|marker| {
                 bounded_project_marker(directory, marker).is_some_and(|source| {
+                    let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
                     let source = if marker == "package.json" {
-                        source
+                        source.to_owned()
                     } else {
-                        jsonc_source(&source)
+                        jsonc_source(source)
                     };
                     serde_json::from_str::<serde_json::Value>(&source)
                         .is_ok_and(|value| value.is_object())
@@ -323,7 +321,7 @@ fn jsonc_source(source: &str) -> String {
                 index += 1;
             }
             b'/' if !quoted && bytes.get(index + 1) == Some(&b'/') => {
-                while index < bytes.len() && bytes[index] != b'\n' {
+                while index < bytes.len() && !matches!(bytes[index], b'\r' | b'\n') {
                     bytes[index] = b' ';
                     index += 1;
                 }

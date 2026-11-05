@@ -166,10 +166,11 @@ impl ResolvedConfiguration {
             )
         } else {
             let segments = crate::config::config_key_segments(key)?;
-            let canonical = segments.join(".");
             let value =
                 resolved_toml_value(toml::Value::try_from(&self.settings).ok()?, &segments)?;
-            let source = if self.user_setting_keys.contains(&canonical) {
+            let user_key = (1..=segments.len()).rev().map(|length| segments[..length].join("."))
+                .find(|ancestor| self.user_setting_keys.contains(ancestor));
+            let source = if user_key.is_some() {
                 &self.sources.settings
             } else {
                 // Inherited values continue to identify the bundled declaration.
@@ -177,7 +178,8 @@ impl ResolvedConfiguration {
                     std::sync::LazyLock::new(|| PathBuf::from("<bundled:config>"));
                 &BUNDLED_SETTINGS
             };
-            (value, source, self.user_setting_spans.get(&canonical), true)
+            let span = user_key.as_ref().and_then(|key| self.user_setting_spans.get(key));
+            (value, source, span, true)
         };
         let mut final_source = source.display().to_string();
         if let Some(span) = span {
@@ -281,15 +283,12 @@ impl ResolvedKeymaps {
         command: &str,
     ) -> EffectiveBinding {
         let mut keys = self
-            .reverse
+            .inspections
             .iter()
-            .filter(|((mapped_context, fingerprint), _)| {
-                mapped_context == context
-                    && fingerprint
-                        .strip_prefix(command)
-                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))
-            })
-            .map(|(_, binding)| binding.keys.clone())
+            .filter(|inspection| inspection.context == context
+                && inspection.command.as_deref() == Some(command)
+                && self.mapping_reachable(inspection))
+            .map(|inspection| inspection.keys.clone())
             .collect::<Vec<_>>();
         keys.sort();
         keys.dedup();
@@ -375,6 +374,27 @@ impl ResolvedKeymaps {
         &self.groups
     }
 
+    fn mapping_reachable(&self, inspection: &KeymapInspection) -> bool {
+        let Ok(keys) = inspection.keys.split_whitespace().map(KeyEvent::from_str)
+            .collect::<Result<Vec<_>, _>>() else { return false; };
+        let mut sequence = KeymapSequence::default();
+        let mut resolution = MappingResolution::Missing;
+        for (index, key) in keys.iter().enumerate() {
+            resolution = self.resolve(&mut sequence, &inspection.context, key.clone());
+            if index + 1 < keys.len()
+                && !matches!(resolution, MappingResolution::Pending | MappingResolution::Ambiguous)
+            {
+                return false;
+            }
+        }
+        if resolution == MappingResolution::Ambiguous {
+            resolution = sequence.flush_timeout();
+        }
+        matches!(resolution, MappingResolution::Ready(invocation)
+            if Some(invocation.id.as_str()) == inspection.command.as_deref()
+                && invocation.arguments == inspection.arguments)
+    }
+
     /// Projects reachable continuations from the already-resolved mapping roster.
     /// This is read-only presentation data, never an alternate dispatch table.
     #[must_use]
@@ -410,7 +430,8 @@ impl ResolvedKeymaps {
                 .map(KeyEvent::from_str)
                 .collect::<Result<Vec<_>, _>>()
                 .ok()?;
-            if sequence.len() <= prefix.len() || !sequence.starts_with(&prefix) {
+            if sequence.len() <= prefix.len() || !sequence.starts_with(&prefix)
+                || !self.mapping_reachable(inspection) {
                 continue;
             }
             let next_key = sequence[prefix.len()].to_string();

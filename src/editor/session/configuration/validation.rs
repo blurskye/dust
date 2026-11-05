@@ -144,11 +144,15 @@ pub(in crate::editor::session) fn invocation_fingerprint(invocation: &CommandInv
     let mut fingerprint = invocation.id.as_str().to_owned();
     for (name, value) in &invocation.arguments {
         fingerprint.push('|');
+        fingerprint.push_str(&name.len().to_string());
+        fingerprint.push(':');
         fingerprint.push_str(name);
         fingerprint.push('=');
         match value {
             CommandValue::String(value) => {
                 fingerprint.push_str("string:");
+                fingerprint.push_str(&value.len().to_string());
+                fingerprint.push(':');
                 fingerprint.push_str(value);
             }
             CommandValue::Bool(value) => {

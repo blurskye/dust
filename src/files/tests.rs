@@ -11,7 +11,7 @@ use tempfile::tempdir;
 use super::directory::{list_scoped_directory, natural_name_key};
 use super::recovery::{
     RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
-    bounded_recovery_entries, read_bounded_bytes, read_bounded_utf8, recovery_journal_size_allowed,
+    bounded_recovery_entries, read_bounded_bytes, recovery_journal_size_allowed,
     recovery_payload_size_allowed,
 };
 use super::vfs::checked_atomic_write;
@@ -142,6 +142,27 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
 }
 
 #[test]
+fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
+    use super::project_root::{bounded_project_marker, PROJECT_ROOT_MANIFEST_BYTE_CEILING};
+    let root = tempdir().unwrap();
+    let marker = root.path().join("Cargo.toml");
+    nix::unistd::mkfifo(&marker, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::remove_file(&marker).unwrap();
+    let target = root.path().join("manifest");
+    fs::write(&target, "[workspace]\n").unwrap();
+    std::os::unix::fs::symlink(&target, &marker).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::remove_file(&marker).unwrap();
+    fs::write(&marker, "x".repeat(PROJECT_ROOT_MANIFEST_BYTE_CEILING as usize + 1)).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::write(&marker, [0xff]).unwrap();
+    assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
+    fs::write(&marker, "[workspace]\n").unwrap();
+    assert_eq!(bounded_project_marker(root.path(), "Cargo.toml").as_deref(), Some("[workspace]\n"));
+}
+
+#[test]
 fn project_roots_accept_jsonc_configs_and_whitespace_separated_go_directives() {
     use super::project_root::project_root_is_valid;
     let root = tempdir().unwrap();
@@ -192,6 +213,37 @@ fn project_roots_accept_jsonc_configs_and_whitespace_separated_go_directives() {
 }
 
 #[test]
+fn project_roots_accept_bom_prefixed_node_manifests() {
+    let root = tempdir().unwrap();
+    for marker in ["tsconfig.json", "jsconfig.json", "package.json"] {
+        fs::write(root.path().join(marker), "\u{feff}{\"name\":\"demo\"}").unwrap();
+        let resolution = super::project_root::resolve_project_root(
+            1,
+            1,
+            &root.path().join("src/new.ts"),
+            root.path(),
+            &[marker.into()],
+            ProjectRootStrategy::Node,
+        ).unwrap();
+        assert_eq!(resolution.project_root, Some(fs::canonicalize(root.path()).unwrap()));
+        fs::remove_file(root.path().join(marker)).unwrap();
+    }
+}
+
+#[test]
+fn project_roots_accept_jsonc_comments_with_all_line_endings() {
+    use super::project_root::project_root_is_valid;
+    let root = tempdir().unwrap();
+    for marker in ["tsconfig.json", "jsconfig.json"] {
+        for newline in ["\r", "\n", "\r\n"] {
+            let source = format!("{{{newline}// comment{newline}\"compilerOptions\": {{}},{newline}}}");
+            fs::write(root.path().join(marker), source).unwrap();
+            assert!(project_root_is_valid(root.path(), &[marker.into()], ProjectRootStrategy::Node));
+        }
+    }
+}
+
+#[test]
 fn explorer_watch_detects_ignore_rule_edits_in_parent_directories() {
     let root = tempdir().unwrap();
     let child = root.path().join("child");
@@ -209,6 +261,44 @@ fn explorer_watch_detects_ignore_rule_edits_in_parent_directories() {
         after,
         explorer_directory_fingerprint(&child, &roots, 10, 4096).unwrap()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn explorer_watch_reads_symlinked_ignore_files() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let target = outside.path().join("ignore");
+    fs::write(&target, "one.txt\n").unwrap();
+    symlink(&target, root.path().join(".gitignore")).unwrap();
+    let roots = vec![fs::canonicalize(root.path()).unwrap()];
+    let before = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
+    fs::write(&target, "two.txt\n").unwrap();
+    let after = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
+    assert_eq!(before.entries, after.entries);
+    assert_ne!(before.ignore_rules, after.ignore_rules);
+
+    // Initial reconciliation must also succeed, not just individual reads.
+    let mut watch = ExplorerWatchService::start(ExplorerWatchPolicy {
+        poll_interval: Duration::from_millis(10),
+        debounce: Duration::ZERO,
+        ..ExplorerWatchPolicy::default()
+    }).unwrap();
+    watch.reconcile(1, roots.clone(), roots).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut revision = 0;
+    loop {
+        revision += 1;
+        fs::write(&target, format!("{revision}.txt\n")).unwrap();
+        let events = watch.poll();
+        assert!(!events.iter().any(|event| matches!(event, super::ExplorerWatchEvent::Failed { .. })));
+        if events.iter().any(|event| matches!(event, super::ExplorerWatchEvent::Batch(_))) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "watch did not observe symlink target edits");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -496,23 +586,21 @@ fn document_reader_accepts_exact_limit_and_rejects_limit_plus_one() {
 
 #[test]
 fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
-    let exact =
-        read_bounded_utf8(std::io::Cursor::new(b"1234"), 4, "test journal").expect("exact limit");
-    assert_eq!(exact, "1234");
-    let overflow = read_bounded_utf8(std::io::Cursor::new(b"12345"), 4, "test journal")
-        .expect_err("limit plus one");
-    assert_eq!(overflow, "test journal exceeds 4 byte safety ceiling");
-    let invalid = read_bounded_utf8(std::io::Cursor::new([0xff]), 4, "test journal")
-        .expect_err("invalid UTF-8");
-    assert!(invalid.starts_with("test journal is not UTF-8:"));
-
     let root = tempdir().expect("tempdir");
     let path = root.path().join("invalid.toml");
+    fs::write(&path, "1234").unwrap();
+    let exact = super::vfs::read_file_with_ceiling(&path, 4).expect("exact limit");
+    assert_eq!(exact, b"1234");
+    fs::write(&path, "12345").unwrap();
+    assert!(matches!(super::vfs::read_file_with_ceiling(&path, 4),
+        Err(VfsError::DocumentTooLarge { maximum_bytes: 4, .. })));
     fs::write(&path, [0xff]).expect("invalid journal");
+    let invalid = super::recovery::read_recovery_source(&path).expect_err("invalid UTF-8");
+    assert!(invalid.starts_with("recovery journal is not UTF-8:"));
     let discovery = discover_recovery(root.path());
     assert!(discovery.records.is_empty());
     assert!(discovery.diagnostics[0].contains("recovery journal is not UTF-8"));
-    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time(), &[]);
     assert!(cleanup.deleted.is_empty());
     assert!(
         path.exists(),
@@ -541,7 +629,7 @@ fn recovery_discovery_bounds_records_and_aggregate_content() {
             .records
             .is_empty()
     );
-    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 0, 0, crate::clock::system_time(), &[]);
     assert_eq!(cleanup.deleted.len(), 3);
 }
 
@@ -562,7 +650,7 @@ fn recovery_discovery_keeps_the_same_newest_journals_as_cleanup() {
     let discovery = discover_recovery(root.path());
     assert!(discovery.diagnostics.is_empty());
     assert_eq!(discovery.records.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>(), newest);
-    let cleanup = cleanup_recovery(root.path(), 100, 0, now);
+    let cleanup = cleanup_recovery(root.path(), 100, 0, now, &[]);
     assert_eq!(cleanup.deleted.len(), 100);
     assert!(cleanup.diagnostics.is_empty());
     assert!(discovery.records.iter().all(|(path, _)| path.exists()));
@@ -579,7 +667,7 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
     write_recovery(&second, &RecoveryRecord::new(None, 2, "two".into())).expect("second");
     fs::write(&corrupt, "broken=[").expect("corrupt");
 
-    let cleanup = cleanup_recovery(root.path(), 1, 0, crate::clock::system_time());
+    let cleanup = cleanup_recovery(root.path(), 1, 0, crate::clock::system_time(), &[]);
     assert_eq!(cleanup.deleted.len(), 1);
     assert!(
         corrupt.exists(),
@@ -588,7 +676,7 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
     assert_eq!(discover_recovery(root.path()).records.len(), 1);
 
     let future = crate::clock::system_time() + Duration::from_secs(2 * 86_400);
-    let cleanup = cleanup_recovery(root.path(), 10, 1, future);
+    let cleanup = cleanup_recovery(root.path(), 10, 1, future, &[]);
     assert_eq!(cleanup.deleted.len(), 1, "age policy removes the survivor");
     assert!(corrupt.exists());
 }
@@ -626,7 +714,7 @@ fn recovery_cleanup_waits_for_replacement_before_deciding_retention() {
     let (finished, completion) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         started.send(()).unwrap();
-        finished.send(cleanup_recovery(&directory, 10, 1, now)).unwrap();
+        finished.send(cleanup_recovery(&directory, 10, 1, now, &[])).unwrap();
     });
     starting.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(matches!(completion.recv_timeout(Duration::from_millis(50)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
@@ -639,6 +727,20 @@ fn recovery_cleanup_waits_for_replacement_before_deciding_retention() {
     assert!(cleanup.deleted.is_empty());
     assert!(cleanup.diagnostics.is_empty());
     assert_eq!(discover_recovery(root.path()).records, vec![(journal, fresh)]);
+}
+
+#[test]
+fn recovery_cleanup_preserves_protected_journals_beyond_count_and_age_limits() {
+    let root = tempdir().unwrap();
+    let live = root.path().join("live.toml");
+    let old = root.path().join("old.toml");
+    for path in [&live, &old] {
+        write_recovery(path, &RecoveryRecord::new(None, 1, "draft".into())).unwrap();
+    }
+    let future = crate::clock::system_time() + Duration::from_secs(31 * 86_400);
+    let cleanup = cleanup_recovery(root.path(), 0, 30, future, std::slice::from_ref(&live));
+    assert_eq!(cleanup.deleted, vec![old]);
+    assert!(live.exists());
 }
 
 #[test]

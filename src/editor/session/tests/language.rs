@@ -7,7 +7,7 @@ use crate::ui::render::overlays::{
 
 #[test]
 fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
@@ -73,7 +73,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
 
 #[test]
 fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     fs::create_dir(app.state.workspace_root.join(".git")).unwrap();
     let template = app.tooling.entries().iter()
         .find(|entry| entry.definition.id == "rust-analyzer").unwrap().definition.clone();
@@ -129,7 +129,7 @@ fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root(
 
 #[test]
 fn a_server_the_user_stopped_stays_stopped_until_asked_for() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
@@ -182,7 +182,7 @@ fn a_server_the_user_stopped_stays_stopped_until_asked_for() {
 
 #[test]
 fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let nested = app.state.workspace_root.join("nested");
     fs::create_dir_all(nested.join("src")).unwrap();
     fs::write(
@@ -333,7 +333,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
 
 #[test]
 fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let nested = app.state.workspace_root.join("nested-debug");
     fs::create_dir_all(nested.join("src")).unwrap();
     fs::write(
@@ -400,7 +400,7 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
 
 #[test]
 fn untrusted_workspace_blocks_project_local_language_server_launch() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),
@@ -497,7 +497,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
 
 #[test]
 fn generic_picker_filters_and_invokes_registry_commands() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::editor::PickerKind::Commands);
     assert!(
         app.ui
@@ -524,7 +524,7 @@ fn generic_picker_filters_and_invokes_registry_commands() {
 
 #[test]
 fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffers() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let first = app.state.workspace_root.join("first.rs");
     let second = app.state.workspace_root.join("second.rs");
     fs::write(&first, "abc").expect("first");
@@ -661,7 +661,7 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
 
 #[test]
 fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let server = "root:1:rust-analyzer".to_owned();
     let token = "cargo-check".to_owned();
     app.update_lsp_progress(
@@ -716,7 +716,7 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
 
 #[test]
 fn lsp_completion_applies_through_one_validated_transaction() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn ma"),
@@ -776,7 +776,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
 
 #[test]
 fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let count = usize::from(COMPLETION_MAX_ROWS) + 2;
     app.ui.language_completion = Some(crate::ui::LanguageCompletionState {
         typed: 0,
@@ -824,7 +824,7 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
 
 #[test]
 fn stale_lsp_workspace_edit_is_rejected_without_mutation() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     let (buffer, _) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("abc"),
@@ -871,7 +871,7 @@ fn rust_analyzer_toolchain_and_standalone_versions_are_not_conflated() {
 
 #[test]
 fn rustup_working_directory_follows_the_selected_document() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let project = root.join("nested");
     fs::create_dir(&project).unwrap();
@@ -906,7 +906,7 @@ fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
 #[test]
 fn background_tool_install_updates_preserve_the_selected_row() {
     use std::os::unix::fs::PermissionsExt;
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let directory = tempdir().unwrap();
     let rustup = directory.path().join("rustup");
     fs::write(&rustup, "#!/bin/sh\nexit 0\n").unwrap();
@@ -943,7 +943,7 @@ fn background_tool_install_updates_preserve_the_selected_row() {
 fn finished_tool_install_progress_cannot_restore_the_installing_state() {
     use std::os::unix::fs::PermissionsExt;
 
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary rustup directory");
     let rustup = directory.path().join("rustup");
     fs::write(&rustup, "#!/bin/sh\nexit 0\n").expect("rustup fixture");
@@ -995,7 +995,7 @@ fn finished_tool_install_progress_cannot_restore_the_installing_state() {
 #[cfg(unix)]
 #[test]
 fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary proxy directory");
     let rustup = directory.path().join("rustup");
     fs::write(&rustup, b"rustup").expect("rustup fixture");
@@ -1035,7 +1035,7 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
 
 #[test]
 fn reference_labels_cache_only_bounded_excerpts() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("references.rs");
     let location = |line| {
         let position = crate::language::lsp::LspPosition { line, character: 0 };
@@ -1061,7 +1061,7 @@ fn reference_labels_cache_only_bounded_excerpts() {
 
 #[test]
 fn symbol_picker_uses_the_session_key_to_resolve_position_encoding() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("symbol.rs");
     let (_, view) = app.state.open_text(TextBuffer::from_text("éx"), Some(path.clone())).unwrap();
     let definition = app.tooling.entries().iter()
@@ -1095,7 +1095,7 @@ fn symbol_picker_uses_the_session_key_to_resolve_position_encoding() {
 #[test]
 fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     use crate::editor::text::{ByteOffset, ByteRange, TextEdit, TextEditSet};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let definition = app
         .tooling
         .entries()
@@ -1185,7 +1185,7 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
 
 #[test]
 fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let definition = app
         .tooling
         .entries()
@@ -1283,7 +1283,7 @@ fn lsp_installation_mechanisms_are_host_specific() {
 #[test]
 fn tool_manager_probes_require_trust_and_follow_category_changes() {
     for safe in [false, true] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         app.tooling.fixture_retain(|_| false);
         let echo = crate::tools::discover_executable("echo").unwrap();
         for (id, kind) in [("probe-lsp", ToolKind::Lsp), ("probe-dap", ToolKind::Dap)] {
@@ -1329,7 +1329,7 @@ fn tool_manager_probes_require_trust_and_follow_category_changes() {
 
 #[test]
 fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("main.rs");
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source)).unwrap();
@@ -1409,7 +1409,7 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
 
 #[test]
 fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     let echo = crate::tools::discover_executable("echo").expect("echo executable");
@@ -1444,7 +1444,7 @@ fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
 
 #[test]
 fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     app.tooling.fixture_insert(crate::tools::ToolEntry {
@@ -1474,7 +1474,7 @@ fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
 
 #[test]
 fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.tooling
         .fixture_retain(|entry| entry.definition.kind != ToolKind::Lsp);
     app.tooling.fixture_insert(crate::tools::ToolEntry {
@@ -1522,7 +1522,7 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
 
 #[test]
 fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_tool_menu("lsp".into());
     let row_count = app.ui.tool_menu.as_ref().expect("menu").rows.len();
     for _ in 0..row_count {
@@ -1545,7 +1545,7 @@ fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
 
 #[test]
 fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.process_effect(crate::editor::AppEffect::OpenToolMenu("lsp".into()));
     let menu = app.ui.tool_menu.as_ref().expect("tool menu");
     assert_eq!(menu.category, "lsp");
@@ -1814,7 +1814,7 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
 
 #[test]
 fn slash_searches_the_tool_manager_by_name_and_language() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     app.open_tool_menu("all".into());
     app.handle_configured_key(KeyEvent::character('/'));
     assert_eq!(app.active_input_context(), "tool_manager_search");
@@ -1859,7 +1859,7 @@ fn slash_searches_the_tool_manager_by_name_and_language() {
 
 #[test]
 fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let definition = app
         .tooling
         .entries()
@@ -1907,7 +1907,7 @@ fn completion_keeps_its_start_when_the_request_takes_ownership_of_the_buffer() {
 
 #[test]
 fn completion_anchor_measures_wide_identifiers_in_terminal_cells() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("wide.rs");
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("obj.变量"), Some(path)).unwrap();
     app.state.views[view].cursor = ByteOffset("obj.变量".len());
@@ -1948,7 +1948,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
         resolve_item: None,
         resolved: true,
     };
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     let (buffer, view) = app.state.open_text(
         crate::editor::text::TextBuffer::from_text("person.na"),
@@ -2058,7 +2058,7 @@ pub(super) fn fixture_owned_lsp(
 
 #[test]
 fn overlapping_formatting_saves_wait_for_their_own_results() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.settings.lsp.format_on_save = true;
     app.configuration.install_fixture(fixture);
@@ -2109,7 +2109,7 @@ fn overlapping_formatting_saves_wait_for_their_own_results() {
 
 #[test]
 fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("saved-snapshot.rs");
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.settings.editor.final_newline = crate::config::FinalNewlinePolicy::Insert;
@@ -2134,7 +2134,7 @@ fn save_notifications_describe_written_text_not_newer_unsaved_edits() {
 
 #[test]
 fn active_document_retries_preserve_automatic_completion_after_typing() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("completion.rs");
     let (buffer, view) = app.state.open_text(TextBuffer::from_text(""), Some(path)).unwrap();
     app.set_dashboard_visibility(false);
@@ -2163,7 +2163,7 @@ fn active_document_retries_preserve_automatic_completion_after_typing() {
 fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui() {
     use crate::language::lsp::{LspFeature, LspProgressKind, LspRange, LspPosition};
     for display_progress in [true, false] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("loading.rs");
         let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path)).unwrap();
         app.set_dashboard_visibility(false);
@@ -2193,7 +2193,7 @@ fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_
 
 #[test]
 fn waiting_lsp_requests_stay_queued_while_their_server_is_starting() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("starting.rs");
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn main() {}"), Some(path)).unwrap();
     app.set_dashboard_visibility(false);
@@ -2221,7 +2221,7 @@ fn waiting_lsp_requests_stay_queued_while_their_server_is_starting() {
 
 #[test]
 fn save_notifications_reach_every_document_owner_after_buffer_switch() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("saved.rs");
     fs::write(&path, "old").unwrap();
     let (buffer, _) = app
@@ -2255,7 +2255,7 @@ fn save_notifications_reach_every_document_owner_after_buffer_switch() {
 
 #[test]
 fn save_as_detaches_previous_project_ownership_before_sync() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("old.rs");
     let (buffer, _) = app
         .state
@@ -2283,7 +2283,7 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
         DiagnosticBatch, DiagnosticDocument, DiagnosticValidity,
     };
     for effect in [AppEffect::LspStop, AppEffect::LspDetach, AppEffect::StopSelectedLsp] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("problem.rs");
         let (buffer, _) = app
             .state
@@ -2332,7 +2332,7 @@ fn explicit_lsp_stop_clears_push_and_pull_diagnostic_sources() {
 #[test]
 fn code_lens_commands_keep_their_originating_session() {
     use crate::language::lsp::*;
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("lens.rs");
     let (buffer, _) = app.state.open_text(TextBuffer::from_text("fn f() {}"), Some(path.clone())).unwrap();
     let first = fixture_owned_lsp(&mut app, "first", buffer);
@@ -2371,7 +2371,7 @@ fn code_action_command_waits_for_approval_of_its_edits() {
 fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure() {
     use crate::language::lsp::*;
     for disconnect in [false, true] {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("action.rs");
     let (buffer, _) = app
         .state
@@ -2436,7 +2436,7 @@ fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_fai
 fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
     use crate::language::lsp::*;
     for fail in [false, true] {
-        let mut app = app();
+        let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("action.rs");
         let target = path.with_file_name("renamed.rs");
         fs::write(&path, "old").unwrap();
@@ -2494,7 +2494,7 @@ fn code_action_command_waits_for_resource_application_and_stops_on_failure() {
 #[test]
 fn deferred_code_action_commands_belong_to_their_own_resource_proposals() {
     use crate::language::lsp::*;
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let mut fixtures = Vec::new();
     for name in ["first", "second"] {
         let path = app.state.workspace_root.join(format!("{name}.rs"));
@@ -2536,7 +2536,7 @@ fn deferred_code_action_commands_belong_to_their_own_resource_proposals() {
 #[test]
 fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
     use crate::language::lsp::{LspFeatureResult, LspPosition, LspRange};
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("selection.rs");
     let (buffer, view) = app.state.open_text(TextBuffer::from_text("abc def;"), Some(path.clone())).unwrap();
     app.set_dashboard_visibility(false);
@@ -2565,7 +2565,7 @@ fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
 
 #[test]
 fn explicit_detach_survives_autostart_until_attach() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     for root in app.workspace.roots().to_vec() {
         app.workspace.fixture_trust_identity(root.identity);
@@ -2596,7 +2596,7 @@ fn explicit_detach_survives_autostart_until_attach() {
 
 #[test]
 fn stopping_a_starting_server_retires_its_launch() {
-    let mut app = app();
+    let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state.open_text(
         crate::editor::text::TextBuffer::from_text("fn main() {}"),

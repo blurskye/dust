@@ -29,6 +29,20 @@ pub struct ReviewComment {
     pub body: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PullRequestHead {
+    pub number: u64,
+    pub commit: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReviewCommentTarget {
+    pub path: PathBuf,
+    pub line: usize,
+    pub text: String,
+    pub head: PullRequestHead,
+}
+
 #[derive(Debug)]
 pub enum ForgeReply {
     List(Result<Vec<PullRequest>, String>),
@@ -40,6 +54,7 @@ pub enum ForgeReply {
     /// The worktree the pull request was checked out into.
     CheckedOut(Result<PathBuf, String>),
     Comments(Result<Vec<ReviewComment>, String>),
+    CommentTarget(Result<ReviewCommentTarget, String>),
     Commented(Result<(), String>),
 }
 
@@ -206,16 +221,29 @@ impl ForgeJobs {
         });
     }
 
-    /// Comment on `line` (1-based) of `path` in the pull request for the current branch.
-    pub fn comment(
+    /// Capture the pull request and head before a review draft is opened.
+    pub fn comment_target(
         &self,
         root: PathBuf,
         generation: u64,
         path: PathBuf,
         line: usize,
-        body: String,
         text: String,
     ) {
+        self.spawn(root, generation, move |root| {
+            ForgeReply::CommentTarget(with_forge(root, |forge| current_head(root, forge))
+                .map(|head| ReviewCommentTarget { path, line, text, head }))
+        });
+    }
+
+    pub fn comment(
+        &self,
+        root: PathBuf,
+        generation: u64,
+        target: ReviewCommentTarget,
+        body: String,
+    ) {
+        let ReviewCommentTarget { path, line, text, head } = target;
         self.spawn(root, generation, move |root| {
             ForgeReply::Commented({
                 let relative = path
@@ -223,16 +251,13 @@ impl ForgeJobs {
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .into_owned();
-                with_forge(root, |forge| match forge {
+                with_forge(root, |forge| {
+                    check_comment_head(&head, &current_head(root, forge)?)?;
+                    let number = head.number;
+                    let commit = &head.commit;
+                    check_comment_text(root, commit, &relative, &text)?;
+                    match forge {
                     Forge::GitHub => {
-                        let view = run(root, "gh", &["pr", "view", "--json", "number,headRefOid"])?;
-                        let view: Value =
-                            serde_json::from_str(&view).map_err(|error| error.to_string())?;
-                        let number = view["number"]
-                            .as_u64()
-                            .ok_or("no pull request for this branch")?;
-                        let commit = view["headRefOid"].as_str().unwrap_or_default();
-                        check_comment_text(root, commit, &relative, &text)?;
                         run(
                             root,
                             "gh",
@@ -256,18 +281,6 @@ impl ForgeJobs {
                         .map(|_| ())
                     }
                     Forge::Gitea => {
-                        let number = current_number(root, Forge::Gitea)?;
-                        let view = run(
-                            root,
-                            "tea",
-                            &["api", &format!("repos/{{owner}}/{{repo}}/pulls/{number}")],
-                        )?;
-                        let view: Value =
-                            serde_json::from_str(&view).map_err(|error| error.to_string())?;
-                        let commit = view["head"]["sha"]
-                            .as_str()
-                            .ok_or("pull request head is missing")?;
-                        check_comment_text(root, commit, &relative, &text)?;
                         let review = serde_json::json!({
                             "event": "COMMENT",
                             "body": "",
@@ -287,10 +300,38 @@ impl ForgeJobs {
                         )
                         .map(|_| ())
                     }
+                    }
                 })
             })
         });
     }
+}
+
+fn current_head(root: &Path, forge: Forge) -> Result<PullRequestHead, String> {
+    let (number, commit) = match forge {
+        Forge::GitHub => {
+            let output = run(root, "gh", &["pr", "view", "--json", "number,headRefOid"])?;
+            let view: Value = serde_json::from_str(&output).map_err(|error| error.to_string())?;
+            let number = view["number"].as_u64().ok_or("no pull request for this branch")?;
+            let commit = view["headRefOid"].as_str().ok_or("pull request head is missing")?.to_owned();
+            (number, commit)
+        }
+        Forge::Gitea => {
+            let number = current_number(root, forge)?;
+            let output = run(root, "tea", &["api", &format!("repos/{{owner}}/{{repo}}/pulls/{number}")])?;
+            let view: Value = serde_json::from_str(&output).map_err(|error| error.to_string())?;
+            let commit = view["head"]["sha"].as_str().ok_or("pull request head is missing")?.to_owned();
+            (number, commit)
+        }
+    };
+    Ok(PullRequestHead { number, commit })
+}
+
+fn check_comment_head(expected: &PullRequestHead, current: &PullRequestHead) -> Result<(), String> {
+    if expected != current {
+        return Err("the pull request or its head changed; start a new review comment".into());
+    }
+    Ok(())
 }
 
 fn check_comment_text(root: &Path, commit: &str, path: &str, text: &str) -> Result<(), String> {
@@ -768,6 +809,14 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn review_drafts_require_the_original_pull_request_and_head() {
+        let original = PullRequestHead { number: 7, commit: "abc".into() };
+        assert!(check_comment_head(&original, &original).is_ok());
+        assert!(check_comment_head(&original, &PullRequestHead { number: 8, ..original.clone() }).is_err());
+        assert!(check_comment_head(&original, &PullRequestHead { commit: "def".into(), ..original.clone() }).is_err());
     }
 
     #[test]

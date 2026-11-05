@@ -734,7 +734,8 @@ fn highlight_spans(
         .map(|name| {
             (!uncoloured_capture(name))
                 .then(|| {
-                    Highlight::named(&format!("@{name}.{language}"))
+                    // Keep the language even when its theme is loaded after this parse.
+                    Highlight::register(&format!("@{name}.{language}"))
                         .or_else(|| Highlight::for_capture(name))
                 })
                 .flatten()
@@ -1444,11 +1445,11 @@ mod tests {
         assert_eq!(group("Title"), Some("@markup.heading.1.markdown"));
         assert_eq!(group("code"), Some("@markup.raw.markdown_inline"));
         assert_eq!(group("Sub"), Some("@markup.heading.2.markdown"));
-        assert_eq!(group("quote"), Some("@markup.quote"));
-        assert_eq!(group("bold"), Some("@markup.strong"));
-        assert_eq!(group("it* "), Some("@markup.italic"));
+        assert_eq!(group("quote"), Some("@markup.quote.markdown"));
+        assert_eq!(group("bold"), Some("@markup.strong.markdown_inline"));
+        assert_eq!(group("it* "), Some("@markup.italic.markdown_inline"));
         assert_eq!(group("link"), Some("@markup.link.label.markdown_inline"));
-        assert_eq!(group("https"), Some("@markup.link.url"));
+        assert_eq!(group("https"), Some("@markup.link.url.markdown_inline"));
         assert!(spans.windows(2).all(|pair| pair[0].end <= pair[1].start));
     }
     #[test]
@@ -1670,10 +1671,10 @@ mod tests {
                 .find(|span| span.start <= at && at < span.end)
                 .map(|span| span.role.name())
         };
-        assert_eq!(role_at("package"), Some("@keyword"));
-        assert_eq!(role_at("name"), Some("@type"));
-        assert_eq!(role_at("\"dust\""), Some("@string"));
-        assert_eq!(role_at("2"), Some("@number"));
+        assert_eq!(role_at("package"), Some("@keyword.toml"));
+        assert_eq!(role_at("name"), Some("@type.toml"));
+        assert_eq!(role_at("\"dust\""), Some("@string.toml"));
+        assert_eq!(role_at("2"), Some("@number.toml"));
     }
     #[test]
     fn scripts_without_an_extension_are_known_by_their_first_line() {
