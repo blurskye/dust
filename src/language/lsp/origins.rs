@@ -191,6 +191,14 @@ impl EditSourceFixture {
         }
         None
     }
+    pub(crate) fn requested_feature(&self) -> Option<super::model::LspFeature> {
+        while let Ok(command) = self.commands.try_recv() {
+            if let SessionCommand::Request { feature, .. } = command {
+                return Some(feature);
+            }
+        }
+        None
+    }
     pub(crate) fn executed_command(&self) -> Option<String> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Request {

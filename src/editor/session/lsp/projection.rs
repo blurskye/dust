@@ -241,7 +241,7 @@ impl LspSession {
                 state.definition.supports_language(&document.language_id)
                     && state.documents.contains_key(&buffer)
                     && document.path.starts_with(&state.root_path)
-                    && state.capabilities.as_ref().is_some_and(|c| LspFeature::Formatting.capability_for_document(c, document))
+                    && state.capabilities.as_ref().is_some_and(|c| c.formatting && c.supports_document("textDocument/formatting", document))
             })
             .map(|(key, _)| key.clone())
             .min()
@@ -1480,6 +1480,7 @@ mod tests {
             kind: None,
             snippet: false,
             documentation: None,
+            command: None,
             resolve_item: None,
             resolved: true,
         }
@@ -1607,6 +1608,7 @@ mod tests {
             severity: Some(1),
             source: None,
             code: None,
+            related: Vec::new(),
             message: "problem".into(),
             data: None,
         };

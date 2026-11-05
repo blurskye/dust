@@ -131,6 +131,7 @@ pub(super) struct TestKey {
 }
 struct Plan {
     remaining: VecDeque<(String, TaskConfig)>,
+    formatter: Option<crate::tools::ManagedFormatter>,
     adapter: AdapterContext,
     awaiting: bool,
 }
@@ -139,6 +140,7 @@ pub(super) struct TaskStep {
     requested: String,
     name: String,
     task: TaskConfig,
+    formatter: Option<crate::tools::ManagedFormatter>,
     adapter: AdapterContext,
     key: RunKey,
 }
@@ -221,11 +223,14 @@ impl TaskSession {
         config: &Config,
         workspace: &WorkspaceSession,
         configuration: u64,
+        formatter: Option<crate::tools::ManagedFormatter>,
     ) -> Result<(), String> {
         workspace
             .execution_allowed()
             .map_err(|_| "tasks run only in a trusted workspace".to_owned())?;
-        self.plan_checked(name, adapter, config, workspace, configuration)
+        self.plan_checked(name, adapter, config, workspace, configuration)?;
+        self.plans.get_mut(name).expect("admitted task plan").formatter = formatter;
+        Ok(())
     }
     fn plan_checked(
         &mut self,
@@ -266,6 +271,7 @@ impl TaskSession {
                         (name, task)
                     })
                     .collect(),
+                formatter: None,
                 adapter: adapter.clone(),
                 awaiting: false,
             },
@@ -337,6 +343,7 @@ impl TaskSession {
         Ok((
             TaskStep {
                 requested: requested.into(),
+                formatter: if name == requested { plan.formatter.take() } else { None },
                 name,
                 request: request.clone(),
                 task,
@@ -464,15 +471,19 @@ impl TaskSession {
         let request = JobRequest {
             program: result.executable,
             argv0: Some(step.request.executable.clone()),
-            arguments: step.task.arguments,
+            arguments: step.formatter.as_ref().map_or_else(
+                || step.task.arguments.into_iter().map(Into::into).collect(),
+                |formatter| formatter.arguments.clone(),
+            ),
             cwd: result.cwd,
             // A task runs with what the user's shell gave Dust, as a terminal does, and its own
             // settings win.
             environment: std::env::vars_os()
                 .filter_map(|(key, value)| {
-                    Some((key.into_string().ok()?, value.into_string().ok()?))
+                    Some((key.into_string().ok()?, value))
                 })
-                .chain(step.task.environment)
+                .chain(step.task.environment.into_iter().map(|(key, value)| (key, value.into())))
+                .chain(step.formatter.into_iter().flat_map(|formatter| formatter.environment))
                 .collect(),
             root_revision: result.root_revision,
             stdin,

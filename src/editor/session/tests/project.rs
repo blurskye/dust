@@ -2002,8 +2002,14 @@ fn save_as_reload_close_and_external_change_protection_work() {
     assert_eq!(app.state.buffers[buffer].text.to_string(), "external");
     app.invoke_insert_text("X".into());
 
+    let unsaved = app.state.buffers[buffer].text.to_string();
+    assert!(app.state.buffers[buffer].dirty);
     app.start_reload(false);
-    assert_eq!(app.documents.legacy_count(), 0);
+    assert_eq!(app.documents.pending_count(), 0);
+    wait_vfs(&mut app);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), unsaved);
+    assert!(app.state.buffers[buffer].dirty);
+    assert_eq!(fs::read(&path).unwrap(), b"external");
     app.start_reload(true);
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].text.to_string(), "external");

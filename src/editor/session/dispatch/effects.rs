@@ -3251,9 +3251,19 @@ impl InteractiveApplication {
                         break;
                     }
                 };
-                if let Err(error) = result {
-                    self.show_error(error);
-                    break;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.notify_message(
+                            "Document queue is full; remaining resources are still staged. Apply them again after pending work finishes.".into(),
+                            false,
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        self.show_error(error);
+                        break;
+                    }
                 }
             },
             effect => return Err(effect),
@@ -6013,26 +6023,27 @@ impl InteractiveApplication {
                     name.into(),
                     crate::config::TaskConfig {
                         kind: crate::config::TaskKind::Formatter,
-                        executable: tool.executable,
-                        arguments: tool.arguments,
+                        executable: tool.executable.clone(),
+                        arguments: Vec::new(),
                         cwd: None,
-                        environment: tool.environment,
+                        environment: BTreeMap::new(),
                         dependencies: Vec::new(),
                         timeout_ms: Some(10_000),
                         stdin: true,
                         matcher: None,
                     },
                 );
-                Some(config)
+                Some((config, tool))
             }
             _ => None,
         };
         match self.tasks.plan(
             name,
             &adapter,
-            managed.as_ref().unwrap_or(self.configuration.settings()),
+            managed.as_ref().map_or(self.configuration.settings(), |(config, _)| config),
             &self.workspace,
             self.configuration.binding_revision(),
+            managed.as_ref().map(|(_, tool)| tool.clone()),
         ) {
             Ok(()) => {}
             Err(error) => {
@@ -6592,6 +6603,7 @@ impl InteractiveApplication {
                 ) {
                     Ok(()) => {
                         if let Some(reply) = reply {
+                            self.terminal_session.set_debugger_owned(id);
                             self.debugger_session.register_terminal(id, reply);
                             self.close_debug_terminal();
                             self.debug_terminal = Some(id);
@@ -7064,7 +7076,9 @@ impl InteractiveApplication {
                 edits,
             }],
         };
-        if let Err(error) = self.apply_lsp_workspace_edit(workspace_edit, encoding) {
+        let applied = self.apply_lsp_workspace_edit(workspace_edit, encoding);
+        let succeeded = applied.is_ok();
+        if let Err(error) = applied {
             self.show_error(error);
         } else {
             if let Some(start) = insertion_start
@@ -7086,6 +7100,28 @@ impl InteractiveApplication {
         }
         self.language.clear_completion();
         self.ui.language_completion = None;
+        if succeeded && let Some(command) = item.command {
+            self.execute_lsp_command(&server, command);
+        }
+    }
+
+    pub(in crate::editor::session) fn execute_lsp_command(
+        &mut self,
+        server: &str,
+        command: crate::language::lsp::LspCommand,
+    ) {
+        self.sync_lsp_document();
+        self.refresh_lsp_projection_owner();
+        if let Some((_, document)) = self.active_lsp_document()
+            && let Err(error) = self.language.request_projected(
+                server,
+                LspFeature::ExecuteCommand(command),
+                document,
+                ByteOffset(0),
+            )
+        {
+            self.show_error(error);
+        }
     }
 
     pub(in crate::editor::session) fn select_snippet_current(&mut self) {
@@ -9613,8 +9649,22 @@ impl InteractiveApplication {
                     self.request_lsp(LspFeature::ExecuteCommand(command));
                 }
             }
-            Some(PickerPayload::LspCommand(command)) => {
-                self.request_lsp(LspFeature::ExecuteCommand(command));
+            Some(PickerPayload::LspCodeLens { server, lens }) => {
+                if let Some(command) = lens.command {
+                    self.execute_lsp_command(&server, command);
+                } else if let Some(item) = lens.resolve_item {
+                    self.refresh_lsp_projection_owner();
+                    if let Some((_, document)) = self.active_lsp_document()
+                        && let Err(error) = self.language.request_projected(
+                            &server,
+                            LspFeature::CodeLensResolve { item },
+                            document,
+                            ByteOffset(0),
+                        )
+                    {
+                        self.show_error(error);
+                    }
+                }
             }
             Some(PickerPayload::Buffer(buffer)) => {
                 if let Err(error) = self.state.show_buffer(buffer) {
@@ -14354,7 +14404,10 @@ impl InteractiveApplication {
             deadline: std::time::Instant::now()
                 + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
         });
-        self.request_lsp(LspFeature::Formatting);
+        self.request_lsp(LspFeature::Formatting {
+            tab_size: self.state.policy.tab_width,
+            insert_spaces: self.state.policy.expand_tabs,
+        });
         true
     }
 

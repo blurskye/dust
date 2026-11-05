@@ -3,6 +3,7 @@ use super::{
     LoadedConfig, PathBuf, ResolvedConfiguration, UnicodeSegmentation, UnicodeWidthStr,
     compile_keymap_entries, compile_keymaps, keymap_entries, plugin_owner_from_id,
     register_app_commands, register_builtin_commands, validate_configured_commands,
+    configured_context, compile::expanded_key_sequence, literal_key_sequence, InputContextRegistry,
 };
 
 pub(in crate::editor::session) fn base_safe_keymaps(
@@ -34,12 +35,14 @@ pub(in crate::editor::session) fn base_safe_keymaps(
     let mut entries = base.entries[..base.bundled_count].to_vec();
     let mut spans = Vec::new();
     let mut deferred = false;
+    let mut deferred_entries = Vec::new();
     for (offset, entry) in base.entries[base.bundled_count..].iter().enumerate() {
         let owner = plugin_owner_from_id(&entry.id)
             .or_else(|| entry.command.as_deref().and_then(plugin_owner_from_id))
             .or_else(|| entry.context.as_deref().and_then(plugin_owner_from_id));
         if owner.is_some_and(|owner| enabled.contains(owner)) {
             deferred = true;
+            deferred_entries.push(entry);
         } else {
             entries.push(entry.clone());
             if let Some(span) = base.user_spans.get(offset) {
@@ -47,12 +50,36 @@ pub(in crate::editor::session) fn base_safe_keymaps(
             }
         }
     }
+    let policy = &loaded.config.input.keymaps;
+    let leaders = literal_key_sequence("input.keymaps.leader", &policy.leader).and_then(|leader| {
+        literal_key_sequence("input.keymaps.local_leader", &policy.local_leader)
+            .map(|local_leader| (leader, local_leader))
+    });
+    let contexts = InputContextRegistry::bundled();
     let mut groups = base.groups[..base.bundled_group_count].to_vec();
     let mut group_spans = Vec::new();
     for (offset, group) in base.groups[base.bundled_group_count..].iter().enumerate() {
         let owner = plugin_owner_from_id(&group.id)
             .or_else(|| group.context.as_deref().and_then(plugin_owner_from_id));
-        if owner.is_some_and(|owner| enabled.contains(owner)) {
+        let deferred_continuation = leaders.as_ref().is_ok_and(|(leader, local_leader)| {
+            let Some(prefix) = group.prefix.as_deref().and_then(|prefix| {
+                expanded_key_sequence(prefix, leader, local_leader).ok()
+            }) else { return false; };
+            let Some(context) = group.context.as_deref().and_then(|context| {
+                configured_context(&contexts, context, &group.mode).ok()
+            }) else { return false; };
+            deferred_entries.iter().any(|entry| {
+                entry.context.as_deref().is_some_and(|entry_context| {
+                    configured_context(&contexts, entry_context, &entry.mode)
+                        .is_ok_and(|entry_context| entry_context == context)
+                }) && entry.keys.as_deref().is_some_and(|keys| {
+                    expanded_key_sequence(keys, leader, local_leader).is_ok_and(|keys| {
+                        keys.len() > prefix.len() && keys.starts_with(&prefix)
+                    })
+                })
+            })
+        });
+        if owner.is_some_and(|owner| enabled.contains(owner)) || deferred_continuation {
             deferred = true;
         } else {
             groups.push(group.clone());

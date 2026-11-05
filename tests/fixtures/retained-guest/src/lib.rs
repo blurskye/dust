@@ -20,6 +20,7 @@ static PRIVATE_HANDLE: AtomicU64 = AtomicU64::new(0);
 static PRIVATE_DIMENSIONS: AtomicU64 = AtomicU64::new(0);
 static STORAGE_PHASE: AtomicU8 = AtomicU8::new(0);
 static STORAGE_REVISION: AtomicU64 = AtomicU64::new(0);
+static STORAGE_TOKEN: AtomicU64 = AtomicU64::new(0);
 static PROVIDER_PHASE: AtomicU8 = AtomicU8::new(0);
 static VIRTUAL_PHASE: AtomicU8 = AtomicU8::new(0);
 static CONFIRMATION_HANDLE: AtomicU64 = AtomicU64::new(0);
@@ -326,13 +327,56 @@ fn drive_provider() -> Result<String, String> {
 
 fn drive_storage() -> Result<String, String> {
     let results = host::take_storage_results();
-    for result in &results {
-        if let Some(revision) = result.revision {
+    let phase = STORAGE_PHASE.load(Ordering::SeqCst);
+    let mut revision = STORAGE_REVISION.load(Ordering::SeqCst);
+    if phase == 0 {
+        if !results.is_empty() {
+            return Err("storage:0:unexpected-results".into());
+        }
+    } else {
+        let [result] = results.as_slice() else {
+            return Err(format!("storage:{phase}:expected-one-result"));
+        };
+        let valid_error = if phase == 3 {
+            result.error.as_ref().is_some_and(|error| {
+                error.code == host::StorageErrorCode::StaleRevision
+            })
+        } else {
+            result.error.is_none()
+        };
+        let valid_content = match phase {
+            1 => result.value.is_none()
+                && result.revision.is_some_and(|revision| revision > 0)
+                && result.entries.is_empty(),
+            2 => result.value.as_deref() == Some(b"value".as_slice())
+                && result.revision == Some(revision)
+                && result.entries.is_empty(),
+            3 | 6 => result.value.is_none()
+                && result.revision.is_none()
+                && result.entries.is_empty(),
+            4 => result.value.is_none()
+                && result.revision.is_none()
+                && matches!(result.entries.as_slice(), [entry]
+                    if entry.key == "item.one"
+                        && entry.value == b"value"
+                        && entry.revision == revision),
+            5 => result.value.is_none()
+                && result.revision == Some(revision)
+                && result.entries.is_empty(),
+            _ => false,
+        };
+        if result.token != STORAGE_TOKEN.load(Ordering::SeqCst)
+            || result.truncated
+            || !valid_error
+            || !valid_content
+        {
+            return Err(format!("storage:{phase}:invalid-result"));
+        }
+        if phase == 1 {
+            revision = result.revision.unwrap();
             STORAGE_REVISION.store(revision, Ordering::SeqCst);
         }
     }
-    let phase = STORAGE_PHASE.load(Ordering::SeqCst);
-    let revision = STORAGE_REVISION.load(Ordering::SeqCst);
     let request = match phase {
         0 => StorageRequest::CompareAndSet(StorageCasRequest {
             key: "item.one".into(),
@@ -354,15 +398,11 @@ fn drive_storage() -> Result<String, String> {
             expected_revision: revision,
         }),
         5 => StorageRequest::Get("item.one".into()),
-        _ => {
-            let missing = results
-                .last()
-                .is_some_and(|result| result.value.is_none() && result.error.is_none());
-            return Ok(format!("storage:done:missing={missing}"));
-        }
+        _ => return Ok("storage:done:missing=true".into()),
     };
     let token = host::queue_storage_request(&request)
         .map_err(|error| format!("storage:{:?}", error.code))?;
+    STORAGE_TOKEN.store(token, Ordering::SeqCst);
     let error = results
         .last()
         .and_then(|result| result.error.as_ref())

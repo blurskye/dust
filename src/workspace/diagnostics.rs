@@ -28,7 +28,9 @@ pub enum DiagnosticSeverity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RelatedDiagnostic {
     pub uri: String,
-    pub range: ByteRange,
+    /// Source coordinates, retained even when the related file is not open.
+    pub range: std::ops::Range<(usize, usize)>,
+    pub encoding: crate::editor::text::PositionEncoding,
     pub message: String,
 }
 
@@ -39,7 +41,7 @@ pub struct Diagnostic {
     pub range: ByteRange,
     pub severity: DiagnosticSeverity,
     pub source: String,
-    pub code: Option<String>,
+    pub code: Option<serde_json::Value>,
     pub message: String,
     pub related: Vec<RelatedDiagnostic>,
     pub tags: Vec<String>,
@@ -55,7 +57,7 @@ pub struct ProblemRow {
     pub range: ByteRange,
     pub severity: DiagnosticSeverity,
     pub source: String,
-    pub code: Option<String>,
+    pub code: Option<serde_json::Value>,
     pub message: String,
     pub data: Option<serde_json::Value>,
 }

@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     fs,
     path::PathBuf,
-    sync::mpsc::{self, SyncSender, TrySendError},
+    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
     thread,
     time::UNIX_EPOCH,
 };
@@ -75,11 +75,12 @@ impl StructuredLogs {
             {
                 *value = "[redacted]".into()
             } else {
-                *value = value
-                    .chars()
-                    .filter(|character| !character.is_control())
-                    .take(self.policy.maximum_field_bytes)
-                    .collect()
+                value.retain(|character| !character.is_control());
+                let mut end = value.len().min(self.policy.maximum_field_bytes);
+                while !value.is_char_boundary(end) {
+                    end -= 1;
+                }
+                value.truncate(end);
             }
         }
         let record = LogRecord {
@@ -115,9 +116,13 @@ fn write_record(path: &PathBuf, record: &LogRecord, policy: &LogPolicy) -> std::
         for index in (1..policy.rotations).rev() {
             let from = path.with_extension(format!("jsonl.{index}"));
             let to = path.with_extension(format!("jsonl.{}", index + 1));
-            let _ = fs::rename(from, to);
+            if let Err(error) = fs::rename(from, to)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(error);
+            }
         }
-        let _ = fs::rename(path, path.with_extension("jsonl.1"));
+        fs::rename(path, path.with_extension("jsonl.1"))?;
     }
     let mut options = fs::OpenOptions::new();
     options.create(true).append(true);
@@ -147,19 +152,29 @@ pub struct LiveCrashSnapshot {
 }
 pub struct CrashSnapshotWriter {
     sender: SyncSender<LiveCrashSnapshot>,
+    results: Receiver<Result<LiveCrashSnapshot, String>>,
 }
 impl CrashSnapshotWriter {
     pub fn start(path: PathBuf) -> Self {
         let (sender, receiver) = mpsc::sync_channel(1);
+        let (results_sender, results) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("dust-crash-snapshot".into())
             .spawn(move || {
                 while let Ok(snapshot) = receiver.recv() {
-                    let _ = write_live_snapshot(&path, &snapshot);
+                    let result = write_live_snapshot(&path, &snapshot)
+                        .map(|()| snapshot)
+                        .map_err(|error| format!("could not write crash snapshot: {error}"));
+                    if results_sender.send(result).is_err() {
+                        break;
+                    }
                 }
             })
             .expect("crash snapshot worker");
-        Self { sender }
+        Self { sender, results }
+    }
+    pub fn try_result(&self) -> Option<Result<LiveCrashSnapshot, String>> {
+        self.results.try_recv().ok()
     }
     pub fn submit(&self, snapshot: LiveCrashSnapshot) -> Result<(), String> {
         self.sender.try_send(snapshot).map_err(|error| match error {
@@ -225,6 +240,47 @@ pub struct HealthSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_fields_are_limited_by_utf8_bytes() {
+        let mut logs = StructuredLogs::new(LogPolicy {
+            maximum_records: 1,
+            maximum_field_bytes: 5,
+            maximum_file_bytes: 1024,
+            rotations: 1,
+            sensitive_keys: vec!["secret".into()],
+        }, None, 1);
+        logs.record(LogLevel::Info, "test", "bytes", BTreeMap::from([
+            ("emoji".into(), "\n😀😀".into()),
+            ("mixed".into(), "a😀b".into()),
+            ("secret".into(), "password".into()),
+        ]));
+        let fields = &logs.snapshot()[0].fields;
+        assert_eq!(fields["emoji"], "😀");
+        assert_eq!(fields["mixed"], "a😀");
+        assert_eq!(fields["secret"], "[redacted]");
+    }
+
+    #[test]
+    fn failed_log_rotation_does_not_append() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("dust.jsonl");
+        let record = LogRecord {
+            timestamp_ms: 0, level: LogLevel::Info, subsystem: "test".into(),
+            event: "rotation".into(), fields: BTreeMap::new(),
+        };
+        let policy = LogPolicy {
+            maximum_records: 1, maximum_field_bytes: 1, maximum_file_bytes: 1,
+            rotations: 1, sensitive_keys: Vec::new(),
+        };
+        fs::write(&path, "full").unwrap();
+        fs::create_dir(path.with_extension("jsonl.1")).unwrap();
+        assert!(write_record(&path, &record, &policy).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"full");
+        fs::remove_dir(path.with_extension("jsonl.1")).unwrap();
+        write_record(&path, &record, &policy).unwrap();
+        assert_eq!(fs::read(path.with_extension("jsonl.1")).unwrap(), b"full");
+    }
 
     #[test]
     fn concurrent_log_writers_keep_records_and_rotation_intact() {

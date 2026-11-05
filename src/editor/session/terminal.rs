@@ -64,6 +64,7 @@ pub(in crate::editor::session) struct TerminalOpen {
 struct Open {
     request: ExecutionPreflightRequest,
     config: TerminalProfileConfig,
+    arguments: Vec<std::ffi::OsString>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::editor::session) enum TerminalUpdate {
@@ -333,8 +334,10 @@ impl TerminalSession {
             .iter()
             .find(|r| Some(r.id) == workspace.active_root())
             .ok_or("terminal has no active workspace root")?;
-        let config = expand_placeholders(config, &root.identity.canonical_path, file)?;
-        self.open_program(name, config, workspace, navigation, capture)
+        let (config, arguments) = expand_placeholders(config, &root.identity.canonical_path, file)?;
+        let token = self.open_program(name, config, workspace, navigation, capture)?;
+        self.intent.as_mut().expect("new terminal intent").open.arguments = arguments;
+        Ok(token)
     }
     /// Opens `config` as it stands, for a program with no profile of its own.
     pub(in crate::editor::session) fn open_program(
@@ -384,7 +387,11 @@ impl TerminalSession {
             },
         );
         let request = ExecutionPreflightRequest {
-            executable: config.program.clone(),
+            executable: if config.program.is_absolute() {
+                config.program.clone()
+            } else {
+                cwd.join(&config.program)
+            },
             cwd,
             roots: workspace
                 .roots()
@@ -407,6 +414,7 @@ impl TerminalSession {
             open: Open {
                 request,
                 config: config.clone(),
+                arguments: config.arguments.iter().map(Into::into).collect(),
             },
             scope: workspace.version(),
             epoch: self.epoch.clone(),
@@ -448,14 +456,16 @@ impl TerminalSession {
                 profile: source.token.profile,
                 cwd: request.cwd.clone(),
                 close_on_exit: config.close_on_exit,
+                debugger_owned: false,
                 side: false,
                 pty: None,
                 scope: source.scope,
                 epoch: source.epoch,
-                requested_size: (config.columns, config.rows),
+                requested_size: (config.columns.max(2), config.rows),
                 geometry_source: None,
                 next_resize: Some(1),
                 pending_resizes: VecDeque::new(),
+                pending_replies: Vec::new(),
                 screen: PtyScreen::with_scrollback_bytes(
                     config.columns,
                     config.rows,
@@ -558,7 +568,7 @@ impl TerminalSession {
         let request = PtyRequest {
             program: result.executable,
             argv0: Some(open.request.executable.clone()),
-            arguments: open.config.arguments.clone(),
+            arguments: open.arguments.clone(),
             cwd: open.request.cwd.clone(),
             environment: self
                 .environment
@@ -581,6 +591,7 @@ impl TerminalSession {
             .map_err(|e| e.to_string())?;
         tab.pty = Some(pty);
         tab.pending = None;
+        self.revision = self.revision.and_then(|r| r.checked_add(1));
         Ok(id)
     }
     pub(in crate::editor::session) fn request_stop(&mut self, id: PtyId) -> Result<bool, String> {
@@ -632,7 +643,7 @@ impl TerminalSession {
     pub(in crate::editor::session) fn running_in_root(&self, root: &std::path::Path) -> usize {
         self.tabs
             .values()
-            .filter(|tab| tab.running && tab.cwd.starts_with(root))
+            .filter(|tab| (tab.running || tab.pty.is_some()) && tab.cwd.starts_with(root))
             .count()
     }
     pub(in crate::editor::session) fn close_root(&mut self, root: &std::path::Path) {
@@ -712,6 +723,7 @@ impl TerminalSession {
         if columns == 0 || rows == 0 || usize::from(columns) * usize::from(rows) > 1_000_000 {
             return Err("terminal geometry is empty or exceeds its cell limit".into());
         }
+        let columns = columns.max(2);
         let same_size = tab.requested_size == (columns, rows);
         let same_source = tab.geometry_source.as_ref() == Some(&source);
         let acknowledged = tab.screen.dimensions() == (usize::from(columns), usize::from(rows));
@@ -744,7 +756,8 @@ impl TerminalSession {
                 rows,
             });
         } else {
-            tab.screen.resize(columns, rows);
+            tab.screen.resize_tracked(columns, rows, &mut tab.normal_cursor, &mut tab.visual_anchor, &mut tab.scroll_offset);
+            keep_terminal_cursor_visible(tab);
         }
         tab.geometry_source = Some(source);
         tab.requested_size = (columns, rows);
@@ -782,13 +795,7 @@ impl TerminalSession {
                 .sync_deadline()
                 .is_some_and(|deadline| deadline <= std::time::Instant::now())
             {
-                let replies = tab.feed_bytes(&[]);
-                if !replies.is_empty()
-                    && let Some(pty) = tab.pty
-                    && let Ok(admission) = self.service.reserve_input(pty)
-                {
-                    let _ = admission.submit(replies);
-                }
+                tab.feed_bytes(&[]);
                 updates.push(TerminalUpdate::Changed);
             }
         }
@@ -832,12 +839,7 @@ impl TerminalSession {
                     bytes, truncated, ..
                 } => {
                     // Answers to the program's questions go straight back to it.
-                    let replies = tab.feed_bytes(&bytes);
-                    if !replies.is_empty()
-                        && let Ok(admission) = self.service.reserve_input(pty)
-                    {
-                        let _ = admission.submit(replies);
-                    }
+                    tab.feed_bytes(&bytes);
                     tab.truncated |= truncated;
                     updates.push(TerminalUpdate::Changed);
                 }
@@ -860,6 +862,7 @@ impl TerminalSession {
                         &mut tab.screen,
                         receipt,
                         current.as_ref(),
+                        &mut tab.normal_cursor, &mut tab.visual_anchor, &mut tab.scroll_offset,
                     ) {
                         continue;
                     }
@@ -886,7 +889,7 @@ impl TerminalSession {
                     let stopping = tab.stopping;
                     // A debugged program's output stays to be read until the next run, and how it
                     // exited is the program's business, not a terminal failure.
-                    let keep_output = tab.profile == DEBUG_TERMINAL_PROFILE;
+                    let keep_output = tab.debugger_owned;
                     tab.pty = None;
                     tab.io_complete = true;
                     updates.push(TerminalUpdate::IoComplete(id));
@@ -944,7 +947,19 @@ impl TerminalSession {
                 }
             }
         }
+        for tab in self.tabs.values_mut() {
+            tab.flush_replies(&self.service);
+        }
+        if updates.iter().any(|update| !matches!(update, TerminalUpdate::Changed)) {
+            self.revision = self.revision.and_then(|r| r.checked_add(1));
+        }
         updates
+    }
+
+    pub(in crate::editor::session) fn set_debugger_owned(&mut self, id: PtyId) {
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            tab.debugger_owned = true;
+        }
     }
 }
 
@@ -972,6 +987,9 @@ fn acknowledge_resize(
     screen: &mut PtyScreen,
     receipt: ResizeReceipt,
     current: Option<&TerminalGeometrySource>,
+    cursor: &mut Option<(usize, usize)>,
+    anchor: &mut Option<(usize, usize)>,
+    offset: &mut usize,
 ) -> bool {
     let Some(expected) = pending.front() else {
         return false;
@@ -992,7 +1010,7 @@ fn acknowledge_resize(
         return false;
     }
     let expected = pending.pop_front().expect("matched pending resize");
-    screen.resize(receipt.columns, receipt.rows);
+    screen.resize_tracked(receipt.columns, receipt.rows, cursor, anchor, offset);
     current == Some(&expected.source)
 }
 
@@ -1000,6 +1018,7 @@ struct TerminalRuntime {
     profile: String,
     cwd: std::path::PathBuf,
     close_on_exit: bool,
+    debugger_owned: bool,
     side: bool,
     pty: Option<PtyId>,
     scope: WorkspaceVersion,
@@ -1009,6 +1028,7 @@ struct TerminalRuntime {
     geometry_source: Option<TerminalGeometrySource>,
     next_resize: Option<u64>,
     pending_resizes: VecDeque<PendingResize>,
+    pending_replies: Vec<u8>,
     screen: PtyScreen,
     running: bool,
     stopping: bool,
@@ -1061,6 +1081,7 @@ impl TerminalSession {
                 profile: fixture.profile,
                 cwd: std::path::PathBuf::new(),
                 close_on_exit: false,
+                debugger_owned: false,
                 side: false,
                 pty: None,
                 scope,
@@ -1070,6 +1091,7 @@ impl TerminalSession {
                 geometry_source: None,
                 next_resize: Some(1),
                 pending_resizes: VecDeque::new(),
+                pending_replies: Vec::new(),
                 screen: fixture.screen,
                 running: fixture.running,
                 stopping: false,
@@ -1131,7 +1153,7 @@ impl TerminalSession {
 }
 
 impl TerminalRuntime {
-    fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+    fn feed_bytes(&mut self, bytes: &[u8]) {
         self.screen.feed_bytes_tracked(
             bytes,
             &mut self.normal_cursor,
@@ -1147,7 +1169,18 @@ impl TerminalRuntime {
             }
             keep_terminal_cursor_visible(self);
         }
-        self.screen.take_replies()
+        self.pending_replies.extend(self.screen.take_replies());
+    }
+    fn flush_replies(&mut self, service: &PtyService) {
+        if !self.pending_replies.is_empty()
+            && let Some(pty) = self.pty
+            && let Ok(admission) = service.reserve_input(pty)
+        {
+            let count = self.pending_replies.len().min(TERMINAL_MAXIMUM_INPUT_BYTES);
+            if admission.submit(self.pending_replies[..count].to_vec()).is_ok() {
+                self.pending_replies.drain(..count);
+            }
+        }
     }
     fn phase(&self) -> crate::ui::TerminalPhase {
         use crate::ui::TerminalPhase;
@@ -1175,6 +1208,202 @@ impl TerminalRuntime {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    fn fixture() -> (tempfile::TempDir, WorkspaceSession, TerminalSession) {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::workspace::WorkspaceState::new(crate::workspace::WorkspaceId(1), [(
+            "root".into(), crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+        )]).unwrap();
+        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let mut session = TerminalSession::new(&TerminalsConfig::default());
+        session.fixture(PtyId(1), TerminalFixture {
+            profile: "shell".into(), screen: PtyScreen::new(10, 4, 100),
+            running: false, exit_code: None, truncated: false,
+        }, workspace.version());
+        session.fixture_cwd(PtyId(1), root.path().to_path_buf());
+        (root, workspace, session)
+    }
+
+    #[cfg(unix)]
+    fn launch_shell(root: &std::path::Path, workspace: &WorkspaceSession, session: &mut TerminalSession) {
+        let mut config = TerminalsConfig::default().profiles["shell"].clone();
+        config.arguments = vec!["-c".into(), "read value; exit 0".into()];
+        session.tabs.get_mut(&PtyId(1)).unwrap().pending = Some(Open {
+            request: ExecutionPreflightRequest {
+                executable: "/bin/sh".into(), cwd: root.into(), roots: vec![root.into()],
+                root_revision: workspace.root_revision(),
+            },
+            arguments: config.arguments.iter().map(Into::into).collect(), config,
+        });
+        let ready = ExecutionReady::fixture(workspace, crate::process::ExecutionPreflightResult {
+            id: crate::process::PreflightId(1), executable: "/bin/sh".into(),
+            cwd: root.into(), root: root.into(), root_revision: workspace.root_revision(),
+        });
+        session.launch(session.key(PtyId(1)).unwrap(), ready, workspace).unwrap();
+    }
+
+    #[test]
+    fn relative_terminal_programs_use_the_requested_working_directory() {
+        let (root, workspace, mut session) = fixture();
+        let editor = crate::editor::EditorState::new(root.path().into());
+        let windows = super::super::windows::WindowSession::new(false, 8);
+        let mut config = TerminalsConfig::default().profiles["shell"].clone();
+        config.program = "./app".into();
+        config.cwd = Some("build".into());
+        session.open_program("debug", config, &workspace,
+            windows.navigation_stamp(editor.window_version(), None), Arc::new(())).unwrap();
+        let request = &session.intent.as_ref().unwrap().open.request;
+        assert_eq!(request.cwd, root.path().join("build"));
+        assert_eq!(request.executable, root.path().join("build/./app"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_lifecycle_revisions_include_launch_and_exit_and_starting_counts_as_running() {
+        let (root, workspace, mut session) = fixture();
+        let before = session.revision();
+        launch_shell(root.path(), &workspace, &mut session);
+        assert!(session.revision() > before);
+        assert_eq!(session.descriptions()[0].2, ContentLifecycle::Starting);
+        assert_eq!(session.running_in_root(root.path()), 1);
+        assert!(!session.tabs[&PtyId(1)].running);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !session.tabs[&PtyId(1)].running {
+            session.drain(&workspace, |_| None);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let running_revision = session.revision();
+        let pty = session.tabs[&PtyId(1)].pty.unwrap();
+        session.service.input(pty, b"done\n".to_vec(), TERMINAL_MAXIMUM_INPUT_BYTES).unwrap();
+        while !session.tabs[&PtyId(1)].io_complete {
+            session.drain(&workspace, |_| None);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(session.revision() > running_revision);
+        assert_eq!(session.descriptions()[0].2, ContentLifecycle::Exited);
+        assert_eq!(session.running_in_root(root.path()), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_pty_stream_failure_reports_incomplete_output_instead_of_exit_status_or_unknown() {
+        let (root, workspace, mut session) = fixture();
+        let pty = session.service.open(PtyRequest {
+            program: "/bin/sh".into(), argv0: None,
+            arguments: vec!["-c".into(), "printf 123456789".into()],
+            cwd: root.path().into(), environment: BTreeMap::new(),
+            columns: 10, rows: 4, root_revision: workspace.root_revision(),
+            policy: PtyPolicy { maximum_output_bytes: 4, ..PtyPolicy::default() },
+        }).unwrap();
+        session.tabs.get_mut(&PtyId(1)).unwrap().pty = Some(pty);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut updates = Vec::new();
+        while !session.tabs[&PtyId(1)].io_complete {
+            updates.extend(session.drain(&workspace, |_| None));
+            assert!(std::time::Instant::now() < deadline, "{updates:?}");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let message = "PTY output limit exceeded; stream is incomplete";
+        assert!(updates.contains(&TerminalUpdate::IoComplete(PtyId(1))));
+        assert!(updates.contains(&TerminalUpdate::Failed(PtyId(1), message.into())));
+        let tab = &session.tabs[&PtyId(1)];
+        assert_eq!(tab.failure.as_deref(), Some(message));
+        assert!(tab.exited);
+        assert!(tab.unknown.is_none());
+        let panel = session.projection(PtyId(1), true, 4).unwrap();
+        assert!(panel.truncated);
+        assert_eq!(panel.tabs[0].phase, crate::ui::TerminalPhase::Failed);
+        assert_eq!(session.descriptions()[0].2, ContentLifecycle::Failed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_replies_wait_for_input_capacity_and_retry_failed_submissions() {
+        let (root, workspace, mut session) = fixture();
+        launch_shell(root.path(), &workspace, &mut session);
+        let pty = session.tabs[&PtyId(1)].pty.unwrap();
+        let admissions = (0..TERMINAL_QUEUE_CAPACITY).map(|_| session.service.reserve_input(pty).unwrap()).collect::<Vec<_>>();
+        let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
+        tab.feed_bytes(b"\x1b[6n");
+        let replies = tab.pending_replies.clone();
+        assert_eq!(replies, b"\x1b[1;1R");
+        tab.flush_replies(&session.service);
+        assert_eq!(tab.pending_replies, replies);
+        drop(admissions);
+        tab.flush_replies(&session.service);
+        assert!(tab.pending_replies.is_empty());
+        tab.feed_bytes(b"\x1b[6n");
+        session.service.close(pty).unwrap();
+        tab.flush_replies(&session.service);
+        assert_eq!(tab.pending_replies, replies);
+    }
+
+    #[test]
+    fn one_column_terminal_geometry_settles_at_the_screen_minimum() {
+        let (_root, workspace, mut session) = fixture();
+        let source = TerminalGeometrySource::fixture(1);
+        session.resize(PtyId(1), 1, 4, source.clone(), &workspace).unwrap();
+        assert_eq!(session.tabs[&PtyId(1)].requested_size, (2, 4));
+        assert_eq!(session.tabs[&PtyId(1)].screen.dimensions(), (2, 4));
+        session.resize(PtyId(1), 1, 4, source, &workspace).unwrap();
+        assert!(session.tabs[&PtyId(1)].pending_resizes.is_empty());
+    }
+
+    #[test]
+    fn terminal_resize_keeps_visual_text_through_wrapping() {
+        let (_root, workspace, mut session) = fixture();
+        let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
+        tab.screen.feed_bytes(b"0123456789abc\r\n$ ");
+        tab.mode = TerminalPanelMode::Visual;
+        tab.normal_cursor = Some((0, 8));
+        tab.visual_anchor = Some((0, 7));
+        let source = TerminalGeometrySource::fixture(1);
+        session.resize(PtyId(1), 5, 6, source.clone(), &workspace).unwrap();
+        assert_eq!(session.tabs[&PtyId(1)].normal_cursor, Some((1, 3)));
+        assert_eq!(session.tabs[&PtyId(1)].visual_anchor, Some((1, 2)));
+        assert_eq!(session.yank_terminal_text(PtyId(1), false), Some(("78".into(), false)));
+        session.start_terminal_visual(PtyId(1), false);
+        session.move_terminal_normal_cursor(PtyId(1), "left").unwrap();
+        session.resize(PtyId(1), 20, 4, source, &workspace).unwrap();
+        assert_eq!(session.tabs[&PtyId(1)].normal_cursor, Some((0, 7)));
+        assert_eq!(session.tabs[&PtyId(1)].visual_anchor, Some((0, 8)));
+        assert_eq!(session.yank_terminal_text(PtyId(1), false), Some(("78".into(), false)));
+    }
+
+    #[test]
+    fn terminal_placeholders_expand_only_original_tokens() {
+        let mut config = TerminalsConfig::default().profiles["shell"].clone();
+        config.arguments = vec!["--file={file}:{line}".into(), "{root}/{dir}".into()];
+        config.cwd = Some("{dir}".into());
+        let (expanded, arguments) = expand_placeholders(&config, std::path::Path::new("/root/{line}"),
+            Some((std::path::Path::new("/root/{line}/a{line}.rs"), 7))).unwrap();
+        assert_eq!(arguments[0], "--file=/root/{line}/a{line}.rs:7");
+        assert_eq!(arguments[1], "/root/{line}//root/{line}");
+        assert_eq!(expanded.cwd.unwrap(), std::path::Path::new("/root/{line}"));
+        config.arguments = vec!["{root}".into()];
+        config.cwd = None;
+        assert!(expand_placeholders(&config, std::path::Path::new("/root/{file}"), None).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_placeholders_preserve_native_path_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/root/\xff".to_vec()));
+        let file = root.join(std::ffi::OsString::from_vec(b"a\xfe{line}.rs".to_vec()));
+        let mut config = TerminalsConfig::default().profiles["shell"].clone();
+        config.arguments = vec!["{root}".into(), "prefix:{file}".into(), "{dir}".into()];
+        config.cwd = Some(root.join("{line}"));
+        let (expanded, arguments) = expand_placeholders(&config, &root, Some((&file, 9))).unwrap();
+        assert_eq!(arguments[0], root.as_os_str());
+        let mut expected = std::ffi::OsString::from("prefix:");
+        expected.push(&file);
+        assert_eq!(arguments[1], expected);
+        assert_eq!(arguments[2], root.as_os_str());
+        assert_eq!(expanded.cwd.unwrap(), root.join("9"));
+    }
 
     #[test]
     fn terminal_normal_motions_and_yanks_skip_wide_continuations() {
@@ -1252,6 +1481,7 @@ mod tests {
         }
         terminals.tabs.get_mut(&PtyId(2)).unwrap().pending = Some(Open {
             config: policy.profiles["shell"].clone(),
+            arguments: Vec::new(),
             request: ExecutionPreflightRequest {
                 executable: "sh".into(),
                 cwd: root.path().into(),
@@ -1291,11 +1521,16 @@ mod tests {
             pending_resize(&source, 8, 60, 20),
         ]);
         let mut screen = PtyScreen::new(20, 5, 20);
+        screen.feed_bytes(b"0123456789abcdefghijAB");
+        let mut cursor = Some((1, 1));
+        let mut anchor = Some((0, 18));
+        let mut offset = 0;
         assert!(!acknowledge_resize(
             &mut pending,
             &mut screen,
             receipt(8, 60, 20),
             Some(&source),
+            &mut None, &mut None, &mut 0,
         ));
         assert!(!acknowledge_resize(
             &mut pending,
@@ -1305,6 +1540,7 @@ mod tests {
                 ..receipt(7, 40, 10)
             },
             Some(&source),
+            &mut None, &mut None, &mut 0,
         ));
         assert_eq!(pending.len(), 2);
         assert!(acknowledge_resize(
@@ -1312,8 +1548,11 @@ mod tests {
             &mut screen,
             receipt(7, 40, 10),
             Some(&source),
+            &mut cursor, &mut anchor, &mut offset,
         ));
         assert_eq!(screen.dimensions(), (40, 10));
+        assert_eq!(cursor, Some((0, 21)));
+        assert_eq!(anchor, Some((0, 18)));
         assert_eq!(pending.len(), 1, "intermediate ACK was applied");
         screen.feed_bytes(b"\x1b[?1049h\x1b[1;999HX");
         assert!(!acknowledge_resize(
@@ -1321,12 +1560,14 @@ mod tests {
             &mut screen,
             receipt(7, 40, 10),
             Some(&source),
+            &mut None, &mut None, &mut 0,
         ));
         assert!(acknowledge_resize(
             &mut pending,
             &mut screen,
             receipt(8, 60, 20),
             Some(&source),
+            &mut None, &mut None, &mut 0,
         ));
         assert_eq!(screen.dimensions(), (60, 20));
         assert_eq!(screen.history_row(0).unwrap()[39].text, "X");
@@ -1335,6 +1576,7 @@ mod tests {
             &mut screen,
             receipt(8, 60, 20),
             Some(&source),
+            &mut None, &mut None, &mut 0,
         ));
 
         pending.push_back(pending_resize(&source, 9, 40, 10));
@@ -1343,6 +1585,7 @@ mod tests {
             &mut screen,
             receipt(9, 40, 10),
             Some(&replacement),
+            &mut None, &mut None, &mut 0,
         ));
         assert!(pending.is_empty(), "stale window receipt was retired");
         assert_eq!(screen.dimensions(), (40, 10));
@@ -1352,12 +1595,14 @@ mod tests {
             &mut screen,
             receipt(9, 40, 10),
             Some(&replacement),
+            &mut None, &mut None, &mut 0,
         ));
         assert!(acknowledge_resize(
             &mut pending,
             &mut screen,
             receipt(10, 40, 10),
             Some(&replacement),
+            &mut None, &mut None, &mut 0,
         ));
         assert!(pending.is_empty());
         assert_eq!(screen.dimensions(), (40, 10));
@@ -1370,29 +1615,58 @@ fn expand_placeholders(
     config: &crate::config::TerminalProfileConfig,
     root: &std::path::Path,
     file: Option<(&std::path::Path, usize)>,
-) -> Result<crate::config::TerminalProfileConfig, String> {
-    let expand = |value: &str| -> Result<String, String> {
-        let mut value = value.replace("{root}", &root.to_string_lossy());
-        for placeholder in ["{file}", "{dir}", "{line}"] {
-            if !value.contains(placeholder) {
+) -> Result<(crate::config::TerminalProfileConfig, Vec<std::ffi::OsString>), String> {
+    let expand = |value: &std::ffi::OsStr| -> Result<std::ffi::OsString, String> {
+        #[cfg(unix)]
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        #[cfg(windows)]
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        #[cfg(unix)]
+        let bytes = value.as_bytes();
+        #[cfg(windows)]
+        let bytes: Vec<u16> = value.encode_wide().collect();
+        let native_slice = |range: std::ops::Range<usize>| {
+            #[cfg(unix)]
+            { std::ffi::OsString::from_vec(bytes[range].to_vec()) }
+            #[cfg(windows)]
+            { std::ffi::OsString::from_wide(&bytes[range]) }
+        };
+        let mut expanded = std::ffi::OsString::new();
+        let mut copied = 0;
+        let mut index = 0;
+        while index < bytes.len() {
+            let placeholder = ["{root}", "{file}", "{dir}", "{line}"]
+                .into_iter()
+                .find(|placeholder| {
+                    bytes.len() - index >= placeholder.len()
+                        && placeholder.bytes().zip(&bytes[index..]).all(|(a, b)| u32::from(a) == u32::from(*b))
+                });
+            let Some(placeholder) = placeholder else {
+                index += 1;
                 continue;
-            }
-            let (path, line) = file.ok_or("this terminal profile needs a file buffer")?;
-            let replacement = match placeholder {
-                "{file}" => path.to_string_lossy().into_owned(),
-                "{dir}" => path.parent().unwrap_or(root).to_string_lossy().into_owned(),
-                _ => line.to_string(),
             };
-            value = value.replace(placeholder, &replacement);
+            // ASCII delimiters are valid native-string boundaries on every platform.
+            expanded.push(native_slice(copied..index));
+            if placeholder == "{root}" {
+                expanded.push(root);
+            } else {
+                let (path, line) = file.ok_or("this terminal profile needs a file buffer")?;
+                match placeholder {
+                    "{file}" => expanded.push(path),
+                    "{dir}" => expanded.push(path.parent().unwrap_or(root)),
+                    _ => expanded.push(line.to_string()),
+                }
+            }
+            index += placeholder.len();
+            copied = index;
         }
-        Ok(value)
+        expanded.push(native_slice(copied..bytes.len()));
+        Ok(expanded)
     };
+    let arguments = config.arguments.iter().map(|s| expand(s.as_ref())).collect::<Result<_, _>>()?;
     let mut expanded = config.clone();
-    for argument in &mut expanded.arguments {
-        *argument = expand(argument)?;
+    if let Some(cwd) = &config.cwd {
+        expanded.cwd = Some(expand(cwd.as_os_str())?.into());
     }
-    if let Some(cwd) = &expanded.cwd {
-        expanded.cwd = Some(expand(&cwd.to_string_lossy())?.into());
-    }
-    Ok(expanded)
+    Ok((expanded, arguments))
 }

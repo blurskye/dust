@@ -217,6 +217,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
                 filter_text: None,
                 sort_text: None,
                 detail: String::new(),
+                command: None,
                 insert_text: "main".into(),
                 text_edit: None,
                 additional_edits: Vec::new(),
@@ -447,6 +448,96 @@ fn generic_picker_filters_and_invokes_registry_commands() {
 }
 
 #[test]
+fn workspace_edit_preparation_retries_unopened_files_after_queue_backpressure() {
+    use crate::language::lsp::{LspDocumentEdit, LspPosition, LspRange, LspTextEdit, LspWorkspaceEdit};
+    let mut app = app();
+    let paths = (0..17)
+        .map(|index| app.state.workspace_root.join(format!("file-{index}.rs")))
+        .collect::<Vec<_>>();
+    for path in &paths {
+        fs::write(path, "old").unwrap();
+    }
+    app.begin_workspace_proposal(
+        "many unopened files".into(),
+        LspWorkspaceEdit {
+            documents: paths.iter().map(|path| LspDocumentEdit {
+                uri: crate::language::lsp::file_uri(path),
+                version: None,
+                edits: vec![LspTextEdit {
+                    range: LspRange {
+                        start: LspPosition { line: 0, character: 0 },
+                        end: LspPosition { line: 0, character: 3 },
+                    },
+                    new_text: "new".into(),
+                }],
+            }).collect(),
+            resources: Vec::new(),
+        },
+        None,
+        PositionEncoding::Utf16,
+    );
+    assert!(app.workspace_edits.preparing());
+    assert_eq!(app.documents.pending_count(), 8);
+    wait_vfs(&mut app);
+    assert!(!app.workspace_edits.preparing());
+    assert_eq!(app.workspace_edits.proposal().unwrap().files.len(), paths.len());
+    app.accept_workspace_proposal();
+    for path in &paths {
+        let (_, buffer) = app.state.buffers.iter()
+            .find(|(_, buffer)| buffer.path.as_ref() == Some(path)).unwrap();
+        assert_eq!(buffer.text.to_string(), "new");
+        assert!(buffer.dirty);
+        assert_eq!(fs::read_to_string(path).unwrap(), "old");
+    }
+}
+
+#[test]
+fn staged_workspace_resources_survive_queue_backpressure_and_can_be_retried() {
+    use crate::language::lsp::{LspResourceOperation, LspWorkspaceEdit};
+    let mut app = app();
+    let paths = (0..9).map(|index| (
+        app.state.workspace_root.join(format!("old-{index}")),
+        app.state.workspace_root.join(format!("new-{index}")),
+    )).collect::<Vec<_>>();
+    // Independent previews can accumulate more resources than one admission batch.
+    for (source, target) in &paths {
+        fs::write(source, "resource").unwrap();
+        app.begin_workspace_proposal(
+            "rename".into(),
+            LspWorkspaceEdit {
+                documents: Vec::new(),
+                resources: vec![LspResourceOperation::Rename {
+                    old_uri: crate::language::lsp::file_uri(source),
+                    new_uri: crate::language::lsp::file_uri(target),
+                    overwrite: false,
+                    ignore_if_exists: false,
+                }],
+            },
+            None,
+            PositionEncoding::Utf16,
+        );
+        wait_vfs(&mut app);
+        assert!(app.workspace_edits.proposal().is_some());
+        app.accept_workspace_proposal();
+    }
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 8);
+    wait_vfs(&mut app);
+    for (source, target) in &paths[..8] {
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(target).unwrap(), "resource");
+    }
+    assert!(paths[8].0.exists() && !paths[8].1.exists());
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 1);
+    wait_vfs(&mut app);
+    assert!(!paths[8].0.exists());
+    assert_eq!(fs::read_to_string(&paths[8].1).unwrap(), "resource");
+    app.process_effect(AppEffect::WorkspaceResourceApply);
+    assert_eq!(app.documents.pending_count(), 0);
+}
+
+#[test]
 fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffers() {
     let mut app = app();
     let first = app.state.workspace_root.join("first.rs");
@@ -639,6 +730,115 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
 }
 
 #[test]
+fn completion_executes_its_command_on_the_offering_server_only_after_insertion() {
+    use crate::language::lsp::*;
+    for invalid_edit in [false, true] {
+        let mut app = app();
+        let path = app.state.workspace_root.join("completion.rs");
+        let (buffer, view) = app.state.open_text(TextBuffer::from_text("ex"), Some(path));
+        app.state.views[view].cursor = ByteOffset(2);
+        app.set_dashboard_visibility(false);
+        let offering = fixture_owned_lsp(&mut app, "offering", buffer);
+        let other = fixture_owned_lsp(&mut app, "other", buffer);
+        app.language.select("other");
+        app.refresh_lsp_projection_owner();
+        app.mark_lsp_completion_start(false);
+        let item = LspCompletionItem {
+            label: "example".into(), filter_text: None, sort_text: None, detail: String::new(),
+            insert_text: "example".into(),
+            text_edit: invalid_edit.then(|| LspTextEdit {
+                range: LspRange { start: LspPosition { line: 99, character: 0 }, end: LspPosition { line: 99, character: 1 } },
+                new_text: "example".into(),
+            }),
+            additional_edits: Vec::new(), kind: None, snippet: false, documentation: None,
+            command: Some(LspCommand { command: "add.import".into(), arguments: vec![serde_json::json!("example")] }),
+            resolve_item: None, resolved: true,
+        };
+        app.present_lsp_result("offering", app.language.generation(), "textDocument/completion", "", LspFeatureResult::Completion { items: vec![item], incomplete: false });
+        assert!(app.ui.language_completion.is_some());
+        assert_eq!(offering.executed_command(), None);
+        app.accept_lsp_completion();
+        if invalid_edit {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "ex");
+            assert_eq!(offering.executed_command(), None);
+            assert!(app.ui.notification_error);
+        } else {
+            assert_eq!(app.state.buffers[buffer].text.to_string(), "example");
+            assert_eq!(offering.executed_command(), Some("add.import".into()));
+        }
+        assert_eq!(other.executed_command(), None);
+    }
+}
+
+#[test]
+fn unresolved_code_lenses_are_resolved_and_run_on_the_offering_server() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("lens.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("test"), Some(path.clone()));
+    let offering = fixture_owned_lsp(&mut app, "offering", buffer);
+    let other = fixture_owned_lsp(&mut app, "other", buffer);
+    app.language.running("offering", LspCapabilities { code_lens: true, code_lens_resolve: true, execute_command: true, ..Default::default() });
+    app.language.select("other");
+    app.refresh_lsp_projection_owner();
+    let item = serde_json::json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},"data":{"id":42}});
+    let range = LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } };
+    app.present_lsp_result("offering", 1, "textDocument/codeLens", &file_uri(&path), LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range: range.clone(), title: String::new(), command: None, resolve_item: Some(item.clone()),
+    }]));
+    assert!(app.ui.picker.is_some());
+    app.accept_picker();
+    assert!(matches!(offering.requested_feature(), Some(LspFeature::CodeLensResolve { item: sent }) if sent == item));
+    assert_eq!(offering.executed_command(), None);
+    assert!(other.requested_feature().is_none());
+    app.present_lsp_result("offering", app.language.generation(), "codeLens/resolve", &file_uri(&path), LspFeatureResult::CodeLens(vec![LspCodeLens {
+        range, title: "Run test".into(),
+        command: Some(LspCommand { command: "run.test".into(), arguments: Vec::new() }), resolve_item: None,
+    }]));
+    assert!(app.ui.picker.as_ref().unwrap().rows.iter().any(|row| row.label == "Run test"));
+    assert_eq!(offering.executed_command(), None);
+    app.accept_picker();
+    assert_eq!(offering.executed_command(), Some("run.test".into()));
+    assert_eq!(other.executed_command(), None);
+}
+
+#[test]
+fn lsp_formatting_captures_the_active_indentation_policy() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("format.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("text"), Some(path));
+    let transport = fixture_owned_lsp(&mut app, "formatter", buffer);
+    app.language.running("formatter", LspCapabilities { formatting: true, range_formatting: true, ..Default::default() });
+    app.language.select("formatter");
+    app.state.policy.tab_width = 2;
+    app.state.policy.expand_tabs = false;
+    app.request_lsp(LspFeature::Formatting { tab_size: 0, insert_spaces: true });
+    assert!(matches!(transport.requested_feature(), Some(LspFeature::Formatting { tab_size: 2, insert_spaces: false })));
+    app.request_lsp(LspFeature::RangeFormatting {
+        range: LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } },
+        tab_size: 0, insert_spaces: true,
+    });
+    assert!(matches!(transport.requested_feature(), Some(LspFeature::RangeFormatting { tab_size: 2, insert_spaces: false, .. })));
+}
+
+#[test]
+fn empty_document_highlights_replace_previous_highlights() {
+    use crate::language::lsp::*;
+    let mut app = app();
+    let path = app.state.workspace_root.join("highlights.rs");
+    let (buffer, _) = app.state.open_text(TextBuffer::from_text("name"), Some(path.clone()));
+    let _transport = fixture_owned_lsp(&mut app, "highlight", buffer);
+    app.language.select("highlight");
+    let uri = file_uri(&path);
+    let range = LspRange { start: LspPosition { line: 0, character: 0 }, end: LspPosition { line: 0, character: 4 } };
+    app.present_lsp_result("highlight", 1, "textDocument/documentHighlight", &uri, LspFeatureResult::Ranges(vec![range]));
+    assert_eq!(app.ui.lsp_highlight_spans.len(), 1);
+    app.present_lsp_result("highlight", 2, "textDocument/documentHighlight", &uri, LspFeatureResult::Ranges(Vec::new()));
+    assert!(app.ui.lsp_highlight_spans.is_empty());
+}
+
+#[test]
 fn lsp_completion_applies_through_one_validated_transaction() {
     let mut app = app();
     let path = app.state.workspace_root.join("main.rs");
@@ -671,6 +871,7 @@ fn lsp_completion_applies_through_one_validated_transaction() {
             filter_text: None,
             sort_text: None,
             detail: "function".into(),
+            command: None,
             insert_text: "in".into(),
             text_edit: None,
             additional_edits: vec![crate::language::lsp::LspTextEdit {
@@ -727,6 +928,7 @@ fn lsp_completion_selection_scrolls_and_wraps_inside_the_visible_window() {
         (0..count)
             .map(|index| crate::language::lsp::LspCompletionItem {
                 label: format!("item-{index}"),
+                command: None,
                 filter_text: None,
                 sort_text: None,
                 detail: String::new(),
@@ -961,6 +1163,7 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     app.mark_lsp_completion_start(false);
     let item = |label: &str| crate::language::lsp::LspCompletionItem {
         label: label.into(),
+        command: None,
         filter_text: None,
         sort_text: None,
         detail: String::new(),
@@ -1294,7 +1497,9 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
     assert_eq!(result.operation, operation);
     let error = result.result.unwrap_err();
     assert!(error.contains(diagnostic), "{error}");
-    assert_eq!(fs::read_dir(store).unwrap().count(), 1);
+    assert!(store.join(".installer.lock").is_file());
+    assert_eq!(fs::read_to_string(store.join("nix-lsp-workspace")).unwrap(), "occupied by fixture");
+    assert_eq!(fs::read_dir(store).unwrap().count(), 2);
 }
 
 #[test]
@@ -1687,6 +1892,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     use crate::language::lsp::LspCompletionItem;
     let item = |label: &str| LspCompletionItem {
         label: label.into(),
+        command: None,
         filter_text: None,
         sort_text: None,
         detail: String::new(),

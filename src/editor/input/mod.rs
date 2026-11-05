@@ -8,6 +8,7 @@ mod keymap;
 mod search;
 
 pub use command_line::{ExParseError, parse_ex, substitute_pattern, typed_substitution};
+pub(crate) use command_line::substitution_pattern;
 pub use context::{
     InputContextDescriptor, InputContextError, InputContextLayer, InputContextPolicy,
     InputContextRegistry,

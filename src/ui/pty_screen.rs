@@ -255,6 +255,81 @@ impl PtyScreen {
         }
         self.term.resize(size(columns, rows));
     }
+    /// Keep selections on the same logical text while the grid reflows wrapped rows.
+    pub fn resize_tracked(
+        &mut self,
+        columns: u16,
+        rows: u16,
+        cursor: &mut Option<(usize, usize)>,
+        anchor: &mut Option<(usize, usize)>,
+        offset: &mut usize,
+    ) {
+        if cursor.is_none() || self.alternate_active() {
+            self.resize(columns, rows);
+            return;
+        }
+        let before = self.logical_rows();
+        let old_reference = before[self.scrollback_len() + self.cursor().1].0;
+        let position = |point: Option<(usize, usize)>| {
+            let (row, column) = point?;
+            let &(line, start) = before.get(row)?;
+            Some((line as isize - old_reference as isize, start + column as isize))
+        };
+        let old_cursor = *cursor;
+        let cursor_position = position(*cursor);
+        let anchor_position = position(*anchor);
+        self.resize(columns, rows);
+        let after = self.logical_rows();
+        let reference = after[self.scrollback_len() + self.cursor().1].0;
+        let restore = |position: Option<(isize, isize)>| {
+            let (delta, column) = position?;
+            let line = reference.checked_add_signed(delta)?;
+            after.iter().enumerate().rev().find_map(|(row, &(candidate, start))| {
+                (candidate == line && start <= column)
+                    .then(|| (row, ((column - start) as usize).min(self.term.columns() - 1)))
+            })
+        };
+        *cursor = restore(cursor_position);
+        *anchor = restore(anchor_position);
+        if let (Some(old), Some(new)) = (old_cursor, *cursor) {
+            *offset = offset.saturating_sub(old.0.saturating_sub(new.0));
+        } else {
+            *cursor = Some((0, 0));
+            *anchor = None;
+            *offset = 0;
+        }
+    }
+    fn logical_rows(&self) -> Vec<(usize, isize)> {
+        let mut positions = Vec::with_capacity(self.history_len());
+        let mut line = 0;
+        let mut column = 0;
+        let mut first_row = 0;
+        for row in 0..self.history_len() {
+            positions.push((line, column as isize));
+            let grid_row = &self.term.grid()[Line(row as i32 - self.scrollback_len() as i32)];
+            let last = &grid_row[Column(self.term.columns() - 1)];
+            if last.flags.contains(Flags::WRAPLINE) && row + 1 < self.history_len() {
+                column += self.term.columns()
+                    - usize::from(last.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER));
+            } else {
+                let used = (0..self.term.columns()).rfind(|&column| {
+                    let cell = &grid_row[Column(column)];
+                    cell.c != ' ' || cell.zerowidth().is_some()
+                        || cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+                }).map_or(0, |column| column + 1);
+                // The end of a logical line survives eviction of its oldest wrapped
+                // rows; a column measured from the beginning does not.
+                let length = (column + used) as isize;
+                for (_, start) in &mut positions[first_row..] {
+                    *start -= length;
+                }
+                first_row = positions.len();
+                line += 1;
+                column = 0;
+            }
+        }
+        positions
+    }
     #[must_use]
     pub fn dimensions(&self) -> (usize, usize) {
         (self.term.columns(), self.term.screen_lines())
@@ -668,6 +743,23 @@ mod tests {
         assert_eq!(offset, 0);
         assert_eq!(screen.lines()[0], "two");
         assert_eq!(screen.lines()[1], "three");
+    }
+
+    #[test]
+    fn tracked_resize_keeps_text_when_wrapped_scrollback_is_evicted() {
+        for suffix in ["", "\r\n$ "] {
+            let mut screen = PtyScreen::new(10, 2, 2);
+            screen.feed_bytes(b"0123456789abcdefghijABCDEFGHIJklmnopqrstKLMNOPQRSTuvwxyzABCD");
+            screen.feed_bytes(suffix.as_bytes());
+            let mut cursor = Some((2, 8));
+            let mut anchor = Some((2, 7));
+            let selected = screen.history_row(2).unwrap()[7..=8].to_vec();
+            screen.resize_tracked(5, 2, &mut cursor, &mut anchor, &mut 0);
+            let (row, column) = cursor.unwrap();
+            let (anchor_row, anchor_column) = anchor.unwrap();
+            assert_eq!(row, anchor_row);
+            assert_eq!(&screen.history_row(row).unwrap()[anchor_column..=column], selected);
+        }
     }
 
     #[test]

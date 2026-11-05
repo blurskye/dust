@@ -53,7 +53,7 @@ impl TaskDiagnosticRun {
                     .iter()
                     .filter_map(|(id, buffer)| {
                         Some((
-                            buffer.path.clone()?,
+                            source_path(buffer.path.as_deref()?),
                             (
                                 crate::editor::session::diagnostics::DiagnosticDocument::capture(
                                     state, id,
@@ -105,20 +105,37 @@ impl TaskDiagnosticRun {
                     && state
                         .buffers
                         .iter()
-                        .any(|(_, b)| b.path.as_deref() == Some(path) && !b.dirty) =>
+                        .any(|(_, b)| b.path.as_deref().is_some_and(|p| source_path(p) == path) && !b.dirty) =>
             {
                 Ok(Some(document))
             }
             None if !state
                 .buffers
                 .iter()
-                .any(|(_, b)| b.path.as_deref() == Some(path)) =>
+                .any(|(_, b)| b.path.as_deref().is_some_and(|p| source_path(p) == path)) =>
             {
                 Ok(None)
             }
             _ => Err("linter source document changed or was unsaved".into()),
         }
     }
+}
+
+pub(super) fn source_path(path: &Path) -> PathBuf {
+    resolve_source_path(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub(super) fn resolve_source_path(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).or_else(|error| {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(error);
+        }
+        // A new open buffer can have a missing file under a symlinked directory.
+        let parent = std::fs::canonicalize(path.parent().ok_or(error)?)?;
+        Ok(parent.join(path.file_name().ok_or_else(|| {
+            std::io::Error::other("linter source has no filename")
+        })?))
+    })
 }
 
 impl TaskSession {

@@ -26,6 +26,9 @@ pub(super) struct DiagnosticDocument {
     text: TextVersion,
 }
 impl DiagnosticDocument {
+    pub(super) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
     pub(super) fn capture(editor: &EditorState, id: BufferId) -> Option<Self> {
         let buffer = editor.buffers.get(id)?;
         Some(Self {
@@ -481,7 +484,9 @@ impl DiagnosticSession {
                         range: row.problem.range,
                         severity: row.problem.severity,
                         source: row.problem.source.clone(),
-                        code: row.problem.code.clone(),
+                        code: row.problem.code.as_ref().map(|code| {
+                            code.as_str().map_or_else(|| code.to_string(), str::to_owned)
+                        }),
                         message: row.problem.message.clone(),
                     })
                 })

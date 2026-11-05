@@ -51,7 +51,7 @@ pub fn substitution_regex(pattern: &str, flags: &str) -> Result<regex::Regex, St
     if flags.chars().any(|flag| !"gicn".contains(flag)) {
         return Err("unsupported substitute flag".into());
     }
-    let pattern = pattern.replace(r"\<", r"\b").replace(r"\>", r"\b");
+    let pattern = super::substitution_pattern(pattern);
     RegexBuilder::new(&pattern)
         .case_insensitive(flags.contains('i'))
         .build()

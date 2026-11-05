@@ -12,6 +12,7 @@ use std::{
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
     },
+    os::fd::AsFd,
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
@@ -54,6 +55,18 @@ pub struct Reply {
 }
 
 impl Reply {
+    /// The MCP client cancels a call by closing its connection. The request reader
+    /// has already finished, so this is the only reader of this socket now.
+    pub fn is_cancelled(&self) -> bool {
+        use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+        let mut descriptors = [PollFd::new(self.stream.as_fd(), PollFlags::POLLIN)];
+        if !matches!(poll(&mut descriptors, PollTimeout::ZERO), Ok(1)) {
+            return false;
+        }
+        let mut stream = &self.stream;
+        matches!(stream.read(&mut [0]), Ok(0))
+    }
+
     /// Written from a worker thread, so a reader that stalls cannot stall Dust.
     pub fn send(self, answer: Result<String, String>) {
         // A full queue closes this connection; it must not create another worker.
@@ -191,10 +204,9 @@ fn parse_agent(body: &str, reply: Reply) -> Option<RemoteRequest> {
     }))
 }
 
-/// Ask the Dust at `server` for a subagent and wait for its answer: `{"text": …}` or
-/// `{"error": …}`.
-pub fn ask_agent(server: &Path, request: &Value) -> io::Result<Value> {
-    let mut stream = UnixStream::connect(server)?;
+/// Ask for a subagent on a connected socket and wait for its answer: `{"text": …}` or
+/// `{"error": …}`. Shutting down a clone of the socket cancels the call.
+pub fn ask_agent(mut stream: UnixStream, request: &Value) -> io::Result<Value> {
     stream.write_all(format!("{AGENT_PREFIX}{request}\n").as_bytes())?;
     let mut answer = String::new();
     BufReader::new(stream).read_line(&mut answer)?;
@@ -346,7 +358,7 @@ mod tests {
         let path = server.path().to_owned();
         let asking = thread::spawn(move || {
             ask_agent(
-                &path,
+                UnixStream::connect(&path).unwrap(),
                 &json!({"parent": 3, "description": "look", "prompt": "find it"}),
             )
         });

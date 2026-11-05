@@ -214,12 +214,13 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
         return executable_file(candidate).then(|| candidate.to_path_buf());
     }
     env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
+        let directory = if directory.as_os_str().is_empty() { PathBuf::from(".") } else { directory };
         let path = directory.join(executable);
         executable_file(&path).then_some(path)
     })
 }
 
-fn executable_file(path: &Path) -> bool {
+pub(crate) fn executable_file(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
@@ -228,8 +229,13 @@ fn executable_file(path: &Path) -> bool {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
+        rustix::fs::accessat(
+            rustix::fs::CWD,
+            path,
+            rustix::fs::Access::EXEC_OK,
+            rustix::fs::AtFlags::EACCESS,
+        )
+        .is_ok()
     }
     #[cfg(not(unix))]
     true
@@ -244,6 +250,11 @@ impl PathExecutables {
         let mut found = HashMap::new();
         let mut listed = BTreeSet::new();
         for directory in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
+            let directory = if directory.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                directory
+            };
             if !listed.insert(directory.clone()) {
                 continue;
             }
@@ -360,6 +371,7 @@ pub(super) fn nixos_os_release_at(path: &Path) -> bool {
         let value = value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
             .unwrap_or(value);
         value == "nixos"
     })
@@ -386,14 +398,14 @@ pub fn nix_lsp_shell(definition: &ToolDefinition) -> Option<&str> {
 /// `node` entry is Bun on ordinary Linux or pinned Nix Node on NixOS, so a
 /// `#!/usr/bin/env node` package executable never depends on global Node/npm.
 #[must_use]
-pub fn tool_launch_environment(definition: &ToolDefinition) -> BTreeMap<String, String> {
+pub fn tool_launch_environment(definition: &ToolDefinition) -> BTreeMap<String, OsString> {
     tool_launch_environment_at(&tool_store_root(), definition)
 }
 
 pub(super) fn tool_launch_environment_at(
     root: &Path,
     definition: &ToolDefinition,
-) -> BTreeMap<String, String> {
+) -> BTreeMap<String, OsString> {
     if !matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
         return BTreeMap::new();
     }
@@ -408,7 +420,7 @@ pub(super) fn tool_launch_environment_at(
     let Ok(path) = env::join_paths(paths) else {
         return BTreeMap::new();
     };
-    BTreeMap::from([("PATH".into(), path.to_string_lossy().into_owned())])
+    BTreeMap::from([("PATH".into(), path)])
 }
 
 pub(super) fn managed_executable(root: &Path, definition: &ToolDefinition) -> Option<PathBuf> {
@@ -416,7 +428,7 @@ pub(super) fn managed_executable(root: &Path, definition: &ToolDefinition) -> Op
         .join(&definition.id)
         .join("bin")
         .join(&definition.executable);
-    candidate.is_file().then_some(candidate)
+    executable_file(&candidate).then_some(candidate)
 }
 
 /// Returns the executable installed in Dust's private tool store, independently
@@ -427,11 +439,12 @@ pub fn managed_tool_executable(definition: &ToolDefinition) -> Option<PathBuf> {
 }
 
 /// A formatter installed from the tool manager: its id, executable and arguments for `path`.
+#[derive(Clone, Debug)]
 pub struct ManagedFormatter {
     pub id: String,
     pub executable: PathBuf,
-    pub arguments: Vec<String>,
-    pub environment: BTreeMap<String, String>,
+    pub arguments: Vec<OsString>,
+    pub environment: BTreeMap<String, OsString>,
 }
 
 /// The installed formatter `select` picks, if any. Only the tool manager's count here: a
@@ -440,8 +453,15 @@ pub fn managed_formatter(
     select: impl Fn(&ToolDefinition) -> bool,
     path: &Path,
 ) -> Option<ManagedFormatter> {
+    managed_formatter_at(&tool_store_root(), select, path)
+}
+
+fn managed_formatter_at(
+    root: &Path,
+    select: impl Fn(&ToolDefinition) -> bool,
+    path: &Path,
+) -> Option<ManagedFormatter> {
     static FORMATTERS: std::sync::OnceLock<Vec<ToolDefinition>> = std::sync::OnceLock::new();
-    let shown = path.display().to_string();
     FORMATTERS
         .get_or_init(|| {
             bundled_tool_catalog()
@@ -454,13 +474,22 @@ pub fn managed_formatter(
         .find_map(|tool| {
             Some(ManagedFormatter {
                 id: tool.id.clone(),
-                executable: managed_tool_executable(tool)?,
+                executable: managed_executable(root, tool)?,
                 arguments: tool
                     .format_arguments
                     .iter()
-                    .map(|argument| argument.replace("{path}", &shown))
+                    .map(|argument| {
+                        let mut expanded = OsString::new();
+                        for (index, part) in argument.split("{path}").enumerate() {
+                            if index != 0 {
+                                expanded.push(path);
+                            }
+                            expanded.push(part);
+                        }
+                        expanded
+                    })
                     .collect(),
-                environment: tool_launch_environment(tool),
+                environment: tool_launch_environment_at(root, tool),
             })
         })
 }
@@ -659,9 +688,10 @@ pub(super) fn nix_lsp_runtime_at(
 pub(crate) fn nix_lsp_launch_environment_at(
     root: &Path,
     definition: &ToolDefinition,
-) -> Result<BTreeMap<String, String>, String> {
+) -> Result<BTreeMap<String, OsString>, String> {
     let runtime = nix_lsp_runtime_at(root, definition)?;
-    let mut environment = runtime.environment();
+    let mut environment: BTreeMap<String, OsString> = runtime.environment().into_iter()
+        .map(|(key, value)| (key, value.into())).collect();
     let mut paths = Vec::new();
     if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
         paths.push(root.join(&definition.id).join("bin"));
@@ -671,14 +701,14 @@ pub(crate) fn nix_lsp_launch_environment_at(
         paths.extend(env::split_paths(&existing));
     }
     let path = env::join_paths(paths).map_err(|_| "Dust Nix runtime PATH is invalid")?;
-    environment.insert("PATH".into(), path.to_string_lossy().into_owned());
+    environment.insert("PATH".into(), path);
     Ok(environment)
 }
 
 pub(crate) fn nix_lsp_launch_environment_for_workspace_at(
     workspace: &Path,
     definition: &ToolDefinition,
-) -> Result<BTreeMap<String, String>, String> {
+) -> Result<BTreeMap<String, OsString>, String> {
     if !workspace.is_absolute()
         || workspace.file_name().and_then(|name| name.to_str()) != Some("nix-lsp-workspace")
     {
@@ -693,7 +723,7 @@ pub(crate) fn nix_lsp_launch_environment_for_workspace_at(
 /// Environment for a verified upstream LSP processed by Dust's private Nix runtime.
 pub fn nix_lsp_launch_environment(
     definition: &ToolDefinition,
-) -> Result<BTreeMap<String, String>, String> {
+) -> Result<BTreeMap<String, OsString>, String> {
     nix_lsp_launch_environment_at(&tool_store_root(), definition)
 }
 
@@ -758,6 +788,96 @@ pub fn inspect_tools() -> Vec<ToolEntry> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn path_scan_treats_empty_components_as_current_directory_in_order() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let name = executable.file_name().unwrap().to_str().unwrap();
+        // Run in a child so parallel tests never observe changed PATH or cwd.
+        const CHILD: &str = "DUST_TEST_EMPTY_PATH";
+        if std::env::var_os(CHILD).is_some() {
+            let scanned = PathExecutables::scan();
+            assert_eq!(scanned.find(name), discover_executable(name));
+            assert_eq!(scanned.find(name).unwrap(), PathBuf::from(".").join(name));
+            return;
+        }
+        let local = root.path().join(name);
+        std::os::unix::fs::symlink(&executable, &local).unwrap();
+        let path = env::join_paths([Path::new(""), executable.parent().unwrap()]).unwrap();
+        let result = std::process::Command::new(&executable)
+            .args(["--exact", "tools::catalog::tests::path_scan_treats_empty_components_as_current_directory_in_order"])
+            .env(CHILD, "1")
+            .env("PATH", path)
+            .current_dir(root.path())
+            .output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
+    }
+
+    #[test]
+    fn executable_discovery_matches_effective_execution_permissions() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("tool");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        for mode in [0o641, 0o600, 0o700] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            let can_execute = std::process::Command::new(&path).status().is_ok();
+            assert_eq!(executable_file(&path), can_execute, "mode {mode:o}");
+        }
+    }
+
+    #[test]
+    fn managed_discovery_requires_an_executable_file() {
+        let root = tempfile::tempdir().unwrap();
+        let definition = bundled_tool_catalog().into_iter().find(|tool| tool.id == "prettier").unwrap();
+        let bin = root.path().join(&definition.id).join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let executable = bin.join(&definition.executable);
+        fs::write(&executable, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(managed_executable(root.path(), &definition).is_none());
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(managed_executable(root.path(), &definition), Some(executable));
+    }
+
+    #[test]
+    fn managed_formatter_preserves_native_paths_in_arguments_and_environment() {
+        use std::os::unix::ffi::OsStringExt;
+        let directory = tempfile::tempdir().unwrap();
+        const CHILD: &str = "DUST_TEST_NATIVE_TOOL_PATH";
+        if std::env::var_os(CHILD).is_none() {
+            let mut path = OsString::from_vec(b"missing-\xff:".to_vec());
+            path.push(std::env::var_os("PATH").unwrap_or_default());
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tools::catalog::tests::managed_formatter_preserves_native_paths_in_arguments_and_environment"])
+                .env(CHILD, "1").env("PATH", path).output().unwrap();
+            assert!(result.status.success(), "{}{}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            return;
+        }
+        let root = directory.path().join("tools");
+        let bin = root.join("prettier/bin");
+        fs::create_dir_all(&bin).unwrap();
+        let executable = bin.join("prettier");
+        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(bin.join("node"), "runtime").unwrap();
+        let path = directory.path().join(OsString::from_vec(b"file-\xff{path}.js".to_vec()));
+        let formatter = managed_formatter_at(&root, |tool| tool.id == "prettier", &path).unwrap();
+        assert!(formatter.arguments.iter().any(|argument| argument == path.as_os_str()));
+        let mut paths = env::split_paths(&formatter.environment["PATH"]);
+        assert_eq!(paths.next(), Some(bin));
+        assert_eq!(paths.collect::<Vec<_>>(), env::split_paths(&env::var_os("PATH").unwrap()).collect::<Vec<_>>());
+        let output = std::process::Command::new(formatter.executable)
+            .args(&formatter.arguments).envs(&formatter.environment).output().unwrap();
+        assert!(output.status.success());
+        let mut expected = Vec::new();
+        for argument in formatter.arguments {
+            expected.extend(argument.into_vec());
+            expected.push(b'\n');
+        }
+        expected.extend(formatter.environment["PATH"].clone().into_vec());
+        assert_eq!(output.stdout, expected);
+    }
 
     #[test]
     fn path_lookup_skips_nonexecutable_files() {

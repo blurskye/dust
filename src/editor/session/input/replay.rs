@@ -186,8 +186,15 @@ impl InputSession {
                 let low = selection.anchor.min(selection.head);
                 let high = selection.anchor.max(selection.head);
                 let end = next_grapheme_boundary(text, high);
-                let selected = text.slice(ByteRange::new(low, end).ok()?).ok()?;
-                ("character", selected.graphemes(true).count(), 1_usize)
+                let first_line = text.byte_to_line(low).ok()?;
+                let last_line = text.byte_to_line(high).ok()?;
+                let start = if first_line == last_line {
+                    low
+                } else {
+                    text.line_to_byte(last_line).ok()?
+                };
+                let selected = text.slice(ByteRange::new(start, end).ok()?).ok()?;
+                ("character", selected.graphemes(true).count(), last_line - first_line + 1)
             }
             crate::editor::SelectionKind::Line => {
                 let anchor = text.byte_to_line(selection.anchor).ok()?;
@@ -253,6 +260,24 @@ mod tests {
         let mut invocation = CommandInvocation::new(id, InvocationSource::Test).unwrap();
         invocation.target.buffer = Some(buffers.insert(()));
         invocation
+    }
+
+    #[test]
+    fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
+        use crate::editor::{EditorMode, input::{GrammarInput, InputAction, PendingInputContext}};
+        let mut input = InputSession::new(100);
+        input.start_macro_recording('a');
+        input.record_successful_invocation(&invocation("edit.delete_char"), None, false);
+        input.cancel_pending();
+        let InputAction::Invoke(stop) = input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap() else {
+            panic!("stop recording");
+        };
+        assert_eq!(stop.id.as_str(), "macro.record.stop");
+        let (register, recorded) = input.finish_macro_recording().unwrap();
+        assert_eq!(register, 'a');
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(input.feed(EditorMode::Normal, GrammarInput::MacroRecordToggle).unwrap(), InputAction::Pending);
+        assert_eq!(input.pending_context(), Some(PendingInputContext::MacroRecord));
     }
 
     #[test]

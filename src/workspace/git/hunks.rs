@@ -187,7 +187,8 @@ impl GitHunk {
     /// Whether this one-based line is part of the hunk, its context included.
     #[must_use]
     pub fn covers_line(&self, line: u32) -> bool {
-        line >= self.new_start && line < self.new_start + self.new_lines.max(1)
+        let first = self.new_start.max(1);
+        line >= first && line < first + self.new_lines.max(1)
     }
 }
 
@@ -672,7 +673,11 @@ pub(super) fn read_hunks_owned(
     if index_fingerprint != index_before {
         return Err(GitHunkError::StaleIndex);
     }
-    let worktree_sha256 = worktree_hash(&root.join(&p.file)).ok().map(|value| value.0);
+    let worktree_sha256 = if p.layer == GitDiffLayer::Unstaged {
+        worktree_hash(&root.join(&p.file)).ok().map(|value| value.0)
+    } else {
+        None
+    };
     Ok(GitHunkSnapshot {
         generation,
         revision: 0,

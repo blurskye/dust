@@ -203,7 +203,11 @@ pub(super) fn register_commands(
         (
             "lsp.format",
             "Format file",
-            AppEffect::LspRequest(crate::language::lsp::LspFeature::Formatting),
+            // The application fills in the active buffer's indentation settings.
+            AppEffect::LspRequest(crate::language::lsp::LspFeature::Formatting {
+                tab_size: 0,
+                insert_spaces: false,
+            }),
         ),
         (
             "lsp.code_action",

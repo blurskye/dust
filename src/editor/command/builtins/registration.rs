@@ -114,6 +114,7 @@ pub fn register_builtin_commands<E: 'static>(
             .field("motion", ArgumentType::String, true)
             .field("linewise", ArgumentType::Bool, true)
             .field("character", ArgumentType::String, false)
+            .field("find_character", ArgumentType::String, false)
             .field("comment", ArgumentType::String, false),
     )?;
     register(

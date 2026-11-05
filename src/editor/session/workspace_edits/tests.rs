@@ -191,7 +191,9 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
     documents.submit_workspace_io(permit).unwrap();
     let permit = io.prepare_io(1, &workspace, &1, &editor).unwrap();
-    assert!(documents.submit_workspace_io(permit).is_err());
+    assert!(!documents.submit_workspace_io(permit).unwrap());
+    assert!(matches!(io.next_file(), Some((1, InputFile::Create(path))) if path == &created));
+    assert_eq!(documents.pending_count(), 1);
     let retired = io.reject();
     assert_eq!(retired.requests.len(), 1);
     assert!(documents.cancel_request(retired.requests[0]));
@@ -655,7 +657,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
 }
 
 #[test]
-fn combined_text_and_rename_is_rejected_before_publication() {
+fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(
         crate::workspace::WorkspaceId(1),
@@ -676,6 +678,14 @@ fn combined_text_and_rename_is_rejected_before_publication() {
     let mut editor = EditorState::new(root.path().into());
     let path = root.path().join("old");
     let (buffer, _) = editor.open_text(TextBuffer::from_text("old"), Some(path.clone()));
+    for kind in [
+        ResourceIntentKind::Rename {
+            target: root.path().join("new"),
+            parent_device: 1,
+            parent_inode: 1,
+        },
+        ResourceIntentKind::Delete,
+    ] {
     let mut owner = WorkspaceEditSession::default();
     let ticket = owner
         .begin(
@@ -701,15 +711,11 @@ fn combined_text_and_rename_is_rejected_before_publication() {
             bytes: b"old".to_vec(),
         }],
         resources: vec![CheckedResourceIntent {
-            source: path,
+            source: path.clone(),
             source_device: 1,
             source_inode: 1,
             source_bytes: b"old".to_vec(),
-            kind: ResourceIntentKind::Rename {
-                target: root.path().join("new"),
-                parent_device: 1,
-                parent_inode: 1,
-            },
+            kind,
         }],
     };
     assert!(
@@ -719,4 +725,5 @@ fn combined_text_and_rename_is_rejected_before_publication() {
     );
     assert_eq!(editor.buffers[buffer].text.to_string(), "old");
     assert!(owner.proposal().is_none());
+    }
 }

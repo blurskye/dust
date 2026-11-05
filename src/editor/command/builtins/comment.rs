@@ -26,7 +26,7 @@ pub(super) fn build_comment_toggle(
         last -= 1;
     }
     let (token, suffix) = match token.split_once("%s") {
-        Some((before, after)) => (before.trim_end(), after.trim_start()),
+        Some((before, after)) => (before.trim(), after.trim()),
         None => (token, ""),
     };
     let mut lines = Vec::new();
@@ -62,6 +62,7 @@ pub(super) fn build_comment_toggle(
             spaced,
             closing,
             start + content.len(),
+            content[..indent].chars().count(),
         ));
     }
     if lines.is_empty() {
@@ -74,7 +75,7 @@ pub(super) fn build_comment_toggle(
     let uncomment = lines.iter().all(|line| line.2);
     let edits = if uncomment {
         let mut edits = Vec::new();
-        for (start, indent, _, spaced, closing, _) in &lines {
+        for (start, indent, _, spaced, closing, _, _) in &lines {
             let from = start + indent;
             let to = from + token.len() + usize::from(*spaced);
             edits.push(TextEdit::new(
@@ -90,11 +91,15 @@ pub(super) fn build_comment_toggle(
         }
         edits
     } else {
-        let indent = lines.iter().map(|line| line.1).min().unwrap_or(0);
+        let indent = lines.iter().map(|line| line.6).min().unwrap_or(0);
         let mut edits = Vec::new();
-        for (start, _, _, _, _, end) in &lines {
+        for (start, bytes, _, _, _, end, _) in &lines {
+            let whitespace = text
+                .slice(ByteRange::new(ByteOffset(*start), ByteOffset(start + bytes)).map_err(failed)?)
+                .map_err(failed)?;
+            let offset = whitespace.chars().take(indent).map(char::len_utf8).sum::<usize>();
             edits.push(TextEdit::new(
-                ByteRange::empty(ByteOffset(start + indent)),
+                ByteRange::empty(ByteOffset(start + offset)),
                 format!("{token} "),
             ));
             if !suffix.is_empty() {

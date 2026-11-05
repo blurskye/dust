@@ -322,7 +322,7 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
     let mut request = request(root.path(), "");
     request.program =
         crate::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
-    request.arguments = vec![script.display().to_string()];
+    request.arguments = vec![script.as_os_str().to_owned()];
     let id = service.open(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut screen = crate::ui::PtyScreen::new(80, 8, 8);

@@ -85,7 +85,7 @@ impl LspLaunch {
     pub(in crate::editor::session) fn environment(
         &self,
         definition: &ToolDefinition,
-    ) -> Result<BTreeMap<String, String>, String> {
+    ) -> Result<BTreeMap<String, std::ffi::OsString>, String> {
         match self {
             Self::Direct { managed: true, .. } => Ok(tool_launch_environment(definition)),
             Self::Direct { .. } => Ok(BTreeMap::new()),

@@ -670,7 +670,7 @@ pub(super) fn execute_builtin<E>(
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
                 let original_motion = motion;
                 let motion = change_word_motion(operator, motion, &buffer.text, view.cursor);
-                let requested_linewise = bool_argument(invocation, "linewise")?;
+                let requested_linewise = bool_argument(invocation, "linewise")? || motion == "percentage";
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
                 } else {
@@ -683,7 +683,10 @@ pub(super) fn execute_builtin<E>(
                             count,
                             motion != original_motion,
                             requested_linewise,
-                            character_argument(invocation, "character")?,
+                            character_argument(
+                                invocation,
+                                if operator == "surround_add" { "find_character" } else { "character" },
+                            )?,
                             state.policy,
                         )?],
                         if requested_linewise {
@@ -1238,10 +1241,12 @@ fn character_argument(
     }
 }
 
-/// `3G` and `3gg` go to line 3; without a count they go to the end or start.
+/// Counts turn `G`/`gg` into line navigation and `%` into percentage navigation.
 fn counted_motion<'a>(motion: &'a str, invocation: &CommandInvocation) -> &'a str {
     if invocation.count.is_some() && matches!(motion, "document_start" | "document_end") {
         "line_number"
+    } else if invocation.count.is_some() && motion == "matching_pair" {
+        "percentage"
     } else {
         motion
     }

@@ -15,7 +15,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, HashMap},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 struct Raw {
@@ -182,6 +182,7 @@ impl TaskSession {
             .or_else(|| self.matchers.get(&task.requested))
             .ok_or("linter matcher unavailable")?;
         let mut raw = BTreeMap::<PathBuf, Vec<Raw>>::new();
+        let mut paths = HashMap::<String, PathBuf>::new();
         for (index, captures) in regex
             .captures_iter(text)
             .take(maximum_items.min(65536).saturating_add(1))
@@ -194,20 +195,23 @@ impl TaskSession {
                 .name(&matcher.path_group)
                 .ok_or("linter record has no path")?
                 .as_str();
-            let path = PathBuf::from(path);
-            // Lexical parent traversal is not a participating-root proof.
-            if path.components().any(|c| matches!(c, Component::ParentDir)) {
-                return Err("linter path traverses its root".into());
-            }
-            let path = if path.is_absolute() {
-                path
+            let path = if let Some(resolved) = paths.get(path) {
+                resolved.clone()
             } else {
-                task.cwd.join(path)
+                let reported = Path::new(path);
+                let joined = if reported.is_absolute() {
+                    reported.to_path_buf()
+                } else {
+                    task.cwd.join(reported)
+                };
+                let resolved = super::sources::resolve_source_path(&joined)
+                    .map_err(|error| format!("cannot resolve linter source: {error}"))?;
+                if !resolved.starts_with(&task.root) {
+                    return Err("linter path is outside its task root".into());
+                }
+                paths.insert(path.to_owned(), resolved.clone());
+                resolved
             };
-            if !path.starts_with(&task.root) {
-                return Err("linter path is outside its task root".into());
-            }
-            source.checked_document(&path, editor)?;
             let line = captures
                 .name(&matcher.line_group)
                 .and_then(|c| c.as_str().parse::<usize>().ok())
@@ -264,10 +268,13 @@ impl TaskSession {
         let mut grouped = BTreeMap::new();
         let mut unread = BTreeMap::new();
         for (path, raw) in raw {
+            source.checked_document(&path, editor)?;
             if let Some(buffer) = editor
                 .buffers
                 .iter()
-                .find_map(|(_, b)| (b.path.as_ref() == Some(&path)).then_some(b))
+                .find_map(|(_, b)| {
+                    b.path.as_ref().filter(|p| super::sources::source_path(p) == path).map(|_| b)
+                })
             {
                 grouped.insert(
                     path.clone(),
@@ -466,11 +473,20 @@ impl TaskSession {
         let result = build
             .grouped
             .into_iter()
-            .map(|(path, items)| {
+            .map(|(path, mut items)| {
+                let document = build.source.document(&path, editor)?;
+                // Reads share a canonical identity, but open-buffer diagnostics use the
+                // buffer's own path, as required by the diagnostic publisher and gutter.
+                let uri = crate::language::lsp::file_uri(
+                    document.as_ref().map_or(path.as_path(), |document| document.path()),
+                );
+                for item in &mut items {
+                    item.uri = uri.clone();
+                }
                 Ok(DiagnosticBatch {
-                    document: build.source.document(&path, editor)?,
+                    document,
                     producer: build.source.producer().clone(),
-                    uri: crate::language::lsp::file_uri(&path),
+                    uri,
                     validity: DiagnosticValidity::DiskReport,
                     items,
                 })
@@ -487,17 +503,48 @@ impl TaskSession {
 }
 fn convert(
     path: &Path,
-    raw: Vec<Raw>,
+    mut raw: Vec<Raw>,
     text: &TextBuffer,
     version: Option<crate::editor::text::BufferRevision>,
     source: &str,
 ) -> Result<Vec<Diagnostic>, String> {
     let uri = crate::language::lsp::file_uri(path);
+    // Sorted positions let each encoding walk a source line only once.
+    raw.sort_by_key(|raw| (raw.line, raw.encoding.lsp_name(), raw.column));
+    let mut line = None;
+    let mut line_text = String::new();
+    let mut line_start = 0;
+    let mut encoding = None;
+    let mut units = 0;
+    let mut byte_column = 0;
     raw.into_iter()
         .map(|raw| {
-            let start = crate::editor::text::PositionCodec::new(text)
-                .lsp_to_byte(raw.line, raw.column, raw.encoding)
-                .map_err(|_| "linter column is outside its source or splits UTF-8")?;
+            if line != Some(raw.line) {
+                line_text = text.line(raw.line).map_err(|e| e.to_string())?;
+                line_start = text.line_to_byte(raw.line).map_err(|e| e.to_string())?.get();
+                line = Some(raw.line);
+                encoding = None;
+            }
+            if encoding != Some(raw.encoding) {
+                encoding = Some(raw.encoding);
+                units = 0;
+                byte_column = 0;
+            }
+            let content = line_text.strip_suffix('\n').unwrap_or(&line_text);
+            while units < raw.column && byte_column < content.len() {
+                let scalar = content[byte_column..].chars().next().expect("remaining scalar");
+                let width = match raw.encoding {
+                    crate::editor::text::PositionEncoding::Utf8 => scalar.len_utf8(),
+                    crate::editor::text::PositionEncoding::Utf16 => scalar.len_utf16(),
+                    crate::editor::text::PositionEncoding::Utf32 => 1,
+                };
+                if width > raw.column - units {
+                    return Err("linter column is outside its source or splits UTF-8".into());
+                }
+                units += width;
+                byte_column += scalar.len_utf8();
+            }
+            let start = crate::editor::text::ByteOffset(line_start + byte_column);
             let offset = start.get();
             let end = text
                 .line_to_byte(raw.line.saturating_add(1))

@@ -1,5 +1,6 @@
 use std::{
     hash::{Hash, Hasher},
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -125,6 +126,7 @@ pub struct GitChangePlanRequest {
     /// Strictly increasing indices into `selected.lines` for line-scoped plans.
     pub selected_lines: Vec<u32>,
     pub expected_index: Option<GitIndexFingerprint>,
+    /// A staging capture of `None` means missing; hunk plans also require a deletion hunk.
     pub expected_worktree: Option<[u8; 32]>,
     pub expected_head: GitHeadExpectation,
     /// The exact unsaved document revision the caller captured, when it captured one.
@@ -141,6 +143,7 @@ pub struct GitStageHunkRequest {
     pub hunk_id: GitHunkId,
     pub selected: GitHunk,
     pub expected_index: Option<GitIndexFingerprint>,
+    /// `None` captures a missing file and is only valid for a deletion hunk.
     pub expected_worktree: Option<[u8; 32]>,
     pub maximum_patch_bytes: usize,
     pub deadline: Duration,
@@ -154,6 +157,7 @@ pub struct GitResetHunkRequest {
     /// Positions in the hunk's `lines` to reset. Empty means all of it.
     pub selected_lines: Vec<u32>,
     pub expected_index: Option<GitIndexFingerprint>,
+    /// `None` captures a missing file and is only valid for a deletion hunk.
     pub expected_worktree: Option<[u8; 32]>,
     pub maximum_patch_bytes: usize,
     pub deadline: Duration,
@@ -251,7 +255,8 @@ impl GitMutationService {
                 request.deadline,
                 request.hunk_snapshot_revision,
                 request.policy.layer,
-                request.expected_index.is_some() && request.expected_worktree.is_some(),
+                request.expected_index.is_some()
+                    && (request.expected_worktree.is_some() || request.selected.new_mode == 0),
                 &request.policy,
             )?,
             GitMutationRequest::ResetUnstagedHunk(request) => validate_legacy_request(
@@ -259,7 +264,8 @@ impl GitMutationService {
                 request.deadline,
                 request.hunk_snapshot_revision,
                 request.policy.layer,
-                request.expected_index.is_some() && request.expected_worktree.is_some(),
+                request.expected_index.is_some()
+                    && (request.expected_worktree.is_some() || request.selected.new_mode == 0),
                 &request.policy,
             )?,
             GitMutationRequest::Plan(plan) => validate_change_plan(plan)?,
@@ -330,8 +336,20 @@ impl Drop for GitMutationService {
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path).map_err(|_| GitMutationError::Backend)?;
-    if bytes.len() > 8 * 1024 * 1024 {
+    const LIMIT: usize = 8 * 1024 * 1024;
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| GitMutationError::Backend)?;
+    if !metadata.is_file() {
+        return Err(GitMutationError::UnsupportedPath);
+    }
+    let file = std::fs::File::open(path).map_err(|_| GitMutationError::Backend)?;
+    if !file.metadata().map_err(|_| GitMutationError::Backend)?.is_file() {
+        return Err(GitMutationError::UnsupportedPath);
+    }
+    let mut bytes = Vec::new();
+    file.take((LIMIT + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| GitMutationError::Backend)?;
+    if bytes.len() > LIMIT {
         return Err(GitMutationError::Invalid);
     }
     let hash = Sha256::digest(&bytes).into();
@@ -459,13 +477,8 @@ pub(super) fn reset_hunk(
         return Err(GitMutationError::StaleIndex);
     }
     let file = root.join(&r.policy.file);
-    let metadata =
-        std::fs::symlink_metadata(&file).map_err(|_| GitMutationError::UnsupportedPath)?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(GitMutationError::UnsupportedPath);
-    }
-    let (pre_hash, pre_bytes) = worktree_hash(&file)?;
-    if r.expected_worktree != Some(pre_hash) {
+    let before_worktree = worktree_state(&file)?;
+    if !before_worktree.matches_capture(r.expected_worktree, r.selected.new_mode == 0) {
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
@@ -479,8 +492,10 @@ pub(super) fn reset_hunk(
         return Err(GitMutationError::WrongHunk);
     }
     let name = checked_name(&repo_path)?;
-    let chosen =
-        |index: usize| r.selected_lines.is_empty() || r.selected_lines.contains(&(index as u32));
+    validate_selected_lines(current, &r.selected_lines)?;
+    let chosen = |index: usize| {
+        r.selected_lines.is_empty() || r.selected_lines.binary_search(&(index as u32)).is_ok()
+    };
     // Going back: added lines come out and deleted ones return. An addition left alone stays as
     // context, and a deletion left alone stays gone.
     let mut body = String::new();
@@ -500,7 +515,14 @@ pub(super) fn reset_hunk(
         emitted.push((mark, line.text.as_str()));
     }
     append_patch_lines(&mut body, emitted);
-    let header = patch_header(name, current.new_mode, current.new_mode);
+    let target_mode = if current.old_mode == 0 && kept_lines == 0 {
+        0
+    } else if current.new_mode == 0 {
+        current.old_mode
+    } else {
+        current.new_mode
+    };
+    let header = patch_header(name, current.new_mode, target_mode);
     let target_start = patch_start(current.new_start, current.new_lines, kept_lines);
     let patch = format!(
         "{header}@@ -{},{} +{},{} @@\n{body}",
@@ -518,15 +540,15 @@ pub(super) fn reset_hunk(
     if git_index_fingerprint(&repository)? != before {
         return Err(GitMutationError::StaleIndex);
     }
-    if worktree_hash(&file)?.0 != pre_hash {
+    if worktree_state(&file)? != before_worktree {
         return Err(GitMutationError::StaleWorktree);
     }
     let diff = git2::Diff::from_buffer(patch.as_bytes()).map_err(|_| GitMutationError::Backend)?;
+    verify_patch_paths(&diff, &repo_path)?;
     repo.apply(&diff, git2::ApplyLocation::WorkDir, None)
         .map_err(|_| GitMutationError::Backend)?;
     let after = git_index_fingerprint(&repository)?;
-    let (post_hash, post_bytes) = worktree_hash(&file)?;
-    if after != before || post_hash == pre_hash || post_bytes == pre_bytes {
+    if after != before || worktree_state(&file)? == before_worktree {
         return Err(GitMutationError::Postcondition);
     }
     let remaining = read_hunks_owned(GitHunkGeneration(0), &r.policy, cancel)
@@ -562,13 +584,8 @@ pub(super) fn stage_hunk(
         return Err(GitMutationError::StaleIndex);
     }
     let file = root.join(&r.policy.file);
-    let metadata =
-        std::fs::symlink_metadata(&file).map_err(|_| GitMutationError::UnsupportedPath)?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(GitMutationError::UnsupportedPath);
-    }
-    let (worktree_hash_before, worktree) = worktree_hash(&file)?;
-    if r.expected_worktree != Some(worktree_hash_before) {
+    let worktree = worktree_state(&file)?;
+    if !worktree.matches_capture(r.expected_worktree, r.selected.new_mode == 0) {
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
@@ -597,15 +614,16 @@ pub(super) fn stage_hunk(
     if git_index_fingerprint(&repository)? != before {
         return Err(GitMutationError::StaleIndex);
     }
-    if worktree_hash(&file)?.0 != worktree_hash_before {
+    if worktree_state(&file)? != worktree {
         return Err(GitMutationError::StaleWorktree);
     }
     let diff = git2::Diff::from_buffer(&patch).map_err(|_| GitMutationError::Backend)?;
+    verify_patch_paths(&diff, &repo_path)?;
     repo.apply(&diff, git2::ApplyLocation::Index, None)
         .map_err(|_| GitMutationError::Backend)?;
     index_write.commit()?;
     let after = git_index_fingerprint(&repository)?;
-    if before == after || worktree_hash(&file)?.1 != worktree {
+    if before == after || worktree_state(&file)? != worktree {
         return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {
@@ -618,8 +636,8 @@ pub(super) fn stage_hunk(
     })
 }
 
-/// Existing hunk operations keep their original capture discipline: caller-supplied index
-/// fingerprint and worktree hash, unstaged layer only. Extracted so the plan path below can
+/// Hunk operations require a caller-supplied index fingerprint and worktree capture (a hash
+/// or a missing file for deletion hunks), unstaged layer only. The plan path below can
 /// add HEAD and document capture without changing this behaviour.
 pub(super) fn validate_legacy_request(
     maximum_patch_bytes: usize,
@@ -676,7 +694,8 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || !plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none()
+                    && !plan.selected.as_ref().is_some_and(|hunk| hunk.new_mode == 0))
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -699,7 +718,8 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
                 || plan.hunk_id.is_none()
                 || plan.selected.is_none()
                 || plan.selected_lines.is_empty()
-                || plan.expected_worktree.is_none()
+                || (plan.expected_worktree.is_none()
+                    && !plan.selected.as_ref().is_some_and(|hunk| hunk.new_mode == 0))
             {
                 return Err(GitMutationError::Invalid);
             }
@@ -709,9 +729,20 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
     }
 }
 
+#[derive(Eq, PartialEq)]
 enum WorktreeState {
     Missing,
     Regular { sha256: [u8; 32] },
+}
+
+impl WorktreeState {
+    fn matches_capture(&self, expected: Option<[u8; 32]>, missing: bool) -> bool {
+        match (self, expected) {
+            (Self::Regular { sha256 }, Some(expected)) => *sha256 == expected,
+            (Self::Missing, None) => missing,
+            _ => false,
+        }
+    }
 }
 
 fn worktree_state(file: &Path) -> Result<WorktreeState, GitMutationError> {
@@ -758,19 +789,50 @@ fn append_patch_text(patch: &mut String, text: &str) {
     }
 }
 
+fn patch_path(prefix: &str, name: &str) -> String {
+    let mut quoted = String::from("\"");
+    for byte in prefix.bytes().chain(name.bytes()) {
+        match byte {
+            b'"' => quoted.push_str("\\\""),
+            b'\\' => quoted.push_str("\\\\"),
+            b' '..=b'~' => quoted.push(char::from(byte)),
+            _ => quoted.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn verify_patch_paths(diff: &git2::Diff<'_>, path: &Path) -> Result<(), GitMutationError> {
+    if diff.deltas().len() != 1 {
+        return Err(GitMutationError::Invalid);
+    }
+    let delta = diff.get_delta(0).ok_or(GitMutationError::Invalid)?;
+    let old = delta.old_file();
+    let new = delta.new_file();
+    if old.path().is_none() && new.path().is_none()
+        || [old.path(), new.path()].into_iter().flatten().any(|parsed| parsed != path)
+    {
+        return Err(GitMutationError::Invalid);
+    }
+    Ok(())
+}
+
 fn patch_header(name: &str, old_mode: u32, new_mode: u32) -> String {
-    let mut header = format!("diff --git a/{name} b/{name}\n");
+    let old = patch_path("a/", name);
+    let new = patch_path("b/", name);
+    let mut header = format!("diff --git {old} {new}\n");
     if old_mode == 0 {
         header.push_str(&format!(
-            "new file mode {new_mode:06o}\n--- /dev/null\n+++ b/{name}\n"
+            "new file mode {new_mode:06o}\n--- /dev/null\n+++ {new}\n"
         ));
     } else if new_mode == 0 {
         header.push_str(&format!(
-            "deleted file mode {old_mode:06o}\n--- a/{name}\n+++ /dev/null\n"
+            "deleted file mode {old_mode:06o}\n--- {old}\n+++ /dev/null\n"
         ));
     } else {
         header.push_str(&format!(
-            "index 0000000..0000000 {old_mode:06o}\n--- a/{name}\n+++ b/{name}\n"
+            "index 0000000..0000000 {old_mode:06o}\n--- {old}\n+++ {new}\n"
         ));
     }
     header
@@ -818,20 +880,7 @@ fn selected_lines_patch(
     hunk: &GitHunk,
     selected: &[u32],
 ) -> Result<Vec<u8>, GitMutationError> {
-    let mut previous: Option<u32> = None;
-    for index in selected {
-        if previous.is_some_and(|last| last >= *index) {
-            return Err(GitMutationError::InvalidRange);
-        }
-        let line = hunk
-            .lines
-            .get(*index as usize)
-            .ok_or(GitMutationError::InvalidRange)?;
-        if line.kind == GitDiffLineKind::Context {
-            return Err(GitMutationError::InvalidRange);
-        }
-        previous = Some(*index);
-    }
+    validate_selected_lines(hunk, selected)?;
     let mut body = String::new();
     let mut old_lines = 0u32;
     let mut new_lines = 0u32;
@@ -886,6 +935,24 @@ fn selected_lines_patch(
         patch_start(hunk.old_start, old_lines, new_lines)
     );
     Ok(format!("{header}{body}").into_bytes())
+}
+
+fn validate_selected_lines(hunk: &GitHunk, selected: &[u32]) -> Result<(), GitMutationError> {
+    let mut previous: Option<u32> = None;
+    for index in selected {
+        if previous.is_some_and(|last| last >= *index) {
+            return Err(GitMutationError::InvalidRange);
+        }
+        let line = hunk
+            .lines
+            .get(*index as usize)
+            .ok_or(GitMutationError::InvalidRange)?;
+        if line.kind == GitDiffLineKind::Context {
+            return Err(GitMutationError::InvalidRange);
+        }
+        previous = Some(*index);
+    }
+    Ok(())
 }
 
 /// The hunk's lines with each removed line next to the added line that replaces it, so a removed
@@ -1017,7 +1084,13 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
         Err(error) if error.code() == git2::ErrorCode::UnbornBranch => None,
         Err(_) => return Err(GitMutationError::Backend),
     };
-    let entry = tree.as_ref().and_then(|tree| tree.get_path(repo_path).ok());
+    let entry = match tree.as_ref().map(|tree| tree.get_path(repo_path)) {
+        Some(Ok(entry)) => Some(entry),
+        Some(Err(error)) if error.code() == git2::ErrorCode::NotFound
+            && error.class() == git2::ErrorClass::Tree => None,
+        Some(Err(_)) => return Err(GitMutationError::Backend),
+        None => None,
+    };
     if let Some(entry) = entry {
         let mut restored = index.get_path(repo_path, 0).unwrap_or(git2::IndexEntry {
             ctime: git2::IndexTime::new(0, 0),
@@ -1039,6 +1112,7 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
         restored.ctime = git2::IndexTime::new(0, 0);
         restored.mtime = git2::IndexTime::new(0, 0);
         restored.file_size = 0;
+        index.remove_path(repo_path).map_err(|_| GitMutationError::Backend)?;
         index
             .add(&restored)
             .map_err(|_| GitMutationError::Backend)?;
@@ -1090,11 +1164,11 @@ pub(super) fn apply_change_plan(
     }
 
     let file = root.join(&p.policy.file);
-    let worktree = worktree_state(&file)?;
-    if from_worktree {
-        match (&worktree, p.expected_worktree) {
+    let worktree = if from_worktree { Some(worktree_state(&file)?) } else { None };
+    if let Some(worktree) = &worktree {
+        match (worktree, p.expected_worktree) {
             (WorktreeState::Regular { sha256 }, Some(expected)) if *sha256 == expected => {}
-            (WorktreeState::Missing, None) if p.kind == GitMutationKind::StageFile => {}
+            (WorktreeState::Missing, None) => {}
             _ => return Err(GitMutationError::StaleWorktree),
         }
     }
@@ -1126,13 +1200,10 @@ pub(super) fn apply_change_plan(
     if !p.expected_head.matches(git_head_id(&workdir)?) {
         return Err(GitMutationError::StaleHead);
     }
-    if from_worktree {
-        match (worktree_state(&file)?, &worktree) {
-            (WorktreeState::Regular { sha256 }, WorktreeState::Regular { sha256: pre })
-                if sha256 == *pre => {}
-            (WorktreeState::Missing, WorktreeState::Missing) => {}
-            _ => return Err(GitMutationError::StaleWorktree),
-        }
+    if let Some(worktree) = &worktree
+        && worktree_state(&file)? != *worktree
+    {
+        return Err(GitMutationError::StaleWorktree);
     }
 
     if let Some(patch) = patch {
@@ -1140,10 +1211,11 @@ pub(super) fn apply_change_plan(
             return Err(GitMutationError::Invalid);
         }
         let diff = git2::Diff::from_buffer(&patch).map_err(|_| GitMutationError::Backend)?;
+        verify_patch_paths(&diff, &repo_path)?;
         repo.apply(&diff, git2::ApplyLocation::Index, None)
             .map_err(|_| GitMutationError::Backend)?;
     } else if p.kind == GitMutationKind::StageFile {
-        stage_whole_file(&repo, &repo_path, &worktree)?;
+        stage_whole_file(&repo, &repo_path, worktree.as_ref().ok_or(GitMutationError::Invalid)?)?;
     } else {
         unstage_whole_file(&repo, &repo_path)?;
     }
@@ -1153,14 +1225,11 @@ pub(super) fn apply_change_plan(
     if before == after {
         return Err(GitMutationError::NoChange);
     }
-    if from_worktree {
-        // Staging must never write the worktree.
-        match (worktree_state(&file)?, &worktree) {
-            (WorktreeState::Regular { sha256 }, WorktreeState::Regular { sha256: pre })
-                if sha256 == *pre => {}
-            (WorktreeState::Missing, WorktreeState::Missing) => {}
-            _ => return Err(GitMutationError::Postcondition),
-        }
+    // Staging must never write the worktree.
+    if let Some(worktree) = &worktree
+        && worktree_state(&file)? != *worktree
+    {
+        return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {
         generation,
@@ -1175,6 +1244,14 @@ pub(super) fn apply_change_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parsed_patch_paths_must_match_the_requested_file() {
+        let patch = b"diff --git a/foo b/foo\n--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-old\n+new\n";
+        let diff = git2::Diff::from_buffer(patch).unwrap();
+        assert_eq!(verify_patch_paths(&diff, Path::new("foo")), Ok(()));
+        assert_eq!(verify_patch_paths(&diff, Path::new("foo ")), Err(GitMutationError::Invalid));
+    }
 
     #[test]
     fn index_mutations_hold_git_lock() {

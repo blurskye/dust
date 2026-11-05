@@ -490,6 +490,123 @@ fn replace_backspace_preserves_earlier_records_and_remaps_unaffected_ones() {
 }
 
 #[test]
+fn counted_horizontal_and_word_motions_stop_at_boundaries() {
+    let source = format!("{}\nlast", "e\u{301}".repeat(20_000));
+    let (mut state, _, view) = editing(&source, 0);
+    for motion in ["left", "word_backward", "big_word_backward"] {
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], 1_000_000);
+        assert_eq!(state.views[view].cursor.get(), 0, "{motion}");
+    }
+    apply(&mut state, "view.cursor.move", &[("motion", "right")], 1_000_000);
+    assert_eq!(state.views[view].cursor.get(), source.len() - 8);
+    apply(&mut state, "view.cursor.move", &[("motion", "left")], 1_000_000);
+    assert_eq!(state.views[view].cursor.get(), 0);
+    for motion in ["word_forward", "big_word_forward", "word_end", "big_word_end"] {
+        state.views[view].cursor = crate::editor::text::ByteOffset(0);
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], 1_000_000);
+        assert_eq!(state.views[view].cursor.get(), source.len() - 1, "{motion}");
+    }
+}
+
+#[test]
+fn counted_line_end_moves_and_deletes_through_the_requested_line() {
+    for (count, cursor, remaining) in [(2, 7, "a\nlast\n"), (100, 12, "a\n")] {
+        let (mut state, buffer, view) = editing("abc\ndefg\nlast\n", 1);
+        apply(&mut state, "view.cursor.move", &[("motion", "line_end")], count);
+        assert_eq!(state.views[view].cursor.get(), cursor);
+        state.views[view].cursor = crate::editor::text::ByteOffset(1);
+        apply(&mut state, "edit.operator", &[
+            ("operator", "delete"), ("motion", "line_end"), ("linewise", "false")
+        ], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), remaining);
+    }
+    for (source, cursor, count, expected) in [
+        ("a\n\nb", 2, 1, "a\n\nb"),
+        ("a\nb", 0, 1, "\nb"),
+        ("a", 0, 1, ""),
+        ("a\nb\nc", 0, 2, "\nc"),
+        ("a\n\nb", 0, 2, "\nb"),
+        ("e\u{301}\nb", 0, 1, "\nb"),
+    ] {
+        let (mut state, buffer, view) = editing(source, cursor);
+        apply(&mut state, "edit.operator", &[
+            ("operator", "delete"), ("motion", "line_end"), ("linewise", "false")
+        ], count);
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        if source == "a\n\nb" && cursor == 2 {
+            assert_eq!(state.views[view].cursor.get(), 2);
+        }
+    }
+}
+
+#[test]
+fn counted_percent_navigates_lines_and_document_start_skips_indent() {
+    let source = "  line\n".repeat(100);
+    let (mut state, _, view) = editing(&source, 70);
+    for (count, line) in [(1, 0), (50, 49), (100, 99)] {
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], count);
+        assert_eq!(state.views[view].cursor.get(), line * 7 + 2);
+    }
+    for count in [0, 1] {
+        state.views[view].cursor = crate::editor::text::ByteOffset(70);
+        apply(&mut state, "view.cursor.move", &[("motion", "document_start")], count);
+        assert_eq!(state.views[view].cursor.get(), 2);
+    }
+}
+
+#[test]
+fn matching_pairs_ignore_quoted_and_escaped_delimiters_in_both_directions() {
+    for source in [
+        r#"( ")" )"#,
+        r#"( '(' ')' )"#,
+        r"( `)` )",
+        r#"( "escaped \" )" )"#,
+        r"( \) )",
+        r"( \\() )",
+        "(\n  \"quoted )\"\n)",
+        r#""ignored (" ( ")" )"#,
+        "(don't)",
+        "('unterminated)",
+        "(&'a str, &'b str)",
+        "(don't 'x')",
+    ] {
+        let opening = if source.starts_with('"') { source.find(" ( ").unwrap() + 1 } else { 0 };
+        let closing = source.len() - 1;
+        let (mut state, _, view) = editing(source, opening);
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), closing, "{source}");
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), opening, "{source}");
+    }
+}
+
+#[test]
+fn matching_pairs_handle_unbalanced_prefixes_and_rust_lifetimes() {
+    for source in [")(()", "fn f<'a, 'b>(x: &'a str)"] {
+        let opening = source.rfind('(').unwrap();
+        let closing = source.len() - 1;
+        let (mut state, _, view) = editing(source, opening);
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), closing, "{source}");
+        apply(&mut state, "view.cursor.move", &[("motion", "matching_pair")], 0);
+        assert_eq!(state.views[view].cursor.get(), opening, "{source}");
+    }
+}
+
+#[test]
+fn counted_percent_operators_cover_whole_lines() {
+    for cursor in [0, 8] {
+        let (mut state, buffer, _) = editing("  one\ntwo\nthree\nfour\n", cursor);
+        apply(&mut state, "edit.operator", &[
+            ("operator", "delete"), ("motion", "matching_pair"), ("linewise", "false")
+        ], 50);
+        let expected = if cursor == 0 { "three\nfour\n" } else { "  one\nthree\nfour\n" };
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
+        assert_eq!(state.registers.get('"').unwrap().shape, crate::editor::RegisterShape::Line);
+    }
+}
+
+#[test]
 fn replace_backspace_does_not_restore_across_cursor_movement() {
     let (mut state, buffer, view) = editing("abc\ndef", 0);
     apply(&mut state, "mode.replace", &[], 1);
@@ -504,9 +621,11 @@ fn replace_backspace_does_not_restore_across_cursor_movement() {
 
 #[test]
 fn backward_inclusive_operators_include_the_cursor_character() {
-    for (text, cursor, motion, character) in [
-        ("(abc)", 4, "matching_pair", "("),
-        ("abc", 2, "find_backward", "a"),
+    for (text, cursor, motion, character, expected) in [
+        ("(abc)", 4, "matching_pair", "(", ""),
+        ("abc", 2, "find_backward", "a", ""),
+        ("abc", 2, "till_backward", "a", "a"),
+        ("abcb", 3, "till_backward_again", "a", "a"),
     ] {
         let (mut state, buffer, _) = editing(text, cursor);
         apply(
@@ -518,9 +637,9 @@ fn backward_inclusive_operators_include_the_cursor_character() {
                 ("character", character),
                 ("linewise", "false"),
             ],
-            1,
+            0,
         );
-        assert_eq!(state.buffers[buffer].text.to_string(), "");
+        assert_eq!(state.buffers[buffer].text.to_string(), expected);
     }
 }
 
@@ -547,6 +666,60 @@ fn word_motions_and_objects_keep_combining_graphemes_whole() {
         1,
     );
     assert_eq!(state.buffers[buffer].text.to_string(), " test");
+}
+
+#[test]
+fn repeated_till_skips_an_adjacent_target_after_a_combining_grapheme() {
+    let (mut state, _, view) = editing("e\u{301}x ax", 0);
+    apply(&mut state, "view.cursor.move", &[("motion", "till_forward"), ("character", "x")], 1);
+    assert_eq!(state.views[view].cursor.get(), 0);
+    apply(&mut state, "view.cursor.move", &[("motion", "till_forward_again"), ("character", "x")], 1);
+    assert_eq!(state.views[view].cursor.get(), 5);
+    let (mut state, _, view) = editing("xax e\u{301}z", 4);
+    apply(&mut state, "view.cursor.move", &[("motion", "till_backward"), ("character", "x")], 1);
+    assert_eq!(state.views[view].cursor.get(), 3);
+    apply(&mut state, "view.cursor.move", &[("motion", "till_backward_again"), ("character", "x")], 1);
+    assert_eq!(state.views[view].cursor.get(), 1);
+}
+
+#[test]
+fn word_motions_stop_on_empty_lines_in_both_directions() {
+    for (motion, cursor, count, expected) in [
+        ("word_forward", 0, 1, 4), ("word_forward", 0, 2, 5),
+        ("big_word_forward", 0, 1, 4), ("big_word_forward", 4, 1, 5),
+        ("word_backward", 5, 1, 4), ("word_backward", 5, 2, 0),
+        ("big_word_backward", 5, 1, 4), ("big_word_backward", 4, 1, 0),
+    ] {
+        let (mut state, _, view) = editing("one\n\ntwo", cursor);
+        apply(&mut state, "view.cursor.move", &[("motion", motion)], count);
+        assert_eq!(state.views[view].cursor.get(), expected, "{motion}");
+    }
+}
+
+#[test]
+fn word_forward_operators_keep_the_final_words_newline() {
+    for motion in ["word_forward", "big_word_forward"] {
+        for (source, cursor, count, expected) in [
+            ("one\ntwo", 0, 1, "\ntwo"),
+            ("\ntwo", 0, 1, "two"),
+            ("one  \n  two", 0, 1, "\n  two"),
+            ("one two\nthree", 0, 2, "\nthree"),
+            ("one\ntwo three", 0, 2, "three"),
+            ("one\n  \ntwo", 0, 1, "\n  \ntwo"),
+            ("one\ntwo\nthree", 0, 2, "three"),
+            ("one\ntwo\nthree", 1, 2, "o\nthree"),
+            ("one\n\ntwo", 0, 2, "two"),
+            ("one\n\ntwo", 1, 2, "o\ntwo"),
+            ("  one\ntwo\nthree", 2, 2, "three"),
+            ("one\ntwo\n", 0, 100, ""),
+        ] {
+            let (mut state, buffer, _) = editing(source, cursor);
+            apply(&mut state, "edit.operator", &[
+                ("operator", "delete"), ("motion", motion), ("linewise", "false")
+            ], count);
+            assert_eq!(state.buffers[buffer].text.to_string(), expected, "{motion}");
+        }
+    }
 }
 
 #[test]
@@ -691,6 +864,44 @@ fn indentation_and_joins_accept_multibyte_endpoints() {
         1,
     );
     assert_eq!(state.buffers[buffer].text.to_string(), "a é\n");
+}
+
+#[test]
+fn comment_templates_with_outer_whitespace_round_trip() {
+    for template in [" <!-- %s -->", "<!-- %s --> ", " <!-- %s --> "] {
+        let (mut state, buffer, _) = editing("  hello\n  world\n", 0);
+        let arguments = [
+            ("operator", "comment"),
+            ("motion", "line"),
+            ("linewise", "true"),
+            ("comment", template),
+        ];
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), "  <!-- hello -->\n  <!-- world -->\n");
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), "  hello\n  world\n");
+    }
+}
+
+#[test]
+fn comment_insertion_uses_each_lines_unicode_whitespace_boundaries() {
+    for (original, commented) in [
+        ("\u{2003}one\n two\n", "\u{2003}// one\n // two\n"),
+        ("\u{2003}\u{2003}one\n two\n", "\u{2003}// \u{2003}one\n // two\n"),
+        (" one\n\u{2003}two\n", " // one\n\u{2003}// two\n"),
+    ] {
+        let (mut state, buffer, _) = editing(original, 0);
+        let arguments = [
+            ("operator", "comment"),
+            ("motion", "line"),
+            ("linewise", "true"),
+            ("comment", "//"),
+        ];
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), commented);
+        apply(&mut state, "edit.operator", &arguments, 2);
+        assert_eq!(state.buffers[buffer].text.to_string(), original);
+    }
 }
 
 #[test]

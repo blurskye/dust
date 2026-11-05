@@ -304,6 +304,13 @@ impl AgentSession {
             }
             None => agent::new_session_params(&self.root, &self.tools, self.meta.as_ref()),
         };
+        let params = match params {
+            Ok(params) => params,
+            Err(error) => {
+                self.stop(&error);
+                return;
+            }
+        };
         match self.request(method, params) {
             Ok(id) if method == "session/new" => self.phase = Phase::Creating(id),
             Ok(id) => self.phase = Phase::Rejoining(id),
@@ -975,17 +982,17 @@ impl InteractiveApplication {
                 Ok(())
             }
             AgentChoice::Resume(id) => match self.reopen_conversation(&id) {
-                Some(index) if self.agent.sessions[index].process.is_none() => {
+                Ok(index) if self.agent.sessions[index].process.is_none() => {
                     self.show_agent_panel();
                     self.agent.normal = false;
                     self.restart_active_agent()
                 }
-                Some(_) => {
+                Ok(_) => {
                     self.show_agent_panel();
                     self.agent.normal = false;
                     Ok(())
                 }
-                None => Err("that conversation could not be read".to_owned()),
+                Err(error) => Err(error),
             },
             AgentChoice::Option(option) => {
                 self.open_agent_option_picker(Some(&option));
@@ -1132,6 +1139,9 @@ impl InteractiveApplication {
     /// An agent's `agent` tool call: start a subagent of the asking session in a new tab.
     /// The tab shown does not change; the subagent's answer goes back once it is done.
     pub(super) fn start_subagent(&mut self, request: AgentRequest) {
+        if request.reply.is_cancelled() {
+            return;
+        }
         let Some(parent) = self
             .agent
             .sessions
@@ -1152,7 +1162,13 @@ impl InteractiveApplication {
                 return;
             }
         };
-        let index = self.add_agent_tab(name, root, Vec::new(), None, None);
+        let index = match self.add_agent_tab(name, root, Vec::new(), None, None) {
+            Ok(index) => index,
+            Err(error) => {
+                request.reply.send(Err(error));
+                return;
+            }
+        };
         let session = &mut self.agent.sessions[index];
         session.parent = Some(request.parent);
         session.task = match request.description.trim() {
@@ -1239,7 +1255,7 @@ impl InteractiveApplication {
             .profiles
             .get(name)
             .and_then(|profile| profile.note.clone().map(Entry::Notice));
-        let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None);
+        let index = self.add_agent_tab(name.to_owned(), root, Vec::new(), None, None)?;
         self.agent.active = index;
         self.agent.sessions[index].attach(spawned);
         self.agent.sessions[index].entries.extend(note);
@@ -1254,9 +1270,8 @@ impl InteractiveApplication {
         entries: Vec<Entry>,
         earlier: Option<String>,
         history: Option<String>,
-    ) -> usize {
-        self.agent.started += 1;
-        let number = self.agent.started;
+    ) -> Result<usize, String> {
+        let number = self.agent.started + 1;
         let history = history.unwrap_or_else(|| {
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1272,10 +1287,11 @@ impl InteractiveApplication {
                     server.path(),
                     number,
                     &profiles
-                )])
+                )?])
             }
             _ => json!([]),
         };
+        self.agent.started = number;
         self.agent.sessions.push(AgentSession {
             number,
             name,
@@ -1301,7 +1317,7 @@ impl InteractiveApplication {
             tools,
             meta: None,
         });
-        self.agent.sessions.len() - 1
+        Ok(self.agent.sessions.len() - 1)
     }
 
     /// Start the active tab's agent again after it exited, in the tab's own worktree. It
@@ -1330,8 +1346,10 @@ impl InteractiveApplication {
         let Some(program) = self.agent_program(&profile.program) else {
             return Err(self.missing_agent_program(&profile.program));
         };
-        let mut environment = profile.environment.clone();
-        environment.extend(profile.acp_environment.clone());
+        let mut environment = profile.environment.iter()
+            .chain(&profile.acp_environment)
+            .map(|(key, value)| (key.clone(), std::ffi::OsString::from(value)))
+            .collect::<BTreeMap<_, _>>();
         if let Some(entry) = self.tooling.entries().iter().find(|entry| {
             entry.definition.kind == ToolKind::Agent
                 && matches!(&entry.status, ToolStatus::Installed(path) if path == &program)
@@ -1341,15 +1359,15 @@ impl InteractiveApplication {
         if let Some(server) = &self.remote {
             environment.insert(
                 crate::remote::SERVER_VARIABLE.into(),
-                server.path().display().to_string(),
+                server.path().as_os_str().to_owned(),
             );
         }
         if let Some(tab) = tab {
-            environment.insert(agent::mcp::TAB_VARIABLE.into(), tab.to_string());
+            environment.insert(agent::mcp::TAB_VARIABLE.into(), tab.to_string().into());
         }
         let profiles = self.configuration.settings().agents.profiles.keys();
         let profiles = profiles.map(String::as_str).collect::<Vec<_>>().join(",");
-        environment.insert(agent::mcp::PROFILES_VARIABLE.into(), profiles);
+        environment.insert(agent::mcp::PROFILES_VARIABLE.into(), profiles.into());
         let mut process = AgentProcess::spawn(&program, &profile.arguments, &environment, root)
             .map_err(|error| format!("could not start agent {name}: {error}"))?;
         let id = process.request("initialize", agent::initialize_params())?;
@@ -1416,6 +1434,12 @@ impl InteractiveApplication {
     pub(super) fn process_agent_events(&mut self) {
         let mut changed = false;
         for index in 0..self.agent.sessions.len() {
+            if self.agent.sessions[index].reply.as_ref().is_some_and(Reply::is_cancelled) {
+                let number = self.agent.sessions[index].number;
+                self.cancel_agent_permissions(&[number]);
+                self.agent.sessions[index].stop("the MCP client cancelled the subagent");
+                changed = true;
+            }
             let mut save = false;
             for _ in 0..MESSAGES_PER_TICK {
                 let Some(message) = self.agent.sessions[index]
@@ -1494,7 +1518,7 @@ impl InteractiveApplication {
     }
 
     /// Put a saved conversation in a tab, or show the tab it is already in.
-    fn reopen_conversation(&mut self, id: &str) -> Option<usize> {
+    fn reopen_conversation(&mut self, id: &str) -> Result<usize, String> {
         if let Some(index) = self
             .agent
             .sessions
@@ -1502,18 +1526,19 @@ impl InteractiveApplication {
             .position(|session| session.history == id)
         {
             self.agent.active = index;
-            return Some(index);
+            return Ok(index);
         }
-        let (conversation, entries) = history::load(&self.agent.directory, id)?;
+        let (conversation, entries) = history::load(&self.agent.directory, id)
+            .ok_or_else(|| "that conversation could not be read".to_owned())?;
         let index = self.add_agent_tab(
             conversation.agent,
             conversation.root,
             entries,
             conversation.session,
             Some(conversation.id),
-        );
+        )?;
         self.agent.active = index;
-        Some(index)
+        Ok(index)
     }
 
     fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
@@ -2952,7 +2977,7 @@ mod tests {
             Vec::new(),
             None,
             None,
-        )
+        ).unwrap()
     }
 
     fn child(app: &mut InteractiveApplication, parent: u64, phase: Phase) -> usize {
@@ -2994,6 +3019,74 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_tab_passes_its_remote_socket_to_the_mcp_server() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = test_app();
+        let server = crate::remote::RemoteServer::start(directory.path()).unwrap();
+        let socket = server.path().to_str().unwrap().to_owned();
+        app.remote = Some(server);
+        let index = tab(&mut app);
+        let tools = &app.agent.sessions[index].tools;
+        assert_eq!(tools[0]["env"][0]["value"], socket);
+        assert_eq!(tools[0]["args"][1], app.agent.sessions[index].number.to_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_resume_reuses_tabs_and_reports_unreadable_history() {
+        let mut app = test_app();
+        let index = tab(&mut app);
+        let conversation = app.agent.sessions[index].conversation();
+        assert_eq!(app.reopen_conversation(&conversation.id).unwrap(), index);
+        assert_eq!(app.agent.sessions.len(), 1);
+        history::save(app.agent.directory.clone(), conversation.clone(), Vec::new());
+        assert!(history::flush(std::time::Instant::now() + std::time::Duration::from_secs(5)));
+        app.agent.sessions.clear();
+        let index = app.reopen_conversation(&conversation.id).unwrap();
+        assert_eq!(app.agent.sessions[index].history, conversation.id);
+        assert_eq!(app.agent.sessions[index].root, conversation.root);
+        let started = app.agent.started;
+        assert_eq!(app.reopen_conversation("missing").unwrap_err(), "that conversation could not be read");
+        assert_eq!(app.agent.sessions.len(), 1);
+        assert_eq!(app.agent.started, started);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_mcp_cancellation_stops_only_the_requested_child() {
+        let (reply, connection) = subagent_reply();
+        let (other_reply, _other_connection) = subagent_reply();
+        let mut app = test_app();
+        let parent = tab(&mut app);
+        let number = app.agent.sessions[parent].number;
+        let cancelled = child(&mut app, number, Phase::Prompting(2));
+        let other = child(&mut app, number, Phase::Creating(3));
+        app.agent.sessions[cancelled].reply = Some(reply);
+        app.agent.sessions[other].reply = Some(other_reply);
+        for index in [cancelled, other] {
+            app.agent.sessions[index].process = Some(
+                AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &app.state.workspace_root).unwrap()
+            );
+        }
+        let cancelled_number = app.agent.sessions[cancelled].number;
+        app.agent.permissions.push_back(permission(cancelled_number));
+        app.agent.asking = Some(permission(cancelled_number));
+        connection.get_ref().shutdown(std::net::Shutdown::Both).unwrap();
+        app.process_agent_events();
+        let session = &app.agent.sessions[cancelled];
+        assert_eq!(session.phase, Phase::Stopped);
+        assert!(session.process.is_none());
+        assert!(session.queued.is_empty());
+        assert!(session.reply.is_none());
+        assert!(app.agent.permissions.is_empty());
+        assert!(app.agent.asking.is_none());
+        assert_eq!(app.agent.sessions[other].phase, Phase::Creating(3));
+        assert!(app.agent.sessions[other].reply.is_some());
+        assert_eq!(app.agent.sessions[parent].phase, Phase::Ready);
     }
 
     #[cfg(unix)]
@@ -3140,6 +3233,45 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn invalid_workspace_paths_stop_session_startup_and_answer_subagents() {
+        use std::{io::BufRead, os::unix::ffi::OsStrExt};
+
+        for capabilities in [
+            json!({}),
+            json!({"sessionCapabilities": {"resume": {}}}),
+            json!({"loadSession": true}),
+        ] {
+            let mut app = test_app();
+            let index = child(&mut app, 99, Phase::Initializing(1));
+            let (reply, mut answer) = subagent_reply();
+            let session = &mut app.agent.sessions[index];
+            session.process = Some(
+                AgentProcess::spawn(Path::new("cat"), &[], &BTreeMap::new(), &session.root)
+                    .unwrap(),
+            );
+            session.root = Path::new(std::ffi::OsStr::from_bytes(b"/workspace/\xff")).into();
+            session.earlier = Some("previous".into());
+            session.reply = Some(reply);
+
+            app.handle_agent_response(index, 1, Ok(json!({"agentCapabilities": capabilities})));
+
+            let session = &app.agent.sessions[index];
+            assert_eq!(session.phase, Phase::Stopped);
+            assert!(session.process.is_none());
+            assert!(session.queued.is_empty());
+            assert!(session.reply.is_none());
+            assert!(!session.working());
+            assert!(matches!(session.entries.last(), Some(Entry::Notice(error))
+                if error.contains("UTF-8 workspace path")));
+            let mut line = String::new();
+            answer.read_line(&mut line).unwrap();
+            assert!(serde_json::from_str::<Value>(&line).unwrap()["error"]
+                .as_str().unwrap().contains("UTF-8 workspace path"));
+        }
+    }
+
     #[test]
     fn agent_restart_failure_keeps_the_submitted_draft() {
         let mut app = test_app();
@@ -3159,7 +3291,7 @@ mod tests {
             Vec::new(),
             None,
             None,
-        );
+        ).unwrap();
         app.agent.active = index;
         app.show_agent_panel();
         app.agent.context.push(PromptPart::Text("context".into()));

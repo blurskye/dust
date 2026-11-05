@@ -397,7 +397,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let app = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
-    let config_source = "editor = { tab_width = 7 }\n";
+    let config_source = "editor = { tab_width = 7 }\n[command_labels]\n\"view.cursor.move\" = \"MOVE\"\n";
     fs::write(&config_path, config_source).expect("config");
     let mut loaded = crate::config::load_config(&config_path);
 
@@ -418,6 +418,11 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let (resolved, diagnostic) =
         super::resolve_configuration(&app.commands, loaded, true).expect("resolve");
     assert!(diagnostic.is_none());
+    let label = resolved
+        .explain(r#"command_labels."view.cursor.\u006dove""#)
+        .expect("escaped command label");
+    assert_eq!(label.value, "\"MOVE\"");
+    assert!(label.source.starts_with(&config_path.display().to_string()));
     let setting = resolved.explain("editor.tab_width").expect("setting");
     assert!(
         setting
@@ -1522,6 +1527,70 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
         .unwrap();
     app.process_effect(AppEffect::Zen);
     assert!(app.ui.explorer.is_some());
+}
+
+#[test]
+fn direct_motion_binding_preserves_an_explicit_count_of_one() {
+    let mut app = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.keymaps.entries.push(toml::from_str(r#"
+        id = "user.direct-end"
+        context = "editor"
+        mode = "normal"
+        keys = "Z"
+        command = "view.cursor.move"
+        arguments = { motion = "document_end" }
+    "#).unwrap());
+    app.apply_configuration_candidate(loaded, false).unwrap();
+    let (_, view) = app.state.open_text(TextBuffer::from_text("first\nsecond\nthird"), None);
+    app.set_dashboard_visibility(false);
+    app.handle_configured_key(KeyEvent::character('Z'));
+    assert_eq!(app.state.views[view].cursor, ByteOffset(13));
+    for key in ['1', 'Z'] {
+        app.handle_configured_key(KeyEvent::character(key));
+    }
+    assert_eq!(app.state.views[view].cursor, ByteOffset(0));
+}
+
+#[test]
+fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
+    let mut app = app();
+    let mut loaded = crate::config::load_bundled_config();
+    loaded.installed_plugins.insert("demo".into());
+    loaded.keymaps.entries.push(toml::from_str(r#"
+        id = "user.demo"
+        context = "editor"
+        mode = "normal"
+        keys = "<leader> j x"
+        command = "plugin.demo.run"
+    "#).unwrap());
+    let group: crate::config::KeyGroupEntry = toml::from_str(r#"
+        id = "user.group"
+        context = "editor"
+        mode = "normal"
+        prefix = "space j"
+        label = "Demo"
+    "#).unwrap();
+    loaded.keymaps.groups.push(group.clone());
+    let (resolved, diagnostic) = super::resolve_configuration(&app.commands, loaded.clone(), true).unwrap();
+    assert!(diagnostic.is_none());
+    assert!(resolved.deferred_plugin_keymaps);
+    assert!(resolved.base_keymaps.groups.iter().all(|group| group.id != "user.group"));
+    assert!(resolved.raw_keymaps.groups.iter().any(|group| group.id == "user.group"));
+
+    let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
+    spec.source = crate::editor::CommandSource::Plugin("demo".into());
+    app.commands.register(spec, |_, _| Ok(crate::editor::CommandOutcome::empty())).unwrap();
+    let (compiled, diagnostic) = compile_keymaps(&app.commands, &resolved.raw_keymaps, &resolved.settings.input.keymaps);
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+    assert!(compiled.groups.iter().any(|group| group.id == "user.group"));
+    assert!(compiled.inspect_id("user.demo").is_some());
+
+    let mut unreachable = group;
+    unreachable.id = "user.unreachable".into();
+    unreachable.prefix = Some("<leader> j z".into());
+    loaded.keymaps.groups.push(unreachable);
+    assert!(super::resolve_configuration(&app.commands, loaded, true).err().expect("unreachable group").contains("user.unreachable"));
 }
 
 #[test]
