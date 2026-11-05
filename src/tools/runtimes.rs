@@ -456,8 +456,11 @@ pub(super) fn install_path_rustup_component(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    // A toolchain installed with only some components lacks the compiler libraries
+    // rust-analyzer loads and the cargo it runs to read the workspace. Adding components
+    // that are already there does nothing.
     let mut child = command
-        .args(["component", "add", component])
+        .args(["component", "add", component, "rust-src", "rustc", "cargo"])
         .current_dir(&cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -503,6 +506,18 @@ pub(super) fn install_path_rustup_component(
             definition.executable
         ));
     }
+    let environment = env::vars_os()
+        .filter_map(|(key, value)| key.into_string().ok().map(|key| (key, value)))
+        .collect();
+    run_managed(
+        proxy,
+        &["--version".into()],
+        &cwd,
+        &environment,
+        cancellations,
+        None,
+    )
+    .map_err(|error| format!("rustup added {component}, but it does not run: {error}"))?;
     Ok(Some(proxy.to_path_buf()))
 }
 

@@ -1603,6 +1603,10 @@ fn opening_a_file_whose_server_does_not_work_installs_it() {
         }),
         "rustup adds the missing rust-analyzer without a key press"
     );
+    assert!(
+        app.ui.tool_menu.is_none(),
+        "an automatic install notifies instead of opening the tools menu"
+    );
 }
 
 #[test]

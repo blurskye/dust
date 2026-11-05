@@ -1169,7 +1169,7 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
     let rustup = directory.path().join("rustup");
     std::fs::write(
         &rustup,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PWD/.rustup-args\"\n",
+        "#!/bin/sh\n[ \"$1\" = component ] && printf '%s\\n' \"$@\" > \"$PWD/.rustup-args\"\nexit 0\n",
     )
     .expect("rustup fixture");
     std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755))
@@ -1207,7 +1207,7 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
     assert_eq!(result.result.expect("rustup install"), Some(proxy));
     assert_eq!(
         std::fs::read_to_string(directory.path().join(".rustup-args")).expect("rustup arguments"),
-        "component\nadd\nrust-analyzer\n"
+        "component\nadd\nrust-analyzer\nrust-src\nrustc\ncargo\n"
     );
 }
 
@@ -1247,6 +1247,45 @@ fn failed_rustup_component_installation_reports_bounded_stderr() {
     assert!(error.contains("exited with 1"), "{error}");
     assert!(error.contains("certificate verification failed"), "{error}");
     assert!(error.len() < 512, "stderr tail must be bounded");
+}
+
+#[cfg(unix)]
+#[test]
+fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_run() {
+    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+
+    let directory = tempfile::tempdir().unwrap();
+    let rustup = directory.path().join("rustup");
+    // As rustup, record the arguments; as the proxy, fail like a toolchain without rustc.
+    fs::write(
+        &rustup,
+        "#!/bin/sh\nif [ \"$1\" = component ]; then echo \"$@\" > added; exit 0; fi\necho 'cannot open shared object file' >&2\nexit 127\n",
+    )
+    .unwrap();
+    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    let proxy = directory.path().join("rust-analyzer");
+    fs::hard_link(&rustup, &proxy).unwrap();
+    let definition = bundled_tool_catalog()
+        .into_iter()
+        .find(|tool| tool.id == "rust-analyzer")
+        .unwrap();
+    let (_cancel, cancellations) = mpsc::channel();
+    let error = super::runtimes::install_path_rustup_component(
+        &definition,
+        &rustup,
+        &proxy,
+        directory.path(),
+        "rust-analyzer",
+        &cancellations,
+        &mut |_, _, _| {},
+    )
+    .unwrap_err();
+    assert_eq!(
+        fs::read_to_string(directory.path().join("added")).unwrap(),
+        "component add rust-analyzer rust-src rustc cargo\n"
+    );
+    assert!(error.contains("does not run"), "{error}");
+    assert!(error.contains("cannot open shared object file"), "{error}");
 }
 
 #[cfg(unix)]

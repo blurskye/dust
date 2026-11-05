@@ -12819,13 +12819,11 @@ impl InteractiveApplication {
                     },
                     false,
                 );
-                let category = self
-                    .ui
-                    .tool_menu
-                    .as_ref()
-                    .map_or("all", |menu| &menu.category)
-                    .to_owned();
-                self.rebuild_tool_menu(&category, Some(id));
+                // An automatic install only notifies; it doesn't open the tools menu.
+                if let Some(menu) = &self.ui.tool_menu {
+                    let category = menu.category.clone();
+                    self.rebuild_tool_menu(&category, Some(id));
+                }
             }
             Err(error) => self.show_error(error),
         }
