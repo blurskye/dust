@@ -12959,8 +12959,58 @@ impl InteractiveApplication {
         }
     }
 
+    /// When rustup can't add rust-analyzer, install Dust's pinned standalone build instead, as
+    /// mason does, so automatic installs still end with a working server.
+    fn install_rust_analyzer_download(&mut self, id: &str, diagnostic: &str) -> bool {
+        if !self.configuration.settings().lsp.auto_install {
+            return false;
+        }
+        let Some(definition) = self
+            .tooling
+            .entries()
+            .iter()
+            .find(|entry| entry.definition.id == id)
+            .map(|entry| entry.definition.clone())
+        else {
+            return false;
+        };
+        let source = if is_nixos_host() {
+            LspRuntimeSource::Nix
+        } else {
+            LspRuntimeSource::Managed
+        };
+        if source == LspRuntimeSource::Nix && !self.nix_workspace_available_for(&definition)
+            || self
+                .tooling
+                .select_runtime(id, source, definition.version.clone())
+                .is_err()
+        {
+            return false;
+        }
+        self.install_tool(id, Some(source));
+        let installing = self.tooling.entries().iter().any(|entry| {
+            entry.definition.id == id && matches!(entry.status, ToolStatus::Installing { .. })
+        });
+        if installing {
+            self.notify_message(
+                format!(
+                    "rustup could not add {} ({diagnostic}); installing Dust's build instead…",
+                    definition.name
+                ),
+                false,
+            );
+        }
+        installing
+    }
+
     pub(in crate::editor::session) fn process_tool_results(&mut self) {
         while let Some((name, result)) = self.tooling.poll_install() {
+            if let Err(diagnostic) = &result.result
+                && result.operation == ToolOperation::InstallRustup
+                && self.install_rust_analyzer_download(&result.id, diagnostic)
+            {
+                continue;
+            }
             if let Err(diagnostic) = result.result {
                 self.show_error(format!(
                     "{} {} failed: {diagnostic}",
