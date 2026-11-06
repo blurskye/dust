@@ -107,7 +107,7 @@ use crate::config::ThemeStyle;
 use crate::editor::input::KeyCode;
 use crate::editor::input::KeyEvent;
 use crate::editor::input::Modifiers;
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 use thiserror::Error;
 
 use crate::ui::Frame;

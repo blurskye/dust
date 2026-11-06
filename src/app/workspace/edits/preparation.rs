@@ -6,7 +6,7 @@ use crate::editor::transaction::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::VfsResult;
-use crate::workspace::FileSnapshot;
+use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use std::collections::HashMap;
 use std::path::Path;
@@ -27,7 +27,7 @@ pub(in crate::app) enum InputFile {
     },
 }
 impl InputFile {
-    pub(super) fn path(&self) -> &Path {
+    pub(in crate::app) fn path(&self) -> &Path {
         match self {
             Self::Read(path) | Self::Create(path) | Self::ReadMatchingDisk { path, .. } => path,
             Self::Resource { source, .. } => source,
@@ -347,7 +347,7 @@ impl WorkspaceEditSession {
 }
 
 impl Preparation {
-    pub(super) fn new(source: Source) -> Self {
+    pub(in crate::app) fn new(source: Source) -> Self {
         Self {
             source,
             label: String::new(),

@@ -42,3 +42,5 @@ pub use position::ByteRange;
 pub use position::PositionError;
 pub use rope::TextBuffer;
 pub(crate) use rope::TextVersion;
+
+pub(crate) mod diff;

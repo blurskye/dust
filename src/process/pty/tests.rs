@@ -50,7 +50,7 @@ fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
     std::fs::create_dir(&original).unwrap();
     std::fs::create_dir(&other).unwrap();
     std::os::unix::fs::symlink(&original, &alias).unwrap();
-    let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+    let identity = crate::files::RootIdentity::capture(root.path()).unwrap();
     let cwd = open_working_directory(&alias, Some(&identity)).unwrap();
     let pinned = format!("/proc/self/fd/{}", cwd.as_raw_fd());
     std::fs::remove_file(&alias).unwrap();
@@ -196,7 +196,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
 
     let target = root.path().join("scope");
     std::fs::create_dir(&target).unwrap();
-    let identity = crate::workspace::RootIdentity::capture(&target).unwrap();
+    let identity = crate::files::RootIdentity::capture(&target).unwrap();
     std::fs::rename(&target, root.path().join("old-scope")).unwrap();
     std::fs::create_dir(&target).unwrap();
     let mut replaced = PtyService::start(1);

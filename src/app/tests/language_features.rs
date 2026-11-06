@@ -688,7 +688,7 @@ fn documentation_resize_clamps_scroll_to_the_new_layout() {
     assert!(app.ui.documentation_popup.as_ref().unwrap().scroll > 0);
     app.handle_event(UiEvent::Resize(120, 40));
     let popup = app.ui.documentation_popup.as_ref().unwrap();
-    let total = crate::ui::render::overlays::documentation_display_rows(
+    let total = crate::ui::render::documentation::documentation_display_rows(
         popup,
         app.configuration.settings(),
         120,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 fn scope(root: &std::path::Path) -> WorkspaceVersion {
-    let identity = crate::workspace::RootIdentity::capture(root).unwrap();
+    let identity = crate::files::RootIdentity::capture(root).unwrap();
     let state = crate::workspace::WorkspaceState::new(
         crate::workspace::WorkspaceId(1),
         [("root".into(), identity)],

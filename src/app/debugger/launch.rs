@@ -20,7 +20,7 @@ use crate::tools::ToolEntry;
 use crate::tools::ToolKind;
 use crate::tools::ToolStatus;
 use crate::workspace::RootId;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ pub(in crate::app) struct DebugIntent {
     nonce: Arc<()>,
 }
 impl PartialEq for DebugIntent {
-    fn eq(&self, other: &Self) -> bool {
+    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.nonce, &other.nonce)
     }
 }

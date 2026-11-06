@@ -94,7 +94,7 @@ impl WindowSession {
     pub(in crate::app) fn return_from_terminal(&mut self) {
         self.request_focus(self.before_terminal);
     }
-    pub(super) fn accept_graph_focus(&mut self) {
+    pub(in crate::app) fn accept_graph_focus(&mut self) {
         let Some(window) = self.core.graph.focused() else {
             self.focus = FocusTarget::Editor;
             return;

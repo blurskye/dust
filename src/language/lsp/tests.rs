@@ -7,21 +7,21 @@ use serde_json::Value;
 
 use serde_json::json;
 
-use crate::language::lsp::model::LspDocument;
+use crate::language::lsp::messages::LspDocument;
 
-use crate::language::lsp::model::LspEvent;
+use crate::language::lsp::messages::LspEvent;
 
-use crate::language::lsp::model::LspFeature;
+use crate::language::lsp::messages::LspFeature;
 
-use crate::language::lsp::model::LspFeatureResult;
+use crate::language::lsp::messages::LspFeatureResult;
 
-use crate::language::lsp::model::LspMarkupKind;
+use crate::language::lsp::messages::LspMarkupKind;
 
-use crate::language::lsp::model::LspPolicy;
+use crate::language::lsp::server::LspPolicy;
 
-use crate::language::lsp::model::LspProgressKind;
+use crate::language::lsp::messages::LspProgressKind;
 
-use crate::language::lsp::model::SyncKind;
+use crate::language::lsp::server::SyncKind;
 
 use crate::language::lsp::paths::file_uri;
 

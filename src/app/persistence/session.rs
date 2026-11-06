@@ -45,7 +45,7 @@ pub(super) struct RestoreSource {
     configuration: u64,
 }
 impl RestoreSource {
-    fn capture(context: &RestoreContext<'_>) -> Self {
+    pub(in crate::app) fn capture(context: &RestoreContext<'_>) -> Self {
         Self {
             editor: context.editor.version(),
             workspace: context.workspace.version(),
@@ -56,7 +56,7 @@ impl RestoreSource {
             configuration: context.configuration,
         }
     }
-    fn current(&self, context: &RestoreContext<'_>) -> bool {
+    pub(in crate::app) fn current(&self, context: &RestoreContext<'_>) -> bool {
         self.editor == context.editor.version()
             && context
                 .windows

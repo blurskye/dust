@@ -140,7 +140,7 @@ impl InputSession {
         self.capture_epoch = std::sync::Arc::new(());
     }
 
-    pub(super) fn new(count_limit: u64) -> Self {
+    pub(in crate::app) fn new(count_limit: u64) -> Self {
         Self {
             snippet: None,
             mouse: mouse::MouseState::default(),
@@ -256,7 +256,7 @@ impl InputSession {
             .filter(|popup| popup.kind != crate::ui::DocumentationPopupKind::Completion)
             .map(|_| "documentation")
     }
-    pub(super) fn reconfigure(&mut self) {
+    pub(in crate::app) fn reconfigure(&mut self) {
         self.cancel_mapping();
         self.cancel_prompt_completions();
         self.close_documentation();
@@ -265,19 +265,19 @@ impl InputSession {
             prompt.selected_completion = None;
         }
     }
-    pub(super) fn cancel_pending(&mut self) {
+    pub(in crate::app) fn cancel_pending(&mut self) {
         self.modal.cancel_pending();
     }
-    pub(super) fn effective_mode(&self, mode: EditorMode) -> EditorMode {
+    pub(in crate::app) fn effective_mode(&self, mode: EditorMode) -> EditorMode {
         self.modal.effective_mode(mode)
     }
-    pub(super) fn pending_context(&self) -> Option<PendingInputContext> {
+    pub(in crate::app) fn pending_context(&self) -> Option<PendingInputContext> {
         self.modal.pending_context()
     }
-    pub(super) fn decorate_invocation(&mut self, invocation: &mut CommandInvocation) {
+    pub(in crate::app) fn decorate_invocation(&mut self, invocation: &mut CommandInvocation) {
         self.modal.decorate_invocation(invocation);
     }
-    pub(super) fn feed(
+    pub(in crate::app) fn feed(
         &mut self,
         mode: EditorMode,
         input: GrammarInput,
@@ -296,7 +296,7 @@ impl InputSession {
         result
     }
 
-    pub(super) fn resolve(
+    pub(in crate::app) fn resolve(
         &mut self,
         context: &str,
         key: KeyEvent,
@@ -338,12 +338,12 @@ impl InputSession {
         self.hints = None;
         result
     }
-    pub(super) fn mapping_context(&self) -> Option<&str> {
+    pub(in crate::app) fn mapping_context(&self) -> Option<&str> {
         self.pending
             .as_ref()
             .map(|pending| pending.context.as_str())
     }
-    pub(super) fn finish_mapping(&mut self, context: &str, revision: u64) -> MappingResolution {
+    pub(in crate::app) fn finish_mapping(&mut self, context: &str, revision: u64) -> MappingResolution {
         let Some(pending) = self.pending.take() else {
             return MappingResolution::Missing;
         };
@@ -354,12 +354,12 @@ impl InputSession {
         self.hints = None;
         self.sequence.flush_timeout()
     }
-    pub(super) fn cancel_mapping(&mut self) {
+    pub(in crate::app) fn cancel_mapping(&mut self) {
         self.pending = None;
         self.sequence.cancel();
         self.hints = None;
     }
-    pub(super) fn flush_timeout(
+    pub(in crate::app) fn flush_timeout(
         &mut self,
         context: &str,
         revision: u64,
@@ -377,13 +377,13 @@ impl InputSession {
         }
         self.finish_mapping(context, revision)
     }
-    pub(super) fn hide_hints(&mut self) {
+    pub(in crate::app) fn hide_hints(&mut self) {
         self.hints = None;
     }
-    pub(super) fn hints(&self) -> Option<&KeyHintUiState> {
+    pub(in crate::app) fn hints(&self) -> Option<&KeyHintUiState> {
         self.hints.as_ref()
     }
-    pub(super) fn update_hints(
+    pub(in crate::app) fn update_hints(
         &mut self,
         context: &str,
         version: (&ResolvedKeymaps, u64),
@@ -458,3 +458,5 @@ impl InputSession {
         self.pending.as_ref().and_then(|pending| pending.deadline)
     }
 }
+
+mod interaction;

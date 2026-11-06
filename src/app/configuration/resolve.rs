@@ -130,9 +130,14 @@ pub(in crate::app) fn base_safe_keymaps(
 
 pub(in crate::app) fn resolve_configuration(
     commands: &CommandRegistry<AppEffect>,
-    loaded: LoadedConfig,
+    mut loaded: LoadedConfig,
     strict: bool,
 ) -> Result<(ResolvedConfiguration, Option<String>), String> {
+    if loaded.user_configuration {
+        loaded.installed_plugins = crate::tools::installed_plugins(
+            &crate::config::user_state_directory().join("packages"),
+        );
+    }
     let mut diagnostics = Vec::new();
     diagnostics.extend(loaded.diagnostic.iter().cloned());
     diagnostics.extend(loaded.keymaps.diagnostic.iter().cloned());

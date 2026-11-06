@@ -137,7 +137,7 @@ pub(in crate::app) struct PluginWindowHost {
 thread_local! { static HOST_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
 impl Clone for PluginWindowHost {
-    fn clone(&self) -> Self {
+    pub(in crate::app) fn clone(&self) -> Self {
         HOST_CLONES.with(|count| count.set(count.get() + 1));
         Self {
             next_handle: self.next_handle,

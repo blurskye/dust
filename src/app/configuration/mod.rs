@@ -33,14 +33,14 @@ mod keymaps;
 /// The enum name is needed by tests and by prose; production reaches it through the method it
 /// returns from, so the alias is gated rather than left to warn as an unused import.
 #[cfg(test)]
-pub(in crate::app) use model::EffectiveBinding;
-pub(in crate::app) use model::ReverseBinding;
-pub use model::ConfigurationSources;
-pub use model::KeymapInspection;
-pub use model::KeymapOperation;
-pub use model::ResolvedConfiguration;
-pub use model::ResolvedKeyGroup;
-pub use model::ResolvedKeymaps;
+pub(in crate::app) use keymaps::EffectiveBinding;
+pub(in crate::app) use keymaps::ReverseBinding;
+pub use keymaps::ConfigurationSources;
+pub use keymaps::KeymapInspection;
+pub use keymaps::KeymapOperation;
+pub use keymaps::ResolvedConfiguration;
+pub use keymaps::ResolvedKeyGroup;
+pub use keymaps::ResolvedKeymaps;
 mod resolve;
 pub use resolve::validate_loaded_configuration;
 pub(in crate::app) use resolve::configuration_generation_is_newer;
@@ -169,7 +169,7 @@ impl ConfigurationCandidate {
 }
 
 impl ConfigurationSession {
-    pub(super) fn new(
+    pub(in crate::app) fn new(
         accepted: ResolvedConfiguration,
         user_configuration: bool,
         source_fingerprint: Option<Vec<crate::config::SourceFingerprint>>,
@@ -192,70 +192,70 @@ impl ConfigurationSession {
             zen: None,
         }
     }
-    pub(super) fn settings(&self) -> &crate::config::Config {
+    pub(in crate::app) fn settings(&self) -> &crate::config::Config {
         &self.accepted.settings
     }
     /// The config.toml the Settings page writes, or `None` when Dust runs on the bundled
     /// defaults only.
-    pub(super) fn user_settings_path(&self) -> Option<PathBuf> {
+    pub(in crate::app) fn user_settings_path(&self) -> Option<PathBuf> {
         self.user_configuration
             .then(crate::config::user_config_path)
     }
     /// Keys the user's config.toml sets.
-    pub(super) fn user_setting_keys(&self) -> &BTreeSet<String> {
+    pub(in crate::app) fn user_setting_keys(&self) -> &BTreeSet<String> {
         &self.accepted.user_setting_keys
     }
-    pub(super) fn dashboard(&self) -> &crate::config::DashboardConfig {
+    pub(in crate::app) fn dashboard(&self) -> &crate::config::DashboardConfig {
         &self.accepted.dashboard
     }
-    pub(super) fn theme(&self) -> &crate::config::ThemeConfig {
+    pub(in crate::app) fn theme(&self) -> &crate::config::ThemeConfig {
         self.effective_theme()
     }
-    pub(super) fn note_rejected_keymaps(&mut self, diagnostic: Option<String>) {
+    pub(in crate::app) fn note_rejected_keymaps(&mut self, diagnostic: Option<String>) {
         self.rejected_keymaps = diagnostic;
     }
-    pub(super) fn rejected_keymaps(&self) -> Option<&str> {
+    pub(in crate::app) fn rejected_keymaps(&self) -> Option<&str> {
         self.rejected_keymaps.as_deref()
     }
-    pub(super) fn keymaps(&self) -> &ResolvedKeymaps {
+    pub(in crate::app) fn keymaps(&self) -> &ResolvedKeymaps {
         &self.accepted.keymaps
     }
-    pub(super) fn raw_keymaps(&self) -> &crate::config::LoadedKeymaps {
+    pub(in crate::app) fn raw_keymaps(&self) -> &crate::config::LoadedKeymaps {
         &self.accepted.raw_keymaps
     }
-    pub(super) fn base_keymaps(&self) -> &crate::config::LoadedKeymaps {
+    pub(in crate::app) fn base_keymaps(&self) -> &crate::config::LoadedKeymaps {
         &self.accepted.base_keymaps
     }
-    pub(super) fn raw_windows(&self) -> &crate::config::WindowsConfig {
+    pub(in crate::app) fn raw_windows(&self) -> &crate::config::WindowsConfig {
         &self.accepted.raw_windows
     }
-    pub(super) fn expected_plugin_indexes(&self) -> &BTreeSet<String> {
+    pub(in crate::app) fn expected_plugin_indexes(&self) -> &BTreeSet<String> {
         &self.accepted.expected_plugin_indexes
     }
-    pub(super) fn deferred_plugin_keymaps(&self) -> bool {
+    pub(in crate::app) fn deferred_plugin_keymaps(&self) -> bool {
         self.accepted.deferred_plugin_keymaps
     }
-    pub(super) fn complete_plugin_indexes(&mut self) {
+    pub(in crate::app) fn complete_plugin_indexes(&mut self) {
         self.accepted.deferred_plugin_keymaps = false;
     }
-    pub(super) fn generation(&self) -> u64 {
+    pub(in crate::app) fn generation(&self) -> u64 {
         self.generation
     }
-    pub(super) fn binding_revision_ref(&self) -> &u64 {
+    pub(in crate::app) fn binding_revision_ref(&self) -> &u64 {
         &self.binding_revision
     }
-    pub(super) fn binding_revision(&self) -> u64 {
+    pub(in crate::app) fn binding_revision(&self) -> u64 {
         self.binding_revision
     }
-    pub(super) fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+    pub(in crate::app) fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
         self.explain_theme(key)
             .or_else(|| self.accepted.explain(key))
     }
-    pub(super) fn dashboard_actions(&self) -> Vec<DashboardAction> {
+    pub(in crate::app) fn dashboard_actions(&self) -> Vec<DashboardAction> {
         dashboard_actions(&self.accepted)
     }
     /// The command of the `index`th shown dashboard item, as its key would run it.
-    pub(super) fn dashboard_invocation(&self, index: usize) -> Option<CommandInvocation> {
+    pub(in crate::app) fn dashboard_invocation(&self, index: usize) -> Option<CommandInvocation> {
         let action = self
             .accepted
             .dashboard
@@ -272,10 +272,10 @@ impl ConfigurationSession {
         }
         Some(invocation)
     }
-    pub(super) fn request_reload(&self) -> Result<(), ConfigurationWorkerError> {
+    pub(in crate::app) fn request_reload(&self) -> Result<(), ConfigurationWorkerError> {
         self.worker.request_reload()
     }
-    pub(super) fn next_result(
+    pub(in crate::app) fn next_result(
         &mut self,
     ) -> Result<Option<ConfigurationWorkerResult>, ConfigurationWorkerError> {
         let Some(result) = self.worker.try_result()? else {
@@ -289,10 +289,10 @@ impl ConfigurationSession {
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(Some(result))
     }
-    pub(super) fn retain_watch(&self) {
+    pub(in crate::app) fn retain_watch(&self) {
         let _ = self.worker.verify_watch();
     }
-    pub(super) fn prepare(
+    pub(in crate::app) fn prepare(
         &self,
         loaded: LoadedConfig,
         commands: &CommandRegistry<AppEffect>,
@@ -333,7 +333,7 @@ impl ConfigurationSession {
             stamp: self.stamp.clone(),
         })
     }
-    pub(super) fn stage_watch(
+    pub(in crate::app) fn stage_watch(
         &self,
         candidate: &ConfigurationCandidate,
         catalog: &PluginContributionCatalog,
@@ -344,7 +344,7 @@ impl ConfigurationSession {
             .verify_watch()
             .map_err(|error| error.to_string())
     }
-    fn check_catalog(
+    pub(in crate::app) fn check_catalog(
         expected: &crate::plugins::PluginCatalogVersion,
         current: &PluginContributionCatalog,
     ) -> Result<(), String> {
@@ -354,14 +354,14 @@ impl ConfigurationSession {
             Err("configuration candidate catalogue revision is stale".into())
         }
     }
-    fn check_stamp(&self, stamp: &Arc<()>) -> Result<(), String> {
+    pub(in crate::app) fn check_stamp(&self, stamp: &Arc<()>) -> Result<(), String> {
         if Arc::ptr_eq(&self.stamp, stamp) {
             Ok(())
         } else {
             Err("configuration candidate is stale or belongs to another session".into())
         }
     }
-    pub(super) fn commit(
+    pub(in crate::app) fn commit(
         &mut self,
         candidate: ConfigurationCandidate,
         catalog: &PluginContributionCatalog,
@@ -388,14 +388,14 @@ impl ConfigurationSession {
         Ok(receipt)
     }
     #[cfg(test)]
-    pub(super) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {
+    pub(in crate::app) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {
         self.accepted.keymaps = keymaps;
         self.accepted.deferred_plugin_keymaps = deferred;
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
     }
     /// Flip one view setting and return whether it is now on.
-    pub(super) fn toggle_view(&mut self, toggle: ViewToggle) -> bool {
+    pub(in crate::app) fn toggle_view(&mut self, toggle: ViewToggle) -> bool {
         self.stamp = Arc::new(());
         let editor = &mut self.accepted.settings.editor;
         match toggle {
@@ -437,7 +437,7 @@ impl ConfigurationSession {
     }
     /// Enter zen mode, hiding line numbers, git signs and indent guides, or leave it and put
     /// them back. Leaving returns whether to reopen the explorer and undo zen's zoom.
-    pub(super) fn toggle_zen(&mut self, explorer_open: bool, zoomed: bool) -> Option<(bool, bool)> {
+    pub(in crate::app) fn toggle_zen(&mut self, explorer_open: bool, zoomed: bool) -> Option<(bool, bool)> {
         self.stamp = Arc::new(());
         let editor = &mut self.accepted.settings.editor;
         if let Some(zen) = self.zen.take() {
@@ -458,7 +458,7 @@ impl ConfigurationSession {
         editor.indent_guides.enabled = false;
         None
     }
-    pub(super) fn toggle_inlay_hints(&mut self) -> bool {
+    pub(in crate::app) fn toggle_inlay_hints(&mut self) -> bool {
         self.stamp = Arc::new(());
         self.accepted.settings.lsp.inlay_hints = !self.accepted.settings.lsp.inlay_hints;
         self.accepted.settings.lsp.inlay_hints
@@ -488,3 +488,5 @@ pub(in crate::app) fn plugin_owner_from_id(id: &str) -> Option<&str> {
         .flatten()
         .filter(|owner| !owner.is_empty())
 }
+
+mod interaction;

@@ -49,7 +49,7 @@ struct Build {
     failed: Option<String>,
 }
 impl Build {
-    fn fail(&mut self, reason: impl Into<String>) {
+    pub(in crate::app) fn fail(&mut self, reason: impl Into<String>) {
         if self.failed.is_none() {
             self.failed = Some(reason.into());
         }
@@ -62,7 +62,7 @@ pub(super) struct Linters {
     builds: BTreeMap<u64, Build>,
 }
 impl Linters {
-    pub(super) fn stop_run(&mut self, key: &RunKey) -> Option<DiagnosticProducer> {
+    pub(in crate::app) fn stop_run(&mut self, key: &RunKey) -> Option<DiagnosticProducer> {
         let mut producer = None;
         for build in self
             .builds
@@ -93,7 +93,7 @@ impl LinterReadLoan<'_> {
     pub(in crate::app) fn request(
         &self,
         worker: &std::sync::Arc<()>,
-    ) -> Result<(PathBuf, Vec<crate::workspace::RootIdentity>, u64), String> {
+    ) -> Result<(PathBuf, Vec<crate::files::RootIdentity>, u64), String> {
         if self
             .build
             .pending

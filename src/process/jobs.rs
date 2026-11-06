@@ -85,7 +85,7 @@ impl Drop for JobSlot {
     }
 }
 struct Submission {
-    root: Option<crate::workspace::RootIdentity>,
+    root: Option<crate::files::RootIdentity>,
     id: JobId,
     request: JobRequest,
     cancel: Arc<AtomicBool>,
@@ -250,7 +250,7 @@ impl JobAdmission<'_> {
     pub(crate) fn submit_scoped(
         self,
         request: JobRequest,
-        root: crate::workspace::RootIdentity,
+        root: crate::files::RootIdentity,
     ) -> Result<JobId, JobError> {
         if !request.cwd.starts_with(&root.canonical_path) {
             return Err(JobError::InvalidPolicy);
@@ -260,7 +260,7 @@ impl JobAdmission<'_> {
     fn submit_inner(
         self,
         request: JobRequest,
-        root: Option<crate::workspace::RootIdentity>,
+        root: Option<crate::files::RootIdentity>,
     ) -> Result<JobId, JobError> {
         check_request(&request)?;
         let supervisor = self.supervisor;
@@ -394,7 +394,7 @@ impl JobEngine {
             .canonicalize()
             .map_err(|_| JobError::InvalidPolicy)?;
         if let Some(expected) = root
-            && (crate::workspace::RootIdentity::capture(&expected.canonical_path)
+            && (crate::files::RootIdentity::capture(&expected.canonical_path)
                 .ok()
                 .as_ref()
                 != Some(&expected)
@@ -916,7 +916,7 @@ mod tests {
         assert_eq!(bytes, b"line\n".repeat(32));
         let target = root.path().join("target");
         std::fs::create_dir(&target).unwrap();
-        let identity = crate::workspace::RootIdentity::capture(&target).unwrap();
+        let identity = crate::files::RootIdentity::capture(&target).unwrap();
         std::fs::rename(&target, root.path().join("old-target")).unwrap();
         std::fs::create_dir(&target).unwrap();
         let id = jobs
@@ -998,7 +998,7 @@ mod tests {
         let cwd = root.path().join("sub");
         std::fs::create_dir(&cwd).unwrap();
         let (mut queued, _) = submission(&cwd, "printf forbidden > marker");
-        queued.root = Some(crate::workspace::RootIdentity::capture(root.path()).unwrap());
+        queued.root = Some(crate::files::RootIdentity::capture(root.path()).unwrap());
         std::fs::remove_dir(&cwd).unwrap();
         std::os::unix::fs::symlink(outside.path(), &cwd).unwrap();
         let mut engine = JobEngine::new(16);

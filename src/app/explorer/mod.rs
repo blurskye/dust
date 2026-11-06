@@ -81,7 +81,7 @@ pub(in crate::app) struct ExplorerSession {
     pending: Option<PendingDirectoryLoad>,
     epoch: Arc<()>,
     roots: Vec<PathBuf>,
-    observed_roots: Vec<crate::workspace::RootIdentity>,
+    observed_roots: Vec<crate::files::RootIdentity>,
     root_count: usize,
     hidden: bool,
     ignored: bool,
@@ -213,7 +213,7 @@ impl ExplorerSession {
             |generation, view| generation.saturating_add(view.tree.projection_generation()),
         )
     }
-    fn watched_directories(&self) -> Vec<PathBuf> {
+    pub(in crate::app) fn watched_directories(&self) -> Vec<PathBuf> {
         self.cloned_views
             .values()
             .flat_map(|view| view.tree.watched_directories())
@@ -1033,8 +1033,8 @@ mod tests {
     use crate::app::explorer::*;
     use std::time::Duration;
     use std::time::Instant;
-    fn fixture(root: &std::path::Path) -> (ExplorerSession, WorkspaceVersion) {
-        let identity = crate::workspace::RootIdentity::capture(root).unwrap();
+    pub(in crate::app) fn fixture(root: &std::path::Path) -> (ExplorerSession, WorkspaceVersion) {
+        let identity = crate::files::RootIdentity::capture(root).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity)],
@@ -1054,7 +1054,7 @@ mod tests {
         owner.reset_roots(workspace.roots(), workspace.root_revision());
         (owner, workspace.version())
     }
-    fn drain(owner: &mut ExplorerSession, scope: WorkspaceVersion) {
+    pub(in crate::app) fn drain(owner: &mut ExplorerSession, scope: WorkspaceVersion) {
         let deadline = Instant::now() + Duration::from_secs(2);
         while owner.pending() {
             owner.poll(scope.clone(), 1);
@@ -1714,3 +1714,5 @@ mod tests {
 }
 
 mod tree;
+
+mod interaction;

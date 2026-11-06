@@ -51,27 +51,27 @@ use crate::editor::state::layout::split_leaf;
 
 use crate::editor::state::layout::swap_layout_leaves;
 
-use crate::editor::state::model::Axis;
+use crate::editor::state::layout::Axis;
 
-use crate::editor::state::model::Buffer;
+use crate::editor::state::buffer::Buffer;
 
-use crate::editor::state::model::BufferOrigin;
+use crate::editor::state::buffer::BufferOrigin;
 
-use crate::editor::state::model::EditingPolicy;
+use crate::editor::state::mod::EditingPolicy;
 
-use crate::editor::state::model::EditorMode;
+use crate::editor::state::view::EditorMode;
 
-use crate::editor::state::model::FocusDirection;
+use crate::editor::state::layout::FocusDirection;
 
-use crate::editor::state::model::LayoutNode;
+use crate::editor::state::layout::LayoutNode;
 
-use crate::editor::state::model::Pane;
+use crate::editor::state::layout::Pane;
 
-use crate::editor::state::model::RegisterStore;
+use crate::editor::state::registers::RegisterStore;
 
-use crate::editor::state::model::Tab;
+use crate::editor::state::layout::Tab;
 
-use crate::editor::state::model::View;
+use crate::editor::state::view::View;
 
 /// Opaque identity/revision of editor-owned window topology. Transaction clones
 /// preserve identity; independently constructed editor states do not.

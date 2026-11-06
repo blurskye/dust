@@ -31,7 +31,7 @@ pub(super) struct PullRequests {
 }
 
 impl PullRequests {
-    fn prepare(&mut self, source: crate::app::workspace::WorkspaceVersion) {
+    pub(in crate::app) fn prepare(&mut self, source: crate::app::workspace::WorkspaceVersion) {
         if self.source.as_ref() != Some(&source) {
             self.jobs.cancel();
             self.generation += 1;
@@ -57,7 +57,7 @@ impl App {
             && self.pull_requests.source.as_ref() == Some(&self.workspace.version())
     }
 
-    pub(super) fn list_pull_requests(&mut self) {
+    pub(in crate::app) fn list_pull_requests(&mut self) {
         let generation = self.pull_request_generation();
         match self
             .pull_requests
@@ -69,7 +69,7 @@ impl App {
         }
     }
 
-    pub(super) fn list_review_comments(&mut self) {
+    pub(in crate::app) fn list_review_comments(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
         match self.pull_requests.jobs.comments(
             self.state.workspace_root.clone(),
@@ -80,7 +80,7 @@ impl App {
         }
     }
 
-    pub(super) fn begin_review_comment(&mut self) {
+    pub(in crate::app) fn begin_review_comment(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
         if self.pull_requests.comment_sending || self.pull_requests.comment_loading {
             self.notify_message("a review comment request is still running".into(), false);
@@ -119,7 +119,7 @@ impl App {
         }
     }
 
-    pub(super) fn submit_review_comment(&mut self, body: String) {
+    pub(in crate::app) fn submit_review_comment(&mut self, body: String) {
         if self.pull_requests.comment_sending {
             return;
         }
@@ -153,7 +153,7 @@ impl App {
         }
     }
 
-    pub(super) fn checkout_pull_request(
+    pub(in crate::app) fn checkout_pull_request(
         &mut self,
         root: PathBuf,
         generation: u64,
@@ -182,7 +182,7 @@ impl App {
         }
     }
 
-    pub(super) fn process_pull_request_events(&mut self) {
+    pub(in crate::app) fn process_pull_request_events(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
         while let Some(event) = self.pull_requests.jobs.try_reply() {
             if !self.pull_request_is_current(&event.root, event.generation) {
@@ -363,7 +363,7 @@ impl App {
 mod tests {
     use crate::app::git::pull_requests::*;
 
-    fn app() -> App {
+    pub(in crate::app) fn app() -> App {
         App::new(
             crate::app::startup::StartupTarget::Dashboard {
                 root: tempfile::tempdir().unwrap().keep(),
@@ -557,7 +557,7 @@ mod tests {
             .workspace
             .fixture_add_root(
                 "other".into(),
-                crate::workspace::RootIdentity::capture(other.path()).unwrap(),
+                crate::files::RootIdentity::capture(other.path()).unwrap(),
             )
             .unwrap();
         app.workspace.set_active_root(first).unwrap();

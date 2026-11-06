@@ -15,7 +15,7 @@ use crate::ui::SetupState;
 
 impl App {
     /// Ask the setup questions when this is the first start, that is, config.toml is missing.
-    pub(super) fn open_setup_on_first_start(&mut self) {
+    pub(in crate::app) fn open_setup_on_first_start(&mut self) {
         if self
             .configuration
             .user_settings_path()
@@ -90,7 +90,7 @@ impl App {
         }
     }
 
-    pub(super) fn setup_action(&mut self, action: SetupAction) {
+    pub(in crate::app) fn setup_action(&mut self, action: SetupAction) {
         if matches!(action, SetupAction::Open) {
             self.open_setup();
             return;

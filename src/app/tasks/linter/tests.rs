@@ -8,7 +8,7 @@ use crate::app::startup::StartupTarget;
 use crate::app::documents::DocumentEvent;
 use crate::app::documents::DocumentSession;
 use crate::files::VfsWorker;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use crate::workspace::WorkspaceId;
 use crate::workspace::WorkspaceState;
 use std::thread;

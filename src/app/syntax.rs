@@ -70,7 +70,7 @@ pub(super) struct SyntaxSession {
 }
 
 impl SyntaxSession {
-    pub(super) fn new(queue_capacity: usize) -> Self {
+    pub(in crate::app) fn new(queue_capacity: usize) -> Self {
         Self {
             service: SyntaxService::start(queue_capacity),
             versions: HashMap::new(),
@@ -86,7 +86,7 @@ impl SyntaxSession {
         }
     }
 
-    fn close(&mut self, buffer: BufferId) {
+    pub(in crate::app) fn close(&mut self, buffer: BufferId) {
         self.versions.remove(&buffer);
         if let Some(document) = self.documents.remove(&buffer) {
             self.service.cancel(document);
@@ -100,7 +100,7 @@ impl SyntaxSession {
 
     /// Returns how many source strings were materialized, for admission-cost checks.
     /// No source snapshot is created before revision, debounce and queue admission succeed.
-    pub(super) fn tick(
+    pub(in crate::app) fn tick(
         &mut self,
         documents: &[SyntaxDocument<'_>],
         config: &SyntaxConfig,
@@ -238,7 +238,7 @@ impl SyntaxSession {
         materialized
     }
 
-    fn accept_event(
+    pub(in crate::app) fn accept_event(
         &mut self,
         event: SyntaxEvent,
         live: &HashMap<BufferId, (BufferRevision, SyntaxLanguage)>,
@@ -312,10 +312,10 @@ impl SyntaxSession {
         }
     }
 
-    pub(super) fn result(&self, buffer: BufferId) -> Option<&SyntaxResult> {
+    pub(in crate::app) fn result(&self, buffer: BufferId) -> Option<&SyntaxResult> {
         self.accepted.get(&buffer).map(|(_, result)| result)
     }
-    pub(super) fn source(&self, buffer: BufferId) -> Option<&TextVersion> {
+    pub(in crate::app) fn source(&self, buffer: BufferId) -> Option<&TextVersion> {
         self.accepted.get(&buffer).map(|(source, _)| source)
     }
     pub(super) fn results(&self) -> impl Iterator<Item = (&BufferId, &SyntaxResult)> {
@@ -336,7 +336,7 @@ impl SyntaxSession {
     pub(super) fn colours_pending(&self, buffer: BufferId) -> bool {
         !self.accepted.contains_key(&buffer) && !self.failures.contains_key(&buffer)
     }
-    pub(super) fn failure(&self, buffer: BufferId) -> Option<&str> {
+    pub(in crate::app) fn failure(&self, buffer: BufferId) -> Option<&str> {
         self.failures
             .get(&buffer)
             .map(|failure| failure.diagnostic.as_str())
@@ -650,5 +650,445 @@ mod tests {
         session.close(buffer);
         session.accept_event(event(3, 7, SyntaxLanguage::Rust), &live, "large");
         assert_eq!(session.failure(buffer), None);
+    }
+}
+
+use crate::app::ByteOffset;
+use crate::app::ByteRange;
+use crate::app::EditorOperation;
+use crate::app::EditorState;
+use crate::app::EditorTransaction;
+use crate::app::HashSet;
+use crate::app::App;
+use crate::app::Precondition;
+use crate::app::TextEdit;
+use crate::app::BufferRevision;
+use crate::app::IndentError;
+use crate::app::SyntaxDocument;
+use crate::app::SyntaxSupport;
+use crate::app::TextEditSet;
+use crate::app::UiFold;
+use crate::app::UiSyntaxSpan;
+use crate::app::language_for_document;
+
+
+impl App {
+
+    pub(in crate::app) fn syntax_support_label(&self, support: SyntaxSupport) -> String {
+        self.message(
+            match support {
+                SyntaxSupport::Full => "syntax_support_full",
+                SyntaxSupport::Partial => "syntax_support_partial",
+                SyntaxSupport::Unsupported => "syntax_support_unsupported",
+            },
+            &[],
+        )
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn apply_syntax_indent_line(&mut self) {
+        let Some(view_id) = self.state.active_view else {
+            return;
+        };
+        let view = &self.state.views[view_id];
+        let buffer_id = view.buffer;
+        let cursor = view.cursor;
+        let Some(buffer) = self.state.buffers.get(buffer_id) else {
+            return;
+        };
+        let Some(language) = language_for_document(
+            buffer.path.as_deref(),
+            buffer.text.chunks().next().unwrap_or_default(),
+        ) else {
+            self.show_error(self.message("syntax_indent_unavailable", &[]));
+            return;
+        };
+        let revision = buffer.text.revision();
+        let line = match buffer.text.byte_to_line(cursor) {
+            Ok(line) => line,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let levels = match self.syntax.indentation(buffer_id, revision, language, line) {
+            Ok(levels) => levels,
+            Err(error) => {
+                let message = match error {
+                    IndentError::Pending => self.message("syntax_indent_pending", &[]),
+                    IndentError::Unsupported => self.message(
+                        "syntax_indent_unsupported",
+                        &[("language", language.name().to_owned())],
+                    ),
+                    IndentError::Truncated => self.message("syntax_indent_truncated", &[]),
+                };
+                self.show_error(message);
+                return;
+            }
+        };
+        let desired = if self.state.policy.expand_tabs {
+            " ".repeat(levels.saturating_mul(self.state.policy.indent_width))
+        } else {
+            "\t".repeat(levels)
+        };
+        let text = match buffer.text.line(line) {
+            Ok(text) => text,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let whitespace = text
+            .bytes()
+            .take_while(|byte| matches!(*byte, b' ' | b'\t'))
+            .count();
+        if text.get(..whitespace) == Some(desired.as_str()) {
+            self.notify_message(self.message("syntax_indent_unchanged", &[]), false);
+            return;
+        }
+        let start = match buffer.text.line_to_byte(line) {
+            Ok(start) => start,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let end = ByteOffset(start.get().saturating_add(whitespace));
+        let edits = TextEditSet::new(
+            revision,
+            vec![TextEdit::new(
+                ByteRange::new(start, end).expect("ordered indentation"),
+                desired,
+            )],
+        );
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_precondition(Precondition::BufferRevision {
+                buffer: buffer_id,
+                revision,
+            })
+            .with_precondition(Precondition::BufferWritable(buffer_id))
+            .with_precondition(Precondition::ViewDisplays {
+                view: view_id,
+                buffer: buffer_id,
+            })
+            .with_operation(EditorOperation::ApplyEdits {
+                buffer: buffer_id,
+                edits,
+            });
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error)
+        } else {
+            self.notify_message(self.message("syntax_indent_applied", &[]), false);
+        }
+    }
+}
+
+impl App {
+
+
+    /// A file that was just opened is drawn once it has its colours and, when they are on,
+    /// its inlay hints, unless those take longer than a moment.
+    pub(in crate::app) fn hold_first_frame(&mut self) -> bool {
+        let now = self.clock.monotonic();
+        let Some(buffer) = self.state.active_buffer_id() else {
+            return false;
+        };
+        if !self.syntax.first_frame_pending(buffer, now) {
+            return false;
+        }
+        let waiting = self.syntax.colours_pending(buffer)
+            || self.configuration.settings().lsp.inlay_hints
+                && self.language.inlays_in_flight(buffer);
+        // Once drawn, later edits and hint refreshes never hold a frame back.
+        if !waiting {
+            self.syntax.first_frame_shown(buffer);
+        }
+        waiting
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn process_syntax(&mut self) {
+        // Move old fold rows with their text before matching them to a new parse.
+        let mut folds_changed = false;
+        for (fold, source) in self
+            .ui
+            .value
+            .syntax_folds
+            .iter_mut()
+            .zip(&mut self.syntax_fold_positions)
+        {
+            let Some((buffer_id, version, revision, range)) = source else {
+                continue;
+            };
+            let Some(buffer) = self.state.buffers.get(*buffer_id).filter(|buffer| {
+                self.state
+                    .views
+                    .get(fold.view)
+                    .is_some_and(|view| view.buffer == *buffer_id)
+                    && version.same_incarnation(&buffer.text.source_version())
+            }) else {
+                folds_changed |= fold.collapsed;
+                fold.collapsed = false;
+                continue;
+            };
+            if let Some(mapped) = buffer.text.map_range_since(*revision, *range) {
+                let start = buffer
+                    .text
+                    .byte_to_line(mapped.start)
+                    .unwrap_or(fold.start_line);
+                let end = buffer
+                    .text
+                    .byte_to_line(mapped.end)
+                    .unwrap_or(fold.end_line);
+                folds_changed |= (fold.start_line, fold.end_line) != (start, end);
+                fold.start_line = start;
+                fold.end_line = end;
+                *range = mapped;
+                *version = buffer.text.source_version();
+                *revision = buffer.text.revision();
+            }
+        }
+        if folds_changed {
+            self.ui.revision = self.ui.revision.wrapping_add(1);
+        }
+        let documents = self
+            .state
+            .buffers
+            .iter()
+            .map(|(buffer, state)| SyntaxDocument {
+                buffer,
+                text: &state.text,
+                language: state
+                    .virtual_language
+                    .as_deref()
+                    .and_then(crate::language::syntax::language_for_fence)
+                    .or_else(|| {
+                        language_for_document(
+                            state.path.as_deref(),
+                            state.text.chunks().next().unwrap_or_default(),
+                        )
+                    }),
+                enabled: !self.effective_large_file(buffer),
+            })
+            .collect::<Vec<_>>();
+        let too_large = self.message("syntax_source_too_large", &[]);
+        self.syntax.tick(
+            &documents,
+            &self.configuration.settings().syntax,
+            self.configuration.settings().editor.tab_width,
+            self.clock.monotonic(),
+            &too_large,
+        );
+        for (buffer, result) in self.syntax.results() {
+            let revision = BufferRevision(result.revision);
+            let stale = self.state.buffers.get(*buffer).is_some_and(|target| {
+                self.syntax.source(*buffer) == Some(&target.text.source_version())
+                    && !self.syntax_spans_source.0.contains(&(
+                        *buffer,
+                        result.generation,
+                        result.revision,
+                    ))
+            });
+            if stale {
+                self.state.buffers[*buffer].syntax_objects =
+                    Some((revision, result.objects.clone()));
+            }
+        }
+        // Folds and spans are rebuilt only when a parse result or the views changed, not on
+        // every tick.
+        let source = (
+            self.syntax
+                .results()
+                .map(|(buffer, result)| (*buffer, result.generation, result.revision))
+                .collect::<Vec<_>>(),
+            self.state
+                .views
+                .iter()
+                .map(|(view_id, view)| (view_id, view.buffer))
+                .collect::<Vec<_>>(),
+        );
+        if source != self.syntax_spans_source {
+            self.syntax_spans_source = source;
+            self.rebuild_syntax_rows();
+        }
+        // Until a new parse or token reply arrives, the old colours follow the edit instead of
+        // dropping out, so typed text doesn't flash plain and back.
+        let syntax_changed =
+            move_spans_onto_current_text(&mut self.ui.value.syntax_spans, &self.state);
+        let semantic_changed =
+            move_spans_onto_current_text(&mut self.ui.value.lsp_semantic_spans, &self.state);
+        if syntax_changed || semantic_changed {
+            self.ui.revision = self.ui.revision.wrapping_add(1);
+        }
+    }
+}
+
+impl App {
+
+
+    fn rebuild_syntax_rows(&mut self) {
+        let collapsed = self
+            .ui
+            .syntax_folds
+            .iter()
+            .filter(|fold| fold.collapsed)
+            .map(|fold| (fold.view, fold.start_line, fold.end_line))
+            .collect::<HashSet<_>>();
+        let mut syntax_folds = Vec::new();
+        for (view_id, view) in self.state.views.iter() {
+            if let Some(result) = self.syntax.result(view.buffer) {
+                let text = &self.state.buffers[view.buffer].text;
+                let Some(parsed) = text.text_at(BufferRevision(result.revision)) else {
+                    continue;
+                };
+                for fold in &result.folds {
+                    let range = parsed
+                        .line_to_byte(fold.start_row)
+                        .ok()
+                        .zip(parsed.line_to_byte(fold.end_row).ok())
+                        .and_then(|(start, end)| ByteRange::new(start, end).ok())
+                        .and_then(|range| {
+                            text.map_range_since(BufferRevision(result.revision), range)
+                        });
+                    let Some((start_line, end_line)) = range.and_then(|range| {
+                        Some((
+                            text.byte_to_line(range.start).ok()?,
+                            text.byte_to_line(range.end).ok()?,
+                        ))
+                    }) else {
+                        continue;
+                    };
+                    syntax_folds.push(UiFold {
+                        view: view_id,
+                        start_line,
+                        end_line,
+                        collapsed: collapsed.contains(&(view_id, start_line, end_line)),
+                    });
+                }
+            }
+        }
+        self.syntax_fold_positions = syntax_folds
+            .iter()
+            .map(|fold| {
+                let buffer = self
+                    .state
+                    .buffers
+                    .get(self.state.views.get(fold.view)?.buffer)?;
+                Some((
+                    self.state.views.get(fold.view)?.buffer,
+                    buffer.text.source_version(),
+                    buffer.text.revision(),
+                    ByteRange::new(
+                        buffer.text.line_to_byte(fold.start_line).ok()?,
+                        buffer.text.line_to_byte(fold.end_line).ok()?,
+                    )
+                    .ok()?,
+                ))
+            })
+            .collect();
+        self.ui.set(syntax_folds, |ui| &mut ui.syntax_folds);
+        self.ui.syntax_spans = self
+            .syntax
+            .results()
+            .flat_map(|(buffer, result)| {
+                result.spans.iter().filter_map(|span| {
+                    Some(UiSyntaxSpan {
+                        buffer: *buffer,
+                        revision: BufferRevision(result.revision),
+                        range: ByteRange::new(ByteOffset(span.start), ByteOffset(span.end)).ok()?,
+                        role: span.role,
+                    })
+                })
+            })
+            .collect();
+        self.ui
+            .syntax_spans
+            .sort_unstable_by_key(|span| (span.range.start, span.range.end));
+        self.ui.markdown_marks = self
+            .syntax
+            .results()
+            .flat_map(|(buffer, result)| {
+                result.markdown.iter().filter_map(|span| {
+                    Some(crate::ui::UiMarkdownMark {
+                        buffer: *buffer,
+                        revision: BufferRevision(result.revision),
+                        range: ByteRange::new(ByteOffset(span.start), ByteOffset(span.end)).ok()?,
+                        mark: span.mark,
+                    })
+                })
+            })
+            .collect();
+        self.ui
+            .markdown_marks
+            .sort_unstable_by_key(|mark| mark.range.start);
+    }
+}
+
+
+
+/// Where the `count`th non-blank character (from zero) of `text` starts, or its end.
+pub(in crate::app) fn nth_non_blank(text: &str, count: usize) -> usize {
+    text.char_indices()
+        .filter(|(_, character)| !character.is_whitespace())
+        .nth(count)
+        .map_or(text.len(), |(at, _)| at)
+}
+
+
+fn move_spans_onto_current_text(
+    spans: &mut Vec<UiSyntaxSpan>,
+    state: &crate::editor::EditorState,
+) -> bool {
+    let current = |span: &UiSyntaxSpan| {
+        state
+            .buffers
+            .get(span.buffer)
+            .map(|buffer| buffer.text.revision())
+    };
+    if spans
+        .iter()
+        .all(|span| current(span).is_none_or(|at| at == span.revision))
+    {
+        return false;
+    }
+    spans.retain_mut(|span| {
+        let Some(buffer) = state.buffers.get(span.buffer) else {
+            return true;
+        };
+        if span.revision == buffer.text.revision() {
+            return true;
+        }
+        let Some(range) = buffer.text.map_range_since(span.revision, span.range) else {
+            return false;
+        };
+        span.range = range;
+        span.revision = buffer.text.revision();
+        true
+    });
+    true
+}
+
+
+#[cfg(test)]
+mod formatter_cursor_tests {
+    #[test]
+    fn a_formatted_file_keeps_the_cursor_on_its_word() {
+        let before = "<html><head></head>\n<body><p>Hello World</p></body></html>\n";
+        let after =
+            "<html>\n  <head></head>\n  <body>\n    <p>Hello World</p>\n  </body>\n</html>\n";
+        let cursor = before.find("World").unwrap();
+        let non_blank = before[..cursor]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .count();
+        let moved = crate::app::events::nth_non_blank(after, non_blank);
+        assert_eq!(&after[moved..moved + 5], "World");
+        assert_eq!(crate::app::events::nth_non_blank("a b", 9), 3);
     }
 }

@@ -46,7 +46,7 @@ pub(super) struct TestSession {
     _state: TempDir,
 }
 impl TestSession {
-    pub(super) fn new(loaded: LoadedConfig) -> Self {
+    pub(in crate::app) fn new(loaded: LoadedConfig) -> Self {
         loaded
             .config
             .validate()
@@ -74,40 +74,40 @@ impl TestSession {
             _state: state,
         }
     }
-    pub(super) fn new_buffer(&mut self) {
+    pub(in crate::app) fn new_buffer(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::NewBuffer);
     }
-    pub(super) fn new_tab(&mut self) {
+    pub(in crate::app) fn new_tab(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::Layout(
                 crate::app::LayoutAction::NewTab,
             ));
     }
-    pub(super) fn window_list(&mut self) {
+    pub(in crate::app) fn window_list(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::WindowList);
     }
-    pub(super) fn focused_window(&self) -> Option<crate::windows::WindowId> {
+    pub(in crate::app) fn focused_window(&self) -> Option<crate::windows::WindowId> {
         self.application.window_session.graph().focused()
     }
-    pub(super) fn active_tab(&self) -> Option<crate::editor::TabId> {
+    pub(in crate::app) fn active_tab(&self) -> Option<crate::editor::TabId> {
         self.application.state.active_tab
     }
-    pub(super) fn reconcile_windows(&mut self) {
+    pub(in crate::app) fn reconcile_windows(&mut self) {
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn copy_counts(&self) -> (usize, usize, usize) {
+    pub(in crate::app) fn copy_counts(&self) -> (usize, usize, usize) {
         (
             crate::windows::WindowGraph::test_clone_count(),
             crate::app::plugins::ExtensionSession::fixture_window_clone_count(),
             self.application.window_session.content_builds(),
         )
     }
-    pub(super) fn graph_revision(&self) -> u64 {
+    pub(in crate::app) fn graph_revision(&self) -> u64 {
         self.application.window_session.graph().revision().unwrap()
     }
-    pub(super) fn window_identity(
+    pub(in crate::app) fn window_identity(
         &self,
         window: crate::windows::WindowId,
     ) -> (
@@ -130,7 +130,7 @@ impl TestSession {
             .content;
         (window, descriptor.view, content)
     }
-    pub(super) fn install_plugin_fixture(
+    pub(in crate::app) fn install_plugin_fixture(
         &mut self,
         index: crate::plugins::PluginContributionIndex,
     ) {
@@ -139,14 +139,14 @@ impl TestSession {
             .fixture_contribution(index)
             .unwrap();
     }
-    pub(super) fn remove_catalog_load(&mut self, owner: &str, load: u64) {
+    pub(in crate::app) fn remove_catalog_load(&mut self, owner: &str, load: u64) {
         assert!(
             self.application
                 .extension
                 .remove_contribution(owner, crate::plugins::PluginLoadId(load))
         );
     }
-    pub(super) fn plugin_window_target(&self, owner: &str) -> String {
+    pub(in crate::app) fn plugin_window_target(&self, owner: &str) -> String {
         let window = self
             .application
             .window_session
@@ -164,14 +164,14 @@ impl TestSession {
             .expect("plugin window");
         format!("window:{}", window.0)
     }
-    pub(super) fn clone_plugin_window(&mut self, target: String) {
+    pub(in crate::app) fn clone_plugin_window(&mut self, target: String) {
         self.application
             .process_effect(crate::app::AppEffect::WindowClone {
                 target,
                 axis: crate::editor::Axis::Vertical,
             });
     }
-    pub(super) fn attempt_host_plugin_window_operations(&mut self, target: &str) {
+    pub(in crate::app) fn attempt_host_plugin_window_operations(&mut self, target: &str) {
         use crate::app::AppEffect;
         for effect in [
             AppEffect::WindowDock {
@@ -203,7 +203,7 @@ impl TestSession {
             self.application.process_effect(effect);
         }
     }
-    pub(super) fn plugin_clone_state(&self) -> PluginCloneState {
+    pub(in crate::app) fn plugin_clone_state(&self) -> PluginCloneState {
         PluginCloneState {
             graph: format!("{:?}", self.application.window_session.graph()),
             editor: self.application.state.window_version(),
@@ -214,14 +214,14 @@ impl TestSession {
             copies: self.copy_counts(),
         }
     }
-    pub(super) fn plugin_request(
+    pub(in crate::app) fn plugin_request(
         &mut self,
         index: &crate::plugins::PluginContributionIndex,
         request: crate::plugins::PluginUiRequest,
     ) -> crate::plugins::PluginUiEvent {
         self.application.apply_plugin_ui_request(index, request)
     }
-    pub(super) fn reject_catalog_contribution(
+    pub(in crate::app) fn reject_catalog_contribution(
         &mut self,
         index: crate::plugins::PluginContributionIndex,
     ) -> Result<(), String> {
@@ -235,7 +235,7 @@ impl TestSession {
             .unwrap();
         self.application.commit_contribution_candidate(candidate)
     }
-    pub(super) fn terminal_fixture(&mut self) {
+    pub(in crate::app) fn terminal_fixture(&mut self) {
         let app = &mut self.application;
         for id in [1, 2] {
             let mut screen = crate::ui::PtyScreen::new(80, 8, 100);
@@ -256,7 +256,7 @@ impl TestSession {
         app.set_terminal_focus(true);
         app.sync_terminal_panel();
     }
-    pub(super) fn terminal_snapshots(&self) -> Vec<(u64, Vec<String>)> {
+    pub(in crate::app) fn terminal_snapshots(&self) -> Vec<(u64, Vec<String>)> {
         self.application
             .terminal_session
             .descriptions()
@@ -273,7 +273,7 @@ impl TestSession {
             })
             .collect()
     }
-    pub(super) fn background_completion_fixture(&mut self) {
+    pub(in crate::app) fn background_completion_fixture(&mut self) {
         self.application.ui.language_completion = Some(crate::ui::LanguageCompletionState {
             typed: 0,
             items: vec![crate::ui::CompletionItem {
@@ -286,53 +286,53 @@ impl TestSession {
             scroll: 0,
         });
     }
-    pub(super) fn select_terminal_without_focus(&mut self, id: u64) {
+    pub(in crate::app) fn select_terminal_without_focus(&mut self, id: u64) {
         self.application
             .terminal_session
             .select(crate::process::PtyId(id));
     }
-    pub(super) fn selected_terminal(&self) -> Option<u64> {
+    pub(in crate::app) fn selected_terminal(&self) -> Option<u64> {
         self.application.terminal_session.selected().map(|id| id.0)
     }
-    pub(super) fn displayed_terminal(&self) -> Option<u64> {
+    pub(in crate::app) fn displayed_terminal(&self) -> Option<u64> {
         self.application.displayed_terminal().map(|id| id.0)
     }
-    pub(super) fn keyboard_terminal(&self) -> Option<u64> {
+    pub(in crate::app) fn keyboard_terminal(&self) -> Option<u64> {
         self.application.keyboard_terminal().map(|id| id.0)
     }
-    pub(super) fn context(&self) -> String {
+    pub(in crate::app) fn context(&self) -> String {
         self.application.active_input_context()
     }
-    pub(super) fn focus_explorer(&mut self, focused: bool) {
+    pub(in crate::app) fn focus_explorer(&mut self, focused: bool) {
         self.application.set_explorer_focus(focused);
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn open_command_prompt(&mut self) {
+    pub(in crate::app) fn open_command_prompt(&mut self) {
         self.application
             .open_prompt(crate::ui::PromptKind::Command, String::new());
     }
-    pub(super) fn close_prompt(&mut self) {
+    pub(in crate::app) fn close_prompt(&mut self) {
         self.application.close_prompt();
     }
-    pub(super) fn close_documentation(&mut self) {
+    pub(in crate::app) fn close_documentation(&mut self) {
         self.application.close_documentation();
     }
-    pub(super) fn close_explorer(&mut self) {
+    pub(in crate::app) fn close_explorer(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::ExplorerClose);
     }
-    pub(super) fn notice(&mut self, text: &str) {
+    pub(in crate::app) fn notice(&mut self, text: &str) {
         self.application.notify_message(text.into(), false);
     }
-    pub(super) fn error(&mut self, text: &str) {
+    pub(in crate::app) fn error(&mut self, text: &str) {
         self.application.notify_message(text.into(), true);
     }
-    pub(super) fn resize(&mut self, width: u16, height: u16) {
+    pub(in crate::app) fn resize(&mut self, width: u16, height: u16) {
         self.application
             .handle_event(UiEvent::Resize(width, height));
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn frame(&mut self) -> crate::ui::Frame {
+    pub(in crate::app) fn frame(&mut self) -> crate::ui::Frame {
         self.application.reconcile_editor_windows();
         crate::ui::render(
             &self.application.state,
@@ -343,7 +343,7 @@ impl TestSession {
             self.application.window_session.height(),
         )
     }
-    pub(super) fn explorer_fixture(&mut self) {
+    pub(in crate::app) fn explorer_fixture(&mut self) {
         for index in 0..40 {
             std::fs::write(
                 self._workspace.path().join(format!("file{index:02}.txt")),
@@ -360,10 +360,10 @@ impl TestSession {
         }
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn clone_explorer(&mut self) {
+    pub(in crate::app) fn clone_explorer(&mut self) {
         self.clone_explorer_view(1).unwrap();
     }
-    pub(super) fn clone_explorer_view(&mut self, view: u64) -> Result<(), String> {
+    pub(in crate::app) fn clone_explorer_view(&mut self, view: u64) -> Result<(), String> {
         let ids = self
             .application
             .window_session
@@ -377,7 +377,7 @@ impl TestSession {
         self.application.reconcile_editor_windows();
         Ok(())
     }
-    pub(super) fn close_explorer_view(&mut self, view: u64) -> Result<(), String> {
+    pub(in crate::app) fn close_explorer_view(&mut self, view: u64) -> Result<(), String> {
         let ids = self
             .application
             .window_session
@@ -387,23 +387,23 @@ impl TestSession {
         self.application
             .close_graph_window(&format!("window:{}", ids.window.0))
     }
-    pub(super) fn reset_window_runtime(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn reset_window_runtime(&mut self) -> Result<(), String> {
         self.application.window_session.reset_runtime(&[])?;
         self.application.reconcile_editor_windows();
         self.application.sync_explorer_ui();
         Ok(())
     }
-    pub(super) fn reset_terminal_window_runtime(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn reset_terminal_window_runtime(&mut self) -> Result<(), String> {
         self.application.window_session.reset_runtime(&[])?;
         self.application.reconcile_editor_windows();
         self.application.sync_terminal_panel();
         self.application.resize_active_terminal_to_panel();
         Ok(())
     }
-    pub(super) fn explorer_focus(&self) -> Option<u64> {
+    pub(in crate::app) fn explorer_focus(&self) -> Option<u64> {
         self.application.window_session.focused_explorer()
     }
-    pub(super) fn explorer_selections(&self) -> std::collections::BTreeMap<u64, Option<u64>> {
+    pub(in crate::app) fn explorer_selections(&self) -> std::collections::BTreeMap<u64, Option<u64>> {
         let mut selections = std::collections::BTreeMap::new();
         selections.insert(
             1,
@@ -426,7 +426,7 @@ impl TestSession {
         }));
         selections
     }
-    pub(super) fn explorer_body(&self, view: u64) -> crate::windows::WindowRect {
+    pub(in crate::app) fn explorer_body(&self, view: u64) -> crate::windows::WindowRect {
         let ids = self
             .application
             .window_session
@@ -439,9 +439,9 @@ impl TestSession {
             .and_then(|projection| projection.window(ids.window))
             .expect("projected explorer fixture")
             .rect;
-        crate::ui::geometry::explorer_body_geometry(rect)
+        crate::ui::render::explorer::explorer_body_geometry(rect)
     }
-    pub(super) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
+    pub(in crate::app) fn explorer_graph_shape(&self) -> (usize, usize, usize) {
         let ids = self.explorer_content_ids();
         let contents = ids
             .iter()
@@ -458,7 +458,7 @@ impl TestSession {
             .sum();
         (contents.len(), views, ids.len())
     }
-    pub(super) fn explorer_content_ids(
+    pub(in crate::app) fn explorer_content_ids(
         &self,
     ) -> Vec<(u64, crate::windows::ContentId, crate::windows::ViewId)> {
         self.application
@@ -468,7 +468,7 @@ impl TestSession {
             .map(|(view, ids)| (view, ids.content, ids.view))
             .collect()
     }
-    pub(super) fn float_explorer(&mut self) {
+    pub(in crate::app) fn float_explorer(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::WindowFloat {
                 target: "explorer".into(),
@@ -479,7 +479,7 @@ impl TestSession {
             });
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn explorer_window(&self, view: u64) -> crate::windows::WindowId {
+    pub(in crate::app) fn explorer_window(&self, view: u64) -> crate::windows::WindowId {
         self.application
             .window_session
             .native_ids()
@@ -487,7 +487,7 @@ impl TestSession {
             .expect("explorer fixture view")
             .window
     }
-    pub(super) fn window_tab(
+    pub(in crate::app) fn window_tab(
         &self,
         window: crate::windows::WindowId,
     ) -> crate::windows::WorkspaceTabId {
@@ -498,14 +498,14 @@ impl TestSession {
             .expect("fixture window")
             .tab
     }
-    pub(super) fn active_window_tab(&self) -> crate::windows::WorkspaceTabId {
+    pub(in crate::app) fn active_window_tab(&self) -> crate::windows::WorkspaceTabId {
         self.application
             .window_session
             .graph()
             .active_tab()
             .expect("active fixture window tab")
     }
-    pub(super) fn window_placement(
+    pub(in crate::app) fn window_placement(
         &self,
         window: crate::windows::WindowId,
     ) -> crate::windows::WindowPlacement {
@@ -516,7 +516,7 @@ impl TestSession {
             .expect("fixture window")
             .placement
     }
-    pub(super) fn place_window(
+    pub(in crate::app) fn place_window(
         &mut self,
         window: crate::windows::WindowId,
         placement: crate::windows::WindowPlacement,
@@ -524,17 +524,17 @@ impl TestSession {
         self.application
             .place_graph_window(&format!("window:{}", window.0), placement)
     }
-    pub(super) fn show_window(
+    pub(in crate::app) fn show_window(
         &mut self,
         window: crate::windows::WindowId,
     ) -> Result<(), String> {
         self.application
             .show_graph_window(&format!("window:{}", window.0))
     }
-    pub(super) fn page_explorer(&mut self, direction: isize) {
+    pub(in crate::app) fn page_explorer(&mut self, direction: isize) {
         self.application.page_explorer_selection(direction);
     }
-    pub(super) fn click(&mut self, column: u16, row: u16) {
+    pub(in crate::app) fn click(&mut self, column: u16, row: u16) {
         self.application.handle_event(UiEvent::Mouse {
             key: crate::editor::input::KeyEvent::mouse(
                 crate::editor::input::KeyCode::MouseLeftDown,
@@ -544,24 +544,24 @@ impl TestSession {
             row,
         });
     }
-    pub(super) fn mouse(&mut self, code: crate::editor::input::KeyCode, column: u16, row: u16) {
+    pub(in crate::app) fn mouse(&mut self, code: crate::editor::input::KeyCode, column: u16, row: u16) {
         self.application.handle_event(UiEvent::Mouse {
             key: crate::editor::input::KeyEvent::mouse(code, Default::default()),
             column,
             row,
         });
     }
-    pub(super) fn explorer_focused(&self) -> bool {
+    pub(in crate::app) fn explorer_focused(&self) -> bool {
         self.application.window_session.focused_explorer().is_some()
     }
     /// Waits for the open a click started, and names the file it brought up.
-    pub(super) fn wait_for_opened_file(&mut self) -> Option<String> {
+    pub(in crate::app) fn wait_for_opened_file(&mut self) -> Option<String> {
         crate::app::tests::wait_vfs(&mut self.application);
         let buffer = self.application.state.active_buffer_id()?;
         let path = self.application.state.buffers[buffer].path.as_ref()?;
         Some(path.file_name()?.to_string_lossy().into_owned())
     }
-    pub(super) fn grep_snapshot_fixture(&mut self) {
+    pub(in crate::app) fn grep_snapshot_fixture(&mut self) {
         // Exercise the real bounded worker/store instead of fabricating rich picker payloads.
         let text = (0..1200)
             .map(|line| format!("line{line:04} {}\n", "context ".repeat(12)))
@@ -585,13 +585,13 @@ impl TestSession {
         assert_eq!(self.application.search.matches().len(), 45);
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn start_files_fixture(&mut self) {
+    pub(in crate::app) fn start_files_fixture(&mut self) {
         for name in ["jack-1.txt", "jack-2.txt", "other.txt"] {
             std::fs::write(self._workspace.path().join(name), "jack\n").unwrap();
         }
         self.application.start_workspace_file_picker();
     }
-    pub(super) fn finish_search(&mut self) {
+    pub(in crate::app) fn finish_search(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while self.application.search.files_pending() || self.application.search.pending() {
             self.application.process_workspace_file_events();
@@ -601,42 +601,42 @@ impl TestSession {
         }
         crate::app::tests::wait_vfs(&mut self.application);
     }
-    pub(super) fn open_grep(&mut self) {
+    pub(in crate::app) fn open_grep(&mut self) {
         self.application.open_live_workspace_search();
     }
-    pub(super) fn paste(&mut self, text: &str) {
+    pub(in crate::app) fn paste(&mut self, text: &str) {
         self.application.handle_event(UiEvent::Paste(text.into()));
     }
     /// The application under test, so a test can ask the SESSION what it did rather than
     /// infer it from the driver's surface.
-    pub(super) fn application(&self) -> &App {
+    pub(in crate::app) fn application(&self) -> &App {
         &self.application
     }
-    pub(super) fn application_mut(&mut self) -> &mut App {
+    pub(in crate::app) fn application_mut(&mut self) -> &mut App {
         &mut self.application
     }
-    pub(super) fn editor_mode(&self) -> crate::editor::EditorMode {
+    pub(in crate::app) fn editor_mode(&self) -> crate::editor::EditorMode {
         self.application.state.views[self.application.state.active_view.unwrap()].mode
     }
-    pub(super) fn key(&mut self, key: &str) {
+    pub(in crate::app) fn key(&mut self, key: &str) {
         self.application.handle_event(UiEvent::Key {
             key: key.parse().unwrap(),
             kind: KeyInputKind::Press,
         });
     }
-    pub(super) fn advance_input(&mut self, elapsed: Duration) {
+    pub(in crate::app) fn advance_input(&mut self, elapsed: Duration) {
         self.clock.advance(elapsed);
         self.application.flush_keymap_timeout();
         self.application.update_key_hint_ui();
     }
-    pub(super) fn focus_lost(&mut self) {
+    pub(in crate::app) fn focus_lost(&mut self) {
         self.application.handle_event(UiEvent::FocusLost);
     }
-    pub(super) fn apply_candidate(&mut self, loaded: LoadedConfig) -> Result<(), String> {
+    pub(in crate::app) fn apply_candidate(&mut self, loaded: LoadedConfig) -> Result<(), String> {
         self.application
             .apply_configuration_candidate(loaded, false)
     }
-    pub(super) fn reject_stale_contribution(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn reject_stale_contribution(&mut self) -> Result<(), String> {
         let candidate = self
             .application
             .configuration
@@ -644,7 +644,7 @@ impl TestSession {
         self.application.configuration.toggle_inlay_hints();
         self.application.commit_contribution_candidate(candidate)
     }
-    pub(super) fn window_policy_snapshot(
+    pub(in crate::app) fn window_policy_snapshot(
         &self,
     ) -> (
         crate::windows::WindowGraph,
@@ -657,19 +657,19 @@ impl TestSession {
             self.application.configuration.binding_revision(),
         )
     }
-    pub(super) fn time(&self) -> (Instant, std::time::SystemTime) {
+    pub(in crate::app) fn time(&self) -> (Instant, std::time::SystemTime) {
         (self.clock.monotonic(), self.clock.system_time())
     }
-    pub(super) fn quit_requested(&self) -> bool {
+    pub(in crate::app) fn quit_requested(&self) -> bool {
         self.application.should_quit
     }
-    pub(super) fn projection(&self) -> &UiState {
+    pub(in crate::app) fn projection(&self) -> &UiState {
         &self.application.ui
     }
-    pub(super) fn prefix(&self) -> Option<&str> {
+    pub(in crate::app) fn prefix(&self) -> Option<&str> {
         self.application.input.mapping_prefix()
     }
-    pub(super) fn documentation(&mut self, text: String) {
+    pub(in crate::app) fn documentation(&mut self, text: String) {
         self.application.present_documentation_popup(
             crate::ui::DocumentationPopupKind::Hover,
             "Hover".into(),
@@ -684,7 +684,7 @@ impl TestSession {
 }
 
 impl TestSession {
-    pub(super) fn verify_open_lifetimes(&mut self) {
+    pub(in crate::app) fn verify_open_lifetimes(&mut self) {
         use crate::app::tests::wait_vfs;
         use crate::editor::text::TextBuffer;
         use std::fs;
@@ -743,7 +743,7 @@ impl TestSession {
             "valid background data discarded"
         );
     }
-    pub(super) fn verify_save_collisions(&mut self) {
+    pub(in crate::app) fn verify_save_collisions(&mut self) {
         use crate::app::tests::wait_vfs;
         use crate::editor::text::TextBuffer;
         use std::fs;
@@ -783,7 +783,7 @@ impl TestSession {
 }
 
 impl TestSession {
-    pub(super) fn verify_expired_shutdown_does_not_write(&mut self) {
+    pub(in crate::app) fn verify_expired_shutdown_does_not_write(&mut self) {
         self.application.documents.stop_worker();
         let deadline = Instant::now() + Duration::from_secs(2);
         while !self.application.documents.worker_finished() {
@@ -830,7 +830,7 @@ impl TestSession {
 }
 
 impl TestSession {
-    pub(super) fn trust_owned_terminal_fixture(&mut self) {
+    pub(in crate::app) fn trust_owned_terminal_fixture(&mut self) {
         crate::app::tests::prepare_trust_identity(&mut self.application);
         for root in self.application.workspace.roots().to_vec() {
             self.application
@@ -839,20 +839,20 @@ impl TestSession {
         }
         self.application.reconcile_workspace_trust();
     }
-    pub(super) fn terminal_request(&mut self, profile: &str) {
+    pub(in crate::app) fn terminal_request(&mut self, profile: &str) {
         self.application
             .process_effect(crate::app::AppEffect::TerminalOpen(Some(profile.into())));
     }
-    pub(super) fn terminal_open(&mut self, profile: &str) {
+    pub(in crate::app) fn terminal_open(&mut self, profile: &str) {
         self.terminal_request(profile);
     }
-    pub(super) fn focus_only_terminal(&mut self) {
+    pub(in crate::app) fn focus_only_terminal(&mut self) {
         let ids = self.application.terminal_session.descriptions();
         assert_eq!(ids.len(), 1);
         self.application
             .process_effect(crate::app::AppEffect::TerminalFocus(ids[0].0));
     }
-    pub(super) fn terminal_close(&mut self) {
+    pub(in crate::app) fn terminal_close(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::TerminalClose);
         if self
@@ -867,7 +867,7 @@ impl TestSession {
             self.application.submit_prompt();
         }
     }
-    pub(super) fn terminal_begin_close(&mut self) {
+    pub(in crate::app) fn terminal_begin_close(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::TerminalClose);
         assert!(
@@ -877,43 +877,43 @@ impl TestSession {
                 .is_some_and(|prompt| prompt.kind == crate::ui::PromptKind::TerminalClose)
         );
     }
-    pub(super) fn terminal_submit_close(&mut self) {
+    pub(in crate::app) fn terminal_submit_close(&mut self) {
         self.application.submit_prompt();
     }
-    pub(super) fn terminal_hide_and_show(&mut self) {
+    pub(in crate::app) fn terminal_hide_and_show(&mut self) {
         self.terminal_begin_close();
         self.terminal_submit_close();
         self.application
             .process_effect(crate::app::AppEffect::TerminalToggle);
     }
-    pub(super) fn notification(&self) -> Option<&str> {
+    pub(in crate::app) fn notification(&self) -> Option<&str> {
         self.application.ui.notification.as_deref()
     }
-    pub(super) fn terminal_unfocus(&mut self) {
+    pub(in crate::app) fn terminal_unfocus(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::TerminalUnfocus);
     }
-    pub(super) fn terminal_send(&mut self, text: &str) {
+    pub(in crate::app) fn terminal_send(&mut self, text: &str) {
         self.application
             .process_effect(crate::app::AppEffect::TerminalSend(text.into()));
     }
-    pub(super) fn clone_terminal(&mut self) {
+    pub(in crate::app) fn clone_terminal(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::WindowClone {
                 target: "terminal".into(),
                 axis: crate::editor::Axis::Horizontal,
             });
     }
-    pub(super) fn place_terminal(
+    pub(in crate::app) fn place_terminal(
         &mut self,
         placement: crate::windows::WindowPlacement,
     ) -> Result<(), String> {
         self.application.place_graph_window("terminal", placement)
     }
-    pub(super) fn show_terminal(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn show_terminal(&mut self) -> Result<(), String> {
         self.application.show_graph_window("terminal")
     }
-    pub(super) fn terminal_window_identity(
+    pub(in crate::app) fn terminal_window_identity(
         &self,
     ) -> Option<(
         crate::windows::ContentId,
@@ -928,7 +928,7 @@ impl TestSession {
             .terminal(id.0)?;
         Some((ids.content, ids.view, ids.window))
     }
-    pub(super) fn terminal_geometry_source(
+    pub(in crate::app) fn terminal_geometry_source(
         &self,
     ) -> Option<crate::app::windows::TerminalGeometrySource> {
         let id = self.application.displayed_terminal()?;
@@ -936,7 +936,7 @@ impl TestSession {
             .window_session
             .terminal_geometry_source(id.0)
     }
-    pub(super) fn terminal_window_tab(&self) -> Option<crate::windows::WorkspaceTabId> {
+    pub(in crate::app) fn terminal_window_tab(&self) -> Option<crate::windows::WorkspaceTabId> {
         let (_, _, window) = self.terminal_window_identity()?;
         self.application
             .window_session
@@ -944,18 +944,18 @@ impl TestSession {
             .window(window)
             .map(|window| window.tab)
     }
-    pub(super) fn terminal_mode(&self) -> Option<crate::ui::TerminalPanelMode> {
+    pub(in crate::app) fn terminal_mode(&self) -> Option<crate::ui::TerminalPanelMode> {
         let id = self.application.displayed_terminal()?;
         self.application.terminal_session.mode(id)
     }
-    pub(super) fn terminal_cursor(&self) -> Option<(usize, usize)> {
+    pub(in crate::app) fn terminal_cursor(&self) -> Option<(usize, usize)> {
         self.application
             .ui
             .terminal_panel
             .as_ref()
             .and_then(|panel| panel.cursor)
     }
-    pub(super) fn terminal_clone_state(&self) -> TerminalCloneState {
+    pub(in crate::app) fn terminal_clone_state(&self) -> TerminalCloneState {
         let selected = self.application.terminal_session.selected();
         TerminalCloneState {
             graph: self.application.window_session.graph().clone(),
@@ -971,14 +971,14 @@ impl TestSession {
             starts: self.terminal_started_markers(),
         }
     }
-    pub(super) fn pump_terminal(&mut self) {
+    pub(in crate::app) fn pump_terminal(&mut self) {
         self.application.process_execution_preflight();
         self.application.process_pty_events();
     }
-    pub(super) fn terminal_pending(&self) -> usize {
+    pub(in crate::app) fn terminal_pending(&self) -> usize {
         self.application.terminal_session.pending()
     }
-    pub(super) fn terminal_phase(&self) -> Option<crate::ui::TerminalPhase> {
+    pub(in crate::app) fn terminal_phase(&self) -> Option<crate::ui::TerminalPhase> {
         let selected = self.application.terminal_session.selected()?;
         self.application
             .ui
@@ -989,14 +989,14 @@ impl TestSession {
             .find(|tab| tab.id == selected.0)
             .map(|tab| tab.phase)
     }
-    pub(super) fn terminal_exit_code(&self) -> Option<u32> {
+    pub(in crate::app) fn terminal_exit_code(&self) -> Option<u32> {
         self.application
             .ui
             .terminal_panel
             .as_ref()
             .and_then(|panel| panel.exit_code)
     }
-    pub(super) fn expire_shutdown_with_terminal(&mut self) -> Vec<String> {
+    pub(in crate::app) fn expire_shutdown_with_terminal(&mut self) -> Vec<String> {
         let _ = self
             .application
             .finish_shutdown_before(Instant::now() - Duration::from_millis(1));
@@ -1006,14 +1006,14 @@ impl TestSession {
             .map(|(_, message)| message.clone())
             .collect()
     }
-    pub(super) fn terminal_dimensions(&self) -> Option<(u16, u16)> {
+    pub(in crate::app) fn terminal_dimensions(&self) -> Option<(u16, u16)> {
         self.application.terminal_body_dimensions()
     }
-    pub(super) fn terminal_screen_dimensions(&self) -> Option<(usize, usize)> {
+    pub(in crate::app) fn terminal_screen_dimensions(&self) -> Option<(usize, usize)> {
         let id = self.application.displayed_terminal()?;
         Some(self.application.terminal_session.fixture_dimensions(id))
     }
-    pub(super) fn stop_terminal_then_resize(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn stop_terminal_then_resize(&mut self) -> Result<(), String> {
         let id = self.application.displayed_terminal().expect("terminal");
         let source = self.terminal_geometry_source().expect("geometry");
         self.application.terminal_session.request_stop(id)?;
@@ -1021,7 +1021,7 @@ impl TestSession {
             .terminal_session
             .resize(id, 70, 5, source, &self.application.workspace)
     }
-    pub(super) fn terminal_pending_resizes(&self) -> Option<usize> {
+    pub(in crate::app) fn terminal_pending_resizes(&self) -> Option<usize> {
         let id = self.application.displayed_terminal()?;
         Some(
             self.application
@@ -1029,7 +1029,7 @@ impl TestSession {
                 .fixture_pending_resizes(id),
         )
     }
-    pub(super) fn terminal_pending_resize_matches(
+    pub(in crate::app) fn terminal_pending_resize_matches(
         &self,
         source: &crate::app::windows::TerminalGeometrySource,
     ) -> bool {
@@ -1039,32 +1039,32 @@ impl TestSession {
                 .fixture_pending_resize_matches(id, source)
         })
     }
-    pub(super) fn terminal_screen_state(
+    pub(in crate::app) fn terminal_screen_state(
         &self,
     ) -> Option<crate::app::terminal::TerminalScreenState> {
         let id = self.application.displayed_terminal()?;
         Some(self.application.terminal_session.fixture_screen_state(id))
     }
-    pub(super) fn terminal_lines(&self) -> Vec<String> {
+    pub(in crate::app) fn terminal_lines(&self) -> Vec<String> {
         self.application
             .displayed_terminal()
             .map(|id| self.application.terminal_session.fixture_lines(id))
             .unwrap_or_default()
     }
-    pub(super) fn terminal_started_markers(&self) -> String {
+    pub(in crate::app) fn terminal_started_markers(&self) -> String {
         std::fs::read_to_string(self._workspace.path().join("starts")).unwrap_or_default()
     }
 }
 
 impl TestSession {
     #[cfg(unix)]
-    pub(super) fn debug_program_fixture(&self) {
+    pub(in crate::app) fn debug_program_fixture(&self) {
         use std::os::unix::fs::PermissionsExt;
         let path = self._workspace.path().join("debuggee");
         std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    pub(super) fn debug_start_native_program_fixture(&mut self) {
+    pub(in crate::app) fn debug_start_native_program_fixture(&mut self) {
         let source = self._workspace.path().join("main.rs");
         std::fs::write(&source, "fn main() {}\n").unwrap();
         self.application
@@ -1092,14 +1092,14 @@ impl TestSession {
             Some(self._workspace.path().join("debuggee")),
         );
     }
-    pub(super) fn debug_program_pending(&self) -> bool {
+    pub(in crate::app) fn debug_program_pending(&self) -> bool {
         self.application.debugger_session.debug_program_pending()
     }
-    pub(super) fn debug_program_wire_path(&self) -> bool {
+    pub(in crate::app) fn debug_program_wire_path(&self) -> bool {
         std::fs::read_to_string(self._workspace.path().join("launch-program"))
             .is_ok_and(|p| std::path::Path::new(&p) == self._workspace.path().join("debuggee"))
     }
-    pub(super) fn debug_reverse_refusal(&self) -> bool {
+    pub(in crate::app) fn debug_reverse_refusal(&self) -> bool {
         std::fs::read(self._workspace.path().join("reverse-reply"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
@@ -1110,28 +1110,28 @@ impl TestSession {
                         .is_some_and(|s| s.contains("original debug configuration"))
             })
     }
-    pub(super) fn debug_request(&mut self, name: &str) {
+    pub(in crate::app) fn debug_request(&mut self, name: &str) {
         self.application
             .process_effect(crate::app::AppEffect::DapConfigurationStart(name.into()));
     }
-    pub(super) fn debug_preflights(&self) -> usize {
+    pub(in crate::app) fn debug_preflights(&self) -> usize {
         self.application.workspace.preflight_pending()
     }
-    pub(super) fn debug_start(&mut self, name: &str) {
+    pub(in crate::app) fn debug_start(&mut self, name: &str) {
         self.application
             .process_effect(crate::app::AppEffect::DapConfigurationStart(name.into()));
     }
-    pub(super) fn debug_stop(&mut self) {
+    pub(in crate::app) fn debug_stop(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::DapStop);
     }
-    pub(super) fn pump_debug(&mut self) {
+    pub(in crate::app) fn pump_debug(&mut self) {
         self.application.process_dap_project_root();
         self.application.process_execution_preflight();
         self.application.process_dap_events();
     }
     /// A stop fills the panes by itself; asking for the threads is what opens a picker.
-    pub(super) fn open_debug_threads_after_stop(&mut self) {
+    pub(in crate::app) fn open_debug_threads_after_stop(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(6);
         while self.application.debugger_session.threads().is_empty() {
             self.pump_debug();
@@ -1149,20 +1149,20 @@ impl TestSession {
             std::thread::sleep(Duration::from_millis(2));
         }
     }
-    pub(super) fn debug_threads(&mut self) {
+    pub(in crate::app) fn debug_threads(&mut self) {
         self.application
             .process_effect(crate::app::AppEffect::DapThreads);
     }
-    pub(super) fn accept_debug_picker(&mut self) {
+    pub(in crate::app) fn accept_debug_picker(&mut self) {
         self.application.accept_picker();
     }
-    pub(super) fn debug_pending(&self) -> usize {
+    pub(in crate::app) fn debug_pending(&self) -> usize {
         self.application.debugger_session.pending()
     }
-    pub(super) fn debug_source_pending(&self) -> bool {
+    pub(in crate::app) fn debug_source_pending(&self) -> bool {
         self.application.debugger_session.source_pending()
     }
-    pub(super) fn debug_source_text(&self) -> Option<String> {
+    pub(in crate::app) fn debug_source_text(&self) -> Option<String> {
         let editor = &self.application.state;
         let buffer = &editor.buffers[editor.views[editor.active_view?].buffer];
         buffer

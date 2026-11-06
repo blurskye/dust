@@ -1,21 +1,21 @@
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::ui::CellGrid;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
-use crate::ui::window::WindowRect;
+use crate::windows::WindowRect;
 
 use crate::ui::render::ExplorerSegmentRole;
 
 use crate::ui::render::ExplorerUiState;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::editor::cursor_style;
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 
 pub(crate) const EXPLORER_MAXIMUM_VISIBLE_ROWS: usize = 200;
 pub(crate) const EXPLORER_MINIMUM_WIDTH: u16 = 28;
@@ -101,7 +101,7 @@ pub(super) fn render_explorer_window(
         config.editor.ambiguous_width == AmbiguousWidth::Wide,
     );
     let panel_width = rect.width.saturating_sub(1);
-    let body = crate::ui::geometry::explorer_body_geometry(rect);
+    let body = crate::ui::render::explorer::explorer_body_geometry(rect);
     let local_body = WindowRect {
         x: 0,
         y: body.y.saturating_sub(rect.y),
@@ -304,7 +304,7 @@ fn render_explorer_search_box(
     let x = grid.put_text_clipped(2, 1, EXPLORER_FOCUS_MARKER, Style::ExplorerHeader, count_x);
     let right = count_x.saturating_sub(1);
     let start = x.saturating_add(1).min(right);
-    let (query, cursor) = crate::ui::render::surfaces::prompt_viewport(
+    let (query, cursor) = crate::ui::render::prompt::prompt_viewport(
         &explorer.query,
         explorer.query.len(),
         usize::from(right.saturating_sub(start)),
@@ -424,5 +424,31 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+use crate::ui::render::explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS;
+
+
+
+
+
+/// The box around the explorer's search row.
+const EXPLORER_SEARCH_ROWS: u16 = 3;
+
+
+#[must_use]
+pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
+    WindowRect {
+        x: rect.x,
+        y: rect
+            .y
+            .saturating_add(EXPLORER_SEARCH_ROWS)
+            .min(rect.y.saturating_add(rect.height)),
+        width: rect.width.saturating_sub(1),
+        height: rect
+            .height
+            .saturating_sub(EXPLORER_SEARCH_ROWS)
+            .min(u16::try_from(EXPLORER_MAXIMUM_VISIBLE_ROWS).unwrap_or(u16::MAX)),
     }
 }

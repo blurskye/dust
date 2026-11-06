@@ -647,7 +647,7 @@ pub(in crate::app) fn focusable_nodes(tree: &PluginUiTree) -> Vec<u64> {
         .map(|node| (node.id, node))
         .collect::<BTreeMap<_, _>>();
     let mut ordered = Vec::new();
-    fn collect(
+    pub(in crate::app) fn collect(
         id: u64,
         nodes: &BTreeMap<u64, &crate::plugins::PluginUiNode>,
         ordered: &mut Vec<u64>,
@@ -707,7 +707,7 @@ pub(in crate::app) fn tree_rows(
         .map(|node| (node.id, node))
         .collect::<BTreeMap<_, _>>();
     let mut rows = Vec::new();
-    fn collect(
+    pub(in crate::app) fn collect(
         id: u64,
         depth: usize,
         nodes: &BTreeMap<u64, &crate::plugins::PluginUiNode>,

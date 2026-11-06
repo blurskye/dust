@@ -195,7 +195,7 @@ impl LspSession {
         self.projection.inlay_request = None;
         self.projection.inlay_retries = 0;
     }
-    pub(super) fn next_generation(&mut self) -> Option<u64> {
+    pub(in crate::app) fn next_generation(&mut self) -> Option<u64> {
         let next = self
             .projection
             .generation
@@ -1711,7 +1711,7 @@ mod tests {
             resolved: true,
         }
     }
-    fn fixture() -> (
+    pub(in crate::app) fn fixture() -> (
         EditorState,
         crate::editor::BufferId,
         LspDocument,

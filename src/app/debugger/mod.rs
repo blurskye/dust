@@ -491,7 +491,7 @@ impl DebugSession {
             }
         }
     }
-    fn prepare_answer(&mut self, id: u64, request: &DapControl, failed: bool) {
+    pub(in crate::app) fn prepare_answer(&mut self, id: u64, request: &DapControl, failed: bool) {
         let pending = self.requests.remove(&id);
         let epoch = pending
             .as_ref()
@@ -1020,7 +1020,7 @@ impl DebugSession {
         self.resend_breakpoints(&row.path);
         Ok(removed)
     }
-    fn apply_breakpoints(
+    pub(in crate::app) fn apply_breakpoints(
         &mut self,
         path: &std::path::Path,
         rows: &[DapSourceBreakpoint],
@@ -1320,7 +1320,7 @@ impl DebugSession {
             }
         }
     }
-    fn install(&mut self, values: Vec<(String, String, Choice)>) -> Vec<DebugRow> {
+    pub(in crate::app) fn install(&mut self, values: Vec<(String, String, Choice)>) -> Vec<DebugRow> {
         let source = self.event_source.take().or_else(|| self.service.context());
         let Some(source) = source.filter(|s| self.service.current(s)) else {
             self.choices = None;
@@ -1606,7 +1606,7 @@ impl DebugSession {
             (_, response) => Ok(response),
         }
     }
-    fn refresh_watches(&mut self) {
+    pub(in crate::app) fn refresh_watches(&mut self) {
         if self
             .event_source
             .as_ref()
@@ -1635,7 +1635,7 @@ impl DebugSession {
             }
         }
     }
-    fn follow_control(&mut self, control: DapControl) {
+    pub(in crate::app) fn follow_control(&mut self, control: DapControl) {
         match self.control_request(control) {
             Ok(Some(id)) => {
                 self.requests
@@ -1852,3 +1852,5 @@ impl DebugSession {
 
 #[cfg(test)]
 pub(super) mod tests;
+
+mod interaction;

@@ -35,7 +35,7 @@ pub struct DirectoryListing {
     pub truncated: bool,
 }
 
-type DirectoryResult = Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>;
+type DirectoryResult = Result<(DirectoryListing, Vec<crate::files::RootIdentity>), VfsError>;
 
 #[derive(Default)]
 pub struct DirectoryService {
@@ -71,7 +71,7 @@ impl DirectoryService {
                     let canonical = canonical_path(&worker_directory)?;
                     let allowed = canonical_roots
                         .iter()
-                        .map(|path| crate::workspace::RootIdentity {
+                        .map(|path| crate::files::RootIdentity {
                             canonical_path: path.clone(),
                             filesystem_identity: None,
                         })
@@ -86,7 +86,7 @@ impl DirectoryService {
                             .iter()
                             .map(|root| &root.canonical_path)
                             .map(|path| {
-                                let observed = crate::workspace::RootIdentity::capture(path)
+                                let observed = crate::files::RootIdentity::capture(path)
                                     .map_err(|error| VfsError::Io {
                                         operation: "inspect directory scope",
                                         path: path.clone(),
@@ -133,7 +133,7 @@ impl DirectoryService {
 
     pub(crate) fn poll_result(
         &mut self,
-    ) -> Option<Result<(DirectoryListing, Vec<crate::workspace::RootIdentity>), VfsError>> {
+    ) -> Option<Result<(DirectoryListing, Vec<crate::files::RootIdentity>), VfsError>> {
         match self.receiver.as_ref()?.try_recv() {
             Ok(result) => {
                 self.receiver = None;

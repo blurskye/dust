@@ -1,15 +1,16 @@
 //! Content rectangles shared by surface painting and interaction.
 use crate::config::AmbiguousWidth;
-use crate::config::Config;
-use crate::ui::render::explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS;
-use crate::ui::render::overlays::DOCUMENTATION_MAX_HEIGHT;
-use crate::ui::PickerSurfaceKind;
-use crate::ui::PickerUiState;
-use crate::ui::window::WindowRect;
+use crate::windows::WindowRect;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+use crate::ui::geometry::text_width;
+
+use crate::ui::render::picker::PickerContentGeometry;
+
+
 
 pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
+
 
 pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
     if ambiguous_width == AmbiguousWidth::Wide {
@@ -19,6 +20,7 @@ pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
     }
 }
 
+
 /// Width of text painted by CellGrid, including its visible replacements.
 pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
     text.graphemes(true)
@@ -26,9 +28,9 @@ pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
             let safe = if grapheme == "\t" {
                 " "
             } else if grapheme.chars().any(char::is_control) {
-                crate::ui::render::CONTROL_CHARACTER_REPLACEMENT
+                crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT
             } else if text_width(grapheme, ambiguous) == 0 {
-                crate::ui::render::ZERO_WIDTH_REPLACEMENT
+                crate::ui::grid::ZERO_WIDTH_REPLACEMENT
             } else {
                 grapheme
             };
@@ -37,195 +39,6 @@ pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
         .sum()
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PickerContentGeometry {
-    pub outer: WindowRect,
-    pub list: WindowRect,
-    pub divider: Option<u16>,
-    pub stacked_divider: Option<u16>,
-    /// The rows the preview has inside the border, zero when none is showing.
-    pub preview_rows: u16,
-}
-
-/// Theme selection leaves most of the editor visible for live color preview.
-/// Other picker sizes retain their configured behavior.
-#[must_use]
-pub(crate) fn picker_window_geometry(
-    picker: &PickerUiState,
-    bounds: WindowRect,
-) -> Option<WindowRect> {
-    let mut rect = crate::ui::picker_geometry(bounds)?;
-    if picker.surface == crate::ui::PickerSurfaceKind::Theme {
-        rect.width = rect.width.min(64);
-        rect.height = rect
-            .height
-            .min(u16::try_from(picker.rows.len().clamp(2, 8)).unwrap_or(8) + 4);
-        rect.x = bounds
-            .x
-            .saturating_add(bounds.width.saturating_sub(rect.width) / 2);
-        rect.y = bounds
-            .y
-            .saturating_add((bounds.height.saturating_sub(rect.height) / 4).min(4));
-    } else if picker.surface == crate::ui::PickerSurfaceKind::Choice {
-        let widest = picker
-            .rows
-            .iter()
-            .map(|row| row.label.chars().count() + row.detail.chars().count() + 2)
-            .max()
-            .unwrap_or(0);
-        let wanted = u16::try_from(widest + 8).unwrap_or(u16::MAX).max(48);
-        rect.width = rect.width.min(wanted);
-        // Border, query, divider, the rows and the footer.
-        rect.height = rect
-            .height
-            .min(u16::try_from(picker.rows.len().clamp(2, 12)).unwrap_or(12) + 5);
-        rect.x = bounds
-            .x
-            .saturating_add(bounds.width.saturating_sub(rect.width) / 2);
-        rect.y = bounds
-            .y
-            .saturating_add(bounds.height.saturating_sub(rect.height) / 3);
-    }
-    Some(rect)
-}
-
-/// The preview decision uses the same bounded content sample as painting.
-#[must_use]
-pub fn picker_content_geometry(
-    picker: &PickerUiState,
-    config: &Config,
-    rect: WindowRect,
-) -> Option<PickerContentGeometry> {
-    let WindowRect {
-        x: left,
-        y: top,
-        width,
-        height,
-    } = rect;
-    if width < 4 || height < 6 {
-        return None;
-    }
-    let preview = picker
-        .preview
-        .as_ref()
-        .filter(|_| width >= 40 && height >= 12);
-    let list_width = picker
-        .rows
-        .iter()
-        .take(64)
-        .map(|row| {
-            text_width(&row.label, config.editor.ambiguous_width)
-                .saturating_add(text_width(&row.detail, config.editor.ambiguous_width))
-                .saturating_add(text_width(&row.source, config.editor.ambiguous_width))
-                .saturating_add(8)
-        })
-        .max()
-        .unwrap_or(28)
-        .clamp(28, 72);
-    let preview_width = preview.map_or(0, |preview| {
-        // Measurement reads the same rows the painter draws, so the two cannot disagree
-        // about how wide a preview is.
-        let (rows, numbers) = match &preview.body {
-            crate::ui::PickerPreviewBody::Text(text) => (
-                text.lines().to_vec(),
-                text.first_line
-                    .saturating_add(text.lines().len())
-                    .max(1)
-                    .to_string()
-                    .len(),
-            ),
-            crate::ui::PickerPreviewBody::Diff(diff) => {
-                // The measured rows already include both line-number columns.
-                let width = diff.content_width(config.editor.ambiguous_width);
-                (vec![], width.saturating_add(4))
-            }
-        };
-        if rows.is_empty() {
-            return numbers.clamp(32, 88);
-        }
-        rows.iter()
-            .take(64)
-            .map(|line| text_width(line, config.editor.ambiguous_width))
-            .max()
-            .unwrap_or(28)
-            .saturating_add(numbers)
-            .saturating_add(4)
-            .clamp(32, 88)
-    });
-    let side_by_side = preview.is_some()
-        && usize::from(width) >= list_width.saturating_add(preview_width).saturating_add(3);
-    let divider = side_by_side.then(|| {
-        left.saturating_add(u16::try_from(list_width).unwrap_or(width - 1))
-            .saturating_add(1)
-            .min(left.saturating_add(width - 2))
-    });
-    let stacked_divider = (preview.is_some() && !side_by_side).then(|| {
-        // A short list of changes leaves its spare rows to the diff.
-        let list_rows = if picker.surface == PickerSurfaceKind::Changes {
-            u16::try_from(picker.rows.len())
-                .unwrap_or(u16::MAX)
-                .saturating_add(3)
-        } else {
-            u16::MAX
-        };
-        let list_share = (height.saturating_mul(2) / 3).min(list_rows);
-        top.saturating_add(list_share).clamp(
-            top.saturating_add(6),
-            top.saturating_add(height.saturating_sub(4)),
-        )
-    });
-    let list_right = divider.unwrap_or(left.saturating_add(width - 1));
-    let list_bottom = stacked_divider.unwrap_or(top.saturating_add(height - 1));
-    let x = left.saturating_add(2);
-    let y = top.saturating_add(3);
-    let preview_rows = if preview.is_some() {
-        height
-            .saturating_sub(stacked_divider.map_or(0, |divider| divider.saturating_sub(top)))
-            .saturating_sub(2)
-    } else {
-        0
-    };
-    Some(PickerContentGeometry {
-        outer: rect,
-        list: WindowRect {
-            x,
-            y,
-            width: list_right.saturating_sub(x),
-            height: list_bottom.saturating_sub(y),
-        },
-        divider,
-        stacked_divider,
-        preview_rows,
-    })
-}
-
-/// The box around the explorer's search row.
-const EXPLORER_SEARCH_ROWS: u16 = 3;
-
-#[must_use]
-pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
-    WindowRect {
-        x: rect.x,
-        y: rect
-            .y
-            .saturating_add(EXPLORER_SEARCH_ROWS)
-            .min(rect.y.saturating_add(rect.height)),
-        width: rect.width.saturating_sub(1),
-        height: rect
-            .height
-            .saturating_sub(EXPLORER_SEARCH_ROWS)
-            .min(u16::try_from(EXPLORER_MAXIMUM_VISIBLE_ROWS).unwrap_or(u16::MAX)),
-    }
-}
-
-#[must_use]
-pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usize {
-    if !config.ui.documentation_popup.enabled || width < 4 {
-        return 0;
-    }
-    usize::from(DOCUMENTATION_MAX_HEIGHT.saturating_sub(2))
-        .min(usize::from(height.saturating_sub(2)))
-}
 
 pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
     let margin = 1_u16.min(width / 2);
@@ -238,10 +51,104 @@ pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<Win
     })
 }
 
+
 #[derive(Clone, Debug, Default)]
 pub struct SurfaceContentGeometry {
     pub picker: Option<PickerContentGeometry>,
     pub explorer: Option<WindowRect>,
     pub terminal: Option<WindowRect>,
     pub documentation_rows: usize,
+}
+
+
+
+
+
+
+/// What fits of `text`, ending in an ellipsis when some had to go.
+pub(super) fn ellipsized(
+    text: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    if text_width(text, ambiguous) <= maximum || maximum == 0 {
+        return if maximum == 0 {
+            String::new()
+        } else {
+            text.to_owned()
+        };
+    }
+    let mut kept = String::new();
+    let mut width = text_width("…", ambiguous);
+    if width > maximum {
+        return kept;
+    }
+    for grapheme in text.graphemes(true) {
+        width += text_width(grapheme, ambiguous).max(1);
+        if width > maximum {
+            break;
+        }
+        kept.push_str(grapheme);
+    }
+    format!("{kept}…")
+}
+
+
+
+/// Key hints broken between items into at most two rows, so narrow screens keep them all.
+pub(super) fn wrapped_key_help(
+    help: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> Vec<String> {
+    const SEPARATOR: &str = " · ";
+    let mut first = String::new();
+    let mut rest = Vec::new();
+    for item in help.split(SEPARATOR) {
+        let candidate = if first.is_empty() {
+            item.to_owned()
+        } else {
+            format!("{first}{SEPARATOR}{item}")
+        };
+        if rest.is_empty() && text_width(&candidate, ambiguous) <= maximum {
+            first = candidate;
+        } else {
+            rest.push(item);
+        }
+    }
+    let mut rows = vec![ellipsized(&first, maximum, ambiguous)];
+    if !rest.is_empty() {
+        rows.push(ellipsized(&rest.join(SEPARATOR), maximum, ambiguous));
+    }
+    rows
+}
+
+
+
+/// A footer legend shortened to whole entries that fit.
+///
+/// A narrow surface drops whole actions rather than clipping one, so a footer can never show
+/// half an action that reads as a different one.
+pub(crate) fn fitted_footer(
+    text: &str,
+    width: usize,
+    ambiguous_width: crate::config::AmbiguousWidth,
+) -> String {
+    if text_width(text, ambiguous_width) <= width {
+        return text.to_owned();
+    }
+    let mut fitted = String::new();
+    for entry in text.split(" · ") {
+        let candidate = if fitted.is_empty() {
+            entry.to_owned()
+        } else {
+            format!("{fitted} · {entry}")
+        };
+        if text_width(&candidate, ambiguous_width) > width {
+            break;
+        }
+        fitted = candidate;
+    }
+    fitted
 }

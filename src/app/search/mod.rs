@@ -163,7 +163,7 @@ impl SearchSession {
         self.matches.clear();
         self.intent = None;
     }
-    fn cancel_files(&mut self) {
+    pub(in crate::app) fn cancel_files(&mut self) {
         self.files.cancel();
         self.file_generation = None;
         self.file_scope = None;
@@ -346,7 +346,7 @@ impl SearchSession {
         }
         updates
     }
-    fn accept(&mut self, event: WorkspaceSearchEvent) -> Option<SearchUpdate> {
+    pub(in crate::app) fn accept(&mut self, event: WorkspaceSearchEvent) -> Option<SearchUpdate> {
         let generation = match &event {
             WorkspaceSearchEvent::Batch { generation, .. }
             | WorkspaceSearchEvent::Complete { generation, .. }
@@ -467,3 +467,5 @@ impl SearchSession {
 
 #[cfg(test)]
 mod tests;
+
+mod interaction;

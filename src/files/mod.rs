@@ -84,3 +84,7 @@ mod tests;
 pub(crate) use vfs::participating_roots;
 
 pub(crate) use vfs::roots_current;
+
+mod root_identity;
+pub use root_identity::RootIdentity;
+pub(crate) mod path_encoding;

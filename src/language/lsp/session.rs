@@ -51,21 +51,21 @@ use crate::language::lsp::MESSAGE_QUEUE;
 
 use crate::language::lsp::error::LspError;
 
-use crate::language::lsp::model::LspCapabilities;
+use crate::language::lsp::server::LspCapabilities;
 
-use crate::language::lsp::model::LspDocument;
+use crate::language::lsp::messages::LspDocument;
 
-use crate::language::lsp::model::LspEvent;
+use crate::language::lsp::messages::LspEvent;
 
-use crate::language::lsp::model::LspFeature;
+use crate::language::lsp::messages::LspFeature;
 
-use crate::language::lsp::model::LspHealth;
+use crate::language::lsp::messages::LspHealth;
 
-use crate::language::lsp::model::LspPolicy;
+use crate::language::lsp::server::LspPolicy;
 
-use crate::language::lsp::model::LspServerConfiguration;
+use crate::language::lsp::server::LspServerConfiguration;
 
-use crate::language::lsp::model::ServerRequestId;
+use crate::language::lsp::messages::ServerRequestId;
 
 use crate::language::lsp::origins::EditContext;
 
@@ -1350,7 +1350,7 @@ fn sync_document(
                 previous.version != document.version || previous.text != document.text
             }) {
                 send_change(stdin, previous, document, capabilities)?;
-                if capabilities.sync_kind_for_document(document) != crate::language::lsp::model::SyncKind::None {
+                if capabilities.sync_kind_for_document(document) != crate::language::lsp::server::SyncKind::None {
                     opened_documents.insert(uri.clone(), document.version);
                 }
             }
@@ -1942,7 +1942,7 @@ while True:
                 PositionEncoding::Utf16,
             );
             let base = LspCapabilities {
-                sync_kind: crate::language::lsp::model::SyncKind::None,
+                sync_kind: crate::language::lsp::server::SyncKind::None,
                 ..Default::default()
             };
             let options = json!({"documentSelector":[{"language":"rust"}],"syncKind":2});

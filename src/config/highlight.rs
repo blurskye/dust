@@ -120,7 +120,7 @@ struct DefaultsFile {
     defaults: BTreeMap<String, HighlightDefinition>,
 }
 
-struct Registry {
+struct HighlightGroups {
     groups: RwLock<Groups>,
     defaults: BTreeMap<String, HighlightDefinition>,
 }
@@ -145,8 +145,8 @@ impl Groups {
     }
 }
 
-fn registry() -> &'static Registry {
-    static REGISTRY: OnceLock<Registry> = OnceLock::new();
+fn registry() -> &'static HighlightGroups {
+    static REGISTRY: OnceLock<HighlightGroups> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let file: DefaultsFile =
             toml::from_str(DEFAULTS).expect("bundled highlight defaults must remain valid");
@@ -163,7 +163,7 @@ fn registry() -> &'static Registry {
         {
             groups.insert(name).expect("highlight groups fit in u16");
         }
-        Registry {
+        HighlightGroups {
             groups: RwLock::new(groups),
             defaults: file.defaults,
         }
@@ -172,7 +172,7 @@ fn registry() -> &'static Registry {
 
 #[cfg(test)]
 mod tests {
-    use crate::language::syntax::highlight::Highlight;
+    use crate::config::highlight::Highlight;
 
     #[test]
     fn captures_fall_back_to_the_nearest_known_group() {

@@ -1,5 +1,5 @@
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 
 use crate::config::AmbiguousWidth;
 
@@ -13,15 +13,15 @@ use crate::ui::Style;
 
 use crate::ui::geometry::text_width;
 
-use crate::ui::window::CompositorLayer;
+use crate::windows::CompositorLayer;
 
-use crate::ui::window::ProjectedCompositorWindow;
+use crate::windows::ProjectedCompositorWindow;
 
-use crate::ui::window::WindowRect;
+use crate::windows::WindowRect;
 
 use crate::ui::render::CompositorLayoutState;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::KeyHintUiState;
 
@@ -511,7 +511,7 @@ pub(super) fn render_key_hints(
         }
         // A label too long for its column ends in an ellipsis instead of stopping mid-word.
         let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
-        let label = crate::ui::render::surfaces::ellipsized(&row.label, room, ambiguous);
+        let label = crate::ui::geometry::ellipsized(&row.label, room, ambiguous);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,

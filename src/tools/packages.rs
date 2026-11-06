@@ -1137,3 +1137,51 @@ mod tests {
         assert!(object.exists());
     }
 }
+
+pub(crate) fn installed_plugins(root: &Path) -> BTreeSet<String> {
+    use sha2::Digest;
+    use sha2::Sha256;
+
+    let read = |path: &Path| -> Option<Vec<u8>> {
+        let mut bytes = Vec::new();
+        crate::files::open_regular_file(path)
+            .ok()?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        (bytes.len() <= 1024 * 1024).then_some(bytes)
+    };
+    let Some(lock) = read(&root.join("dust-packages.lock.json"))
+        .and_then(|bytes| serde_json::from_slice::<crate::tools::PackageLock>(&bytes).ok())
+    else {
+        return BTreeSet::new();
+    };
+    lock.packages
+        .iter()
+        .take(1024)
+        .filter_map(|package| {
+            let digest = package
+                .activation_sha256
+                .as_ref()
+                .unwrap_or(&package.content_sha256);
+            if [&package.content_sha256, digest]
+                .into_iter()
+                .any(|digest| digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()))
+            {
+                return None;
+            }
+            let bytes = read(&root.join("activations").join(format!("{digest}.toml")))?;
+            if package.activation_sha256.is_some()
+                && !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(digest)
+            {
+                return None;
+            }
+            let manifest: crate::plugins::PluginManifest =
+                toml::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
+            manifest
+                .component_sha256
+                .eq_ignore_ascii_case(&package.content_sha256)
+                .then_some(manifest.id)
+        })
+        .collect()
+}

@@ -1495,7 +1495,7 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
     app.workspace
         .fixture_add_root(
             "third".into(),
-            crate::workspace::RootIdentity::capture(third.path()).expect("identity"),
+            crate::files::RootIdentity::capture(third.path()).expect("identity"),
         )
         .expect("concurrent model mutation");
     wait_root_operation(&mut app);
@@ -2449,11 +2449,11 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("find-me.txt");
     let mut contents = String::from("found\n");
-    contents.push_str(&"x".repeat(crate::ui::render::surfaces::PICKER_MAXIMUM_PREVIEW_BYTES));
+    contents.push_str(&"x".repeat(crate::ui::render::picker::PICKER_MAXIMUM_PREVIEW_BYTES));
     fs::write(&path, contents).unwrap();
     assert!(
         fs::metadata(&path).unwrap().len()
-            > crate::ui::render::surfaces::PICKER_MAXIMUM_PREVIEW_BYTES as u64
+            > crate::ui::render::picker::PICKER_MAXIMUM_PREVIEW_BYTES as u64
     );
     app.start_workspace_file_picker();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -2695,7 +2695,7 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     app.workspace
         .fixture_add_root(
             "extra".into(),
-            crate::workspace::RootIdentity::capture(extra.path()).unwrap(),
+            crate::files::RootIdentity::capture(extra.path()).unwrap(),
         )
         .unwrap();
     app.process_workspace_search_events();
@@ -4437,7 +4437,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         app.workspace
             .fixture_add_root(
                 name.into(),
-                crate::workspace::RootIdentity::capture(root).unwrap(),
+                crate::files::RootIdentity::capture(root).unwrap(),
             )
             .unwrap();
     }
@@ -7108,7 +7108,7 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
         .workspace
         .fixture_add_root(
             "second".into(),
-            crate::workspace::RootIdentity::capture(extra.path()).unwrap(),
+            crate::files::RootIdentity::capture(extra.path()).unwrap(),
         )
         .unwrap();
     app.activate_workspace_root(second);

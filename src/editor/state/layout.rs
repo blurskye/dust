@@ -1,7 +1,7 @@
 use crate::editor::state::id::PaneId;
-use crate::editor::state::model::Axis;
-use crate::editor::state::model::FocusDirection;
-use crate::editor::state::model::LayoutNode;
+use crate::editor::state::layout::Axis;
+use crate::editor::state::layout::FocusDirection;
+use crate::editor::state::layout::LayoutNode;
 
 pub(super) fn layout_ratios_are_valid(node: &LayoutNode) -> bool {
     match node {
@@ -343,4 +343,49 @@ pub(super) fn offset_index(current: usize, len: usize, offset: isize, wrap: bool
         candidate.clamp(0, len.saturating_sub(1))
     };
     usize::try_from(target).unwrap_or(0)
+}
+
+use crate::editor::state::id::ViewId;
+
+
+
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusDirection {
+    Left,
+    Down,
+    Up,
+    Right,
+}
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LayoutNode {
+    Pane(PaneId),
+    Split {
+        axis: Axis,
+        ratio: u16,
+        first: Box<LayoutNode>,
+        second: Box<LayoutNode>,
+    },
+}
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Pane {
+    pub view: ViewId,
+}
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Tab {
+    pub root: LayoutNode,
+    pub focused: PaneId,
 }

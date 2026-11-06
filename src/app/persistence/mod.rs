@@ -201,7 +201,7 @@ impl PersistenceSession {
         self.failure = None;
         Ok(())
     }
-    fn failed(&mut self, error: impl std::fmt::Display) -> String {
+    pub(in crate::app) fn failed(&mut self, error: impl std::fmt::Display) -> String {
         let message = error.to_string().chars().take(1024).collect::<String>();
         self.failure = Some(message.clone());
         message
@@ -275,7 +275,7 @@ impl PersistenceSession {
 #[cfg(test)]
 mod tests {
     use crate::app::persistence::*;
-    fn drain(owner: &mut PersistenceSession) {
+    pub(in crate::app) fn drain(owner: &mut PersistenceSession) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while owner.pending() {
             owner.poll();
@@ -460,3 +460,5 @@ mod tests {
         assert_eq!(owner.marks()[0].location.byte, 4);
     }
 }
+
+mod coordination;

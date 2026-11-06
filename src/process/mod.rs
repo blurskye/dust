@@ -334,7 +334,7 @@ pub enum ExecutionPreflightEvent {
     },
 }
 struct PreflightCommand {
-    identities: Vec<crate::workspace::RootIdentity>,
+    identities: Vec<crate::files::RootIdentity>,
     id: PreflightId,
     request: ExecutionPreflightRequest,
 }
@@ -358,7 +358,7 @@ impl ExecutionPreflightService {
                     let event = preflight(command.id, command.request)
                         .and_then(|result| {
                             for expected in command.identities {
-                                let actual = crate::workspace::RootIdentity::capture(
+                                let actual = crate::files::RootIdentity::capture(
                                     &expected.canonical_path,
                                 )
                                 .map_err(|e| e.to_string())?;
@@ -397,7 +397,7 @@ impl ExecutionPreflightService {
     pub(crate) fn request_scoped(
         &mut self,
         request: ExecutionPreflightRequest,
-        identities: Vec<crate::workspace::RootIdentity>,
+        identities: Vec<crate::files::RootIdentity>,
     ) -> Result<PreflightId, PreflightError> {
         if request.roots.is_empty() || request.roots.len() > 64 {
             return Err(PreflightError::Invalid);
@@ -447,7 +447,7 @@ fn preflight(
     if !executable_metadata.file_type().is_file() || !cwd_metadata.file_type().is_dir() {
         return Err("resolved execution target must be a regular executable and resolved cwd must be a real directory".into());
     }
-    if !crate::tools::executable_file(&executable) {
+    if !crate::process::executable_file(&executable) {
         return Err("execution target is not executable".into());
     }
     let mut roots = request
@@ -695,3 +695,6 @@ mod cancellable_pipe_tests {
         child.wait().unwrap();
     }
 }
+
+mod executable;
+pub(crate) use executable::executable_file;

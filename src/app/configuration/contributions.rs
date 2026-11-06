@@ -131,7 +131,7 @@ impl ConfigurationSession {
         Ok(receipt)
     }
 
-    pub(super) fn resolve_plugin_window_rules(
+    pub(in crate::app) fn resolve_plugin_window_rules(
         windows: &WindowsConfig,
         expected: &std::collections::BTreeSet<String>,
         catalog: &PluginContributionCatalog,

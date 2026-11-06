@@ -86,7 +86,7 @@ impl PtyAdmission<'_> {
     pub(crate) fn submit(
         self,
         request: PtyRequest,
-        root: Option<crate::workspace::RootIdentity>,
+        root: Option<crate::files::RootIdentity>,
     ) -> Result<PtyId, PtyError> {
         validate(&request)?;
         let id = PtyId(self.service.next.ok_or(PtyError::Exhausted)?);
@@ -394,7 +394,7 @@ fn deliver(
 }
 fn open_working_directory(
     path: &std::path::Path,
-    root: Option<&crate::workspace::RootIdentity>,
+    root: Option<&crate::files::RootIdentity>,
 ) -> Result<std::fs::File, PtyError> {
     use rustix::fs::OFlags;
     let fail = |error: String| PtyError::Spawn(error);
@@ -402,7 +402,7 @@ fn open_working_directory(
         .canonicalize()
         .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))?;
     if let Some(root) = root {
-        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+        let current = crate::files::RootIdentity::capture(&root.canonical_path)
             .map_err(|e| fail(e.to_string()))?;
         if root != &current
             || !path.starts_with(&root.canonical_path)
@@ -420,7 +420,7 @@ fn open_working_directory(
 fn run(
     id: PtyId,
     request: PtyRequest,
-    root: Option<crate::workspace::RootIdentity>,
+    root: Option<crate::files::RootIdentity>,
     events: &SyncSender<PtyEvent>,
     cancel: Arc<AtomicBool>,
     controls: (Receiver<Input>, Receiver<(u64, u16, u16)>),

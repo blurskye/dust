@@ -106,19 +106,19 @@ pub(in crate::app) const fn tool_kind_key(kind: ToolKind) -> &'static str {
 
 #[cfg(test)]
 impl ToolingSession {
-    pub(super) fn fixture_installer(&mut self, root: PathBuf) {
+    pub(in crate::app) fn fixture_installer(&mut self, root: PathBuf) {
         self.installer = ToolInstaller::start_at(root);
     }
-    pub(super) fn fixture_retain(&mut self, keep: impl FnMut(&ToolEntry) -> bool) {
+    pub(in crate::app) fn fixture_retain(&mut self, keep: impl FnMut(&ToolEntry) -> bool) {
         self.entries.retain(keep);
     }
-    pub(super) fn fixture_insert(&mut self, entry: ToolEntry) {
+    pub(in crate::app) fn fixture_insert(&mut self, entry: ToolEntry) {
         self.entries.push(entry);
     }
-    pub(super) fn fixture_version(&mut self, key: String, value: Result<String, String>) {
+    pub(in crate::app) fn fixture_version(&mut self, key: String, value: Result<String, String>) {
         self.versions.insert(key, value);
     }
-    pub(super) fn check_probe_worker_replacement(
+    pub(in crate::app) fn check_probe_worker_replacement(
         &mut self,
         definition: &ToolDefinition,
         executable: PathBuf,
@@ -155,7 +155,7 @@ pub(in crate::app) enum ToolInstall {
 }
 
 impl ToolingSession {
-    pub(super) fn new(entries: Vec<ToolEntry>) -> Self {
+    pub(in crate::app) fn new(entries: Vec<ToolEntry>) -> Self {
         Self {
             entries,
             path_lookups: RefCell::default(),
@@ -172,21 +172,21 @@ impl ToolingSession {
             versions: BTreeMap::new(),
         }
     }
-    pub(super) fn entries(&self) -> &[ToolEntry] {
+    pub(in crate::app) fn entries(&self) -> &[ToolEntry] {
         &self.entries
     }
-    pub(super) fn version(&self, key: &str) -> Option<&Result<String, String>> {
+    pub(in crate::app) fn version(&self, key: &str) -> Option<&Result<String, String>> {
         self.versions.get(key)
     }
-    pub(super) fn managed_version(&self, id: &str) -> Option<&String> {
+    pub(in crate::app) fn managed_version(&self, id: &str) -> Option<&String> {
         self.managed_versions.get(id)
     }
-    pub(super) fn forget_probe(&mut self, key: &str) {
+    pub(in crate::app) fn forget_probe(&mut self, key: &str) {
         self.versions.remove(key);
         self.version_pending.remove(key);
         self.version_queued.retain(|request| request.id != key);
     }
-    pub(super) fn refresh(&mut self) {
+    pub(in crate::app) fn refresh(&mut self) {
         self.reinspect(None);
         self.path_lookups.get_mut().clear();
         self.replace_probe_worker();
@@ -215,7 +215,7 @@ impl ToolingSession {
         self.version_pending.clear();
         self.version_queued.clear();
     }
-    pub(super) fn poll_versions(&mut self, execution_allowed: bool) -> (bool, bool) {
+    pub(in crate::app) fn poll_versions(&mut self, execution_allowed: bool) -> (bool, bool) {
         let mut changed = false;
         let mut unavailable = false;
         let mut rustup_key = None;
@@ -259,7 +259,7 @@ impl ToolingSession {
         }
         (changed, unavailable)
     }
-    pub(super) fn select_version(&mut self, id: &str, version: String) -> Result<(), String> {
+    pub(in crate::app) fn select_version(&mut self, id: &str, version: String) -> Result<(), String> {
         if !self.entries.iter().any(|e| {
             e.definition.id == id
                 && e.definition.kind == ToolKind::Lsp
@@ -273,7 +273,7 @@ impl ToolingSession {
         self.managed_versions.insert(id.into(), version);
         Ok(())
     }
-    pub(super) fn select_runtime(
+    pub(in crate::app) fn select_runtime(
         &mut self,
         id: &str,
         source: LspRuntimeSource,
@@ -311,7 +311,7 @@ impl ToolingSession {
         }
         Ok(())
     }
-    pub(super) fn metadata(&self) -> BTreeMap<String, String> {
+    pub(in crate::app) fn metadata(&self) -> BTreeMap<String, String> {
         self.nix_preferred
             .iter()
             .map(|id| (format!("lsp.runtime.{id}"), "nix".into()))
@@ -327,13 +327,13 @@ impl ToolingSession {
             )
             .collect()
     }
-    pub(super) fn begin_restore(&mut self) {
+    pub(in crate::app) fn begin_restore(&mut self) {
         self.changed_runtimes = Some(BTreeSet::new());
     }
-    pub(super) fn finish_restore(&mut self) {
+    pub(in crate::app) fn finish_restore(&mut self) {
         self.changed_runtimes = None;
     }
-    pub(super) fn restore(&mut self, metadata: &BTreeMap<String, String>) {
+    pub(in crate::app) fn restore(&mut self, metadata: &BTreeMap<String, String>) {
         let changed = self.changed_runtimes.take().unwrap_or_default();
         self.nix_preferred.retain(|id| changed.contains(id));
         self.managed_preferred.retain(|id| changed.contains(id));
@@ -364,7 +364,7 @@ impl ToolingSession {
             }
         }
     }
-    pub(super) fn install(&mut self, request: ToolInstall) -> Result<(), String> {
+    pub(in crate::app) fn install(&mut self, request: ToolInstall) -> Result<(), String> {
         let (definition, removing) = match &request {
             ToolInstall::Managed(d)
             | ToolInstall::Nix(d, _)
@@ -420,7 +420,7 @@ impl ToolingSession {
         }
         Ok(())
     }
-    pub(super) fn poll_progress(&mut self) -> Option<String> {
+    pub(in crate::app) fn poll_progress(&mut self) -> Option<String> {
         let mut changed = None;
         while let Ok(Some(progress)) = self.installer.try_progress() {
             if let Some(entry) = self
@@ -438,7 +438,7 @@ impl ToolingSession {
         }
         changed
     }
-    pub(super) fn poll_install(&mut self) -> Option<(String, ToolInstallResult)> {
+    pub(in crate::app) fn poll_install(&mut self) -> Option<(String, ToolInstallResult)> {
         let result = self.installer.try_result().ok()??;
         // Progress and completion use separate queues. Drain progress sent before this
         // result so a later poll cannot put the finished row back into Installing.

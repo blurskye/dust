@@ -73,3 +73,6 @@ pub use transaction::TransactionError;
 pub use transaction::UndoPolicy;
 pub use transaction::UndoTree;
 
+
+mod objects;
+pub use objects::{SyntaxObject, SyntaxObjectKind};

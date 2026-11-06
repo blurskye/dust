@@ -49,7 +49,7 @@ impl TaskReadReply {
     pub(in crate::app) fn into_result(self) -> VfsResult {
         self.result
     }
-    pub(super) fn new(worker: Arc<()>, result: VfsResult) -> Self {
+    pub(in crate::app) fn new(worker: Arc<()>, result: VfsResult) -> Self {
         Self {
             key: TaskReadKey {
                 worker,
@@ -63,7 +63,7 @@ pub(in crate::app) struct TaskReadStopped {
     worker: Arc<()>,
 }
 impl TaskReadStopped {
-    pub(super) fn new(worker: Arc<()>) -> Self {
+    pub(in crate::app) fn new(worker: Arc<()>) -> Self {
         Self { worker }
     }
     pub(in crate::app) fn matches(&self, key: &TaskReadKey) -> bool {

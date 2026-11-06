@@ -48,7 +48,7 @@ struct Invocation {
     interaction_available: bool,
 }
 impl Invocation {
-    fn current(
+    pub(in crate::app) fn current(
         &self,
         manager: &PluginManager,
         workspace: &WorkspaceVersion,
@@ -106,10 +106,10 @@ pub(super) struct InvocationLoan<'a> {
     _configuration: &'a u64,
 }
 impl InvocationLoan<'_> {
-    pub(super) fn origin(&self) -> &PluginInvocationOrigin {
+    pub(in crate::app) fn origin(&self) -> &PluginInvocationOrigin {
         &self.invocation.origin
     }
-    pub(super) fn submit(self, mut request: PluginExecutionRequest) -> Result<(), String> {
+    pub(in crate::app) fn submit(self, mut request: PluginExecutionRequest) -> Result<(), String> {
         self.admission.check(&request).map_err(|e| e.to_string())?;
         // Only this source serializes the snapshot attached to its provenance.
         request.snapshot = self
@@ -138,13 +138,13 @@ pub(super) struct ConfirmationSource {
     interaction_available: bool,
 }
 impl ConfirmationSource {
-    pub(super) fn origin(&self) -> &PluginInvocationOrigin {
+    pub(in crate::app) fn origin(&self) -> &PluginInvocationOrigin {
         &self.origin
     }
-    pub(super) fn manager_current(&self, manager: &PluginManager) -> bool {
+    pub(in crate::app) fn manager_current(&self, manager: &PluginManager) -> bool {
         self.origin.current(manager)
     }
-    pub(super) fn current(
+    pub(in crate::app) fn current(
         &self,
         manager: &PluginManager,
         editor: &EditorState,
@@ -164,12 +164,12 @@ impl ConfirmationSource {
                 })
             })
     }
-    pub(super) fn navigation_current(&self, editor: &EditorState, windows: &WindowSession) -> bool {
+    pub(in crate::app) fn navigation_current(&self, editor: &EditorState, windows: &WindowSession) -> bool {
         self.navigation.as_ref().is_none_or(|navigation| {
             windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
         })
     }
-    pub(super) fn presentation_current(
+    pub(in crate::app) fn presentation_current(
         &self,
         manager: &PluginManager,
         editor: &EditorState,
@@ -288,7 +288,7 @@ impl PluginEditSources {
             _configuration: configuration,
         })
     }
-    pub(super) fn receive(
+    pub(in crate::app) fn receive(
         &mut self,
         reply: PluginExecutionReply,
         manager: &PluginManager,
@@ -355,10 +355,10 @@ impl PluginEditSources {
             preview,
         })
     }
-    pub(super) fn owns(&self, key: &OriginKey) -> bool {
+    pub(in crate::app) fn owns(&self, key: &OriginKey) -> bool {
         self.ready.as_ref().is_some_and(|r| r.key.same(key))
     }
-    pub(super) fn check(
+    pub(in crate::app) fn check(
         &self,
         key: &OriginKey,
         manager: &PluginManager,
@@ -377,7 +377,7 @@ impl PluginEditSources {
         ready.invocation.document(editor)?;
         Ok(())
     }
-    pub(super) fn prepare_preview(
+    pub(in crate::app) fn prepare_preview(
         &mut self,
         key: &OriginKey,
         manager: &PluginManager,
@@ -440,21 +440,21 @@ impl PluginEditSources {
             },
         })
     }
-    fn range(start: u64, end: u64) -> Result<ByteRange, String> {
+    pub(in crate::app) fn range(start: u64, end: u64) -> Result<ByteRange, String> {
         ByteRange::new(
             ByteOffset(usize::try_from(start).map_err(|e| e.to_string())?),
             ByteOffset(usize::try_from(end).map_err(|e| e.to_string())?),
         )
         .map_err(|e| e.to_string())
     }
-    pub(super) fn finish(&mut self, key: &OriginKey) -> Result<(), String> {
+    pub(in crate::app) fn finish(&mut self, key: &OriginKey) -> Result<(), String> {
         if !self.owns(key) {
             return Err("plugin proposal decision duplicated or retired".into());
         }
         self.ready = None; // One-way proposal: no invented applied/failed wire acknowledgement.
         Ok(())
     }
-    pub(super) fn retire(
+    pub(in crate::app) fn retire(
         &mut self,
         manager: &PluginManager,
         editor: &EditorState,
@@ -474,7 +474,7 @@ impl PluginEditSources {
             .map(|r| r.key.clone());
         (before - self.pending.len(), key)
     }
-    pub(super) fn close(&mut self) -> usize {
+    pub(in crate::app) fn close(&mut self) -> usize {
         let discarded = self.pending.len() + usize::from(self.ready.is_some());
         self.closed = true;
         self.pending.clear();
@@ -491,7 +491,7 @@ mod tests {
     use crate::plugins::OwnedPluginEvent;
     use crate::plugins::PluginEdit;
     use crate::plugins::empty_execution_request;
-    fn reply(manager: &mut PluginManager) -> PluginExecutionReply {
+    pub(in crate::app) fn reply(manager: &mut PluginManager) -> PluginExecutionReply {
         let OwnedPluginEvent::Executed(reply) = manager.poll_owned().unwrap().pop().unwrap() else {
             panic!("execution reply");
         };
@@ -504,7 +504,7 @@ mod tests {
             crate::workspace::WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();

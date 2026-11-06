@@ -58,7 +58,7 @@ pub(in crate::app) enum Language {
 impl Language {
     const ALL: [Self; 3] = [Self::Rust, Self::TypeScript, Self::Python];
 
-    fn name(self) -> &'static str {
+    pub(in crate::app) fn name(self) -> &'static str {
         match self {
             Self::Rust => "Rust",
             Self::TypeScript => "TypeScript",
@@ -67,7 +67,7 @@ impl Language {
     }
 
     /// How the language is written in the saved progress.
-    fn id(self) -> &'static str {
+    pub(in crate::app) fn id(self) -> &'static str {
         match self {
             Self::Rust => "rust",
             Self::TypeScript => "typescript",
@@ -206,7 +206,7 @@ impl Step {
     }
 
     /// The practice file the step's text checks and cursor are about.
-    fn file(&self) -> &str {
+    pub(in crate::app) fn file(&self) -> &str {
         self.open.as_deref().unwrap_or(self.practice)
     }
 
@@ -325,7 +325,7 @@ pub(super) struct Tutor {
 }
 
 impl Tutor {
-    pub(super) fn new(state_directory: &Path) -> Self {
+    pub(in crate::app) fn new(state_directory: &Path) -> Self {
         Self {
             steps: Vec::new(),
             current: None,
@@ -340,7 +340,7 @@ impl Tutor {
         }
     }
 
-    fn step(&self) -> Option<&Step> {
+    pub(in crate::app) fn step(&self) -> Option<&Step> {
         self.current.and_then(|index| self.steps.get(index))
     }
 
@@ -368,7 +368,7 @@ impl Tutor {
     }
 
     /// The user's own layout while the tutor has the editor in its practice project.
-    pub(super) fn saved_layout(&self) -> Option<&Option<PersistedSession>> {
+    pub(in crate::app) fn saved_layout(&self) -> Option<&Option<PersistedSession>> {
         self.practice.as_ref().map(|practice| &practice.layout)
     }
 }
@@ -562,7 +562,7 @@ impl App {
     }
 
     /// Called for every command that ran without an error.
-    pub(super) fn tutor_observe(&mut self, invocation: &CommandInvocation) {
+    pub(in crate::app) fn tutor_observe(&mut self, invocation: &CommandInvocation) {
         let Some(step) = self.tutor.step() else {
             return;
         };
@@ -577,7 +577,7 @@ impl App {
 
     /// Called once per main loop pass: follow the moves in and out of the practice project,
     /// finish the step when it is done and keep the card in sync with what is on screen.
-    pub(super) fn tutor_tick(&mut self) {
+    pub(in crate::app) fn tutor_tick(&mut self) {
         let Some(practice) = &mut self.tutor.practice else {
             return;
         };
@@ -1046,7 +1046,7 @@ impl App {
                     start: ByteOffset(start),
                     end: ByteOffset(start + mark.len()),
                 },
-                role: crate::language::syntax::Highlight::VARIABLE,
+                role: crate::config::Highlight::VARIABLE,
             })
         });
         if let Some((line, indent)) = found {
@@ -1067,7 +1067,7 @@ impl App {
 mod tests {
     use crate::app::tutor::*;
 
-    fn app() -> App {
+    pub(in crate::app) fn app() -> App {
         App::new(
             crate::app::startup::StartupTarget::Dashboard {
                 root: tempfile::tempdir().unwrap().keep(),
@@ -1098,7 +1098,7 @@ mod tests {
             .fixture_cwd(crate::process::PtyId(1), app.state.workspace_root.clone());
     }
 
-    fn enter(app: &mut App) {
+    pub(in crate::app) fn enter(app: &mut App) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while app.workspace.root_operation_pending() {
             app.process_trust_events();
@@ -1285,7 +1285,7 @@ mod tests {
         });
         enter(&mut app);
         let root = app.workspace.active_root().unwrap();
-        let identity = crate::workspace::RootIdentity::capture(&app.state.workspace_root).unwrap();
+        let identity = crate::files::RootIdentity::capture(&app.state.workspace_root).unwrap();
         app.workspace.fixture_identity(root, identity).unwrap();
         app.tutor_command("workspace.trust");
         assert!(app.input.prompt().is_some());

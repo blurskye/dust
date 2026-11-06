@@ -501,14 +501,14 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
                 width,
                 height,
             };
-            let body = crate::ui::geometry::explorer_body_geometry(rect);
+            let body = crate::ui::render::explorer::explorer_body_geometry(rect);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
             if let Some(notice) = crate::ui::geometry::error_notification_geometry(width, height) {
                 assert!(notice.x + notice.width <= width);
                 assert!(notice.y + notice.height <= height);
             }
-            let rows = crate::ui::geometry::documentation_page_rows(&config, width, height);
+            let rows = crate::ui::render::documentation::documentation_page_rows(&config, width, height);
             assert!(rows <= usize::from(height.saturating_sub(2)));
         }
     }
@@ -588,7 +588,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
     assert_eq!((body.y, body.height), (3, 27));
     assert_eq!(
         windows.content().documentation_rows,
-        crate::ui::geometry::documentation_page_rows(&config, 75, 30)
+        crate::ui::render::documentation::documentation_page_rows(&config, 75, 30)
     );
     // Exercise the revision predicate itself, rather than merely clearing the cache.
     windows

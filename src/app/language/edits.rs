@@ -80,7 +80,7 @@ pub(super) struct LspEditSources {
     replies: VecDeque<PendingEditReply>,
 }
 impl LspEditSources {
-    pub(super) fn offer_actions(
+    pub(in crate::app) fn offer_actions(
         &mut self,
         server: &str,
         uri: &str,
@@ -95,15 +95,15 @@ impl LspEditSources {
                 context: context.clone(),
             }));
     }
-    pub(super) fn clear_offered_actions(&mut self) {
+    pub(in crate::app) fn clear_offered_actions(&mut self) {
         self.offered.clear();
     }
-    pub(super) fn has_offered_actions(&self) -> bool {
+    pub(in crate::app) fn has_offered_actions(&self) -> bool {
         !self.offered.is_empty()
     }
     /// Installs what the servers offered, `first`'s actions on top. A server that went away since
     /// it answered takes its actions with it.
-    pub(super) fn install_offered_actions(
+    pub(in crate::app) fn install_offered_actions(
         &mut self,
         first: Option<&str>,
         service: &LspService,
@@ -158,10 +158,10 @@ impl LspEditSources {
             self.actions = None;
         }
     }
-    pub(super) fn clear_actions(&mut self) {
+    pub(in crate::app) fn clear_actions(&mut self) {
         self.actions = None;
     }
-    pub(super) fn take_action(
+    pub(in crate::app) fn take_action(
         &mut self,
         key: &CodeActionKey,
         service: &LspService,
@@ -199,10 +199,10 @@ impl LspEditSources {
     // Keep draining while replies await acknowledgement: event backpressure must
     // not stop the worker from reading those replies. Each server already limits
     // its outstanding applyEdit requests in the protocol handler.
-    pub(super) fn poll_event(&self, service: &LspService) -> Option<OwnedLspEvent> {
+    pub(in crate::app) fn poll_event(&self, service: &LspService) -> Option<OwnedLspEvent> {
         service.try_owned_event()
     }
-    pub(super) fn flush(&mut self) -> Vec<String> {
+    pub(in crate::app) fn flush(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
         for _ in 0..self.replies.len().min(128) {
             let Some(mut reply) = self.replies.pop_front() else {
@@ -216,15 +216,15 @@ impl LspEditSources {
         }
         errors
     }
-    pub(super) fn pending_replies(&self) -> bool {
+    pub(in crate::app) fn pending_replies(&self) -> bool {
         !self.replies.is_empty()
     }
-    pub(super) fn reject_reply(&mut self, reply: Option<ApplyEditReply>, reason: String) {
+    pub(in crate::app) fn reject_reply(&mut self, reply: Option<ApplyEditReply>, reason: String) {
         if let Some(reply) = reply {
             self.replies.push_back(reply.finish(false, Some(reason)));
         }
     }
-    pub(super) fn start(
+    pub(in crate::app) fn start(
         &mut self,
         edit: LspWorkspaceEdit,
         encoding: PositionEncoding,
@@ -380,7 +380,7 @@ impl LspEditSources {
         }
         Ok(())
     }
-    pub(super) fn check(
+    pub(in crate::app) fn check(
         &self,
         key: &OriginKey,
         current: &[EditDocument<'_>],
@@ -393,7 +393,7 @@ impl LspEditSources {
             .ok_or("workspace edit origin is foreign or retired")?;
         Self::validate_context(request.context.as_ref(), &request.paths, current, service)
     }
-    pub(super) fn decode(
+    pub(in crate::app) fn decode(
         &mut self,
         key: &OriginKey,
         files: PreparedFiles<'_>,
@@ -429,7 +429,7 @@ impl LspEditSources {
             })
             .collect()
     }
-    pub(super) fn set_command(
+    pub(in crate::app) fn set_command(
         &mut self,
         server: String,
         command: crate::language::lsp::LspCommand,
@@ -438,7 +438,7 @@ impl LspEditSources {
             request.command = Some((server, command));
         }
     }
-    pub(super) fn take_command(
+    pub(in crate::app) fn take_command(
         &mut self,
         key: &OriginKey,
     ) -> Option<(String, crate::language::lsp::LspCommand)> {
@@ -448,7 +448,7 @@ impl LspEditSources {
             .command
             .take()
     }
-    pub(super) fn finish(
+    pub(in crate::app) fn finish(
         &mut self,
         key: &OriginKey,
         applied: bool,
@@ -463,7 +463,7 @@ impl LspEditSources {
         }
         Ok(())
     }
-    pub(super) fn completion_transaction(
+    pub(in crate::app) fn completion_transaction(
         edit: LspWorkspaceEdit,
         encoding: PositionEncoding,
         current: &[EditDocument<'_>],
@@ -566,7 +566,7 @@ mod tests {
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
     use crate::language::lsp::ServerRequestId;
-    use crate::workspace::RootIdentity;
+    use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
     fn documents(editor: &EditorState) -> Vec<EditDocument<'_>> {
@@ -794,8 +794,7 @@ mod tests {
                     .finish_preparation(drafts, &scope, &version, 1)
                     .unwrap();
                 let (captured, preview) = owner.approval(&version, 1).unwrap();
-                let draft = editor
-                    .prepare_workspace_edit(captured, preview, TransactionId(1))
+                let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, captured, preview, TransactionId(1))
                     .unwrap();
                 editor = draft.accept(&editor.version()).unwrap();
                 assert_eq!(editor.buffers[buffer].text.to_string(), "aXc");
@@ -845,7 +844,7 @@ mod tests {
                 expected_revision: Some(BufferRevision(0)),
                 edits: decoded,
             }],
-            vec![crate::workspace::FileSnapshot {
+            vec![crate::editor::transaction::DocumentSnapshot {
                 canonical_path: path.clone(),
                 revision: Some(BufferRevision(0)),
                 bytes: b"x".to_vec(),
@@ -1125,8 +1124,7 @@ mod tests {
         );
         assert_eq!(TextBuffer::test_materializations(), before);
         let (captured, preview) = owner.approval(&version, 1).unwrap();
-        let draft = editor
-            .prepare_workspace_edit(captured, preview, TransactionId(1))
+        let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, captured, preview, TransactionId(1))
             .unwrap();
         owner.stage_approval(&draft, Vec::new()).unwrap();
         assert!(owner.accepted(editor.publication()).is_err());
@@ -1317,7 +1315,7 @@ mod tests {
 
 impl LspEditSources {
     // Protocol conversion stays with the LSP source, not the canonical store.
-    pub(super) fn diagnostic_batch(
+    pub(in crate::app) fn diagnostic_batch(
         context: &EditContext,
         service: &LspService,
         editor: &crate::editor::EditorState,

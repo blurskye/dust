@@ -1,6 +1,6 @@
 use crate::app::tests::*;
 use crate::app::FULL_PAGE_PERCENT;
-use crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP;
+use crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP;
 
 #[test]
 fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {

@@ -12,24 +12,26 @@ pub use id::ViewId;
 
 pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::UNIVERSAL_LAYOUT_DEPTH_CEILING;
 pub const MAXIMUM_LAYOUT_PANES: usize = crate::UNIVERSAL_LAYOUT_WINDOW_CEILING;
-mod model;
-pub use model::Axis;
-pub use model::Buffer;
-pub use model::BufferOrigin;
-pub use model::EditingPolicy;
-pub use model::EditorMode;
-pub use model::FocusDirection;
-pub use model::InsertRepeat;
-pub use model::LayoutNode;
-pub use model::Pane;
-pub use model::RegisterShape;
-pub use model::RegisterStore;
-pub use model::RegisterValue;
-pub use model::ReplaceRecord;
-pub use model::Selection;
-pub use model::SelectionKind;
-pub use model::Tab;
-pub use model::View;
+mod buffer;
+mod view;
+mod registers;
+pub use layout::Axis;
+pub use buffer::Buffer;
+pub use buffer::BufferOrigin;
+
+pub use view::EditorMode;
+pub use layout::FocusDirection;
+pub use view::InsertRepeat;
+pub use layout::LayoutNode;
+pub use layout::Pane;
+pub use registers::RegisterShape;
+pub use registers::RegisterStore;
+pub use registers::RegisterValue;
+pub use view::ReplaceRecord;
+pub use view::Selection;
+pub use view::SelectionKind;
+pub use layout::Tab;
+pub use view::View;
 mod store;
 pub use store::EditorState;
 pub(crate) use store::EditorTopology;
@@ -39,3 +41,20 @@ mod layout;
 
 #[cfg(test)]
 mod tests;
+
+
+
+
+
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EditingPolicy {
+    pub tab_width: usize,
+    pub indent_width: usize,
+    pub expand_tabs: bool,
+    pub undo_break_on_text_commit: bool,
+    pub registers_enabled: bool,
+    pub mirror_named_to_unnamed: bool,
+    pub ambiguous_width_wide: bool,
+    pub autopairs: bool,
+}

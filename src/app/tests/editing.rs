@@ -1577,7 +1577,7 @@ fn tutor_moves_on_when_each_step_is_done() {
         self::press(app, key);
         app.tutor_tick();
     }
-    fn title(app: &App) -> String {
+    pub(in crate::app) fn title(app: &App) -> String {
         app.ui
             .tutor
             .as_ref()
@@ -2623,7 +2623,7 @@ fn syntax_objects_refresh_when_only_the_document_language_changes() {
     assert!(
         objects
             .iter()
-            .any(|object| object.kind == crate::language::syntax::SyntaxObjectKind::Function)
+            .any(|object| object.kind == crate::editor::SyntaxObjectKind::Function)
     );
 }
 
@@ -2691,7 +2691,7 @@ fn idle_syntax_and_clipboard_polls_preserve_frame_revisions() {
         buffer,
         revision: app.state.buffers[buffer].text.revision(),
         range: ByteRange::new(ByteOffset(4), ByteOffset(8)).unwrap(),
-        role: crate::language::syntax::Highlight::VARIABLE,
+        role: crate::config::Highlight::VARIABLE,
     }];
     app.process_syntax();
     let before = (app.state.revision, app.ui.revision);
@@ -2718,7 +2718,7 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
         buffer,
         revision: app.state.buffers[buffer].text.revision(),
         range: word,
-        role: crate::language::syntax::Highlight::VARIABLE,
+        role: crate::config::Highlight::VARIABLE,
     }];
     for key in ['i', 'X'] {
         app.handle_configured_key(KeyEvent::character(key));

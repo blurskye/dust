@@ -34,7 +34,7 @@ pub(super) struct SnippetSession {
     current: usize,
 }
 impl SnippetSession {
-    fn matches(&self, document: &SnippetDocument<'_>) -> bool {
+    pub(in crate::app) fn matches(&self, document: &SnippetDocument<'_>) -> bool {
         self.editor.same_editor(document.editor)
             && self.buffer == document.buffer
             && self.revision == document.text.revision()
@@ -570,7 +570,7 @@ mod tests {
     use crate::app::language::snippets::*;
     use crate::editor::EditorState;
     use crate::editor::TransactionId;
-    fn fixture() -> (EditorState, BufferId, InputSession) {
+    pub(in crate::app) fn fixture() -> (EditorState, BufferId, InputSession) {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text("x x"), None).unwrap();
         (state, buffer, InputSession::new(100))
@@ -625,7 +625,7 @@ mod tests {
         let source = state.window_version();
         assert!(input.accept_snippet_edit(update, Some(document(state, buffer, &source))));
     }
-    fn install(source: &str) -> (EditorState, BufferId, InputSession) {
+    pub(in crate::app) fn install(source: &str) -> (EditorState, BufferId, InputSession) {
         let parsed = crate::language::lsp::parse_snippet(source, 1024).unwrap();
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state

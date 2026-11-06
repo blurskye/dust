@@ -98,7 +98,7 @@ pub(super) struct ClipboardSession {
 impl ClipboardSession {
     /// Turn sync on for a real terminal session. Tests never call this, so they never touch
     /// the developer's clipboard.
-    pub(super) fn enable(&mut self, registers: &RegisterStore) {
+    pub(in crate::app) fn enable(&mut self, registers: &RegisterStore) {
         self.enabled = true;
         self.tool = Tool::detect();
         self.synced_generation = registers.generation();
@@ -106,7 +106,7 @@ impl ClipboardSession {
 
     /// Send a changed unnamed register to the system clipboard. Returns the text when it must
     /// go through the terminal (OSC 52) because no clipboard program exists.
-    pub(super) fn push(&mut self, registers: &mut RegisterStore) -> Option<String> {
+    pub(in crate::app) fn push(&mut self, registers: &mut RegisterStore) -> Option<String> {
         if !self.enabled {
             return None;
         }
@@ -149,23 +149,23 @@ impl ClipboardSession {
         }
     }
 
-    pub(super) fn waiting(&self) -> bool {
+    pub(in crate::app) fn waiting(&self) -> bool {
         self.paste.is_some()
     }
 
-    pub(super) fn defer(&mut self, input: DeferredInput) {
+    pub(in crate::app) fn defer(&mut self, input: DeferredInput) {
         self.deferred.push_back(input);
     }
 
-    pub(super) fn take_deferred(&mut self) -> VecDeque<DeferredInput> {
+    pub(in crate::app) fn take_deferred(&mut self) -> VecDeque<DeferredInput> {
         std::mem::take(&mut self.deferred)
     }
 
-    pub(super) fn append_deferred(&mut self, mut inputs: VecDeque<DeferredInput>) {
+    pub(in crate::app) fn append_deferred(&mut self, mut inputs: VecDeque<DeferredInput>) {
         self.deferred.append(&mut inputs);
     }
 
-    pub(super) fn next_input(&mut self) -> Option<DeferredInput> {
+    pub(in crate::app) fn next_input(&mut self) -> Option<DeferredInput> {
         if self.waiting() {
             None
         } else {
@@ -173,7 +173,7 @@ impl ClipboardSession {
         }
     }
 
-    pub(super) fn pull(
+    pub(in crate::app) fn pull(
         &mut self,
         invocation: &CommandInvocation,
         source: EditorWindowVersion,
@@ -214,7 +214,7 @@ impl ClipboardSession {
         true
     }
 
-    pub(super) fn finish_pull(
+    pub(in crate::app) fn finish_pull(
         &mut self,
         registers: &mut RegisterStore,
         enabled: bool,
@@ -351,7 +351,7 @@ fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 impl ClipboardSession {
-    pub(super) fn fixture_read(&mut self) -> mpsc::Sender<Option<String>> {
+    pub(in crate::app) fn fixture_read(&mut self) -> mpsc::Sender<Option<String>> {
         let (sender, receiver) = mpsc::channel();
         self.enabled = true;
         self.tool = Some(Tool::Wayland);
@@ -559,7 +559,7 @@ mod tests {
         }
     }
 
-    fn value(text: &str) -> RegisterValue {
+    pub(in crate::app) fn value(text: &str) -> RegisterValue {
         RegisterValue {
             text: text.into(),
             shape: RegisterShape::Character,

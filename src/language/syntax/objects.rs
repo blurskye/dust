@@ -48,21 +48,7 @@ const ARGUMENT_LISTS: &[&str] = &[
     "argument_list",
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SyntaxObjectKind {
-    Function,
-    Class,
-    Argument,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SyntaxObject {
-    pub kind: SyntaxObjectKind,
-    /// Byte range of the `a` object.
-    pub outer: (usize, usize),
-    /// Byte range of the `i` object.
-    pub inner: (usize, usize),
-}
+use crate::editor::{SyntaxObject, SyntaxObjectKind};
 
 pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> Vec<SyntaxObject> {
     let mut objects = Vec::new();

@@ -2274,11 +2274,11 @@ fn tool_menu_navigation_keeps_the_selected_server_inside_the_rendered_list() {
         app.move_tool_menu(1);
         let menu = app.ui.tool_menu.as_ref().expect("menu");
         let modal_height = (u32::from(app.window_session.height())
-            * u32::from(crate::ui::render::surfaces::TOOL_MANAGER_HEIGHT_PERCENT)
+            * u32::from(crate::ui::render::tools::TOOL_MANAGER_HEIGHT_PERCENT)
             / 100) as u16;
         let modal_height = modal_height
             .max(
-                crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT
+                crate::ui::render::tools::TOOL_MANAGER_MINIMUM_HEIGHT
                     .min(app.window_session.height()),
             )
             .min(app.window_session.height());

@@ -28,7 +28,7 @@ pub(super) struct Themes {
 }
 impl Themes {
     /// Keep a selection only if it differs from the freshly loaded configured theme.
-    pub(super) fn reset(&mut self, keep_applied: bool, configured_name: &str) {
+    pub(in crate::app) fn reset(&mut self, keep_applied: bool, configured_name: &str) {
         let applied = self
             .applied
             .take()
@@ -288,7 +288,7 @@ impl ConfigurationSession {
     pub(in crate::app) fn cancel_theme_picker(&mut self) {
         self.themes.interaction = None;
     }
-    pub(super) fn effective_theme(&self) -> &ThemeConfig {
+    pub(in crate::app) fn effective_theme(&self) -> &ThemeConfig {
         self.theme_override()
             .map_or(&self.accepted.theme, |choice| &choice.theme)
     }
@@ -301,7 +301,7 @@ impl ConfigurationSession {
             .map(Arc::as_ref)
             .or(self.themes.applied.as_deref())
     }
-    pub(super) fn explain_theme(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+    pub(in crate::app) fn explain_theme(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
         let choice = self.theme_override()?;
         let value = if key == "ui.theme" {
             toml::Value::String(choice.theme.name.clone())

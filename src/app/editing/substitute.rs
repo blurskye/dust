@@ -187,7 +187,7 @@ fn global_lines(
 
 impl App {
     /// Shows what a `:s` being typed puts in place of each match, as with Vim's inccommand.
-    pub(super) fn preview_substitute(&mut self) {
+    pub(in crate::app) fn preview_substitute(&mut self) {
         let preview = self.typed_substitute_hints().unwrap_or_default();
         self.ui.set(preview, |ui| &mut ui.substitute_preview);
     }
@@ -232,7 +232,7 @@ impl App {
         )
     }
 
-    pub(super) fn run_substitute(
+    pub(in crate::app) fn run_substitute(
         &mut self,
         range: &str,
         pattern: &str,
@@ -319,7 +319,7 @@ impl App {
 
     /// `:g/pattern/d`, or with `invert` `:v/pattern/d`: deletes the lines of `range` (the whole
     /// file without one) that match, or that don't.
-    pub(super) fn run_global_delete(&mut self, range: &str, pattern: &str, invert: bool) {
+    pub(in crate::app) fn run_global_delete(&mut self, range: &str, pattern: &str, invert: bool) {
         let Some(view_id) = self.state.active_view else {
             return;
         };
@@ -511,7 +511,7 @@ impl App {
 
     /// Replace (or skip) the match being asked about, or with `all` every one left, then ask
     /// about the next.
-    pub(super) fn answer_substitution(&mut self, replace: bool, all: bool) {
+    pub(in crate::app) fn answer_substitution(&mut self, replace: bool, all: bool) {
         let Some(mut confirm) = self.substitute_confirm.take() else {
             return;
         };
@@ -534,7 +534,7 @@ impl App {
     }
 
     /// Makes the replacements said yes to, as one change to undo.
-    pub(super) fn finish_substitution(&mut self) {
+    pub(in crate::app) fn finish_substitution(&mut self) {
         let Some(confirm) = self.substitute_confirm.take() else {
             return;
         };

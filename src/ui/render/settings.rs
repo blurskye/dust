@@ -4,18 +4,18 @@
 use crate::config::AmbiguousWidth;
 
 use crate::config::Config;
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::editor::cursor_style;
 
-use crate::ui::render::surfaces::ellipsized;
+use crate::ui::geometry::ellipsized;
 
-use crate::ui::render::surfaces::prompt_viewport;
+use crate::ui::render::prompt::prompt_viewport;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsPageState {

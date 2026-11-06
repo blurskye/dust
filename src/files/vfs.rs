@@ -272,7 +272,7 @@ pub(crate) enum VfsReply {
     Explorer(ExplorerIoReply),
 }
 struct QueuedRequest {
-    read_roots: Option<Vec<crate::workspace::RootIdentity>>,
+    read_roots: Option<Vec<crate::files::RootIdentity>>,
     explorer: Option<ExplorerIo>,
     document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
     request: VfsRequest,
@@ -328,7 +328,7 @@ impl VfsReadAdmission<'_> {
     pub(crate) fn submit(
         self,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum_bytes: u64,
     ) -> Result<RequestId, VfsError> {
         self.worker
@@ -875,7 +875,7 @@ impl VfsWorker {
     pub(crate) fn open_explorer(
         &mut self,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
         self.submit_io(
@@ -891,7 +891,7 @@ impl VfsWorker {
     pub(crate) fn inspect_explorer_rename(
         &mut self,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
@@ -928,7 +928,7 @@ impl VfsWorker {
     pub(crate) fn prepare_explorer(
         &mut self,
         operation: ExplorerMutation,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
@@ -1176,7 +1176,7 @@ impl VfsWorker {
         &mut self,
         id: RequestId,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum_bytes: u64,
     ) -> Result<(), VfsError> {
         self.submit_packet(
@@ -1196,7 +1196,7 @@ impl VfsWorker {
         request: VfsRequest,
         document_paths: Option<(Option<PathBuf>, Vec<PathBuf>)>,
         explorer: Option<ExplorerIo>,
-        read_roots: Option<Vec<crate::workspace::RootIdentity>>,
+        read_roots: Option<Vec<crate::files::RootIdentity>>,
     ) -> Result<(), VfsError> {
         if self.stopping.load(Ordering::Acquire) {
             return Err(VfsError::WorkerStopped);
@@ -1294,7 +1294,7 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
     }
 }
 
-pub(crate) fn roots_current(roots: &[crate::workspace::RootIdentity]) -> Result<(), VfsError> {
+pub(crate) fn roots_current(roots: &[crate::files::RootIdentity]) -> Result<(), VfsError> {
     let error = |path: &Path, message: String| VfsError::Io {
         operation: "check root identity",
         path: path.into(),
@@ -1307,7 +1307,7 @@ pub(crate) fn roots_current(roots: &[crate::workspace::RootIdentity]) -> Result<
         ));
     }
     for root in roots {
-        let current = crate::workspace::RootIdentity::capture(&root.canonical_path)
+        let current = crate::files::RootIdentity::capture(&root.canonical_path)
             .map_err(|e| error(&root.canonical_path, e.to_string()))?;
         if root.filesystem_identity.is_none() || &current != root {
             return Err(error(
@@ -1323,8 +1323,8 @@ pub(crate) fn roots_current(roots: &[crate::workspace::RootIdentity]) -> Result<
 pub(crate) fn participating_roots(
     requested: &[&Path],
     canonical: &[&Path],
-    roots: &[crate::workspace::RootIdentity],
-) -> Result<Vec<crate::workspace::RootIdentity>, VfsError> {
+    roots: &[crate::files::RootIdentity],
+) -> Result<Vec<crate::files::RootIdentity>, VfsError> {
     let mut selected = Vec::new();
     for (paths, required) in [(requested, false), (canonical, true)] {
         for path in paths {

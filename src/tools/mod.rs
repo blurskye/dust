@@ -66,10 +66,10 @@ pub use catalog::tool_store_root;
 pub(crate) use catalog::executable_file;
 pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 mod installer;
-pub use installer_service::ToolInstallProgress;
-pub use installer_service::ToolInstallResult;
-pub use installer_service::ToolInstaller;
-pub use installer_service::ToolOperation;
+pub use installer::ToolInstallProgress;
+pub use installer::ToolInstallResult;
+pub use installer::ToolInstaller;
+pub use installer::ToolOperation;
 mod version;
 pub use version::ToolVersionRequest;
 pub use version::ToolVersionResult;
@@ -84,12 +84,14 @@ mod install_prepare;
 mod runtimes;
 pub use install::ToolInstallerError;
 mod packages;
-pub use package_service::PackageManager;
-pub use package_service::PackageOperation;
-pub use package_service::PackageOperationResult;
-pub use package_service::PackageService;
-pub use package_service::PackageServiceEvent;
-pub use package_service::PreparedPackage;
+pub use packages::PackageManager;
+pub use packages::PackageOperation;
+pub use packages::PackageOperationResult;
+pub use packages::PackageService;
+pub use packages::PackageServiceEvent;
+pub use packages::PreparedPackage;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) use packages::installed_plugins;

@@ -144,3 +144,184 @@ mod tests {
         assert_eq!(labels("Foo foo", 3, "F"), vec![(0, Some('a'))]);
     }
 }
+
+use crate::app::ByteOffset;
+use crate::app::EditorOperation;
+use crate::app::EditorTransaction;
+use crate::app::App;
+use crate::app::UndoPolicy;
+use crate::app::VisualRowAnchor;
+use crate::app::VisualRowModel;
+use crate::app::active_editor_pane_viewport;
+use crate::app::editor_state_content_width;
+use crate::app::KeyEvent;
+use crate::app::ViewId;
+
+
+impl App {
+
+    pub(in crate::app) fn begin_flash(&mut self) {
+        self.reconcile_editor_windows();
+        let Some(view) = self.state.active_view else {
+            return;
+        };
+        self.flash = Some(crate::app::editing::flash::FlashState {
+            view,
+            buffer: self.state.views[view].buffer,
+            source: self.state.buffers[self.state.views[view].buffer]
+                .text
+                .source_version(),
+            query: String::new(),
+            targets: Vec::new(),
+        });
+        self.sync_flash_ui();
+    }
+}
+
+impl App {
+
+
+    /// While flash is active every key goes here: characters extend the query or pick a
+    /// label, Backspace edits, and anything else cancels.
+    pub(in crate::app) fn handle_flash_key(&mut self, key: &KeyEvent) {
+        let Some(mut flash) = self.flash.take() else {
+            return;
+        };
+        if self.state.active_view != Some(flash.view)
+            || !self
+                .state
+                .views
+                .get(flash.view)
+                .is_some_and(|view| view.buffer == flash.buffer)
+            || !self
+                .state
+                .buffers
+                .get(flash.buffer)
+                .is_some_and(|buffer| buffer.text.source_version() == flash.source)
+        {
+            self.sync_flash_ui();
+            return;
+        }
+        match key.code {
+            crate::editor::input::KeyCode::Char(character)
+                if !key.modifiers.control && !key.modifiers.alt =>
+            {
+                if let Some(target) = flash
+                    .targets
+                    .iter()
+                    .find(|target| target.label == Some(character))
+                {
+                    self.flash_jump(flash.view, target.range.start);
+                    return;
+                }
+                flash.query.push(character);
+            }
+            crate::editor::input::KeyCode::Backspace if !flash.query.is_empty() => {
+                flash.query.pop();
+            }
+            _ => {
+                self.sync_flash_ui();
+                return;
+            }
+        }
+        let Some(view) = self.state.views.get(flash.view) else {
+            self.sync_flash_ui();
+            return;
+        };
+        let Some(viewport) = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
+            .filter(|viewport| viewport.view == flash.view)
+        else {
+            self.sync_flash_ui();
+            return;
+        };
+        let text = &self.state.buffers[view.buffer].text;
+        let width = crate::ui::editor_state_content_width(
+            &self.state,
+            text,
+            &self.configuration.settings().editor,
+            viewport.width,
+        );
+        let wrap = width > 0
+            && self.configuration.settings().editor.wrap
+            && !self.ui.large_file_buffers.contains(&view.buffer);
+        let model = crate::ui::VisualRowModel::new_for_state(
+            &self.state,
+            text,
+            flash.view,
+            &self.ui,
+            self.configuration.settings(),
+            viewport.width,
+            wrap,
+        );
+        let start = crate::ui::VisualRowAnchor {
+            line: view.scroll_line,
+            wrap_row: view.scroll_wrap_row,
+        };
+        let horizontal = if wrap { 0 } else { view.scroll_column };
+        let ranges = if width > 0 {
+            model.visible_text_ranges(start, usize::from(viewport.height), horizontal)
+        } else {
+            Vec::new()
+        };
+        flash.targets =
+            crate::app::editing::flash::flash_targets(text, &ranges, view.cursor, &flash.query);
+        match flash.targets.as_slice() {
+            [] if !flash.query.is_empty() => {
+                self.sync_flash_ui();
+                self.notify_message(format!("no match for {}", flash.query), false);
+            }
+            [only] => self.flash_jump(flash.view, only.range.start),
+            _ => {
+                self.flash = Some(flash);
+                self.sync_flash_ui();
+            }
+        }
+    }
+}
+
+impl App {
+
+
+    fn flash_jump(&mut self, view: crate::editor::ViewId, target: ByteOffset) {
+        self.record_jump();
+        let transaction = EditorTransaction::new(self.transaction_id())
+            .with_operation(EditorOperation::SetCursor {
+                view,
+                position: target,
+            })
+            .with_undo_policy(UndoPolicy::Ignore);
+        if let Err(error) = self.state.apply_transaction(&transaction) {
+            self.show_error(error);
+        }
+        self.sync_flash_ui();
+        self.ensure_cursor_visible();
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn sync_flash_ui(&mut self) {
+        if self.flash.as_ref().is_some_and(|flash| {
+            self.state.active_view != Some(flash.view)
+                || self
+                    .window_session
+                    .graph()
+                    .focused()
+                    .and_then(|window| self.window_session.editor_ids().pane_for_window(window))
+                    .and_then(|pane| self.state.panes.get(pane))
+                    .is_none_or(|pane| pane.view != flash.view)
+        }) {
+            self.flash = None;
+        }
+        self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
+            view: flash.view,
+            matches: flash.targets.iter().map(|target| target.range).collect(),
+            labels: flash
+                .targets
+                .iter()
+                .filter_map(|target| Some((target.range.start, target.label?)))
+                .collect(),
+        });
+    }
+}

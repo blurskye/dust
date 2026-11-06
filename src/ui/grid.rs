@@ -76,13 +76,13 @@ pub enum Style {
     TerminalStatusAccent,
     Terminal(PtyStyle),
     /// A Neovim highlight group, coloured by the theme's `[highlights]`.
-    Syntax(crate::language::syntax::Highlight),
+    Syntax(crate::config::Highlight),
     /// A syntax group drawn on the documentation popup's background.
-    DocumentationSyntax(crate::language::syntax::Highlight),
+    DocumentationSyntax(crate::config::Highlight),
     /// A markdown heading's group drawn on its bar.
-    MarkdownHeading(crate::language::syntax::Highlight),
+    MarkdownHeading(crate::config::Highlight),
     /// A syntax group, or plain text, drawn on a markdown code block's background.
-    MarkdownCode(Option<crate::language::syntax::Highlight>),
+    MarkdownCode(Option<crate::config::Highlight>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -389,4 +389,20 @@ mod tests {
         wide.put_text_clipped(1, 0, "界", Style::Accent, 2);
         assert_eq!(wide.row_text(0), "  | ");
     }
+}
+
+use crossterm::cursor::SetCursorStyle;
+use crate::ui::CellGrid;
+
+
+
+pub(crate) const CONTROL_CHARACTER_REPLACEMENT: &str = "�";
+
+pub(crate) const ZERO_WIDTH_REPLACEMENT: &str = "◌";
+
+
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub grid: CellGrid,
+    pub cursor: Option<(u16, u16, SetCursorStyle)>,
 }

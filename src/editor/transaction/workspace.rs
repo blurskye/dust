@@ -1,3 +1,17 @@
+
+pub(crate) struct DraftEdit<'a> {
+    pub(crate) canonical_path: &'a std::path::Path,
+    pub(crate) base_revision: Option<crate::editor::text::BufferRevision>,
+    pub(crate) original_bytes: &'a [u8],
+    pub(crate) edits: &'a [crate::editor::text::TextEdit],
+    pub(crate) preferred_line_ending: crate::editor::text::LineEnding,
+}
+#[derive(Clone, Debug)]
+pub struct DocumentSnapshot {
+    pub canonical_path: PathBuf,
+    pub revision: Option<crate::editor::text::BufferRevision>,
+    pub bytes: Vec<u8>,
+}
 //! Workspace preview source capture and all-or-nothing editor draft preparation.
 use std::path::PathBuf;
 
@@ -15,7 +29,7 @@ use crate::editor::text::TextEditSet;
 
 use crate::editor::text::TextVersion;
 
-use crate::workspace::WorkspaceEditProposal;
+
 
 use crate::editor::transaction::EditorDraft;
 
@@ -29,6 +43,11 @@ use crate::editor::transaction::Precondition;
 pub(crate) struct WorkspaceEditSources {
     editor: EditorWindowVersion,
     buffers: Vec<(BufferId, PathBuf, TextVersion)>,
+}
+impl WorkspaceEditSources {
+    pub(crate) fn same_editor(&self, state: &EditorState) -> bool {
+        self.editor.same_editor(&state.window_version()) && state.window_version().revision().is_some()
+    }
 }
 impl EditorState {
     pub(crate) fn validate_workspace_sources<'a>(
@@ -133,10 +152,11 @@ impl EditorState {
                 .collect(),
         })
     }
-    pub(crate) fn prepare_workspace_edit(
+    pub(crate) fn prepare_document_edits(
         &self,
         sources: &WorkspaceEditSources,
-        proposal: &WorkspaceEditProposal,
+        label: &str,
+        files: &[DraftEdit<'_>],
         transaction: TransactionId,
     ) -> Result<EditorDraft, String> {
         if !sources.editor.same_editor(&self.window_version())
@@ -144,11 +164,8 @@ impl EditorState {
         {
             return Err("workspace edit belongs to a foreign or exhausted editor".into());
         }
-        if proposal.state != crate::workspace::ProposalState::Preview {
-            return Err("workspace preview is closed".into());
-        }
         // Validate every known buffer before decoding snapshots or cloning the editor.
-        for file in proposal.files.iter().filter(|file| file.selected) {
+        for file in files.iter() {
             let before = sources
                 .buffers
                 .iter()
@@ -156,7 +173,7 @@ impl EditorState {
             let current = self
                 .buffers
                 .iter()
-                .find(|(_, buffer)| buffer.path.as_ref() == Some(&file.canonical_path));
+                .find(|(_, buffer)| buffer.path.as_ref() == Some(file.canonical_path));
             match (before, current) {
                 (Some((expected, _, version)), Some((id, buffer)))
                     if *expected == id
@@ -174,22 +191,22 @@ impl EditorState {
         }
         let mut draft = self.draft();
         let mut edits = EditorTransaction::new(transaction);
-        edits.label = Some(proposal.label.clone());
+        edits.label = Some(label.to_owned());
         let mut created = Vec::new();
         let mut preferences = Vec::new();
-        for file in proposal.files.iter().filter(|file| file.selected) {
+        for file in files.iter() {
             let existing = draft
                 .state
                 .buffers
                 .iter()
-                .find(|(_, buffer)| buffer.path.as_ref() == Some(&file.canonical_path))
+                .find(|(_, buffer)| buffer.path.as_ref() == Some(file.canonical_path))
                 .map(|(id, _)| id);
             let buffer = if let Some(id) = existing {
                 id
             } else {
                 let text =
-                    TextBuffer::from_bytes(&file.original_bytes).map_err(|e| e.to_string())?;
-                let id = draft.load_document(text, file.canonical_path.clone());
+                    TextBuffer::from_bytes(file.original_bytes).map_err(|e| e.to_string())?;
+                let id = draft.load_document(text, file.canonical_path.to_path_buf());
                 created.push(id);
                 id
             };
@@ -207,7 +224,7 @@ impl EditorState {
                 .push(Precondition::BufferWritable(buffer));
             edits.operations.push(EditorOperation::ApplyEdits {
                 buffer,
-                edits: TextEditSet::new(revision, file.edits.clone())
+                edits: TextEditSet::new(revision, file.edits.to_vec())
                     .with_normalized_line_endings(),
             });
         }
@@ -224,85 +241,6 @@ impl EditorState {
     }
 }
 
-/// Only what differs between the texts, so cursors and marks elsewhere stay where they are.
-/// Replaces the whole text when a line diff can't describe the change, as with binary content.
-pub(crate) fn changed_spans(before: &str, after: &str) -> Vec<(std::ops::Range<usize>, String)> {
-    if before == after {
-        return Vec::new();
-    }
-    let spans = line_diff_spans(before, after).filter(|spans| {
-        let mut rebuilt = String::with_capacity(after.len());
-        let mut position = 0;
-        for (range, text) in spans {
-            rebuilt.push_str(&before[position..range.start]);
-            rebuilt.push_str(text);
-            position = range.end;
-        }
-        rebuilt.push_str(&before[position..]);
-        !spans.is_empty() && rebuilt == after
-    });
-    spans.unwrap_or_else(|| vec![(0..before.len(), after.to_owned())])
-}
-
-fn line_diff_spans(before: &str, after: &str) -> Option<Vec<(std::ops::Range<usize>, String)>> {
-    let mut options = git2::DiffOptions::new();
-    options.context_lines(0);
-    let patch = git2::Patch::from_buffers(
-        before.as_bytes(),
-        None,
-        after.as_bytes(),
-        None,
-        Some(&mut options),
-    )
-    .ok()?;
-    let mut line_starts = vec![0];
-    line_starts.extend(before.match_indices('\n').map(|(index, _)| index + 1));
-    let line_start = |line: usize| line_starts.get(line).copied().unwrap_or(before.len());
-    let mut spans = Vec::new();
-    for index in 0..patch.num_hunks() {
-        let (hunk, lines) = patch.hunk(index).ok()?;
-        let removed = usize::try_from(hunk.old_lines()).ok()?;
-        // With nothing removed, the hunk's old line is the one it inserts after.
-        let first = usize::try_from(hunk.old_start())
-            .ok()?
-            .saturating_sub(usize::from(removed > 0));
-        let mut added = Vec::new();
-        for line in 0..lines {
-            let line = patch.line_in_hunk(index, line).ok()?;
-            if line.origin() == '+' {
-                added.extend_from_slice(line.content());
-            }
-        }
-        let added = String::from_utf8(added).ok()?;
-        let (start, end) = (line_start(first), line_start(first.saturating_add(removed)));
-        let old = before.get(start..end)?;
-        let mut prefix = old
-            .bytes()
-            .zip(added.bytes())
-            .take_while(|(a, b)| a == b)
-            .count();
-        while !old.is_char_boundary(prefix) || !added.is_char_boundary(prefix) {
-            prefix -= 1;
-        }
-        let mut suffix = old[prefix..]
-            .bytes()
-            .rev()
-            .zip(added[prefix..].bytes().rev())
-            .take_while(|(a, b)| a == b)
-            .count();
-        while !old.is_char_boundary(old.len() - suffix)
-            || !added.is_char_boundary(added.len() - suffix)
-        {
-            suffix -= 1;
-        }
-        spans.push((
-            start + prefix..end - suffix,
-            added[prefix..added.len() - suffix].to_owned(),
-        ));
-    }
-    Some(spans)
-}
-
 /// Borrowed accepted editor projection; EditorDraft does not expose this view.
 pub(crate) struct EditorPublication<'a>(&'a EditorState);
 pub(crate) struct WorkspaceCommitCheck {
@@ -315,26 +253,23 @@ impl EditorState {
     }
 }
 impl EditorDraft {
-    pub(crate) fn workspace_commit_check(
+    pub(crate) fn check_document_edits<'a>(
         &self,
-        proposal: &WorkspaceEditProposal,
+        files: impl Iterator<Item = (&'a std::path::Path, &'a [u8])>,
     ) -> Result<WorkspaceCommitCheck, String> {
-        let targets = proposal
-            .files
-            .iter()
-            .filter(|file| file.selected)
-            .map(|file| {
+        let targets = files
+            .map(|(path, bytes)| {
                 self.state
                     .buffers
                     .iter()
                     .find(|(_, buffer)| {
-                        buffer.path.as_ref() == Some(&file.canonical_path)
-                            && buffer.text.matches_encoded_text(&file.proposed_bytes)
+                        buffer.path.as_ref() == Some(path)
+                            && buffer.text.matches_encoded_text(bytes)
                     })
                     .map(|(id, buffer)| {
                         (
                             id,
-                            file.canonical_path.clone(),
+                            path.to_path_buf(),
                             buffer.text.source_version(),
                         )
                     })
@@ -366,7 +301,7 @@ pub(crate) struct WorkspaceSnapshot {
     editor: EditorWindowVersion,
     buffer: BufferId,
     source: TextVersion,
-    file: crate::workspace::FileSnapshot,
+    file: DocumentSnapshot,
 }
 impl EditorState {
     pub(crate) fn workspace_snapshot(
@@ -394,7 +329,7 @@ impl EditorState {
             editor: self.window_version(),
             buffer: id,
             source: buffer.text.source_version(),
-            file: crate::workspace::FileSnapshot {
+            file: DocumentSnapshot {
                 canonical_path: path.into(),
                 revision: Some(buffer.text.revision()),
                 bytes,
@@ -407,7 +342,7 @@ impl WorkspaceSnapshot {
         self,
         sources: &WorkspaceEditSources,
         path: &std::path::Path,
-    ) -> Result<crate::workspace::FileSnapshot, String> {
+    ) -> Result<DocumentSnapshot, String> {
         if !sources.editor.same_editor(&self.editor)
             || self.file.canonical_path != path
             || !sources.buffers.iter().any(|(id, expected, version)| {
@@ -424,7 +359,7 @@ impl WorkspaceSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::transaction::workspace::changed_spans;
+    use crate::editor::text::diff::changed_spans;
     use crate::editor::state::EditorState;
     use crate::editor::state::TransactionId;
     use crate::editor::text::ByteOffset;
@@ -434,10 +369,10 @@ mod tests {
     use crate::editor::text::TextEditSet;
     use crate::editor::transaction::EditorOperation;
     use crate::editor::transaction::EditorTransaction;
-    use crate::workspace::FileSnapshot;
+    use DocumentSnapshot;
     use crate::workspace::ProposalId;
     use crate::workspace::WorkspaceEditDraft;
-    use crate::workspace::WorkspaceEditProposal;
+    
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
 
@@ -449,7 +384,7 @@ mod tests {
             WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -482,10 +417,9 @@ mod tests {
         )
         .unwrap();
         let sources = editor.workspace_edit_sources().unwrap();
-        let draft = editor
-            .prepare_workspace_edit(&sources, &proposal, TransactionId(1))
+        let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, &sources, &proposal, TransactionId(1))
             .unwrap();
-        draft.workspace_commit_check(&proposal).unwrap();
+        crate::app::workspace::edits::workspace_commit_check(&draft, &proposal).unwrap();
         editor = draft.accept(&editor.version()).unwrap();
         assert_eq!(
             editor.buffers[buffer].text.to_bytes(),
@@ -506,7 +440,7 @@ mod tests {
         // A draft with the same normalized text but different separators is not the preview.
         let mut wrong = editor.draft();
         wrong.state.buffers[buffer].text = TextBuffer::from_bytes(b"\xef\xbb\xbfA\r\nb\n").unwrap();
-        assert!(wrong.workspace_commit_check(&proposal).is_err());
+        assert!(crate::app::workspace::edits::workspace_commit_check(&wrong, &proposal).is_err());
     }
 
     #[test]
@@ -517,7 +451,7 @@ mod tests {
             WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -581,14 +515,13 @@ mod tests {
                 }],
             )
             .unwrap();
-            let draft = editor
-                .prepare_workspace_edit(
+            let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, 
                     &editor.workspace_edit_sources().unwrap(),
                     &proposal,
                     TransactionId(2),
                 )
                 .unwrap();
-            draft.workspace_commit_check(&proposal).unwrap();
+            crate::app::workspace::edits::workspace_commit_check(&draft, &proposal).unwrap();
             editor = draft.accept(&editor.version()).unwrap();
             assert_eq!(
                 editor.buffers[buffer].text.to_bytes(),
@@ -626,7 +559,7 @@ mod tests {
             WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -676,8 +609,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let draft = editor
-            .prepare_workspace_edit(
+        let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, 
                 &editor.workspace_edit_sources().unwrap(),
                 &proposal,
                 TransactionId(2),

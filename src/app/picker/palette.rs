@@ -30,7 +30,7 @@ pub(super) fn readable_keys(keys: &str) -> String {
 }
 
 impl App {
-    pub(super) fn open_command_palette(&mut self) {
+    pub(in crate::app) fn open_command_palette(&mut self) {
         let settings = self.configuration.settings();
         let palette = &settings.command_palette;
         let mut rows = self
@@ -111,7 +111,7 @@ impl App {
     }
 
     /// Esc closes the palette at once, as in VS Code: it has no list mode worth stopping in.
-    pub(super) fn palette_is_open(&self) -> bool {
+    pub(in crate::app) fn palette_is_open(&self) -> bool {
         let title = self.message("picker_commands_title", &[]);
         self.search
             .picker()
@@ -120,7 +120,7 @@ impl App {
 
     /// Runs the chosen row and moves it to the top of the palette. Flags such as `force` stay
     /// off; a command that needs typed text opens the command line instead.
-    pub(super) fn run_palette_command(&mut self, id: &str) {
+    pub(in crate::app) fn run_palette_command(&mut self, id: &str) {
         self.palette_recent.retain(|previous| previous != id);
         self.palette_recent.insert(0, id.to_owned());
         self.palette_recent.truncate(RECENT);

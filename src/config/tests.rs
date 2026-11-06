@@ -741,12 +741,12 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
         .unwrap();
         fs::write(&path, &source).unwrap();
         assert_eq!(
-            crate::config::load::installed_plugins(root.path()),
+            crate::tools::installed_plugins(root.path()),
             BTreeSet::from([manifest.id.clone()])
         );
         if verifies_digest {
             fs::write(&path, source.replace("1.0.0", "2.0.0")).unwrap();
-            assert!(crate::config::load::installed_plugins(root.path()).is_empty());
+            assert!(crate::tools::installed_plugins(root.path()).is_empty());
         }
     }
 }
@@ -856,7 +856,7 @@ fn configuration_reads_reject_fifos_and_devices_without_blocking() {
             CapturedText::Error(_)
         ));
     }
-    assert!(crate::config::load::installed_plugins(root.path()).is_empty());
+    assert!(crate::tools::installed_plugins(root.path()).is_empty());
     let device = PathBuf::from("/dev/zero");
     assert!(source_fingerprint(device.clone()).content_hash.is_none());
     assert!(matches!(
@@ -1353,7 +1353,7 @@ label = "Files"
 
 #[test]
 fn highlight_groups_resolve_like_neovim() {
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
     let group = |name| Highlight::named(name).expect(name);
     let colour = |theme: &crate::config::ThemeConfig, name| {
         theme.highlight(group(name)).map(|style| style.foreground)
@@ -1431,7 +1431,7 @@ fn highlight_groups_resolve_like_neovim() {
 
 #[test]
 fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
     use crate::language::syntax::SyntaxLanguage;
     use crate::language::syntax::highlight;
     let fallback = crate::config::themes::bundled_named("dust").unwrap().theme;
@@ -1844,7 +1844,7 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
 fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
     for (index, expected) in [(1, ThemeColor::DarkRed), (196, ThemeColor::Red)] {
         let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.highlights.insert(
@@ -1871,7 +1871,7 @@ fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
 fn markdown_code_recomputes_both_background_fallbacks() {
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
     for background in [ThemeColor::DarkRed, ThemeColor::Indexed(9)] {
         let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.styles.default.foreground = ThemeColor::Rgb(255, 255, 255);
@@ -1894,7 +1894,7 @@ fn markdown_code_recomputes_both_background_fallbacks() {
 fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
     for (index, expected) in [
         ThemeColor::Black,
         ThemeColor::DarkRed,

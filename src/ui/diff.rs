@@ -407,3 +407,417 @@ index 9792656..89d6f9e 100644
         );
     }
 }
+
+use crate::ui::geometry::text_width;
+use crate::config::AmbiguousWidth;
+
+
+
+/// How a diff line relates to the comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+
+/// A byte range inside a diff line's text that changed, for intra-line emphasis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiffSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    /// The line's number on the old side, absent for a line the old side does not have.
+    pub old_number: Option<u32>,
+    /// The line's number on the new side, absent for a line the new side does not have.
+    pub new_number: Option<u32>,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffHunk {
+    /// The `@@` header, including the enclosing section where the language provides one.
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+    /// Unchanged lines omitted immediately before this hunk, with the exact count.
+    pub collapsed_before: usize,
+}
+
+
+/// How a diff is laid out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiffLayout {
+    /// One column, as a patch is written. This is the default.
+    #[default]
+    Unified,
+    /// Old and new side by side, paired line for line.
+    SideBySide,
+}
+
+
+/// One unified diff row, ready to paint: its text and the spans inside that text that
+/// changed, already in the text's own coordinates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffRow {
+    pub kind: DiffRowKind,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+
+/// One half of a side-by-side row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffSideCell {
+    pub number: Option<u32>,
+    pub text: String,
+    pub spans: Vec<DiffSpan>,
+}
+
+
+/// One side-by-side row: what the old side shows and what the new side shows.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffSideRow {
+    pub kind: DiffRowKind,
+    /// Text for a row that spans both sides, such as the provenance or a hunk header.
+    pub spanning: Option<String>,
+    pub old: Option<DiffSideCell>,
+    pub new: Option<DiffSideCell>,
+}
+
+
+/// A diff carried as structure: hunks of classified lines with both line numbers and the
+/// spans that changed inside a line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffPreview {
+    pub hunks: Vec<DiffHunk>,
+    /// The comparison this diff is relative to, e.g. `staged = HEAD -> index`.
+    pub provenance: String,
+    /// True when the patch was bounded and what is shown is a window onto a larger total.
+    pub truncated: bool,
+    /// The true number of changed lines, so a bounded view can state what it is not showing.
+    pub total_lines: usize,
+    pub layout: DiffLayout,
+}
+
+
+/// What a rendered diff row is, so painting and measurement read the same row set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiffRowKind {
+    Provenance,
+    Collapsed,
+    Header,
+    Context,
+    Added,
+    Removed,
+    Truncated,
+}
+
+
+impl DiffPreview {
+    /// The widest line number, so both numbers align in their own columns.
+    #[must_use]
+    pub fn number_width(&self) -> usize {
+        self.hunks
+            .iter()
+            .flat_map(|hunk| hunk.lines.iter())
+            .flat_map(|line| [line.old_number, line.new_number])
+            .flatten()
+            .map(|number| number.to_string().len())
+            .max()
+            .unwrap_or(1)
+    }
+
+    /// The row that states how many unchanged lines a hunk skipped.
+    #[must_use]
+    pub fn collapsed_text(&self, count: usize) -> String {
+        format!(
+            "{:>number_width$}   {count} unchanged lines",
+            "",
+            number_width = self.number_width()
+        )
+    }
+
+    /// The row that states a bounded patch is not the whole patch.
+    #[must_use]
+    pub fn truncated_text(&self) -> String {
+        format!(
+            "patch truncated; {} changed lines in total",
+            self.total_lines
+        )
+    }
+
+    /// The widest content this diff draws, so a surface sizes its pane from the same rows the
+    /// painter uses rather than from a re-derivation that could drift.
+    #[must_use]
+    pub fn content_width(&self, ambiguous_width: crate::config::AmbiguousWidth) -> usize {
+        let number_width = self.number_width();
+        let measure = |text: &str| crate::ui::geometry::text_width(text, ambiguous_width);
+        match self.layout {
+            DiffLayout::Unified => self
+                .iter_rows()
+                .take(64)
+                .map(|row| measure(&row.text))
+                .max()
+                .unwrap_or(28),
+            DiffLayout::SideBySide => {
+                let rows = self.side_by_side_rows();
+                let spanning = rows
+                    .iter()
+                    .filter_map(|row| row.spanning.as_deref())
+                    .take(64)
+                    .map(measure)
+                    .max()
+                    .unwrap_or(0);
+                let (left, right) = rows.iter().fold((0usize, 0usize), |(left, right), row| {
+                    let half = |cell: &DiffSideCell| {
+                        measure(&Self::side_cell_text_with_width(cell, number_width).0)
+                    };
+                    (
+                        left.max(row.old.as_ref().map_or(0, half)),
+                        right.max(row.new.as_ref().map_or(0, half)),
+                    )
+                });
+                // The two halves and the divider between them share one row.
+                spanning.max(left.saturating_add(right).saturating_add(1))
+            }
+        }
+    }
+
+    /// The text of one unified diff line, with the changed spans moved into its coordinates.
+    #[must_use]
+    pub fn line_row(&self, line: &DiffLine) -> (String, Vec<DiffSpan>) {
+        Self::line_row_with_width(line, self.number_width())
+    }
+
+    fn line_row_with_width(line: &DiffLine, number_width: usize) -> (String, Vec<DiffSpan>) {
+        let old = line.old_number.map_or_else(String::new, |n| n.to_string());
+        let new = line.new_number.map_or_else(String::new, |n| n.to_string());
+        let glyph = match line.kind {
+            DiffLineKind::Added => '+',
+            DiffLineKind::Removed => '-',
+            DiffLineKind::Context => ' ',
+        };
+        let prefix = format!("{old:>number_width$} {new:>number_width$} {glyph} ");
+        let offset = prefix.len();
+        let spans = line
+            .spans
+            .iter()
+            .map(|span| DiffSpan {
+                start: span.start.saturating_add(offset),
+                end: span.end.saturating_add(offset),
+            })
+            .collect();
+        (format!("{prefix}{}", line.text), spans)
+    }
+
+    /// The text of one side-by-side half, with its number column and its changed spans in the
+    /// returned text's coordinates.
+    #[must_use]
+    pub fn side_cell_text(&self, cell: &DiffSideCell) -> (String, Vec<DiffSpan>) {
+        Self::side_cell_text_with_width(cell, self.number_width())
+    }
+
+    fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
+        let number = cell.number.map_or_else(String::new, |n| n.to_string());
+        let prefix = format!("{number:>width$} ", width = width);
+        let offset = prefix.len();
+        let spans = cell
+            .spans
+            .iter()
+            .map(|span| DiffSpan {
+                start: span.start.saturating_add(offset),
+                end: span.end.saturating_add(offset),
+            })
+            .collect();
+        (format!("{prefix}{}", cell.text), spans)
+    }
+
+    /// The rows that stay on top of the box while the rest scroll: the comparison's name.
+    #[must_use]
+    pub fn pinned_rows(&self) -> usize {
+        usize::from(!self.provenance.is_empty())
+    }
+
+    /// The furthest a box of `height` rows can scroll.
+    #[must_use]
+    pub fn last_scroll(&self, height: usize) -> usize {
+        let pinned = self.pinned_rows();
+        let total = self
+            .hunks
+            .iter()
+            .map(|hunk| hunk.lines.len() + 1 + usize::from(hunk.collapsed_before > 0))
+            .sum::<usize>()
+            + pinned
+            + usize::from(self.truncated);
+        total
+            .saturating_sub(pinned)
+            .saturating_sub(height.saturating_sub(pinned))
+    }
+
+    /// Where a box of `height` rows opens: at the top when the first change fits, otherwise
+    /// on that change with one row above it.
+    #[must_use]
+    pub fn opening_scroll(&self, height: usize) -> usize {
+        let pinned = self.pinned_rows();
+        let first_change = self
+            .iter_rows()
+            .skip(pinned)
+            .position(|row| matches!(row.kind, DiffRowKind::Added | DiffRowKind::Removed))
+            .unwrap_or(0);
+        if first_change < height.saturating_sub(pinned) {
+            0
+        } else {
+            first_change.saturating_sub(1)
+        }
+    }
+
+    /// Every row this diff draws in the unified layout, in order.
+    ///
+    /// Measurement and painting both read this, so a preview's width cannot be computed from
+    /// one row set while a different one is drawn, and the spans a row carries are already in
+    /// that row's own coordinates so the painter cannot shift them wrongly.
+    #[must_use]
+    pub fn rows(&self) -> Vec<DiffRow> {
+        self.iter_rows().collect()
+    }
+
+    fn iter_rows(&self) -> impl Iterator<Item = DiffRow> + '_ {
+        let number_width = self.number_width();
+        let plain = |kind, text| DiffRow {
+            kind,
+            text,
+            spans: Vec::new(),
+        };
+        let provenance = (!self.provenance.is_empty())
+            .then(|| plain(DiffRowKind::Provenance, self.provenance.clone()));
+        let hunks = self.hunks.iter().flat_map(move |hunk| {
+            let collapsed = (hunk.collapsed_before > 0).then(|| {
+                plain(
+                    DiffRowKind::Collapsed,
+                    format!(
+                        "{:>number_width$}   {} unchanged lines",
+                        "", hunk.collapsed_before
+                    ),
+                )
+            });
+            collapsed
+                .into_iter()
+                .chain(std::iter::once(plain(
+                    DiffRowKind::Header,
+                    hunk.header.clone(),
+                )))
+                .chain(hunk.lines.iter().map(move |line| {
+                    let kind = match line.kind {
+                        DiffLineKind::Added => DiffRowKind::Added,
+                        DiffLineKind::Removed => DiffRowKind::Removed,
+                        DiffLineKind::Context => DiffRowKind::Context,
+                    };
+                    let (text, spans) = Self::line_row_with_width(line, number_width);
+                    DiffRow { kind, text, spans }
+                }))
+        });
+        provenance.into_iter().chain(hunks).chain(
+            self.truncated
+                .then(|| plain(DiffRowKind::Truncated, self.truncated_text())),
+        )
+    }
+
+    /// Every row a side-by-side diff draws, paired line for line.
+    ///
+    /// The side-by-side layout reads this for both measurement and painting the same way the
+    /// unified layout reads `rows`, so neither layout can be measured from one row set while
+    /// a different one is drawn.
+    #[must_use]
+    pub fn side_by_side_rows(&self) -> Vec<DiffSideRow> {
+        let number_width = self.number_width();
+        let spanning = |kind: DiffRowKind, text: String| DiffSideRow {
+            kind,
+            spanning: Some(text),
+            old: None,
+            new: None,
+        };
+        let cell = |number: Option<u32>, line: &DiffLine| DiffSideCell {
+            number,
+            text: line.text.clone(),
+            spans: line.spans.clone(),
+        };
+        let mut rows = Vec::new();
+        if !self.provenance.is_empty() {
+            rows.push(spanning(DiffRowKind::Provenance, self.provenance.clone()));
+        }
+        for hunk in &self.hunks {
+            if hunk.collapsed_before > 0 {
+                rows.push(spanning(
+                    DiffRowKind::Collapsed,
+                    format!(
+                        "{:>number_width$}   {} unchanged lines",
+                        "", hunk.collapsed_before
+                    ),
+                ));
+            }
+            rows.push(spanning(DiffRowKind::Header, hunk.header.clone()));
+            let mut index = 0usize;
+            while index < hunk.lines.len() {
+                let line = &hunk.lines[index];
+                match line.kind {
+                    DiffLineKind::Context => {
+                        rows.push(DiffSideRow {
+                            kind: DiffRowKind::Context,
+                            spanning: None,
+                            old: Some(cell(line.old_number, line)),
+                            new: Some(cell(line.new_number, line)),
+                        });
+                        index += 1;
+                    }
+                    DiffLineKind::Removed => {
+                        let removed_start = index;
+                        while index < hunk.lines.len()
+                            && hunk.lines[index].kind == DiffLineKind::Removed
+                        {
+                            index += 1;
+                        }
+                        let added_start = index;
+                        while index < hunk.lines.len()
+                            && hunk.lines[index].kind == DiffLineKind::Added
+                        {
+                            index += 1;
+                        }
+                        let removed = &hunk.lines[removed_start..added_start];
+                        let added = &hunk.lines[added_start..index];
+                        // A change block pairs its removed and added lines so the two sides
+                        // stay in step; an unpaired line leaves the other side blank.
+                        for pair in 0..removed.len().max(added.len()) {
+                            rows.push(DiffSideRow {
+                                kind: DiffRowKind::Removed,
+                                spanning: None,
+                                old: removed.get(pair).map(|l| cell(l.old_number, l)),
+                                new: added.get(pair).map(|l| cell(l.new_number, l)),
+                            });
+                        }
+                    }
+                    DiffLineKind::Added => {
+                        rows.push(DiffSideRow {
+                            kind: DiffRowKind::Added,
+                            spanning: None,
+                            old: None,
+                            new: Some(cell(line.new_number, line)),
+                        });
+                        index += 1;
+                    }
+                }
+            }
+        }
+        if self.truncated {
+            rows.push(spanning(DiffRowKind::Truncated, self.truncated_text()));
+        }
+        rows
+    }
+}

@@ -334,7 +334,7 @@ use crate::app::syntax::SYNTAX_QUEUE_CAPACITY;
 use crate::app::workspace::TRUST_QUEUE_CAPACITY;
 
 impl App {
-    pub(super) fn new(
+    pub(in crate::app) fn new(
         startup: StartupTarget,
         loaded_config: LoadedConfig,
         safe_mode: bool,
@@ -528,7 +528,7 @@ impl App {
 }
 
 impl App {
-    pub(super) fn draw_before_startup_reads(
+    pub(in crate::app) fn draw_before_startup_reads(
         &mut self,
         draw: impl FnOnce(&Self) -> Result<bool, crate::ui::TerminalError>,
     ) -> Result<bool, crate::ui::TerminalError> {
@@ -537,7 +537,7 @@ impl App {
         Ok(painted)
     }
 
-    pub(super) fn queue_startup_reads(&mut self) {
+    pub(in crate::app) fn queue_startup_reads(&mut self) {
         self.documents
             .startup_activation(&self.state, &self.window_session);
         for error in self
@@ -548,7 +548,7 @@ impl App {
         }
         self.finish_startup_reads_if_complete();
     }
-    pub(super) fn open_startup_document(
+    pub(in crate::app) fn open_startup_document(
         &mut self,
         text: TextBuffer,
         path: PathBuf,
@@ -571,7 +571,7 @@ impl App {
         }
         Ok(buffer)
     }
-    pub(super) fn finish_startup_reads_if_complete(&mut self) {
+    pub(in crate::app) fn finish_startup_reads_if_complete(&mut self) {
         let activate = self
             .documents
             .startup_activation(&self.state, &self.window_session);

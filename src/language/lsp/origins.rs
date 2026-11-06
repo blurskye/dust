@@ -12,10 +12,10 @@ use crate::editor::text::PositionEncoding;
 use crate::editor::text::TextVersion;
 
 #[cfg(test)]
-use crate::language::lsp::model::LspDiagnostic;
-use crate::language::lsp::model::LspWorkspaceEdit;
-use crate::language::lsp::model::LspEvent;
-use crate::language::lsp::model::ServerRequestId;
+use crate::language::lsp::messages::LspDiagnostic;
+use crate::language::lsp::messages::LspWorkspaceEdit;
+use crate::language::lsp::messages::LspEvent;
+use crate::language::lsp::messages::ServerRequestId;
 use crate::language::lsp::session::SessionCommand;
 
 #[derive(Clone, Debug)]
@@ -192,8 +192,8 @@ impl EditSourceFixture {
         &self,
         generation: u64,
         method: &str,
-        document: &crate::language::lsp::model::LspDocument,
-        result: crate::language::lsp::model::LspFeatureResult,
+        document: &crate::language::lsp::messages::LspDocument,
+        result: crate::language::lsp::messages::LspFeatureResult,
     ) {
         self.events.send(LspEvent::Result {
             server: self.events.context.server.to_string(),
@@ -204,7 +204,7 @@ impl EditSourceFixture {
             result,
         });
     }
-    pub(crate) fn synced_document(&self) -> Option<crate::language::lsp::model::LspDocument> {
+    pub(crate) fn synced_document(&self) -> Option<crate::language::lsp::messages::LspDocument> {
         match self.commands.try_recv().ok()? {
             SessionCommand::SyncOwned { document, .. } => Some(document),
             _ => panic!("expected owned document sync"),
@@ -221,7 +221,7 @@ impl EditSourceFixture {
     pub(crate) fn saved_uri(&self) -> Option<String> {
         self.saved_document().map(|document| document.uri())
     }
-    pub(crate) fn saved_document(&self) -> Option<crate::language::lsp::model::LspDocument> {
+    pub(crate) fn saved_document(&self) -> Option<crate::language::lsp::messages::LspDocument> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Save(document) = command {
                 return Some(document);
@@ -229,13 +229,13 @@ impl EditSourceFixture {
         }
         None
     }
-    pub(crate) fn configured(&self) -> Option<crate::language::lsp::model::LspServerConfiguration> {
+    pub(crate) fn configured(&self) -> Option<crate::language::lsp::server::LspServerConfiguration> {
         match self.commands.try_recv().ok()? {
             SessionCommand::Configure(configuration) => Some(configuration),
             _ => None,
         }
     }
-    pub(crate) fn requested_feature(&self) -> Option<crate::language::lsp::model::LspFeature> {
+    pub(crate) fn requested_feature(&self) -> Option<crate::language::lsp::messages::LspFeature> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Request { feature, .. } = command {
                 return Some(feature);
@@ -246,7 +246,7 @@ impl EditSourceFixture {
     pub(crate) fn executed_command(&self) -> Option<String> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Request {
-                feature: crate::language::lsp::model::LspFeature::ExecuteCommand(command),
+                feature: crate::language::lsp::messages::LspFeature::ExecuteCommand(command),
                 ..
             } = command
             {

@@ -3,7 +3,7 @@ use crate::files::vfs::roots_current;
 use crate::files::ExplorerMutation;
 use crate::files::RequestId;
 use crate::files::VfsError;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use std::fs;
 use std::io;
 use std::path::Path;

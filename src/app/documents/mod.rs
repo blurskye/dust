@@ -638,7 +638,7 @@ impl DocumentSession {
     pub(in crate::app) fn open_explorer(
         &mut self,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
         let id = self.vfs.open_explorer(path, roots)?;
@@ -648,7 +648,7 @@ impl DocumentSession {
     pub(in crate::app) fn inspect_explorer_rename(
         &mut self,
         path: PathBuf,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
@@ -669,7 +669,7 @@ impl DocumentSession {
     pub(in crate::app) fn prepare_explorer(
         &mut self,
         operation: ExplorerMutation,
-        roots: Vec<crate::workspace::RootIdentity>,
+        roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
         self.check_admission()?;
@@ -738,7 +738,7 @@ pub(in crate::app) struct RecoveryIo<'a> {
     remaining: usize,
 }
 impl RecoveryIo<'_> {
-    fn submit(
+    pub(in crate::app) fn submit(
         &mut self,
         send: impl FnOnce(&mut VfsWorker) -> Result<RequestId, VfsError>,
     ) -> Result<RequestId, VfsError> {
@@ -895,7 +895,7 @@ impl DocumentSession {
 mod tests {
     use crate::app::documents::*;
     use crate::editor::EditorState;
-    fn fixture() -> (EditorState, DocumentSession) {
+    pub(in crate::app) fn fixture() -> (EditorState, DocumentSession) {
         let state = EditorState::new("/workspace".into());
         let startup = StartupTarget::Dashboard {
             root: "/workspace".into(),
@@ -1095,3 +1095,7 @@ mod tests {
 }
 
 pub(in crate::app) mod recovery;
+
+mod coordination;
+
+mod navigation;

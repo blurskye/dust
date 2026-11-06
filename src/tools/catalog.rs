@@ -1,3 +1,4 @@
+use crate::process::executable_file;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -241,26 +242,7 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
     })
 }
 
-pub(crate) fn executable_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        rustix::fs::accessat(
-            rustix::fs::CWD,
-            path,
-            rustix::fs::Access::EXEC_OK,
-            rustix::fs::AtFlags::EACCESS,
-        )
-        .is_ok()
-    }
-    #[cfg(not(unix))]
-    true
-}
+
 
 /// The executables on `PATH`, read with one listing per directory. Looking up every catalog
 /// tool in every directory separately costs thousands of `stat` calls at startup.

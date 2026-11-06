@@ -36,7 +36,7 @@ pub(super) struct NoticeSession {
 }
 
 impl NoticeSession {
-    pub(super) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
+    pub(in crate::app) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
         Self {
             current: None,
             passing: None,
@@ -52,7 +52,7 @@ impl NoticeSession {
         }
     }
 
-    pub(super) fn notify(&mut self, message: String, error: bool, now: Instant, timeout: Duration) {
+    pub(in crate::app) fn notify(&mut self, message: String, error: bool, now: Instant, timeout: Duration) {
         // Repeated status messages do not perpetually postpone expiry.
         if self
             .current
@@ -88,18 +88,18 @@ impl NoticeSession {
         self.current.is_some() && self.warning
     }
 
-    pub(super) fn clear(&mut self) {
+    pub(in crate::app) fn clear(&mut self) {
         self.current = None;
         self.deadline = None;
     }
 
     /// Remembers the current notice as one that stops being true, such as "starting".
-    pub(super) fn mark_current_passing(&mut self) {
+    pub(in crate::app) fn mark_current_passing(&mut self) {
         self.passing = self.current.as_ref().map(|(_, message)| message.clone());
     }
 
     /// Takes down the passing notice once it has passed, unless another has replaced it.
-    pub(super) fn clear_passing(&mut self) {
+    pub(in crate::app) fn clear_passing(&mut self) {
         if self.passing.take().is_some_and(|passing| {
             self.current
                 .as_ref()
@@ -109,7 +109,7 @@ impl NoticeSession {
         }
     }
 
-    pub(super) fn tick(&mut self, now: Instant) -> bool {
+    pub(in crate::app) fn tick(&mut self, now: Instant) -> bool {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
             self.clear();
             true
@@ -118,17 +118,17 @@ impl NoticeSession {
         }
     }
 
-    pub(super) fn current(&self) -> Option<(bool, &str)> {
+    pub(in crate::app) fn current(&self) -> Option<(bool, &str)> {
         self.current
             .as_ref()
             .map(|(error, message)| (*error, message.as_str()))
     }
 
-    pub(super) fn history(&self) -> impl DoubleEndedIterator<Item = &(bool, String)> {
+    pub(in crate::app) fn history(&self) -> impl DoubleEndedIterator<Item = &(bool, String)> {
         self.history.iter()
     }
 
-    pub(super) fn record(
+    pub(in crate::app) fn record(
         &mut self,
         level: LogLevel,
         subsystem: &str,
@@ -138,19 +138,19 @@ impl NoticeSession {
         self.logs.record(level, subsystem, event, fields);
     }
 
-    pub(super) fn set_terminal_capabilities(&mut self, capabilities: String) {
+    pub(in crate::app) fn set_terminal_capabilities(&mut self, capabilities: String) {
         self.terminal_capabilities = capabilities;
     }
 
-    pub(super) fn terminal_capabilities(&self) -> &str {
+    pub(in crate::app) fn terminal_capabilities(&self) -> &str {
         &self.terminal_capabilities
     }
 
-    pub(super) fn health_due(&self, now: Instant) -> bool {
+    pub(in crate::app) fn health_due(&self, now: Instant) -> bool {
         now >= self.next_crash_snapshot
     }
 
-    pub(super) fn submit_health(
+    pub(in crate::app) fn submit_health(
         &mut self,
         mut snapshot: LiveCrashSnapshot,
         now: Instant,
@@ -353,5 +353,84 @@ mod tests {
         assert_eq!(notices.history().count(), 200);
         assert_eq!(notices.history().next().unwrap().1, "5");
         assert_eq!(notices.history().next_back().unwrap().1, "204");
+    }
+}
+
+use crate::app::App;
+use crate::app::Path;
+use crate::app::Duration;
+
+
+
+
+/// How long a notice stays on screen.
+const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
+impl App {
+
+    pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
+        self.notices
+            .notify(message, error, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.project_notice();
+    }
+}
+
+impl App {
+
+    /// A small yellow notice: something is missing, but what could be shown is shown.
+    pub(in crate::app) fn notify_warning(&mut self, message: String) {
+        self.notices
+            .warn(message, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.project_notice();
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn clear_notice(&mut self) {
+        self.notices.clear();
+        self.project_notice();
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn project_notice(&mut self) {
+        let current = self.notices.current();
+        self.ui.notification = current.map(|(_, message)| message.to_owned());
+        self.ui.notification_error = current.is_some_and(|(error, _)| error);
+        self.ui.notification_warning = self.notices.is_warning();
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn update_notification_timer(&mut self) {
+        if self.notices.tick(self.clock.monotonic()) {
+            self.project_notice();
+        }
+    }
+}
+
+impl App {
+
+    /// A path as the reader knows it in the project, or whole when it lies outside.
+    /// A short name for a notification: outside the workspace a full path would fill the toast.
+    pub(in crate::app) fn notice_file_label(&self, path: &std::path::Path) -> String {
+        let label = self.workspace_relative_label(path);
+        if std::path::Path::new(&label).is_absolute() {
+            path.file_name()
+                .map_or(label, |name| name.to_string_lossy().into_owned())
+        } else {
+            label
+        }
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn show_error(&mut self, error: impl std::fmt::Display) {
+        self.notify_message(error.to_string(), true);
     }
 }

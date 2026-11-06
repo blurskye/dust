@@ -4,9 +4,9 @@
 //! place of the pane that holds it, so the pane still moves, resizes and zooms like any
 //! other window.
 
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 
-use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use std::ops::Range;
 
 use crossterm::cursor::SetCursorStyle;
@@ -28,7 +28,7 @@ use crate::ui::markdown::Styled;
 
 use crate::ui::render::ContentTabEntry;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::overlays::render_content_tab_line;
 
@@ -218,7 +218,7 @@ pub(super) fn render_agent_panel(
             let (mark, style) = if row.shown {
                 (
                     "● ",
-                    Style::Syntax(crate::language::syntax::Highlight::STRONG),
+                    Style::Syntax(crate::config::Highlight::STRONG),
                 )
             } else {
                 ("○ ", Style::Muted)
@@ -252,7 +252,7 @@ pub(super) fn render_agent_panel(
             let start = x.saturating_add(2).max(18);
             let room = usize::from((width - 1).saturating_sub(start));
             let description =
-                crate::ui::render::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
+                crate::ui::geometry::ellipsized(description, room, config.editor.ambiguous_width);
             grid.put_text_clipped(start, y, &description, text_style, width - 1);
         }
     }
@@ -365,14 +365,14 @@ fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> St
     let separator_width = text_width(" · ", ambiguous);
     match settings.split_once(" · ") {
         Some((model, rest)) if text_width(rest, ambiguous) + separator_width + 6 <= room => {
-            let model = crate::ui::render::surfaces::ellipsized(
+            let model = crate::ui::geometry::ellipsized(
                 model,
                 room - text_width(rest, ambiguous) - separator_width,
                 ambiguous,
             );
             format!("{model} · {rest}")
         }
-        _ => crate::ui::render::surfaces::ellipsized(settings, room, ambiguous),
+        _ => crate::ui::geometry::ellipsized(settings, room, ambiguous),
     }
 }
 

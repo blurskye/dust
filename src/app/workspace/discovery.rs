@@ -94,7 +94,7 @@ pub(super) struct Preflights {
     capacity: usize,
 }
 impl Preflights {
-    pub(super) fn new(capacity: usize) -> Self {
+    pub(in crate::app) fn new(capacity: usize) -> Self {
         Self {
             worker: ExecutionPreflightService::start(capacity),
             pending: HashMap::new(),
@@ -359,7 +359,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use std::time::Instant;
-    fn owner(root: &std::path::Path) -> WorkspaceSession {
+    pub(in crate::app) fn owner(root: &std::path::Path) -> WorkspaceSession {
         let identity = RootIdentity::capture(root).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),

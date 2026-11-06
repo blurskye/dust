@@ -2471,7 +2471,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
 
 #[test]
 fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
-    fn index(owner: &str, generation: u64) -> crate::plugins::PluginContributionIndex {
+    pub(in crate::app) fn index(owner: &str, generation: u64) -> crate::plugins::PluginContributionIndex {
         crate::plugins::PluginContributionIndex {
             owner: owner.into(),
             version: "1.0.0".into(),

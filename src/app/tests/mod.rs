@@ -292,7 +292,7 @@ fn wait_workspace_approval(app: &mut App) {
 
 fn prepare_trust_identity(app: &mut App) {
     let identity =
-        crate::workspace::RootIdentity::capture(&app.state.workspace_root).expect("identity");
+        crate::files::RootIdentity::capture(&app.state.workspace_root).expect("identity");
     let root = app.workspace.active_root().expect("root");
     app.workspace
         .fixture_identity(root, identity)

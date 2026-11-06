@@ -14,7 +14,7 @@ use crate::remote::lazygit_config;
 impl App {
     /// Listen for `dust --remote` and tell terminals where to find this session. Without a
     /// socket Dust still works; lazygit then opens files in its own configured editor.
-    pub(super) fn start_remote_server(&mut self) {
+    pub(in crate::app) fn start_remote_server(&mut self) {
         let directory = std::env::var_os("XDG_RUNTIME_DIR")
             .map(|directory| std::path::PathBuf::from(directory).join("dust"))
             .unwrap_or_else(|| crate::config::user_state_directory().join("run"));
@@ -38,7 +38,7 @@ impl App {
         self.remote = Some(server);
     }
 
-    pub(super) fn process_remote_opens(&mut self) {
+    pub(in crate::app) fn process_remote_opens(&mut self) {
         let Some(server) = &self.remote else {
             return;
         };

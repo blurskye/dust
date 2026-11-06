@@ -8,8 +8,8 @@ use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 
 use crate::editor::text::TextBuffer;
-use crate::language::syntax::SyntaxObject;
-use crate::language::syntax::SyntaxObjectKind;
+use crate::editor::SyntaxObject;
+use crate::editor::SyntaxObjectKind;
 
 use crate::editor::command::CommandError;
 

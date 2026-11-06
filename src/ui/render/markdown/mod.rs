@@ -26,7 +26,7 @@ use crate::editor::text::TextBuffer;
 
 use crate::files::ExplorerIconColor;
 
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 
 use crate::language::syntax::MarkdownMark;
 

@@ -12,9 +12,9 @@ use crate::ui::CompositorLayoutState;
 use crate::ui::NativeSurfaceWindowBinding;
 use crate::ui::PickerUiState;
 use crate::ui::geometry::SurfaceContentGeometry;
-use crate::ui::geometry::documentation_page_rows;
-use crate::ui::geometry::explorer_body_geometry;
-use crate::ui::geometry::picker_content_geometry;
+use crate::ui::render::documentation::documentation_page_rows;
+use crate::ui::render::explorer::explorer_body_geometry;
+use crate::ui::render::picker::picker_content_geometry;
 use crate::windows::CompositorProjection;
 use crate::windows::ContentId;
 use crate::windows::ViewId;
@@ -77,7 +77,7 @@ pub(in crate::app) struct TerminalGeometrySource {
 }
 
 impl PartialEq for TerminalGeometrySource {
-    fn eq(&self, other: &Self) -> bool {
+    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.origin, &other.origin)
             && self.terminal == other.terminal
             && self.content == other.content
@@ -175,12 +175,12 @@ impl WindowSession {
         self.observed_size.1
     }
 
-    pub(super) fn invalidate(&mut self) {
+    pub(in crate::app) fn invalidate(&mut self) {
         self.layout = None;
         self.content = SurfaceContentGeometry::default();
     }
 
-    pub(super) fn project(&mut self, request: ProjectionRequest) {
+    pub(in crate::app) fn project(&mut self, request: ProjectionRequest) {
         if self.core.graph.revision() != Some(request.graph_revision) {
             self.invalidate();
             return;
@@ -217,7 +217,7 @@ impl WindowSession {
         }
         self.current(source.revision(), size)
     }
-    pub(super) fn current(
+    pub(in crate::app) fn current(
         &self,
         source: Option<u64>,
         size: (u16, u16),
@@ -233,14 +233,14 @@ impl WindowSession {
             .then_some(&layout.projection)
     }
 
-    pub(super) fn layout(&self) -> Option<&CompositorLayoutState> {
+    pub(in crate::app) fn layout(&self) -> Option<&CompositorLayoutState> {
         self.layout.as_ref()
     }
-    pub(super) fn content(&self) -> &SurfaceContentGeometry {
+    pub(in crate::app) fn content(&self) -> &SurfaceContentGeometry {
         &self.content
     }
 
-    pub(super) fn project_content(&mut self, picker: Option<&PickerUiState>, config: &Config) {
+    pub(in crate::app) fn project_content(&mut self, picker: Option<&PickerUiState>, config: &Config) {
         let Some(layout) = &self.layout else {
             return;
         };
@@ -293,3 +293,5 @@ pub(in crate::app) use plugin::PluginWindowKey;
 pub(in crate::app) use plugin::PluginWindowReceipt;
 
 pub(in crate::app) use plugin::PluginWindowTransition;
+
+mod interaction;

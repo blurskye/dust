@@ -56,7 +56,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         crate::workspace::WorkspaceId(1),
         [(
             "root".into(),
-            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
         )],
     )
     .unwrap();
@@ -150,7 +150,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         crate::workspace::WorkspaceId(1),
         [(
             "root".into(),
-            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
         )],
     )
     .unwrap();
@@ -236,8 +236,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let copies = EditorState::test_clone_count();
     let materializations = TextBuffer::test_materializations();
     assert!(
-        editor
-            .prepare_workspace_edit(sources, preview, TransactionId(1))
+        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(1))
             .is_err()
     );
     assert_eq!(editor.buffers.len(), 1); // earlier unopened target never leaks into live state
@@ -253,14 +252,12 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             .is_err()
     );
     assert!(
-        editor
-            .prepare_workspace_edit(sources, preview, TransactionId(2))
+        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(2))
             .is_err()
     );
     editor.replace_buffer_from_disk(buffer, TextBuffer::from_text("old"), path.clone());
     assert!(
-        editor
-            .prepare_workspace_edit(sources, preview, TransactionId(3))
+        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(3))
             .is_err()
     );
     assert!(editor.workspace_resource_change(sources, &path).is_err());
@@ -278,8 +275,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             .prepare_workspace_edit(sources, preview, TransactionId(4))
             .is_err()
     );
-    let draft = editor
-        .prepare_workspace_edit(sources, preview, TransactionId(5))
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(5))
         .unwrap();
     owner.stage_approval(&draft, Vec::new()).unwrap();
     assert!(owner.accepted(editor.publication()).is_err());
@@ -710,8 +706,7 @@ fn stage_resource(
         .unwrap();
     let (sources, proposal) = owner.approval(&version, 1).unwrap();
     let change = editor.workspace_resource_change(sources, source).unwrap();
-    let draft = editor
-        .prepare_workspace_edit(sources, proposal, TransactionId(1))
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, TransactionId(1))
         .unwrap();
     owner.stage_approval(&draft, vec![change]).unwrap();
     let published = draft.accept(&editor.version()).unwrap();
@@ -725,7 +720,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
         crate::workspace::WorkspaceId(1),
         [(
             "root".into(),
-            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
         )],
     )
     .unwrap();
@@ -799,8 +794,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
     let (sources, proposal) = owner.approval(&workspace.version(), 1).unwrap();
     assert_eq!(proposal.files.len(), 1);
     assert_eq!(proposal.files[0].proposed_bytes, b"fn main() {}\n");
-    let draft = editor
-        .prepare_workspace_edit(sources, proposal, TransactionId(1))
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, TransactionId(1))
         .unwrap();
     let published = draft.accept(&editor.version()).unwrap();
     let buffer = published
@@ -819,7 +813,7 @@ fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
         crate::workspace::WorkspaceId(1),
         [(
             "root".into(),
-            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
         )],
     )
     .unwrap();
@@ -896,7 +890,7 @@ fn combined_text_and_rename_is_rejected_before_publication() {
         crate::workspace::WorkspaceId(1),
         [(
             "root".into(),
-            crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
         )],
     )
     .unwrap();

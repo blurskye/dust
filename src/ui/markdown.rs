@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::language::syntax::self;
 
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 
 /// Code blocks larger than this are shown without highlighting.
 const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;

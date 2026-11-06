@@ -1278,7 +1278,7 @@ esac
             crate::workspace::WorkspaceId(1),
             [(
                 "workspace".into(),
-                crate::workspace::RootIdentity {
+                crate::files::RootIdentity {
                     canonical_path: root.path().into(),
                     filesystem_identity: None,
                 },

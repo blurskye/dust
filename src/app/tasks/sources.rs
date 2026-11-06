@@ -29,7 +29,7 @@ pub(in crate::app) struct TaskDiagnosticRun {
     configuration: u64,
 }
 impl TaskDiagnosticRun {
-    pub(super) fn editor_current(&self, state: &EditorState) -> bool {
+    pub(in crate::app) fn editor_current(&self, state: &EditorState) -> bool {
         self.editor.same_editor(&state.window_version())
             && state.window_version().revision().is_some()
     }
@@ -142,7 +142,7 @@ pub(super) fn resolve_source_path(path: &Path) -> std::io::Result<PathBuf> {
 }
 
 impl TaskSession {
-    pub(super) fn apply_test_result(&mut self, task: &RunningTask) {
+    pub(in crate::app) fn apply_test_result(&mut self, task: &RunningTask) {
         let AdapterContext::Test { matcher } = &task.adapter else {
             return;
         };
@@ -243,7 +243,7 @@ impl FormatterSource {
             text: state.text.source_version(),
         })
     }
-    pub(super) fn check(&self, editor: &EditorState) -> Result<(), String> {
+    pub(in crate::app) fn check(&self, editor: &EditorState) -> Result<(), String> {
         if self.editor.same_editor(&editor.window_version())
             && editor.window_version().revision().is_some()
             && editor.buffers.get(self.buffer).is_some_and(|buffer| {
@@ -257,7 +257,7 @@ impl FormatterSource {
             Err("formatter document incarnation, content or ownership changed".into())
         }
     }
-    pub(super) fn stdin(&self, editor: &EditorState, maximum: usize) -> Result<Vec<u8>, String> {
+    pub(in crate::app) fn stdin(&self, editor: &EditorState, maximum: usize) -> Result<Vec<u8>, String> {
         self.check(editor)?;
         let text = &editor.buffers[self.buffer].text;
         if text.len_bytes() > maximum {

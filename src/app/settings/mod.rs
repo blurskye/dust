@@ -23,7 +23,7 @@ use crate::ui::settings_lines_height;
 const MODIFIED_FILTER: &str = "@modified";
 
 impl App {
-    pub(super) fn open_settings(&mut self) {
+    pub(in crate::app) fn open_settings(&mut self) {
         self.cancel_pending_mapping();
         self.input.cancel_pending();
         self.close_prompt();
@@ -37,7 +37,7 @@ impl App {
     }
 
     /// Rebuild the rows from the configuration in use, keeping the search and the selection.
-    pub(super) fn refresh_settings(&mut self) {
+    pub(in crate::app) fn refresh_settings(&mut self) {
         let Some(page) = self.ui.settings.as_ref() else {
             return;
         };
@@ -112,7 +112,7 @@ impl App {
         (sections, rows)
     }
 
-    pub(super) fn settings_status(&mut self, message: String, error: bool) {
+    pub(in crate::app) fn settings_status(&mut self, message: String, error: bool) {
         if let Some(page) = self.ui.settings.as_mut() {
             page.saving = false;
             page.status = Some((message, error));
@@ -159,7 +159,7 @@ impl App {
         page.scroll = page.scroll.min(total.saturating_sub(view));
     }
 
-    pub(super) fn settings_action(&mut self, action: SettingsAction) {
+    pub(in crate::app) fn settings_action(&mut self, action: SettingsAction) {
         match action {
             SettingsAction::Open => return self.open_settings(),
             SettingsAction::Shortcuts => return self.open_shortcuts(),
@@ -364,7 +364,7 @@ impl App {
     }
 
     /// Write one setting to config.toml and reload; the reload refreshes the page.
-    pub(super) fn save_setting(
+    pub(in crate::app) fn save_setting(
         &mut self,
         key: &str,
         value: Option<toml::Value>,
@@ -395,7 +395,7 @@ impl App {
         result
     }
 
-    pub(super) fn settings_mouse(&mut self, key: &crate::app::KeyEvent, column: u16, row: u16) {
+    pub(in crate::app) fn settings_mouse(&mut self, key: &crate::app::KeyEvent, column: u16, row: u16) {
         use crate::editor::input::TerminalMouseInput;
         let (width, height) = (self.window_session.width(), self.settings_height());
         let ambiguous = self.configuration.settings().editor.ambiguous_width;

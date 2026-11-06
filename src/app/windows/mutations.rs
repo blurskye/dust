@@ -113,7 +113,7 @@ impl WindowSession {
             .ok_or("window graph revision is exhausted")?;
         Ok(())
     }
-    pub(super) fn candidate(&self) -> Result<WindowCandidate, String> {
+    pub(in crate::app) fn candidate(&self) -> Result<WindowCandidate, String> {
         self.check_transition_capacity()?;
         Ok(WindowCandidate {
             origin: self.origin.clone(),
@@ -122,7 +122,7 @@ impl WindowSession {
             dashboard: None,
         })
     }
-    pub(super) fn commit(&mut self, candidate: WindowCandidate) -> Result<(), String> {
+    pub(in crate::app) fn commit(&mut self, candidate: WindowCandidate) -> Result<(), String> {
         if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
             return Err("window candidate is stale or belongs to another session".into());
         }
@@ -318,7 +318,7 @@ impl WindowSession {
         transition.candidate.dashboard = Some(false);
         Ok(transition)
     }
-    pub(super) fn stage_editor_transition(
+    pub(in crate::app) fn stage_editor_transition(
         &self,
         proposal: crate::editor::EditorDraft,
         candidate: WindowCandidate,
@@ -457,7 +457,7 @@ impl WindowSession {
         }
         Ok(())
     }
-    pub(super) fn prepare_editor(
+    pub(in crate::app) fn prepare_editor(
         &self,
         state: &EditorTopology<'_>,
         scratch: &str,
@@ -471,7 +471,7 @@ impl WindowSession {
             .map_err(|e| e.to_string())?;
         Ok(candidate)
     }
-    pub(super) fn focus_window(&mut self, window: WindowId) -> Result<(), String> {
+    pub(in crate::app) fn focus_window(&mut self, window: WindowId) -> Result<(), String> {
         let mut candidate = self.candidate()?;
         candidate
             .core
@@ -481,7 +481,7 @@ impl WindowSession {
         candidate.core.native.invalidate();
         self.commit(candidate)
     }
-    pub(super) fn require_projected_graph(&self) -> Result<(), String> {
+    pub(in crate::app) fn require_projected_graph(&self) -> Result<(), String> {
         if self
             .layout
             .as_ref()

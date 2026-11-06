@@ -1,6 +1,6 @@
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::SCRATCH_LABEL;
-use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use std::collections::BTreeMap;
 
 use crossterm::cursor::SetCursorStyle;
@@ -44,7 +44,7 @@ use crate::ui::geometry::text_width;
 
 use crate::ui::render::DebugSignKind;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::TerminalPanelMode;
 
@@ -871,7 +871,7 @@ pub(super) fn render_editor_view(
                     .copied()
                     .filter(|span| span.range.contains(global))
             } {
-                crate::ui::render::overlays::color_swatch_style(span.rgb)
+                crate::ui::render::documentation::color_swatch_style(span.rgb)
             } else if let Some(span) = {
                 while highlight_spans
                     .get(highlight_cursor)

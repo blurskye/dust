@@ -31,10 +31,10 @@ pub(super) struct DiagnosticDocument {
     text: TextVersion,
 }
 impl DiagnosticDocument {
-    pub(super) fn path(&self) -> &std::path::Path {
+    pub(in crate::app) fn path(&self) -> &std::path::Path {
         &self.path
     }
-    pub(super) fn capture(editor: &EditorState, id: BufferId) -> Option<Self> {
+    pub(in crate::app) fn capture(editor: &EditorState, id: BufferId) -> Option<Self> {
         let buffer = editor.buffers.get(id)?;
         Some(Self {
             editor: editor.window_version(),
@@ -43,7 +43,7 @@ impl DiagnosticDocument {
             text: buffer.text.source_version(),
         })
     }
-    pub(super) fn current(&self, editor: &EditorState) -> bool {
+    pub(in crate::app) fn current(&self, editor: &EditorState) -> bool {
         self.editor.same_editor(&editor.window_version())
             && editor.window_version().revision().is_some()
             && editor.buffers.get(self.id).is_some_and(|buffer| {
@@ -72,7 +72,7 @@ pub(super) struct DiagnosticKey {
     index: usize,
 }
 impl DiagnosticKey {
-    fn same(&self, other: &Self) -> bool {
+    pub(in crate::app) fn same(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.epoch, &other.epoch) && self.index == other.index
     }
 }
@@ -85,7 +85,7 @@ struct Batch {
     revision: Option<BufferRevision>,
 }
 impl Batch {
-    fn current(&self, editor: &EditorState) -> bool {
+    pub(in crate::app) fn current(&self, editor: &EditorState) -> bool {
         match &self.document {
             Some(document) => document.current(editor),
             None => !editor
@@ -109,7 +109,7 @@ pub(super) struct DiagnosticSession {
     dirty: bool,
 }
 impl DiagnosticSession {
-    pub(super) fn new(total: usize, per_uri: usize) -> Self {
+    pub(in crate::app) fn new(total: usize, per_uri: usize) -> Self {
         Self {
             store: DiagnosticStore::new(total, per_uri),
             producers: BTreeMap::new(),
@@ -121,19 +121,19 @@ impl DiagnosticSession {
         }
     }
     /// Explicit producer activation, not a late result's implicit name lookup.
-    pub(super) fn activate(&mut self, producer: DiagnosticProducer) {
+    pub(in crate::app) fn activate(&mut self, producer: DiagnosticProducer) {
         if self.current(&producer) {
             return;
         }
         self.clear_owner(producer.owner());
         self.producers.insert(producer.owner().clone(), producer);
     }
-    pub(super) fn current(&self, producer: &DiagnosticProducer) -> bool {
+    pub(in crate::app) fn current(&self, producer: &DiagnosticProducer) -> bool {
         self.producers
             .get(producer.owner())
             .is_some_and(|p| p.same(producer))
     }
-    pub(super) fn publish(
+    pub(in crate::app) fn publish(
         &mut self,
         batch: DiagnosticBatch,
         editor: &EditorState,
@@ -143,7 +143,7 @@ impl DiagnosticSession {
         }
         Ok(())
     }
-    pub(super) fn replace_source(
+    pub(in crate::app) fn replace_source(
         &mut self,
         producer: &DiagnosticProducer,
         batches: Vec<DiagnosticBatch>,
@@ -271,23 +271,23 @@ impl DiagnosticSession {
         );
         Ok(true)
     }
-    pub(super) fn clear_source(&mut self, producer: &DiagnosticProducer) {
+    pub(in crate::app) fn clear_source(&mut self, producer: &DiagnosticProducer) {
         if self.current(producer) {
             self.clear_owner(producer.owner());
         }
     }
-    pub(super) fn clear_owner(&mut self, owner: &DiagnosticOwner) {
+    pub(in crate::app) fn clear_owner(&mut self, owner: &DiagnosticOwner) {
         self.producers.remove(owner);
         self.store.clear_owner(owner);
         self.batches.retain(|(o, _), _| o != owner);
         self.changed();
     }
-    pub(super) fn clear_owner_uri(&mut self, owner: &DiagnosticOwner, uri: &str) {
+    pub(in crate::app) fn clear_owner_uri(&mut self, owner: &DiagnosticOwner, uri: &str) {
         self.store.clear_owner_uri(owner, uri);
         self.batches.remove(&(owner.clone(), uri.into()));
         self.changed();
     }
-    fn changed(&mut self) {
+    pub(in crate::app) fn changed(&mut self) {
         let mut indices = BTreeMap::<(DiagnosticOwner, String), usize>::new();
         self.rows = self
             .store
@@ -328,7 +328,7 @@ impl DiagnosticSession {
         }
         self.dirty = true;
     }
-    pub(super) fn retire_documents(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn retire_documents(&mut self, editor: &EditorState) {
         self.follow_edits(editor);
         let retired = self
             .batches
@@ -345,7 +345,7 @@ impl DiagnosticSession {
         }
         self.changed();
     }
-    pub(super) fn resolve(&self, key: &DiagnosticKey, editor: &EditorState) -> Option<&ProblemRow> {
+    pub(in crate::app) fn resolve(&self, key: &DiagnosticKey, editor: &EditorState) -> Option<&ProblemRow> {
         let row = self.rows.iter().find(|row| row.key.same(key))?;
         let batch = self
             .batches
@@ -356,10 +356,10 @@ impl DiagnosticSession {
         }
         Some(&row.problem)
     }
-    pub(super) fn counts(&self) -> &BTreeMap<PathBuf, ContentTabDiagnostic> {
+    pub(in crate::app) fn counts(&self) -> &BTreeMap<PathBuf, ContentTabDiagnostic> {
         &self.counts
     }
-    pub(super) fn choices(
+    pub(in crate::app) fn choices(
         &self,
     ) -> impl Iterator<Item = (DiagnosticKey, &ProblemRow, DiagnosticValidity)> {
         self.rows.iter().map(|row| {
@@ -371,7 +371,7 @@ impl DiagnosticSession {
         })
     }
     /// The problems within this stretch of a file, which a code action there may fix.
-    pub(super) fn within(&self, uri: &str, start: ByteOffset, end: ByteOffset) -> Vec<&ProblemRow> {
+    pub(in crate::app) fn within(&self, uri: &str, start: ByteOffset, end: ByteOffset) -> Vec<&ProblemRow> {
         self.rows
             .iter()
             .filter(|row| {
@@ -390,7 +390,7 @@ impl DiagnosticSession {
             .map(|row| &row.problem)
             .collect()
     }
-    pub(super) fn adjacent(
+    pub(in crate::app) fn adjacent(
         &self,
         uri: &str,
         offset: ByteOffset,
@@ -421,7 +421,7 @@ impl DiagnosticSession {
         let index = (first as u128 + u128::from(count.saturating_sub(1))) % rows.len() as u128;
         Some(rows[index as usize].key.clone())
     }
-    pub(super) fn expand(
+    pub(in crate::app) fn expand(
         &mut self,
         key: DiagnosticKey,
         severities: &[DiagnosticSeverity],
@@ -431,7 +431,7 @@ impl DiagnosticSession {
             self.expanded = Some((key, severities.to_vec()));
         }
     }
-    pub(super) fn dismiss_expansion(&mut self) {
+    pub(in crate::app) fn dismiss_expansion(&mut self) {
         self.expanded = None;
     }
     pub(super) fn expanded(&self, editor: &EditorState) -> Option<ExpandedDiagnosticState> {
@@ -493,7 +493,7 @@ impl DiagnosticSession {
             self.changed();
         }
     }
-    pub(super) fn projection(&mut self, editor: &EditorState) -> Option<Vec<UiDiagnostic>> {
+    pub(in crate::app) fn projection(&mut self, editor: &EditorState) -> Option<Vec<UiDiagnostic>> {
         self.retire_documents(editor);
         if !std::mem::take(&mut self.dirty) {
             return None;
@@ -828,5 +828,19 @@ mod tests {
             shown[0].range,
             ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()
         );
+    }
+}
+
+use crate::app::App;
+
+
+impl App {
+
+    pub(in crate::app) fn sync_ui_diagnostics(&mut self) {
+        if let Some(candidate) = self.diagnostics.projection(&self.state) {
+            self.ui.diagnostics = candidate;
+            self.window_session.diagnostics_changed();
+        }
+        self.ui.expanded_diagnostic = self.diagnostics.expanded(&self.state);
     }
 }

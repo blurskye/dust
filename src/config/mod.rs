@@ -427,3 +427,6 @@ impl LoadedConfig {
 
 #[cfg(test)]
 mod tests;
+
+mod highlight;
+pub use highlight::Highlight;

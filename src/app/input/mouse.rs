@@ -22,7 +22,7 @@ pub(super) struct MouseState {
     anchor: Option<MouseAnchor>,
 }
 impl Default for MouseState {
-    fn default() -> Self {
+    pub(in crate::app) fn default() -> Self {
         Self {
             position: None,
             generation: Some(0),
@@ -228,7 +228,7 @@ impl InputSession {
 mod tests {
     use crate::app::input::mouse::*;
     use crate::editor::EditorState;
-    fn plan(input: &InputSession, state: &EditorState) -> MousePlan {
+    pub(in crate::app) fn plan(input: &InputSession, state: &EditorState) -> MousePlan {
         plan_at(input, state, &crate::ui::UiState::default(), 1, 0, false)
     }
     fn plan_at(

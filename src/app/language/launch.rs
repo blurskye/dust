@@ -73,7 +73,7 @@ struct Source {
     configuration: u64,
 }
 impl Source {
-    fn capture(
+    pub(in crate::app) fn capture(
         buffer: crate::editor::BufferId,
         path: &std::path::Path,
         context: &LaunchContext<'_>,
@@ -97,7 +97,7 @@ impl Source {
             configuration: context.configuration,
         })
     }
-    fn current(&self, context: &LaunchContext<'_>) -> bool {
+    pub(in crate::app) fn current(&self, context: &LaunchContext<'_>) -> bool {
         self.workspace == context.workspace
             && self.configuration == context.configuration
             && self.editor.same_editor(&context.editor.window_version())
@@ -647,7 +647,7 @@ mod tests {
         use crate::app::language::LspAutostartObservation;
         use crate::editor::text::TextBuffer;
         let root = tempfile::tempdir().unwrap();
-        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let identity = crate::files::RootIdentity::capture(root.path()).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity)],
@@ -814,7 +814,7 @@ mod tests {
     fn launch_source_allows_edits_but_rejects_foreign_text_editor_and_configuration() {
         use crate::editor::text::TextBuffer;
         let root = tempfile::tempdir().unwrap();
-        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let identity = crate::files::RootIdentity::capture(root.path()).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity)],
@@ -861,7 +861,7 @@ mod tests {
     fn stopping_a_definition_retires_pending_root_nix_and_preflight_launches() {
         use crate::editor::text::TextBuffer;
         let root = tempfile::tempdir().unwrap();
-        let identity = crate::workspace::RootIdentity::capture(root.path()).unwrap();
+        let identity = crate::files::RootIdentity::capture(root.path()).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity)],

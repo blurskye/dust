@@ -123,8 +123,6 @@ use crate::app::windows::WindowSession;
 pub(super) mod commands;
 use crate::app::debugger::DebugSession;
 pub(super) mod agent;
-mod effects;
-mod events;
 mod remote;
 mod settings;
 
@@ -300,12 +298,12 @@ use crate::ui::workspace_top_rows;
 use crate::workspace::DiagnosticOwner;
 use crate::workspace::ExecutionSource;
 use crate::app::explorer::tree::ExplorerKind;
-use crate::workspace::FileSnapshot;
+use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
 use crate::workspace::PickerState;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use crate::workspace::WorkspaceEditDraft;
 use crate::workspace::WorkspaceId;
 use crate::workspace::WorkspaceState;
@@ -708,7 +706,7 @@ pub fn run_interactive(
 }
 
 impl App {
-    fn process_clipboard(&mut self) -> Option<String> {
+    pub(in crate::app) fn process_clipboard(&mut self) -> Option<String> {
         self.process_clipboard_paste();
         let generation = self.state.registers.generation();
         let output = if self.clipboard_shared() {
@@ -761,7 +759,6 @@ pub enum InteractiveError {
 #[cfg(test)]
 mod tests;
 
-mod render;
 mod shutdown;
 pub mod startup;
 pub(super) mod tutor;
@@ -770,3 +767,9 @@ mod editing;
 mod picker;
 mod prompt;
 mod documentation;
+
+mod help;
+
+mod dashboard;
+
+mod health;

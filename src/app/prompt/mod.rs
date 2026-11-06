@@ -683,3 +683,5 @@ fn command_completions<'a>(
 fn takes_path(command: &str) -> bool {
     matches!(command, "file.open" | "file.save" | "workspace.root.add")
 }
+
+mod interaction;

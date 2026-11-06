@@ -512,7 +512,7 @@ impl WindowSession {
         self.editor_close = None;
     }
 
-    fn plan(
+    pub(in crate::app) fn plan(
         &self,
         source: &EditorWindowVersion,
         catalog: PluginCatalogVersion,

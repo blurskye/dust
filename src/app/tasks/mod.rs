@@ -83,13 +83,13 @@ pub(in crate::app) struct RunningTask {
 }
 
 impl RunningTask {
-    pub(super) fn requested(&self) -> &String {
+    pub(in crate::app) fn requested(&self) -> &String {
         &self.requested
     }
-    pub(super) fn name(&self) -> &String {
+    pub(in crate::app) fn name(&self) -> &String {
         &self.name
     }
-    pub(super) fn adapter(&self) -> &AdapterContext {
+    pub(in crate::app) fn adapter(&self) -> &AdapterContext {
         &self.adapter
     }
 }
@@ -193,7 +193,7 @@ pub(super) struct TaskSession {
     closed: bool,
 }
 impl TaskSession {
-    pub(super) fn new(config: &Config) -> Self {
+    pub(in crate::app) fn new(config: &Config) -> Self {
         let mut owner = Self {
             linters: linter::Linters::default(),
             jobs: JobSupervisor::new(PROCESS_EVENT_CAPACITY),
@@ -215,7 +215,7 @@ impl TaskSession {
         owner.configure(config);
         owner
     }
-    pub(super) fn configure(&mut self, config: &Config) {
+    pub(in crate::app) fn configure(&mut self, config: &Config) {
         self.adapters.clear();
         self.maximum_output = MAXIMUM_OUTPUT_BYTES;
         self.matchers = config
@@ -246,7 +246,7 @@ impl TaskSession {
             let _ = self.jobs.cancel(*id);
         }
     }
-    pub(super) fn plan(
+    pub(in crate::app) fn plan(
         &mut self,
         name: &str,
         adapter: &AdapterContext,
@@ -265,7 +265,7 @@ impl TaskSession {
             .formatter = formatter;
         Ok(())
     }
-    fn plan_checked(
+    pub(in crate::app) fn plan_checked(
         &mut self,
         name: &str,
         adapter: &AdapterContext,
@@ -315,10 +315,10 @@ impl TaskSession {
         self.statuses.insert(name.into(), "queued".into());
         Ok(())
     }
-    pub(super) fn last_adapter(&self, name: &str) -> Option<&AdapterContext> {
+    pub(in crate::app) fn last_adapter(&self, name: &str) -> Option<&AdapterContext> {
         self.adapters.get(name)
     }
-    pub(super) fn step(
+    pub(in crate::app) fn step(
         &mut self,
         requested: &str,
         workspace: &WorkspaceSession,
@@ -434,7 +434,7 @@ impl TaskSession {
             }
         }
     }
-    pub(super) fn reject_step(&mut self, step: &TaskStep) {
+    pub(in crate::app) fn reject_step(&mut self, step: &TaskStep) {
         if self
             .keys
             .get(&step.requested)
@@ -446,7 +446,7 @@ impl TaskSession {
                 .insert(step.requested.clone(), "failed".into());
         }
     }
-    pub(super) fn launch(
+    pub(in crate::app) fn launch(
         &mut self,
         step: TaskStep,
         ready: crate::app::workspace::ExecutionReady,
@@ -468,7 +468,7 @@ impl TaskSession {
         }
         result
     }
-    fn launch_inner(
+    pub(in crate::app) fn launch_inner(
         &mut self,
         step: TaskStep,
         result: ExecutionPreflightResult,
@@ -584,7 +584,7 @@ impl TaskSession {
                 .get(name)
                 .is_some_and(|current| Arc::ptr_eq(&key.epoch, &current.epoch))
     }
-    pub(super) fn current(
+    pub(in crate::app) fn current(
         &self,
         task: &RunningTask,
         workspace: &WorkspaceSession,
@@ -592,28 +592,28 @@ impl TaskSession {
     ) -> bool {
         self.key_current(&task.requested, &task.key, workspace, configuration)
     }
-    pub(super) fn running_count(&self) -> usize {
+    pub(in crate::app) fn running_count(&self) -> usize {
         self.running.len()
     }
-    pub(super) fn status_count(&self) -> usize {
+    pub(in crate::app) fn status_count(&self) -> usize {
         self.statuses.len()
     }
-    pub(super) fn names(&self) -> impl Iterator<Item = &String> {
+    pub(in crate::app) fn names(&self) -> impl Iterator<Item = &String> {
         self.statuses.keys()
     }
-    pub(super) fn active_output(&self) -> Option<&str> {
+    pub(in crate::app) fn active_output(&self) -> Option<&str> {
         self.active_output.as_deref()
     }
-    pub(super) fn select_output(&mut self, name: Option<&str>) {
+    pub(in crate::app) fn select_output(&mut self, name: Option<&str>) {
         self.active_output = name.map(str::to_owned);
     }
-    fn launch_pending(&self, name: &str) -> bool {
+    pub(in crate::app) fn launch_pending(&self, name: &str) -> bool {
         self.plans.contains_key(name) || self.preflights.values().any(|step| step.requested == name)
     }
-    pub(super) fn is_running(&self, name: &str) -> bool {
+    pub(in crate::app) fn is_running(&self, name: &str) -> bool {
         self.launch_pending(name) || self.running.values().any(|task| task.requested == name)
     }
-    pub(super) fn stop_formatter(&mut self, name: &str, buffer: BufferId) {
+    pub(in crate::app) fn stop_formatter(&mut self, name: &str, buffer: BufferId) {
         if matches!(self.adapters.get(name), Some(AdapterContext::Formatter { source }) if source.buffer() == buffer)
         {
             // stop retires the run key as well as cancelling the process, so already
@@ -621,7 +621,7 @@ impl TaskSession {
             let _ = self.stop(name);
         }
     }
-    pub(super) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
+    pub(in crate::app) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
         let pending = self.launch_pending(name);
         let current = self.keys.get(name).cloned();
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
@@ -665,7 +665,7 @@ impl TaskSession {
             Err("task is not running".into())
         }
     }
-    pub(super) fn retire_workspace(&mut self) {
+    pub(in crate::app) fn retire_workspace(&mut self) {
         self.preflights.clear();
         self.linters
             .retire("task source configuration/workspace retired");
@@ -680,7 +680,7 @@ impl TaskSession {
         self.statuses.clear();
         self.active_output = None;
     }
-    pub(super) fn begin_shutdown(&mut self) {
+    pub(in crate::app) fn begin_shutdown(&mut self) {
         self.preflights.clear();
         self.closed = true;
         self.linters
@@ -692,13 +692,13 @@ impl TaskSession {
         }
         self.jobs.begin_shutdown();
     }
-    pub(super) fn abandon(&mut self) -> usize {
+    pub(in crate::app) fn abandon(&mut self) -> usize {
         let count = self.running.len();
         self.jobs.abandon();
         self.running.clear();
         count
     }
-    pub(super) fn next_update(
+    pub(in crate::app) fn next_update(
         &mut self,
         workspace: &WorkspaceSession,
         configuration: u64,
@@ -862,7 +862,7 @@ impl TaskSession {
         }
         None
     }
-    pub(super) fn task_items(&self) -> Vec<PickerItem> {
+    pub(in crate::app) fn task_items(&self) -> Vec<PickerItem> {
         self.statuses
             .iter()
             .map(|(name, status)| PickerItem {
@@ -876,7 +876,7 @@ impl TaskSession {
             })
             .collect()
     }
-    pub(super) fn output_items(&self, name: &str) -> Vec<PickerItem> {
+    pub(in crate::app) fn output_items(&self, name: &str) -> Vec<PickerItem> {
         self.rows
             .get(name)
             .into_iter()
@@ -897,7 +897,7 @@ impl TaskSession {
             })
             .collect()
     }
-    pub(super) fn test_items(&self, name: &str) -> Vec<(PickerItem, TestKey)> {
+    pub(in crate::app) fn test_items(&self, name: &str) -> Vec<(PickerItem, TestKey)> {
         let Some(key) = self.keys.get(name) else {
             return Vec::new();
         };
@@ -927,7 +927,7 @@ impl TaskSession {
             .collect()
     }
     /// Failed cases of the current runs that name a source line, for the Problems list.
-    pub(super) fn failed_tests(&self) -> Vec<(PathBuf, usize, String, TestKey)> {
+    pub(in crate::app) fn failed_tests(&self) -> Vec<(PathBuf, usize, String, TestKey)> {
         let mut names = self.tests.keys().collect::<Vec<_>>();
         names.sort();
         let mut failed = Vec::new();
@@ -956,14 +956,14 @@ impl TaskSession {
         }
         failed
     }
-    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<crate::app::picker::MatcherSource> {
+    pub(in crate::app) fn resolve_test(&self, key: &TestKey) -> Option<crate::app::picker::MatcherSource> {
         let current = self.keys.get(&key.name)?;
         if !Arc::ptr_eq(&current.epoch, &key.run) {
             return None;
         }
         self.tests.get(&key.name)?.get(key.index)?.source.clone()
     }
-    pub(super) fn formatter_transaction(
+    pub(in crate::app) fn formatter_transaction(
         &self,
         task: &RunningTask,
         editor: &EditorState,
@@ -984,7 +984,7 @@ impl TaskSession {
             .text;
         let text = &editor.buffers[source.buffer()].text;
         // Only what the formatter changed is replaced, so the cursor stays on the code it was on.
-        let edits = crate::editor::transaction::changed_spans(&text.to_string(), &replacement)
+        let edits = crate::editor::text::diff::changed_spans(&text.to_string(), &replacement)
             .into_iter()
             .map(|(range, inserted)| {
                 ByteRange::new(ByteOffset(range.start), ByteOffset(range.end))
@@ -1008,7 +1008,7 @@ impl TaskSession {
 }
 #[cfg(test)]
 impl TaskSession {
-    pub(super) fn fixture_formatter_result(
+    pub(in crate::app) fn fixture_formatter_result(
         &mut self,
         name: &str,
         buffer: crate::editor::BufferId,
@@ -1058,7 +1058,7 @@ impl TaskSession {
 mod tests {
     use crate::app::tasks::*;
     use crate::editor::text::TextBuffer;
-    use crate::workspace::RootIdentity;
+    use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
     #[test]
@@ -1096,7 +1096,7 @@ mod tests {
         };
         assert_eq!(task.output, b"formatted");
     }
-    fn fixture() -> (
+    pub(in crate::app) fn fixture() -> (
         tempfile::TempDir,
         EditorState,
         WorkspaceSession,
@@ -1374,3 +1374,5 @@ mod tests {
         assert!(owner.resolve_test(&key).is_none());
     }
 }
+
+mod interaction;

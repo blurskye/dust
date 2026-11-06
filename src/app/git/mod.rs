@@ -150,15 +150,15 @@ pub(super) struct HunkReady {
 }
 
 impl GitSession {
-    pub(super) fn status(&self) -> Option<&GitStatusSnapshot> {
+    pub(in crate::app) fn status(&self) -> Option<&GitStatusSnapshot> {
         self.status_snapshot.as_ref()
     }
     /// The checked-out branch as of the last status result.
-    pub(super) fn branch(&self) -> Option<&str> {
+    pub(in crate::app) fn branch(&self) -> Option<&str> {
         self.branch.as_deref()
     }
     /// Hold the previewed replacement until its confirmation is answered.
-    pub(super) fn set_pending_replacement(
+    pub(in crate::app) fn set_pending_replacement(
         &mut self,
         plan: crate::git::GitReplacementPlan,
     ) {
@@ -166,26 +166,26 @@ impl GitSession {
         self.pending_replacement = Some(plan);
     }
     /// Take the previewed replacement, so it can be answered exactly once.
-    pub(super) fn take_pending_replacement(
+    pub(in crate::app) fn take_pending_replacement(
         &mut self,
     ) -> Option<crate::git::GitReplacementPlan> {
         self.pending_replacement.take()
     }
-    pub(super) fn cancel_destructive(&mut self) {
+    pub(in crate::app) fn cancel_destructive(&mut self) {
         self.pending_replacement = None;
         self.pending_destructive = None;
     }
     /// Whether a replacement is waiting for an answer.
-    pub(super) fn has_pending_replacement(&self) -> bool {
+    pub(in crate::app) fn has_pending_replacement(&self) -> bool {
         self.pending_replacement.is_some()
     }
-    pub(super) fn remember_reset_target(&mut self) {
+    pub(in crate::app) fn remember_reset_target(&mut self) {
         self.reset_target = self
             .selected
             .as_ref()
             .map(|(snapshot, hunk, path)| (snapshot.revision, hunk.id, path.clone()));
     }
-    pub(super) fn take_reset_target(&mut self) -> bool {
+    pub(in crate::app) fn take_reset_target(&mut self) -> bool {
         self.reset_target.take().is_some_and(|expected| {
             self.selected
                 .as_ref()
@@ -194,7 +194,7 @@ impl GitSession {
                 })
         })
     }
-    pub(super) fn hunks_match(
+    pub(in crate::app) fn hunks_match(
         &self,
         editor: &EditorState,
         path: &Path,
@@ -218,16 +218,16 @@ impl GitSession {
                     && status.scope_root.join(&hunks.file) == path
             })
     }
-    pub(super) fn hunks(&self) -> Option<&GitHunkSnapshot> {
+    pub(in crate::app) fn hunks(&self) -> Option<&GitHunkSnapshot> {
         self.hunk_snapshot.as_ref()
     }
-    pub(super) fn decorations(&self) -> &BTreeMap<PathBuf, GitFileStatus> {
+    pub(in crate::app) fn decorations(&self) -> &BTreeMap<PathBuf, GitFileStatus> {
         &self.decorations
     }
-    pub(super) fn has_selection(&self) -> bool {
+    pub(in crate::app) fn has_selection(&self) -> bool {
         self.selected.is_some()
     }
-    pub(super) fn retry_status(&mut self) {
+    pub(in crate::app) fn retry_status(&mut self) {
         self.silent_attempted = None;
     }
 
@@ -239,7 +239,7 @@ impl GitSession {
         self.last_unstaged = None;
     }
     /// Where a hunk's line sits in the buffer: a staged hunk counts the index's lines.
-    pub(super) fn line_in_buffer(&self, layer: GitDiffLayer, line: usize) -> usize {
+    pub(in crate::app) fn line_in_buffer(&self, layer: GitDiffLayer, line: usize) -> usize {
         self.last_unstaged
             .as_ref()
             .filter(|_| layer == GitDiffLayer::Staged)
@@ -258,7 +258,7 @@ impl GitSession {
         self.selected = None;
         self.selected_change.clear();
     }
-    pub(super) fn clear(&mut self) {
+    pub(in crate::app) fn clear(&mut self) {
         if self.branch_list_scope.take().is_some() {
             self.branches.cancel();
             self.branch_generation = None;
@@ -285,13 +285,13 @@ impl GitSession {
         self.silent = false;
     }
 
-    pub(super) fn reconcile_status_documents(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn reconcile_status_documents(&mut self, editor: &EditorState) {
         if let Some(snapshot) = &mut self.status_snapshot {
             let documents = Self::unsaved_documents(editor, &snapshot.scope_root);
             snapshot.reconcile_unsaved_documents(&documents, 100_000, 16 * 1024 * 1024);
         }
     }
-    pub(super) fn needs_status(&mut self, revision: u64, root: Option<&Path>) -> bool {
+    pub(in crate::app) fn needs_status(&mut self, revision: u64, root: Option<&Path>) -> bool {
         let current = self
             .status_snapshot
             .as_ref()
@@ -312,7 +312,7 @@ impl GitSession {
         self.silent_attempted = Some((revision, root.to_owned()));
         true
     }
-    pub(super) fn refresh(
+    pub(in crate::app) fn refresh(
         &mut self,
         editor: &EditorState,
         root: Option<&Path>,
@@ -351,7 +351,7 @@ impl GitSession {
             }
         }
     }
-    pub(super) fn poll_status(&mut self, revision: u64) -> Result<bool, String> {
+    pub(in crate::app) fn poll_status(&mut self, revision: u64) -> Result<bool, String> {
         if self.status_generation.is_some() && self.status_root_revision != Some(revision) {
             self.clear();
             return Ok(true);
@@ -419,7 +419,7 @@ impl GitSession {
         ))
     }
     /// True means the previous derived signs must be cleared.
-    pub(super) fn reconcile_signs(
+    pub(in crate::app) fn reconcile_signs(
         &mut self,
         editor: &EditorState,
         revision: u64,
@@ -468,7 +468,7 @@ impl GitSession {
         }
         true
     }
-    pub(super) fn poll_signs(
+    pub(in crate::app) fn poll_signs(
         &mut self,
         editor: &EditorState,
         revision: u64,
@@ -570,7 +570,7 @@ impl GitSession {
             deadline: Duration::from_secs(5),
         }
     }
-    pub(super) fn start_hunks(
+    pub(in crate::app) fn start_hunks(
         &mut self,
         editor: &EditorState,
         path: Option<&Path>,
@@ -636,7 +636,7 @@ impl GitSession {
         self.hunk_selection_line = selection_line;
         Ok(())
     }
-    pub(super) fn poll_hunks(&mut self, editor: &EditorState) -> Result<Option<HunkReady>, String> {
+    pub(in crate::app) fn poll_hunks(&mut self, editor: &EditorState) -> Result<Option<HunkReady>, String> {
         if self.hunk_source.as_ref().is_some_and(|(id, version)| {
             editor
                 .buffers
@@ -687,7 +687,7 @@ impl GitSession {
             }
         }
     }
-    pub(super) fn select(
+    pub(in crate::app) fn select(
         &mut self,
         revision: u64,
         repository: GitRepositoryId,
@@ -716,7 +716,7 @@ impl GitSession {
         self.selected = Some((snapshot.clone(), hunk.clone(), path.to_owned()));
         true
     }
-    pub(super) fn reconcile_hunk_path(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn reconcile_hunk_path(&mut self, editor: &EditorState) {
         let active = editor
             .active_buffer_id()
             .and_then(|id| editor.buffers[id].path.as_deref());
@@ -729,7 +729,7 @@ impl GitSession {
             self.clear_hunks();
         }
     }
-    pub(super) fn navigate(
+    pub(in crate::app) fn navigate(
         &mut self,
         direction: i8,
         line: u32,
@@ -767,7 +767,7 @@ impl GitSession {
         self.selected = Some((snapshot.clone(), hunk.clone(), path.clone()));
         Ok((path, line))
     }
-    pub(super) fn selected_line(&self) -> Option<u32> {
+    pub(in crate::app) fn selected_line(&self) -> Option<u32> {
         let (_, hunk, _) = self.selected.as_ref()?;
         hunk.change_lines()
             .into_iter()
@@ -776,7 +776,7 @@ impl GitSession {
     }
     /// Select the hunk under the cursor, as gitsigns acts on the hunk you are in. Elsewhere the
     /// earlier selection stands.
-    pub(super) fn select_at(&mut self, line: u32) {
+    pub(in crate::app) fn select_at(&mut self, line: u32) {
         let Some(snapshot) = self.hunk_snapshot.as_ref() else {
             return;
         };
@@ -804,7 +804,7 @@ impl GitSession {
         self.selected = Some((snapshot.clone(), hunk.clone(), path));
     }
     /// Select the hunk with changes on these one-based lines and return those changes.
-    pub(super) fn select_lines(&mut self, start: u32, end: u32) -> Result<Vec<u32>, String> {
+    pub(in crate::app) fn select_lines(&mut self, start: u32, end: u32) -> Result<Vec<u32>, String> {
         let snapshot = self
             .hunk_snapshot
             .as_ref()
@@ -830,12 +830,12 @@ impl GitSession {
         Ok(lines)
     }
     /// The file changed on disk, so the hunks have to be read again.
-    pub(super) fn forget_hunks(&mut self) {
+    pub(in crate::app) fn forget_hunks(&mut self) {
         if self.mutation_generation.is_none() {
             self.clear_hunks();
         }
     }
-    pub(super) fn preview(&mut self) -> Result<(String, String), String> {
+    pub(in crate::app) fn preview(&mut self) -> Result<(String, String), String> {
         let snapshot = self
             .hunk_snapshot
             .as_ref()
@@ -933,7 +933,7 @@ impl GitSession {
     }
     /// Start a whole-file or line-scoped plan for the active buffer. Every plan carries the
     /// captured index, worktree, HEAD and unsaved revisions.
-    pub(super) fn start_plan(
+    pub(in crate::app) fn start_plan(
         &mut self,
         editor: &EditorState,
         kind: GitMutationKind,
@@ -949,7 +949,7 @@ impl GitSession {
     /// The change surface labels `s` and `u` by focus, so it stages the row under the cursor
     /// rather than the active buffer's file. A caller that names no file keeps exactly the
     /// behaviour it had, which is the active buffer's path.
-    pub(super) fn start_plan_for(
+    pub(in crate::app) fn start_plan_for(
         &mut self,
         editor: &EditorState,
         kind: GitMutationKind,
@@ -1037,7 +1037,7 @@ impl GitSession {
         Ok(())
     }
     /// Read the worktree list.
-    pub(super) fn start_branches(
+    pub(in crate::app) fn start_branches(
         &mut self,
         repository: &Path,
         revision: u64,
@@ -1059,15 +1059,15 @@ impl GitSession {
         self.branch_list_scope = Some((repository.to_path_buf(), revision));
         Ok(())
     }
-    pub(super) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
+    pub(in crate::app) fn set_pending_destructive(&mut self, action: GitDestructiveAction) {
         self.pending_replacement = None;
         self.pending_destructive = Some(action);
     }
-    pub(super) fn take_pending_destructive(&mut self) -> Option<GitDestructiveAction> {
+    pub(in crate::app) fn take_pending_destructive(&mut self) -> Option<GitDestructiveAction> {
         self.pending_destructive.take()
     }
     /// Remove a worktree and its directory. This never deletes a branch.
-    pub(super) fn start_worktree_remove(
+    pub(in crate::app) fn start_worktree_remove(
         &mut self,
         editor: &EditorState,
         repository: &Path,
@@ -1103,13 +1103,13 @@ impl GitSession {
     }
     /// Create a worktree for a branch. The destination and occupancy checks are the model's.
     /// The worktree list reopens when the running change finishes.
-    pub(super) fn show_worktrees_after_change(&mut self) {
+    pub(in crate::app) fn show_worktrees_after_change(&mut self) {
         self.show_worktrees = true;
     }
-    pub(super) fn take_show_worktrees(&mut self) -> bool {
+    pub(in crate::app) fn take_show_worktrees(&mut self) -> bool {
         std::mem::take(&mut self.show_worktrees)
     }
-    pub(super) fn start_worktree_create(
+    pub(in crate::app) fn start_worktree_create(
         &mut self,
         repository: &Path,
         name: &str,
@@ -1135,7 +1135,7 @@ impl GitSession {
         Ok(())
     }
     /// One poll reporting whichever branch outcome arrived.
-    pub(super) fn poll_branch_outcome(
+    pub(in crate::app) fn poll_branch_outcome(
         &mut self,
         root_revision: u64,
         root: &Path,
@@ -1191,7 +1191,7 @@ impl GitSession {
             }
         }
     }
-    pub(super) fn mutate(
+    pub(in crate::app) fn mutate(
         &mut self,
         editor: &EditorState,
         reset: bool,
@@ -1277,7 +1277,7 @@ impl GitSession {
         );
         Ok(())
     }
-    pub(super) fn poll_mutation(&mut self) -> Result<Option<GitMutationOutcome>, String> {
+    pub(in crate::app) fn poll_mutation(&mut self) -> Result<Option<GitMutationOutcome>, String> {
         if self.mutation_generation.is_none() {
             return Ok(None);
         }
@@ -1316,35 +1316,35 @@ impl GitSession {
     }
 
     #[allow(dead_code)]
-    pub(super) fn unsaved_refusal(&self) -> Option<&Path> {
+    pub(in crate::app) fn unsaved_refusal(&self) -> Option<&Path> {
         self.unsaved_refusal.as_deref()
     }
-    pub(super) fn status_pending(&self) -> bool {
+    pub(in crate::app) fn status_pending(&self) -> bool {
         self.status_generation.is_some()
     }
-    pub(super) fn mutation_pending(&self) -> bool {
+    pub(in crate::app) fn mutation_pending(&self) -> bool {
         self.mutation_generation.is_some()
     }
 }
 
 #[cfg(test)]
 impl GitSession {
-    pub(super) fn signs_pending(&self) -> bool {
+    pub(in crate::app) fn signs_pending(&self) -> bool {
         self.sign_generation.is_some() || self.staged_sign_generation.is_some()
     }
-    pub(super) fn hunks_pending(&self) -> bool {
+    pub(in crate::app) fn hunks_pending(&self) -> bool {
         self.hunk_generation.is_some()
     }
-    pub(super) fn branch_pending(&self) -> bool {
+    pub(in crate::app) fn branch_pending(&self) -> bool {
         self.branch_generation.is_some()
     }
-    pub(super) fn silent(&self) -> bool {
+    pub(in crate::app) fn silent(&self) -> bool {
         self.silent
     }
-    pub(super) fn status_generation(&self) -> u64 {
+    pub(in crate::app) fn status_generation(&self) -> u64 {
         self.status.generation()
     }
-    pub(super) fn sign_generation(&self) -> u64 {
+    pub(in crate::app) fn sign_generation(&self) -> u64 {
         self.sign_hunks.generation()
     }
 }
@@ -1516,7 +1516,7 @@ mod regression_tests {
         assert!(!removed.spans.is_empty());
     }
 
-    fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, GitSession) {
+    pub(in crate::app) fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, GitSession) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -1555,7 +1555,7 @@ mod regression_tests {
         (dir, repo, editor, session)
     }
 
-    fn refresh(session: &mut GitSession, editor: &EditorState, root: &Path) {
+    pub(in crate::app) fn refresh(session: &mut GitSession, editor: &EditorState, root: &Path) {
         session.refresh(editor, Some(root), 1, true).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while session.status_pending() {
@@ -1579,7 +1579,7 @@ mod regression_tests {
         signs
     }
 
-    fn read_hunks(session: &mut GitSession, editor: &EditorState, path: &Path) {
+    pub(in crate::app) fn read_hunks(session: &mut GitSession, editor: &EditorState, path: &Path) {
         session
             .start_hunks(editor, Some(path), 1, None, GitDiffLayer::Unstaged)
             .unwrap();
@@ -2174,3 +2174,5 @@ mod regression_tests {
 
 mod conflict_markers;
 mod pull_requests;
+
+mod interaction;

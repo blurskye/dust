@@ -9,7 +9,7 @@ use crate::editor::transaction::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::ResourceIntentKind;
-use crate::workspace::FileSnapshot;
+use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use crate::workspace::WorkspaceEditDraft;
 use crate::workspace::WorkspaceEditProposal;
@@ -26,10 +26,10 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(super) struct OriginKey(Arc<()>);
 impl OriginKey {
-    pub(super) fn new() -> Self {
+    pub(in crate::app) fn new() -> Self {
         Self(Arc::new(()))
     }
-    pub(super) fn same(&self, other: &Self) -> bool {
+    pub(in crate::app) fn same(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
@@ -48,7 +48,7 @@ struct Source {
     editor: WorkspaceEditSources,
 }
 impl Source {
-    fn current(&self, workspace: &WorkspaceVersion, configuration: u64) -> bool {
+    pub(in crate::app) fn current(&self, workspace: &WorkspaceVersion, configuration: u64) -> bool {
         &self.workspace == workspace && self.configuration == configuration
     }
 }
@@ -78,16 +78,16 @@ pub(super) struct ResourceApplication {
     retired: Option<String>,
 }
 impl ResourceApplication {
-    pub(super) fn intent(&self) -> &CheckedResourceIntent {
+    pub(in crate::app) fn intent(&self) -> &CheckedResourceIntent {
         &self.intent
     }
     pub(super) fn change(&self) -> &BufferPathChange {
         &self.change
     }
-    pub(super) fn target(&self) -> Option<&Path> {
+    pub(in crate::app) fn target(&self) -> Option<&Path> {
         self.target.as_deref()
     }
-    pub(super) fn into_change(self) -> (BufferPathChange, Option<std::path::PathBuf>) {
+    pub(in crate::app) fn into_change(self) -> (BufferPathChange, Option<std::path::PathBuf>) {
         (self.change, self.target)
     }
 }
@@ -99,7 +99,7 @@ pub(super) struct ResourcePermit<'a> {
     _editor: &'a crate::editor::EditorState,
 }
 impl ResourcePermit<'_> {
-    pub(super) fn intent(&self, worker: &Arc<()>) -> Result<&CheckedResourceIntent, String> {
+    pub(in crate::app) fn intent(&self, worker: &Arc<()>) -> Result<&CheckedResourceIntent, String> {
         if self
             .applying
             .values()
@@ -109,7 +109,7 @@ impl ResourcePermit<'_> {
         }
         Ok(self.accepted[0].intent())
     }
-    pub(super) fn finish(
+    pub(in crate::app) fn finish(
         self,
         submission: crate::app::documents::WorkspaceSubmission,
     ) -> Result<(), String> {
@@ -145,7 +145,7 @@ pub(super) struct WorkspaceEditSession {
     applying: HashMap<RequestId, (Arc<()>, ResourceApplication)>,
 }
 impl Default for WorkspaceEditSession {
-    fn default() -> Self {
+    pub(in crate::app) fn default() -> Self {
         Self {
             owner: Arc::new(()),
             next: 1,
@@ -159,7 +159,7 @@ impl Default for WorkspaceEditSession {
     }
 }
 impl WorkspaceEditSession {
-    pub(super) fn check_begin(&self) -> Result<(), String> {
+    pub(in crate::app) fn check_begin(&self) -> Result<(), String> {
         if self.preparing.is_some() || self.preview.is_some() {
             return Err("another workspace edit is pending".into());
         }
@@ -171,7 +171,7 @@ impl WorkspaceEditSession {
             .ok_or("workspace proposal identity exhausted")?;
         Ok(())
     }
-    pub(super) fn begin(
+    pub(in crate::app) fn begin(
         &mut self,
         workspace: WorkspaceVersion,
         configuration: u64,
@@ -194,7 +194,7 @@ impl WorkspaceEditSession {
             id,
         })
     }
-    fn check_ticket(&self, ticket: &PreparationTicket) -> Result<(), String> {
+    pub(in crate::app) fn check_ticket(&self, ticket: &PreparationTicket) -> Result<(), String> {
         if !Arc::ptr_eq(&self.owner, &ticket.owner)
             || self.preparing.as_ref().is_none_or(|p| {
                 !Arc::ptr_eq(&p.source.key, &ticket.key) || p.source.id != ticket.id
@@ -204,7 +204,7 @@ impl WorkspaceEditSession {
         }
         Ok(())
     }
-    pub(super) fn current_preparation(
+    pub(in crate::app) fn current_preparation(
         &self,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -218,7 +218,7 @@ impl WorkspaceEditSession {
         }
         Ok(())
     }
-    pub(super) fn build(
+    pub(in crate::app) fn build(
         &mut self,
         prepared: PreparedEdits,
         scope: &WorkspaceState,
@@ -233,7 +233,7 @@ impl WorkspaceEditSession {
         p.resources = prepared.resources;
         self.finish_preparation(prepared.drafts, scope, workspace, configuration)
     }
-    pub(super) fn finish_preparation(
+    pub(in crate::app) fn finish_preparation(
         &mut self,
         mut drafts: Vec<WorkspaceEditDraft>,
         scope: &WorkspaceState,
@@ -286,16 +286,16 @@ impl WorkspaceEditSession {
         });
         Ok(())
     }
-    pub(super) fn proposal(&self) -> Option<&WorkspaceEditProposal> {
+    pub(in crate::app) fn proposal(&self) -> Option<&WorkspaceEditProposal> {
         self.preview.as_ref().map(|p| &p.proposal)
     }
-    pub(super) fn origin(&self) -> Option<&OriginKey> {
+    pub(in crate::app) fn origin(&self) -> Option<&OriginKey> {
         self.preview
             .as_ref()
             .and_then(|p| p.origin.as_ref())
             .or_else(|| self.preparing_origin())
     }
-    pub(super) fn resources_pending(&self, proposal: ProposalId) -> bool {
+    pub(in crate::app) fn resources_pending(&self, proposal: ProposalId) -> bool {
         self.accepted
             .iter()
             .any(|request| request.proposal == proposal)
@@ -304,10 +304,10 @@ impl WorkspaceEditSession {
                 .values()
                 .any(|(_, request)| request.proposal == proposal)
     }
-    pub(super) fn next_resource_proposal(&self) -> Option<ProposalId> {
+    pub(in crate::app) fn next_resource_proposal(&self) -> Option<ProposalId> {
         self.accepted.first().map(|request| request.proposal)
     }
-    pub(super) fn resource_proposal(
+    pub(in crate::app) fn resource_proposal(
         &self,
         reply: &crate::app::documents::WorkspaceIoReply,
     ) -> Option<ProposalId> {
@@ -316,12 +316,12 @@ impl WorkspaceEditSession {
             .filter(|(worker, _)| reply.is_from(worker))
             .map(|(_, request)| request.proposal)
     }
-    pub(super) fn resources(&self) -> &[CheckedResourceIntent] {
+    pub(in crate::app) fn resources(&self) -> &[CheckedResourceIntent] {
         self.preview
             .as_ref()
             .map_or(&[], |p| p.resources.as_slice())
     }
-    pub(super) fn toggle(&mut self, index: usize) -> Result<(), String> {
+    pub(in crate::app) fn toggle(&mut self, index: usize) -> Result<(), String> {
         if self.approval.is_some() || self.pending_approval.is_some() {
             return Err("workspace approval is already staged".into());
         }
@@ -331,7 +331,7 @@ impl WorkspaceEditSession {
         }
         p.proposal.toggle_file(index).map_err(|e| e.to_string())
     }
-    pub(super) fn approval(
+    pub(in crate::app) fn approval(
         &self,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -342,7 +342,7 @@ impl WorkspaceEditSession {
         }
         Ok((&p.source.editor, &p.proposal))
     }
-    pub(super) fn prepare_approval(
+    pub(in crate::app) fn prepare_approval(
         &mut self,
         editor: &crate::editor::EditorState,
         transaction: crate::editor::TransactionId,
@@ -360,8 +360,7 @@ impl WorkspaceEditSession {
                 .iter()
                 .any(|file| file.selected && file.base_revision.is_none());
         if !needs_history {
-            return editor
-                .prepare_workspace_edit(sources, proposal, transaction)
+            return crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, transaction)
                 .map(|draft| Some((draft, changes)));
         }
         // Unopened files restore persistent undo while constructing the draft.
@@ -371,12 +370,12 @@ impl WorkspaceEditSession {
         let proposal = proposal.clone();
         let worker = std::thread::Builder::new()
             .name("dust-workspace-edit".into())
-            .spawn(move || editor.prepare_workspace_edit(&sources, &proposal, transaction))
+            .spawn(move || crate::app::workspace::edits::prepare_workspace_edit(&editor, &sources, &proposal, transaction))
             .map_err(|error| error.to_string())?;
         self.pending_approval = Some(PendingApproval { worker, changes });
         Ok(None)
     }
-    pub(super) fn poll_approval(
+    pub(in crate::app) fn poll_approval(
         &mut self,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -394,7 +393,7 @@ impl WorkspaceEditSession {
             Ok((draft, pending.changes))
         })())
     }
-    pub(super) fn stage_approval(
+    pub(in crate::app) fn stage_approval(
         &mut self,
         draft: &EditorDraft,
         changes: Vec<BufferPathChange>,
@@ -411,15 +410,15 @@ impl WorkspaceEditSession {
         }
         self.approval = Some(Approval {
             key: p.source.key.clone(),
-            check: draft.workspace_commit_check(&p.proposal)?,
+            check: crate::app::workspace::edits::workspace_commit_check(&draft, &p.proposal)?,
             changes,
         });
         Ok(())
     }
-    pub(super) fn abandon_approval(&mut self) {
+    pub(in crate::app) fn abandon_approval(&mut self) {
         self.approval = None;
     }
-    pub(super) fn accepted(
+    pub(in crate::app) fn accepted(
         &mut self,
         publication: EditorPublication<'_>,
     ) -> Result<Option<OriginKey>, String> {
@@ -456,7 +455,7 @@ impl WorkspaceEditSession {
             );
         Ok(p.origin)
     }
-    pub(super) fn reject(&mut self) -> Retirement {
+    pub(in crate::app) fn reject(&mut self) -> Retirement {
         self.approval = None;
         // A retired worker only owns a private draft; it cannot publish an edit.
         self.pending_approval = None;
@@ -505,7 +504,7 @@ impl WorkspaceEditSession {
             _editor: editor,
         }))
     }
-    pub(super) fn resource_finished(
+    pub(in crate::app) fn resource_finished(
         &mut self,
         reply: crate::app::documents::WorkspaceIoReply,
         workspace: &WorkspaceVersion,
@@ -534,7 +533,7 @@ impl WorkspaceEditSession {
             _ => Err("wrong workspace resource terminal; disk outcome is unknown".into()),
         })
     }
-    pub(super) fn discard_staged_resources(&mut self, reason: &str) -> Vec<String> {
+    pub(in crate::app) fn discard_staged_resources(&mut self, reason: &str) -> Vec<String> {
         self.accepted
             .drain(..)
             .map(|request| {
@@ -545,7 +544,7 @@ impl WorkspaceEditSession {
             })
             .collect()
     }
-    pub(super) fn retire_resources(&mut self, reason: &str) -> (Vec<String>, Vec<RequestId>) {
+    pub(in crate::app) fn retire_resources(&mut self, reason: &str) -> (Vec<String>, Vec<RequestId>) {
         let notices = self.discard_staged_resources(reason);
         let requests = self
             .applying
@@ -560,7 +559,7 @@ impl WorkspaceEditSession {
             .collect();
         (notices, requests)
     }
-    pub(super) fn resource_cancelled(
+    pub(in crate::app) fn resource_cancelled(
         &mut self,
         cancelled: crate::app::documents::WorkspaceCancellation,
     ) -> Option<String> {
@@ -579,7 +578,7 @@ impl WorkspaceEditSession {
             )
         })
     }
-    pub(super) fn finish_resources(&mut self, reason: &str) -> Vec<String> {
+    pub(in crate::app) fn finish_resources(&mut self, reason: &str) -> Vec<String> {
         let mut notices = self.discard_staged_resources(reason);
         notices.extend(self.applying.drain().map(|(_, (_, request))| format!("proposal {} resource outcome is unknown after {reason}; admitted disk work may have completed or may still finish", request.proposal.0)));
         notices
@@ -588,3 +587,36 @@ impl WorkspaceEditSession {
 
 #[cfg(test)]
 mod tests;
+
+mod interaction;
+
+fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<crate::editor::transaction::DraftEdit<'_>> {
+    proposal.files.iter().filter(|file| file.selected).map(|file| crate::editor::transaction::DraftEdit {
+        canonical_path: &file.canonical_path,
+        base_revision: file.base_revision,
+        original_bytes: &file.original_bytes,
+        edits: &file.edits,
+        preferred_line_ending: file.preferred_line_ending,
+    }).collect()
+}
+pub(in crate::app) fn prepare_workspace_edit(
+    state: &crate::editor::EditorState,
+    sources: &crate::editor::transaction::WorkspaceEditSources,
+    proposal: &crate::workspace::WorkspaceEditProposal,
+    transaction: crate::editor::TransactionId,
+) -> Result<crate::editor::transaction::EditorDraft, String> {
+    // Preserve editor identity validation before the preview-state check.
+    if !sources.same_editor(state) {
+        return Err("workspace edit belongs to a foreign or exhausted editor".into());
+    }
+    if proposal.state != crate::workspace::ProposalState::Preview {
+        return Err("workspace preview is closed".into());
+    }
+    state.prepare_document_edits(sources, &proposal.label, &selected_edits(proposal), transaction)
+}
+pub(crate) fn workspace_commit_check(
+    draft: &crate::editor::transaction::EditorDraft,
+    proposal: &crate::workspace::WorkspaceEditProposal,
+) -> Result<crate::editor::transaction::WorkspaceCommitCheck, String> {
+    draft.check_document_edits(proposal.files.iter().filter(|file| file.selected).map(|file| (file.canonical_path.as_path(), file.proposed_bytes.as_slice())))
+}

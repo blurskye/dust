@@ -1,18 +1,18 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::render::editor::END_OF_BUFFER_MARKER;
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::SCRATCH_LABEL;
-use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::editor::EditorState;
 use crate::ui::CellGrid;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
-use crate::ui::window::TileAxis;
+use crate::windows::TileAxis;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::UiState;
 

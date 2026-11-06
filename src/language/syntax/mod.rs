@@ -28,10 +28,9 @@ use tree_sitter::Query;
 use tree_sitter::QueryCursor;
 use tree_sitter::StreamingIterator;
 
-mod highlight;
 mod markdown;
 mod objects;
-pub use highlight::Highlight;
+use crate::config::Highlight;
 pub use markdown::MarkdownMark;
 pub use markdown::MarkdownSpan;
 pub use objects::SyntaxObject;

@@ -183,7 +183,7 @@ impl LspSession {
     pub(in crate::app) fn edit_context_current(&self, context: &EditContext) -> bool {
         self.service.edit_context_current(context)
     }
-    pub(super) fn register_navigation_read(
+    pub(in crate::app) fn register_navigation_read(
         &mut self,
         id: crate::files::RequestId,
         range: crate::language::lsp::LspRange,
@@ -194,7 +194,7 @@ impl LspSession {
         self.navigation_reads
             .insert(id, (range, encoding, navigation, workspace));
     }
-    pub(super) fn take_navigation_read(
+    pub(in crate::app) fn take_navigation_read(
         &mut self,
         id: crate::files::RequestId,
     ) -> Option<(
@@ -205,26 +205,26 @@ impl LspSession {
     )> {
         self.navigation_reads.remove(&id)
     }
-    pub(super) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
         self.navigation_reads.remove(&id);
     }
-    pub(super) fn running_servers(&self) -> Vec<String> {
+    pub(in crate::app) fn running_servers(&self) -> Vec<String> {
         self.service.running_servers()
     }
-    pub(super) fn stop(&mut self, server: &str) -> Result<(), LspError> {
+    pub(in crate::app) fn stop(&mut self, server: &str) -> Result<(), LspError> {
         self.service.stop(server)
     }
-    pub(super) fn diagnostic_producer(
+    pub(in crate::app) fn diagnostic_producer(
         &self,
         server: &str,
         prefix: &str,
     ) -> Option<crate::workspace::DiagnosticProducer> {
         self.service.diagnostic_producer(server, prefix)
     }
-    pub(super) fn owns_event_context(&self, context: &EditContext) -> bool {
+    pub(in crate::app) fn owns_event_context(&self, context: &EditContext) -> bool {
         self.service.owns_event_context(context)
     }
-    pub(super) fn sync_owned(
+    pub(in crate::app) fn sync_owned(
         &mut self,
         server: &str,
         document: LspDocument,
@@ -238,29 +238,29 @@ impl LspSession {
         self.document_synced(server, source.0, source.1, document);
         Ok(())
     }
-    pub(super) fn close(&self, server: &str, uri: String) -> Result<(), LspError> {
+    pub(in crate::app) fn close(&self, server: &str, uri: String) -> Result<(), LspError> {
         self.service.close(server, uri)
     }
-    pub(super) fn explicitly_detached(&self, server: &str, buffer: BufferId) -> bool {
+    pub(in crate::app) fn explicitly_detached(&self, server: &str, buffer: BufferId) -> bool {
         self.detached.contains(&(server.to_owned(), buffer))
     }
-    pub(super) fn clear_detached(&mut self, buffer: BufferId) {
+    pub(in crate::app) fn clear_detached(&mut self, buffer: BufferId) {
         self.detached.retain(|(_, id)| *id != buffer);
     }
-    pub(super) fn set_detached(&mut self, server: String, buffer: BufferId, detached: bool) {
+    pub(in crate::app) fn set_detached(&mut self, server: String, buffer: BufferId, detached: bool) {
         if detached {
             self.detached.insert((server, buffer));
         } else {
             self.detached.remove(&(server, buffer));
         }
     }
-    pub(super) fn save(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
+    pub(in crate::app) fn save(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
         self.service.save(server, document)
     }
-    pub(super) fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
+    pub(in crate::app) fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
         self.service.cancel(server, generation)
     }
-    pub(super) fn configure(
+    pub(in crate::app) fn configure(
         &mut self,
         server: &str,
         configuration: LspServerConfiguration,
@@ -275,7 +275,7 @@ impl LspSession {
             result => result,
         }
     }
-    pub(super) fn retry_configurations(&mut self) -> Vec<LspError> {
+    pub(in crate::app) fn retry_configurations(&mut self) -> Vec<LspError> {
         let mut errors = Vec::new();
         for (server, configuration) in std::mem::take(&mut self.pending_configurations) {
             if let Err(error) = self.configure(&server, configuration)
@@ -286,10 +286,10 @@ impl LspSession {
         }
         errors
     }
-    pub(super) fn health(&self, server: &str) -> Result<(), LspError> {
+    pub(in crate::app) fn health(&self, server: &str) -> Result<(), LspError> {
         self.service.health(server)
     }
-    pub(super) fn offer_actions(
+    pub(in crate::app) fn offer_actions(
         &mut self,
         server: &str,
         uri: &str,
@@ -298,13 +298,13 @@ impl LspSession {
     ) {
         self.edits.offer_actions(server, uri, actions, context);
     }
-    pub(super) fn clear_offered_actions(&mut self) {
+    pub(in crate::app) fn clear_offered_actions(&mut self) {
         self.edits.clear_offered_actions();
     }
-    pub(super) fn has_offered_actions(&self) -> bool {
+    pub(in crate::app) fn has_offered_actions(&self) -> bool {
         self.edits.has_offered_actions()
     }
-    pub(super) fn install_offered_actions(
+    pub(in crate::app) fn install_offered_actions(
         &mut self,
         maximum: usize,
     ) -> Result<Vec<CodeActionChoice>, String> {
@@ -318,29 +318,29 @@ impl LspSession {
     ) {
         self.edits.retain_actions(displayed);
     }
-    pub(super) fn clear_actions(&mut self) {
+    pub(in crate::app) fn clear_actions(&mut self) {
         self.edits.clear_actions();
     }
-    pub(super) fn take_action(
+    pub(in crate::app) fn take_action(
         &mut self,
         key: &CodeActionKey,
         current: &[EditDocument<'_>],
     ) -> Result<OfferedAction, String> {
         self.edits.take_action(key, &self.service, current)
     }
-    pub(super) fn poll_event(&self) -> Option<OwnedLspEvent> {
+    pub(in crate::app) fn poll_event(&self) -> Option<OwnedLspEvent> {
         self.edits.poll_event(&self.service)
     }
-    pub(super) fn flush_edit_replies(&mut self) -> Vec<String> {
+    pub(in crate::app) fn flush_edit_replies(&mut self) -> Vec<String> {
         self.edits.flush()
     }
-    pub(super) fn pending_replies(&self) -> bool {
+    pub(in crate::app) fn pending_replies(&self) -> bool {
         self.edits.pending_replies()
     }
-    pub(super) fn reject_reply(&mut self, reply: Option<ApplyEditReply>, reason: String) {
+    pub(in crate::app) fn reject_reply(&mut self, reply: Option<ApplyEditReply>, reason: String) {
         self.edits.reject_reply(reply, reason);
     }
-    pub(super) fn start_edit(
+    pub(in crate::app) fn start_edit(
         &mut self,
         edit: LspWorkspaceEdit,
         encoding: crate::editor::text::PositionEncoding,
@@ -351,21 +351,21 @@ impl LspSession {
         self.edits
             .start(edit, encoding, context, reply, current, &self.service)
     }
-    pub(super) fn check_edit(
+    pub(in crate::app) fn check_edit(
         &self,
         key: &OriginKey,
         current: &[EditDocument<'_>],
     ) -> Result<(), String> {
         self.edits.check(key, current, &self.service)
     }
-    pub(super) fn decode_edit(
+    pub(in crate::app) fn decode_edit(
         &mut self,
         key: &OriginKey,
         files: PreparedFiles<'_>,
     ) -> Result<Vec<crate::workspace::WorkspaceEditDraft>, String> {
         self.edits.decode(key, files)
     }
-    pub(super) fn finish_edit(
+    pub(in crate::app) fn finish_edit(
         &mut self,
         key: &OriginKey,
         applied: bool,
@@ -457,7 +457,7 @@ impl LspSession {
         }
         Ok(())
     }
-    pub(super) fn defer_edit(
+    pub(in crate::app) fn defer_edit(
         &mut self,
         key: &OriginKey,
         proposal: ProposalId,
@@ -469,7 +469,7 @@ impl LspSession {
         }
         Ok(())
     }
-    pub(super) fn finish_deferred_edit(
+    pub(in crate::app) fn finish_deferred_edit(
         &mut self,
         proposal: ProposalId,
         editor: &EditorState,
@@ -484,18 +484,18 @@ impl LspSession {
         }
         Ok(())
     }
-    pub(super) fn cancel_deferred_edits(&mut self, proposal: Option<ProposalId>) {
+    pub(in crate::app) fn cancel_deferred_edits(&mut self, proposal: Option<ProposalId>) {
         self.deferred_commands
             .retain(|(id, _, _)| proposal.is_some_and(|proposal| *id != proposal));
     }
-    pub(super) fn set_edit_command(
+    pub(in crate::app) fn set_edit_command(
         &mut self,
         server: String,
         command: crate::language::lsp::LspCommand,
     ) {
         self.edits.set_command(server, command);
     }
-    pub(super) fn diagnostic_batch(
+    pub(in crate::app) fn diagnostic_batch(
         &self,
         context: &EditContext,
         editor: &EditorState,
@@ -512,13 +512,13 @@ impl LspSession {
             policy.2,
         )
     }
-    pub(super) fn sessions(&self) -> &HashMap<String, LspRuntimeState> {
+    pub(in crate::app) fn sessions(&self) -> &HashMap<String, LspRuntimeState> {
         &self.sessions
     }
-    pub(super) fn active(&self) -> Option<&String> {
+    pub(in crate::app) fn active(&self) -> Option<&String> {
         self.active.as_ref()
     }
-    pub(super) fn capabilities(&self) -> Option<&LspCapabilities> {
+    pub(in crate::app) fn capabilities(&self) -> Option<&LspCapabilities> {
         #[cfg(test)]
         if self.fixture_capabilities.is_some() {
             return self.fixture_capabilities.as_ref();
@@ -528,23 +528,23 @@ impl LspSession {
             .capabilities
             .as_ref()
     }
-    pub(super) fn errors(&self) -> &BTreeMap<String, String> {
+    pub(in crate::app) fn errors(&self) -> &BTreeMap<String, String> {
         &self.errors
     }
-    pub(super) fn failed(&mut self, server: String, error: String) {
+    pub(in crate::app) fn failed(&mut self, server: String, error: String) {
         self.errors.insert(server, error);
     }
-    pub(super) fn clear_error(&mut self, server: &str) {
+    pub(in crate::app) fn clear_error(&mut self, server: &str) {
         self.errors.remove(server);
     }
-    pub(super) fn clear_active(&mut self) {
+    pub(in crate::app) fn clear_active(&mut self) {
         self.active = None;
         #[cfg(test)]
         {
             self.fixture_capabilities = None;
         }
     }
-    pub(super) fn start(
+    pub(in crate::app) fn start(
         &mut self,
         request: LspSessionLaunch<'_>,
         source: (BufferId, TextVersion),
@@ -631,7 +631,7 @@ impl LspSession {
         }
         Ok(())
     }
-    pub(super) fn retire_documents(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn retire_documents(&mut self, editor: &EditorState) {
         for (key, session) in &mut self.sessions {
             session.documents.retain(|id, document| {
                 let current = editor
@@ -653,7 +653,7 @@ impl LspSession {
         }
     }
     /// Returns whether the active document changed, so its UI refreshes still run.
-    pub(super) fn retry_documents(&mut self, editor: &EditorState) -> bool {
+    pub(in crate::app) fn retry_documents(&mut self, editor: &EditorState) -> bool {
         self.retire_documents(editor);
         let mut active_changed = false;
         for (key, session) in &mut self.sessions {
@@ -686,12 +686,12 @@ impl LspSession {
         }
         active_changed
     }
-    pub(super) fn remove(&mut self, key: &str) {
+    pub(in crate::app) fn remove(&mut self, key: &str) {
         self.retire_projection_server(key);
         self.sessions.remove(key);
         self.forget_synced(key);
     }
-    pub(super) fn select(&mut self, key: &str) -> bool {
+    pub(in crate::app) fn select(&mut self, key: &str) -> bool {
         if !self.sessions.contains_key(key) {
             return false;
         }
@@ -701,7 +701,7 @@ impl LspSession {
         self.active = Some(key.into());
         true
     }
-    pub(super) fn running(&mut self, key: &str, capabilities: LspCapabilities) -> bool {
+    pub(in crate::app) fn running(&mut self, key: &str, capabilities: LspCapabilities) -> bool {
         let Some(session) = self.sessions.get_mut(key) else {
             return false;
         };
@@ -709,7 +709,7 @@ impl LspSession {
         session.capabilities = Some(capabilities);
         self.active.as_deref() == Some(key)
     }
-    pub(super) fn stopped(&mut self, key: &str) -> bool {
+    pub(in crate::app) fn stopped(&mut self, key: &str) -> bool {
         self.retire_projection_server(key);
         self.forget_synced(key);
         self.sessions.get_mut(key).is_some_and(|state| {
@@ -717,13 +717,13 @@ impl LspSession {
             state.desired_running
         })
     }
-    pub(super) fn request_stop(&mut self, key: &str) {
+    pub(in crate::app) fn request_stop(&mut self, key: &str) {
         if let Some(state) = self.sessions.get_mut(key) {
             state.desired_running = false;
             state.restart_due = None;
         }
     }
-    pub(super) fn request_start(&mut self, key: &str, restart: Option<Instant>) {
+    pub(in crate::app) fn request_start(&mut self, key: &str, restart: Option<Instant>) {
         if let Some(state) = self.sessions.get_mut(key) {
             state.restart_count = 0;
             state.restart_due = restart;
@@ -731,7 +731,7 @@ impl LspSession {
             state.desired_running = true;
         }
     }
-    pub(super) fn schedule_restart(&mut self, key: &str, now: Instant) -> Option<String> {
+    pub(in crate::app) fn schedule_restart(&mut self, key: &str, now: Instant) -> Option<String> {
         let state = self.sessions.get_mut(key)?;
         if !state.desired_running || state.restart_due.is_some() {
             return None;
@@ -748,7 +748,7 @@ impl LspSession {
         state.restart_due = Some(now + Duration::from_millis(delay));
         None
     }
-    pub(super) fn restart_due(&mut self, now: Instant) -> Option<String> {
+    pub(in crate::app) fn restart_due(&mut self, now: Instant) -> Option<String> {
         let (key, state) = self.sessions.iter_mut().find(|(_, state)| {
             state.desired_running
                 && !state.circuit_open
@@ -757,7 +757,7 @@ impl LspSession {
         state.restart_due = None;
         Some(key.clone())
     }
-    pub(super) fn synced(&self, key: &str, buffer: BufferId, version: &TextVersion) -> bool {
+    pub(in crate::app) fn synced(&self, key: &str, buffer: BufferId, version: &TextVersion) -> bool {
         self.synced.get(&(key.into(), buffer)) == Some(version)
     }
     fn document_synced(
@@ -772,13 +772,13 @@ impl LspSession {
             self.synced.insert((key.into(), buffer), version);
         }
     }
-    pub(super) fn invalidate_document(&mut self, key: &str, buffer: BufferId) {
+    pub(in crate::app) fn invalidate_document(&mut self, key: &str, buffer: BufferId) {
         self.synced.remove(&(key.into(), buffer));
     }
-    pub(super) fn forget_synced(&mut self, key: &str) {
+    pub(in crate::app) fn forget_synced(&mut self, key: &str) {
         self.synced.retain(|(server, _), _| server != key);
     }
-    pub(super) fn detach(&mut self, key: &str, buffer: BufferId) {
+    pub(in crate::app) fn detach(&mut self, key: &str, buffer: BufferId) {
         self.invalidate_document(key, buffer);
         if let Some(document) = self
             .sessions
@@ -788,11 +788,11 @@ impl LspSession {
             self.retire_projection_document(key, &document.uri());
         }
     }
-    pub(super) fn hint_install_once(&mut self, language: &str) -> bool {
+    pub(in crate::app) fn hint_install_once(&mut self, language: &str) -> bool {
         self.install_hinted.insert(language.to_owned())
     }
     /// Records a server's status and says whether it is a new problem worth reporting.
-    pub(super) fn status_changed(&mut self, key: &str, healthy: bool, message: &str) -> bool {
+    pub(in crate::app) fn status_changed(&mut self, key: &str, healthy: bool, message: &str) -> bool {
         if healthy {
             self.statuses.remove(key);
             return false;
@@ -803,29 +803,29 @@ impl LspSession {
             != Some(message)
     }
     /// A restarted server reports afresh, so a problem it still has is shown again.
-    pub(super) fn forget_status(&mut self, key: &str) {
+    pub(in crate::app) fn forget_status(&mut self, key: &str) {
         self.statuses.remove(key);
     }
-    pub(super) fn repair_once(&mut self, server_id: &str) -> bool {
+    pub(in crate::app) fn repair_once(&mut self, server_id: &str) -> bool {
         self.repaired.insert(server_id.to_owned())
     }
-    pub(super) fn mark_stopped(&mut self, server_id: &str) {
+    pub(in crate::app) fn mark_stopped(&mut self, server_id: &str) {
         self.stopped.insert(server_id.to_owned());
     }
-    pub(super) fn clear_stopped(&mut self, server_id: &str) {
+    pub(in crate::app) fn clear_stopped(&mut self, server_id: &str) {
         self.stopped.remove(server_id);
     }
-    pub(super) fn clear_all_stopped(&mut self) {
+    pub(in crate::app) fn clear_all_stopped(&mut self) {
         self.stopped.clear();
     }
-    pub(super) fn is_stopped(&self, server_id: &str) -> bool {
+    pub(in crate::app) fn is_stopped(&self, server_id: &str) -> bool {
         self.stopped.contains(server_id)
     }
-    pub(super) fn reset_autostart(&mut self) {
+    pub(in crate::app) fn reset_autostart(&mut self) {
         self.autostart = None;
     }
     /// Starts the next unattached server once per change in what the editor sees.
-    pub(super) fn observe(
+    pub(in crate::app) fn observe(
         &mut self,
         observation: LspAutostartObservation,
         safe_mode: bool,
@@ -845,7 +845,7 @@ impl LspSession {
 }
 #[cfg(test)]
 impl LspSession {
-    pub(super) fn fixture_transport(
+    pub(in crate::app) fn fixture_transport(
         &mut self,
         key: &str,
         document: &LspDocument,
@@ -859,13 +859,15 @@ impl LspSession {
             16,
         )
     }
-    pub(super) fn fixture_session(&mut self, key: String, state: LspRuntimeState) {
+    pub(in crate::app) fn fixture_session(&mut self, key: String, state: LspRuntimeState) {
         self.sessions.insert(key, state);
     }
-    pub(super) fn fixture_capabilities(&mut self, capabilities: LspCapabilities) {
+    pub(in crate::app) fn fixture_capabilities(&mut self, capabilities: LspCapabilities) {
         self.fixture_capabilities = Some(capabilities);
     }
 }
 
 pub(in crate::app) mod edits;
 pub(in crate::app) mod snippets;
+
+mod interaction;

@@ -166,7 +166,7 @@ impl InputSession {
 /// A display row and its styled runs, as byte ranges in the row.
 type StyledRow = (
     String,
-    Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>,
+    Vec<(std::ops::Range<usize>, crate::config::Highlight)>,
 );
 
 /// Markdown rendered as the agent transcript is, one row per line. Control characters and the
@@ -280,7 +280,7 @@ fn without_data_images(line: &str) -> String {
 mod tests {
     use crate::app::documentation::markdown_rows;
     use crate::app::documentation::wrap_prose;
-    use crate::language::syntax::Highlight;
+    use crate::config::Highlight;
 
     #[test]
     fn markdown_reads_as_a_rendered_page_with_styles() {
@@ -428,5 +428,106 @@ mod tests {
         input.scroll_documentation(1, 10, 10, 30);
         input.scroll_documentation(0, 0, 10, 5);
         assert_eq!(input.documentation().unwrap().scroll, 0);
+    }
+}
+
+use crate::app::ByteRange;
+use crate::app::DocumentationPopupKind;
+use crate::app::App;
+use crate::app::LspMarkupContent;
+use crate::app::LspMarkupKind;
+use crate::app::DocumentationMarkupKind;
+
+
+impl App {
+
+
+    pub(in crate::app) fn present_documentation_popup(
+        &mut self,
+        kind: DocumentationPopupKind,
+        title: String,
+        provider: String,
+        source_range: Option<ByteRange>,
+        source_sections: Vec<LspMarkupContent>,
+    ) {
+        if kind != DocumentationPopupKind::Completion {
+            self.reconcile_editor_windows();
+            self.input.hold_focus(self.window_session.capture_focus());
+        }
+        let config = self.configuration.settings();
+        let available = usize::from(self.window_session.width());
+        let available = if kind == DocumentationPopupKind::Completion {
+            available / 2
+        } else {
+            available
+        };
+        let text_width = available
+            .min(usize::from(
+                crate::ui::render::documentation::DOCUMENTATION_MAX_WIDTH,
+            ))
+            .saturating_sub(
+                2 + 2 * usize::from(crate::ui::render::documentation::DOCUMENTATION_PADDING),
+            );
+        self.input.present_documentation(
+            kind,
+            title,
+            provider,
+            source_range,
+            source_sections.into_iter().map(|source| {
+                (
+                    match source.kind {
+                        LspMarkupKind::PlainText => DocumentationMarkupKind::PlainText,
+                        LspMarkupKind::Markdown => DocumentationMarkupKind::Markdown,
+                    },
+                    source.value,
+                )
+            }),
+            config,
+            text_width,
+        );
+        self.restore_input_focus();
+        self.project_input_documentation();
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn hover_is_showing(&self) -> bool {
+        self.input
+            .documentation()
+            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Hover)
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn project_input_documentation(&mut self) {
+        let popup = self.input.documentation().cloned();
+        self.ui.set(popup, |ui| &mut ui.documentation_popup);
+        if self.ui.documentation_popup.is_some() {
+            let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                &self.state,
+                &self.ui,
+                self.configuration.settings(),
+                self.configuration.dashboard(),
+                self.window_session.width(),
+                self.window_session.height(),
+            );
+            if let Some((visible, total)) = geometry {
+                self.input.scroll_documentation(0, 0, visible, total);
+                let popup = self.input.documentation().cloned();
+                self.ui.set(popup, |ui| &mut ui.documentation_popup);
+            }
+        }
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn close_documentation(&mut self) {
+        self.input.close_documentation();
+        self.restore_input_focus();
+        self.project_input_documentation();
     }
 }

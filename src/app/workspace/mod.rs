@@ -4,7 +4,7 @@ mod discovery;
 use crate::editor::EditorState;
 use crate::workspace::ExecutionSource;
 use crate::workspace::RootId;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use crate::workspace::TrustEvent;
 use crate::workspace::TrustStore;
 use crate::workspace::WorkspaceError;
@@ -31,7 +31,7 @@ use std::sync::atomic::Ordering;
 #[derive(Clone, Debug)]
 pub(in crate::app) struct WorkspaceVersion(Arc<()>);
 impl PartialEq for WorkspaceVersion {
-    fn eq(&self, other: &Self) -> bool {
+    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
@@ -42,7 +42,7 @@ pub(in crate::app) enum WorkspaceFailure {
     Plain(String),
 }
 impl From<WorkspaceError> for WorkspaceFailure {
-    fn from(e: WorkspaceError) -> Self {
+    pub(in crate::app) fn from(e: WorkspaceError) -> Self {
         Self::Plain(e.to_string())
     }
 }
@@ -217,7 +217,7 @@ impl WorkspaceSession {
         self.execution_allowed().ok()?;
         Some(self.probe_cancelled.clone())
     }
-    fn changed(&mut self) {
+    pub(in crate::app) fn changed(&mut self) {
         self.probe_cancelled.store(true, Ordering::Release);
         self.version = WorkspaceVersion(Arc::new(()));
         self.confirmation = None;
@@ -540,7 +540,7 @@ impl WorkspaceSession {
         }
         updates
     }
-    fn accept_event(
+    pub(in crate::app) fn accept_event(
         &mut self,
         event: TrustEvent,
         updates: &mut Vec<WorkspaceUpdate>,
@@ -739,7 +739,7 @@ impl WorkspaceSession {
 #[cfg(test)]
 mod tests {
     use crate::app::workspace::*;
-    fn fixture() -> (WorkspaceSession, tempfile::TempDir) {
+    pub(in crate::app) fn fixture() -> (WorkspaceSession, tempfile::TempDir) {
         let state = WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [
@@ -1079,3 +1079,5 @@ mod tests {
 }
 
 pub(in crate::app) mod edits;
+
+mod interaction;

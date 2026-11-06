@@ -70,7 +70,7 @@ pub(super) struct RecoverySession {
     reads: HashMap<RequestId, (PathBuf, String, crate::app::workspace::WorkspaceVersion)>,
 }
 impl RecoverySession {
-    pub(super) fn new(directory: PathBuf) -> Self {
+    pub(in crate::app) fn new(directory: PathBuf) -> Self {
         static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let session = format!(
             "{}-{}-{}",
@@ -98,7 +98,7 @@ impl RecoverySession {
             reads: HashMap::new(),
         }
     }
-    pub(super) fn register_read(
+    pub(in crate::app) fn register_read(
         &mut self,
         id: RequestId,
         journal: PathBuf,
@@ -107,7 +107,7 @@ impl RecoverySession {
     ) {
         self.reads.insert(id, (journal, content, workspace));
     }
-    pub(super) fn take_read(
+    pub(in crate::app) fn take_read(
         &mut self,
         id: RequestId,
         workspace: crate::app::workspace::WorkspaceVersion,
@@ -117,10 +117,10 @@ impl RecoverySession {
             .filter(|(_, _, source)| *source == workspace)
             .map(|(journal, content, _)| (journal, content))
     }
-    pub(super) fn records(&self) -> &[(PathBuf, RecoveryRecord)] {
+    pub(in crate::app) fn records(&self) -> &[(PathBuf, RecoveryRecord)] {
         &self.records
     }
-    pub(super) fn configure(&mut self, old: &RecoveryConfig, new: &RecoveryConfig) {
+    pub(in crate::app) fn configure(&mut self, old: &RecoveryConfig, new: &RecoveryConfig) {
         if old != new {
             self.discovery_queued = false;
             self.cleanup_queued = false;
@@ -129,11 +129,11 @@ impl RecoverySession {
             self.scheduled.clear();
         }
     }
-    pub(super) fn retain_recovered(&mut self, buffer: BufferId, journal: PathBuf) {
+    pub(in crate::app) fn retain_recovered(&mut self, buffer: BufferId, journal: PathBuf) {
         self.records.retain(|(path, _)| path != &journal);
         self.recovered.insert(buffer, journal);
     }
-    pub(super) fn path(&self, buffer: BufferId) -> PathBuf {
+    pub(in crate::app) fn path(&self, buffer: BufferId) -> PathBuf {
         if let Some(path) = self.recovered.get(&buffer) {
             return path.clone();
         }
@@ -147,7 +147,7 @@ impl RecoverySession {
     fn recorded(&self, buffer: BufferId, revision: BufferRevision, path: &Option<PathBuf>) -> bool {
         self.paths.get(&buffer) == Some(path) && self.revisions.get(&buffer) == Some(&revision)
     }
-    pub(super) fn retire_buffer(&mut self, buffer: BufferId, clean: bool) {
+    pub(in crate::app) fn retire_buffer(&mut self, buffer: BufferId, clean: bool) {
         if clean && (self.revisions.contains_key(&buffer) || self.recovered.contains_key(&buffer)) {
             self.closed_journals.insert(self.path(buffer));
         }
@@ -157,7 +157,7 @@ impl RecoverySession {
         self.oversized.remove(&buffer);
         self.scheduled.remove(&buffer);
     }
-    pub(super) fn schedule(
+    pub(in crate::app) fn schedule(
         &mut self,
         editor: &EditorState,
         config: &RecoveryConfig,
@@ -299,7 +299,7 @@ impl RecoverySession {
             }
         }
     }
-    pub(super) fn clear_crash(
+    pub(in crate::app) fn clear_crash(
         &mut self,
         path: PathBuf,
         mut io: RecoveryIo<'_>,
@@ -310,7 +310,7 @@ impl RecoverySession {
     }
     /// Delete one discovered journal; the record goes once the delete completes, and
     /// `announce` says so then.
-    pub(super) fn discard(
+    pub(in crate::app) fn discard(
         &mut self,
         path: &Path,
         announce: bool,
@@ -334,12 +334,12 @@ impl RecoverySession {
         );
         Ok(())
     }
-    pub(super) fn stopped(&mut self) {
+    pub(in crate::app) fn stopped(&mut self) {
         self.pending.clear();
         self.revisions.clear();
         self.scheduled.clear();
     }
-    pub(super) fn unwritten(&self, editor: &EditorState, config: &RecoveryConfig) -> usize {
+    pub(in crate::app) fn unwritten(&self, editor: &EditorState, config: &RecoveryConfig) -> usize {
         if !config.enabled {
             return 0;
         }
@@ -352,7 +352,7 @@ impl RecoverySession {
                     }))
         }).count()
     }
-    pub(super) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
+    pub(in crate::app) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
         let id = match &result {
             VfsResult::RecoveryDiscovered { id, .. }
             | VfsResult::RecoveryCleaned { id, .. }
@@ -478,26 +478,26 @@ impl RecoverySession {
 }
 #[cfg(test)]
 impl RecoverySession {
-    pub(super) fn skip_maintenance(&mut self) {
+    pub(in crate::app) fn skip_maintenance(&mut self) {
         self.discovery_queued = true;
         self.cleanup_queued = true;
     }
-    pub(super) fn directory(&self) -> &std::path::Path {
+    pub(in crate::app) fn directory(&self) -> &std::path::Path {
         &self.directory
     }
-    pub(super) fn fixture_records(&mut self, records: Vec<(PathBuf, RecoveryRecord)>) {
+    pub(in crate::app) fn fixture_records(&mut self, records: Vec<(PathBuf, RecoveryRecord)>) {
         self.records = records;
     }
-    pub(super) fn scheduled(&self) -> &HashMap<BufferId, (BufferRevision, Instant)> {
+    pub(in crate::app) fn scheduled(&self) -> &HashMap<BufferId, (BufferRevision, Instant)> {
         &self.scheduled
     }
-    pub(super) fn revisions(&self) -> &HashMap<BufferId, BufferRevision> {
+    pub(in crate::app) fn revisions(&self) -> &HashMap<BufferId, BufferRevision> {
         &self.revisions
     }
-    pub(super) fn writing(&self, revision: Option<BufferRevision>) -> bool {
+    pub(in crate::app) fn writing(&self, revision: Option<BufferRevision>) -> bool {
         self.pending.values().any(|p| matches!(p, Pending::Write { revision: r, .. } if revision.is_none_or(|revision| *r == revision)))
     }
-    pub(super) fn check_foreign_completions(&mut self) {
+    pub(in crate::app) fn check_foreign_completions(&mut self) {
         let (id, path) = self
             .pending
             .iter()
@@ -526,7 +526,7 @@ impl RecoverySession {
         assert_eq!(self.pending.len(), count);
         assert!(self.pending.contains_key(&id));
     }
-    pub(super) fn deleting(&self) -> bool {
+    pub(in crate::app) fn deleting(&self) -> bool {
         self.pending
             .values()
             .any(|p| matches!(p, Pending::Delete { .. }))

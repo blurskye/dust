@@ -47,7 +47,7 @@ fn is_leader(key: &str) -> bool {
 }
 
 impl App {
-    pub(super) fn open_shortcuts(&mut self) {
+    pub(in crate::app) fn open_shortcuts(&mut self) {
         self.open_settings();
         if let Some(page) = self.ui.settings.as_mut() {
             *page = SettingsPageState {
@@ -76,7 +76,7 @@ impl App {
     /// The page's sections and rows: the leader keys, then each binding in effect under its
     /// context and mode with its keys as keymaps.toml writes them, and the other bindings there
     /// with the same keys.
-    pub(super) fn shortcut_rows(&self) -> (Vec<String>, Vec<SettingsRow>) {
+    pub(in crate::app) fn shortcut_rows(&self) -> (Vec<String>, Vec<SettingsRow>) {
         let settings = self.configuration.settings();
         let policy = &settings.input.keymaps;
         let user_keys = self.configuration.user_setting_keys();
@@ -188,7 +188,7 @@ impl App {
 
     /// While new keys are being recorded every key goes to them: Enter saves, Escape cancels
     /// and Backspace takes back the last key. Returns whether the key was used.
-    pub(super) fn record_shortcut_key(&mut self, key: &KeyEvent) -> bool {
+    pub(in crate::app) fn record_shortcut_key(&mut self, key: &KeyEvent) -> bool {
         let Some(page) = self.ui.settings.as_mut() else {
             return false;
         };
@@ -275,7 +275,7 @@ impl App {
         }
     }
 
-    pub(super) fn reset_shortcut(&mut self) {
+    pub(in crate::app) fn reset_shortcut(&mut self) {
         let Some(row) = self
             .ui
             .settings

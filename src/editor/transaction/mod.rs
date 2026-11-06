@@ -11,7 +11,6 @@ pub(crate) use workspace::EditorPublication;
 pub(crate) use workspace::WorkspaceCommitCheck;
 pub(crate) use workspace::WorkspaceEditSources;
 pub(crate) use workspace::WorkspaceSnapshot;
-pub(crate) use workspace::changed_spans;
 mod undo;
 pub(crate) use paths::BufferPathChange;
 
@@ -1647,3 +1646,6 @@ mod tests {
         assert_eq!(state.buffers[buffer].text.to_string(), "abc");
     }
 }
+
+pub(crate) use workspace::DraftEdit;
+pub use workspace::DocumentSnapshot;

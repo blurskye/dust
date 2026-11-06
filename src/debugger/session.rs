@@ -757,7 +757,7 @@ impl DapAdmission<'_> {
     }
 }
 pub(crate) struct ExecutionScope {
-    pub(crate) roots: Vec<crate::workspace::RootIdentity>,
+    pub(crate) roots: Vec<crate::files::RootIdentity>,
     pub(crate) paths: Vec<std::path::PathBuf>,
 }
 impl ExecutionScope {

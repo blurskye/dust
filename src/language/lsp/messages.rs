@@ -1,241 +1,12 @@
-use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
-
 use serde_json::Value;
-
 use serde_json::json;
-use sha2::Digest;
-use sha2::Sha256;
-
-use crate::editor::text::PositionEncoding;
-
-use crate::language::lsp::MAX_LOG_LINES;
-
-use crate::language::lsp::REQUEST_TIMEOUT;
-
 use crate::language::lsp::paths::file_uri;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LspPolicy {
-    pub request_timeout: Duration,
-    pub maximum_log_lines: usize,
-}
+use crate::language::lsp::server::LspCapabilities;
+use crate::language::lsp::server::supports_document;
 
-impl Default for LspPolicy {
-    fn default() -> Self {
-        Self {
-            request_timeout: REQUEST_TIMEOUT,
-            maximum_log_lines: MAX_LOG_LINES,
-        }
-    }
-}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LspServerConfiguration {
-    pub(super) initialization_options: Option<Value>,
-    pub(super) settings: Value,
-}
-
-impl LspServerConfiguration {
-    #[must_use]
-    pub fn standard() -> Self {
-        Self {
-            initialization_options: None,
-            settings: json!({}),
-        }
-    }
-
-    #[must_use]
-    pub fn for_server(server_id: &str, executable: &Path) -> Self {
-        if matches!(
-            server_id,
-            "astro-language-server" | "astro" | "vue-language-server" | "vue_ls"
-        ) && let Some(tsdk) = typescript_sdk_for_executable(executable)
-        {
-            return Self {
-                initialization_options: Some(json!({
-                    "typescript":{"tsdk":tsdk.to_string_lossy()}
-                })),
-                settings: json!({}),
-            };
-        }
-        // What nvim-lspconfig sends: these servers format and validate only when told to.
-        match server_id {
-            "vscode-json-language-server" => Self {
-                initialization_options: Some(json!({"provideFormatter":true})),
-                settings: json!({"json":{"validate":{"enable":true},"format":{"enable":true}}}),
-            },
-            "vscode-css-language-server" => Self {
-                initialization_options: Some(json!({"provideFormatter":true})),
-                settings: json!({"css":{"validate":true},"scss":{"validate":true},"less":{"validate":true}}),
-            },
-            "vscode-html-language-server" => Self {
-                initialization_options: Some(json!({
-                    "provideFormatter":true,
-                    "embeddedLanguages":{"css":true,"javascript":true},
-                    "configurationSection":["html","css","javascript"]
-                })),
-                settings: json!({}),
-            },
-            _ => Self::standard(),
-        }
-    }
-
-    pub(crate) fn overlay(&mut self, other: Self) {
-        fn merge(target: &mut Value, source: Value) {
-            match (target, source) {
-                (Value::Object(target), Value::Object(source)) => {
-                    for (key, value) in source {
-                        merge(target.entry(key).or_insert(Value::Null), value);
-                    }
-                }
-                (target, source) => *target = source,
-            }
-        }
-        if let Some(options) = other.initialization_options {
-            merge(
-                self.initialization_options.get_or_insert(Value::Null),
-                options,
-            );
-        }
-        merge(&mut self.settings, other.settings);
-    }
-    #[must_use]
-    pub fn initialization_options(&self) -> Option<&Value> {
-        self.initialization_options.as_ref()
-    }
-
-    #[must_use]
-    pub fn maximum_inlay_hints(server_id: &str) -> Self {
-        match server_id {
-            "rust-analyzer" => {
-                let hints = json!({
-                    "bindingModeHints":{"enable":true},
-                    "chainingHints":{"enable":true},
-                    "closingBraceHints":{"enable":true,"minLines":0},
-                    "closureCaptureHints":{"enable":true},
-                    "closureReturnTypeHints":{"enable":"always"},
-                    "discriminantHints":{"enable":"always"},
-                    "expressionAdjustmentHints":{
-                        "disableReborrows":false,"enable":"always","hideOutsideUnsafe":false,"mode":"prefix"
-                    },
-                    "genericParameterHints":{
-                        "const":{"enable":true},"lifetime":{"enable":true},"type":{"enable":true}
-                    },
-                    "implicitDrops":{"enable":true},
-                    "implicitSizedBoundHints":{"enable":true},
-                    "impliedDynTraitHints":{"enable":true},
-                    "lifetimeElisionHints":{"enable":"always","useParameterNames":true},
-                    "maxLength":null,
-                    "parameterHints":{"enable":true,"missingArguments":{"enable":true}},
-                    "rangeExclusiveHints":{"enable":true},
-                    "renderColons":true,
-                    "typeHints":{
-                        "enable":true,
-                        "hideClosureInitialization":false,
-                        "hideClosureParameter":false,
-                        "hideInferredTypes":false,
-                        "hideNamedConstructor":false,
-                        "location":"inline"
-                    }
-                });
-                Self {
-                    initialization_options: Some(json!({"inlayHints":hints.clone()})),
-                    settings: json!({"rust-analyzer":{"inlayHints":hints}}),
-                }
-            }
-            "typescript-language-server" => {
-                let hints = json!({
-                    "includeInlayEnumMemberValueHints":true,
-                    "includeInlayFunctionLikeReturnTypeHints":true,
-                    "includeInlayFunctionParameterTypeHints":true,
-                    "includeInlayParameterNameHints":"all",
-                    "includeInlayParameterNameHintsWhenArgumentMatchesName":true,
-                    "includeInlayPropertyDeclarationTypeHints":true,
-                    "includeInlayVariableTypeHints":true,
-                    "includeInlayVariableTypeHintsWhenTypeMatchesName":true
-                });
-                let preferences = json!({
-                    "includeInlayEnumMemberValueHints":true,
-                    "includeInlayFunctionLikeReturnTypeHints":true,
-                    "includeInlayFunctionParameterTypeHints":true,
-                    "includeInlayParameterNameHints":"all",
-                    "includeInlayParameterNameHintsWhenArgumentMatchesName":true,
-                    "includeInlayPropertyDeclarationTypeHints":true,
-                    "includeInlayVariableTypeHints":true,
-                    "includeInlayVariableTypeHintsWhenTypeMatchesName":true
-                });
-                Self {
-                    initialization_options: Some(json!({"preferences":preferences})),
-                    settings: json!({
-                        "typescript":{"inlayHints":hints.clone()},
-                        "javascript":{"inlayHints":hints}
-                    }),
-                }
-            }
-            "gopls" => {
-                let hints = json!({
-                    "assignVariableTypes":true,
-                    "compositeLiteralFields":true,
-                    "compositeLiteralTypes":true,
-                    "constantValues":true,
-                    "functionTypeParameters":true,
-                    "parameterNames":true,
-                    "rangeVariableTypes":true
-                });
-                Self {
-                    initialization_options: Some(json!({"hints":hints.clone()})),
-                    settings: json!({"gopls":{"hints":hints}}),
-                }
-            }
-            _ => Self::standard(),
-        }
-    }
-}
-
-fn typescript_sdk_for_executable(executable: &Path) -> Option<PathBuf> {
-    let executable = std::fs::canonicalize(executable).ok()?;
-    for ancestor in executable.ancestors().take(12) {
-        for candidate in [
-            ancestor.join("typescript/lib"),
-            ancestor.join("node_modules/typescript/lib"),
-            ancestor.join("install/global/node_modules/typescript/lib"),
-        ] {
-            if candidate.join("typescript.js").is_file()
-                || candidate.join("tsserverlibrary.js").is_file()
-            {
-                return std::fs::canonicalize(candidate).ok();
-            }
-        }
-    }
-    None
-}
-
-impl Default for LspServerConfiguration {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct LspSessionKey {
-    /// Identity/trust owner of the enclosing Dust workspace root.
-    pub root_id: u64,
-    /// Canonical adapter project root selected by the generic project resolver.
-    pub project_root: PathBuf,
-    pub server_id: String,
-}
-impl LspSessionKey {
-    #[must_use]
-    pub fn transport_key(&self) -> String {
-        let digest = Sha256::digest(self.project_root.as_os_str().as_encoded_bytes());
-        format!(
-            "root:{}:project:{digest:x}:{}",
-            self.root_id, self.server_id
-        )
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDocument {
@@ -245,6 +16,7 @@ pub struct LspDocument {
     pub text: String,
 }
 
+
 impl LspDocument {
     #[must_use]
     pub fn uri(&self) -> String {
@@ -252,123 +24,6 @@ impl LspDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum SyncKind {
-    None,
-    #[default]
-    Full,
-    Incremental,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct LspCapabilities {
-    pub position_encoding: PositionEncoding,
-    pub sync_kind: SyncKind,
-    pub completion: bool,
-    pub completion_resolve: bool,
-    pub completion_triggers: Vec<String>,
-    pub hover: bool,
-    pub signature_help: bool,
-    pub definition: bool,
-    pub declaration: bool,
-    pub type_definition: bool,
-    pub implementation: bool,
-    pub references: bool,
-    pub document_symbols: bool,
-    pub workspace_symbols: bool,
-    pub rename: bool,
-    pub formatting: bool,
-    pub range_formatting: bool,
-    pub code_action: bool,
-    pub execute_command: bool,
-    pub semantic_tokens: bool,
-    pub semantic_tokens_delta: bool,
-    pub inlay_hints: bool,
-    pub pull_diagnostics: bool,
-    pub code_lens: bool,
-    pub code_lens_resolve: bool,
-    pub document_highlights: bool,
-    pub folding_ranges: bool,
-    pub selection_ranges: bool,
-    pub document_colors: bool,
-    pub semantic_token_types: Vec<String>,
-    /// Selectors for providers enabled only by dynamic registration.
-    pub document_selectors: std::collections::HashMap<String, Vec<Value>>,
-    pub sync_registrations: Vec<Value>,
-}
-
-impl LspCapabilities {
-    pub fn supports_document(&self, method: &str, document: &LspDocument) -> bool {
-        self.document_selectors.get(method).is_none_or(|options| {
-            options
-                .iter()
-                .any(|options| registration_matches(options, document))
-        })
-    }
-
-    pub(super) fn sync_kind_for_document(&self, document: &LspDocument) -> SyncKind {
-        let mut kinds = self
-            .sync_registrations
-            .iter()
-            .filter(|options| registration_matches(options, document))
-            .filter_map(|options| options.get("syncKind").and_then(Value::as_u64))
-            .peekable();
-        if kinds.peek().is_none() {
-            return self.sync_kind;
-        }
-        kinds.fold(SyncKind::None, |kind, registered| match registered {
-            1 => SyncKind::Full,
-            2 if kind != SyncKind::Full => SyncKind::Incremental,
-            _ => kind,
-        })
-    }
-}
-
-fn registration_matches(options: &Value, document: &LspDocument) -> bool {
-    let selector = options.get("documentSelector").unwrap_or(&Value::Null);
-    if selector.is_null() {
-        return true;
-    }
-    selector.as_array().is_some_and(|filters| {
-        filters.iter().any(|filter| {
-            filter.is_object()
-                && filter
-                    .get("language")
-                    .is_none_or(|language| language.as_str() == Some(&document.language_id))
-                && filter
-                    .get("scheme")
-                    .is_none_or(|scheme| scheme.as_str() == Some("file"))
-                && filter.get("pattern").is_none_or(|pattern| {
-                    let (pattern, path) = if let Some(pattern) = pattern.as_str() {
-                        (pattern, document.path.as_path())
-                    } else {
-                        let Some(base) = pattern.get("baseUri") else {
-                            return false;
-                        };
-                        let Some(base) = base
-                            .as_str()
-                            .or_else(|| base.get("uri").and_then(Value::as_str))
-                            .and_then(crate::language::lsp::paths::path_from_file_uri)
-                        else {
-                            return false;
-                        };
-                        let (Some(pattern), Ok(path)) = (
-                            pattern.get("pattern").and_then(Value::as_str),
-                            document.path.strip_prefix(base),
-                        ) else {
-                            return false;
-                        };
-                        (pattern, path)
-                    };
-                    globset::GlobBuilder::new(pattern)
-                        .literal_separator(true)
-                        .build()
-                        .ok()
-                        .is_some_and(|glob| glob.compile_matcher().is_match(path))
-                })
-        })
-    })
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspPosition {
@@ -376,11 +31,13 @@ pub struct LspPosition {
     pub character: usize,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspRange {
     pub start: LspPosition,
     pub end: LspPosition,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspTextEdit {
@@ -388,12 +45,14 @@ pub struct LspTextEdit {
     pub new_text: String,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDocumentEdit {
     pub uri: String,
     pub version: Option<u64>,
     pub edits: Vec<LspTextEdit>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspResourceOperation {
@@ -414,11 +73,13 @@ pub enum LspResourceOperation {
         ignore_if_not_exists: bool,
     },
 }
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LspWorkspaceEdit {
     pub documents: Vec<LspDocumentEdit>,
     pub resources: Vec<LspResourceOperation>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDiagnostic {
@@ -432,11 +93,13 @@ pub struct LspDiagnostic {
     pub data: Option<Value>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspLocation {
     pub uri: String,
     pub range: LspRange,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LspMarkupKind {
@@ -444,17 +107,20 @@ pub enum LspMarkupKind {
     Markdown,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspMarkupContent {
     pub kind: LspMarkupKind,
     pub value: String,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspHover {
     pub sections: Vec<LspMarkupContent>,
     pub range: Option<LspRange>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCompletionItem {
@@ -474,6 +140,7 @@ pub struct LspCompletionItem {
     pub resolve_item: Option<Value>,
     pub resolved: bool,
 }
+
 
 impl LspCompletionItem {
     /// What the menu row has no room for: a signature that says more than the label.
@@ -496,6 +163,7 @@ impl LspCompletionItem {
             .or_else(|| css_color(&self.detail))
     }
 }
+
 
 /// The first `#rgb`, `#rrggbb` or `rgb()`/`rgba()` colour in `text`.
 pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
@@ -539,6 +207,7 @@ pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
     Some((channels.next()??, channels.next()??, channels.next()??))
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSymbol {
     pub name: String,
@@ -547,6 +216,7 @@ pub struct LspSymbol {
     /// All of the symbol, where `location` is only its name when the server gives both.
     pub extent: Option<LspRange>,
 }
+
 
 /// The name LSP gives a symbol kind number.
 #[must_use]
@@ -586,17 +256,20 @@ pub fn lsp_symbol_kind_name(kind: u8) -> &'static str {
         .unwrap_or("Symbol")
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspInlayHint {
     pub position: LspPosition,
     pub label: String,
 }
+
 /// A colour the server found in the document, such as a CSS value or a Tailwind class.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspColor {
     pub range: LspRange,
     pub rgb: (u8, u8, u8),
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCodeLens {
     pub range: LspRange,
@@ -604,34 +277,40 @@ pub struct LspCodeLens {
     pub command: Option<LspCommand>,
     pub resolve_item: Option<Value>,
 }
+
 /// Something a server runs on request, through `workspace/executeCommand`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCommand {
     pub command: String,
     pub arguments: Vec<Value>,
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSemanticTokens {
     pub result_id: Option<String>,
     pub data: Vec<u32>,
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSemanticTokenEdit {
     pub start: usize,
     pub delete_count: usize,
     pub data: Vec<u32>,
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSemanticTokenDelta {
     pub result_id: Option<String>,
     pub edits: Vec<LspSemanticTokenEdit>,
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspPullDiagnostics {
     pub result_id: Option<String>,
     pub items: Vec<LspDiagnostic>,
     pub unchanged: bool,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCodeAction {
@@ -641,6 +320,7 @@ pub struct LspCodeAction {
     pub edit: Option<LspWorkspaceEdit>,
     pub command: Option<LspCommand>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspFeature {
@@ -695,6 +375,7 @@ pub enum LspFeature {
     SelectionRanges,
     DocumentColors,
 }
+
 
 impl LspFeature {
     pub(crate) fn method(&self) -> &'static str {
@@ -797,6 +478,7 @@ impl LspFeature {
     }
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 pub enum LspFeatureResult {
@@ -822,6 +504,7 @@ pub enum LspFeatureResult {
     Empty,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspHealth {
     pub root: PathBuf,
@@ -832,11 +515,13 @@ pub struct LspHealth {
     pub recent_logs: usize,
 }
 
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ServerRequestId {
     Number(i64),
     String(String),
 }
+
 
 impl ServerRequestId {
     pub(super) fn from_value(value: &Value) -> Option<Self> {
@@ -854,12 +539,14 @@ impl ServerRequestId {
     }
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LspProgressKind {
     Begin,
     Report,
     End,
 }
+
 
 #[derive(Clone, Debug)]
 pub enum LspEvent {

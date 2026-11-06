@@ -18,63 +18,63 @@ use crate::language::lsp::MAX_LOG_LINE_BYTES;
 
 use crate::language::lsp::markdown::sanitize_markdown;
 
-use crate::language::lsp::model::LspCapabilities;
+use crate::language::lsp::server::LspCapabilities;
 
-use crate::language::lsp::model::LspCodeAction;
+use crate::language::lsp::messages::LspCodeAction;
 
-use crate::language::lsp::model::LspCodeLens;
+use crate::language::lsp::messages::LspCodeLens;
 
-use crate::language::lsp::model::LspColor;
+use crate::language::lsp::messages::LspColor;
 
-use crate::language::lsp::model::LspCommand;
+use crate::language::lsp::messages::LspCommand;
 
-use crate::language::lsp::model::LspCompletionItem;
+use crate::language::lsp::messages::LspCompletionItem;
 
-use crate::language::lsp::model::LspDiagnostic;
+use crate::language::lsp::messages::LspDiagnostic;
 
-use crate::language::lsp::model::LspDocument;
+use crate::language::lsp::messages::LspDocument;
 
-use crate::language::lsp::model::LspDocumentEdit;
+use crate::language::lsp::messages::LspDocumentEdit;
 
-use crate::language::lsp::model::LspEvent;
+use crate::language::lsp::messages::LspEvent;
 
-use crate::language::lsp::model::LspFeature;
+use crate::language::lsp::messages::LspFeature;
 
-use crate::language::lsp::model::LspFeatureResult;
+use crate::language::lsp::messages::LspFeatureResult;
 
-use crate::language::lsp::model::LspHover;
+use crate::language::lsp::messages::LspHover;
 
-use crate::language::lsp::model::LspInlayHint;
+use crate::language::lsp::messages::LspInlayHint;
 
-use crate::language::lsp::model::LspLocation;
+use crate::language::lsp::messages::LspLocation;
 
-use crate::language::lsp::model::LspMarkupContent;
+use crate::language::lsp::messages::LspMarkupContent;
 
-use crate::language::lsp::model::LspMarkupKind;
+use crate::language::lsp::messages::LspMarkupKind;
 
-use crate::language::lsp::model::LspPosition;
+use crate::language::lsp::messages::LspPosition;
 
-use crate::language::lsp::model::LspProgressKind;
+use crate::language::lsp::messages::LspProgressKind;
 
-use crate::language::lsp::model::LspPullDiagnostics;
+use crate::language::lsp::messages::LspPullDiagnostics;
 
-use crate::language::lsp::model::LspRange;
+use crate::language::lsp::messages::LspRange;
 
-use crate::language::lsp::model::LspResourceOperation;
+use crate::language::lsp::messages::LspResourceOperation;
 
-use crate::language::lsp::model::LspSemanticTokenDelta;
+use crate::language::lsp::messages::LspSemanticTokenDelta;
 
-use crate::language::lsp::model::LspSemanticTokenEdit;
+use crate::language::lsp::messages::LspSemanticTokenEdit;
 
-use crate::language::lsp::model::LspSemanticTokens;
+use crate::language::lsp::messages::LspSemanticTokens;
 
-use crate::language::lsp::model::LspSymbol;
+use crate::language::lsp::messages::LspSymbol;
 
-use crate::language::lsp::model::LspTextEdit;
+use crate::language::lsp::messages::LspTextEdit;
 
-use crate::language::lsp::model::LspWorkspaceEdit;
+use crate::language::lsp::messages::LspWorkspaceEdit;
 
-use crate::language::lsp::model::SyncKind;
+use crate::language::lsp::server::SyncKind;
 
 use crate::language::lsp::origins::EditContext;
 

@@ -104,7 +104,7 @@ pub(super) struct ExtensionSession {
     results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
 }
 impl ExtensionSession {
-    pub(super) fn new(
+    pub(in crate::app) fn new(
         root: PathBuf,
         capacity: usize,
         package_root: PathBuf,
@@ -149,16 +149,16 @@ impl ExtensionSession {
             results: BTreeMap::new(),
         }
     }
-    pub(super) fn statuses(&self) -> &BTreeMap<String, PluginStatus> {
+    pub(in crate::app) fn statuses(&self) -> &BTreeMap<String, PluginStatus> {
         &self.manager.statuses
     }
-    pub(super) fn load_id(&self, id: &str) -> Option<PluginLoadId> {
+    pub(in crate::app) fn load_id(&self, id: &str) -> Option<PluginLoadId> {
         self.manager.load_id(id)
     }
-    pub(super) fn is_active_generation(&self, id: &str, load: PluginLoadId) -> bool {
+    pub(in crate::app) fn is_active_generation(&self, id: &str, load: PluginLoadId) -> bool {
         self.manager.is_active_generation(id, load)
     }
-    pub(super) fn index_from_store(
+    pub(in crate::app) fn index_from_store(
         &mut self,
         plugin: String,
         store: PathBuf,
@@ -169,7 +169,7 @@ impl ExtensionSession {
         self.manager
             .index_from_store(plugin, store, manifest, component, limits)
     }
-    pub(super) fn disable(&mut self, plugin: &str) -> Result<(), PluginError> {
+    pub(in crate::app) fn disable(&mut self, plugin: &str) -> Result<(), PluginError> {
         let load = self.manager.load_id(plugin);
         self.manager.disable(plugin)?;
         self.disabled_plugins.insert(plugin.into());
@@ -183,17 +183,17 @@ impl ExtensionSession {
         }
         Ok(())
     }
-    pub(super) fn disable_generation(
+    pub(in crate::app) fn disable_generation(
         &mut self,
         plugin: &str,
         load: PluginLoadId,
     ) -> Result<(), PluginError> {
         self.manager.disable_generation(plugin, load)
     }
-    pub(super) fn poll_owned(&mut self) -> Result<Vec<OwnedPluginEvent>, PluginError> {
+    pub(in crate::app) fn poll_owned(&mut self) -> Result<Vec<OwnedPluginEvent>, PluginError> {
         self.manager.poll_owned()
     }
-    pub(super) fn execute(
+    pub(in crate::app) fn execute(
         &mut self,
         plugin: &str,
         command: &str,
@@ -259,7 +259,7 @@ impl ExtensionSession {
             loan.submit(request)
         })
     }
-    pub(super) fn receive(
+    pub(in crate::app) fn receive(
         &mut self,
         reply: PluginExecutionReply,
         workspace: &WorkspaceVersion,
@@ -291,14 +291,14 @@ impl ExtensionSession {
         }
         received
     }
-    pub(super) fn admit_confirmations(
+    pub(in crate::app) fn admit_confirmations(
         &mut self,
         source: crate::app::plugins::edits::ConfirmationSource,
         requests: Vec<crate::plugins::PluginConfirmationRequest>,
     ) -> Result<(), String> {
         self.confirmations.admit(source, requests, &self.manager)
     }
-    pub(super) fn next_confirmation(
+    pub(in crate::app) fn next_confirmation(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
@@ -316,13 +316,13 @@ impl ExtensionSession {
                 windows,
             })
     }
-    pub(super) fn answer_confirmation(
+    pub(in crate::app) fn answer_confirmation(
         &mut self,
         answer: crate::plugins::PluginConfirmationAnswer,
     ) -> bool {
         self.confirmations.answer(answer)
     }
-    pub(super) fn dispatch_confirmation_results(
+    pub(in crate::app) fn dispatch_confirmation_results(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
@@ -337,7 +337,7 @@ impl ExtensionSession {
             self.runtime_epoch,
         )
     }
-    pub(super) fn retire_stale_confirmations(
+    pub(in crate::app) fn retire_stale_confirmations(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
@@ -355,10 +355,10 @@ impl ExtensionSession {
                 windows,
             })
     }
-    pub(super) fn owns_edit(&self, key: &OriginKey) -> bool {
+    pub(in crate::app) fn owns_edit(&self, key: &OriginKey) -> bool {
         self.edits.owns(key)
     }
-    pub(super) fn check_edit(
+    pub(in crate::app) fn check_edit(
         &self,
         key: &OriginKey,
         editor: &EditorState,
@@ -368,7 +368,7 @@ impl ExtensionSession {
         self.edits
             .check(key, &self.manager, editor, workspace, configuration)
     }
-    pub(super) fn prepare_edit(
+    pub(in crate::app) fn prepare_edit(
         &mut self,
         key: &OriginKey,
         editor: &EditorState,
@@ -378,10 +378,10 @@ impl ExtensionSession {
         self.edits
             .prepare_preview(key, &self.manager, editor, workspace, configuration)
     }
-    pub(super) fn finish_edit(&mut self, key: &OriginKey) -> Result<(), String> {
+    pub(in crate::app) fn finish_edit(&mut self, key: &OriginKey) -> Result<(), String> {
         self.edits.finish(key)
     }
-    pub(super) fn retire_edits(
+    pub(in crate::app) fn retire_edits(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
@@ -390,10 +390,10 @@ impl ExtensionSession {
         self.edits
             .retire(&self.manager, editor, workspace, configuration)
     }
-    pub(super) fn close_edits(&mut self) -> usize {
+    pub(in crate::app) fn close_edits(&mut self) -> usize {
         self.edits.close()
     }
-    pub(super) fn push_action(
+    pub(in crate::app) fn push_action(
         &mut self,
         plugin: String,
         load: PluginLoadId,
@@ -406,7 +406,7 @@ impl ExtensionSession {
         pending.push(event);
         Ok(())
     }
-    pub(super) fn queue_ui(
+    pub(in crate::app) fn queue_ui(
         &mut self,
         plugin: String,
         load: PluginLoadId,
@@ -425,38 +425,38 @@ impl ExtensionSession {
         }
     }
     #[cfg(test)]
-    pub(super) fn take_ui(&mut self, plugin: &str, load: PluginLoadId) -> Vec<PluginUiEvent> {
+    pub(in crate::app) fn take_ui(&mut self, plugin: &str, load: PluginLoadId) -> Vec<PluginUiEvent> {
         self.ui.remove(&(plugin.into(), load)).unwrap_or_default()
     }
     #[cfg(test)]
-    pub(super) fn deliver(
+    pub(in crate::app) fn deliver(
         &mut self,
         plugin: &str,
         load: PluginLoadId,
     ) -> Vec<crate::plugins::PluginHostEventEnvelope> {
         self.events.deliver(plugin, load)
     }
-    pub(super) fn acknowledge(&mut self, plugin: &str, load: PluginLoadId, ids: &[u64]) {
+    pub(in crate::app) fn acknowledge(&mut self, plugin: &str, load: PluginLoadId, ids: &[u64]) {
         self.events.acknowledge(plugin, load, ids);
     }
-    pub(super) fn install_events(
+    pub(in crate::app) fn install_events(
         &mut self,
         index: &PluginContributionIndex,
     ) -> Result<(), PluginError> {
         self.observation = None;
         self.events.install(index)
     }
-    pub(super) fn install_storage(&mut self, plugin: &str, load: PluginLoadId) {
+    pub(in crate::app) fn install_storage(&mut self, plugin: &str, load: PluginLoadId) {
         self.storage.install_generation(plugin, load);
     }
-    pub(super) fn reset_observation(&mut self) {
+    pub(in crate::app) fn reset_observation(&mut self) {
         self.observation = None;
     }
-    pub(super) fn clear_events(&mut self) {
+    pub(in crate::app) fn clear_events(&mut self) {
         self.events = PluginHostEventQueue::default();
         self.observation = None;
     }
-    pub(super) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         let active_confirmation = self.confirmations.remove_generation(plugin, load);
         self.ui.remove(&(plugin.into(), load));
         self.results.remove(&(plugin.into(), load));
@@ -465,7 +465,7 @@ impl ExtensionSession {
         self.observation = None;
         active_confirmation
     }
-    pub(super) fn reset_runtime(&mut self) -> bool {
+    pub(in crate::app) fn reset_runtime(&mut self) -> bool {
         self.runtime_epoch = self.runtime_epoch.saturating_add(1);
         self.edits = PluginEditSources::default();
         let active_confirmation = self.confirmations.reset();
@@ -490,14 +490,14 @@ impl ExtensionSession {
         }
         active_confirmation
     }
-    pub(super) fn queue_storage(&mut self, result: PluginStorageResult) {
+    pub(in crate::app) fn queue_storage(&mut self, result: PluginStorageResult) {
         let pending = self
             .results
             .entry((result.plugin.clone(), result.load))
             .or_default();
         pending.push(result);
     }
-    pub(super) fn request_storage(
+    pub(in crate::app) fn request_storage(
         &mut self,
         plugin: &str,
         load: PluginLoadId,
@@ -519,7 +519,7 @@ impl ExtensionSession {
             }
         }
     }
-    pub(super) fn poll_storage(&mut self) {
+    pub(in crate::app) fn poll_storage(&mut self) {
         for result in self.storage.poll() {
             if self.manager.load_id(&result.plugin) == Some(result.load)
                 && self
@@ -530,7 +530,7 @@ impl ExtensionSession {
             }
         }
     }
-    pub(super) fn observe(
+    pub(in crate::app) fn observe(
         &mut self,
         observation: HostObservation,
         roots: usize,
@@ -584,27 +584,29 @@ impl ExtensionSession {
 }
 #[cfg(test)]
 impl ExtensionSession {
-    pub(super) fn fixture_manager(&mut self, manager: PluginManager) {
+    pub(in crate::app) fn fixture_manager(&mut self, manager: PluginManager) {
         self.manager = manager;
         self.edits = PluginEditSources::default();
     }
-    pub(super) fn events(&self) -> &PluginHostEventQueue {
+    pub(in crate::app) fn events(&self) -> &PluginHostEventQueue {
         &self.events
     }
-    pub(super) fn observation(&self) -> &Option<HostObservation> {
+    pub(in crate::app) fn observation(&self) -> &Option<HostObservation> {
         &self.observation
     }
-    pub(super) fn ui_events(&self) -> &BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>> {
+    pub(in crate::app) fn ui_events(&self) -> &BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>> {
         &self.ui
     }
-    pub(super) fn storage_results(
+    pub(in crate::app) fn storage_results(
         &self,
     ) -> &BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>> {
         &self.results
     }
-    pub(super) fn confirmation_count(&self) -> usize {
+    pub(in crate::app) fn confirmation_count(&self) -> usize {
         self.confirmations.pending_count()
     }
 }
 
 pub(in crate::app) mod edits;
+
+mod interaction;

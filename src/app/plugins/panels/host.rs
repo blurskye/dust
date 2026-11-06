@@ -673,7 +673,7 @@ impl PluginWindowHost {
             )),
         }
     }
-    pub(super) fn allocate_handle(&mut self) -> Result<u64, PluginUiError> {
+    pub(in crate::app) fn allocate_handle(&mut self) -> Result<u64, PluginUiError> {
         let handle = self.next_handle.max(1);
         self.next_handle = handle.checked_add(1).ok_or_else(|| {
             ui_error(

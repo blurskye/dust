@@ -11,7 +11,7 @@ use serde::Serializer;
 
 use serde::de;
 
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeColor {

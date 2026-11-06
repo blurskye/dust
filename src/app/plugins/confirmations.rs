@@ -65,7 +65,7 @@ pub(super) struct ConfirmationReservationLoan<'a> {
     committed: bool,
 }
 impl ConfirmationReservationLoan<'_> {
-    pub(super) fn available(&self) -> bool {
+    pub(in crate::app) fn available(&self) -> bool {
         self.reserved
     }
     pub(super) fn enqueue<T>(
@@ -102,7 +102,7 @@ pub(super) struct PluginConfirmations {
 }
 
 impl PluginConfirmations {
-    fn len(&self) -> usize {
+    pub(in crate::app) fn len(&self) -> usize {
         self.pending.len()
             + usize::from(self.active.is_some())
             + self.answered.len()
@@ -126,7 +126,7 @@ impl PluginConfirmations {
         }
     }
 
-    pub(super) fn release_terminal(&mut self, origin: &PluginInvocationOrigin) -> bool {
+    pub(in crate::app) fn release_terminal(&mut self, origin: &PluginInvocationOrigin) -> bool {
         let Some(index) = self
             .reservations
             .iter()
@@ -138,7 +138,7 @@ impl PluginConfirmations {
         true
     }
 
-    pub(super) fn admit(
+    pub(in crate::app) fn admit(
         &mut self,
         source: ConfirmationSource,
         requests: Vec<PluginConfirmationRequest>,
@@ -194,7 +194,7 @@ impl PluginConfirmations {
         Ok(())
     }
 
-    fn failed(pending: PendingConfirmation, detail: &str) -> AnsweredConfirmation {
+    pub(in crate::app) fn failed(pending: PendingConfirmation, detail: &str) -> AnsweredConfirmation {
         AnsweredConfirmation {
             pending,
             outcome: PluginConfirmationOutcome::Failed(PluginConfirmationError::new(
@@ -204,7 +204,7 @@ impl PluginConfirmations {
         }
     }
 
-    pub(super) fn activate_next(
+    pub(in crate::app) fn activate_next(
         &mut self,
         context: ConfirmationContext<'_>,
     ) -> Option<ConfirmationPresentation> {
@@ -242,7 +242,7 @@ impl PluginConfirmations {
         None
     }
 
-    pub(super) fn answer(&mut self, answer: PluginConfirmationAnswer) -> bool {
+    pub(in crate::app) fn answer(&mut self, answer: PluginConfirmationAnswer) -> bool {
         let Some(pending) = self.active.take() else {
             return false;
         };
@@ -253,7 +253,7 @@ impl PluginConfirmations {
         true
     }
 
-    pub(super) fn dispatch(
+    pub(in crate::app) fn dispatch(
         &mut self,
         manager: &mut PluginManager,
         editor: &EditorState,
@@ -321,13 +321,13 @@ impl PluginConfirmations {
         Ok(true)
     }
 
-    pub(super) fn owns(&self, origin: &PluginInvocationOrigin) -> bool {
+    pub(in crate::app) fn owns(&self, origin: &PluginInvocationOrigin) -> bool {
         self.deliveries
             .iter()
             .any(|delivery| delivery.origin.same(origin))
     }
 
-    pub(super) fn receive(
+    pub(in crate::app) fn receive(
         &mut self,
         reply: PluginExecutionReply,
         manager: &PluginManager,
@@ -357,7 +357,7 @@ impl PluginConfirmations {
         Ok((execution, delivery.pending.source))
     }
 
-    pub(super) fn retire_stale(&mut self, context: ConfirmationContext<'_>) -> bool {
+    pub(in crate::app) fn retire_stale(&mut self, context: ConfirmationContext<'_>) -> bool {
         let active_stale = self.active.as_ref().is_some_and(|pending| {
             pending.source.manager_current(context.manager)
                 && !pending.source.current(
@@ -405,7 +405,7 @@ impl PluginConfirmations {
         active_stale
     }
 
-    pub(super) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         let active = self
             .active
             .as_ref()
@@ -424,14 +424,14 @@ impl PluginConfirmations {
         active
     }
 
-    pub(super) fn reset(&mut self) -> bool {
+    pub(in crate::app) fn reset(&mut self) -> bool {
         let active = self.active.is_some();
         *self = Self::default();
         active
     }
 
     #[cfg(test)]
-    pub(super) fn pending_count(&self) -> usize {
+    pub(in crate::app) fn pending_count(&self) -> usize {
         self.len()
     }
 }

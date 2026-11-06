@@ -438,7 +438,7 @@ pub(crate) fn visual_ranges(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn operator_range(
     text: &TextBuffer,
-    objects: &[crate::language::syntax::SyntaxObject],
+    objects: &[crate::editor::SyntaxObject],
     cursor: ByteOffset,
     motion: &str,
     count: usize,

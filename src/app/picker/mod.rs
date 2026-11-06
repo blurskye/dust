@@ -411,7 +411,7 @@ impl SearchSession {
             .as_ref()
             .map_or(PickerSurfaceKind::Generic, |picker| picker.surface)
     }
-    pub(super) fn retire_picker(&mut self) {
+    pub(in crate::app) fn retire_picker(&mut self) {
         self.picker.interaction = None;
     }
     pub(in crate::app) fn picker_insert(&mut self, text: &str) -> Option<String> {
@@ -524,7 +524,7 @@ impl SearchSession {
         picker.preview_scroll = Some(scroll.min(diff.last_scroll(picker.preview_rows)));
     }
     /// A different diff is about to show, so the next layout places it afresh.
-    pub(super) fn picker_preview_replaced(&mut self) {
+    pub(in crate::app) fn picker_preview_replaced(&mut self) {
         if let Some(picker) = &mut self.picker.interaction {
             picker.preview_scroll = None;
         }
@@ -772,3 +772,5 @@ fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<Pi
 
 mod preview;
 mod palette;
+
+mod interaction;

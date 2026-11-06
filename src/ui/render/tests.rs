@@ -1,4 +1,4 @@
-use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
 use crate::ui::render::overlays::BUFFER_OVERFLOW_RIGHT;
 use crate::ui::render::overlays::BUFFER_SEPARATOR;
@@ -163,7 +163,7 @@ fn attach_test_compositor(
         .picker
         .as_ref()
         .and_then(|picker| {
-            crate::ui::geometry::picker_window_geometry(
+            crate::ui::render::picker::picker_window_geometry(
                 picker,
                 crate::windows::WindowRect {
                     x: 0,
@@ -261,7 +261,7 @@ fn render(
     dashboard: &crate::config::DashboardConfig,
     width: u16,
     height: u16,
-) -> crate::ui::render::Frame {
+) -> crate::ui::grid::Frame {
     let mut ui = ui.clone();
     attach_test_compositor(state, &mut ui, config, width, height);
     crate::ui::render::render(state, &ui, config, dashboard, width, height)
@@ -274,7 +274,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
     local.set_cell(0, 0, "X", crate::ui::Style::Default);
     local.set_cell(5, 2, "Y", crate::ui::Style::Default);
     let frame = crate::ui::render::place_workspace_frame(
-        crate::ui::render::Frame {
+        crate::ui::grid::Frame {
             grid: local,
             cursor: Some((1, 1, crossterm::cursor::SetCursorStyle::SteadyBlock)),
         },
@@ -776,7 +776,7 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
 fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
     use crate::ui::CellGrid;
     use crate::ui::Style;
-    use crate::ui::window::WindowRect;
+    use crate::windows::WindowRect;
     let config = crate::config::load_bundled_config().config;
     let bounds = WindowRect {
         x: 7,
@@ -798,11 +798,11 @@ fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
         }],
     };
     for cursor_y in [12, 16, 22] {
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: CellGrid::new(80, 24),
             cursor: Some((10, cursor_y, crossterm::cursor::SetCursorStyle::SteadyBar)),
         };
-        crate::ui::render::overlays::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
+        crate::ui::render::documentation::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
         assert!((12..23).any(|y| frame.grid.row_text(y).contains("Hover")));
         crate::ui::render::render_key_hints(
             &mut frame,
@@ -2125,7 +2125,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
                 crate::editor::text::ByteOffset("a\t界e\u{301}".len()),
             )
             .expect("combining syntax range"),
-            role: crate::language::syntax::Highlight::STRING,
+            role: crate::config::Highlight::STRING,
         }],
         lsp_inlay_hints: vec![crate::ui::render::UiInlayHint {
             buffer,
@@ -2152,7 +2152,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
     );
     assert_eq!(
         frame.grid.get(5, 0).expect("syntax after clipping").style,
-        crate::ui::Style::Syntax(crate::language::syntax::Highlight::STRING)
+        crate::ui::Style::Syntax(crate::config::Highlight::STRING)
     );
     assert_eq!(
         frame.grid.get(8 - 1, 0).expect("projected inlay").symbol,
@@ -2802,7 +2802,7 @@ fn wrapping_ignores_horizontal_offset() {
 
 #[test]
 fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(12, 5),
         cursor: None,
     };
@@ -2851,7 +2851,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
     use crate::ui::PickerRow;
     use crate::ui::PickerSurfaceKind;
     use crate::ui::PickerUiState;
-    use crate::ui::window::WindowRect;
+    use crate::windows::WindowRect;
     let config = crate::config::load_bundled_config().config;
     let mut picker = PickerUiState {
         preview_side_scroll: (0, 0),
@@ -2879,13 +2879,13 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
                 height,
             };
             picker.surface = PickerSurfaceKind::Theme;
-            if let Some(rect) = crate::ui::geometry::picker_window_geometry(&picker, bounds) {
+            if let Some(rect) = crate::ui::render::picker::picker_window_geometry(&picker, bounds) {
                 assert!(rect.width <= 64 && rect.height <= 12);
                 assert!(rect.x >= bounds.x && rect.y >= bounds.y);
                 assert!(rect.x + rect.width <= bounds.x + width);
                 assert!(rect.y + rect.height <= bounds.y + height);
                 let content =
-                    crate::ui::geometry::picker_content_geometry(&picker, &config, rect).unwrap();
+                    crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
                 assert_eq!(content.outer, rect);
                 assert_eq!(content.list.height, rect.height - 4);
             } else {
@@ -2893,7 +2893,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
             }
             picker.surface = PickerSurfaceKind::Generic;
             assert_eq!(
-                crate::ui::geometry::picker_window_geometry(&picker, bounds),
+                crate::ui::render::picker::picker_window_geometry(&picker, bounds),
                 crate::ui::render::picker_geometry(bounds)
             );
         }
@@ -2908,7 +2908,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
     use crate::ui::PickerSurfaceKind;
     use crate::ui::PickerUiState;
     use crate::ui::Style;
-    use crate::ui::window::WindowRect;
+    use crate::windows::WindowRect;
     let config = crate::config::load_bundled_config().config;
     for surface in [PickerSurfaceKind::Generic, PickerSurfaceKind::Theme] {
         for width in [64, 20, 8] {
@@ -2940,7 +2940,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                 grid: CellGrid::new(72, 12),
                 cursor: None,
             };
-            crate::ui::render::surfaces::render_picker(&mut frame, &picker, &config, rect, None);
+            crate::ui::render::picker::render_picker(&mut frame, &picker, &config, rect, None);
             for row in 5..8 {
                 assert_eq!(frame.grid.get(rect.x + width - 1, row).unwrap().symbol, "│");
                 assert_eq!(frame.grid.get(rect.x + width, row).unwrap().symbol, " ");
@@ -3027,13 +3027,13 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
         width: 100,
         height: 24,
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(100, 24),
         cursor: None,
     };
     for query in ["", "cached"] {
         picker.query = query.into();
-        crate::ui::render::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+        crate::ui::render::picker::render_picker(&mut frame, &picker, &loaded.config, rect, None);
         assert!((0..24).any(|y| (0..100).any(|x| matches!(
             frame.grid.get(x, y).unwrap().style,
             crate::ui::Style::Syntax(_)
@@ -3045,7 +3045,7 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
     let text = picker.preview.as_mut().unwrap().as_text_mut().unwrap();
     text.set_content(vec!["x".into()], None);
     assert!(text.spans.is_empty());
-    crate::ui::render::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+    crate::ui::render::picker::render_picker(&mut frame, &picker, &loaded.config, rect, None);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("1 x")));
 }
 
@@ -3344,7 +3344,7 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
 
 #[test]
 fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new_with_policy(10, 4, "�", "◌", true),
         cursor: None,
     };
@@ -4153,7 +4153,7 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
             for active in [1, 6, 3] {
                 terminal.id = active;
                 let frame = crate::ui::render::terminal::dock_terminal_panel(
-                    crate::ui::render::Frame {
+                    crate::ui::grid::Frame {
                         grid: crate::ui::CellGrid::new(80, 8),
                         cursor: None,
                     },
@@ -4267,7 +4267,7 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
             })
             .collect(),
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 40),
         cursor: None,
     };
@@ -4309,7 +4309,7 @@ fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
         }],
     };
     for (width, clipped) in [(60, false), (24, true)] {
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: crate::ui::CellGrid::new_with_policy(width, 10, "?", "?", true),
             cursor: None,
         };
@@ -4889,7 +4889,7 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     );
 
     // And the panels are DRAWN in the regions the arrangement reserved, not over the source.
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::render::CellGrid::new(120, 40),
         cursor: None,
     };
@@ -4926,7 +4926,7 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     assert_eq!(narrow.source.width, 60, "the source keeps its FULL width");
     assert!(narrow.source.width >= DEBUG_SOURCE_MIN_WIDTH);
     let strip = narrow.console.expect("one selectable inspector remains");
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
@@ -4974,12 +4974,12 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
         watches: vec!["count".into()],
         console: vec!["count = 1".into()],
     };
-    let mut watches = crate::ui::render::Frame {
+    let mut watches = crate::ui::grid::Frame {
         grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(&mut watches, layout, &base);
-    let mut breakpoints = crate::ui::render::Frame {
+    let mut breakpoints = crate::ui::grid::Frame {
         grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
@@ -4991,7 +4991,7 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
             ..base.clone()
         },
     );
-    let rows_of = |frame: &crate::ui::render::Frame| -> String {
+    let rows_of = |frame: &crate::ui::grid::Frame| -> String {
         (strip.y..strip.y + strip.height)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -5034,7 +5034,7 @@ fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
         watches: Vec::new(),
         console: Vec::new(),
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::render::CellGrid::new(120, 40),
         cursor: None,
     };
@@ -5796,7 +5796,7 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
             crate::editor::text::ByteOffset(end),
         )
         .expect("string range"),
-        role: crate::language::syntax::Highlight::STRING,
+        role: crate::config::Highlight::STRING,
     }];
     let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 5);
     let guide = frame.grid.get(4, 2).expect("guide inside the string");
@@ -5817,14 +5817,14 @@ fn ellipsized_text_reserves_the_measured_ellipsis_width() {
     use crate::config::AmbiguousWidth::Wide;
     for policy in [Narrow, Wide] {
         for maximum in 0..8 {
-            let text = crate::ui::render::surfaces::ellipsized("abcdef", maximum, policy);
+            let text = crate::ui::geometry::ellipsized("abcdef", maximum, policy);
             assert!(crate::ui::geometry::text_width(&text, policy) <= maximum);
         }
     }
-    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 4, Wide), "ab…");
-    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 1, Wide), "");
-    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 2, Wide), "…");
-    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 4, Narrow), "abc…");
+    assert_eq!(crate::ui::geometry::ellipsized("abcdef", 4, Wide), "ab…");
+    assert_eq!(crate::ui::geometry::ellipsized("abcdef", 1, Wide), "");
+    assert_eq!(crate::ui::geometry::ellipsized("abcdef", 2, Wide), "…");
+    assert_eq!(crate::ui::geometry::ellipsized("abcdef", 4, Narrow), "abc…");
 }
 
 #[test]
@@ -5834,13 +5834,13 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         .editor
         .ambiguous_width;
     let path = "/tmp/a/very/long/prefix/that/repeats/on/every/row/src/main.py:12";
-    let (label, detail) = crate::ui::render::surfaces::fitted_picker_row(path, "print(name)", 40, ambiguous);
+    let (label, detail) = crate::ui::render::picker::fitted_picker_row(path, "print(name)", 40, ambiguous);
     assert!(
         label.starts_with('…') && label.ends_with("main.py:12"),
         "{label}"
     );
     assert_eq!(detail, "print(name)");
-    let (label, detail) = crate::ui::render::surfaces::fitted_picker_row(
+    let (label, detail) = crate::ui::render::picker::fitted_picker_row(
         "main",
         "/tmp/a/very/long/prefix/main.go:7:2",
         24,
@@ -5852,7 +5852,7 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         "{detail}"
     );
     let (label, _) =
-        crate::ui::render::surfaces::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
+        crate::ui::render::picker::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
     assert_eq!(
         label, "Git: stage/unstage all",
         "ordinary text is not a path"
@@ -5865,7 +5865,7 @@ fn key_help_breaks_between_items_and_keeps_its_end() {
         .config
         .editor
         .ambiguous_width;
-    let rows = crate::ui::render::surfaces::wrapped_key_help(
+    let rows = crate::ui::geometry::wrapped_key_help(
         "j/k move · Enter install · r refresh · Esc close",
         26,
         ambiguous,
@@ -6021,16 +6021,16 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
     use crate::ui::PickerPreview;
     use crate::ui::PickerPreviewBody;
     use crate::ui::PickerUiState;
-    use crate::ui::window::WindowRect;
+    use crate::windows::WindowRect;
     let config = crate::config::load_bundled_config().config;
-    let diff = crate::ui::render::DiffPreview {
-        hunks: vec![crate::ui::render::DiffHunk {
+    let diff = crate::ui::diff::DiffPreview {
+        hunks: vec![crate::ui::diff::DiffHunk {
             header: "@@".into(),
             collapsed_before: 0,
-            lines: vec![crate::ui::render::DiffLine {
+            lines: vec![crate::ui::diff::DiffLine {
                 old_number: Some(100),
                 new_number: Some(100),
-                kind: crate::ui::render::DiffLineKind::Context,
+                kind: crate::ui::diff::DiffLineKind::Context,
                 text: "x".repeat(30),
                 spans: Vec::new(),
             }],
@@ -6038,7 +6038,7 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
         provenance: String::new(),
         truncated: false,
         total_lines: 1,
-        layout: crate::ui::render::DiffLayout::Unified,
+        layout: crate::ui::diff::DiffLayout::Unified,
     };
     assert_eq!(diff.content_width(config.editor.ambiguous_width), 40);
     let picker = PickerUiState {
@@ -6064,26 +6064,26 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
         width: 80,
         height: 24,
     };
-    let geometry = crate::ui::geometry::picker_content_geometry(&picker, &config, rect).unwrap();
+    let geometry = crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
     assert!(geometry.divider.is_some());
     assert!(geometry.stacked_divider.is_none());
     let narrow = WindowRect { width: 74, ..rect };
-    let geometry = crate::ui::geometry::picker_content_geometry(&picker, &config, narrow).unwrap();
+    let geometry = crate::ui::render::picker::picker_content_geometry(&picker, &config, narrow).unwrap();
     assert!(geometry.divider.is_none());
     assert!(geometry.stacked_divider.is_some());
 }
 
 #[test]
 fn large_diff_rows_share_number_width() {
-    let diff = crate::ui::render::DiffPreview {
-        hunks: vec![crate::ui::render::DiffHunk {
+    let diff = crate::ui::diff::DiffPreview {
+        hunks: vec![crate::ui::diff::DiffHunk {
             header: "@@".into(),
             collapsed_before: 0,
             lines: (1..=50_000)
-                .map(|n| crate::ui::render::DiffLine {
+                .map(|n| crate::ui::diff::DiffLine {
                     old_number: None,
                     new_number: Some(n),
-                    kind: crate::ui::render::DiffLineKind::Added,
+                    kind: crate::ui::diff::DiffLineKind::Added,
                     text: "x".into(),
                     spans: Vec::new(),
                 })
@@ -6092,7 +6092,7 @@ fn large_diff_rows_share_number_width() {
         provenance: String::new(),
         truncated: false,
         total_lines: 50_000,
-        layout: crate::ui::render::DiffLayout::Unified,
+        layout: crate::ui::diff::DiffLayout::Unified,
     };
     assert_eq!(
         diff.content_width(crate::config::AmbiguousWidth::Narrow),
@@ -6260,7 +6260,7 @@ fn debugger_markers_survive_disabled_git_signs() {
 
 #[test]
 fn completion_height_fits_on_one_side_of_the_cursor() {
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(40, 10),
         cursor: Some((3, 5, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
@@ -6367,11 +6367,11 @@ fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
         .insert("dap".into(), "界".repeat(100));
     let mut menu = tool_menu_for_render();
     menu.query = "q".repeat(200);
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new_with_policy(100, 30, "�", "◌", true),
         cursor: None,
     };
-    crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 100, 30);
+    crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, 100, 30);
     // The 82-column modal begins at x=9 and ends at x=90.
     assert_eq!(frame.grid.get(90, 2).unwrap().symbol, "+");
     assert_eq!(frame.grid.get(91, 2).unwrap().symbol, " ");
@@ -6396,11 +6396,11 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     let mut menu = tool_menu_for_render();
     for can_start in [true, false] {
         menu.rows[0].can_start = can_start;
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: crate::ui::CellGrid::new(120, 40),
             cursor: None,
         };
-        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, 120, 40);
         let screen = (0..40)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -6417,11 +6417,11 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     // A failed version probe does not imply an already-running server has stopped.
     for state in ["running", "running ×2", "starting", "restarting"] {
         menu.rows[0].session_state = state.into();
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: crate::ui::CellGrid::new(120, 40),
             cursor: None,
         };
-        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, 120, 40);
         let screen = (0..40)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -6464,18 +6464,18 @@ fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen()
                 .collect(),
         }),
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: None,
     };
-    crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, 24);
+    crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &loaded.config, 80, 24);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("VERSION5")));
     for height in 6..=10 {
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: crate::ui::CellGrid::new(80, height),
             cursor: None,
         };
-        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, height);
+        crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &loaded.config, 80, height);
         assert!((0..height).any(|y| frame.grid.row_text(y).contains("Resize to choose a build")));
         assert!(!(0..height).any(|y| frame.grid.row_text(y).contains("VERSION5")));
     }
@@ -6497,13 +6497,13 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
         }],
         scroll: 20,
     };
-    let total = crate::ui::render::overlays::documentation_display_rows(&popup, &config, 80);
+    let total = crate::ui::render::documentation::documentation_display_rows(&popup, &config, 80);
     assert!(total > 20);
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 40),
         cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    crate::ui::render::overlays::render_documentation_popup(
+    crate::ui::render::documentation::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -6517,7 +6517,7 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
     );
     assert!((0..40).any(|y| frame.grid.row_text(y).contains("THE-END")));
     assert!(
-        crate::ui::render::overlays::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
+        crate::ui::render::documentation::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
             > 1
     );
 }
@@ -6545,7 +6545,7 @@ fn terminal_wide_cells_are_clipped_to_the_window_during_resize() {
         scroll_offset: 0,
         requested_height: 3,
     };
-    let mut workspace = crate::ui::render::Frame {
+    let mut workspace = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 5),
         cursor: None,
     };
@@ -6586,7 +6586,7 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
     let config = crate::config::load_bundled_config().config;
     let ui = ui_with_editor_layout(&state);
     let binding = ui.editor_window_layout.as_ref().unwrap().bindings[0];
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(40, 10),
         cursor: None,
     };
@@ -7204,11 +7204,11 @@ fn documentation_popup_clamps_scroll_after_widening() {
         }],
         scroll: 0,
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(16, 24),
         cursor: None,
     };
-    let (visible, total) = crate::ui::render::overlays::render_documentation_popup(
+    let (visible, total) = crate::ui::render::documentation::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7223,11 +7223,11 @@ fn documentation_popup_clamps_scroll_after_widening() {
     .unwrap();
     popup.scroll = total - visible;
     assert!(popup.scroll > 0);
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: None,
     };
-    crate::ui::render::overlays::render_documentation_popup(
+    crate::ui::render::documentation::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7259,11 +7259,11 @@ fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside(
         }],
         scroll: 0,
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new_with_policy(30, 24, "�", "◌", true),
         cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    let (_, total) = crate::ui::render::overlays::render_documentation_popup(
+    let (_, total) = crate::ui::render::documentation::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7477,11 +7477,11 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
         }],
         scroll: usize::MAX,
     };
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: Some((21, 20, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    let (visible, total) = crate::ui::render::overlays::render_documentation_popup(
+    let (visible, total) = crate::ui::render::documentation::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7499,7 +7499,7 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
         }),
     )
     .unwrap();
-    let expected = crate::ui::render::overlays::wrap_ranges(
+    let expected = crate::ui::render::documentation::wrap_ranges(
         &popup.sections[0].lines[0],
         16,
         config.editor.ambiguous_width,
@@ -7514,12 +7514,12 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
                 == crate::ui::Style::DocumentationBackground)
     );
 
-    let mut frame = crate::ui::render::Frame {
+    let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(80, 3),
         cursor: Some((21, 2, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
     assert!(
-        crate::ui::render::overlays::render_documentation_popup(
+        crate::ui::render::documentation::render_documentation_popup(
             &mut frame,
             &popup,
             &config,
@@ -7601,8 +7601,8 @@ fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
                 let mut expected = crate::ui::CellGrid::new_with_policy(
                     32,
                     1,
-                    crate::ui::render::CONTROL_CHARACTER_REPLACEMENT,
-                    crate::ui::render::ZERO_WIDTH_REPLACEMENT,
+                    crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT,
+                    crate::ui::grid::ZERO_WIDTH_REPLACEMENT,
                     ambiguous == crate::config::AmbiguousWidth::Wide,
                 );
                 let end = expected.put_text(0, 0, "a\u{200b}\tb", crate::ui::Style::Muted);

@@ -1,6 +1,6 @@
 use crate::app::debugger::*;
 use crate::editor::EditorState;
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 use crate::workspace::WorkspaceId;
 use crate::workspace::WorkspaceState;
 

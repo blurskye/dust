@@ -82,7 +82,7 @@ pub(in crate::app) struct EditorWindowBridge {
 }
 
 impl EditorWindowBridge {
-    pub(super) fn source(&self) -> Option<&crate::editor::EditorWindowVersion> {
+    pub(in crate::app) fn source(&self) -> Option<&crate::editor::EditorWindowVersion> {
         self.source.as_ref()
     }
     pub(in crate::app) fn is_current(
@@ -95,7 +95,7 @@ impl EditorWindowBridge {
             && self.scratch_label.as_deref() == Some(scratch_label)
     }
 
-    pub(super) fn reconcile(
+    pub(in crate::app) fn reconcile(
         &mut self,
         state: &EditorTopology<'_>,
         graph: &mut WindowGraph,
@@ -318,7 +318,7 @@ impl EditorWindowBridge {
         Ok(())
     }
 
-    pub(super) fn restore_desired_placements(
+    pub(in crate::app) fn restore_desired_placements(
         &mut self,
         state: &EditorTopology<'_>,
         graph: &mut WindowGraph,
@@ -387,7 +387,7 @@ impl EditorWindowBridge {
         self.desired_placements.get(&pane).copied()
     }
 
-    pub(super) fn place_editor(
+    pub(in crate::app) fn place_editor(
         &mut self,
         graph: &mut WindowGraph,
         pane: PaneId,
@@ -415,14 +415,14 @@ impl EditorWindowBridge {
         graph.place(expected_window, placement)
     }
 
-    pub(super) fn invalidate_layout(&mut self) {
+    pub(in crate::app) fn invalidate_layout(&mut self) {
         // `WindowGraph::place` can only append a returning tile and does not
         // own its original split ratio. Reconciliation rebuilds the filtered
         // topology from the editor-owned logical layout.
         self.source = None;
     }
 
-    pub(super) fn rebuild_tiled_layout(
+    pub(in crate::app) fn rebuild_tiled_layout(
         &self,
         state: &EditorTopology<'_>,
         graph: &mut WindowGraph,
@@ -440,7 +440,7 @@ impl EditorWindowBridge {
         Ok(())
     }
 
-    pub(super) fn resized_tiled_split(
+    pub(in crate::app) fn resized_tiled_split(
         &self,
         state: &EditorTopology<'_>,
         pane: PaneId,
@@ -525,7 +525,7 @@ impl EditorWindowBridge {
             .transpose()
     }
 
-    pub(super) fn swap_editors(
+    pub(in crate::app) fn swap_editors(
         &mut self,
         graph: &mut WindowGraph,
         first: (PaneId, WindowId),
@@ -561,14 +561,14 @@ impl EditorWindowBridge {
         Ok(())
     }
 
-    pub(super) fn restored_placement(&self, pane: PaneId) -> WindowPlacement {
+    pub(in crate::app) fn restored_placement(&self, pane: PaneId) -> WindowPlacement {
         self.restore_placements
             .get(&pane)
             .copied()
             .unwrap_or(WindowPlacement::Tiled)
     }
 
-    pub(super) fn show_editor(
+    pub(in crate::app) fn show_editor(
         &mut self,
         graph: &mut WindowGraph,
         pane: PaneId,
@@ -614,7 +614,7 @@ impl EditorWindowBridge {
     }
 
     #[cfg(test)]
-    pub(super) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
+    pub(in crate::app) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
         graph.remove_owner_generation(EDITOR_OWNER, EDITOR_GENERATION)?;
         *self = Self::default();
         Ok(())
@@ -757,11 +757,11 @@ impl NativeSurfaceBridge {
         signature.terminal_set_revision.is_some() && self.signature.as_ref() == Some(signature)
     }
 
-    pub(super) fn invalidate(&mut self) {
+    pub(in crate::app) fn invalidate(&mut self) {
         self.signature = None;
     }
 
-    pub(super) fn reconcile(
+    pub(in crate::app) fn reconcile(
         &mut self,
         graph: &mut WindowGraph,
         signature: NativeSurfaceSignature,
@@ -1345,7 +1345,7 @@ impl NativeSurfaceBridge {
         }
     }
 
-    pub(super) fn place_target(
+    pub(in crate::app) fn place_target(
         &mut self,
         target: NativeSurfaceTarget,
         placement: WindowPlacement,
@@ -1413,7 +1413,7 @@ impl NativeSurfaceBridge {
         Ok(ids)
     }
 
-    pub(super) fn show_target(
+    pub(in crate::app) fn show_target(
         &mut self,
         target: NativeSurfaceTarget,
         explorer_fallback: WindowPlacement,
@@ -1456,7 +1456,7 @@ impl NativeSurfaceBridge {
         self.place_target(target, placement)
     }
 
-    pub(super) fn close_target(
+    pub(in crate::app) fn close_target(
         &mut self,
         graph: &mut WindowGraph,
         target: NativeSurfaceTarget,
@@ -1520,7 +1520,7 @@ impl NativeSurfaceBridge {
         Ok(ids)
     }
 
-    pub(super) fn clone_explorer(
+    pub(in crate::app) fn clone_explorer(
         &mut self,
         graph: &mut WindowGraph,
         source: NativeSurfaceTarget,
@@ -1575,12 +1575,12 @@ impl NativeSurfaceBridge {
         Ok(ids)
     }
 
-    pub(super) fn allow_explorer(&mut self) {
+    pub(in crate::app) fn allow_explorer(&mut self) {
         self.explorer_closed = false;
         self.signature = None;
     }
 
-    pub(super) fn set_configured_placements(
+    pub(in crate::app) fn set_configured_placements(
         &mut self,
         placements: BTreeMap<String, WindowPlacement>,
     ) -> Result<(), WindowError> {
@@ -1643,7 +1643,7 @@ impl NativeSurfaceBridge {
         }
     }
 
-    pub(super) fn set_semantic_default(
+    pub(in crate::app) fn set_semantic_default(
         &mut self,
         content_type: &str,
         placement: WindowPlacement,
@@ -1692,13 +1692,13 @@ impl NativeSurfaceBridge {
 
     /// Records where a terminal's window goes before the window exists; the next reconcile
     /// creates it there.
-    pub(super) fn prefer_terminal_placement(&mut self, id: u64, placement: WindowPlacement) {
+    pub(in crate::app) fn prefer_terminal_placement(&mut self, id: u64, placement: WindowPlacement) {
         self.terminal_placements.insert(id, placement);
         self.terminal_restore_placements.insert(id, placement);
         self.signature = None;
     }
 
-    pub(super) fn place_terminal(
+    pub(in crate::app) fn place_terminal(
         &mut self,
         id: u64,
         placement: WindowPlacement,
@@ -1724,7 +1724,7 @@ impl NativeSurfaceBridge {
     }
 
     #[cfg(test)]
-    pub(super) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
+    pub(in crate::app) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
         graph.remove_owner_generation("builtin.surfaces", 1)?;
         let configured_placements = std::mem::take(&mut self.configured_placements);
         let explorer_placement = self.explorer_placement;

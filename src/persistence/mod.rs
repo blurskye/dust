@@ -20,76 +20,7 @@ use std::sync::mpsc::TrySendError;
 use std::thread;
 use thiserror::Error;
 
-// Keep existing UTF-8 paths readable; Unix paths with other bytes use byte arrays.
-pub(crate) mod persisted_path {
-    use crate::persistence::*;
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::ffi::OsStringExt;
 
-    #[derive(Serialize, Deserialize)]
-    #[serde(untagged)]
-    enum Encoded {
-        Text(String),
-        Bytes(Vec<u8>),
-    }
-    impl Encoded {
-        fn from_path(path: &Path) -> Self {
-            match path.to_str() {
-                Some(text) => Self::Text(text.to_owned()),
-                None => Self::Bytes(path.as_os_str().as_bytes().to_vec()),
-            }
-        }
-        fn into_path(self) -> PathBuf {
-            match self {
-                Self::Text(text) => PathBuf::from(text),
-                Self::Bytes(bytes) => PathBuf::from(std::ffi::OsString::from_vec(bytes)),
-            }
-        }
-    }
-    pub fn serialize<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
-        Encoded::from_path(path).serialize(serializer)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<PathBuf, D::Error> {
-        Encoded::deserialize(deserializer).map(Encoded::into_path)
-    }
-    pub mod optional {
-        use crate::persistence::persisted_path::*;
-        pub fn serialize<S: serde::Serializer>(
-            path: &Option<PathBuf>,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
-            path.as_deref()
-                .map(Encoded::from_path)
-                .serialize(serializer)
-        }
-        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Option<PathBuf>, D::Error> {
-            Option::<Encoded>::deserialize(deserializer).map(|path| path.map(Encoded::into_path))
-        }
-    }
-    pub mod list {
-        use crate::persistence::persisted_path::*;
-        pub fn serialize<S: serde::Serializer>(
-            paths: &[PathBuf],
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
-            paths
-                .iter()
-                .map(|path| Encoded::from_path(path))
-                .collect::<Vec<_>>()
-                .serialize(serializer)
-        }
-        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Vec<PathBuf>, D::Error> {
-            Vec::<Encoded>::deserialize(deserializer)
-                .map(|paths| paths.into_iter().map(Encoded::into_path).collect())
-        }
-    }
-}
 
 pub const STATE_VERSION: u32 = 2;
 const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;
@@ -112,7 +43,7 @@ impl Default for PersistencePolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedLocation {
-    #[serde(with = "persisted_path")]
+    #[serde(with = "crate::files::path_encoding")]
     pub path: PathBuf,
     pub byte: usize,
     pub anchor: usize,
@@ -122,7 +53,7 @@ pub struct PersistedLocation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedPane {
-    #[serde(with = "persisted_path")]
+    #[serde(with = "crate::files::path_encoding")]
     pub path: PathBuf,
     pub cursor: usize,
     pub anchor: usize,
@@ -146,7 +77,7 @@ pub enum PersistedLayout {
 #[serde(deny_unknown_fields)]
 pub struct PersistedTab {
     pub layout: PersistedLayout,
-    #[serde(default, with = "persisted_path::optional")]
+    #[serde(default, with = "crate::files::path_encoding::optional")]
     pub focused_path: Option<PathBuf>,
     #[serde(default)]
     pub focused_pane: Option<usize>,
@@ -184,7 +115,7 @@ pub struct PersistedContentDescriptor {
     pub semantic_id: String,
     pub content_type: String,
     pub adapter: String,
-    #[serde(default, with = "persisted_path::optional")]
+    #[serde(default, with = "crate::files::path_encoding::optional")]
     pub path: Option<PathBuf>,
     pub provider: Option<String>,
     pub source: Option<String>,
@@ -195,7 +126,7 @@ pub struct PersistedContentDescriptor {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedSession {
-    #[serde(with = "persisted_path::list")]
+    #[serde(with = "crate::files::path_encoding::list")]
     pub roots: Vec<PathBuf>,
     pub tabs: Vec<PersistedTab>,
     pub active_tab: usize,
@@ -206,7 +137,7 @@ pub struct PersistedSession {
     pub content_descriptors: Vec<PersistedContentDescriptor>,
     /// Absent from files written before pins were saved.
     #[serde(default)]
-    #[serde(with = "persisted_path::list")]
+    #[serde(with = "crate::files::path_encoding::list")]
     pub pinned: Vec<PathBuf>,
 }
 impl PersistedSession {
@@ -235,7 +166,7 @@ pub struct PersistedMark {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedBreakpoint {
-    #[serde(with = "persisted_path")]
+    #[serde(with = "crate::files::path_encoding")]
     pub path: PathBuf,
     pub line: u64,
     pub column: Option<u64>,
@@ -251,7 +182,7 @@ pub struct PersistedWatch {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedLargeFileOverride {
-    #[serde(with = "persisted_path")]
+    #[serde(with = "crate::files::path_encoding")]
     pub path: PathBuf,
     pub mode: String,
 }
@@ -260,7 +191,7 @@ pub struct PersistedLargeFileOverride {
 pub struct PersistedState {
     pub version: u32,
     pub session: Option<PersistedSession>,
-    #[serde(with = "persisted_path::list")]
+    #[serde(with = "crate::files::path_encoding::list")]
     pub recent_files: Vec<PathBuf>,
     pub marks: Vec<PersistedMark>,
     pub jumps: Vec<PersistedLocation>,

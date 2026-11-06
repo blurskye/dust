@@ -687,7 +687,7 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     wait(|| service.pending() == 0);
     let scoped_root = root.path().join("scoped");
     std::fs::create_dir(&scoped_root).unwrap();
-    let identity = crate::workspace::RootIdentity::capture(&scoped_root).unwrap();
+    let identity = crate::files::RootIdentity::capture(&scoped_root).unwrap();
     std::fs::rename(&scoped_root, root.path().join("retained-old-root")).unwrap();
     std::fs::create_dir(&scoped_root).unwrap();
     let denied_script = root.path().join("denied.py");

@@ -14,15 +14,15 @@ use crate::language::lsp::MAX_LOG_LINES;
 
 use crate::language::lsp::MAX_PENDING_REQUESTS;
 
-use crate::language::lsp::model::LspCapabilities;
+use crate::language::lsp::server::LspCapabilities;
 
-use crate::language::lsp::model::LspDocument;
+use crate::language::lsp::messages::LspDocument;
 
-use crate::language::lsp::model::LspEvent;
+use crate::language::lsp::messages::LspEvent;
 
-use crate::language::lsp::model::LspServerConfiguration;
+use crate::language::lsp::server::LspServerConfiguration;
 
-use crate::language::lsp::model::ServerRequestId;
+use crate::language::lsp::messages::ServerRequestId;
 
 use crate::language::lsp::origins::EditContext;
 

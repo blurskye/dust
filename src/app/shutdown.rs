@@ -5,12 +5,12 @@ use crate::app::InteractiveError;
 use crate::app::VfsError;
 
 impl App {
-    pub(super) fn finish_shutdown(&mut self) -> Result<(), InteractiveError> {
+    pub(in crate::app) fn finish_shutdown(&mut self) -> Result<(), InteractiveError> {
         // The existing two-second exit budget is shared, not extended. Owner
         // methods admit/drain/signal only; no worker join runs on this thread.
         self.finish_shutdown_before(Instant::now() + Duration::from_secs(2))
     }
-    pub(super) fn finish_shutdown_before(
+    pub(in crate::app) fn finish_shutdown_before(
         &mut self,
         deadline: Instant,
     ) -> Result<(), InteractiveError> {

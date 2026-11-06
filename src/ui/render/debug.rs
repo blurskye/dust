@@ -371,7 +371,7 @@ fn draw_region(grid: &mut crate::ui::render::CellGrid, rect: WindowRect, title: 
 /// Draw the coordinated arrangement into the regions it reserved. The workspace content was
 /// rendered at `layout.source`, so these regions hold no source: the panels cannot cover it.
 pub(crate) fn render_debug_panes(
-    frame: &mut crate::ui::render::Frame,
+    frame: &mut crate::ui::grid::Frame,
     layout: DebugLayout,
     panes: &DebugPanesUiState,
 ) {
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn narrow_console_shows_the_newest_output() {
-        let mut frame = crate::ui::render::Frame {
+        let mut frame = crate::ui::grid::Frame {
             grid: crate::ui::render::CellGrid::new(80, 24),
             cursor: None,
         };

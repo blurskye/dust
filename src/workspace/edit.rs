@@ -1,3 +1,4 @@
+use crate::editor::transaction::DocumentSnapshot;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -32,12 +33,6 @@ pub struct WorkspaceEditDraft {
     pub edits: Vec<TextEdit>,
 }
 
-#[derive(Clone, Debug)]
-pub struct FileSnapshot {
-    pub canonical_path: PathBuf,
-    pub revision: Option<BufferRevision>,
-    pub bytes: Vec<u8>,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProposedFileEdit {
@@ -72,7 +67,7 @@ impl WorkspaceEditProposal {
         label: String,
         workspace: &WorkspaceState,
         drafts: Vec<WorkspaceEditDraft>,
-        snapshots: Vec<FileSnapshot>,
+        snapshots: Vec<DocumentSnapshot>,
     ) -> Result<Self, WorkspaceError> {
         if drafts.len() > ABSOLUTE_PROPOSAL_FILE_LIMIT {
             return Err(WorkspaceError::ProposalFileLimit);

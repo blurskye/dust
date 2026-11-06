@@ -46,7 +46,7 @@ use crate::editor::EditorMode;
 use crate::app::LayoutAction;
 use crate::app::picker::PickerPayload;
 use crate::editor::text::TextBuffer;
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 use crate::remote::AgentRequest;
 use crate::remote::Reply;
 use crate::tools::ToolKind;
@@ -154,7 +154,7 @@ struct AgentFileRequest {
 }
 
 impl AgentPanel {
-    pub(super) fn new(directory: PathBuf) -> Self {
+    pub(in crate::app) fn new(directory: PathBuf) -> Self {
         Self {
             directory,
             ..Self::default()
@@ -246,7 +246,7 @@ struct PermissionRequest {
 }
 
 impl AgentSession {
-    fn status(&self, waiting: bool) -> &'static str {
+    pub(in crate::app) fn status(&self, waiting: bool) -> &'static str {
         match (self.process.is_some(), self.phase) {
             (false, Phase::Stopped) => "stopped",
             (false, _) => "saved",
@@ -258,21 +258,21 @@ impl AgentSession {
         }
     }
 
-    fn option(&self, key: &str) -> Option<&SessionOption> {
+    pub(in crate::app) fn option(&self, key: &str) -> Option<&SessionOption> {
         self.options
             .iter()
             .find(|option| option.id == key)
             .or_else(|| self.options.iter().find(|option| option.category == key))
     }
 
-    fn request(&mut self, method: &str, params: Value) -> Result<u64, String> {
+    pub(in crate::app) fn request(&mut self, method: &str, params: Value) -> Result<u64, String> {
         self.process
             .as_mut()
             .ok_or_else(|| format!("{} is not running", self.name))?
             .request(method, params)
     }
 
-    fn send_next_prompt(&mut self) {
+    pub(in crate::app) fn send_next_prompt(&mut self) {
         if self.phase != Phase::Ready
             || !self.requests.is_empty()
             || self
@@ -317,7 +317,7 @@ impl AgentSession {
         }
     }
 
-    fn set_option(&mut self, key: &str, value: &str) -> Result<(), String> {
+    pub(in crate::app) fn set_option(&mut self, key: &str, value: &str) -> Result<(), String> {
         let session = self.id.clone().ok_or("the session is still starting")?;
         let option = self
             .option(key)
@@ -345,7 +345,7 @@ impl AgentSession {
 
     /// Ask for a session: the earlier one if the agent can pick it up, otherwise a new one
     /// that gets the conversation so far with the next question.
-    fn open_session(&mut self) {
+    pub(in crate::app) fn open_session(&mut self) {
         let method = match &self.earlier {
             Some(_) if self.rejoin.resume => "session/resume",
             Some(_) if self.rejoin.load => "session/load",
@@ -376,7 +376,7 @@ impl AgentSession {
         }
     }
 
-    fn attach(&mut self, (process, phase, preferred, meta): Spawned) {
+    pub(in crate::app) fn attach(&mut self, (process, phase, preferred, meta): Spawned) {
         self.entries.push(Entry::Started {
             root: self.root.clone(),
         });
@@ -389,7 +389,7 @@ impl AgentSession {
         self.meta = meta;
     }
 
-    fn working(&self) -> bool {
+    pub(in crate::app) fn working(&self) -> bool {
         self.process.is_some()
             && matches!(
                 self.phase,
@@ -401,14 +401,14 @@ impl AgentSession {
     }
 
     /// The tab's title: its number and agent, or a subagent's task.
-    fn title(&self) -> String {
+    pub(in crate::app) fn title(&self) -> String {
         match self.parent {
             Some(_) => format!("↳ {}", self.task),
             None => format!("{} {}", self.number, self.name),
         }
     }
 
-    fn conversation(&self) -> Conversation {
+    pub(in crate::app) fn conversation(&self) -> Conversation {
         let title = self
             .entries
             .iter()
@@ -433,7 +433,7 @@ impl AgentSession {
     /// A subagent asked for a model runs on that model or not at all, so the agent that asked
     /// never gets an answer from a model it did not pick. The model may be given by its id or,
     /// ignoring case, its name.
-    fn choose_subagent_model(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn choose_subagent_model(&mut self) -> Result<(), String> {
         let Some(wanted) = self.preferred.remove(SUBAGENT_MODEL) else {
             return Ok(());
         };
@@ -468,7 +468,7 @@ impl AgentSession {
         Ok(())
     }
 
-    fn apply_preferred(&mut self) {
+    pub(in crate::app) fn apply_preferred(&mut self) {
         for (key, value) in std::mem::take(&mut self.preferred) {
             if self
                 .option(&key)
@@ -486,7 +486,7 @@ impl AgentSession {
         }
     }
 
-    fn stop(&mut self, reason: &str) {
+    pub(in crate::app) fn stop(&mut self, reason: &str) {
         self.queued.clear();
         self.requests.clear();
         self.process = None;
@@ -525,7 +525,7 @@ impl App {
 
     /// `<leader>aa` in Visual mode: show the agent with the selection going along with the
     /// next question.
-    pub(super) fn begin_agent_question(&mut self) {
+    pub(in crate::app) fn begin_agent_question(&mut self) {
         if self.configuration.settings().agents.connection
             == crate::config::AgentConnection::Terminal
         {
@@ -681,7 +681,7 @@ impl App {
         }
     }
 
-    pub(super) fn attach_agent_file(&mut self) {
+    pub(in crate::app) fn attach_agent_file(&mut self) {
         let Some(path) = self.active_path() else {
             self.show_error("the current buffer has no file");
             return;
@@ -693,7 +693,7 @@ impl App {
         self.refresh_agent_transcript();
     }
 
-    pub(super) fn attach_agent_diagnostics(&mut self) {
+    pub(in crate::app) fn attach_agent_diagnostics(&mut self) {
         let (Some(path), Some(buffer)) = (self.active_path(), self.state.active_buffer_id()) else {
             self.show_error("the current buffer has no file");
             return;
@@ -732,7 +732,7 @@ impl App {
         self.refresh_agent_transcript();
     }
 
-    pub(super) fn agent_ask(&mut self, question: String) {
+    pub(in crate::app) fn agent_ask(&mut self, question: String) {
         let question = question.trim().to_owned();
         if question.is_empty() {
             return;
@@ -785,7 +785,7 @@ impl App {
         }
     }
 
-    pub(super) fn cancel_agent_turn(&mut self) {
+    pub(in crate::app) fn cancel_agent_turn(&mut self) {
         let Some(session) = self.agent.sessions.get_mut(self.agent.active) else {
             self.notify_message("no agent session".into(), false);
             return;
@@ -884,7 +884,7 @@ impl App {
     }
 
     /// `<leader>an`: pick an agent to start in a new tab.
-    pub(super) fn open_agent_picker(&mut self) {
+    pub(in crate::app) fn open_agent_picker(&mut self) {
         let agents = &self.configuration.settings().agents;
         let default = PickerItemId(format!("agent:{}", agents.default));
         let items = agents
@@ -917,7 +917,7 @@ impl App {
     }
 
     /// `<leader>as`: the open sessions.
-    pub(super) fn open_agent_sessions_picker(&mut self) {
+    pub(in crate::app) fn open_agent_sessions_picker(&mut self) {
         if self.agent.sessions.is_empty() {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
             return;
@@ -960,7 +960,7 @@ impl App {
 
     /// `<leader>am`, `<leader>aM`, `<leader>ar` and `<leader>ao`: the active session's
     /// model, mode, thinking level, or all of its options.
-    pub(super) fn open_agent_option_picker(&mut self, key: Option<&str>) {
+    pub(in crate::app) fn open_agent_option_picker(&mut self, key: Option<&str>) {
         let Some(session) = self.active_agent() else {
             self.notify_message("no agent session; start one with <leader>an".into(), false);
             return;
@@ -1060,7 +1060,7 @@ impl App {
     }
 
     /// `<leader>aR`: saved conversations, newest first.
-    pub(super) fn open_agent_resume_picker(&mut self) {
+    pub(in crate::app) fn open_agent_resume_picker(&mut self) {
         let saved = history::list(&self.agent.directory);
         if saved.is_empty() {
             self.notify_message("no saved agent conversations".into(), false);
@@ -1125,7 +1125,7 @@ impl App {
         self.sync_picker_ui();
     }
 
-    pub(super) fn accept_agent_choice(&mut self, choice: AgentChoice) {
+    pub(in crate::app) fn accept_agent_choice(&mut self, choice: AgentChoice) {
         let result = match choice {
             AgentChoice::Profile(name) => self.open_agent_tab(&name),
             AgentChoice::Session(number) => {
@@ -1174,7 +1174,7 @@ impl App {
     }
 
     /// `<leader>a]` and `<leader>a[`.
-    pub(super) fn cycle_agent_session(&mut self, offset: isize) {
+    pub(in crate::app) fn cycle_agent_session(&mut self, offset: isize) {
         let count = self.agent.sessions.len();
         if count == 0 {
             self.notify_message("no agent sessions; start one with <leader>an".into(), false);
@@ -1188,7 +1188,7 @@ impl App {
     }
 
     /// `<leader>ax`: stop the active session and close its tab.
-    pub(super) fn close_agent_session(&mut self) {
+    pub(in crate::app) fn close_agent_session(&mut self) {
         if self.agent.sessions.is_empty() {
             self.notify_message("no agent session".into(), false);
             return;
@@ -1214,7 +1214,7 @@ impl App {
     }
 
     /// Close sessions before their disposable workspace is removed.
-    pub(super) fn close_agent_sessions_in_root(&mut self, root: &Path) {
+    pub(in crate::app) fn close_agent_sessions_in_root(&mut self, root: &Path) {
         let active = self
             .agent
             .sessions
@@ -1242,7 +1242,7 @@ impl App {
 
     /// Starting an installed adapter from the tool manager opens a session of the profile
     /// that runs it.
-    pub(super) fn start_agent_for_program(&mut self, executable: &str) {
+    pub(in crate::app) fn start_agent_for_program(&mut self, executable: &str) {
         let profile = self
             .configuration
             .settings()
@@ -1266,7 +1266,7 @@ impl App {
 
     /// `ctrl-t` in the panel: a new tab running the default agent. With no default ("ask every
     /// time") it asks which, unless only one agent is installed.
-    pub(super) fn new_agent_tab(&mut self) {
+    pub(in crate::app) fn new_agent_tab(&mut self) {
         let default = self.configuration.settings().agents.default.clone();
         if !default.is_empty() {
             self.accept_agent_choice(AgentChoice::Profile(default));
@@ -1288,7 +1288,7 @@ impl App {
     }
 
     /// Start `name` in a new tab, as many as are asked for, empty or not.
-    fn open_agent_tab(&mut self, name: &str) -> Result<(), String> {
+    pub(in crate::app) fn open_agent_tab(&mut self, name: &str) -> Result<(), String> {
         self.start_agent_session(name)?;
         self.agent.scroll = 0;
         // A new tab keeps the mode the panel is in, as a new tab does in the editor.
@@ -1298,7 +1298,7 @@ impl App {
 
     /// An agent's `agent` tool call: start a subagent of the asking session in a new tab.
     /// The tab shown does not change; the subagent's answer goes back once it is done.
-    pub(super) fn start_subagent(&mut self, request: AgentRequest) {
+    pub(in crate::app) fn start_subagent(&mut self, request: AgentRequest) {
         if request.reply.is_cancelled() {
             return;
         }
@@ -1366,7 +1366,7 @@ impl App {
     }
 
     /// Send a subagent's answer once its turn is over, and stop its agent.
-    fn settle_subagent(&mut self, index: usize) -> bool {
+    pub(in crate::app) fn settle_subagent(&mut self, index: usize) -> bool {
         let session = &mut self.agent.sessions[index];
         let finished = match session.phase {
             _ if session.reply.is_none() => false,
@@ -1451,7 +1451,7 @@ impl App {
     }
 
     /// A stopped tab; its agent starts with `attach`.
-    fn add_agent_tab(
+    pub(in crate::app) fn add_agent_tab(
         &mut self,
         name: String,
         root: PathBuf,
@@ -1543,7 +1543,7 @@ impl App {
     /// Run the agent's `add_tools` command once per run of Dust when `agents.add_tools` is on, so
     /// an agent that reads MCP servers only from its own config gets Dust's tools before it
     /// starts. A failure is shown and not retried until Dust starts again.
-    fn add_agent_tools(&mut self, name: &str) {
+    pub(in crate::app) fn add_agent_tools(&mut self, name: &str) {
         let agents = &self.configuration.settings().agents;
         let Some(command) = agents.profiles.get(name).and_then(add_tools_command) else {
             return;
@@ -1574,7 +1574,7 @@ impl App {
         });
     }
 
-    fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
+    pub(in crate::app) fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
         let profile = self
             .configuration
             .settings()
@@ -1672,7 +1672,7 @@ impl App {
                 .any(|request| request.session == number)
     }
 
-    pub(super) fn process_agent_events(&mut self) {
+    pub(in crate::app) fn process_agent_events(&mut self) {
         let failures = self
             .agent
             .tool_failures
@@ -1789,7 +1789,7 @@ impl App {
         }
     }
 
-    pub(super) fn finish_agent_history(&self, deadline: std::time::Instant) -> Result<(), String> {
+    pub(in crate::app) fn finish_agent_history(&self, deadline: std::time::Instant) -> Result<(), String> {
         for index in 0..self.agent.sessions.len() {
             self.save_agent_history(index);
         }
@@ -1797,7 +1797,7 @@ impl App {
     }
 
     /// Put a saved conversation in a tab, or show the tab it is already in.
-    fn reopen_conversation(&mut self, id: &str) -> Result<usize, String> {
+    pub(in crate::app) fn reopen_conversation(&mut self, id: &str) -> Result<usize, String> {
         if let Some(index) = self
             .agent
             .sessions
@@ -1820,7 +1820,7 @@ impl App {
         Ok(index)
     }
 
-    fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
+    pub(in crate::app) fn handle_agent_message(&mut self, index: usize, message: AgentMessage) {
         let session = &mut self.agent.sessions[index];
         match message {
             AgentMessage::Response { id, result } => {
@@ -1926,7 +1926,7 @@ impl App {
 
     /// The reply to the session's start or prompt requests. Returns whether the agent now
     /// waits for a sign-in.
-    fn handle_agent_response(
+    pub(in crate::app) fn handle_agent_response(
         &mut self,
         index: usize,
         id: u64,
@@ -2118,7 +2118,7 @@ impl App {
     }
 
     /// All disk work is asynchronous; buffer checks and updates stay on the editor thread.
-    pub(super) fn accept_agent_file(
+    pub(in crate::app) fn accept_agent_file(
         &mut self,
         result: crate::files::VfsResult,
     ) -> Option<crate::files::VfsResult> {
@@ -2228,7 +2228,7 @@ impl App {
         Ok(Value::Null)
     }
 
-    pub(super) fn fail_agent_files(&mut self, error: &str) {
+    pub(in crate::app) fn fail_agent_files(&mut self, error: &str) {
         let files = std::mem::take(&mut self.agent.files);
         for (_, request) in files {
             if let Some(index) = self
@@ -2242,7 +2242,7 @@ impl App {
         }
     }
 
-    pub(super) fn answer_agent_permission(&mut self, choice: ConfirmationChoice) {
+    pub(in crate::app) fn answer_agent_permission(&mut self, choice: ConfirmationChoice) {
         let request = self.agent.asking.take();
         self.close_prompt();
         let Some(request) = request else {
@@ -2282,7 +2282,7 @@ impl App {
         self.respond_to_agent(index, request.id, Ok(result));
     }
 
-    pub(super) fn cancel_agent_permission(&mut self) {
+    pub(in crate::app) fn cancel_agent_permission(&mut self) {
         if let Some(request) = self.agent.asking.take()
             && let Some(index) = self
                 .agent
@@ -2294,7 +2294,7 @@ impl App {
         }
     }
 
-    pub(super) fn toggle_agent_panel(&mut self) {
+    pub(in crate::app) fn toggle_agent_panel(&mut self) {
         if self.configuration.settings().agents.connection
             == crate::config::AgentConnection::Terminal
         {
@@ -2345,7 +2345,7 @@ impl App {
     }
 
     /// Show the panel in a split on its side and put the cursor in its input.
-    fn show_agent_panel(&mut self) {
+    pub(in crate::app) fn show_agent_panel(&mut self) {
         let previous = self.active_tab_focus();
         if self.agent_pane().is_none() {
             let pane_width = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
@@ -2414,7 +2414,7 @@ impl App {
         self.reconcile_editor_windows();
     }
 
-    fn agent_pane(&self) -> Option<crate::editor::PaneId> {
+    pub(in crate::app) fn agent_pane(&self) -> Option<crate::editor::PaneId> {
         let buffer = self.agent.buffer?;
         let shown = self.state.active_tab_views();
         self.state
@@ -2440,12 +2440,12 @@ impl App {
         self.state.buffers.get(buffer)?.path.clone()
     }
 
-    fn agent_view(&self) -> Option<crate::editor::ViewId> {
+    pub(in crate::app) fn agent_view(&self) -> Option<crate::editor::ViewId> {
         Some(self.state.panes.get(self.agent_pane()?)?.view)
     }
 
     /// Whether keys go to the panel's input.
-    pub(super) fn agent_input_focused(&self) -> bool {
+    pub(in crate::app) fn agent_input_focused(&self) -> bool {
         self.ui
             .agent_panel
             .as_ref()
@@ -2453,7 +2453,7 @@ impl App {
     }
 
     /// Build what the panel draws from the active session.
-    fn refresh_agent_transcript(&mut self) {
+    pub(in crate::app) fn refresh_agent_transcript(&mut self) {
         let Some(view) = self.agent_view() else {
             self.ui.agent_panel = None;
             return;
@@ -2744,7 +2744,7 @@ impl App {
     }
 
     /// The panel's width changed or it moved to another view: wrap the transcript again.
-    pub(super) fn follow_agent_pane(&mut self) {
+    pub(in crate::app) fn follow_agent_pane(&mut self) {
         let Some(view) = self.agent_view() else {
             if self.ui.agent_panel.is_some() {
                 self.ui.agent_panel = None;
@@ -2768,7 +2768,7 @@ impl App {
         }
     }
 
-    pub(super) fn agent_input_insert(&mut self, text: &str) {
+    pub(in crate::app) fn agent_input_insert(&mut self, text: &str) {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         self.agent.input.insert_str(self.agent.cursor, &text);
         self.agent.cursor += text.len();
@@ -2779,7 +2779,7 @@ impl App {
     /// `word_left`, `word_right`, `home`, `end`, `up`, `down`, `delete_word`, `clear_line`, `clear` and `complete`, and
     /// the Vim ones in `agent_input_vim`. While the slash-command menu is open, up and down
     /// move in it, and `complete` and `submit` take the selected command.
-    pub(super) fn agent_input_edit(&mut self, action: &str) {
+    pub(in crate::app) fn agent_input_edit(&mut self, action: &str) {
         if self.agent_input_vim(action) {
             self.sync_agent_input();
             return;
@@ -2997,7 +2997,7 @@ impl App {
     }
 
     /// Scroll the transcript; positive is up, toward older output.
-    pub(super) fn scroll_agent(&mut self, rows: i64) {
+    pub(in crate::app) fn scroll_agent(&mut self, rows: i64) {
         let rows = isize::try_from(rows).unwrap_or(0);
         self.agent.scroll = self.agent.scroll.saturating_add_signed(rows);
         self.sync_agent_input();
@@ -3005,7 +3005,7 @@ impl App {
 
     /// Escape in Normal mode: close the slash-command menu, or stop a turn that is running.
     /// Insert mode's Escape goes to Normal; `ctrl-h/l` leave the panel like any window.
-    pub(super) fn agent_escape(&mut self) {
+    pub(in crate::app) fn agent_escape(&mut self) {
         if !self.slash_menu().is_empty() {
             self.agent.input.clear();
             self.agent.cursor = 0;
@@ -3021,13 +3021,13 @@ impl App {
     }
 
     /// Whether the input is in Normal mode, for the `agent_normal` key context.
-    pub(super) fn agent_normal_mode(&self) -> bool {
+    pub(in crate::app) fn agent_normal_mode(&self) -> bool {
         self.agent.normal
     }
 
     /// The wheel scrolls the transcript, a click focuses the input, and a click on the tab
     /// line shows that session. Returns whether the event was over the panel.
-    pub(super) fn agent_panel_mouse(
+    pub(in crate::app) fn agent_panel_mouse(
         &mut self,
         key: &crate::editor::input::KeyEvent,
         column: u16,

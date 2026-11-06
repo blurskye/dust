@@ -37,7 +37,7 @@ struct Version {
     snapshot: Option<Box<(Arc<str>, FileFormat)>>,
 }
 impl DocumentView<'_> {
-    fn version(&self) -> Version {
+    pub(in crate::app) fn version(&self) -> Version {
         Version {
             id: self.id,
             path: self.path.map(Path::to_path_buf),
@@ -60,7 +60,7 @@ pub(in crate::app) enum DocumentFailure {
     Error(String),
 }
 impl From<VfsError> for DocumentFailure {
-    fn from(e: VfsError) -> Self {
+    pub(in crate::app) fn from(e: VfsError) -> Self {
         Self::Error(e.to_string())
     }
 }
@@ -396,7 +396,7 @@ impl DocumentSession {
         self.check_admission()?;
         Ok(())
     }
-    pub(super) fn file_reply(&mut self, id: RequestId, event: VfsResult) -> DocumentEvent {
+    pub(in crate::app) fn file_reply(&mut self, id: RequestId, event: VfsResult) -> DocumentEvent {
         match self.pending_files.remove(&id) {
             Some(intent) => DocumentEvent::File(FileReply { id, intent, event }),
             None => DocumentEvent::Discarded,
@@ -625,7 +625,7 @@ mod tests {
     use crate::app::workspace::WorkspaceSession;
     use crate::editor::EditorState;
     use crate::app::startup::StartupTarget;
-    use crate::workspace::RootIdentity;
+    use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
     fn workspace() -> WorkspaceSession {
@@ -648,7 +648,7 @@ mod tests {
             4,
         )
     }
-    fn view(state: &EditorState, id: BufferId) -> DocumentView<'_> {
+    pub(in crate::app) fn view(state: &EditorState, id: BufferId) -> DocumentView<'_> {
         let b = &state.buffers[id];
         DocumentView {
             id,
@@ -661,7 +661,7 @@ mod tests {
             read_only: b.read_only,
         }
     }
-    fn owner(state: &EditorState) -> DocumentSession {
+    pub(in crate::app) fn owner(state: &EditorState) -> DocumentSession {
         DocumentSession::new(
             crate::files::VfsWorker::start(2),
             &StartupTarget::Dashboard {

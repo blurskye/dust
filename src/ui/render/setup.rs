@@ -8,11 +8,11 @@ use crate::config::Config;
 use crate::config::PanelSide;
 
 use crate::config::TerminalPlacement;
-use crate::language::syntax::Highlight;
+use crate::config::Highlight;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
 
-use crate::ui::render::Frame;
+use crate::ui::grid::Frame;
 
 use crate::ui::render::editor::END_OF_BUFFER_MARKER;
 
@@ -30,7 +30,7 @@ use crate::ui::render::settings::fill;
 
 use crate::ui::render::settings::settings_layout;
 
-use crate::ui::render::surfaces::ellipsized;
+use crate::ui::geometry::ellipsized;
 
 /// The list of choices is at least this wide beside the preview, and at most the second.
 const LIST_WIDTH: (u16, u16) = (40, 60);
@@ -93,7 +93,7 @@ pub(super) fn render_setup(
         left + 2,
         top + 3,
         &page.question,
-        Style::Syntax(crate::language::syntax::Highlight::HEADING),
+        Style::Syntax(crate::config::Highlight::HEADING),
         right - 2,
     );
 

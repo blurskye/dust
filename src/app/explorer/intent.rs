@@ -35,7 +35,7 @@ pub(in crate::app) struct RenamePromptRequest {
     pub initial: String,
     pub root: PathBuf,
     pub path: PathBuf,
-    pub roots: Vec<crate::workspace::RootIdentity>,
+    pub roots: Vec<crate::files::RootIdentity>,
 }
 pub(in crate::app) struct MutationContext {
     pub workspace: WorkspaceVersion,
@@ -47,7 +47,7 @@ pub(in crate::app) struct MutationTicket(Arc<()>);
 pub(in crate::app) struct MutationRequest {
     pub ticket: MutationTicket,
     pub operation: ExplorerMutation,
-    pub roots: Vec<crate::workspace::RootIdentity>,
+    pub roots: Vec<crate::files::RootIdentity>,
     pub maximum: u64,
 }
 enum Phase {
@@ -79,7 +79,7 @@ pub(in crate::app) struct OpenTicket(Arc<()>);
 pub(in crate::app) struct OpenRequest {
     pub ticket: OpenTicket,
     pub path: PathBuf,
-    pub roots: Vec<crate::workspace::RootIdentity>,
+    pub roots: Vec<crate::files::RootIdentity>,
 }
 pub(super) struct OpenIntent {
     key: Arc<()>,
@@ -96,7 +96,7 @@ pub(in crate::app) struct OpenReply {
     pub split: bool,
 }
 impl ExplorerSession {
-    fn operation_roots(&self, roots: &[WorkspaceRoot]) -> Vec<crate::workspace::RootIdentity> {
+    fn operation_roots(&self, roots: &[WorkspaceRoot]) -> Vec<crate::files::RootIdentity> {
         roots
             .iter()
             .map(|root| {

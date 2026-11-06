@@ -1,123 +1,228 @@
 pub(crate) mod terminal;
+
 use terminal::active_compositor;
+
 use terminal::dock_terminal_panel;
+
 use terminal::render_key_hints;
+
 mod debug;
+
 pub(crate) mod explorer;
+
 pub use debug::DebugPane;
+
 pub use debug::DebugPanesUiState;
+
 pub use debug::debug_pane_insets;
+
 pub use debug::debug_pane_tab_at;
+
 use debug::debug_layout_in;
+
 use debug::render_debug_panes;
+
 pub(crate) use explorer::explorer_segment_style;
+
 use explorer::place_workspace_frame;
+
 use explorer::render_explorer_window;
+
 pub(crate) mod overlays;
+
 use crate::ui::geometry::text_width;
+
 use overlays::render_dashboard;
+
 use overlays::render_documentation_popup;
+
 use overlays::render_language_completion;
+
 use overlays::render_lsp_loading;
+
 use overlays::render_lsp_progress;
+
 mod workspace;
+
 use workspace::render_non_tiled_editor_window;
+
 use workspace::render_non_tiled_editor_windows;
+
 use workspace::render_workspace;
+
 mod agent;
+
 pub(crate) mod editor;
+
 mod markdown;
+
 mod settings;
+
 mod setup;
-pub(crate) mod surfaces;
+
+pub(crate) mod picker;
+pub(crate) mod tools;
+pub(crate) mod plugins;
+pub(crate) mod prompt;
+pub(crate) mod documentation;
+
 mod visual_rows;
+
 #[cfg(test)]
 use editor::render_editor_view;
+
 pub(crate) use editor::workspace_title;
+
 #[cfg(test)]
 use overlays::content_tab_width;
+
 use overlays::render_content_tab_line;
+
 use surfaces::render_picker;
+
 use surfaces::render_plugin_surface;
+
 use surfaces::render_private_surface;
+
 use surfaces::render_prompt;
+
 use surfaces::render_tool_menu;
+
 #[cfg(test)]
 use visual_rows::VisualRowSlice;
+
 use visual_rows::editor_line_number_digits;
+
 use visual_rows::git_sign_column;
+
 
 pub use agent::AgentListRow;
 
+
 pub use agent::AgentPanelUi;
 
+
 pub use agent::transcript_lines;
+
 pub use editor::snap_display_column;
+
 pub use editor::snap_display_column_forward;
+
 pub use explorer::explorer_panel_width;
+
 pub use overlays::content_tab_at_column;
+
 pub use settings::SettingsEdit;
+
 pub use settings::SettingsHit;
+
 pub use settings::SettingsLine;
+
 pub use settings::SettingsPageState;
+
 pub use settings::SettingsRow;
+
 pub use settings::SettingsValue;
+
 pub use settings::SetupChoice;
+
 pub use settings::SetupPage;
+
 pub use settings::SetupState;
+
 pub use settings::settings_hit;
+
 pub use settings::settings_layout;
+
 pub use settings::settings_lines_height;
+
 pub use surfaces::picker_geometry;
+
 pub use terminal::terminal_tab_at_column;
+
 pub(crate) use terminal::terminal_window_geometry;
+
 pub use visual_rows::VisualRowAnchor;
+
 pub use visual_rows::VisualRowModel;
+
 pub use visual_rows::editor_content_width;
+
 pub use visual_rows::editor_gutter_width;
+
 pub use visual_rows::editor_state_content_width;
+
 pub use visual_rows::editor_state_gutter_width;
+
 pub use workspace::PaneViewport;
+
 pub use workspace::active_editor_pane_viewport;
+
 pub use workspace::active_pane_viewport;
+
 pub use workspace::editor_pane_viewport_at;
+
 pub use workspace::pane_viewports;
+
 pub use workspace::view_pane_viewport;
+
 
 use std::time::Instant;
 
+
 use crate::config::AmbiguousWidth;
+
 
 use crate::config::Config;
 
+
 use crate::config::DashboardConfig;
 
+
 use crate::config::PromptTextConfig;
+
 use crate::editor::EditorState;
+
 use crate::editor::text::ByteOffset;
+
 use crate::editor::text::ByteRange;
+
 use crate::windows::CompositorProjection;
+
 use crate::windows::ContentAdapterKind;
+
 use crate::windows::ContentId;
+
 use crate::windows::TiledLayoutSnapshot;
+
 use crate::windows::WindowId;
+
 use crate::windows::WindowRect;
+
 use crossterm::cursor::SetCursorStyle;
+
 use unicode_segmentation::UnicodeSegmentation;
+
 
 use crate::ui::CellGrid;
 
+
 use crate::ui::Style;
 
-pub(crate) const CONTROL_CHARACTER_REPLACEMENT: &str = "�";
-pub(crate) const ZERO_WIDTH_REPLACEMENT: &str = "◌";
 pub(crate) const SCRATCH_LABEL: &str = "[scratch]";
+
 pub(crate) const TERMINAL_PANEL_MINIMUM_HEIGHT: u16 = 4;
+
 pub(crate) const TERMINAL_PANEL_MAXIMUM_HEIGHT: u16 = 40;
+
 pub(crate) const TERMINAL_PANEL_MINIMUM_WORKSPACE_HEIGHT: u16 = 3;
+
 pub(crate) const TERMINAL_PANEL_RESIZE_STEP: u16 = 2;
+
 pub(crate) const COMPLETION_MAX_ROWS: u16 = 12;
+
 pub(crate) const COMPLETION_DETAIL_GAP: u16 = 2;
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PromptKind {
@@ -140,6 +245,7 @@ pub enum PromptKind {
     ReplaceWith,
     SubstituteConfirm,
 }
+
 
 impl PromptKind {
     #[must_use]
@@ -189,6 +295,7 @@ impl PromptKind {
     }
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionItem {
     /// The kind's glyph, drawn before the label.
@@ -199,11 +306,13 @@ pub struct CompletionItem {
     pub color: Option<(u8, u8, u8)>,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfirmationChoice {
     Yes,
     No,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfirmationState {
@@ -214,6 +323,7 @@ pub struct ConfirmationState {
     pub negative_label: String,
     pub hint: String,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromptState {
@@ -226,6 +336,7 @@ pub struct PromptState {
     pub completions: Vec<CompletionItem>,
     pub selected_completion: Option<usize>,
 }
+
 
 impl PromptState {
     #[must_use]
@@ -243,6 +354,7 @@ impl PromptState {
     }
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DashboardAction {
     pub command: String,
@@ -250,6 +362,7 @@ pub struct DashboardAction {
     pub icon: String,
     pub key: Option<String>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuRow {
@@ -276,6 +389,7 @@ pub struct ToolMenuRow {
     pub update: Option<String>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolRuntimeOption {
     pub source: String,
@@ -293,6 +407,7 @@ pub struct ToolRuntimeOption {
     pub uninstallable: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolRuntimePickerState {
     pub server_id: String,
@@ -301,13 +416,15 @@ pub struct ToolRuntimePickerState {
     pub options: Vec<ToolRuntimeOption>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiSyntaxSpan {
     pub buffer: crate::editor::BufferId,
     pub revision: crate::editor::text::BufferRevision,
     pub range: ByteRange,
-    pub role: crate::language::syntax::Highlight,
+    pub role: crate::config::Highlight,
 }
+
 /// What a markdown buffer draws in place of its markup, for one parse of its text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiMarkdownMark {
@@ -316,6 +433,7 @@ pub struct UiMarkdownMark {
     pub range: ByteRange,
     pub mark: crate::language::syntax::MarkdownMark,
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiInlayHint {
     pub buffer: crate::editor::BufferId,
@@ -323,6 +441,7 @@ pub struct UiInlayHint {
     pub position: ByteOffset,
     pub label: String,
 }
+
 /// A colour a language server reported, painted as the background of its range.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiColorSpan {
@@ -332,6 +451,7 @@ pub struct UiColorSpan {
     pub range: ByteRange,
     pub rgb: (u8, u8, u8),
 }
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiFold {
     pub view: crate::editor::ViewId,
@@ -339,6 +459,7 @@ pub struct UiFold {
     pub end_line: usize,
     pub collapsed: bool,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiDiagnostic {
@@ -350,12 +471,14 @@ pub struct UiDiagnostic {
     pub message: String,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExpandedDiagnosticState {
     pub path: std::path::PathBuf,
     pub line: usize,
     pub severities: Vec<crate::workspace::DiagnosticSeverity>,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationPopupKind {
@@ -367,11 +490,13 @@ pub enum DocumentationPopupKind {
     Notice,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationMarkupKind {
     PlainText,
     Markdown,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentationSection {
@@ -380,8 +505,9 @@ pub struct DocumentationSection {
     pub lines: Vec<String>,
     /// Styled runs of rendered Markdown, as byte ranges in their line, by line; a line
     /// without any is drawn in its role's style.
-    pub spans: Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>>,
+    pub spans: Vec<Vec<(std::ops::Range<usize>, crate::config::Highlight)>>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentationPopupState {
@@ -392,6 +518,7 @@ pub struct DocumentationPopupState {
     pub sections: Vec<DocumentationSection>,
     pub scroll: usize,
 }
+
 
 impl DocumentationPopupState {
     #[must_use]
@@ -431,7 +558,7 @@ impl DocumentationPopupState {
         mut index: usize,
     ) -> Option<(
         &str,
-        &[(std::ops::Range<usize>, crate::language::syntax::Highlight)],
+        &[(std::ops::Range<usize>, crate::config::Highlight)],
     )> {
         for section in &self.sections {
             if let Some(heading) = &section.heading {
@@ -452,6 +579,7 @@ impl DocumentationPopupState {
     }
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageCompletionState {
     /// Columns already typed of the word being completed, so labels line up with it.
@@ -461,6 +589,7 @@ pub struct LanguageCompletionState {
     pub scroll: usize,
 }
 
+
 /// What a picker row is. A section header groups the entries under it and is drawn as a
 /// header rather than as an entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -469,6 +598,7 @@ pub enum PickerRowKind {
     Entry,
     Section,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerRow {
@@ -485,6 +615,7 @@ pub struct PickerRow {
     /// coloured independently of its neighbours.
     pub cells: Vec<PickerCell>,
 }
+
 
 impl PickerRow {
     /// A row rendered from its `label`, `detail` and `source` text, as every existing
@@ -520,6 +651,7 @@ impl PickerRow {
     }
 }
 
+
 /// How a cell's text sits inside its declared width.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CellAlign {
@@ -527,6 +659,7 @@ pub enum CellAlign {
     Left,
     Right,
 }
+
 
 /// One column of a row: its own text, its own style and its own declared width.
 ///
@@ -540,6 +673,7 @@ pub struct PickerCell {
     pub width: u16,
     pub align: CellAlign,
 }
+
 
 impl PickerCell {
     #[must_use]
@@ -576,6 +710,7 @@ impl PickerCell {
     }
 }
 
+
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum PickerSurfaceKind {
     #[default]
@@ -597,6 +732,7 @@ pub enum PickerSurfaceKind {
     Grep,
 }
 
+
 /// What a preview pane draws.
 ///
 /// A preview carries the structure of what it previews rather than flattened text, so a diff
@@ -608,6 +744,7 @@ pub enum PickerPreviewBody {
     Diff(DiffPreview),
 }
 
+
 /// Plain preview lines with a starting line number and one emphasised line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerTextPreview {
@@ -616,8 +753,9 @@ pub struct PickerTextPreview {
     pub highlight_line: Option<usize>,
     /// The language the lines are coloured as, when the previewed file has a grammar.
     language: Option<crate::language::syntax::SyntaxLanguage>,
-    spans: Vec<Vec<(std::ops::Range<usize>, crate::language::syntax::Highlight)>>,
+    spans: Vec<Vec<(std::ops::Range<usize>, crate::config::Highlight)>>,
 }
+
 
 impl PickerTextPreview {
     #[must_use]
@@ -707,410 +845,13 @@ impl PickerTextPreview {
     }
 }
 
-/// How a diff line relates to the comparison.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DiffLineKind {
-    Context,
-    Added,
-    Removed,
-}
-
-/// A byte range inside a diff line's text that changed, for intra-line emphasis.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DiffSpan {
-    pub start: usize,
-    pub end: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffLine {
-    pub kind: DiffLineKind,
-    /// The line's number on the old side, absent for a line the old side does not have.
-    pub old_number: Option<u32>,
-    /// The line's number on the new side, absent for a line the new side does not have.
-    pub new_number: Option<u32>,
-    pub text: String,
-    pub spans: Vec<DiffSpan>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffHunk {
-    /// The `@@` header, including the enclosing section where the language provides one.
-    pub header: String,
-    pub lines: Vec<DiffLine>,
-    /// Unchanged lines omitted immediately before this hunk, with the exact count.
-    pub collapsed_before: usize,
-}
-
-/// How a diff is laid out.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum DiffLayout {
-    /// One column, as a patch is written. This is the default.
-    #[default]
-    Unified,
-    /// Old and new side by side, paired line for line.
-    SideBySide,
-}
-
-/// One unified diff row, ready to paint: its text and the spans inside that text that
-/// changed, already in the text's own coordinates.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffRow {
-    pub kind: DiffRowKind,
-    pub text: String,
-    pub spans: Vec<DiffSpan>,
-}
-
-/// One half of a side-by-side row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffSideCell {
-    pub number: Option<u32>,
-    pub text: String,
-    pub spans: Vec<DiffSpan>,
-}
-
-/// One side-by-side row: what the old side shows and what the new side shows.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffSideRow {
-    pub kind: DiffRowKind,
-    /// Text for a row that spans both sides, such as the provenance or a hunk header.
-    pub spanning: Option<String>,
-    pub old: Option<DiffSideCell>,
-    pub new: Option<DiffSideCell>,
-}
-
-/// A diff carried as structure: hunks of classified lines with both line numbers and the
-/// spans that changed inside a line.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiffPreview {
-    pub hunks: Vec<DiffHunk>,
-    /// The comparison this diff is relative to, e.g. `staged = HEAD -> index`.
-    pub provenance: String,
-    /// True when the patch was bounded and what is shown is a window onto a larger total.
-    pub truncated: bool,
-    /// The true number of changed lines, so a bounded view can state what it is not showing.
-    pub total_lines: usize,
-    pub layout: DiffLayout,
-}
-
-/// What a rendered diff row is, so painting and measurement read the same row set.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DiffRowKind {
-    Provenance,
-    Collapsed,
-    Header,
-    Context,
-    Added,
-    Removed,
-    Truncated,
-}
-
-impl DiffPreview {
-    /// The widest line number, so both numbers align in their own columns.
-    #[must_use]
-    pub fn number_width(&self) -> usize {
-        self.hunks
-            .iter()
-            .flat_map(|hunk| hunk.lines.iter())
-            .flat_map(|line| [line.old_number, line.new_number])
-            .flatten()
-            .map(|number| number.to_string().len())
-            .max()
-            .unwrap_or(1)
-    }
-
-    /// The row that states how many unchanged lines a hunk skipped.
-    #[must_use]
-    pub fn collapsed_text(&self, count: usize) -> String {
-        format!(
-            "{:>number_width$}   {count} unchanged lines",
-            "",
-            number_width = self.number_width()
-        )
-    }
-
-    /// The row that states a bounded patch is not the whole patch.
-    #[must_use]
-    pub fn truncated_text(&self) -> String {
-        format!(
-            "patch truncated; {} changed lines in total",
-            self.total_lines
-        )
-    }
-
-    /// The widest content this diff draws, so a surface sizes its pane from the same rows the
-    /// painter uses rather than from a re-derivation that could drift.
-    #[must_use]
-    pub fn content_width(&self, ambiguous_width: crate::config::AmbiguousWidth) -> usize {
-        let number_width = self.number_width();
-        let measure = |text: &str| crate::ui::geometry::text_width(text, ambiguous_width);
-        match self.layout {
-            DiffLayout::Unified => self
-                .iter_rows()
-                .take(64)
-                .map(|row| measure(&row.text))
-                .max()
-                .unwrap_or(28),
-            DiffLayout::SideBySide => {
-                let rows = self.side_by_side_rows();
-                let spanning = rows
-                    .iter()
-                    .filter_map(|row| row.spanning.as_deref())
-                    .take(64)
-                    .map(measure)
-                    .max()
-                    .unwrap_or(0);
-                let (left, right) = rows.iter().fold((0usize, 0usize), |(left, right), row| {
-                    let half = |cell: &DiffSideCell| {
-                        measure(&Self::side_cell_text_with_width(cell, number_width).0)
-                    };
-                    (
-                        left.max(row.old.as_ref().map_or(0, half)),
-                        right.max(row.new.as_ref().map_or(0, half)),
-                    )
-                });
-                // The two halves and the divider between them share one row.
-                spanning.max(left.saturating_add(right).saturating_add(1))
-            }
-        }
-    }
-
-    /// The text of one unified diff line, with the changed spans moved into its coordinates.
-    #[must_use]
-    pub fn line_row(&self, line: &DiffLine) -> (String, Vec<DiffSpan>) {
-        Self::line_row_with_width(line, self.number_width())
-    }
-
-    fn line_row_with_width(line: &DiffLine, number_width: usize) -> (String, Vec<DiffSpan>) {
-        let old = line.old_number.map_or_else(String::new, |n| n.to_string());
-        let new = line.new_number.map_or_else(String::new, |n| n.to_string());
-        let glyph = match line.kind {
-            DiffLineKind::Added => '+',
-            DiffLineKind::Removed => '-',
-            DiffLineKind::Context => ' ',
-        };
-        let prefix = format!("{old:>number_width$} {new:>number_width$} {glyph} ");
-        let offset = prefix.len();
-        let spans = line
-            .spans
-            .iter()
-            .map(|span| DiffSpan {
-                start: span.start.saturating_add(offset),
-                end: span.end.saturating_add(offset),
-            })
-            .collect();
-        (format!("{prefix}{}", line.text), spans)
-    }
-
-    /// The text of one side-by-side half, with its number column and its changed spans in the
-    /// returned text's coordinates.
-    #[must_use]
-    pub fn side_cell_text(&self, cell: &DiffSideCell) -> (String, Vec<DiffSpan>) {
-        Self::side_cell_text_with_width(cell, self.number_width())
-    }
-
-    fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
-        let number = cell.number.map_or_else(String::new, |n| n.to_string());
-        let prefix = format!("{number:>width$} ", width = width);
-        let offset = prefix.len();
-        let spans = cell
-            .spans
-            .iter()
-            .map(|span| DiffSpan {
-                start: span.start.saturating_add(offset),
-                end: span.end.saturating_add(offset),
-            })
-            .collect();
-        (format!("{prefix}{}", cell.text), spans)
-    }
-
-    /// The rows that stay on top of the box while the rest scroll: the comparison's name.
-    #[must_use]
-    pub fn pinned_rows(&self) -> usize {
-        usize::from(!self.provenance.is_empty())
-    }
-
-    /// The furthest a box of `height` rows can scroll.
-    #[must_use]
-    pub fn last_scroll(&self, height: usize) -> usize {
-        let pinned = self.pinned_rows();
-        let total = self
-            .hunks
-            .iter()
-            .map(|hunk| hunk.lines.len() + 1 + usize::from(hunk.collapsed_before > 0))
-            .sum::<usize>()
-            + pinned
-            + usize::from(self.truncated);
-        total
-            .saturating_sub(pinned)
-            .saturating_sub(height.saturating_sub(pinned))
-    }
-
-    /// Where a box of `height` rows opens: at the top when the first change fits, otherwise
-    /// on that change with one row above it.
-    #[must_use]
-    pub fn opening_scroll(&self, height: usize) -> usize {
-        let pinned = self.pinned_rows();
-        let first_change = self
-            .iter_rows()
-            .skip(pinned)
-            .position(|row| matches!(row.kind, DiffRowKind::Added | DiffRowKind::Removed))
-            .unwrap_or(0);
-        if first_change < height.saturating_sub(pinned) {
-            0
-        } else {
-            first_change.saturating_sub(1)
-        }
-    }
-
-    /// Every row this diff draws in the unified layout, in order.
-    ///
-    /// Measurement and painting both read this, so a preview's width cannot be computed from
-    /// one row set while a different one is drawn, and the spans a row carries are already in
-    /// that row's own coordinates so the painter cannot shift them wrongly.
-    #[must_use]
-    pub fn rows(&self) -> Vec<DiffRow> {
-        self.iter_rows().collect()
-    }
-
-    fn iter_rows(&self) -> impl Iterator<Item = DiffRow> + '_ {
-        let number_width = self.number_width();
-        let plain = |kind, text| DiffRow {
-            kind,
-            text,
-            spans: Vec::new(),
-        };
-        let provenance = (!self.provenance.is_empty())
-            .then(|| plain(DiffRowKind::Provenance, self.provenance.clone()));
-        let hunks = self.hunks.iter().flat_map(move |hunk| {
-            let collapsed = (hunk.collapsed_before > 0).then(|| {
-                plain(
-                    DiffRowKind::Collapsed,
-                    format!(
-                        "{:>number_width$}   {} unchanged lines",
-                        "", hunk.collapsed_before
-                    ),
-                )
-            });
-            collapsed
-                .into_iter()
-                .chain(std::iter::once(plain(
-                    DiffRowKind::Header,
-                    hunk.header.clone(),
-                )))
-                .chain(hunk.lines.iter().map(move |line| {
-                    let kind = match line.kind {
-                        DiffLineKind::Added => DiffRowKind::Added,
-                        DiffLineKind::Removed => DiffRowKind::Removed,
-                        DiffLineKind::Context => DiffRowKind::Context,
-                    };
-                    let (text, spans) = Self::line_row_with_width(line, number_width);
-                    DiffRow { kind, text, spans }
-                }))
-        });
-        provenance.into_iter().chain(hunks).chain(
-            self.truncated
-                .then(|| plain(DiffRowKind::Truncated, self.truncated_text())),
-        )
-    }
-
-    /// Every row a side-by-side diff draws, paired line for line.
-    ///
-    /// The side-by-side layout reads this for both measurement and painting the same way the
-    /// unified layout reads `rows`, so neither layout can be measured from one row set while
-    /// a different one is drawn.
-    #[must_use]
-    pub fn side_by_side_rows(&self) -> Vec<DiffSideRow> {
-        let number_width = self.number_width();
-        let spanning = |kind: DiffRowKind, text: String| DiffSideRow {
-            kind,
-            spanning: Some(text),
-            old: None,
-            new: None,
-        };
-        let cell = |number: Option<u32>, line: &DiffLine| DiffSideCell {
-            number,
-            text: line.text.clone(),
-            spans: line.spans.clone(),
-        };
-        let mut rows = Vec::new();
-        if !self.provenance.is_empty() {
-            rows.push(spanning(DiffRowKind::Provenance, self.provenance.clone()));
-        }
-        for hunk in &self.hunks {
-            if hunk.collapsed_before > 0 {
-                rows.push(spanning(
-                    DiffRowKind::Collapsed,
-                    format!(
-                        "{:>number_width$}   {} unchanged lines",
-                        "", hunk.collapsed_before
-                    ),
-                ));
-            }
-            rows.push(spanning(DiffRowKind::Header, hunk.header.clone()));
-            let mut index = 0usize;
-            while index < hunk.lines.len() {
-                let line = &hunk.lines[index];
-                match line.kind {
-                    DiffLineKind::Context => {
-                        rows.push(DiffSideRow {
-                            kind: DiffRowKind::Context,
-                            spanning: None,
-                            old: Some(cell(line.old_number, line)),
-                            new: Some(cell(line.new_number, line)),
-                        });
-                        index += 1;
-                    }
-                    DiffLineKind::Removed => {
-                        let removed_start = index;
-                        while index < hunk.lines.len()
-                            && hunk.lines[index].kind == DiffLineKind::Removed
-                        {
-                            index += 1;
-                        }
-                        let added_start = index;
-                        while index < hunk.lines.len()
-                            && hunk.lines[index].kind == DiffLineKind::Added
-                        {
-                            index += 1;
-                        }
-                        let removed = &hunk.lines[removed_start..added_start];
-                        let added = &hunk.lines[added_start..index];
-                        // A change block pairs its removed and added lines so the two sides
-                        // stay in step; an unpaired line leaves the other side blank.
-                        for pair in 0..removed.len().max(added.len()) {
-                            rows.push(DiffSideRow {
-                                kind: DiffRowKind::Removed,
-                                spanning: None,
-                                old: removed.get(pair).map(|l| cell(l.old_number, l)),
-                                new: added.get(pair).map(|l| cell(l.new_number, l)),
-                            });
-                        }
-                    }
-                    DiffLineKind::Added => {
-                        rows.push(DiffSideRow {
-                            kind: DiffRowKind::Added,
-                            spanning: None,
-                            old: None,
-                            new: Some(cell(line.new_number, line)),
-                        });
-                        index += 1;
-                    }
-                }
-            }
-        }
-        if self.truncated {
-            rows.push(spanning(DiffRowKind::Truncated, self.truncated_text()));
-        }
-        rows
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerPreview {
     pub title: String,
     pub body: PickerPreviewBody,
 }
+
 
 impl PickerPreview {
     /// A preview of plain text lines.
@@ -1140,6 +881,7 @@ impl PickerPreview {
     }
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
     /// Effective interaction mode and hints derived from the accepted keymaps.
@@ -1166,6 +908,7 @@ pub struct PickerUiState {
     pub preview: Option<PickerPreview>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginSurfaceRow {
     pub node: u64,
@@ -1176,6 +919,7 @@ pub struct PluginSurfaceRow {
     pub focused: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginSurfaceUiState {
     pub handle: u64,
@@ -1185,6 +929,7 @@ pub struct PluginSurfaceUiState {
     pub rows: Vec<PluginSurfaceRow>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateSurfaceCell {
     pub x: u16,
@@ -1193,6 +938,7 @@ pub struct PrivateSurfaceCell {
     pub continuation: bool,
     pub style: Style,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateSurfaceUiState {
@@ -1207,6 +953,7 @@ pub struct PrivateSurfaceUiState {
     pub focused: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyHintUiRow {
     pub next_key: String,
@@ -1215,11 +962,13 @@ pub struct KeyHintUiRow {
     pub group: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyHintUiState {
     pub prefix: String,
     pub rows: Vec<KeyHintUiRow>,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorerSegmentRole {
@@ -1242,11 +991,13 @@ pub enum ExplorerSegmentRole {
     Diagnostic,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiSegment {
     pub text: String,
     pub role: ExplorerSegmentRole,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiRow {
@@ -1255,6 +1006,7 @@ pub struct ExplorerUiRow {
     pub segments: Vec<ExplorerUiSegment>,
     pub right_segments: Vec<ExplorerUiSegment>,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiState {
@@ -1271,12 +1023,14 @@ pub struct ExplorerUiState {
     pub searching: bool,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPanelMode {
     Input,
     Normal,
     Visual,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPhase {
@@ -1289,6 +1043,7 @@ pub enum TerminalPhase {
     Unknown,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalTabState {
     pub phase: TerminalPhase,
@@ -1298,7 +1053,9 @@ pub struct TerminalTabState {
     pub exit_code: Option<u32>,
 }
 
+
 pub type TerminalSelection = ((usize, usize), (usize, usize), bool);
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalPanelState {
@@ -1321,6 +1078,7 @@ pub struct TerminalPanelState {
     pub requested_height: u16,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalPanelGeometry {
     pub x: u16,
@@ -1332,6 +1090,7 @@ pub struct TerminalPanelGeometry {
     pub body_top: u16,
     pub body_height: u16,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuState {
@@ -1345,8 +1104,10 @@ pub struct ToolMenuState {
     pub searching: bool,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContentTabIdentity(pub ContentId);
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentTabKind {
@@ -1357,6 +1118,7 @@ pub enum ContentTabKind {
     PrivateCellSurface,
     ExternalTui,
 }
+
 
 impl From<ContentAdapterKind> for ContentTabKind {
     fn from(adapter: ContentAdapterKind) -> Self {
@@ -1371,16 +1133,19 @@ impl From<ContentAdapterKind> for ContentTabKind {
     }
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentTabDiagnosticSeverity {
     Error,
     Warning,
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContentTabDiagnostic {
     pub severity: ContentTabDiagnosticSeverity,
     pub count: u16,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentTabEntry {
@@ -1395,12 +1160,14 @@ pub struct ContentTabEntry {
     pub closeable: bool,
 }
 
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EditorWindowBinding {
     pub window: WindowId,
     pub pane: crate::editor::PaneId,
     pub view: crate::editor::ViewId,
 }
+
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerWindowUiState {
@@ -1410,12 +1177,14 @@ pub struct ExplorerWindowUiState {
     pub focused: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorWindowLayoutState {
     pub source_revision: u64,
     pub layout: TiledLayoutSnapshot,
     pub bindings: Vec<EditorWindowBinding>,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeSurfaceWindowBinding {
@@ -1425,6 +1194,7 @@ pub struct NativeSurfaceWindowBinding {
     pub picker: Option<WindowId>,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositorLayoutState {
     pub source_revision: u64,
@@ -1433,10 +1203,12 @@ pub struct CompositorLayoutState {
     pub surfaces: NativeSurfaceWindowBinding,
 }
 
+
 enum PluginRenderable<'a> {
     Retained(&'a PluginSurfaceUiState),
     Private(&'a PrivateSurfaceUiState),
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DebugSignKind {
@@ -1446,12 +1218,14 @@ pub enum DebugSignKind {
     Execution,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DebugSign {
     pub path: std::path::PathBuf,
     pub line: usize,
     pub kind: DebugSignKind,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiGitSignKind {
@@ -1460,12 +1234,14 @@ pub enum UiGitSignKind {
     Deleted,
 }
 
+
 /// A symbol the status line can name when the cursor is on one of its lines.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBreadcrumb {
     pub name: String,
     pub range: crate::editor::text::ByteRange,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UiGitSign {
@@ -1479,6 +1255,7 @@ pub struct UiGitSign {
     pub staged: bool,
 }
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiLspProgress {
     pub(crate) server_key: String,
@@ -1491,6 +1268,7 @@ pub struct UiLspProgress {
     pub(crate) completed_at: Option<Instant>,
 }
 
+
 /// What the operation bar shows. The actions are the ones VALID in the repository's real state,
 /// so a bar can never offer an action the repository would refuse.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1501,6 +1279,7 @@ pub struct OperationBarState {
     pub actions: Vec<String>,
     pub abort_binding: Option<String>,
 }
+
 
 impl OperationBarState {
     /// The compact indicator the statusline carries, so the state survives where the bar cannot
@@ -1587,12 +1366,14 @@ impl OperationBarState {
     }
 }
 
+
 #[derive(Clone, Debug)]
 pub struct FlashOverlay {
     pub view: crate::editor::ViewId,
     pub matches: Vec<crate::editor::text::ByteRange>,
     pub labels: Vec<(crate::editor::text::ByteOffset, char)>,
 }
+
 
 /// Text just yanked, drawn in the search colour until `until`, as LazyVim's highlight on yank.
 #[derive(Clone, Debug)]
@@ -1603,6 +1384,7 @@ pub struct YankHighlight {
     pub ranges: Vec<crate::editor::text::ByteRange>,
     pub until: std::time::Instant,
 }
+
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
@@ -1681,6 +1463,7 @@ pub struct UiState {
     pub tutor: Option<TutorCard>,
 }
 
+
 /// One tutor step on a card at the bottom right, above the status line. Text in `backticks` is
 /// drawn as keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1703,11 +1486,6 @@ pub struct TutorCard {
     pub line: Option<(crate::editor::BufferId, usize)>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Frame {
-    pub grid: CellGrid,
-    pub cursor: Option<(u16, u16, SetCursorStyle)>,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PromptGeometry {
@@ -1716,6 +1494,7 @@ pub struct PromptGeometry {
     pub width: u16,
     pub height: u16,
 }
+
 
 #[must_use]
 pub fn prompt_geometry(
@@ -1746,10 +1525,12 @@ pub fn prompt_geometry(
     }
 }
 
+
 #[derive(Clone, Debug)]
 pub(crate) struct ConfirmationLine {
     pub units: Vec<(String, u16)>,
 }
+
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConfirmationLayout {
@@ -1757,6 +1538,7 @@ pub(crate) struct ConfirmationLayout {
     pub lines: Vec<ConfirmationLine>,
     pub fully_visible: bool,
 }
+
 
 fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<ConfirmationLine>, bool) {
     let policy = CellGrid::new_with_policy(
@@ -1808,6 +1590,7 @@ fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<Confirmat
     (lines, oversized)
 }
 
+
 #[must_use]
 pub(crate) fn confirmation_layout(
     terminal_width: u16,
@@ -1857,6 +1640,7 @@ pub(crate) fn confirmation_layout(
     }
 }
 
+
 #[must_use]
 pub fn prompt_geometry_for_state(
     terminal_width: u16,
@@ -1867,6 +1651,7 @@ pub fn prompt_geometry_for_state(
     confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
 }
 
+
 #[must_use]
 pub fn confirmation_fully_visible(
     terminal_width: u16,
@@ -1876,6 +1661,7 @@ pub fn confirmation_fully_visible(
 ) -> bool {
     confirmation_layout(terminal_width, terminal_height, config, prompt).fully_visible
 }
+
 
 #[must_use]
 pub fn prompt_surface_dimensions(
@@ -1891,6 +1677,7 @@ pub fn prompt_surface_dimensions(
     (terminal_width, height)
 }
 
+
 /// Rows at the foot of the screen, under every dock: the status line, and above it the bar of a
 /// paused operation. The dashboard has neither.
 #[must_use]
@@ -1901,6 +1688,7 @@ pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, heig
     1 + u16::from(ui.operation_bar.is_some() && height > 2)
 }
 
+
 #[must_use]
 pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) -> u16 {
     let tab_line = state.tabs.len() > 1;
@@ -1908,6 +1696,7 @@ pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) ->
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     u16::from(tab_line).saturating_add(u16::from(buffer_line))
 }
+
 
 #[must_use]
 pub fn terminal_panel_geometry(
@@ -1936,7 +1725,9 @@ pub fn terminal_panel_geometry(
     })
 }
 
+
 const NOTIFICATION_MAX_LINES: usize = 5;
+
 
 fn render_error_notification(
     frame: &mut Frame,
@@ -2015,6 +1806,7 @@ fn render_error_notification(
     }
 }
 
+
 fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
     text.split('\n')
         .flat_map(|line| {
@@ -2024,6 +1816,7 @@ fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<S
         })
         .collect()
 }
+
 
 /// Tutor text wrapped to `width`, each line a list of (piece, is a key) runs.
 fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Vec<(String, bool)>> {
@@ -2086,6 +1879,7 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
     }
     lines
 }
+
 
 /// The tutor card at the bottom right, above the status line: the step's title in its border,
 /// the instruction and the tutor's commands. It moves to the top while the key hints fill the
@@ -2233,6 +2027,7 @@ fn render_tutor_card(
     }
 }
 
+
 #[must_use]
 pub fn render(
     state: &EditorState,
@@ -2244,6 +2039,7 @@ pub fn render(
 ) -> Frame {
     render_with_documentation_geometry(state, ui, config, dashboard, width, height).0
 }
+
 
 /// Also returns the documentation's visible and wrapped row counts for scrolling.
 pub(crate) fn render_with_documentation_geometry(
@@ -2762,5 +2558,8 @@ pub(crate) fn render_with_documentation_geometry(
     (frame, documentation_geometry)
 }
 
+
 #[cfg(test)]
 mod tests;
+use crate::ui::grid::Frame;
+use crate::ui::diff::{DiffLineKind,DiffSpan,DiffLine,DiffHunk,DiffLayout,DiffRow,DiffSideCell,DiffSideRow,DiffPreview,DiffRowKind};

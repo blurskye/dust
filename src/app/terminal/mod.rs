@@ -40,7 +40,7 @@ pub(in crate::app) struct TerminalKey {
     id: PtyId,
 }
 impl PartialEq for TerminalKey {
-    fn eq(&self, other: &Self) -> bool {
+    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
         self.id == other.id && Arc::ptr_eq(&self.owner, &other.owner)
     }
 }
@@ -1192,7 +1192,7 @@ impl TerminalSession {
 }
 
 impl TerminalRuntime {
-    fn feed_bytes(&mut self, bytes: &[u8]) {
+    pub(in crate::app) fn feed_bytes(&mut self, bytes: &[u8]) {
         self.screen.feed_bytes_tracked(
             bytes,
             &mut self.normal_cursor,
@@ -1224,7 +1224,7 @@ impl TerminalRuntime {
             }
         }
     }
-    fn phase(&self) -> crate::ui::TerminalPhase {
+    pub(in crate::app) fn phase(&self) -> crate::ui::TerminalPhase {
         use crate::ui::TerminalPhase;
         if self.stopping {
             TerminalPhase::Stopping
@@ -1251,13 +1251,13 @@ impl TerminalRuntime {
 mod tests {
     use crate::app::terminal::*;
 
-    fn fixture() -> (tempfile::TempDir, WorkspaceSession, TerminalSession) {
+    pub(in crate::app) fn fixture() -> (tempfile::TempDir, WorkspaceSession, TerminalSession) {
         let root = tempfile::tempdir().unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -1520,7 +1520,7 @@ mod tests {
             crate::workspace::WorkspaceId(1),
             [(
                 "test".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -1567,7 +1567,7 @@ mod tests {
             crate::workspace::WorkspaceId(1),
             [(
                 "test".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -1616,7 +1616,7 @@ mod tests {
             crate::workspace::WorkspaceId(1),
             [(
                 "root".into(),
-                crate::workspace::RootIdentity::capture(root.path()).unwrap(),
+                crate::files::RootIdentity::capture(root.path()).unwrap(),
             )],
         )
         .unwrap();
@@ -1865,3 +1865,5 @@ fn expand_placeholders(
     }
     Ok((expanded, arguments))
 }
+
+mod interaction;
