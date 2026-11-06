@@ -105,11 +105,7 @@ fn completed(
         diagnostic_source: Some(source),
     }
 }
-fn documents(
-    vfs: VfsWorker,
-    editor: &EditorState,
-    workspace: &Workspace,
-) -> Documents {
+fn documents(vfs: VfsWorker, editor: &EditorState, workspace: &Workspace) -> Documents {
     Documents::new(
         vfs,
         &StartupTarget::Dashboard {
@@ -120,11 +116,7 @@ fn documents(
         16,
     )
 }
-fn reply(
-    documents: &mut Documents,
-    editor: &EditorState,
-    workspace: &Workspace,
-) -> TaskReadReply {
+fn reply(documents: &mut Documents, editor: &EditorState, workspace: &Workspace) -> TaskReadReply {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(DocumentEvent::TaskRead(reply)) = documents

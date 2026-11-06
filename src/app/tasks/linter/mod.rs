@@ -1,7 +1,7 @@
 //! Linter interpretation and bounded source-read obligations belong to their original job.
 use crate::app::diagnostics::DiagnosticBatch;
-use crate::app::diagnostics::Diagnostics;
 use crate::app::diagnostics::DiagnosticValidity;
+use crate::app::diagnostics::Diagnostics;
 use crate::app::documents::TaskCancellation;
 use crate::app::documents::TaskReadKey;
 use crate::app::documents::TaskReadReply;
