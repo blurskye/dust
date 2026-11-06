@@ -12,10 +12,10 @@ use crate::plugins::PluginContributionIndex;
 use crate::plugins::PluginError;
 use crate::plugins::PluginExecutionReply;
 use crate::plugins::PluginExecutionRequest;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginHostEventQueue;
 use crate::plugins::PluginLimits;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginHost;
 use crate::plugins::PluginProviderBroker;
 use crate::plugins::PluginStatus;
 use crate::plugins::PluginStorageContribution;
@@ -615,11 +615,7 @@ impl Plugins {
 
 pub(in crate::app) mod edits;
 
-
 pub(in crate::app) mod commands;
-
-
-
 
 use crate::app::App;
 use crate::app::commands::AppEffect;

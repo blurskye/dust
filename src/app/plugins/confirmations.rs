@@ -14,14 +14,14 @@ use crate::plugins::PluginConfirmationResult;
 use crate::plugins::PluginExecution;
 use crate::plugins::PluginExecutionReply;
 use crate::plugins::PluginExecutionRequest;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginInvocationOrigin;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginHost;
 use crate::plugins::PluginUiEvent;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
-const CONFIRMATION_CEILING: usize = 64;
+const CONFIRMATION_LIMIT: usize = 64;
 
 #[derive(Clone)]
 struct PendingConfirmation {
@@ -116,7 +116,7 @@ impl PluginConfirmations {
         &'a mut self,
         origin: &PluginInvocationOrigin,
     ) -> ConfirmationReservationLoan<'a> {
-        let reserved = self.len() < CONFIRMATION_CEILING;
+        let reserved = self.len() < CONFIRMATION_LIMIT;
         if reserved {
             self.reservations.push(origin.clone());
         }

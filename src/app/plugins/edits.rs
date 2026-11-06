@@ -19,10 +19,10 @@ use crate::plugins::PluginEditProposal;
 use crate::plugins::PluginExecution;
 use crate::plugins::PluginExecutionReply;
 use crate::plugins::PluginExecutionRequest;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginInvocation;
 use crate::plugins::PluginInvocationOrigin;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginHost;
 use crate::plugins::PluginSnapshot;
 use crate::workspace::WorkspaceEditDraft;
 use slotmap::Key;
@@ -512,8 +512,7 @@ mod tests {
             )],
         )
         .unwrap();
-        let workspace =
-            Workspace::new(scope, root.path().join("trust.json"), 1, false, false, 1);
+        let workspace = Workspace::new(scope, root.path().join("trust.json"), 1, false, false, 1);
         let version = workspace.version();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");

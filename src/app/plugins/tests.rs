@@ -1,33 +1,33 @@
 //! Plugins behavior and application integration tests.
 
-use crate::app::tests::*;
 use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::picker::tests::palette_row_for;
+use crate::app::tests::*;
 use crate::editor::CommandSource;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::editor::input::InputContextLayer;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistenceWorker;
 use crate::plugins::PluginLoadId;
+use crate::ui::ContentTabKind;
 use crate::ui::PickerSurfaceKind;
+use crate::ui::render::overlays::SCRATCH_ICON;
+use crate::ui::render::overlays::VIRTUAL_ICON;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::AppEffect;
-use crate::app::picker::tests::palette_row_for;
-use crate::ui::render::overlays::SCRATCH_ICON;
-use crate::ui::render::overlays::VIRTUAL_ICON;
-use crate::ui::ContentTabKind;
-use crate::windows::DockEdge;
-use crate::windows::WindowPlacement;
-use crate::windows::WindowRect;
 use tempfile::tempdir;
-use crate::persistence::PersistedSession;
-use crate::persistence::PersistedState;
-use crate::persistence::PersistenceWorker;
 
 #[test]
 fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
@@ -354,8 +354,7 @@ fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
 }
 
 #[test]
-fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload()
-{
+fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -1026,8 +1025,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 }
 
 #[test]
-fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback()
- {
+fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
     use sha2::Digest;
     use sha2::Sha256;
     let core = include_bytes!(concat!(
@@ -1756,8 +1754,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
 }
 
 #[test]
-fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned()
- {
+fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -2244,8 +2241,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
 }
 
 #[test]
-fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure()
- {
+fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure() {
     let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
     write_plugin_manifest(
@@ -3364,8 +3360,7 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
 }
 
 #[test]
-fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
-{
+fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5() {
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -3818,8 +3813,7 @@ fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
 }
 
 #[test]
-fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement()
- {
+fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -4154,8 +4148,7 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
 }
 
 #[test]
-fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
-{
+fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views() {
     let (_app_dirs, mut app) = app();
     let (buffer, original_view) = app
         .state
@@ -4429,8 +4422,7 @@ fn content_line_uses_filename_icons_for_extensionless_files() {
 }
 
 #[test]
-fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements()
- {
+fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state

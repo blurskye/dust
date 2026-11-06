@@ -236,7 +236,7 @@ impl Plugins {
         key: String,
         editor: &EditorState,
     ) -> Result<VirtualOpen, String> {
-        if key.len() > crate::plugins::VIRTUAL_DOCUMENT_KEY_BYTE_CEILING
+        if key.len() > crate::plugins::VIRTUAL_DOCUMENT_KEY_BYTE_LIMIT
             || key.chars().any(char::is_control)
         {
             return Err("invalid virtual document key".into());

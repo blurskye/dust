@@ -5,9 +5,9 @@ use crate::plugins::PluginContributionIndex;
 use crate::plugins::PluginLimits;
 use crate::plugins::PluginLoadId;
 use crate::tools::PackageError;
+use crate::tools::PackageEvent;
 use crate::tools::PackageLock;
 use crate::tools::PackageOperation;
-use crate::tools::PackageEvent;
 use crate::tools::RegistryEvent;
 use crate::tools::RegistryRequest;
 use crate::tools::RegistryResult;
@@ -691,7 +691,7 @@ use crate::app::search::workflow::SearchMatcherKind;
 use crate::app::search::workflow::SearchPresenterKind;
 use crate::app::search::workflow::SearchRequestId;
 use crate::app::search::workflow::SearchSourceKind;
-use crate::app::search::workflow::SearchStreamGeneration;
+use crate::app::search::workflow::SearchStreamId;
 use crate::app::search::workflow::SearchWorkflowBroker;
 use crate::app::search::workflow::SearchWorkflowChunk;
 use crate::app::search::workflow::SearchWorkflowError;
@@ -717,7 +717,7 @@ pub(in crate::app) fn compose_plugin_picker_items(
     let mut broker = SearchWorkflowBroker::try_new(spec)?;
     broker.begin(
         SearchRequestId(projection.request),
-        SearchStreamGeneration(projection.revision),
+        SearchStreamId(projection.revision),
         &projection.query,
     )?;
     let workflow = projection
@@ -727,7 +727,7 @@ pub(in crate::app) fn compose_plugin_picker_items(
         .collect();
     broker.accept(SearchWorkflowChunk {
         request: SearchRequestId(projection.request),
-        generation: SearchStreamGeneration(projection.revision),
+        stream_id: SearchStreamId(projection.revision),
         sequence: 0,
         items: workflow,
         complete: true,
@@ -784,7 +784,7 @@ pub(in crate::app) fn compose_command_picker_items(
         maximum_bytes: ABS_MAX_BYTES,
     };
     let mut broker = SearchWorkflowBroker::try_new(spec)?;
-    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
+    broker.begin(SearchRequestId(1), SearchStreamId(1), "")?;
     let workflow = items
         .iter()
         .map(|(item, payload)| {
@@ -799,7 +799,7 @@ pub(in crate::app) fn compose_command_picker_items(
         .collect();
     broker.accept(SearchWorkflowChunk {
         request: SearchRequestId(1),
-        generation: SearchStreamGeneration(1),
+        stream_id: SearchStreamId(1),
         sequence: 0,
         items: workflow,
         complete: true,
@@ -1852,8 +1852,8 @@ mod tests {
     #[test]
     fn package_update_replaces_managed_plugin_and_commits_after_load() {
         use crate::plugins::PluginEvent;
-        use crate::tools::PackageStore;
         use crate::tools::PackageOperation;
+        use crate::tools::PackageStore;
         use sha2::Digest;
         use sha2::Sha256;
         use std::fs;
@@ -1868,8 +1868,7 @@ mod tests {
             root.path().join("cache"),
         )
         .unwrap();
-        let mut owner =
-            Plugins::new(root.path().join("storage"), 8, packages.clone(), registry);
+        let mut owner = Plugins::new(root.path().join("storage"), 8, packages.clone(), registry);
         let core = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/retained-guest/retained-guest.core.wasm"
