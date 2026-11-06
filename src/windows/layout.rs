@@ -1,3 +1,5 @@
+//! Tiled layouts, window placement and compositor snapshots.
+
 use crate::windows::MAXIMUM_PROTECTED_REGIONS;
 use crate::windows::error::WindowError;
 use crate::windows::identity::WindowId;

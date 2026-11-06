@@ -3540,7 +3540,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         )
         .expect_err("universal non-tiled ceiling rejects actual Component clone");
     assert_eq!(error.code, wire::ErrorCode::LimitExceeded);
-    assert!(error.message.contains("non-tiled window ceiling"));
+    assert!(error.message.contains("non-tiled window limit"));
     assert_eq!(ceiling_graph, ceiling_graph_before);
     assert_eq!(ceiling_host, ceiling_host_before);
     let callback_error = ceiling_runtime

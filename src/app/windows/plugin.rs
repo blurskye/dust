@@ -180,7 +180,7 @@ impl PluginWindowDraft {
             .graph
             .window(window)
             .ok_or(WindowError::UnknownWindow)?;
-        self.require_owner(&window.owner, window.generation)?;
+        self.require_owner(&window.owner, window.instance_id)?;
         if self.graph.active_tab() != Some(window.tab) {
             return Err(WindowError::WindowOutsideActiveTab);
         }
@@ -218,7 +218,7 @@ impl PluginWindowDraft {
             .graph
             .content(content)
             .ok_or(WindowError::UnknownContent)?;
-        self.require_owner(&existing.owner, existing.generation)?;
+        self.require_owner(&existing.owner, existing.instance_id)?;
         self.graph.create_view(content, owner, generation)
     }
     pub(in crate::app) fn open_window(
@@ -241,7 +241,7 @@ impl PluginWindowDraft {
             return Err(WindowError::InvalidPlacement);
         }
         let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
-        self.require_owner(&existing.owner, existing.generation)?;
+        self.require_owner(&existing.owner, existing.instance_id)?;
         self.graph
             .open_window(tab, view, placement, focusable, owner, generation)
     }
@@ -260,7 +260,7 @@ impl PluginWindowDraft {
             return Err(WindowError::WindowOutsideActiveTab);
         }
         let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
-        self.require_owner(&existing.owner, existing.generation)?;
+        self.require_owner(&existing.owner, existing.instance_id)?;
         let window = self.graph.open_window(
             tab,
             view,
@@ -302,7 +302,7 @@ impl PluginWindowDraft {
             .graph
             .window(window)
             .ok_or(WindowError::UnknownWindow)?;
-        self.require_owner(&target.owner, target.generation)?;
+        self.require_owner(&target.owner, target.instance_id)?;
         self.graph.focus(window)
     }
     pub(in crate::app) fn close_window(&mut self, window: WindowId) -> Result<(), WindowError> {
@@ -311,7 +311,7 @@ impl PluginWindowDraft {
     }
     pub(in crate::app) fn remove_view(&mut self, view: ViewId) -> Result<(), WindowError> {
         let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
-        self.require_owner(&existing.owner, existing.generation)?;
+        self.require_owner(&existing.owner, existing.instance_id)?;
         self.graph.remove_view(view)
     }
     pub(in crate::app) fn remove_content(&mut self, content: ContentId) -> Result<(), WindowError> {
@@ -319,7 +319,7 @@ impl PluginWindowDraft {
             .graph
             .content(content)
             .ok_or(WindowError::UnknownContent)?;
-        self.require_owner(&existing.owner, existing.generation)?;
+        self.require_owner(&existing.owner, existing.instance_id)?;
         self.graph.remove_content(content)
     }
 }

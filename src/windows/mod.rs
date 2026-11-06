@@ -1,9 +1,4 @@
-//! Universal content, view, window, and workspace-tab ownership.
-//!
-//! W0 defines the validated graph. W1 reconciles editor resources into its
-//! bounded tiled topology. W2 projects tiled, docked, floating, fullscreen,
-//! overlay, and hidden windows together; the bundled explorer and PTYs are
-//! ordinary graph resources, while editor layout mutation remains transitional.
+//! Window topology, content ownership and compositor geometry.
 
 pub(crate) const PANE_DEFAULT_RATIO: u16 = 500;
 pub(crate) const PANE_RESIZE_STEP: u16 = 50;
@@ -13,8 +8,8 @@ pub(crate) const PANE_MINIMUM_HEIGHT: u16 = 3;
 const MAXIMUM_CONTENT_TYPE_ID_BYTES: usize = 128;
 const MAXIMUM_OWNER_BYTES: usize = 128;
 const MAXIMUM_TITLE_BYTES: usize = 4 * 1024;
-const MAXIMUM_TILED_DEPTH: usize = crate::UNIVERSAL_LAYOUT_DEPTH_CEILING;
-const MAXIMUM_TILED_WINDOWS: usize = crate::UNIVERSAL_LAYOUT_WINDOW_CEILING;
+const MAXIMUM_TILED_DEPTH: usize = crate::MAX_SPLIT_DEPTH;
+const MAXIMUM_TILED_WINDOWS: usize = crate::MAX_WINDOWS;
 const MAXIMUM_NON_TILED_WINDOWS_PER_TAB: usize = 128;
 const MAXIMUM_OVERLAY_WINDOWS_PER_TAB: usize = 32;
 const MAXIMUM_PROTECTED_REGIONS: usize = 16;

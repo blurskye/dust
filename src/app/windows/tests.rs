@@ -210,9 +210,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         editor_window: None,
         focused_plugin: None,
         explorer_visible: true,
-        explorer_views: (1..=crate::UNIVERSAL_LAYOUT_WINDOW_CEILING as u64)
-            .collect::<Vec<_>>()
-            .into(),
+        explorer_views: (1..=crate::MAX_WINDOWS as u64).collect::<Vec<_>>().into(),
         focused_explorer: Some(1),
         explorer_size: 24,
         explorer_edge: crate::windows::DockEdge::Left,
@@ -243,10 +241,10 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
             terminals: &[],
         },
     ) {
-        Ok(_) => panic!("graph ceiling must reject reconstruction"),
+        Ok(_) => panic!("graph limit must reject reconstruction"),
         Err(error) => error,
     };
-    assert!(error.contains("ceiling"), "{error}");
+    assert_eq!(error, "workspace tab exceeds its non-tiled window limit");
     assert_eq!(windows.graph(), &graph);
     assert_eq!(windows.core.native, native);
     assert_eq!(windows.epoch, epoch);

@@ -1,4 +1,29 @@
-use crate::windows::*;
+//! Window topology, resource limits, focus and compositor behavior.
+
+use crate::windows::CompositorLayer;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentCapabilities;
+use crate::windows::ContentContract;
+use crate::windows::ContentId;
+use crate::windows::ContentLifecycle;
+use crate::windows::ContentTypeId;
+use crate::windows::DockEdge;
+use crate::windows::MAXIMUM_TILED_DEPTH;
+use crate::windows::MAXIMUM_TILED_WINDOWS;
+use crate::windows::ProjectedWindow;
+use crate::windows::SpatialDirection;
+use crate::windows::TileAxis;
+use crate::windows::TiledLayoutNode;
+use crate::windows::ViewDescriptor;
+use crate::windows::ViewId;
+use crate::windows::WindowDescriptor;
+use crate::windows::WindowError;
+use crate::windows::WindowGraph;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use crate::windows::WindowTarget;
+use crate::windows::WorkspaceTabId;
 
 fn balanced_layout(windows: &[WindowId]) -> TiledLayoutNode {
     if windows.len() == 1 {
@@ -216,7 +241,7 @@ fn tiled_topology_rejects_stale_duplicate_orphan_and_excess_depth() {
 }
 
 #[test]
-fn topology_count_ceiling_rejects_even_a_shallow_balanced_tree() {
+fn window_limit_rejects_even_a_shallow_balanced_tree() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let mut windows = Vec::new();
     for index in 0..=MAXIMUM_TILED_WINDOWS {
@@ -230,7 +255,7 @@ fn topology_count_ceiling_rejects_even_a_shallow_balanced_tree() {
                     id,
                     content,
                     owner: "builtin".into(),
-                    generation: 1,
+                    instance_id: 1,
                 },
             );
             graph.next_view = graph.next_view.max(id.0);
@@ -246,7 +271,7 @@ fn topology_count_ceiling_rejects_even_a_shallow_balanced_tree() {
                 placement: WindowPlacement::Tiled,
                 focusable: true,
                 owner: "builtin".into(),
-                generation: 1,
+                instance_id: 1,
             },
         );
         graph.next_window = graph.next_window.max(window.0);
@@ -269,10 +294,10 @@ fn checked_topology_mutations_reject_without_partial_graph_changes() {
         tiled.push(
             graph
                 .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
-                .expect("window within topology ceiling"),
+                .expect("window within topology limit"),
         );
     }
-    graph.validate().expect("ceiling graph remains valid");
+    graph.validate().expect("graph at the limit remains valid");
 
     let rejected_view = graph
         .create_view(content, "builtin", 1)
@@ -960,7 +985,7 @@ fn checked_tiled_insertion_honors_neighbor_axis_order_ratio_and_rejects_atomical
 }
 
 #[test]
-fn workspace_tabs_restore_exact_remembered_focus_and_retire_ineligible_memories() {
+fn workspace_tabs_restore_remembered_focus_and_forget_ineligible_windows() {
     let mut graph = WindowGraph::default();
     let first_tab = graph.create_workspace_tab("native", 1).unwrap();
     let content = graph
@@ -1247,7 +1272,7 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
     );
     assert_eq!(graph, before);
 
-    // The earlier plugin view remains usable; a refused clone did not retire it.
+    // A refused clone must leave the earlier plugin view usable.
     let plugin_window = graph
         .open_window(
             tab,
@@ -1272,7 +1297,7 @@ fn content_capabilities_reject_clone_focus_placement_and_close_before_mutation()
 }
 
 #[test]
-fn generation_cleanup_removes_only_exact_owned_graph_resources() {
+fn removing_an_owner_instance_preserves_other_instances_and_owners() {
     let mut graph = WindowGraph::default();
     let old = graph
         .create_content(
@@ -1305,11 +1330,13 @@ fn generation_cleanup_removes_only_exact_owned_graph_resources() {
         )
         .expect("other owner content");
     let mut surviving_resources = Vec::new();
-    for (content, owner, generation) in
+    for (content, owner, instance_id) in
         [(old, "plugin", 1), (new, "plugin", 2), (other, "other", 1)]
     {
-        let view = graph.create_view(content, owner, generation).expect("view");
-        let tab = graph.create_workspace_tab(owner, generation).expect("tab");
+        let view = graph
+            .create_view(content, owner, instance_id)
+            .expect("view");
+        let tab = graph.create_workspace_tab(owner, instance_id).expect("tab");
         let window = graph
             .open_window(
                 tab,
@@ -1317,7 +1344,7 @@ fn generation_cleanup_removes_only_exact_owned_graph_resources() {
                 WindowPlacement::Fullscreen,
                 true,
                 owner,
-                generation,
+                instance_id,
             )
             .expect("window");
         if content != old {
@@ -1325,8 +1352,8 @@ fn generation_cleanup_removes_only_exact_owned_graph_resources() {
         }
     }
     graph
-        .remove_owner_generation("plugin", 1)
-        .expect("remove owner generation");
+        .remove_owner_instance("plugin", 1)
+        .expect("remove owner instance");
     assert!(graph.content(old).is_none());
     for (content, view, tab, window) in surviving_resources {
         assert!(graph.content(content).is_some());

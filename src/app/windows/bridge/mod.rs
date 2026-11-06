@@ -612,7 +612,7 @@ impl EditorWindowBridge {
 
     #[cfg(test)]
     pub(in crate::app) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
-        graph.remove_owner_generation(EDITOR_OWNER, EDITOR_GENERATION)?;
+        graph.remove_owner_instance(EDITOR_OWNER, EDITOR_GENERATION)?;
         *self = Self::default();
         Ok(())
     }
@@ -1707,7 +1707,7 @@ impl NativeSurfaceBridge {
 
     #[cfg(test)]
     pub(in crate::app) fn reset(&mut self, graph: &mut WindowGraph) -> Result<(), WindowError> {
-        graph.remove_owner_generation("builtin.surfaces", 1)?;
+        graph.remove_owner_instance("builtin.surfaces", 1)?;
         let configured_placements = std::mem::take(&mut self.configured_placements);
         let explorer_placement = self.explorer_placement;
         let explorer_restore_placement = self.explorer_restore_placement;

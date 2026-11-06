@@ -266,7 +266,7 @@ impl ExplorerSession {
         &self,
         source: ExplorerViewId,
     ) -> Result<ExplorerCloneCandidate, &'static str> {
-        if self.cloned_views.len().saturating_add(1) >= crate::UNIVERSAL_LAYOUT_WINDOW_CEILING {
+        if self.cloned_views.len().saturating_add(1) >= crate::MAX_WINDOWS {
             return Err("explorer view ceiling reached");
         }
         let id = ExplorerViewId(
@@ -1621,7 +1621,7 @@ mod tests {
         );
         assert_eq!(owner.cloned_views.len(), 0);
 
-        for expected in 2..=crate::UNIVERSAL_LAYOUT_WINDOW_CEILING as u64 {
+        for expected in 2..=crate::MAX_WINDOWS as u64 {
             let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
             assert_eq!(candidate.id(), ExplorerViewId(expected));
             owner.accept_clone(candidate).unwrap();
@@ -1632,7 +1632,7 @@ mod tests {
         );
         assert_eq!(
             owner.cloned_views.len().saturating_add(1),
-            crate::UNIVERSAL_LAYOUT_WINDOW_CEILING
+            crate::MAX_WINDOWS
         );
 
         let (mut exhausted, _) = fixture(root.path());

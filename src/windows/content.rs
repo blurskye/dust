@@ -1,3 +1,5 @@
+//! Content capabilities, lifecycle and the instances that own graph resources.
+
 use crate::windows::identity::ContentId;
 use crate::windows::identity::ContentTypeId;
 use crate::windows::identity::ViewId;
@@ -156,7 +158,7 @@ pub struct ContentDescriptor {
     pub title: String,
     pub dirty: bool,
     pub owner: String,
-    pub generation: u64,
+    pub instance_id: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -164,7 +166,7 @@ pub struct ViewDescriptor {
     pub id: ViewId,
     pub content: ContentId,
     pub owner: String,
-    pub generation: u64,
+    pub instance_id: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,7 +174,7 @@ pub struct WorkspaceTabDescriptor {
     pub id: WorkspaceTabId,
     pub tiled_root: Option<TiledLayoutNode>,
     pub owner: String,
-    pub generation: u64,
+    pub instance_id: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -183,7 +185,7 @@ pub struct WindowDescriptor {
     pub placement: WindowPlacement,
     pub focusable: bool,
     pub owner: String,
-    pub generation: u64,
+    pub instance_id: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

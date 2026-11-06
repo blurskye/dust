@@ -1,3 +1,5 @@
+//! Window topology, focus and resource ownership checked before publication.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -167,7 +169,7 @@ impl WindowGraph {
         title: String,
         dirty: bool,
         owner: impl Into<String>,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<ContentId, WindowError> {
         self.create_content_with_contract(
             content_type,
@@ -175,7 +177,7 @@ impl WindowGraph {
             title,
             dirty,
             owner,
-            generation,
+            instance_id,
         )
     }
 
@@ -186,7 +188,7 @@ impl WindowGraph {
         title: String,
         dirty: bool,
         owner: impl Into<String>,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<ContentId, WindowError> {
         self.ensure_revision_capacity()?;
         let id = ContentId(increment(&mut self.next_content)?);
@@ -199,14 +201,14 @@ impl WindowGraph {
             title,
             dirty,
             owner: owner.into(),
-            generation,
+            instance_id,
         })?;
         Ok(id)
     }
 
     pub fn register_content(&mut self, descriptor: ContentDescriptor) -> Result<(), WindowError> {
         validate_identity(descriptor.id.0)?;
-        validate_owner(&descriptor.owner, descriptor.generation)?;
+        validate_owner(&descriptor.owner, descriptor.instance_id)?;
         validate_title(&descriptor.title)?;
         if self.contents.contains_key(&descriptor.id) {
             return Err(WindowError::DuplicateContent);
@@ -307,7 +309,7 @@ impl WindowGraph {
         &mut self,
         content: ContentId,
         owner: impl Into<String>,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<ViewId, WindowError> {
         let descriptor = self
             .contents
@@ -319,7 +321,7 @@ impl WindowGraph {
             return Err(WindowError::Unsupported("clone-view"));
         }
         let owner = owner.into();
-        validate_owner(&owner, generation)?;
+        validate_owner(&owner, instance_id)?;
         self.ensure_revision_capacity()?;
         let id = ViewId(increment(&mut self.next_view)?);
         self.views.insert(
@@ -328,7 +330,7 @@ impl WindowGraph {
                 id,
                 content,
                 owner,
-                generation,
+                instance_id,
             },
         );
         self.mark_changed()?;
@@ -338,10 +340,10 @@ impl WindowGraph {
     pub fn create_workspace_tab(
         &mut self,
         owner: impl Into<String>,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<WorkspaceTabId, WindowError> {
         let owner = owner.into();
-        validate_owner(&owner, generation)?;
+        validate_owner(&owner, instance_id)?;
         self.ensure_revision_capacity()?;
         let id = WorkspaceTabId(increment(&mut self.next_tab)?);
         self.workspace_tabs.insert(
@@ -350,7 +352,7 @@ impl WindowGraph {
                 id,
                 tiled_root: None,
                 owner,
-                generation,
+                instance_id,
             },
         );
         self.active_tab.get_or_insert(id);
@@ -485,11 +487,11 @@ impl WindowGraph {
         placement: WindowPlacement,
         focusable: bool,
         owner: impl Into<String>,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<WindowId, WindowError> {
         let owner = owner.into();
         self.checked_mutation(move |candidate| {
-            candidate.open_window_inner(tab, view, placement, focusable, owner, generation)
+            candidate.open_window_inner(tab, view, placement, focusable, owner, instance_id)
         })
     }
 
@@ -500,7 +502,7 @@ impl WindowGraph {
         placement: WindowPlacement,
         focusable: bool,
         owner: String,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<WindowId, WindowError> {
         if !self.workspace_tabs.contains_key(&tab) {
             return Err(WindowError::UnknownWorkspaceTab);
@@ -516,7 +518,7 @@ impl WindowGraph {
         if self.windows.values().any(|window| window.view == view) {
             return Err(WindowError::ViewAlreadyHosted);
         }
-        validate_owner(&owner, generation)?;
+        validate_owner(&owner, instance_id)?;
         let id = WindowId(increment(&mut self.next_window)?);
         self.windows.insert(
             id,
@@ -527,7 +529,7 @@ impl WindowGraph {
                 placement,
                 focusable,
                 owner,
-                generation,
+                instance_id,
             },
         );
         if placement == WindowPlacement::Tiled
@@ -1012,30 +1014,30 @@ impl WindowGraph {
         })
     }
 
-    pub fn remove_owner_generation(
+    pub fn remove_owner_instance(
         &mut self,
         owner: &str,
-        generation: u64,
+        instance_id: u64,
     ) -> Result<(), WindowError> {
         self.checked_mutation(|candidate| {
-            candidate.remove_owner_generation_inner(owner, generation);
+            candidate.remove_owner_instance_inner(owner, instance_id);
             Ok(())
         })
     }
 
-    fn remove_owner_generation_inner(&mut self, owner: &str, generation: u64) {
+    fn remove_owner_instance_inner(&mut self, owner: &str, instance_id: u64) {
         let removed_contents = self
             .contents
             .iter()
             .filter_map(|(id, value)| {
-                (value.owner == owner && value.generation == generation).then_some(*id)
+                (value.owner == owner && value.instance_id == instance_id).then_some(*id)
             })
             .collect::<BTreeSet<_>>();
         let removed_views = self
             .views
             .iter()
             .filter_map(|(id, value)| {
-                ((value.owner == owner && value.generation == generation)
+                ((value.owner == owner && value.instance_id == instance_id)
                     || removed_contents.contains(&value.content))
                 .then_some(*id)
             })
@@ -1044,14 +1046,14 @@ impl WindowGraph {
             .workspace_tabs
             .iter()
             .filter_map(|(id, value)| {
-                (value.owner == owner && value.generation == generation).then_some(*id)
+                (value.owner == owner && value.instance_id == instance_id).then_some(*id)
             })
             .collect::<BTreeSet<_>>();
         let removed_windows = self
             .windows
             .iter()
             .filter_map(|(id, value)| {
-                ((value.owner == owner && value.generation == generation)
+                ((value.owner == owner && value.instance_id == instance_id)
                     || removed_views.contains(&value.view)
                     || removed_tabs.contains(&value.tab))
                 .then_some(*id)

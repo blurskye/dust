@@ -73,16 +73,16 @@ impl WindowSession {
             terminal,
             content: content.id,
             content_owner: content.owner.clone(),
-            content_generation: content.generation,
+            content_generation: content.instance_id,
             view: view.id,
             view_owner: view.owner.clone(),
-            view_generation: view.generation,
+            view_generation: view.instance_id,
             window: window.id,
             window_owner: window.owner.clone(),
-            window_generation: window.generation,
+            window_generation: window.instance_id,
             tab: tab.id,
             tab_owner: tab.owner.clone(),
-            tab_generation: tab.generation,
+            tab_generation: tab.instance_id,
             placement: window.placement,
         })
     }
@@ -215,7 +215,7 @@ impl WindowSession {
             candidate
                 .core
                 .graph
-                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
+                .remove_owner_instance(&format!("plugin.{plugin}"), *load)
                 .map_err(|error| error.to_string())?;
         }
         candidate
@@ -704,7 +704,7 @@ impl WindowSession {
         let core = &mut candidate.core;
         for (plugin, load) in plugin_generations {
             core.graph
-                .remove_owner_generation(&format!("plugin.{plugin}"), *load)
+                .remove_owner_instance(&format!("plugin.{plugin}"), *load)
                 .map_err(|e| e.to_string())?;
         }
         core.native
@@ -730,7 +730,7 @@ impl WindowSession {
         candidate
             .core
             .graph
-            .remove_owner_generation(&format!("plugin.{plugin}"), load)
+            .remove_owner_instance(&format!("plugin.{plugin}"), load)
             .map_err(|e| e.to_string())?;
         candidate.core.native.invalidate();
         self.commit(candidate)

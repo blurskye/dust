@@ -1,3 +1,5 @@
+//! Layout validation and projection into clipped window rectangles.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 

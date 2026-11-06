@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-pub(crate) const UNIVERSAL_LAYOUT_DEPTH_CEILING: usize = 64;
-pub(crate) const UNIVERSAL_LAYOUT_WINDOW_CEILING: usize = 1_024;
+pub(crate) const MAX_SPLIT_DEPTH: usize = 64;
+pub(crate) const MAX_WINDOWS: usize = 1_024;
 
 /// Agent Client Protocol client for AI coding agents.
 pub mod agent;
