@@ -548,6 +548,9 @@ pub enum PickerSurfaceKind {
     /// The change list: grouped sections whose entries draw status, path and provenance as
     /// their own columns.
     Changes,
+    /// Grep matches: each row draws its file's icon, `path:line:col` and the line's text
+    /// highlighted as its own columns.
+    Grep,
 }
 
 /// What a preview pane draws.

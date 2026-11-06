@@ -561,6 +561,11 @@ impl SearchSession {
         let picker = self.picker.interaction.as_ref()?;
         let presentation = picker.state.presentation();
         let preview_scroll = picker.preview_scroll.unwrap_or(0);
+        let grep_matches = if picker.surface == PickerSurfaceKind::Grep {
+            self.grep_matches_on_screen(&presentation)
+        } else {
+            HashMap::new()
+        };
         Some(PickerUiState {
             input_hint: String::new(),
             surface: picker.surface,
@@ -585,6 +590,8 @@ impl SearchSession {
                             && !row.badge.is_empty()
                         {
                             choice_row_cells(&row)
+                        } else if let Some(found) = grep_matches.get(row.id.0.as_str()) {
+                            grep_row_cells(found, &row)
                         } else {
                             Vec::new()
                         };
@@ -601,7 +608,29 @@ impl SearchSession {
             preview: self.preview.clone(),
         })
     }
+    /// The grep matches of the rows a screen can show, by id. Only these are drawn, so only
+    /// these get columns and highlighting, however many thousand matches there are.
+    fn grep_matches_on_screen(
+        &self,
+        presentation: &crate::workspace::PickerPresentation,
+    ) -> HashMap<&str, &crate::files::WorkspaceSearchMatch> {
+        let shown: std::collections::HashSet<&str> = presentation
+            .rows
+            .iter()
+            .skip(presentation.scroll)
+            .take(GREP_ROWS_ON_SCREEN)
+            .map(|row| row.id.0.as_str())
+            .collect();
+        self.matches
+            .iter()
+            .filter(|found| shown.contains(found.id.as_str()))
+            .map(|found| (found.id.as_str(), found))
+            .collect()
+    }
 }
+
+/// More grep rows than any terminal is tall.
+const GREP_ROWS_ON_SCREEN: usize = 200;
 
 #[derive(Clone, Debug)]
 pub(in crate::editor::session) struct MatcherSource {
@@ -640,6 +669,60 @@ fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<Pic
         PickerCell::new(label, Style::Default, width),
         PickerCell::flex(source.detail.clone(), Style::Muted),
     ]
+}
+
+/// A grep row as LazyVim draws it: the file's icon, `path:line:col` with the line number
+/// accented, and the line's text highlighted for the file's language.
+fn grep_row_cells(
+    found: &crate::files::WorkspaceSearchMatch,
+    row: &crate::workspace::PickerRowPresentation,
+) -> Vec<PickerCell> {
+    let cell = |text: &str, style| {
+        let width = unicode_width::UnicodeWidthStr::width(text);
+        PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
+    };
+    let mut cells = Vec::new();
+    if let Some(icon) = found
+        .relative_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(crate::files::file_icon)
+    {
+        let role = super::super::explorer::explorer_icon_role(icon.color);
+        let style = crate::ui::explorer_segment_style(role);
+        cells.push(PickerCell::new(format!("{} ", icon.glyph), style, 2));
+    }
+    // With more than one root the root's name comes first, as the source column did.
+    if !row.source.is_empty() {
+        cells.push(cell(&format!("{}/", row.source), Style::Muted));
+    }
+    let path = found.relative_path.display().to_string();
+    let line = found.line.saturating_add(1).to_string();
+    let column = found.column.saturating_add(1).to_string();
+    cells.push(cell(&path, Style::Default));
+    cells.push(cell(":", Style::Muted));
+    cells.push(cell(&line, Style::Accent));
+    cells.push(cell(":", Style::Muted));
+    cells.push(cell(&column, Style::Muted));
+    cells.push(cell("  ", Style::Default));
+    let text = row.detail.as_str();
+    let spans = crate::language::syntax::language_for_path(&found.canonical_path)
+        .map(|language| crate::language::syntax::highlight(language, text))
+        .unwrap_or_default();
+    let mut at = 0;
+    for span in spans {
+        let (Some(before), Some(styled)) =
+            (text.get(at..span.start), text.get(span.start..span.end))
+        else {
+            continue;
+        };
+        cells.push(cell(before, Style::Default));
+        cells.push(cell(styled, Style::Syntax(span.role)));
+        at = span.end;
+    }
+    cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
+    cells.retain(|cell| !cell.text.is_empty());
+    cells
 }
 
 fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {

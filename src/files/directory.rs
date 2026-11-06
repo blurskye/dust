@@ -190,7 +190,7 @@ pub(super) fn natural_name_key(value: &str) -> String {
 }
 
 /// Git's linked worktrees for a repository root, kept in `.worktree/`. Git ignores that folder,
-/// but from the repository's root the tree, the finder and grep still show what's in it.
+/// but from the repository's root the tree still shows what's in it.
 pub(super) fn root_worktrees(
     root: &Path,
     mut keep_scanning: impl FnMut() -> bool,

@@ -8196,6 +8196,30 @@ fn help_filters_do_not_restart_the_suspended_live_grep() {
 }
 
 #[test]
+fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
+    let (_app_dirs, mut app) = app();
+    fs::write(
+        app.state.workspace_root.join("main.rs"),
+        "\n    let needle = 1;\n",
+    )
+    .unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    let picker = app.search.picker_projection().unwrap();
+    assert_eq!(picker.surface, crate::ui::PickerSurfaceKind::Grep);
+    let cells = &picker.rows[0].cells;
+    let icon = crate::files::file_icon("main.rs").unwrap().glyph;
+    assert_eq!(cells[0].text, format!("{icon} "));
+    let texts: Vec<_> = cells[1..6].iter().map(|cell| cell.text.as_str()).collect();
+    assert_eq!(texts, ["main.rs", ":", "2", ":", "9"]);
+    assert_eq!(cells[3].style, crate::ui::Style::Accent);
+    assert_eq!(cells[5].style, crate::ui::Style::Muted);
+    let keyword = cells.iter().find(|cell| cell.text == "let").unwrap();
+    assert!(matches!(keyword.style, crate::ui::Style::Syntax(_)));
+}
+
+#[test]
 fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
     for replacement in [None, Some("changed".into())] {
         let replacing = replacement.is_some();

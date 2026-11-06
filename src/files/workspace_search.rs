@@ -335,30 +335,8 @@ pub(super) fn run_workspace_search(
         builder.add(root);
     }
     let mut summary = WorkspaceSearchSummary::default();
-    let mut scanned = 0;
-    for root in &roots {
-        if cancellation.load(Ordering::Acquire) {
-            return;
-        }
-        let special = root.join(super::directory::WORKTREE_DIRECTORY);
-        if fs::symlink_metadata(&special).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-            summary.walk_errors = summary.walk_errors.saturating_add(1);
-            summary.truncated = true;
-        }
-        for worktree in super::directory::root_worktrees(root, || {
-            if cancellation.load(Ordering::Acquire) {
-                return false;
-            }
-            if scanned >= policy.maximum_files {
-                summary.truncated = true;
-                return false;
-            }
-            scanned += 1;
-            true
-        }) {
-            builder.add(worktree);
-        }
-    }
+    // What Git ignores, linked worktrees in `.worktree/` among it, is not searched, as in
+    // LazyVim's grep.
     builder
         .follow_links(false)
         .hidden(!policy.include_hidden)

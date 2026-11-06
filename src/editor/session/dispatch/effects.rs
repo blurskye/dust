@@ -3403,7 +3403,7 @@ impl InteractiveApplication {
         self.close_picker();
         self.search.open_live();
         self.install_surface_picker_state(
-            PickerSurfaceKind::Generic,
+            PickerSurfaceKind::Grep,
             self.message("workspace_search_title", &[]),
             Vec::new(),
             String::new(),
@@ -3415,7 +3415,7 @@ impl InteractiveApplication {
         self.search.set_query(query.clone());
         if query.is_empty() {
             self.install_surface_picker_state(
-                PickerSurfaceKind::Generic,
+                PickerSurfaceKind::Grep,
                 self.message("workspace_search_title", &[]),
                 Vec::new(),
                 query,
@@ -3568,7 +3568,7 @@ impl InteractiveApplication {
             Ok(()) => {
                 if self.search.live() {
                     self.install_surface_picker_state(
-                        PickerSurfaceKind::Generic,
+                        PickerSurfaceKind::Grep,
                         self.message("workspace_search_title", &[]),
                         Vec::new(),
                         self.search.query().into(),
@@ -3705,7 +3705,7 @@ impl InteractiveApplication {
             .collect();
         if self.search.live() {
             self.install_surface_picker_state(
-                PickerSurfaceKind::Generic,
+                PickerSurfaceKind::Grep,
                 self.message("workspace_search_title", &[]),
                 items,
                 self.search.query().into(),
@@ -3714,7 +3714,7 @@ impl InteractiveApplication {
             );
         } else {
             self.install_surface_picker_state(
-                PickerSurfaceKind::Generic,
+                PickerSurfaceKind::Grep,
                 self.message("workspace_search_title", &[]),
                 items,
                 String::new(),

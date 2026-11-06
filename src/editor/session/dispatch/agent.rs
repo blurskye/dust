@@ -1268,7 +1268,7 @@ impl InteractiveApplication {
     fn open_agent_tab(&mut self, name: &str) -> Result<(), String> {
         self.start_agent_session(name)?;
         self.agent.scroll = 0;
-        self.agent.normal = false;
+        // A new tab keeps the mode the panel is in, as a new tab does in the editor.
         self.show_agent_panel();
         Ok(())
     }

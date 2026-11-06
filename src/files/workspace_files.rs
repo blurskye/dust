@@ -214,29 +214,8 @@ pub(super) fn run_workspace_files(
         builder.add(root);
     }
     let mut truncated = false;
-    let mut scanned = 0;
-    for root in &roots {
-        if cancel.load(Ordering::Acquire) {
-            return;
-        }
-        for worktree in super::directory::root_worktrees(root, || {
-            if cancel.load(Ordering::Acquire) {
-                return false;
-            }
-            if scanned >= policy.maximum_files {
-                truncated = true;
-                return false;
-            }
-            scanned += 1;
-            true
-        }) {
-            if let Ok(worktree) = fs::canonicalize(worktree)
-                && owner_root(&worktree, &roots).is_some()
-            {
-                builder.add(worktree);
-            }
-        }
-    }
+    // What Git ignores, linked worktrees in `.worktree/` among it, is not listed, as in
+    // LazyVim's file finder.
     builder
         .follow_links(false)
         .hidden(!policy.include_hidden)

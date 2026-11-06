@@ -1044,7 +1044,8 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         paths.sort();
         paths
     };
-    assert_eq!(searched(&root), [".worktree/feat/feat.txt", "main.txt"]);
+    // Grep and the finder leave out what Git ignores, the worktrees among it.
+    assert_eq!(searched(&root), ["main.txt"]);
     assert_eq!(searched(&worktree), ["feat.txt"]);
 
     let found = |root: &Path| {
@@ -1082,7 +1083,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(found(&root), [".worktree/feat/feat.txt", "main.txt"]);
+    assert_eq!(found(&root), ["main.txt"]);
     assert_eq!(found(&worktree), ["feat.txt"]);
 
     assert_eq!(
@@ -1159,40 +1160,7 @@ fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
 }
 
 #[test]
-fn worktree_search_preserves_relative_root_paths() {
-    if !isolated_git_test() {
-        return;
-    }
-    let cwd = std::env::current_dir().unwrap();
-    let repository = tempfile::tempdir_in(&cwd).unwrap();
-    let root = repository.path().strip_prefix(&cwd).unwrap();
-    fs::create_dir_all(root.join(".git/info")).unwrap();
-    fs::write(root.join(".git/info/exclude"), "/.worktree/\n").unwrap();
-    let worktree = root.join(".worktree/feat");
-    fs::create_dir_all(&worktree).unwrap();
-    fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
-    fs::write(worktree.join("feat.txt"), "needle\n").unwrap();
-    assert_eq!(
-        super::directory::root_worktrees(root, || true).collect::<Vec<_>>(),
-        std::slice::from_ref(&worktree)
-    );
-    let mut search = WorkspaceSearchService::default();
-    search.start(search_policy(root, "needle")).unwrap();
-    let (matches, summary) = collect_search(&search);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(
-        matches[0].canonical_path,
-        fs::canonicalize(worktree.join("feat.txt")).unwrap()
-    );
-    assert_eq!(
-        matches[0].relative_path,
-        Path::new(".worktree/feat/feat.txt")
-    );
-    assert_eq!(summary.walk_errors, 0);
-}
-
-#[test]
-fn worktree_discovery_and_special_directory_respect_caller_limits() {
+fn worktree_discovery_respects_the_listing_limit() {
     if !isolated_git_test() {
         return;
     }
@@ -1202,31 +1170,6 @@ fn worktree_discovery_and_special_directory_respect_caller_limits() {
         list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 1).unwrap();
     assert_eq!(listing.entries.len(), 1);
     assert!(listing.truncated, "the extra worktree entry did not fit");
-    fs::create_dir_all(root.join(".worktree/other")).unwrap();
-    fs::remove_file(root.join(".worktree/feat/feat.txt")).unwrap();
-    // Only main.txt is visible, so truncation comes from discovery, not file collection.
-    // Even non-worktree children consume the discovery budget.
-    let (entries, summary) = collect_files(super::WorkspaceFilePolicy {
-        roots: vec![root.clone()],
-        root_revision: 1,
-        include_hidden: false,
-        include_ignored: false,
-        maximum_files: 1,
-        maximum_path_bytes: 4096,
-        batch_size: 1,
-        event_queue_capacity: 1,
-    });
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].relative_path, Path::new("main.txt"));
-    assert!(summary.truncated);
-    let mut policy = search_policy(&root, "needle");
-    policy.maximum_files = 1;
-    let mut search = WorkspaceSearchService::default();
-    search.start(policy).unwrap();
-    let (matches, summary) = collect_search(&search);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].relative_path, Path::new("main.txt"));
-    assert!(summary.truncated);
 }
 
 #[cfg(unix)]
@@ -1760,11 +1703,9 @@ fn workspace_search_rejects_worktrees_behind_an_escaping_directory_symlink() {
     symlink(outside.path(), root.path().join(".worktree")).unwrap();
     let mut service = WorkspaceSearchService::default();
     service.start(search_policy(root.path(), "needle")).unwrap();
-    let (matches, summary) = collect_search(&service);
+    let (matches, _) = collect_search(&service);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].relative_path, Path::new("inside"));
-    assert!(summary.walk_errors > 0);
-    assert!(summary.truncated);
 }
 
 #[test]

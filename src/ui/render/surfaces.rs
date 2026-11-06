@@ -711,7 +711,11 @@ pub(super) fn render_picker(
                     cell.width
                 };
                 let cell_right = cell_x.saturating_add(width).min(list_right);
-                let style = if selected && matches!(cell.style, Style::Default | Style::Muted) {
+                let style = if selected
+                    && matches!(
+                        cell.style,
+                        Style::Default | Style::Muted | Style::Accent | Style::Syntax(_)
+                    ) {
                     Style::Selection
                 } else {
                     cell.style
