@@ -1,3 +1,5 @@
+//! Command-line options and application startup.
+
 #![forbid(unsafe_code)]
 
 use crossterm::cursor::Show;
@@ -180,7 +182,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(root) = &cli.package_root {
         let manager =
-            dust::tools::PackageManager::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+            dust::tools::PackageStore::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         if let Some(name) = &cli.package_remove {
             let lock = manager.remove(name)?;
             println!("removed {name}; {} package(s) remain", lock.packages.len());

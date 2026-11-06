@@ -1,3 +1,5 @@
+//! Time and monotonic identifier sources.
+
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::RwLock;

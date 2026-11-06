@@ -1,3 +1,5 @@
+//! Dust library modules and shared layout bounds.
+
 #![forbid(unsafe_code)]
 
 pub(crate) const MAX_SPLIT_DEPTH: usize = 64;
