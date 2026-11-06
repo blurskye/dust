@@ -1,3 +1,5 @@
+//! Command registration and execution for terminal sessions and editor windows.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;
