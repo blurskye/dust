@@ -997,7 +997,6 @@ mod tests {
 
 pub(in crate::app) mod commands;
 
-
 pub(in crate::app) mod packages;
 
 use crate::app::App;
