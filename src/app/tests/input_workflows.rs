@@ -1,3 +1,5 @@
+//! Input workflows tests for cross-feature application workflows.
+
 use crate::app::tests::driver::TestSession;
 use crate::config::LoadedConfig;
 use std::time::Duration;

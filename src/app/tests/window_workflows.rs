@@ -1,3 +1,5 @@
+//! Window workflows tests for cross-feature application workflows.
+
 use crate::app::tests::driver::TestSession;
 use crate::ui::Style;
 

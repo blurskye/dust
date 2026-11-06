@@ -1,3 +1,5 @@
+//! Tests for cross-feature application workflows.
+
 pub(in crate::app) mod driver;
 mod input_workflows;
 pub(super) mod window_workflows;

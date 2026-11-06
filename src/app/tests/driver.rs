@@ -100,7 +100,7 @@ impl TestSession {
     pub(in crate::app) fn copy_counts(&self) -> (usize, usize, usize) {
         (
             crate::windows::WindowGraph::test_clone_count(),
-            crate::app::plugins::ExtensionSession::fixture_window_clone_count(),
+            crate::app::plugins::Plugins::fixture_window_clone_count(),
             self.application.window_session.content_builds(),
         )
     }
@@ -705,7 +705,7 @@ impl TestSession {
             .unwrap();
         app.reconcile_editor_windows();
         let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(2);
-        app.documents = crate::app::documents::DocumentSession::new(
+        app.documents = crate::app::documents::Documents::new(
             worker,
             &StartupTarget::Dashboard { root: root.clone() },
             app.state.window_version(),
@@ -725,7 +725,7 @@ impl TestSession {
             "closed path resurrected"
         );
         let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(2);
-        app.documents = crate::app::documents::DocumentSession::new(
+        app.documents = crate::app::documents::Documents::new(
             worker,
             &StartupTarget::Dashboard { root: root.clone() },
             app.state.window_version(),
