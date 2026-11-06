@@ -165,13 +165,15 @@ mod tests {
             snapshot.buffers[0].saved_revision,
             snapshot.buffers[0].text.revision()
         );
-        state.remove_buffer(buffer);
+        // A buffer still shown in a window cannot be removed, so show another one first.
+        state.replace_active_view(None).unwrap();
+        assert!(state.remove_buffer(buffer).is_some());
         let next = batch(&state, Some(gap.sequence));
         assert!(next.snapshot.is_none());
-        assert!(matches!(
-            next.records[0].1,
-            EditorEvent::BufferClosed { .. }
-        ));
+        assert!(next.records.iter().any(|(_, event)| matches!(
+            event,
+            EditorEvent::BufferClosed { buffer: closed } if *closed == buffer
+        )));
     }
 
     #[test]
