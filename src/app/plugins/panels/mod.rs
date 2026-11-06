@@ -17,8 +17,6 @@ use crate::windows::ViewId;
 use crate::windows::WindowId;
 
 mod host;
-#[cfg(test)]
-mod target03;
 mod validation;
 use validation::apply_private_patch;
 use validation::ensure_focused_visible;
