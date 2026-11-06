@@ -1,5 +1,6 @@
 //! Language-server requests and editor results.
 
+mod incoming;
 mod launch;
 
 pub(in crate::app) const LSP_REQUEST_TIMEOUT_MS: u64 = 10_000;
@@ -149,6 +150,8 @@ pub(super) struct LspSession {
     projection: projection::Projection,
     preparation: launch::Preparation,
     service: LspClient,
+    incoming: Option<(i64, OwnedLspEvent)>,
+    incoming_id: i64,
     edits: LspEditSources,
     deferred_commands: Vec<(ProposalId, String, crate::language::lsp::LspCommand)>,
     sessions: HashMap<String, LspRuntimeState>,
@@ -1043,15 +1046,8 @@ impl App {
             self.ui.language_completion = None;
             return;
         }
-        let Some(completion) = &self.ui.language_completion else {
-            return;
-        };
-        let Some(item) = self
-            .language
-            .completion_items()
-            .get(completion.selected)
-            .cloned()
-        else {
+        let selected = self.language.completion_position().0;
+        let Some(item) = self.language.completion_items().get(selected).cloned() else {
             return;
         };
         let Some((buffer_id, document)) = self.active_lsp_document() else {
@@ -1060,7 +1056,7 @@ impl App {
         // The item belongs to the server that offered it: resolve there and read its positions in that server's encoding.
         let server = self
             .language
-            .completion_server(completion.selected)
+            .completion_server(selected)
             .map(str::to_owned)
             .or_else(|| self.language.active().cloned())
             .unwrap_or_default();
@@ -1077,15 +1073,12 @@ impl App {
                 .state
                 .active_view
                 .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
-            if let Err(error) =
-                self.language
-                    .resolve_completion(completion.selected, document, offset)
-            {
+            if let Err(error) = self.language.resolve_completion(selected, document, offset) {
                 self.show_error(error);
             }
             return;
         }
-        let encoding = self.language.server_encoding(&server);
+        let encoding = self.language.completion_encoding(&server);
         let snippet = item.snippet;
         let offset = self
             .state
@@ -1783,150 +1776,112 @@ impl App {
             self.show_error(error);
         }
         while let Some(owned) = self.language.poll_event() {
-            let crate::language::lsp::OwnedLspEvent {
-                event,
-                context,
-                reply,
-            } = owned;
-            if !self.language.owns_event_context(&context) {
-                self.language
-                    .reject_reply(reply, "requesting language-server session retired".into());
-                continue;
+            self.route_lsp_event(owned);
+        }
+    }
+
+    pub(super) fn handle_lsp_event(&mut self, owned: OwnedLspEvent) {
+        let crate::language::lsp::OwnedLspEvent {
+            event,
+            context,
+            reply,
+        } = owned;
+        if !self.language.owns_event_context(&context) {
+            self.language
+                .reject_reply(reply, "requesting language-server session retired".into());
+            return;
+        }
+        match event {
+            LspEvent::Starting { .. } => {}
+            LspEvent::Running {
+                server,
+                capabilities,
+            } => {
+                self.ui.lsp_loading = None;
+                if self.language.running(&server, capabilities) {
+                    self.schedule_lsp_inlay_startup_refresh();
+                }
+                if self
+                    .lsp_waiting_server
+                    .as_ref()
+                    .is_none_or(|waiting| waiting == &server)
+                    && !self.language.server_loading(&server)
+                {
+                    self.lsp_waiting_server = None;
+                    if let Some(feature) = self.lsp_waiting.take() {
+                        self.request_lsp(feature);
+                    }
+                }
+                self.request_lsp_colors();
+                // Successful lifecycle transitions are reflected by the
+                // status line and bounded progress surface. They must not
+                // leave persistent bottom-left notifications.
             }
-            match event {
-                LspEvent::Starting { .. } => {}
-                LspEvent::Running {
-                    server,
-                    capabilities,
-                } => {
-                    self.ui.lsp_loading = None;
-                    if self.language.running(&server, capabilities) {
-                        self.schedule_lsp_inlay_startup_refresh();
-                    }
-                    if self
-                        .lsp_waiting_server
-                        .as_ref()
-                        .is_none_or(|waiting| waiting == &server)
-                        && !self.language.server_loading(&server)
-                    {
-                        self.lsp_waiting_server = None;
-                        if let Some(feature) = self.lsp_waiting.take() {
-                            self.request_lsp(feature);
-                        }
-                    }
-                    self.request_lsp_colors();
-                    // Successful lifecycle transitions are reflected by the
-                    // status line and bounded progress surface. They must not
-                    // leave persistent bottom-left notifications.
+            LspEvent::CapabilitiesChanged {
+                server,
+                capabilities,
+                ..
+            } => {
+                if self.language.running(&server, capabilities) {
+                    self.schedule_lsp_inlay_refresh(true);
                 }
-                LspEvent::CapabilitiesChanged {
-                    server,
-                    capabilities,
-                } => {
-                    if self.language.running(&server, capabilities) {
-                        self.schedule_lsp_inlay_refresh(true);
-                    }
-                    self.request_lsp_colors();
-                }
+                self.request_lsp_colors();
+            }
 
-                LspEvent::InlayHintsRefresh { server } => {
-                    if self.language.active().map(String::as_str) == Some(&server) {
-                        self.schedule_lsp_inlay_refresh(true);
-                    }
+            LspEvent::InlayHintsRefresh { server } => {
+                if self.language.active().map(String::as_str) == Some(&server) {
+                    self.schedule_lsp_inlay_refresh(true);
                 }
-                LspEvent::Diagnostics {
-                    server,
-                    uri,
-                    version,
-                    diagnostics,
-                } => {
-                    let result = self
-                        .language
-                        .diagnostic_batch(
-                            &context,
-                            &self.state,
-                            (&uri, version, diagnostics),
-                            (
-                                false,
-                                MAXIMUM_DIAGNOSTICS_PER_URI,
-                                &self.lsp_server_label(&server),
-                            ),
-                        )
-                        .and_then(|batch| self.diagnostics.publish(batch, &self.state));
-                    match result {
-                        Ok(()) => self.sync_ui_diagnostics(),
-                        Err(error) => self.append_lsp_log(error),
-                    }
+            }
+            LspEvent::Diagnostics {
+                server,
+                uri,
+                version,
+                diagnostics,
+            } => {
+                let result = self
+                    .language
+                    .diagnostic_batch(
+                        &context,
+                        &self.state,
+                        (&uri, version, diagnostics),
+                        (
+                            false,
+                            MAXIMUM_DIAGNOSTICS_PER_URI,
+                            &self.lsp_server_label(&server),
+                        ),
+                    )
+                    .and_then(|batch| self.diagnostics.publish(batch, &self.state));
+                match result {
+                    Ok(()) => self.sync_ui_diagnostics(),
+                    Err(error) => self.append_lsp_log(error),
                 }
+            }
 
-                LspEvent::Result {
-                    server,
-                    generation,
-                    method,
-                    uri,
-                    version,
-                    result,
-                } => {
-                    if context
-                        .document_source(&uri)
-                        .is_some_and(|(buffer, source)| {
-                            self.state
-                                .buffers
-                                .get(*buffer)
-                                .is_none_or(|buffer| buffer.text.source_version() != *source)
-                        })
-                    {
-                        continue;
-                    }
-                    let save_format = method == "textDocument/formatting"
-                        && self
-                            .formatting_save_for_request(&server, generation)
-                            .is_some();
-                    if save_format {
-                        self.present_lsp_result_owned(
-                            &server,
-                            generation,
-                            &method,
-                            &uri,
-                            result,
-                            Some(context),
-                        );
-                        continue;
-                    }
-                    let current = self.active_lsp_document_without_text();
-                    if !current.as_ref().is_some_and(|(_, document)| {
-                        document.uri() == uri && document.version == version
-                    }) {
-                        continue;
-                    }
-                    if let LspFeatureResult::Colors(colors) = result {
-                        self.install_lsp_colors(&server, &uri, colors, context.encoding());
-                        continue;
-                    }
-                    if self.language.is_breadcrumb_request(generation) {
-                        self.refresh_lsp_projection_owner();
-                        if !self.language.accept_breadcrumbs(&server, &uri, version) {
-                            continue;
-                        }
-                        if let LspFeatureResult::Symbols(symbols) = result {
-                            self.install_lsp_breadcrumbs(symbols, context.encoding());
-                        }
-                        continue;
-                    }
-                    self.refresh_lsp_projection_owner();
-                    if !self.language.accept_result(
-                        &server,
-                        generation,
-                        &method,
-                        &uri,
-                        version,
+            LspEvent::Result {
+                server,
+                generation,
+                method,
+                uri,
+                version,
+                result,
+            } => {
+                if context
+                    .document_source(&uri)
+                    .is_some_and(|(buffer, source)| {
                         self.state
-                            .active_view
-                            .and_then(|id| self.state.views.get(id))
-                            .map_or(ByteOffset(0), |view| view.cursor),
-                    ) {
-                        continue;
-                    }
+                            .buffers
+                            .get(*buffer)
+                            .is_none_or(|buffer| buffer.text.source_version() != *source)
+                    })
+                {
+                    return;
+                }
+                let save_format = method == "textDocument/formatting"
+                    && self
+                        .formatting_save_for_request(&server, generation)
+                        .is_some();
+                if save_format {
                     self.present_lsp_result_owned(
                         &server,
                         generation,
@@ -1935,126 +1890,171 @@ impl App {
                         result,
                         Some(context),
                     );
+                    return;
                 }
-                LspEvent::ApplyEditRequest {
-                    server: _,
-                    request_id: _,
-                    label,
-                    edit,
-                } => {
-                    self.begin_workspace_proposal(
-                        label.unwrap_or_else(|| self.message("workspace_edit_server_label", &[])),
-                        edit,
-                        reply,
-                        context.encoding(),
-                    );
+                let current = self.active_lsp_document_without_text();
+                if !current.as_ref().is_some_and(|(_, document)| {
+                    document.uri() == uri && document.version == version
+                }) {
+                    return;
                 }
-                LspEvent::Progress {
-                    server,
-                    token,
-                    kind,
-                    title,
-                    message,
-                    percentage,
-                } => self.update_lsp_progress(server, token, kind, title, message, percentage),
-                LspEvent::Log { server, message } => {
-                    let server = self.lsp_server_label(&server);
-                    self.append_lsp_log(format!("{server}: {message}"));
+                if let LspFeatureResult::Colors(colors) = result {
+                    self.install_lsp_colors(&server, &uri, colors, context.encoding());
+                    return;
                 }
-                LspEvent::ServerStatus {
-                    server,
-                    healthy,
-                    message,
-                } => {
-                    if self.language.status_changed(&server, healthy, &message) {
-                        self.report_lsp_status(&server, &message);
+                if self.language.is_breadcrumb_request(generation) {
+                    self.refresh_lsp_projection_owner();
+                    if !self.language.accept_breadcrumbs(&server, &uri, version) {
+                        return;
                     }
+                    if let LspFeatureResult::Symbols(symbols) = result {
+                        self.install_lsp_breadcrumbs(symbols, context.encoding());
+                    }
+                    return;
                 }
-                LspEvent::Health { server, health } => {
-                    let server = self.lsp_server_label(&server);
-                    self.notify_message(
-                        self.message(
-                            "lsp_health",
-                            &[
-                                ("server", server),
-                                ("documents", health.attached_documents.to_string()),
-                                ("pending", health.pending_requests.to_string()),
-                                (
-                                    "encoding",
-                                    health.capabilities.position_encoding.lsp_name().into(),
-                                ),
-                            ],
-                        ),
-                        false,
-                    );
-                }
-                LspEvent::Unsupported { server, method } => {
-                    let server = self.lsp_server_label(&server);
-                    self.show_error(
-                        self.message("lsp_unsupported", &[("server", server), ("method", method)]),
-                    );
-                }
-                LspEvent::RequestFailed {
-                    server,
+                self.refresh_lsp_projection_owner();
+                if !self.language.accept_result(
+                    &server,
                     generation,
-                    method,
-                    message,
-                } => self.handle_lsp_request_failure(server, generation, method, message),
-                LspEvent::Stopped { server, success } => {
-                    if context.diagnostic_ambiguous() {
-                        self.language.request_start(&server, None);
-                    }
-                    if !success {
-                        self.reprobe_failed_path_runtime(&server);
-                    }
-                    let desired = self.language.stopped(&server);
-                    for prefix in ["lsp.", "lsp-pull:"] {
-                        if let Ok(producer) = context.diagnostic_producer(prefix) {
-                            self.diagnostics.clear_source(&producer);
-                        }
-                    }
-                    self.sync_ui_diagnostics();
-                    let _ = self.language.stop(&server);
-                    self.language.forget_synced(&server);
-                    self.clear_lsp_progress(&server);
-                    self.ui.lsp_colors.retain(|span| span.server != server);
-                    let server_label = self.lsp_server_label(&server);
-                    self.notify_message(
-                        self.message("lsp_stopped", &[("server", server_label)]),
-                        false,
-                    );
-                    if self.language.active().map(String::as_str) == Some(&server) {
-                        self.clear_lsp_session_state();
-                    }
-                    if desired {
-                        self.schedule_lsp_restart(server);
+                    &method,
+                    &uri,
+                    version,
+                    self.state
+                        .active_view
+                        .and_then(|id| self.state.views.get(id))
+                        .map_or(ByteOffset(0), |view| view.cursor),
+                ) {
+                    return;
+                }
+                self.present_lsp_result_owned(
+                    &server,
+                    generation,
+                    &method,
+                    &uri,
+                    result,
+                    Some(context),
+                );
+            }
+            LspEvent::ApplyEditRequest {
+                server: _,
+                request_id: _,
+                label,
+                edit,
+            } => {
+                self.begin_workspace_proposal(
+                    label.unwrap_or_else(|| self.message("workspace_edit_server_label", &[])),
+                    edit,
+                    reply,
+                    context.encoding(),
+                );
+            }
+            LspEvent::Progress {
+                server,
+                token,
+                kind,
+                title,
+                message,
+                percentage,
+            } => self.update_lsp_progress(server, token, kind, title, message, percentage),
+            LspEvent::Log {
+                server, message, ..
+            } => {
+                let server = self.lsp_server_label(&server);
+                self.append_lsp_log(format!("{server}: {message}"));
+            }
+            LspEvent::ServerStatus {
+                server,
+                healthy,
+                message,
+            } => {
+                if self.language.status_changed(&server, healthy, &message) {
+                    self.report_lsp_status(&server, &message);
+                }
+            }
+            LspEvent::Health { server, health } => {
+                let server = self.lsp_server_label(&server);
+                self.notify_message(
+                    self.message(
+                        "lsp_health",
+                        &[
+                            ("server", server),
+                            ("documents", health.attached_documents.to_string()),
+                            ("pending", health.pending_requests.to_string()),
+                            (
+                                "encoding",
+                                health.capabilities.position_encoding.lsp_name().into(),
+                            ),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            LspEvent::Unsupported { server, method } => {
+                let server = self.lsp_server_label(&server);
+                self.show_error(
+                    self.message("lsp_unsupported", &[("server", server), ("method", method)]),
+                );
+            }
+            LspEvent::RequestFailed {
+                server,
+                generation,
+                method,
+                message,
+            } => self.handle_lsp_request_failure(server, generation, method, message),
+            LspEvent::Stopped { server, success } => {
+                if context.diagnostic_ambiguous() {
+                    self.language.request_start(&server, None);
+                }
+                if !success {
+                    self.reprobe_failed_path_runtime(&server);
+                }
+                let desired = self.language.stopped(&server);
+                for prefix in ["lsp.", "lsp-pull:"] {
+                    if let Ok(producer) = context.diagnostic_producer(prefix) {
+                        self.diagnostics.clear_source(&producer);
                     }
                 }
-                LspEvent::Failed { server, message } => {
-                    self.reprobe_failed_path_runtime(&server);
-                    let desired = self.language.stopped(&server);
-                    for prefix in ["lsp.", "lsp-pull:"] {
-                        if let Ok(producer) = context.diagnostic_producer(prefix) {
-                            self.diagnostics.clear_source(&producer);
-                        }
+                self.sync_ui_diagnostics();
+                let _ = self.language.stop(&server);
+                self.language.forget_synced(&server);
+                self.clear_lsp_progress(&server);
+                self.ui.lsp_colors.retain(|span| span.server != server);
+                let server_label = self.lsp_server_label(&server);
+                self.notify_message(
+                    self.message("lsp_stopped", &[("server", server_label)]),
+                    false,
+                );
+                if self.language.active().map(String::as_str) == Some(&server) {
+                    self.clear_lsp_session_state();
+                }
+                if desired {
+                    self.schedule_lsp_restart(server);
+                }
+            }
+            LspEvent::Failed { server, message } => {
+                self.reprobe_failed_path_runtime(&server);
+                let desired = self.language.stopped(&server);
+                for prefix in ["lsp.", "lsp-pull:"] {
+                    if let Ok(producer) = context.diagnostic_producer(prefix) {
+                        self.diagnostics.clear_source(&producer);
                     }
-                    self.sync_ui_diagnostics();
-                    let _ = self.language.stop(&server);
-                    self.language.forget_synced(&server);
-                    self.clear_lsp_progress(&server);
-                    self.ui.lsp_colors.retain(|span| span.server != server);
-                    let server_label = self.lsp_server_label(&server);
-                    self.language.failed(server_label.clone(), message.clone());
-                    self.show_error(self.message(
-                        "lsp_failed",
-                        &[("server", server_label), ("diagnostic", message)],
-                    ));
-                    if self.language.active().map(String::as_str) == Some(&server) {
-                        self.clear_lsp_session_state();
-                    }
-                    if desired {
-                        self.schedule_lsp_restart(server);
-                    }
+                }
+                self.sync_ui_diagnostics();
+                let _ = self.language.stop(&server);
+                self.language.forget_synced(&server);
+                self.clear_lsp_progress(&server);
+                self.ui.lsp_colors.retain(|span| span.server != server);
+                let server_label = self.lsp_server_label(&server);
+                self.language.failed(server_label.clone(), message.clone());
+                self.show_error(self.message(
+                    "lsp_failed",
+                    &[("server", server_label), ("diagnostic", message)],
+                ));
+                if self.language.active().map(String::as_str) == Some(&server) {
+                    self.clear_lsp_session_state();
+                }
+                if desired {
+                    self.schedule_lsp_restart(server);
                 }
             }
         }

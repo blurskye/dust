@@ -532,6 +532,7 @@ pub enum LspEvent {
     },
     CapabilitiesChanged {
         server: String,
+        method: String,
         capabilities: LspCapabilities,
     },
     InlayHintsRefresh {
@@ -567,6 +568,8 @@ pub enum LspEvent {
     },
     Log {
         server: String,
+        /// Absent for process stderr, which is not a protocol notification.
+        method: Option<String>,
         message: String,
     },
     ServerStatus {

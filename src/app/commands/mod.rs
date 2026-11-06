@@ -433,6 +433,8 @@ pub enum AppEffect {
     LspCompletionDocumentationOpen,
     LspCompletionMove(i8),
     LspCompletionAccept,
+    LspCompletionInlineAccept,
+    LspIncoming(i64),
     LspCompletionCancel,
     SnippetNavigate(i8),
     SnippetLeave,
@@ -1201,6 +1203,8 @@ impl App {
             | AppEffect::LspCompletionDocumentationOpen
             | AppEffect::LspCompletionMove(..)
             | AppEffect::LspCompletionAccept
+            | AppEffect::LspCompletionInlineAccept
+            | AppEffect::LspIncoming(..)
             | AppEffect::LspRenamePrompt
             | AppEffect::LspCompletionLeave
             | AppEffect::LspCompletionCancel

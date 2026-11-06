@@ -180,6 +180,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                 events,
                 LspEvent::Log {
                     server: server.into(),
+                    method: Some(method.into()),
                     message: text,
                 },
             );
@@ -258,6 +259,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     events,
                     LspEvent::CapabilitiesChanged {
                         server: server.into(),
+                        method: method.into(),
                         capabilities: capabilities.clone(),
                     },
                 );

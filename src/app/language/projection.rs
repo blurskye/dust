@@ -51,6 +51,7 @@ pub(in crate::app) struct Projection {
     inlay_due: Option<Instant>,
     inlay_retries: u8,
     completion_owner: Option<(u64, LspProjectionOwner)>,
+    completion_sources: HashMap<String, CompletionSource>,
     completion_items: Vec<LspCompletionItem>,
     completion_servers: Vec<String>,
     /// Everything the servers offered; `completion_items` is the part matching what was typed.
@@ -77,6 +78,12 @@ pub(in crate::app) struct Projection {
     progress_epoch: Option<Instant>,
     progress_frame: usize,
 }
+/// Sources share matching, selection and acceptance; inline is another view of the same item.
+struct CompletionSource {
+    encoding: crate::editor::text::PositionEncoding,
+    inline: bool,
+}
+
 /// How the document the server's results belong to changed since the last frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) enum ProjectionChange {
@@ -848,7 +855,18 @@ impl LspSession {
     pub(in crate::app) fn completion_items(&self) -> &[LspCompletionItem] {
         &self.projection.completion_items
     }
-    /// The first answer for a request replaces the list; later servers append to it.
+    pub(in crate::app) fn register_completion_source(
+        &mut self,
+        source: &str,
+        encoding: crate::editor::text::PositionEncoding,
+        inline: bool,
+    ) {
+        self.projection
+            .completion_sources
+            .insert(source.into(), CompletionSource { encoding, inline });
+    }
+
+    /// LSP uses the same source publication path as other completion producers.
     pub(in crate::app) fn install_completions(
         &mut self,
         server: &str,
@@ -856,25 +874,39 @@ impl LspSession {
         incomplete: bool,
         generation: u64,
     ) {
-        let append = self
+        self.register_completion_source(server, self.server_encoding(server), false);
+        if self
             .projection
             .completion_owner
             .as_ref()
-            .is_some_and(|(owned, _)| *owned == generation);
-        if !append {
-            self.projection.completion_owner = self
-                .projection
-                .owner
-                .clone()
-                .map(|owner| (generation, owner));
-            self.projection.completion_items.clear();
-            self.projection.completion_servers.clear();
-            self.projection.completion_all.clear();
-            self.projection.completion_incomplete = false;
-            self.projection.completion_selected = 0;
-            self.projection.completion_scroll = 0;
-            self.projection.resolve = None;
+            .is_none_or(|(id, _)| *id != generation)
+            && let Some(owner) = self.projection.owner.clone()
+        {
+            self.start_completions(owner, generation);
         }
+        self.publish_completions(server, items, incomplete, generation);
+    }
+
+    /// The first answer replaces the list; later sources merge into it. Publishing again
+    /// replaces that source's batch, so streaming updates cannot duplicate its rows.
+    pub(in crate::app) fn publish_completions(
+        &mut self,
+        source: &str,
+        items: Vec<LspCompletionItem>,
+        incomplete: bool,
+        request_id: u64,
+    ) {
+        if !self.projection.completion_sources.contains_key(source)
+            || self
+                .projection
+                .completion_owner
+                .as_ref()
+                .is_none_or(|(id, _)| *id != request_id)
+        {
+            return;
+        }
+        let server = source;
+        self.remove_completion_source_items(source);
         self.projection.completion_incomplete |= incomplete;
         self.projection.completion_narrowed = None;
         self.projection
@@ -887,6 +919,78 @@ impl LspSession {
             .completion_all
             .extend(items.into_iter().map(|item| (server.to_owned(), item)));
     }
+    /// A request is bound to a document snapshot, not to a running language server.
+    pub(in crate::app) fn start_completions(&mut self, owner: LspProjectionOwner, request_id: u64) {
+        self.projection.completion_owner = Some((request_id, owner));
+        self.projection.completion_items.clear();
+        self.projection.completion_servers.clear();
+        self.projection.completion_all.clear();
+        self.projection.completion_incomplete = false;
+        self.projection.completion_selected = 0;
+        self.projection.completion_scroll = 0;
+        self.projection.completion_narrowed = None;
+        self.projection.resolve = None;
+    }
+
+    pub(in crate::app) fn completion_encoding(
+        &self,
+        source: &str,
+    ) -> crate::editor::text::PositionEncoding {
+        self.projection
+            .completion_sources
+            .get(source)
+            .map_or_else(|| self.server_encoding(source), |source| source.encoding)
+    }
+
+    /// Ghost text is only a suffix of the selected insertion. Replacements that cannot
+    /// be represented as ghost text still remain available in the menu.
+    pub(in crate::app) fn inline_completion(&self, editor: &EditorState) -> Option<String> {
+        if !self.completion_current(editor) {
+            return None;
+        }
+        let selected = self.projection.completion_selected;
+        let source = self.completion_server(selected)?;
+        if !self.projection.completion_sources.get(source)?.inline {
+            return None;
+        }
+        let item = self.completion_items().get(selected)?;
+        let view = editor.views.get(editor.active_view?)?;
+        let text = &editor.buffers.get(view.buffer)?.text;
+        let (start, insertion) = if let Some(edit) = &item.text_edit {
+            let codec = PositionCodec::new(text);
+            let encoding = self.completion_encoding(source);
+            let end = codec
+                .lsp_to_byte(edit.range.end.line, edit.range.end.character, encoding)
+                .ok()?;
+            if end != view.cursor {
+                return None;
+            }
+            (
+                codec
+                    .lsp_to_byte(edit.range.start.line, edit.range.start.character, encoding)
+                    .ok()?,
+                edit.new_text.clone(),
+            )
+        } else {
+            (
+                self.completion_start().unwrap_or(view.cursor),
+                item.insert_text.clone(),
+            )
+        };
+        let insertion = if item.snippet {
+            crate::language::lsp::parse_snippet(&insertion, 1024 * 1024)
+                .ok()?
+                .text
+        } else {
+            insertion
+        };
+        let typed = text.slice(ByteRange::new(start, view.cursor).ok()?).ok()?;
+        insertion
+            .strip_prefix(&typed)
+            .filter(|suffix| !suffix.is_empty())
+            .map(str::to_owned)
+    }
+
     /// Records a typed character for the next sync, which decides whether it opens the menu.
     pub(in crate::app) fn note_typed(&mut self, text: &str) {
         let mut characters = text.chars();
@@ -937,7 +1041,7 @@ impl LspSession {
         self.projection
             .completion_all
             .iter()
-            .map(|(server, _)| (server.clone(), self.server_encoding(server)))
+            .map(|(server, _)| (server.clone(), self.completion_encoding(server)))
             .collect()
     }
     /// Scores each item against the text `typed` gives for it; an item that doesn't match gets none.
@@ -1343,6 +1447,11 @@ impl LspSession {
         if self.projection.request_servers.is_empty() {
             self.projection.request = None;
         }
+        self.projection.completion_sources.remove(server);
+        self.remove_completion_source_items(server);
+    }
+
+    fn remove_completion_source_items(&mut self, server: &str) {
         let retained_index = |index: usize| {
             (self
                 .projection

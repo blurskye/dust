@@ -422,6 +422,7 @@ mod tests {
         };
         sender.send(LspEvent::Log {
             server: "fixture".into(),
+            method: None,
             message: "full".into(),
         });
         let worker = std::thread::spawn(move || {
