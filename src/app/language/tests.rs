@@ -49,6 +49,203 @@ use std::time::Duration;
 use std::time::Instant;
 use tempfile::tempdir;
 
+fn source_completion(
+    label: &str,
+    insertion: &str,
+    rank: &str,
+) -> crate::language::lsp::LspCompletionItem {
+    crate::language::lsp::LspCompletionItem {
+        label: label.into(),
+        filter_text: None,
+        sort_text: Some(rank.into()),
+        detail: String::new(),
+        insert_text: insertion.into(),
+        text_edit: None,
+        additional_edits: Vec::new(),
+        kind: None,
+        snippet: insertion.contains('$'),
+        documentation: None,
+        command: None,
+        resolve_item: None,
+        resolved: true,
+    }
+}
+
+fn start_source_completions(app: &mut App) -> (crate::editor::BufferId, crate::editor::ViewId) {
+    let path = app.state.workspace_root.join("sources.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("pr"), Some(path.clone()))
+        .unwrap();
+    app.state.views[view].cursor = ByteOffset(2);
+    app.state.views[view].mode = crate::editor::EditorMode::Insert;
+    app.set_dashboard_visibility(false);
+    app.language.begin_completion(Some(ByteOffset(0)), true);
+    app.language.start_completions(
+        crate::app::language::LspProjectionOwner {
+            server: "words".into(),
+            buffer,
+            view,
+            revision: app.state.buffers[buffer].text.revision(),
+            text: app.state.buffers[buffer].text.source_version(),
+            uri: file_uri(&path),
+            language: "rust".into(),
+        },
+        7,
+    );
+    app.language
+        .register_completion_source("words", PositionEncoding::Utf16, true);
+    app.language
+        .register_completion_source("snippets", PositionEncoding::Utf8, true);
+    app.language.publish_completions(
+        "words",
+        vec![
+            source_completion("printf", "printf", "2"),
+            source_completion("unrelated", "unrelated", "0"),
+        ],
+        false,
+        7,
+    );
+    app.language.publish_completions(
+        "snippets",
+        vec![source_completion("print", "print(${1:arg})$0", "1")],
+        false,
+        7,
+    );
+    app.narrow_lsp_completion();
+    (buffer, view)
+}
+
+#[test]
+fn completion_sources_merge_sort_filter_and_share_menu_and_inline_selection() {
+    let (_dirs, mut app) = app();
+    start_source_completions(&mut app);
+    let menu = app.ui.language_completion.as_ref().unwrap();
+    assert_eq!(
+        menu.items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        ["print", "printf"]
+    );
+    assert_eq!(
+        app.language.inline_completion(&app.state).as_deref(),
+        Some("int(arg)")
+    );
+    app.move_lsp_completion(1);
+    assert_eq!(
+        app.language.inline_completion(&app.state).as_deref(),
+        Some("intf")
+    );
+    assert_eq!(app.language.completion_server(1), Some("words"));
+    // A streaming source replaces its own batch rather than appending duplicates.
+    app.language.publish_completions(
+        "words",
+        vec![source_completion("printf", "printf", "2")],
+        false,
+        7,
+    );
+    app.narrow_lsp_completion();
+    assert_eq!(app.language.completion_items().len(), 2);
+    app.cancel_lsp_completion();
+    app.language.publish_completions(
+        "words",
+        vec![source_completion("printf", "printf", "2")],
+        false,
+        7,
+    );
+    assert!(app.language.completion_items().is_empty());
+    assert!(app.language.inline_completion(&app.state).is_none());
+}
+
+#[test]
+fn inline_and_menu_accept_the_same_snippet_without_a_running_language_server() {
+    for inline in [false, true] {
+        let (_dirs, mut app) = app();
+        let (buffer, view) = start_source_completions(&mut app);
+        if inline {
+            app.ui.language_completion = None;
+            app.invoke_mapped_command("completion.inline.accept");
+        } else {
+            app.invoke_mapped_command("completion.accept");
+        }
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "print(arg)");
+        assert_eq!(app.input.snippet_buffer(), Some(buffer));
+        let selection = app.state.views[view].selection.unwrap();
+        assert_eq!(selection.anchor, ByteOffset(6));
+        assert_eq!(selection.head, ByteOffset(9));
+        assert!(app.language.inline_completion(&app.state).is_none());
+    }
+}
+
+#[test]
+fn inline_completion_rejects_a_changed_document() {
+    let (_dirs, mut app) = app();
+    let (buffer, _) = start_source_completions(&mut app);
+    app.replace_with_recovered(buffer, "different".into())
+        .unwrap();
+    assert!(app.language.inline_completion(&app.state).is_none());
+    app.process_effect(AppEffect::LspCompletionInlineAccept);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "different");
+}
+
+#[test]
+fn incoming_notification_runs_its_method_command_before_native_handling() {
+    use crate::editor::{
+        ArgumentSchema, ArgumentType, CommandOutcome, CommandRegistry, CommandSpec,
+    };
+    use crate::language::lsp::{LspEvent, OwnedLspEvent};
+    let (_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("notification.rs");
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text(""), Some(path))
+        .unwrap();
+    let endpoint = fixture_owned_lsp(&mut app, "server", buffer);
+    let notification = || OwnedLspEvent {
+        event: LspEvent::Log {
+            server: "server".into(),
+            method: Some("window/showMessage".into()),
+            message: "hello".into(),
+        },
+        context: endpoint.context(),
+        reply: None,
+    };
+    app.route_lsp_event(notification());
+    assert!(
+        app.language
+            .logs()
+            .iter()
+            .any(|line| line.contains("hello"))
+    );
+    let before = app.language.logs().len();
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let called = seen.clone();
+    let mut registry = CommandRegistry::default();
+    let mut spec =
+        CommandSpec::builtin("lsp.incoming.window.showmessage", "Filter notification").unwrap();
+    spec.arguments = ArgumentSchema::default()
+        .field("event", ArgumentType::Integer, true)
+        .field("method", ArgumentType::String, true)
+        .field("server", ArgumentType::String, true);
+    registry
+        .register(spec, move |_, invocation| {
+            assert_eq!(
+                invocation.arguments["method"].as_str().unwrap(),
+                "window/showMessage"
+            );
+            assert_eq!(invocation.arguments["server"].as_str().unwrap(), "server");
+            called.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(CommandOutcome::empty())
+        })
+        .unwrap();
+    app.commands = registry;
+    app.route_lsp_event(notification());
+    assert!(seen.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(app.language.logs().len(), before);
+    assert!(app.language.incoming.is_none());
+}
+
 #[test]
 fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::LspCompletionItem;

@@ -609,6 +609,7 @@ pub(super) fn run_session(
                         &events,
                         LspEvent::Log {
                             server: server.clone(),
+                            method: None,
                             message: sanitize_log(
                                 &String::from_utf8_lossy(line),
                                 MAX_LOG_LINE_BYTES,

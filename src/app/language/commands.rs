@@ -16,6 +16,7 @@ use crate::editor::ContextRequirement;
 pub(in crate::app) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
 ) -> Result<(), CommandError> {
+    crate::app::language::incoming::register_commands(registry)?;
     for (id, title, category) in [
         (
             "tools.menu.open",
@@ -363,6 +364,11 @@ pub(in crate::app) fn register_commands(
             AppEffect::LspCompletionAccept,
         ),
         (
+            "completion.inline.accept",
+            "Accept inline completion",
+            AppEffect::LspCompletionInlineAccept,
+        ),
+        (
             "completion.cancel",
             "Cancel completion",
             AppEffect::LspCompletionCancel,
@@ -613,6 +619,12 @@ impl App {
             }
             AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
             AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
+            AppEffect::LspCompletionInlineAccept => {
+                if self.language.inline_completion(&self.state).is_some() {
+                    self.accept_lsp_completion();
+                }
+            }
+            AppEffect::LspIncoming(id) => self.handle_incoming_lsp_command(id),
             AppEffect::LspRenamePrompt => self.open_rename_prompt(),
             AppEffect::LspCompletionLeave => {
                 self.cancel_lsp_completion();
