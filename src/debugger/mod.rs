@@ -202,8 +202,8 @@ pub(crate) use reverse::DapReplyReceipt;
 pub use reverse::DapTerminalReply;
 
 mod session;
-pub(crate) use session::DapContext;
 pub use session::DapClient;
+pub(crate) use session::DapContext;
 use session::Events;
 pub(crate) use session::ExecutionScope;
 use session::Writer;
