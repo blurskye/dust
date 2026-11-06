@@ -1,3 +1,5 @@
+//! DAP connections and protocol messages.
+
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
@@ -201,7 +203,7 @@ pub use reverse::DapTerminalReply;
 
 mod session;
 pub(crate) use session::DapContext;
-pub use session::DapService;
+pub use session::DapClient;
 use session::Events;
 pub(crate) use session::ExecutionScope;
 use session::Writer;

@@ -97,12 +97,12 @@ struct Session {
     receiver: Receiver<(DapContext, DapEvent)>,
     reported: bool,
 }
-pub struct DapService {
+pub struct DapClient {
     session: Option<Session>,
     residents: Vec<Weak<()>>,
     closed: bool,
 }
-impl DapService {
+impl DapClient {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -448,12 +448,12 @@ fn append_stderr(message: &mut String, actor: &Actor) {
     }
 }
 
-impl Default for DapService {
+impl Default for DapClient {
     fn default() -> Self {
         Self::new()
     }
 }
-impl Drop for DapService {
+impl Drop for DapClient {
     fn drop(&mut self) {
         self.begin_shutdown();
     }
@@ -647,7 +647,7 @@ impl TestAdapter {
     }
 }
 #[cfg(test)]
-pub(crate) fn fixture() -> (DapService, TestAdapter) {
+pub(crate) fn fixture() -> (DapClient, TestAdapter) {
     let actor = Arc::new(Actor {
         cancel: Arc::new(AtomicBool::new(false)),
         supports_terminate: AtomicBool::new(true),
@@ -672,7 +672,7 @@ pub(crate) fn fixture() -> (DapService, TestAdapter) {
         _resident: Arc::new(()),
     };
     (
-        DapService {
+        DapClient {
             session: Some(Session {
                 name: "same-name".into(),
                 actor,
@@ -747,7 +747,7 @@ fn json_bounded(value: &Value) -> bool {
 
 /// Exclusive reservation in the actual resident ledger, retained through worker registration.
 pub(crate) struct DapAdmission<'a> {
-    service: &'a mut DapService,
+    service: &'a mut DapClient,
     resident: Arc<()>,
 }
 impl DapAdmission<'_> {
@@ -853,7 +853,7 @@ while True:
  if c=='disconnect': break
 "#;
         std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-        let mut service = DapService::new();
+        let mut service = DapClient::new();
         service
             .start_absolute(DapLaunch {
                 adapter: "queued".into(),

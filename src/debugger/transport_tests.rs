@@ -1,3 +1,5 @@
+//! Transport tests for dap connections and protocol messages.
+
 use crate::debugger::*;
 use std::time::Instant;
 
@@ -71,7 +73,7 @@ fn adapter_identifiers_with_nul_are_rejected_before_spawning() {
     let root = tempfile::tempdir().unwrap();
     let mut configuration = launch(root.path(), &root.path().join("unused.py"));
     configuration.adapter = "bad\0adapter".into();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     assert!(matches!(
         service.start_absolute(configuration),
         Err(DapError::InvalidConfiguration)
@@ -119,7 +121,7 @@ while True:
             )
         })
         .collect();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service.start_absolute(configuration).unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
     service.writer_gate(true);
@@ -211,7 +213,7 @@ while True:
             log_message: None,
         }],
     )];
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service.start_absolute(configuration).unwrap();
     wait(|| matches!(service.try_event(), Some(DapEvent::Running { .. })));
     service
@@ -242,7 +244,7 @@ fn adapter_startup_failures_include_bounded_stderr() {
             ""
         };
         std::fs::write(&script, format!("{prefix}\nsys.stderr.write('x'*20000+' missing library libadapter.so\\n')\nsys.stderr.flush()\n{rejection}")).unwrap();
-        let mut service = DapService::new();
+        let mut service = DapClient::new();
         service
             .start_absolute(launch(root.path(), &script))
             .unwrap();
@@ -279,7 +281,7 @@ while True:
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("slow-launch.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -308,7 +310,7 @@ fn debuggee_exit_preserves_final_output_until_termination_or_eof() {
             ""
         };
         std::fs::write(&script, format!("{prefix}\nwhile True:\n m=read()\n if m is None: break\n c=m['command']\n send({{'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':{{}}}})\n if c=='launch':\n  send({{'type':'event','event':'exited','body':{{'exitCode':0}}}})\n  send({{'type':'event','event':'output','body':{{'output':'final output'}}}})\n{termination}  break\n")).unwrap();
-        let mut service = DapService::new();
+        let mut service = DapClient::new();
         service
             .start_absolute(launch(root.path(), &script))
             .unwrap();
@@ -347,7 +349,7 @@ while True:
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("buffered-exit.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -410,7 +412,7 @@ log.write('cleaned up\n')
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("cleanup.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -460,7 +462,7 @@ while True:
                 ),
             )
             .unwrap();
-            let mut service = DapService::new();
+            let mut service = DapClient::new();
             let mut configuration = launch(root.path(), &script);
             configuration.request = request.into();
             service.start_absolute(configuration).unwrap();
@@ -603,7 +605,7 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     // Exceed both the event/message queues and OS pipe buffers so the adapter itself blocks.
     let adapter = ADAPTER.replace("str(n)+'\\n'", "str(n)+' '+('x'*4000)+'\\n'");
     std::fs::write(&script, adapter).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -696,7 +698,7 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
         "import pathlib\npathlib.Path('UNAUTHORIZED').write_text('spawned')\n",
     )
     .unwrap();
-    let mut scoped = DapService::new();
+    let mut scoped = DapClient::new();
     drop(scoped.admission().unwrap());
     assert_eq!(scoped.pending(), 0, "unused reservation leaked a resident");
     let admission = scoped.admission().unwrap();
@@ -786,7 +788,7 @@ while True:
   for n in range(32): send({'type':'request','command':'runInTerminal','arguments':{'cwd':str(pathlib.Path.cwd()),'args':['owned'],'env':{}}})
 "#;
     std::fs::write(&script, format!("{prefix}{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -967,7 +969,7 @@ fn variables_requests(root: &Path) -> Vec<String> {
         .filter(|line| line.starts_with("variables "))
         .collect()
 }
-fn control_and_wait(service: &mut DapService, control: DapControl, expect: &str) {
+fn control_and_wait(service: &mut DapClient, control: DapControl, expect: &str) {
     service.control(control).unwrap();
     wait(|| {
         while let Some(event) = service.try_event() {
@@ -995,7 +997,7 @@ fn child_requests_happen_only_when_a_row_is_expanded() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("logging.py");
     std::fs::write(&script, LOGGING_ADAPTER).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1048,7 +1050,7 @@ fn a_declared_attach_session_sends_attach_and_needs_no_program() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("logging.py");
     std::fs::write(&script, LOGGING_ADAPTER).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     let mut configuration = launch(root.path(), &script);
     // Declared as an ATTACH: the configuration says so, and there is no program to run.
     configuration.request = "attach".into();
@@ -1107,7 +1109,7 @@ while True:
         let root = tempfile::tempdir().unwrap();
         let script = root.path().join("continued.py");
         std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-        let mut service = DapService::new();
+        let mut service = DapClient::new();
         service
             .start_absolute(launch(root.path(), &script))
             .unwrap();
@@ -1183,7 +1185,7 @@ while True:
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("resume.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1254,7 +1256,7 @@ while True:
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("pause.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1325,7 +1327,7 @@ while True:
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("breakpoint-order.py");
     std::fs::write(&script, format!("{prefix}\n{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1399,7 +1401,7 @@ while True:
  if c=='disconnect': break
 "#;
     std::fs::write(&script, format!("{prefix}{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1554,7 +1556,7 @@ while True:
  if c=='launch': send({'type':'event','event':'initialized','body':{}})
 "#;
     std::fs::write(&script, format!("{prefix}{body}")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
@@ -1578,7 +1580,7 @@ fn abnormal_adapter_exit_kills_term_ignoring_descendants_and_releases_pipes() {
         .next()
         .unwrap();
     std::fs::write(&script, format!("{prefix}\nimport subprocess,os\np=subprocess.Popen([sys.executable,'-c',\"import signal,time,pathlib; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path('helper-ready').touch(); time.sleep(30)\"])\npathlib.Path('helper-pid').write_text(str(p.pid))\nwhile not pathlib.Path('helper-ready').exists(): time.sleep(.002)\nos._exit(1)\n")).unwrap();
-    let mut service = DapService::new();
+    let mut service = DapClient::new();
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
