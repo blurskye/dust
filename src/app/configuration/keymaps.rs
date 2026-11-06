@@ -1,3 +1,5 @@
+//! Resolved bindings, reverse lookups and key-hint descriptions.
+
 use crate::app::configuration::configuration_value;
 use crate::app::configuration::display_key_sequence;
 use crate::app::configuration::invocation_fingerprint;
@@ -38,7 +40,7 @@ pub struct KeymapInspection {
     pub context: String,
     pub contribution_layer: InputContextLayer,
     pub contribution_owner: Option<String>,
-    pub contribution_generation: u64,
+    pub plugin_load: u64,
     pub operation: KeymapOperation,
     pub command: Option<String>,
     pub arguments: BTreeMap<String, CommandValue>,
@@ -61,7 +63,7 @@ pub struct ResolvedKeyGroup {
     pub context: String,
     pub contribution_layer: InputContextLayer,
     pub contribution_owner: Option<String>,
-    pub contribution_generation: u64,
+    pub plugin_load: u64,
     pub source_prefix: String,
     pub prefix: String,
     pub label: String,
@@ -122,24 +124,6 @@ pub(in crate::app) enum EffectiveBinding {
 }
 
 impl EffectiveBinding {
-    /// Every key that resolves here, in a stable order. Test-facing: the reference page shows
-    /// `display`, and asserting the whole set is what makes the ordering checkable.
-    #[cfg(test)]
-    #[must_use]
-    pub(in crate::app) fn keys(&self) -> &[String] {
-        match self {
-            Self::Bound { keys, .. } => keys,
-            Self::Unbound { .. } => &[],
-        }
-    }
-
-    /// The first resolvable key, for prose that must name one. Stable, because `keys` is sorted.
-    #[cfg(test)]
-    #[must_use]
-    pub(in crate::app) fn primary(&self) -> Option<&str> {
-        self.keys().first().map(String::as_str)
-    }
-
     #[must_use]
     pub(in crate::app) fn is_bound(&self) -> bool {
         matches!(self, Self::Bound { .. })
@@ -167,11 +151,6 @@ impl ResolvedKeymaps {
             .map_or(MappingResolution::Missing, |bindings| {
                 sequence.feed(bindings, key)
             })
-    }
-
-    #[cfg(test)]
-    pub(in crate::app) fn has_bindings(&self) -> bool {
-        !self.bindings.is_empty()
     }
 
     /// The effective binding a lesson must show: the key the user would actually press in this
@@ -209,10 +188,8 @@ impl ResolvedKeymaps {
 
     /// The key to SHOW for a command in a context.
     ///
-    /// `reverse` is a `HashMap`, so a command with several bindings previously answered with
-    /// whichever key the iteration happened to reach first — meaning shipped hint text could
-    /// name a different key between runs. The smallest key is chosen so the answer is stable and
-    /// agrees with `EffectiveBinding::primary()`. Use `effective_binding` when every key matters.
+    /// Choose the smallest key so hash iteration order cannot change the displayed hint.
+    /// Use `effective_binding` when every key matters.
     #[must_use]
     pub fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
         self.reverse
@@ -265,16 +242,6 @@ impl ResolvedKeymaps {
                     && (inspection.keys == keys || inspection.source_keys == keys)
             })
             .cloned()
-    }
-
-    #[must_use]
-    pub fn conflicts(&self) -> &[String] {
-        &self.conflicts
-    }
-
-    #[must_use]
-    pub fn groups(&self) -> &[ResolvedKeyGroup] {
-        &self.groups
     }
 
     fn mapping_reachable(&self, inspection: &KeymapInspection) -> bool {

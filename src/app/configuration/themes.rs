@@ -1,5 +1,5 @@
 //! Theme preview is a presentation override, never a global configuration reload.
-use crate::app::configuration::ConfigurationSession;
+use crate::app::configuration::Configuration;
 use crate::config::ThemeCatalog;
 use crate::config::ThemeChoice;
 use crate::config::ThemeConfig;
@@ -104,7 +104,7 @@ fn themes_directory(source: &std::path::Path, user_config: &std::path::Path) -> 
     }
 }
 
-impl ConfigurationSession {
+impl Configuration {
     pub(in crate::app) fn begin_theme_restore(&mut self) {
         self.themes.restore = None;
         self.themes.restore_source = self
@@ -265,7 +265,7 @@ impl ConfigurationSession {
     }
     pub(in crate::app) fn apply_theme(&mut self, key: &ThemeKey) -> Result<String, String> {
         if !self.theme_key_current(key) {
-            return Err("Theme selection belongs to a retired configuration or picker".into());
+            return Err("Theme selection belongs to an outdated configuration or picker".into());
         }
         let choice = self.themes.interaction.as_ref().unwrap().choices[key.index].clone();
         let name = choice.theme.name.clone();

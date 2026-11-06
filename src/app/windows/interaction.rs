@@ -282,7 +282,7 @@ impl App {
             &(&*self.state).into(),
             self.diagnostics.counts(),
             self.configuration.settings(),
-            self.configuration.generation(),
+            self.configuration.reload_id(),
         );
         self.ui.content_tabs = self.window_session.content_tabs().to_vec();
     }
@@ -804,7 +804,7 @@ impl App {
                 )
                 .height
             }),
-            configuration_generation: self.configuration.generation(),
+            configuration_generation: self.configuration.reload_id(),
             screen_bottom: screen_foot_rows(
                 &self.state,
                 &self.ui,
@@ -828,7 +828,7 @@ impl App {
             && self.window_session.graph().revision() == self.ui.window_graph_revision
             && self
                 .window_session
-                .content_current(self.configuration.generation())
+                .content_current(self.configuration.reload_id())
             && self.compositor_projection().is_some()
         {
             return;

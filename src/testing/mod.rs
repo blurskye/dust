@@ -27,9 +27,9 @@ use crate::editor::text::TextBuffer;
 
 use crate::app::commands::AppEffect;
 
-use crate::app::ResolvedKeymaps;
+use crate::app::configuration::ResolvedKeymaps;
 
-use crate::app::compile_keymaps;
+use crate::app::configuration::compile_keymaps;
 
 use crate::app::commands::register_app_commands;
 
@@ -313,7 +313,7 @@ mod tests {
         mapping.mode = "insert".into();
         mapping.keys = Some("j k".into());
         loaded.keymaps.entries.push(mapping);
-        let (keymaps, diagnostic) = crate::app::compile_keymaps(
+        let (keymaps, diagnostic) = crate::app::configuration::compile_keymaps(
             &editor.registry,
             &loaded.keymaps,
             &loaded.config.input.keymaps,

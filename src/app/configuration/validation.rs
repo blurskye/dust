@@ -1,3 +1,5 @@
+//! Command references and typed arguments in configuration declarations.
+
 use crate::app::commands::AppEffect;
 use crate::config::LoadedConfig;
 use crate::editor::CommandError;

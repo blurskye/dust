@@ -1,3 +1,5 @@
+//! Configuration sources, consistent reads and background reloads.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::env;
@@ -833,7 +835,7 @@ pub struct ConfigurationWorker {
 
 #[derive(Debug)]
 pub struct ConfigurationWorkerResult {
-    pub generation: u64,
+    pub reload_id: u64,
     pub automatic: bool,
     pub candidate: Result<LoadedConfig, String>,
 }
@@ -866,7 +868,7 @@ impl ConfigurationWorker {
         let thread = thread::Builder::new()
             .name("dust-configuration".into())
             .spawn(move || {
-                let mut generation = 0_u64;
+                let mut reload_id = 0_u64;
                 // Without a loaded snapshot, verify startup with a reload. Otherwise
                 // compare against what was loaded so unchanged startup doesn't reset
                 // view toggles or cancel work the user has already started.
@@ -888,7 +890,7 @@ impl ConfigurationWorker {
                             crate::config::themes::discover(request)
                         }
                         Ok(ConfigurationRequest::Reload) => {
-                            generation = generation.saturating_add(1);
+                            reload_id = reload_id.saturating_add(1);
                             let candidate =
                                 match load_consistent_configuration(use_user_configuration, &theme)
                                 {
@@ -910,7 +912,7 @@ impl ConfigurationWorker {
                                 };
                             if results
                                 .send(ConfigurationWorkerResult {
-                                    generation,
+                                    reload_id,
                                     automatic: false,
                                     candidate,
                                 })
@@ -952,10 +954,10 @@ impl ConfigurationWorker {
                                             fingerprint = stable;
                                         }
                                         changed_at = None;
-                                        generation = generation.saturating_add(1);
+                                        reload_id = reload_id.saturating_add(1);
                                         if results
                                             .send(ConfigurationWorkerResult {
-                                                generation,
+                                                reload_id,
                                                 automatic: true,
                                                 candidate: consistent.candidate,
                                             })

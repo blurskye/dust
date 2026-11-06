@@ -1,4 +1,35 @@
-use crate::app::tests::*;
+//! Keymap precedence, plugin contributions and resolved key hints.
+
+use crate::app::configuration::ResolvedKeymaps;
+use crate::app::configuration::keymaps::EffectiveBinding;
+use crate::app::tests::app;
+
+impl EffectiveBinding {
+    pub(in crate::app) fn keys(&self) -> &[String] {
+        match self {
+            Self::Bound { keys, .. } => keys,
+            Self::Unbound { .. } => &[],
+        }
+    }
+
+    pub(in crate::app) fn primary(&self) -> Option<&str> {
+        self.keys().first().map(String::as_str)
+    }
+}
+
+impl ResolvedKeymaps {
+    pub(in crate::app) fn has_bindings(&self) -> bool {
+        !self.bindings.is_empty()
+    }
+
+    pub(in crate::app) fn conflicts(&self) -> &[String] {
+        &self.conflicts
+    }
+
+    pub(in crate::app) fn groups(&self) -> &[crate::app::configuration::ResolvedKeyGroup] {
+        &self.groups
+    }
+}
 
 #[test]
 pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
@@ -75,7 +106,7 @@ pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll
         .inspect_key("dashboard", "x y")
         .expect("indexed binding");
     assert_eq!(indexed.contribution_owner.as_deref(), Some("demo"));
-    assert_eq!(indexed.contribution_generation, load.0);
+    assert_eq!(indexed.plugin_load, load.0);
     assert!(!app.extension.is_active_generation("demo", load));
     let previous = app.extension.load_id("demo");
     app.invoke_mapped(
@@ -260,7 +291,7 @@ pub(in crate::app) fn typed_plugin_defaults_compile_between_bundled_and_user_con
         crate::editor::input::InputContextLayer::Plugin
     );
     assert_eq!(chat.contribution_owner.as_deref(), Some("demo"));
-    assert_eq!(chat.contribution_generation, 4);
+    assert_eq!(chat.plugin_load, 4);
     assert!(
         resolved
             .groups()
@@ -836,7 +867,7 @@ pub(in crate::app) fn key_hints_and_effective_bindings_exclude_terminated_prefix
 
 #[test]
 pub(in crate::app) fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
-    let (_app_dirs, app) = app();
+    let (_app_dirs, mut app) = app();
     for (group, expected) in [
         (
             crate::config::KeyGroupEntry {
@@ -1044,6 +1075,9 @@ pub(in crate::app) fn invalid_key_groups_reject_compilation_and_reload_transacti
         &app.configuration.settings().input.keymaps,
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
+    let mut accepted = crate::config::load_bundled_config();
+    accepted.keymaps = valid.clone();
+    app.apply_configuration_candidate(accepted, false).unwrap();
     let mut invalid = valid;
     invalid.path = PathBuf::from("keymaps.toml");
     invalid.groups.push(crate::config::KeyGroupEntry {
@@ -1056,17 +1090,12 @@ pub(in crate::app) fn invalid_key_groups_reject_compilation_and_reload_transacti
         order: 0,
         disable: false,
     });
-    let (retained, diagnostic) = reload_keymaps(
-        &app.commands,
-        &current,
-        &invalid,
-        &app.configuration.settings().input.keymaps,
-    );
-    assert!(
-        diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("keeping previous keymaps"))
-    );
+    let revision = app.configuration.binding_revision();
+    let mut candidate = crate::config::load_bundled_config();
+    candidate.keymaps = invalid;
+    assert!(app.apply_configuration_candidate(candidate, false).is_err());
+    assert_eq!(app.configuration.binding_revision(), revision);
+    let retained = app.configuration.keymaps();
     assert_eq!(
         retained.groups(),
         current.groups(),
@@ -1305,7 +1334,7 @@ pub(in crate::app) fn effective_bindings_report_remaps_unbound_commands_and_the_
     let unbound = remapped.effective_binding("editor.normal", "health.open");
     assert_eq!(
         unbound,
-        crate::app::configuration::EffectiveBinding::Unbound {
+        crate::app::configuration::keymaps::EffectiveBinding::Unbound {
             command: "health.open".into(),
         },
         "a command with no binding here is UNBOUND rather than given a default"
@@ -1367,5 +1396,4 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::app::compile_keymaps;
-use crate::app::reload_keymaps;
+use crate::app::configuration::compile_keymaps;

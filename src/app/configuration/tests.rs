@@ -1,5 +1,36 @@
+//! Configuration reloads, user keymaps and settings behavior.
+
+use crate::app::configuration::Configuration;
+use crate::app::configuration::ResolvedConfiguration;
+use crate::app::configuration::ResolvedKeymaps;
 use crate::app::configuration::ViewToggle;
-use crate::app::tests::*;
+use crate::app::configuration::themes::Themes;
+use std::sync::Arc;
+
+impl Configuration {
+    pub(in crate::app) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {
+        self.accepted.keymaps = keymaps;
+        self.accepted.deferred_plugin_keymaps = deferred;
+        self.stamp = Arc::new(());
+        self.binding_revision = self.binding_revision.saturating_add(1);
+    }
+
+    pub(in crate::app) fn fixture_snapshot(&self) -> ResolvedConfiguration {
+        self.accepted.clone()
+    }
+
+    pub(in crate::app) fn install_fixture(&mut self, candidate: ResolvedConfiguration) {
+        candidate
+            .settings
+            .validate()
+            .expect("valid owned fixture policy");
+        self.accepted = candidate;
+        self.themes = Themes::default();
+        self.stamp = Arc::new(());
+        self.binding_revision = self.binding_revision.saturating_add(1);
+    }
+}
+use crate::app::tests::app;
 
 #[test]
 pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions()
@@ -42,7 +73,7 @@ pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwr
     );
     app.configuration.begin_theme_restore();
     app.process_effect(AppEffect::SelectTheme);
-    // An old state result is refused before even validating its payload ceiling.
+    // Refuse an old state result before validating its payload size.
     app.configuration
         .restore_theme(Some(&"x".repeat(128 * 1024 + 1)))
         .unwrap();
@@ -69,7 +100,7 @@ pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwr
                 assert!(Instant::now() < deadline);
                 thread::sleep(Duration::from_millis(1));
             }
-            Err(error) => panic!("theme restore admission failed: {error}"),
+            Err(error) => panic!("theme restore request failed: {error}"),
         }
     }
     loop {
@@ -418,7 +449,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
             .source
             .contains("editor-state")
     );
-    // Opening another picker retires the preview, not the already applied theme.
+    // Opening another picker discards the preview, not the already applied theme.
     choose(&mut app);
     app.open_builtin_picker(PickerKind::Commands);
     assert_eq!(app.configuration.theme(), &amber);
@@ -467,16 +498,22 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
     wait_for_discovery(&mut app);
     assert!(
         app.ui.picker.is_none(),
-        "a retired load must not republish its picker"
+        "an outdated load must not republish its picker"
     );
     assert_eq!(app.configuration.theme().name, "newest");
 }
 
 #[test]
-pub(in crate::app) fn stale_configuration_generations_are_never_applied() {
-    assert!(crate::app::configuration::configuration_generation_is_newer(4, 5));
-    assert!(!crate::app::configuration::configuration_generation_is_newer(5, 5));
-    assert!(!crate::app::configuration::configuration_generation_is_newer(6, 5));
+fn stale_configuration_reloads_are_never_applied() {
+    assert!(crate::app::configuration::configuration_reload_is_newer(
+        4, 5
+    ));
+    assert!(!crate::app::configuration::configuration_reload_is_newer(
+        5, 5
+    ));
+    assert!(!crate::app::configuration::configuration_reload_is_newer(
+        6, 5
+    ));
 }
 
 #[test]
@@ -1112,28 +1149,25 @@ pub(in crate::app) fn invalid_user_keymap_set_is_rejected_transactionally() {
     assert!(keymaps.has_bindings());
     assert!(diagnostic.is_some_and(|message| message.contains("keeping bundled keymaps")));
 
-    let (reloaded, reload_diagnostic) = reload_keymaps(
-        &app.commands,
-        app.configuration.keymaps(),
-        &loaded,
-        &app.configuration.settings().input.keymaps,
-    );
+    let before = app.configuration.keymaps().clone();
+    let revision = app.configuration.binding_revision();
+    let mut candidate = crate::config::load_bundled_config();
+    candidate.keymaps = loaded;
+    let diagnostic = app
+        .apply_configuration_candidate(candidate, false)
+        .unwrap_err();
+    assert!(diagnostic.contains("unknown.command"), "{diagnostic}");
+    assert_eq!(app.configuration.binding_revision(), revision);
+    let reloaded = app.configuration.keymaps();
     assert_eq!(
         reloaded.binding_for("editor.normal", "edit.delete_char"),
-        app.configuration
-            .keymaps()
-            .binding_for("editor.normal", "edit.delete_char")
+        before.binding_for("editor.normal", "edit.delete_char")
     );
     let retained = reloaded
         .inspect_id("user.test.retained-health")
         .expect("user mapping survives rejection");
     assert_eq!(retained.keys, "z z");
     assert_eq!(retained.command.as_deref(), Some("health.open"));
-    assert!(
-        reload_diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("keeping previous keymaps"))
-    );
 }
 
 #[test]
@@ -1656,12 +1690,16 @@ pub(in crate::app) fn asking_an_agent_whose_adapter_is_missing_says_how_to_insta
     if std::env::var_os("DUST_TEST_MISSING_ADAPTER").is_none() {
         let root = tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "editor::session::dispatch::tests::configuration::asking_an_agent_whose_adapter_is_missing_says_how_to_install_it", "--nocapture"])
+            .args(["--exact", "app::configuration::tests::asking_an_agent_whose_adapter_is_missing_says_how_to_install_it", "--nocapture"])
             .env("DUST_TEST_MISSING_ADAPTER", "1")
             .env("DUST_STATE_HOME", root.path().join("state"))
             .env("DUST_CONFIG_HOME", root.path().join("config"))
             .env("PATH", "")
             .output().unwrap();
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "child must run the missing-adapter test: {output:?}"
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -1808,11 +1846,20 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
         )
         .unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "editor::session::dispatch::tests::configuration::the_settings_page_saves_and_reloads_user_configuration", "--nocapture"])
+            .args([
+                "--exact",
+                "app::configuration::tests::the_settings_page_saves_and_reloads_user_configuration",
+                "--nocapture",
+            ])
             .env("DUST_TEST_SETTINGS_SAVE", "1")
             .env("DUST_CONFIG_HOME", root.path())
             .env("DUST_STATE_HOME", root.path().join("state"))
-            .output().unwrap();
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "child must run the settings-save test: {output:?}"
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -1856,13 +1903,13 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
     app.process_effect(AppEffect::Settings(SettingsAction::Clear));
     app.process_effect(AppEffect::Settings(SettingsAction::Insert("2".into())));
-    let generation = app.configuration.generation();
+    let reload_id = app.configuration.reload_id();
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
     let page = app.ui.settings.as_ref().unwrap();
     assert!(page.edit.is_none());
     assert_eq!(page.status, Some(("Saved".into(), false)));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while app.configuration.generation() == generation {
+    while app.configuration.reload_id() == reload_id {
         app.process_configuration_result();
         assert!(Instant::now() < deadline, "saved setting was not reloaded");
         thread::sleep(Duration::from_millis(1));
@@ -1887,11 +1934,15 @@ pub(in crate::app) fn the_first_start_setup_saves_the_picked_choices_to_a_new_co
     if std::env::var_os("DUST_TEST_FIRST_START").is_none() {
         let root = tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "editor::session::dispatch::tests::configuration::the_first_start_setup_saves_the_picked_choices_to_a_new_config", "--nocapture"])
+            .args(["--exact", "app::configuration::tests::the_first_start_setup_saves_the_picked_choices_to_a_new_config", "--nocapture"])
             .env("DUST_TEST_FIRST_START", "1")
             .env("DUST_CONFIG_HOME", root.path())
             .env("DUST_STATE_HOME", root.path().join("state"))
             .output().unwrap();
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "child must run the first-start test: {output:?}"
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -1936,9 +1987,9 @@ pub(in crate::app) fn the_first_start_setup_saves_the_picked_choices_to_a_new_co
     assert_eq!(disk["agents"]["side"].as_str(), Some("left"));
     // Choices that match the defaults are left out of the file.
     assert!(disk["ui"].get("terminal_panel").is_none(), "{source}");
-    let generation = app.configuration.generation();
+    let reload_id = app.configuration.reload_id();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while app.configuration.generation() == generation {
+    while app.configuration.reload_id() == reload_id {
         app.process_configuration_result();
         assert!(Instant::now() < deadline, "setup was not reloaded");
         thread::sleep(Duration::from_millis(1));
@@ -1968,11 +2019,20 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
         let root = tempdir().unwrap();
         fs::write(root.path().join("config.toml"), "").unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "editor::session::dispatch::tests::configuration::the_shortcuts_page_records_new_keys_and_resets_them", "--nocapture"])
+            .args([
+                "--exact",
+                "app::configuration::tests::the_shortcuts_page_records_new_keys_and_resets_them",
+                "--nocapture",
+            ])
             .env("DUST_TEST_SHORTCUTS", "1")
             .env("DUST_CONFIG_HOME", root.path())
             .env("DUST_STATE_HOME", root.path().join("state"))
-            .output().unwrap();
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "child must run the shortcuts test: {output:?}"
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -1996,9 +2056,9 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     )
     .unwrap();
     app.window_session.observe_size((120, 40));
-    let reloaded = |app: &mut App, generation| {
+    let reloaded = |app: &mut App, reload_id| {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while app.configuration.generation() == generation {
+        while app.configuration.reload_id() == reload_id {
             app.process_configuration_result();
             assert!(Instant::now() < deadline, "keymaps were not reloaded");
             thread::sleep(Duration::from_millis(1));
@@ -2050,7 +2110,7 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     let path = crate::config::user_keymaps_path();
     assert!(!path.exists());
     app.process_effect(AppEffect::Settings(SettingsAction::Activate));
-    let generation = app.configuration.generation();
+    let reload_id = app.configuration.reload_id();
     press_keys(&mut app, &["space", "s", "x", "backspace", "K", "enter"]);
     let page = app.ui.settings.as_ref().unwrap();
     assert_eq!(page.status, Some(("Saved".into(), false)));
@@ -2060,13 +2120,13 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     assert_eq!(entry["id"].as_str(), Some("builtin.global.search-keymaps"));
     assert_eq!(entry["keys"].as_str(), Some("<leader> s K"));
     assert_eq!(entry["command"].as_str(), Some("settings.shortcuts"));
-    reloaded(&mut app, generation);
+    reloaded(&mut app, reload_id);
     let row = selected(&app);
     assert_eq!(row.value, SettingsValue::Keys("<leader> s K".into()));
     assert!(row.modified);
-    let generation = app.configuration.generation();
+    let reload_id = app.configuration.reload_id();
     app.process_effect(AppEffect::Settings(SettingsAction::Reset));
-    reloaded(&mut app, generation);
+    reloaded(&mut app, reload_id);
     let row = selected(&app);
     assert_eq!(row.value, SettingsValue::Keys("<leader> s k".into()));
     assert!(!row.modified);
@@ -2525,12 +2585,10 @@ use std::time::Duration;
 use std::time::Instant;
 use tempfile::tempdir;
 
-use crate::app::compile_keymaps;
+use crate::app::configuration::compile_keymaps;
 
-use crate::app::reload_keymaps;
-
-use crate::app::AppEffect;
-use crate::app::PickerKind;
+use crate::app::commands::AppEffect;
+use crate::app::commands::PickerKind;
 
 use crate::config::load_bundled_config;
 use crate::config::load_config;
@@ -2551,8 +2609,7 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     let mut commands = crate::editor::CommandRegistry::default();
     crate::editor::register_builtin_commands(&mut commands).unwrap();
     crate::app::register_app_commands(&mut commands).unwrap();
-    let (_, diagnostic) =
-        crate::app::compile_keymaps(&commands, &loaded.keymaps, &loaded.config.input.keymaps);
+    let (_, diagnostic) = compile_keymaps(&commands, &loaded.keymaps, &loaded.config.input.keymaps);
     assert!(diagnostic.is_none(), "{diagnostic:?}");
 
     let surface = crate::config::parse_keymaps(

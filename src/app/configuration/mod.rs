@@ -1,3 +1,5 @@
+//! Accepted configuration, reload candidates and temporary view settings.
+
 use crate::app::commands::AppEffect;
 use crate::config::ConfigurationWorker;
 use crate::config::ConfigurationWorkerError;
@@ -15,19 +17,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub(in crate::app) mod keymaps;
-/// The enum name is needed by tests and by prose; production reaches it through the method it
-/// returns from, so the alias is gated rather than left to warn as an unused import.
-#[cfg(test)]
-pub(in crate::app) use keymaps::EffectiveBinding;
 pub use keymaps::KeymapInspection;
 pub use keymaps::KeymapOperation;
 pub use keymaps::ResolvedKeyGroup;
 pub use keymaps::ResolvedKeymaps;
 pub(in crate::app) use keymaps::ReverseBinding;
-pub use resolve::ConfigurationSources;
 pub use resolve::ResolvedConfiguration;
 pub(in crate::app) mod resolve;
-pub(in crate::app) use resolve::configuration_generation_is_newer;
+pub(in crate::app) use resolve::configuration_reload_is_newer;
 pub(in crate::app) use resolve::configured_grapheme_width;
 pub(in crate::app) use resolve::configured_text_width;
 pub(in crate::app) use resolve::dashboard_actions;
@@ -43,10 +40,8 @@ pub(in crate::app) use compile::KeymapCompilation;
 pub(in crate::app) use compile::compile_keymap_entries;
 pub use compile::compile_keymaps;
 pub use compile::compile_keymaps_with_plugin_catalog;
-pub use compile::compile_keymaps_with_plugin_index;
 pub(in crate::app) use compile::display_key_sequence;
 pub(in crate::app) use compile::literal_key_sequence;
-pub use compile::reload_keymaps;
 mod contributions;
 mod themes;
 pub(in crate::app) use themes::ThemeKey;
@@ -62,15 +57,15 @@ fn configured_context(
         .map_err(|error| error.to_string())
 }
 
-/// Accepted policy and reload admission. No caller receives a mutable policy view.
-pub(super) struct ConfigurationSession {
+/// Accepted settings and pending reloads. Callers cannot mutate the accepted policy.
+pub(super) struct Configuration {
     accepted: ResolvedConfiguration,
     /// Settings come from the user's config.toml rather than only the bundled defaults.
     user_configuration: bool,
     themes: themes::Themes,
     stamp: Arc<()>,
     worker: ConfigurationWorker,
-    generation: u64,
+    reload_id: u64,
     binding_revision: u64,
     /// Why the last reload was refused over its keymaps, which are then not in effect.
     rejected_keymaps: Option<String>,
@@ -118,12 +113,12 @@ pub(in crate::app) struct WindowRuleSource {
     catalog: crate::plugins::PluginCatalogVersion,
     windows: crate::config::WindowsConfig,
 }
-pub(in crate::app) struct ContributionReceipt(WindowRuleSource);
+pub(in crate::app) struct AcceptedContributions(WindowRuleSource);
 impl WindowRuleSource {
-    pub(in crate::app) fn accepts(&self, receipt: &ContributionReceipt) -> bool {
-        Arc::ptr_eq(&self.stamp, &receipt.0.stamp)
-            && self.catalog == receipt.0.catalog
-            && self.windows == receipt.0.windows
+    pub(in crate::app) fn accepts(&self, accepted: &AcceptedContributions) -> bool {
+        Arc::ptr_eq(&self.stamp, &accepted.0.stamp)
+            && self.catalog == accepted.0.catalog
+            && self.windows == accepted.0.windows
     }
 }
 impl ContributionCandidate {
@@ -153,7 +148,7 @@ impl ConfigurationCandidate {
     }
 }
 
-impl ConfigurationSession {
+impl Configuration {
     pub(in crate::app) fn new(
         accepted: ResolvedConfiguration,
         user_configuration: bool,
@@ -170,7 +165,7 @@ impl ConfigurationSession {
             themes: themes::Themes::default(),
             stamp: Arc::new(()),
             worker,
-            generation: 0,
+            reload_id: 0,
             binding_revision: 0,
             rejected_keymaps: None,
             hidden_line_numbers: None,
@@ -223,8 +218,8 @@ impl ConfigurationSession {
     pub(in crate::app) fn complete_plugin_indexes(&mut self) {
         self.accepted.deferred_plugin_keymaps = false;
     }
-    pub(in crate::app) fn generation(&self) -> u64 {
-        self.generation
+    pub(in crate::app) fn reload_id(&self) -> u64 {
+        self.reload_id
     }
     pub(in crate::app) fn binding_revision_ref(&self) -> &u64 {
         &self.binding_revision
@@ -266,11 +261,11 @@ impl ConfigurationSession {
         let Some(result) = self.worker.try_result()? else {
             return Ok(None);
         };
-        if !configuration_generation_is_newer(self.generation, result.generation) {
+        if !configuration_reload_is_newer(self.reload_id, result.reload_id) {
             return Ok(None);
         }
-        self.generation = result.generation;
-        // Preserve cancellation on observed reload generations, including rejected reloads.
+        self.reload_id = result.reload_id;
+        // Even a rejected reload invalidates pending key sequences.
         self.binding_revision = self.binding_revision.saturating_add(1);
         Ok(Some(result))
     }
@@ -350,12 +345,12 @@ impl ConfigurationSession {
         &mut self,
         candidate: ConfigurationCandidate,
         catalog: &PluginContributionCatalog,
-    ) -> Result<ContributionReceipt, String> {
+    ) -> Result<AcceptedContributions, String> {
         self.check_stamp(&candidate.stamp)?;
         Self::check_catalog(&candidate.catalog, catalog)?;
         // Keep a different picker selection while config.toml keeps the same theme.
         let keep_theme = candidate.resolved.settings.ui.theme == self.accepted.settings.ui.theme;
-        let receipt = ContributionReceipt(candidate.window_contribution().window_source());
+        let accepted = AcceptedContributions(candidate.window_contribution().window_source());
         self.accepted = candidate.resolved;
         if let Some(zen) = &mut self.zen {
             let editor = &mut self.accepted.settings.editor;
@@ -370,14 +365,7 @@ impl ConfigurationSession {
         self.themes.reset(keep_theme, &self.accepted.theme.name);
         self.stamp = Arc::new(());
         self.binding_revision = self.binding_revision.saturating_add(1);
-        Ok(receipt)
-    }
-    #[cfg(test)]
-    pub(in crate::app) fn install_bindings(&mut self, keymaps: ResolvedKeymaps, deferred: bool) {
-        self.accepted.keymaps = keymaps;
-        self.accepted.deferred_plugin_keymaps = deferred;
-        self.stamp = Arc::new(());
-        self.binding_revision = self.binding_revision.saturating_add(1);
+        Ok(accepted)
     }
     /// Flip one view setting and return whether it is now on.
     pub(in crate::app) fn toggle_view(&mut self, toggle: ViewToggle) -> bool {
@@ -452,22 +440,6 @@ impl ConfigurationSession {
         self.accepted.settings.lsp.inlay_hints = !self.accepted.settings.lsp.inlay_hints;
         self.accepted.settings.lsp.inlay_hints
     }
-
-    #[cfg(test)]
-    pub(in crate::app) fn fixture_snapshot(&self) -> ResolvedConfiguration {
-        self.accepted.clone()
-    }
-    #[cfg(test)]
-    pub(in crate::app) fn install_fixture(&mut self, candidate: ResolvedConfiguration) {
-        candidate
-            .settings
-            .validate()
-            .expect("valid owned fixture policy");
-        self.accepted = candidate;
-        self.themes = themes::Themes::default();
-        self.stamp = Arc::new(());
-        self.binding_revision = self.binding_revision.saturating_add(1);
-    }
 }
 
 pub(in crate::app) fn plugin_owner_from_id(id: &str) -> Option<&str> {
@@ -478,15 +450,16 @@ pub(in crate::app) fn plugin_owner_from_id(id: &str) -> Option<&str> {
         .filter(|owner| !owner.is_empty())
 }
 
-pub(in crate::app) mod interaction;
+mod reload;
+mod theme_picker;
 
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod configuration_tests;
+mod tests;
 
 #[cfg(test)]
 mod contributions_tests;
 
 #[cfg(test)]
-pub(in crate::app) mod surfaces_tests;
+mod projection_tests;

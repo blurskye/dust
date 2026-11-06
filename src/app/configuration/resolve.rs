@@ -1,3 +1,5 @@
+//! Configuration resolution, source locations and value explanations.
+
 use crate::app::commands::AppEffect;
 use crate::app::commands::register_app_commands;
 use crate::app::configuration::KeymapCompilation;
@@ -258,10 +260,7 @@ pub(in crate::app) fn dashboard_actions(
         .collect()
 }
 
-pub(in crate::app) const fn configuration_generation_is_newer(
-    current: u64,
-    candidate: u64,
-) -> bool {
+pub(in crate::app) const fn configuration_reload_is_newer(current: u64, candidate: u64) -> bool {
     candidate > current
 }
 

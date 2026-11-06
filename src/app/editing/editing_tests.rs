@@ -3396,7 +3396,7 @@ pub(in crate::app) fn startup_reads_load_without_changing_focus_after_user_navig
 
 use crate::app::App;
 use crate::app::AppEffect;
-use crate::app::compile_keymaps;
+use crate::app::configuration::compile_keymaps;
 use crate::app::startup::StartupTarget;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;

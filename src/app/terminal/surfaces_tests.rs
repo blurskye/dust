@@ -2278,7 +2278,7 @@ pub(in crate::app) fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_
 }
 use crate::app::App;
 use crate::app::AppEffect;
-use crate::app::compile_keymaps;
+use crate::app::configuration::compile_keymaps;
 use crate::app::startup::StartupTarget;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;

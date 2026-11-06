@@ -1,3 +1,5 @@
+//! Commands for settings, keymap inspection, themes and view toggles.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 

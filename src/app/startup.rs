@@ -302,7 +302,7 @@ pub enum ApplicationError {
 use crate::app::App;
 use crate::app::InteractiveError;
 use crate::app::commands::register_app_commands;
-use crate::app::configuration::ConfigurationSession;
+use crate::app::configuration::Configuration;
 use crate::app::configuration::resolve_configuration;
 use crate::app::debugger::DebugSession;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS;
@@ -448,7 +448,7 @@ impl App {
             workspace_edits: crate::app::workspace::edits::WorkspaceEditSession::default(),
             commands,
             input: InputSession::new(ABSOLUTE_MAX_COUNT),
-            configuration: ConfigurationSession::new(
+            configuration: Configuration::new(
                 configuration,
                 use_user_configuration,
                 source_fingerprint,

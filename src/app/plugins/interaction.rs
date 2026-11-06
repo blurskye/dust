@@ -214,7 +214,7 @@ impl App {
                 editor: &self.state,
                 workspace: &self.workspace,
                 configuration: self.configuration.binding_revision_ref(),
-                generation: self.configuration.generation(),
+                generation: self.configuration.reload_id(),
                 ui_revision: self.window_session.graph().revision(),
                 input_capture,
                 navigation,

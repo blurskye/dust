@@ -1,3 +1,5 @@
+//! Keymap compilation with bundled, plugin and user precedence.
+
 use crate::app::commands::AppEffect;
 use crate::app::configuration::KeymapInspection;
 use crate::app::configuration::KeymapOperation;
@@ -20,38 +22,6 @@ use crate::editor::input::MappingResolution;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::str::FromStr;
-
-pub fn reload_keymaps(
-    commands: &CommandRegistry<AppEffect>,
-    current: &ResolvedKeymaps,
-    candidate: &crate::config::LoadedKeymaps,
-    policy: &crate::config::KeymapPolicyConfig,
-) -> (ResolvedKeymaps, Option<String>) {
-    let (entries, bundled_count, groups, bundled_group_count) = keymap_entries(candidate);
-    match compile_keymap_entries(
-        commands,
-        KeymapCompilation {
-            entries,
-            bundled_count,
-            groups,
-            bundled_group_count,
-            user_path: &candidate.path,
-            user_spans: &candidate.user_spans,
-            user_group_spans: &candidate.user_group_spans,
-            policy,
-        },
-    ) {
-        Ok(compiled) => (compiled, None),
-        Err(diagnostics) => (
-            current.clone(),
-            Some(format!(
-                "invalid {}; keeping previous keymaps: {}",
-                candidate.path.display(),
-                diagnostics.join("; ")
-            )),
-        ),
-    }
-}
 
 pub fn compile_keymaps(
     commands: &CommandRegistry<AppEffect>,
@@ -215,7 +185,7 @@ pub(in crate::app) fn validate_keymap_id(id: &str) -> Result<(), String> {
 pub(in crate::app) struct KeymapContributionOrigin {
     layer: InputContextLayer,
     owner: Option<String>,
-    generation: u64,
+    plugin_load: u64,
     source: String,
     declaration: usize,
 }
@@ -591,7 +561,7 @@ pub(in crate::app) fn standard_contribution_origins(
                 KeymapContributionOrigin {
                     layer: InputContextLayer::Bundled,
                     owner: None,
-                    generation: 0,
+                    plugin_load: 0,
                     source: format!("<bundled:keymaps>:{kind} {}", index + 1),
                     declaration: index + 1,
                 }
@@ -611,7 +581,7 @@ pub(in crate::app) fn standard_contribution_origins(
                 KeymapContributionOrigin {
                     layer: InputContextLayer::User,
                     owner: None,
-                    generation: 0,
+                    plugin_load: 0,
                     source,
                     declaration,
                 }
@@ -660,125 +630,6 @@ pub(in crate::app) fn compile_keymap_entries(
     )
 }
 
-pub fn compile_keymaps_with_plugin_index(
-    commands: &CommandRegistry<AppEffect>,
-    loaded: &crate::config::LoadedKeymaps,
-    index: &crate::plugins::PluginContributionIndex,
-    policy: &crate::config::KeymapPolicyConfig,
-) -> Result<ResolvedKeymaps, Vec<String>> {
-    let mut contexts = InputContextRegistry::bundled();
-    let namespace = format!("plugin.{}.", index.owner);
-    for context in &index.contexts {
-        let local = context.id.strip_prefix(&namespace).ok_or_else(|| {
-            vec![format!(
-                "plugin context `{}` has invalid ownership",
-                context.id
-            )]
-        })?;
-        contexts
-            .register_plugin(
-                &index.owner,
-                local,
-                &context.title,
-                context.parent_surface.clone(),
-                index.generation,
-                index.source.clone(),
-            )
-            .map_err(|error| vec![error.to_string()])?;
-    }
-    let plugin_entries = index
-        .keymaps
-        .iter()
-        .map(|entry| crate::config::KeymapEntry {
-            id: entry.id.clone(),
-            context: Some(entry.context.clone()),
-            mode: entry.mode.clone(),
-            keys: Some(entry.keys.clone()),
-            command: Some(entry.command.clone()),
-            arguments: entry.arguments.clone(),
-            unmap: false,
-            disable: false,
-            pass_through: false,
-            desc: None,
-        })
-        .collect::<Vec<_>>();
-    let plugin_groups = index
-        .key_groups
-        .iter()
-        .map(|group| crate::config::KeyGroupEntry {
-            id: group.id.clone(),
-            context: Some(group.context.clone()),
-            mode: group.mode.clone(),
-            prefix: Some(group.prefix.clone()),
-            label: Some(group.label.clone()),
-            icon: group.icon.clone(),
-            order: group.order,
-            disable: false,
-        })
-        .collect::<Vec<_>>();
-    let mut entries = loaded.entries[..loaded.bundled_count].to_vec();
-    entries.extend(plugin_entries);
-    entries.extend_from_slice(&loaded.entries[loaded.bundled_count..]);
-    let mut groups = loaded.groups[..loaded.bundled_group_count].to_vec();
-    groups.extend(plugin_groups);
-    groups.extend_from_slice(&loaded.groups[loaded.bundled_group_count..]);
-    let mut entry_origins = standard_contribution_origins(
-        loaded.bundled_count,
-        loaded.bundled_count,
-        &loaded.path,
-        &[],
-        "declaration",
-    );
-    entry_origins.extend(
-        (0..index.keymaps.len()).map(|offset| KeymapContributionOrigin {
-            layer: InputContextLayer::Plugin,
-            owner: Some(index.owner.clone()),
-            generation: index.generation,
-            source: format!("{}:plugin-keymap {}", index.source, offset + 1),
-            declaration: offset + 1,
-        }),
-    );
-    entry_origins.extend(standard_contribution_origins(
-        loaded.entries.len() - loaded.bundled_count,
-        0,
-        &loaded.path,
-        &loaded.user_spans,
-        "declaration",
-    ));
-    let mut group_origins = standard_contribution_origins(
-        loaded.bundled_group_count,
-        loaded.bundled_group_count,
-        &loaded.path,
-        &[],
-        "key-group",
-    );
-    group_origins.extend(
-        (0..index.key_groups.len()).map(|offset| KeymapContributionOrigin {
-            layer: InputContextLayer::Plugin,
-            owner: Some(index.owner.clone()),
-            generation: index.generation,
-            source: format!("{}:plugin-key-group {}", index.source, offset + 1),
-            declaration: offset + 1,
-        }),
-    );
-    group_origins.extend(standard_contribution_origins(
-        loaded.groups.len() - loaded.bundled_group_count,
-        0,
-        &loaded.path,
-        &loaded.user_group_spans,
-        "key-group",
-    ));
-    compile_typed_keymap_entries(
-        commands,
-        &entries,
-        &entry_origins,
-        &groups,
-        &group_origins,
-        &contexts,
-        policy,
-    )
-}
-
 pub fn compile_keymaps_with_plugin_catalog(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::config::LoadedKeymaps,
@@ -815,7 +666,7 @@ pub fn compile_keymaps_with_plugin_catalog(
             entry_origins.push(KeymapContributionOrigin {
                 layer: InputContextLayer::Plugin,
                 owner: Some(index.owner.clone()),
-                generation: index.generation,
+                plugin_load: index.generation,
                 source: format!("{}:plugin-keymap {}", index.source, offset + 1),
                 declaration: offset + 1,
             });
@@ -852,7 +703,7 @@ pub fn compile_keymaps_with_plugin_catalog(
             group_origins.push(KeymapContributionOrigin {
                 layer: InputContextLayer::Plugin,
                 owner: Some(index.owner.clone()),
-                generation: index.generation,
+                plugin_load: index.generation,
                 source: format!("{}:plugin-key-group {}", index.source, offset + 1),
                 declaration: offset + 1,
             });
@@ -999,7 +850,7 @@ pub(in crate::app) fn compile_typed_keymap_entries(
                 context,
                 contribution_layer: entry.origin.layer,
                 contribution_owner: entry.origin.owner.clone(),
-                contribution_generation: entry.origin.generation,
+                plugin_load: entry.origin.plugin_load,
                 operation: entry.operation,
                 command: None,
                 arguments: BTreeMap::new(),
@@ -1017,7 +868,7 @@ pub(in crate::app) fn compile_typed_keymap_entries(
                 context,
                 contribution_layer: entry.origin.layer,
                 contribution_owner: entry.origin.owner.clone(),
-                contribution_generation: entry.origin.generation,
+                plugin_load: entry.origin.plugin_load,
                 operation: entry.operation,
                 command: None,
                 arguments: BTreeMap::new(),
@@ -1068,7 +919,7 @@ pub(in crate::app) fn compile_typed_keymap_entries(
             context: context.clone(),
             contribution_layer: entry.origin.layer,
             contribution_owner: entry.origin.owner.clone(),
-            contribution_generation: entry.origin.generation,
+            plugin_load: entry.origin.plugin_load,
             operation: KeymapOperation::Command,
             command: Some(invocation.id.as_str().into()),
             arguments: invocation.arguments.clone(),
@@ -1143,7 +994,7 @@ pub(in crate::app) fn compile_typed_keymap_entries(
                 context,
                 contribution_layer: group.origin.layer,
                 contribution_owner: group.origin.owner,
-                contribution_generation: group.origin.generation,
+                plugin_load: group.origin.plugin_load,
                 source_prefix: group.prefix,
                 prefix: effective_prefix,
                 label: group.label,

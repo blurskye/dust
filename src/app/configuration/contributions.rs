@@ -1,5 +1,7 @@
+//! Plugin keymaps and window rules validated against the accepted configuration.
+
 use crate::app::commands::AppEffect;
-use crate::app::configuration::ConfigurationSession;
+use crate::app::configuration::Configuration;
 use crate::app::configuration::ContributionCandidate;
 use crate::app::configuration::ResolvedKeymaps;
 use crate::app::configuration::compile_keymaps_with_plugin_catalog;
@@ -11,7 +13,7 @@ use crate::plugins::PluginContributionCatalog;
 use crate::plugins::PluginWindowPlacementKind;
 use std::sync::Arc;
 
-impl ConfigurationSession {
+impl Configuration {
     fn compile_contributions(
         &self,
         commands: &CommandRegistry<AppEffect>,
@@ -118,9 +120,9 @@ impl ConfigurationSession {
         &mut self,
         candidate: ContributionCandidate,
         catalog: &PluginContributionCatalog,
-    ) -> Result<crate::app::configuration::ContributionReceipt, String> {
+    ) -> Result<crate::app::configuration::AcceptedContributions, String> {
         self.check_contributions(&candidate, catalog)?;
-        let receipt = crate::app::configuration::ContributionReceipt(candidate.window_source());
+        let accepted = crate::app::configuration::AcceptedContributions(candidate.window_source());
         if let Some(keymaps) = candidate.keymaps {
             self.accepted.keymaps = keymaps;
             self.accepted.deferred_plugin_keymaps = candidate.deferred;
@@ -128,7 +130,7 @@ impl ConfigurationSession {
         }
         self.accepted.settings.windows = candidate.windows;
         self.stamp = Arc::new(());
-        Ok(receipt)
+        Ok(accepted)
     }
 
     pub(in crate::app) fn resolve_plugin_window_rules(
@@ -185,8 +187,10 @@ impl ConfigurationSession {
 #[cfg(test)]
 mod tests {
     use crate::app::commands::register_app_commands;
-    use crate::app::configuration::contributions::*;
+    use crate::app::configuration::Configuration;
+    use crate::editor::CommandRegistry;
     use crate::editor::register_builtin_commands;
+    use crate::plugins::PluginContributionCatalog;
 
     #[test]
     fn policy_candidates_reject_foreign_and_changed_owners_without_publishing() {
@@ -199,8 +203,8 @@ mod tests {
             true,
         )
         .unwrap();
-        let mut first = ConfigurationSession::new(resolved.clone(), false, None);
-        let mut other = ConfigurationSession::new(resolved, false, None);
+        let mut first = Configuration::new(resolved.clone(), false, None);
+        let mut other = Configuration::new(resolved, false, None);
         let catalog = PluginContributionCatalog::default();
         let before = other.settings().windows.clone();
         let revision = other.binding_revision();

@@ -1,4 +1,6 @@
-use crate::app::tests::*;
+//! Dashboard selection and window rules after configuration changes.
+
+use crate::app::tests::app;
 
 #[test]
 pub(in crate::app) fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {

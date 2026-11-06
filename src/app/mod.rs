@@ -1,5 +1,5 @@
 //! Live editor composition and feature-private owners.
-mod configuration;
+pub(crate) mod configuration;
 mod debugger;
 mod diagnostics;
 mod documents;
@@ -53,28 +53,10 @@ pub(in crate::app) enum TrustedAction {
     },
 }
 
-pub use configuration::ConfigurationSources;
-
-pub use configuration::KeymapInspection;
-
-pub use configuration::ResolvedConfiguration;
-
-pub use configuration::ResolvedKeymaps;
-
-pub use configuration::ViewToggle;
-
-pub use configuration::compile_keymaps;
-
-pub use configuration::compile_keymaps_with_plugin_catalog;
-
-pub use configuration::compile_keymaps_with_plugin_index;
-
-pub use configuration::reload_keymaps;
-
 pub use agent::commands::AgentCommand;
 pub use configuration::validate_loaded_configuration;
 
-use crate::app::configuration::ConfigurationSession;
+use crate::app::configuration::Configuration;
 use crate::app::documents::DocumentSession;
 use crate::app::input::InputSession;
 use crate::app::windows::WindowSession;
@@ -230,7 +212,7 @@ struct App {
     workspace_edits: crate::app::workspace::edits::WorkspaceEditSession,
     commands: CommandRegistry<AppEffect>,
     input: InputSession,
-    configuration: ConfigurationSession,
+    configuration: Configuration,
     ui: Tracked<UiState>,
     documents: DocumentSession,
     search: crate::app::search::SearchSession,

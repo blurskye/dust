@@ -64,4 +64,4 @@ pub(in crate::app) fn protected_prompt_region_blocks_ordinary_compositor_hit_tes
             .is_some()
     );
 }
-use crate::app::compile_keymaps;
+use crate::app::configuration::compile_keymaps;
