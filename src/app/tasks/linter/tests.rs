@@ -1,5 +1,7 @@
+//! Tests for linter execution and diagnostic parsing.
+
 use crate::app::documents::DocumentEvent;
-use crate::app::documents::DocumentSession;
+use crate::app::documents::Documents;
 use crate::app::startup::StartupTarget;
 use crate::app::tasks::TaskUpdate;
 use crate::app::tasks::linter::*;
@@ -17,10 +19,10 @@ use std::time::Instant;
 fn fixture() -> (
     tempfile::TempDir,
     EditorState,
-    WorkspaceSession,
+    Workspace,
     Config,
-    TaskSession,
-    DiagnosticSession,
+    Tasks,
+    Diagnostics,
 ) {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(
@@ -28,7 +30,7 @@ fn fixture() -> (
         [("root".into(), RootIdentity::capture(root.path()).unwrap())],
     )
     .unwrap();
-    let workspace = WorkspaceSession::new(scope, root.path().join("trust"), 1, false, false, 1);
+    let workspace = Workspace::new(scope, root.path().join("trust"), 1, false, false, 1);
     let editor = EditorState::new(root.path().into());
     let matcher = ProblemMatcherConfig {
         pattern: r"(?m)^(?P<path>[^:]+):(?P<line>\d+):(?P<column>\d+):(?P<message>[^\n]+)$".into(),
@@ -59,24 +61,24 @@ fn fixture() -> (
             },
         );
     }
-    let tasks = TaskSession::new(&config);
+    let tasks = Tasks::new(&config);
     (
         root,
         editor,
         workspace,
         config,
         tasks,
-        DiagnosticSession::new(100, 100),
+        Diagnostics::new(100, 100),
     )
 }
 // Simulated completion metadata inside the private owner; the connected dispatch test
 // separately exercises actual authorization, process output and worker submission.
 fn completed(
-    tasks: &mut TaskSession,
+    tasks: &mut Tasks,
     config: &Config,
-    workspace: &WorkspaceSession,
+    workspace: &Workspace,
     editor: &EditorState,
-    diagnostics: &mut DiagnosticSession,
+    diagnostics: &mut Diagnostics,
     name: &str,
     bytes: &[u8],
 ) -> RunningTask {
@@ -106,9 +108,9 @@ fn completed(
 fn documents(
     vfs: VfsWorker,
     editor: &EditorState,
-    workspace: &WorkspaceSession,
-) -> DocumentSession {
-    DocumentSession::new(
+    workspace: &Workspace,
+) -> Documents {
+    Documents::new(
         vfs,
         &StartupTarget::Dashboard {
             root: editor.workspace_root.clone(),
@@ -119,9 +121,9 @@ fn documents(
     )
 }
 fn reply(
-    documents: &mut DocumentSession,
+    documents: &mut Documents,
     editor: &EditorState,
-    workspace: &WorkspaceSession,
+    workspace: &Workspace,
 ) -> TaskReadReply {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -594,7 +596,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
                 .unwrap(),
         )
         .unwrap();
-    let mut other = TaskSession::new(&config);
+    let mut other = Tasks::new(&config);
     let mut second = documents(VfsWorker::start(1), &editor, &workspace);
     let task = completed(
         &mut other,

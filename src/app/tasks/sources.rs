@@ -1,7 +1,7 @@
 //! Original task document captures and source-specific result interpretation.
 use crate::app::tasks::AdapterContext;
 use crate::app::tasks::RunningTask;
-use crate::app::tasks::TaskSession;
+use crate::app::tasks::Tasks;
 use crate::app::tasks::TestCaseResult;
 use crate::editor::BufferId;
 use crate::editor::EditorState;
@@ -29,7 +29,7 @@ impl TaskDiagnosticRun {
     pub(in crate::app) fn capture(
         name: &str,
         state: &crate::editor::EditorState,
-        workspace: &crate::app::workspace::WorkspaceSession,
+        workspace: &crate::app::workspace::Workspace,
         configuration: u64,
     ) -> Result<Self, String> {
         if configuration == u64::MAX || state.window_version().revision().is_none() {
@@ -67,8 +67,8 @@ impl TaskDiagnosticRun {
     }
     pub(in crate::app) fn current(
         &self,
-        diagnostics: &crate::app::diagnostics::DiagnosticSession,
-        workspace: &crate::app::workspace::WorkspaceSession,
+        diagnostics: &crate::app::diagnostics::Diagnostics,
+        workspace: &crate::app::workspace::Workspace,
         configuration: u64,
     ) -> bool {
         diagnostics.current(&self.producer)
@@ -132,7 +132,7 @@ pub(super) fn resolve_source_path(path: &Path) -> std::io::Result<PathBuf> {
     })
 }
 
-impl TaskSession {
+impl Tasks {
     pub(in crate::app) fn apply_test_result(&mut self, task: &RunningTask) {
         let AdapterContext::Test { matcher } = &task.adapter else {
             return;

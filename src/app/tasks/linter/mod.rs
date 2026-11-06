@@ -1,6 +1,6 @@
 //! Linter interpretation and bounded source-read obligations belong to their original job.
 use crate::app::diagnostics::DiagnosticBatch;
-use crate::app::diagnostics::DiagnosticSession;
+use crate::app::diagnostics::Diagnostics;
 use crate::app::diagnostics::DiagnosticValidity;
 use crate::app::documents::TaskCancellation;
 use crate::app::documents::TaskReadKey;
@@ -11,8 +11,8 @@ use crate::app::tasks::AdapterContext;
 use crate::app::tasks::RunKey;
 use crate::app::tasks::RunningTask;
 use crate::app::tasks::TaskDiagnosticRun;
-use crate::app::tasks::TaskSession;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::tasks::Tasks;
+use crate::app::workspace::Workspace;
 use crate::editor::EditorState;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextBuffer;
@@ -84,9 +84,9 @@ impl Linters {
 pub(in crate::app) struct LinterReadLoan<'a> {
     build: &'a mut Build,
     editor: &'a EditorState,
-    _workspace: &'a WorkspaceSession,
+    _workspace: &'a Workspace,
     _configuration: &'a u64,
-    _diagnostics: &'a DiagnosticSession,
+    _diagnostics: &'a Diagnostics,
     roots: &'a [crate::workspace::WorkspaceRoot],
 }
 impl LinterReadLoan<'_> {
@@ -144,14 +144,14 @@ pub(in crate::app) enum LinterUpdate {
     },
     Failed(String),
 }
-impl TaskSession {
+impl Tasks {
     pub(in crate::app) fn begin_linter(
         &mut self,
         task: RunningTask,
         editor: &EditorState,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         configuration: u64,
-        diagnostics: &DiagnosticSession,
+        diagnostics: &Diagnostics,
         limits: (usize, u64),
     ) -> Result<(), String> {
         let (maximum_items, maximum_bytes) = limits;
@@ -316,9 +316,9 @@ impl TaskSession {
     pub(in crate::app) fn retire_linter_sources(
         &mut self,
         editor: &EditorState,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         configuration: u64,
-        diagnostics: &DiagnosticSession,
+        diagnostics: &Diagnostics,
     ) {
         for build in self.linters.builds.values_mut() {
             if !build.source.editor_current(editor)
@@ -346,9 +346,9 @@ impl TaskSession {
     pub(in crate::app) fn linter_read<'a>(
         &'a mut self,
         editor: &'a EditorState,
-        workspace: &'a WorkspaceSession,
+        workspace: &'a Workspace,
         configuration: &'a u64,
-        diagnostics: &'a DiagnosticSession,
+        diagnostics: &'a Diagnostics,
     ) -> Option<LinterReadLoan<'a>> {
         self.retire_linter_sources(editor, workspace, *configuration, diagnostics);
         let build = self
@@ -369,9 +369,9 @@ impl TaskSession {
         &mut self,
         reply: TaskReadReply,
         editor: &EditorState,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         configuration: u64,
-        diagnostics: &DiagnosticSession,
+        diagnostics: &Diagnostics,
     ) -> Result<(), String> {
         if !self.linters.builds.values().any(|build| {
             build
@@ -459,9 +459,9 @@ impl TaskSession {
     pub(in crate::app) fn next_linter_update(
         &mut self,
         editor: &EditorState,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         configuration: u64,
-        diagnostics: &DiagnosticSession,
+        diagnostics: &Diagnostics,
     ) -> Option<LinterUpdate> {
         self.retire_linter_sources(editor, workspace, configuration, diagnostics);
         let id = *self

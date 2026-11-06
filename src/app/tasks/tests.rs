@@ -1,8 +1,23 @@
+//! Tasks behavior and application integration tests.
+
 use crate::app::tests::*;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::app::startup::StartupTarget;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use tempfile::tempdir;
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn successful_task_dependencies_publish_their_matched_diagnostics() {
+fn successful_task_dependencies_publish_their_matched_diagnostics() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("a.txt"), "source\n").unwrap();
@@ -83,7 +98,7 @@ pub(in crate::app) fn successful_task_dependencies_publish_their_matched_diagnos
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
+fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
@@ -229,7 +244,7 @@ pub(in crate::app) fn task_formatter_uses_authorized_worker_and_refuses_reloaded
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
+fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
@@ -287,7 +302,7 @@ pub(in crate::app) fn a_task_inherits_the_shell_environment_and_its_own_settings
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn linter_job_and_vfs_publish_only_original_source_then_recover() {
+fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("open.txt"), "abc\n").unwrap();
@@ -393,7 +408,7 @@ pub(in crate::app) fn linter_job_and_vfs_publish_only_original_source_then_recov
 }
 
 #[test]
-pub(in crate::app) fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
+fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     check_task_diagnostics(false);
 }
 
@@ -504,7 +519,7 @@ pub(in crate::app) fn check_task_diagnostics(with_dependency: bool) {
 }
 
 #[test]
-pub(in crate::app) fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
+fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("deleted.txt");
     fs::write(&path, "first\nsecond\n").unwrap();
@@ -528,16 +543,3 @@ pub(in crate::app) fn matcher_navigation_uses_the_open_buffer_after_its_file_is_
         ByteOffset(8)
     );
 }
-use crate::app::App;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-use crate::app::startup::StartupTarget;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use std::collections::BTreeMap;
-use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
-use tempfile::tempdir;

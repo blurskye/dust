@@ -1,3 +1,5 @@
+//! Command registration and execution for task execution and output.
+
 use crate::app::App;
 use crate::app::TrustedAction;
 use crate::app::commands::AppEffect;
