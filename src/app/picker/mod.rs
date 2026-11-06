@@ -44,7 +44,7 @@ pub(in crate::app) enum PickerPayload {
     /// A pull request number from `gh pr list`.
     PullRequest {
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         number: u64,
         local: Option<PathBuf>,
     },
@@ -340,10 +340,7 @@ pub(in crate::app) fn changes_row_cells(
 pub(in crate::app) mod palette;
 pub(in crate::app) mod preview;
 
-
 pub(in crate::app) mod commands;
-
-
 
 impl Search {
     pub(in crate::app) fn install_picker(
@@ -975,7 +972,7 @@ impl App {
                 .values()
                 .find(|buffer| buffer.path.as_ref() == Some(&path));
             let disk = if open.is_none() {
-                crate::files::read_file_with_ceiling(&path, MAXIMUM_FILE)
+                crate::files::read_file_bounded(&path, MAXIMUM_FILE)
                     .ok()
                     .and_then(|bytes| crate::editor::text::decode_utf8(&bytes).ok())
             } else {
@@ -1350,7 +1347,7 @@ impl App {
     /// A saved location as `file:line`; its byte offset means nothing to a person. A file that
     /// isn't open is read only for a nearby offset, because this runs for every row.
     pub(in crate::app) fn persisted_location_label(&self, location: &PersistedLocation) -> String {
-        const READ_CEILING: usize = 1024 * 1024;
+        const READ_LIMIT: usize = 1024 * 1024;
         let name = self.workspace_relative_label(&location.path);
         let open = self
             .state
@@ -1359,7 +1356,7 @@ impl App {
             .find(|buffer| buffer.path.as_ref() == Some(&location.path));
         let line = match open {
             Some(buffer) => buffer.text.byte_to_line(ByteOffset(location.byte)).ok(),
-            None if location.byte <= READ_CEILING => {
+            None if location.byte <= READ_LIMIT => {
                 use std::io::Read;
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
@@ -1925,10 +1922,10 @@ impl App {
             Some(PickerPayload::Agent(choice)) => self.accept_agent_choice(choice),
             Some(PickerPayload::PullRequest {
                 root,
-                generation,
+                request_id,
                 number,
                 local,
-            }) => self.checkout_pull_request(root, generation, number, local),
+            }) => self.checkout_pull_request(root, request_id, number, local),
             Some(PickerPayload::Terminal(key)) => {
                 if let Some(id) = self.terminal_session.resolve(&key) {
                     self.terminal_session.select(id);

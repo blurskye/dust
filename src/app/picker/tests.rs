@@ -1,20 +1,20 @@
 //! Picker behavior and application integration tests.
 
-use crate::app::tests::*;
 use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::app::tests::*;
 use crate::editor::InvocationSource;
 use crate::editor::text::TextBuffer;
 use crate::ui::PickerSurfaceKind;
+use crate::windows::WindowRect;
 use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::picker::MatcherSource;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-use crate::windows::WindowRect;
 
 #[test]
 fn file_preview_retries_after_capacity_returns_without_picker_input() {
@@ -349,8 +349,7 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
 }
 
 #[test]
-fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources()
- {
+fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
     let (_app_dirs, mut app) = app();
     for logs in [false, true] {
         app.close_picker();
@@ -385,8 +384,7 @@ fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new
 }
 
 #[test]
-fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
-{
+fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
