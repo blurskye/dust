@@ -65,7 +65,7 @@ pub struct PickerPresentation {
 
 #[derive(Clone, Debug)]
 pub struct PickerState {
-    generation: u64,
+    stream_id: u64,
     title: String,
     query: String,
     items: Vec<PickerItem>,
@@ -78,9 +78,9 @@ pub struct PickerState {
 
 impl PickerState {
     #[must_use]
-    pub fn new(generation: u64, title: String, maximum_items: usize) -> Self {
+    pub fn new(stream_id: u64, title: String, maximum_items: usize) -> Self {
         Self {
-            generation,
+            stream_id,
             title,
             query: String::new(),
             items: Vec::new(),
@@ -93,17 +93,17 @@ impl PickerState {
     }
 
     #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub const fn stream_id(&self) -> u64 {
+        self.stream_id
     }
 
     pub fn append(
         &mut self,
-        generation: u64,
+        stream_id: u64,
         items: impl IntoIterator<Item = PickerItem>,
         complete: bool,
     ) -> bool {
-        if generation != self.generation {
+        if stream_id != self.stream_id {
             return false;
         }
         let remaining = self.maximum_items.saturating_sub(self.items.len());
