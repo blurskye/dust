@@ -407,22 +407,22 @@ pub(super) fn capture_source(path: PathBuf) -> CapturedSource {
     let modified = metadata.modified().ok();
     let length = metadata.len();
     let bytes = crate::files::open_regular_file(&path).and_then(|file| {
-        let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING.saturating_add(1));
+        let mut reader = file.take(WATCH_FINGERPRINT_BYTE_LIMIT.saturating_add(1));
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
         Ok(bytes)
     });
     let (text, content_hash) = match bytes {
         Ok(bytes) => {
-            let hash_length = bytes.len().min(WATCH_FINGERPRINT_BYTE_CEILING as usize);
+            let hash_length = bytes.len().min(WATCH_FINGERPRINT_BYTE_LIMIT as usize);
             let hash = Some(hash_source_bytes(&bytes[..hash_length]));
-            if length > WATCH_FINGERPRINT_BYTE_CEILING
-                || bytes.len() as u64 > WATCH_FINGERPRINT_BYTE_CEILING
+            if length > WATCH_FINGERPRINT_BYTE_LIMIT
+                || bytes.len() as u64 > WATCH_FINGERPRINT_BYTE_LIMIT
             {
                 (
                     CapturedText::Error(format!(
                         "configuration source exceeds {} byte ceiling",
-                        WATCH_FINGERPRINT_BYTE_CEILING
+                        WATCH_FINGERPRINT_BYTE_LIMIT
                     )),
                     hash,
                 )
@@ -1122,14 +1122,14 @@ pub(crate) struct SourceFingerprint {
     pub(super) content_hash: Option<u64>,
 }
 
-pub(super) const WATCH_FINGERPRINT_BYTE_CEILING: u64 = 4 * 1024 * 1024;
+pub(super) const WATCH_FINGERPRINT_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 
 pub(super) fn source_fingerprint(path: PathBuf) -> SourceFingerprint {
     let metadata = fs::metadata(&path).ok();
     let content_hash = crate::files::open_regular_file(&path)
         .ok()
         .and_then(|file| {
-            let mut reader = file.take(WATCH_FINGERPRINT_BYTE_CEILING);
+            let mut reader = file.take(WATCH_FINGERPRINT_BYTE_LIMIT);
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).ok()?;
             Some(hash_source_bytes(&bytes))

@@ -19,7 +19,7 @@ use crate::config::load::ConfigurationSourceBundle;
 
 use crate::config::load::SourceFingerprint;
 
-use crate::config::load::WATCH_FINGERPRINT_BYTE_CEILING;
+use crate::config::load::WATCH_FINGERPRINT_BYTE_LIMIT;
 
 use crate::config::load::capture_configuration_bundle_with;
 
@@ -904,7 +904,7 @@ fn watcher_fingerprint_detects_same_length_content_and_sources_are_size_bounded(
     assert_eq!(first.length, second.length);
     assert_ne!(first.content_hash, second.content_hash);
 
-    let oversized = vec![b' '; WATCH_FINGERPRINT_BYTE_CEILING as usize + 1];
+    let oversized = vec![b' '; WATCH_FINGERPRINT_BYTE_LIMIT as usize + 1];
     fs::write(&path, oversized).expect("oversized source");
     let loaded = load_config(&path);
     assert!(
@@ -1700,7 +1700,7 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
     let mut source = "[editor]\ntab_width = 2\n#".to_owned();
     source.extend(std::iter::repeat_n(
         ' ',
-        crate::config::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1,
+        crate::config::load::WATCH_FINGERPRINT_BYTE_LIMIT as usize - source.len() - 1,
     ));
     source.push('\n');
     fs::write(&path, &source).unwrap();
