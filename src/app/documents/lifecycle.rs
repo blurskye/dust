@@ -1,5 +1,7 @@
+//! Document read, save and close state transitions.
+
 use crate::app::documents::DocumentEvent;
-use crate::app::documents::DocumentSession;
+use crate::app::documents::Documents;
 use crate::app::windows::NavigationStamp;
 use crate::app::workspace::WorkspaceVersion;
 use crate::editor::BufferId;
@@ -187,7 +189,7 @@ impl DocumentCommit {
         Ok(self.change)
     }
 }
-impl DocumentSession {
+impl Documents {
     pub(in crate::app) fn file_work_pending(&self) -> bool {
         !self.pending_files.is_empty()
     }
@@ -617,13 +619,13 @@ fn configured_line_ending(configured: &crate::config::EditorConfig) -> Option<Li
 mod tests {
     use crate::app::documents::lifecycle::*;
     use crate::app::startup::StartupTarget;
-    use crate::app::workspace::WorkspaceSession;
+    use crate::app::workspace::Workspace;
     use crate::editor::EditorState;
     use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
-    fn workspace() -> WorkspaceSession {
-        WorkspaceSession::new(
+    fn workspace() -> Workspace {
+        Workspace::new(
             WorkspaceState::new(
                 WorkspaceId(1),
                 [(
@@ -655,8 +657,8 @@ mod tests {
             read_only: b.read_only,
         }
     }
-    pub(in crate::app) fn owner(state: &EditorState) -> DocumentSession {
-        DocumentSession::new(
+    pub(in crate::app) fn owner(state: &EditorState) -> Documents {
+        Documents::new(
             crate::files::VfsWorker::start(2),
             &StartupTarget::Dashboard {
                 root: "/workspace".into(),
@@ -666,7 +668,7 @@ mod tests {
             2,
         )
     }
-    fn reload(state: &EditorState, workspace: &WorkspaceSession, id: BufferId) -> FileReply {
+    fn reload(state: &EditorState, workspace: &Workspace, id: BufferId) -> FileReply {
         FileReply {
             id: RequestId(1),
             intent: FileIntent {
@@ -1007,7 +1009,7 @@ mod tests {
         let state = EditorState::new("/workspace".into());
         let workspace = workspace();
         let (vfs, gate) = crate::files::VfsWorker::start_gated_for_test(2);
-        let mut owner = DocumentSession::new(
+        let mut owner = Documents::new(
             vfs,
             &StartupTarget::Dashboard {
                 root: "/workspace".into(),
@@ -1022,7 +1024,7 @@ mod tests {
                 std::path::Path::new("/workspace"),
                 &state.window_version(),
                 workspace.version(),
-                crate::app::windows::WindowSession::default()
+                crate::app::windows::Windows::default()
                     .navigation_stamp(state.window_version(), state.active_view),
             )
             .unwrap_or_else(|_| panic!("admit"));
@@ -1047,7 +1049,7 @@ mod tests {
                     std::path::Path::new("/workspace"),
                     &state.window_version(),
                     workspace.version(),
-                    crate::app::windows::WindowSession::default()
+                    crate::app::windows::Windows::default()
                         .navigation_stamp(state.window_version(), state.active_view)
                 )
                 .is_err()

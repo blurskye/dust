@@ -1,3 +1,5 @@
+//! Command registration and execution for document opening, saving and recovery.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::documents::LargeFileOverride;
@@ -246,7 +248,7 @@ pub(in crate::app) fn register_commands(
 
 use crate::editor::text::TextBuffer;
 
-use crate::app::documents::coordination::create_user_file;
+use crate::app::documents::create_user_file;
 
 use crate::language::lsp::LspMarkupContent;
 use crate::language::lsp::LspMarkupKind;

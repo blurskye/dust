@@ -1,5 +1,5 @@
-//! Task-neutral worker routes. Parser state and document/run authority stay in TaskSession.
-use crate::app::documents::DocumentSession;
+//! Task-neutral worker routes. Parser state and document/run authority stay in Tasks.
+use crate::app::documents::Documents;
 use crate::files::RequestId;
 use crate::files::VfsResult;
 use std::sync::Arc;
@@ -70,7 +70,7 @@ impl TaskReadStopped {
         key.belongs_to_worker(&self.worker)
     }
 }
-impl DocumentSession {
+impl Documents {
     pub(in crate::app) fn submit_linter_read(
         &mut self,
         loan: crate::app::tasks::LinterReadLoan<'_>,

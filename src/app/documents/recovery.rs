@@ -51,7 +51,7 @@ const MAXIMUM_JOURNAL_AGE_DAYS: u64 = 30;
 /// How long an edit waits before its journal is written.
 pub(in crate::app) const WRITE_DEBOUNCE_MS: u64 = 250;
 
-pub(in crate::app) struct RecoverySession {
+pub(in crate::app) struct Recovery {
     directory: PathBuf,
     session: String,
     records: Vec<(PathBuf, RecoveryRecord)>,
@@ -69,7 +69,7 @@ pub(in crate::app) struct RecoverySession {
     /// and the text it holds, by read.
     reads: HashMap<RequestId, (PathBuf, String, crate::app::workspace::WorkspaceVersion)>,
 }
-impl RecoverySession {
+impl Recovery {
     pub(in crate::app) fn new(directory: PathBuf) -> Self {
         static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let session = format!(
@@ -477,7 +477,7 @@ impl RecoverySession {
     }
 }
 #[cfg(test)]
-impl RecoverySession {
+impl Recovery {
     pub(in crate::app) fn skip_maintenance(&mut self) {
         self.discovery_queued = true;
         self.cleanup_queued = true;
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn recovery_retiring_a_buffer_drops_tracking_but_keeps_pending_writes() {
         let directory = tempfile::tempdir().unwrap();
-        let mut recovery = RecoverySession::new(directory.path().into());
+        let mut recovery = Recovery::new(directory.path().into());
         let mut editor = EditorState::new(directory.path().into());
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("draft"), None)

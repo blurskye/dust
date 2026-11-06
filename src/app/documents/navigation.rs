@@ -1,3 +1,5 @@
+//! File navigation requests and cursor destinations.
+
 use crate::app::App;
 use crate::app::commands::DiagnosticFilter;
 use crate::app::persistence::CHANGE_LIMIT;
