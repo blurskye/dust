@@ -13,51 +13,21 @@ use crate::windows::PANE_MINIMUM_WIDTH;
 use std::path::PathBuf;
 
 pub(super) fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
-    fn convert(
-        node: &crate::editor::LayoutNode,
-        state: &EditorState,
-        next: &mut u64,
-        bindings: &mut Vec<EditorWindowBinding>,
-    ) -> crate::windows::TiledLayoutNode {
-        match node {
-            crate::editor::LayoutNode::Pane(pane) => {
-                *next += 1;
-                let window = crate::windows::WindowId(*next);
-                bindings.push(EditorWindowBinding {
-                    window,
-                    pane: *pane,
-                    view: state.panes[*pane].view,
-                });
-                crate::windows::TiledLayoutNode::Window(window)
-            }
-            crate::editor::LayoutNode::Split {
-                axis,
-                ratio,
-                first,
-                second,
-            } => crate::windows::TiledLayoutNode::Split {
-                axis: match axis {
-                    crate::editor::Axis::Horizontal => crate::windows::TileAxis::Horizontal,
-                    crate::editor::Axis::Vertical => crate::windows::TileAxis::Vertical,
-                },
-                ratio: *ratio,
-                first: Box::new(convert(first, state, next, bindings)),
-                second: Box::new(convert(second, state, next, bindings)),
-            },
-        }
-    }
-
-    let tab = &state.tabs[state.active_tab.expect("active tab")];
-    let mut bindings = Vec::new();
-    let root = convert(&tab.root, state, &mut 0, &mut bindings);
-    let focused = bindings
-        .iter()
-        .find(|binding| binding.pane == tab.focused)
-        .map(|binding| binding.window);
+    let tab = state.active_tab().expect("active tab");
     EditorWindowLayoutState {
         source_revision: state.window_revision().expect("test revision"),
-        layout: crate::windows::TiledLayoutSnapshot { root, focused },
-        bindings,
+        layout: crate::windows::TiledLayoutSnapshot {
+            root: state.tab_layout(tab).unwrap(),
+            focused: state.focused_window(),
+        },
+        bindings: state
+            .tab_windows(tab)
+            .into_iter()
+            .map(|window| EditorWindowBinding {
+                window,
+                view: state.window_view(window).unwrap(),
+            })
+            .collect(),
     }
 }
 
@@ -202,7 +172,7 @@ pub(super) fn attach_test_compositor(
     let (left, right, bottom) = ui
         .debug_panes
         .as_ref()
-        .filter(|_| !ui.dashboard && state.active_view.is_some())
+        .filter(|_| !ui.dashboard && state.active_view().is_some())
         .and_then(|_| {
             crate::ui::render::debug_pane_insets(
                 preliminary.workspace_bounds.width,
@@ -675,8 +645,8 @@ fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
     config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     for axis in [
-        crate::editor::Axis::Horizontal,
-        crate::editor::Axis::Vertical,
+        crate::windows::TileAxis::Horizontal,
+        crate::windows::TileAxis::Vertical,
     ] {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         state
@@ -1278,7 +1248,7 @@ fn configured_wrapping_uses_visual_rows() {
     assert!(frame.grid.row_text(0).starts_with("abcde"));
     assert!(frame.grid.row_text(1).starts_with("fghij"));
 
-    let view = state.active_view.expect("view");
+    let view = state.active_view().expect("view");
     let buffer = state.views[view].buffer;
     state.buffers[buffer].text =
         crate::editor::text::TextBuffer::from_text("abcdefghijklmnopqrstuvwxyz");
@@ -1690,7 +1660,7 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
         .open_text(crate::editor::text::TextBuffer::from_text("x"), None)
         .unwrap();
     split_state
-        .split_active(crate::editor::Axis::Horizontal, 100)
+        .split_active(crate::windows::TileAxis::Horizontal, 100)
         .expect("minimum-ratio split");
     split_state.focus_pane(-1, false).expect("zero-width leaf");
     let mut split_ui = ui_with_editor_layout(&split_state);
@@ -1866,17 +1836,17 @@ fn active_pane_viewport_uses_exact_focused_split_rectangle() {
         .open_text(crate::editor::text::TextBuffer::from_text("one\ntwo"), None)
         .unwrap();
     state
-        .split_active(crate::editor::Axis::Horizontal, 400)
+        .split_active(crate::windows::TileAxis::Horizontal, 400)
         .expect("horizontal split");
     state
-        .split_active(crate::editor::Axis::Vertical, 600)
+        .split_active(crate::windows::TileAxis::Vertical, 600)
         .expect("vertical split");
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut ui, &loaded.config, 79, 24);
     let viewport = crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 79, 23)
         .expect("focused viewport");
-    assert_eq!(Some(viewport.view), state.active_view);
+    assert_eq!(Some(viewport.view), state.active_view());
     assert!(viewport.x > 0 && viewport.y > 0);
     assert!(viewport.width < 79 && viewport.height < 23);
     assert!(viewport.y.saturating_add(viewport.height) <= 23);

@@ -691,7 +691,7 @@ fn stacked_picker_selected_row_and_late_preview_share_the_painted_capacity_after
     );
     // Enter now reaches the dashboard, which runs Find File; no stale row is opened.
     session.key("enter");
-    assert!(session.application_mut().state.active_view.is_none());
+    assert!(session.application_mut().state.active_view().is_none());
 }
 
 #[test]

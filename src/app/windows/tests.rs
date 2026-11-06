@@ -523,27 +523,35 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     let (_, first_view) = app
         .state
         .open_text(TextBuffer::from_text("first"), None)
         .unwrap();
-    let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let first_pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().unwrap())
+        .unwrap();
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
-    let second_view = app.state.active_view.unwrap();
-    let second_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let second_view = app.state.active_view().unwrap();
+    let second_pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().unwrap())
+        .unwrap();
     let first = app
-        .window_session
-        .editor_ids()
-        .window_for(first_pane)
+        .state
+        .graph
+        .window(first_pane)
+        .map(|window| window.id)
         .unwrap();
     let second = app
-        .window_session
-        .editor_ids()
-        .window_for(second_pane)
+        .state
+        .graph
+        .window(second_pane)
+        .map(|window| window.id)
         .unwrap();
     app.place_graph_window(
         &format!("window:{}", first.0),
@@ -557,14 +565,16 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     .unwrap();
     app.place_graph_window(&format!("window:{}", second.0), WindowPlacement::Hidden)
         .unwrap();
-    assert_eq!(app.state.active_view, Some(first_view));
+    assert_eq!(app.state.active_view(), Some(first_view));
     app.process_effect(AppEffect::WindowSwap {
         first: format!("window:{}", first.0),
         second: format!("window:{}", second.0),
     });
-    assert_eq!(app.state.active_view, Some(second_view));
+    assert_eq!(app.state.active_view(), Some(second_view));
     assert_eq!(
-        app.state.tabs[app.state.active_tab.unwrap()].focused,
+        app.state
+            .tab_focused_window(app.state.active_tab().unwrap())
+            .unwrap(),
         second_pane
     );
     assert_eq!(app.window_session.graph().focused(), Some(second));
@@ -577,21 +587,29 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
         .open_text(TextBuffer::from_text("first"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let first_pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().unwrap())
+        .unwrap();
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
-    let second_view = app.state.active_view.unwrap();
-    let second_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
+    let second_view = app.state.active_view().unwrap();
+    let second_pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().unwrap())
+        .unwrap();
     let first = app
-        .window_session
-        .editor_ids()
-        .window_for(first_pane)
+        .state
+        .graph
+        .window(first_pane)
+        .map(|window| window.id)
         .unwrap();
     let second = app
-        .window_session
-        .editor_ids()
-        .window_for(second_pane)
+        .state
+        .graph
+        .window(second_pane)
+        .map(|window| window.id)
         .unwrap();
     let first_target = format!("window:{}", first.0);
     let second_target = format!("window:{}", second.0);
@@ -610,9 +628,11 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
     app.swap_graph_windows(&first_target, &second_target)
         .unwrap();
     assert_eq!(app.window_session.graph().focused(), Some(second));
-    assert_eq!(app.state.active_view, Some(second_view));
+    assert_eq!(app.state.active_view(), Some(second_view));
     assert_eq!(
-        app.state.tabs[app.state.active_tab.unwrap()].focused,
+        app.state
+            .tab_focused_window(app.state.active_tab().unwrap())
+            .unwrap(),
         second_pane
     );
     app.reconcile_editor_windows();
@@ -631,9 +651,9 @@ fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
         app.reconcile_editor_windows();
         let original = app.window_session.graph().focused().unwrap();
         app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-            crate::editor::Axis::Horizontal,
+            crate::windows::TileAxis::Horizontal,
         )));
-        let clone_view = app.state.active_view.unwrap();
+        let clone_view = app.state.active_view().unwrap();
         let clone = app.window_session.graph().focused().unwrap();
         let (fullscreen, floating, floating_view) = if reverse {
             (clone, original, original_view)
@@ -675,7 +695,7 @@ fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
             rect
         );
         assert_eq!(app.window_session.graph().focused(), Some(floating));
-        assert_eq!(app.state.active_view, Some(floating_view));
+        assert_eq!(app.state.active_view(), Some(floating_view));
         app.window_session.graph().validate().unwrap();
     }
 }
@@ -688,12 +708,14 @@ fn tiled_window_resize_accepts_the_minimum_delta() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     app.resize_graph_window("focused", i16::MIN).unwrap();
     assert!(matches!(
-        app.state.tabs[app.state.active_tab.unwrap()].root,
-        crate::editor::LayoutNode::Split { ratio: 900, .. }
+        app.state
+            .tab_layout(app.state.active_tab().unwrap())
+            .unwrap(),
+        crate::windows::TiledLayoutNode::Split { ratio: 900, .. }
     ));
 }
 
@@ -745,12 +767,12 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
         )
         .unwrap();
     app.set_dashboard_visibility(false);
-    let first = app.state.active_view.expect("first view");
+    let first = app.state.active_view().expect("first view");
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
-    assert_ne!(app.state.active_view, Some(first));
-    let flash_view = app.state.active_view.unwrap();
+    assert_ne!(app.state.active_view(), Some(first));
+    let flash_view = app.state.active_view().unwrap();
     app.reconcile_editor_windows();
     app.begin_flash();
     app.handle_event(UiEvent::Key {
@@ -794,7 +816,7 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
         column,
         row,
     });
-    assert_eq!(app.state.active_view, Some(first));
+    assert_eq!(app.state.active_view(), Some(first));
     assert_eq!(
         app.state.views[first].cursor,
         crate::editor::text::ByteOffset(1)
@@ -842,7 +864,7 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
     let terminal_count = app.terminal_session.len();
     app.process_effect(AppEffect::WindowClone {
         target: format!("window:{}", terminal.0),
-        axis: crate::editor::Axis::Vertical,
+        axis: crate::windows::TileAxis::Vertical,
     });
     assert_eq!(app.window_session.graph(), &graph_before_terminal);
     assert_eq!(app.state.window_version(), source_before_terminal);
@@ -860,15 +882,16 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
         .state
         .open_text(TextBuffer::from_text("close then clone"), None)
         .unwrap();
-    let first_tab = closed_app.state.active_tab.expect("first tab");
-    let first_pane = closed_app.state.tabs[first_tab].focused;
+    let first_tab = closed_app.state.active_tab().expect("first tab");
+    let first_pane = closed_app.state.tab_focused_window(first_tab).unwrap();
     closed_app.state.new_tab().expect("remaining tab");
     closed_app.set_dashboard_visibility(false);
     closed_app.reconcile_editor_windows();
     let closed = closed_app
-        .window_session
-        .editor_ids()
-        .window_for(first_pane)
+        .state
+        .graph
+        .window(first_pane)
+        .map(|window| window.id)
         .expect("window to close");
     closed_app
         .state
@@ -888,7 +911,7 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
     let source_after_close = closed_app.state.window_version();
     closed_app.process_effect(AppEffect::WindowClone {
         target: format!("window:{}", closed.0),
-        axis: crate::editor::Axis::Horizontal,
+        axis: crate::windows::TileAxis::Horizontal,
     });
     assert_eq!(closed_app.window_session.graph(), &graph_after_close);
     assert_eq!(closed_app.state.window_version(), source_after_close);
@@ -912,18 +935,18 @@ fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
     let window = app.window_session.graph().focused().expect("source window");
     app.state.exhaust_window_source_for_test();
     let graph_before = app.window_session.graph().clone();
-    let panes_before = app.state.panes.len();
-    let active_before = app.state.active_view;
+    let panes_before = app.state.editor_windows().count();
+    let active_before = app.state.active_view();
 
     app.process_effect(AppEffect::WindowClone {
         target: format!("window:{}", window.0),
-        axis: crate::editor::Axis::Horizontal,
+        axis: crate::windows::TileAxis::Horizontal,
     });
 
     assert_eq!(app.window_session.graph(), &graph_before);
     assert_eq!(app.state.window_version().revision(), None);
-    assert_eq!(app.state.panes.len(), panes_before);
-    assert_eq!(app.state.active_view, active_before);
+    assert_eq!(app.state.editor_windows().count(), panes_before);
+    assert_eq!(app.state.active_view(), active_before);
     assert!(
         app.ui
             .notification
@@ -960,13 +983,13 @@ fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close(
     app.set_dashboard_visibility(false);
     app.state.buffers[dirty].dirty = true;
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("shared split");
     app.state.new_tab().expect("shared tab");
-    let tab_count = app.state.tabs.len();
+    let tab_count = app.state.editor_tabs().count();
     app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
     assert_eq!(
-        app.state.tabs.len(),
+        app.state.editor_tabs().count(),
         tab_count - 1,
         "a dirty buffer with views outside the tab is not a last reference"
     );
@@ -993,7 +1016,7 @@ fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() 
         .open_text(crate::editor::text::TextBuffer::from_text("keeper"), None)
         .unwrap();
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     let (dirty, _) = app
         .state
@@ -1002,8 +1025,16 @@ fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() 
     app.state.set_buffer_dirty(dirty, true);
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
-    let window = app.window_session.editor_ids().window_for(pane).unwrap();
+    let pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().unwrap())
+        .unwrap();
+    let window = app
+        .state
+        .graph
+        .window(pane)
+        .map(|window| window.id)
+        .unwrap();
     let target = format!("window:{}", window.0);
 
     app.close_graph_window(&target).unwrap();
@@ -1050,7 +1081,7 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
         )
         .unwrap();
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     let (second, _) = app
         .state
@@ -1100,21 +1131,21 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     app.state.set_buffer_dirty(second, true);
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let tabs = app.state.tabs.len();
+    let tabs = app.state.editor_tabs().count();
 
     app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
-    assert_eq!(app.state.tabs.len(), tabs);
+    assert_eq!(app.state.editor_tabs().count(), tabs);
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     assert_eq!(
-        app.state.tabs.len(),
+        app.state.editor_tabs().count(),
         tabs,
         "save admission is not close ACK"
     );
     crate::app::tests::wait_vfs(&mut app);
     assert_eq!(
-        app.state.tabs.len(),
+        app.state.editor_tabs().count(),
         tabs,
         "second dirty target needs review"
     );
@@ -1123,7 +1154,7 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
         crate::ui::PromptKind::DirtyClose
     );
     app.submit_prompt();
-    assert_eq!(app.state.tabs.len(), tabs - 1);
+    assert_eq!(app.state.editor_tabs().count(), tabs - 1);
     assert_eq!(
         std::fs::read_to_string(first_path).unwrap(),
         "first saved\n"
@@ -1141,7 +1172,7 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
         .open_text(crate::editor::text::TextBuffer::from_text("a"), None)
         .unwrap();
     app.state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     let (b, _) = app
         .state
@@ -1151,10 +1182,10 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     app.state.set_buffer_dirty(b, true);
     app.reconcile_editor_windows();
     let source = (
-        app.state.active_tab,
-        app.state.active_view,
-        app.state.tabs.len(),
-        app.state.panes.len(),
+        app.state.active_tab(),
+        app.state.active_view(),
+        app.state.editor_tabs().count(),
+        app.state.editor_windows().count(),
         app.state.views.len(),
     );
     app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
@@ -1166,10 +1197,10 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     app.close_prompt();
     assert_eq!(
         (
-            app.state.active_tab,
-            app.state.active_view,
-            app.state.tabs.len(),
-            app.state.panes.len(),
+            app.state.active_tab(),
+            app.state.active_view(),
+            app.state.editor_tabs().count(),
+            app.state.editor_windows().count(),
             app.state.views.len(),
         ),
         source
@@ -1203,11 +1234,11 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     assert_ne!(app.ui.content_tabs[0].title, app.ui.content_tabs[1].title);
     assert!(app.ui.content_tabs[0].dirty);
     assert!(app.ui.content_tabs[1].active);
-    let before = app.window_session.editor_ids().reconciliation_count();
+    let before = app.window_session.test_publications();
     app.state
         .set_workspace_root(PathBuf::from("/workspace/src"));
     app.reconcile_editor_windows();
-    assert!(app.window_session.editor_ids().reconciliation_count() > before);
+    assert!(app.window_session.test_publications() > before);
     assert!(
         app.ui
             .content_tabs
@@ -1217,15 +1248,14 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     assert_eq!(
         app.ui.content_tabs[1].identity,
         crate::ui::ContentTabIdentity(
-            app.window_session
-                .editor_ids()
-                .content_for(second)
+            app.state
+                .content_for_buffer(second)
                 .expect("second content")
         )
     );
 
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.graph().counts(), (3, 3, 3, 1));
@@ -1236,9 +1266,7 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     assert_eq!(app.window_session.graph().counts(), (3, 4, 4, 2));
     assert_eq!(
         app.window_session.graph().active_tab(),
-        app.window_session
-            .editor_ids()
-            .tab_for(second_workspace_tab)
+        Some(second_workspace_tab)
     );
     assert_ne!(app.window_session.graph().focused(), Some(focused));
 
@@ -1259,7 +1287,7 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
         app.window_session.width(),
         app.window_session.height(),
     );
-    let row = u16::from(app.state.tabs.len() > 1);
+    let row = u16::from(app.state.editor_tabs().count() > 1);
     let line = frame.grid.row_text(row);
     for entry in &app.ui.content_tabs {
         assert_eq!(line.matches(&entry.title).count(), 1, "{line:?}");
@@ -1318,9 +1346,9 @@ fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_tra
         .expect("initial window");
 
     app.process_effect(crate::app::commands::AppEffect::Layout(
-        crate::app::windows::LayoutAction::Split(crate::editor::Axis::Horizontal),
+        crate::app::windows::LayoutAction::Split(crate::windows::TileAxis::Horizontal),
     ));
-    assert_eq!(app.state.panes.len(), 2);
+    assert_eq!(app.state.editor_windows().count(), 2);
     assert_eq!(
         app.window_session
             .graph()
@@ -1398,24 +1426,27 @@ fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_tra
         amount: 50,
     });
     assert_ne!(app.window_session.graph(), &before_resize);
-    assert_eq!(app.state.panes.len(), 2);
+    assert_eq!(app.state.editor_windows().count(), 2);
 
     app.process_effect(crate::app::commands::AppEffect::WindowClose(format!(
         "window:{}",
         focused.0
     )));
-    assert_eq!(app.state.panes.len(), 1);
+    assert_eq!(app.state.editor_windows().count(), 1);
     assert!(app.window_session.graph().window(initial_window).is_some());
     let state_revision_before_rejected = app.state.window_revision();
-    let active_view_before_rejected = app.state.active_view;
-    let pane_count_before_rejected = app.state.panes.len();
+    let active_view_before_rejected = app.state.active_view();
+    let pane_count_before_rejected = app.state.editor_windows().count();
     let graph_before_rejected = app.window_session.graph().clone();
     app.process_effect(crate::app::commands::AppEffect::WindowClose(
         "focused".into(),
     ));
     assert_eq!(app.state.window_revision(), state_revision_before_rejected);
-    assert_eq!(app.state.active_view, active_view_before_rejected);
-    assert_eq!(app.state.panes.len(), pane_count_before_rejected);
+    assert_eq!(app.state.active_view(), active_view_before_rejected);
+    assert_eq!(
+        app.state.editor_windows().count(),
+        pane_count_before_rejected
+    );
     assert_eq!(app.window_session.graph(), &graph_before_rejected);
     assert!(app.ui.notification_error);
 }
@@ -1438,13 +1469,17 @@ fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
         height: 10,
     });
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
-    let pane = app.state.tabs[app.state.active_tab.expect("tab")].focused;
+    let pane = app
+        .state
+        .tab_focused_window(app.state.active_tab().expect("tab"))
+        .unwrap();
     let editor = app
-        .window_session
-        .editor_ids()
-        .window_for(pane)
+        .state
+        .graph
+        .window(pane)
+        .map(|window| window.id)
         .expect("later editor window");
     app.process_effect(AppEffect::WindowFloat {
         target: format!("window:{}", editor.0),
@@ -1491,14 +1526,16 @@ fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
     app.input.observe_mouse(10, 4);
     app.focus_mouse_pane();
     assert_eq!(
-        app.state.tabs[app.state.active_tab.expect("tab")].focused,
+        app.state
+            .tab_focused_window(app.state.active_tab().expect("tab"))
+            .unwrap(),
         pane
     );
     assert_eq!(app.window_session.graph().focused(), Some(editor));
     assert_eq!(app.active_input_context(), "editor.normal");
     app.handle_configured_key("i".parse::<KeyEvent>().expect("insert mode"));
     app.handle_configured_key("x".parse::<KeyEvent>().expect("insert text"));
-    let view = app.state.panes[pane].view;
+    let view = app.state.window_view(pane).unwrap();
     let buffer = app.state.views[view].buffer;
     assert!(app.state.buffers[buffer].text.to_string().starts_with('x'));
 }
@@ -1511,7 +1548,7 @@ fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     app.open_explorer();
     let tab = app.window_session.graph().active_tab().expect("active tab");
@@ -1585,21 +1622,18 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let initial_count = app.window_session.editor_ids().reconciliation_count();
+    let initial_count = app.window_session.test_publications();
     let initial_graph = app.window_session.graph().clone();
     for _ in 0..128 {
         app.reconcile_editor_windows();
     }
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        initial_count
-    );
+    assert_eq!(app.window_session.test_publications(), initial_count);
     assert_eq!(app.window_session.graph(), &initial_graph);
 
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
     assert!(app.ui.content_tabs[0].dirty);
-    let after_dirty = app.window_session.editor_ids().reconciliation_count();
+    let after_dirty = app.window_session.test_publications();
 
     let revision = app.state.buffers[buffer].text.revision();
     let bytes = app.state.buffers[buffer].text.to_bytes();
@@ -1612,42 +1646,37 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
     app.reconcile_editor_windows();
     assert!(!app.ui.content_tabs[0].dirty);
     assert_eq!(app.ui.content_tabs[0].title, "saved.rs");
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        after_dirty + 1
-    );
+    assert_eq!(app.window_session.test_publications(), after_dirty + 1);
 
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
     app.reconcile_editor_windows();
-    let split_count = app.window_session.editor_ids().reconciliation_count();
-    let first_pane = match &app.state.tabs[app.state.active_tab.expect("tab")].root {
-        crate::editor::LayoutNode::Split { first, .. } => match first.as_ref() {
-            crate::editor::LayoutNode::Pane(pane) => *pane,
-            crate::editor::LayoutNode::Split { .. } => panic!("unexpected nested split"),
+    let split_count = app.window_session.test_publications();
+    let first_pane = match &app
+        .state
+        .tab_layout(app.state.active_tab().expect("tab"))
+        .unwrap()
+    {
+        crate::windows::TiledLayoutNode::Split { first, .. } => match first.as_ref() {
+            crate::windows::TiledLayoutNode::Window(pane) => *pane,
+            crate::windows::TiledLayoutNode::Split { .. } => panic!("unexpected nested split"),
         },
-        crate::editor::LayoutNode::Pane(_) => panic!("expected split"),
+        crate::windows::TiledLayoutNode::Window(_) => panic!("expected split"),
     };
     app.state.focus_pane_id(first_pane).expect("focus");
     app.reconcile_editor_windows();
     app.state.resize_active_pane(50).expect("resize");
     app.reconcile_editor_windows();
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        split_count + 2
-    );
+    assert_eq!(app.window_session.test_publications(), split_count + 2);
 
-    let before_reload = app.window_session.editor_ids().reconciliation_count();
+    let before_reload = app.window_session.test_publications();
     {
         let fixture = app.configuration.fixture_snapshot();
         app.configuration.install_fixture(fixture);
     }
     app.reconcile_editor_windows();
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        before_reload
-    );
+    assert_eq!(app.window_session.test_publications(), before_reload);
     app.window_session
         .graph()
         .validate()
@@ -1872,6 +1901,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
             plan,
             &app.state.window_version(),
             &app.extension.contributions().version(),
+            &mut app.state,
         )
         .expect("graph-only focus change");
     assert!(app.compositor_projection().is_none());
@@ -1887,7 +1917,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     assert!(
         app.resize_native_window_direction(
             crate::app::windows::NativeSurfaceTarget::Terminal(7),
-            crate::editor::FocusDirection::Up
+            crate::windows::SpatialDirection::Up
         )
         .is_err()
     );
@@ -1921,15 +1951,12 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
     app.reconcile_editor_windows();
     assert!(app.compositor_projection().is_some());
     let idle_graph = app.window_session.graph().clone();
-    let idle_reconciliations = app.window_session.editor_ids().reconciliation_count();
+    let idle_reconciliations = app.window_session.test_publications();
     for _ in 0..128 {
         app.reconcile_editor_windows();
     }
     assert_eq!(app.window_session.graph(), &idle_graph);
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        idle_reconciliations
-    );
+    assert_eq!(app.window_session.test_publications(), idle_reconciliations);
 
     app.process_effect(crate::app::commands::AppEffect::WindowClose(
         "explorer".into(),
@@ -1984,7 +2011,7 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
         }
     );
     app.window_session
-        .accept_current(candidate, &app.state.window_version())
+        .accept_current(candidate, &app.state.window_version(), &mut app.state)
         .expect("checked window candidate");
     app.reconcile_editor_windows();
     assert_eq!(
@@ -2089,21 +2116,21 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
         )
         .unwrap();
     app.set_dashboard_visibility(false);
-    let origin_tab = app.state.active_tab.expect("editor tab");
+    let origin_tab = app.state.active_tab().expect("editor tab");
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
-    let origin_view = app.state.active_view.expect("split view");
+    let origin_view = app.state.active_view().expect("split view");
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
     assert!(app.state.is_zoomed());
-    assert_ne!(app.state.active_tab, Some(origin_tab));
-    let zoomed = app.state.active_view.unwrap();
+    assert_ne!(app.state.active_tab(), Some(origin_tab));
+    let zoomed = app.state.active_view().unwrap();
     app.state.views[zoomed].cursor = crate::editor::text::ByteOffset(4);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
     assert!(!app.state.is_zoomed());
-    assert_eq!(app.state.active_tab, Some(origin_tab));
-    assert_eq!(app.state.active_view, Some(origin_view));
-    assert_eq!(app.state.tabs.len(), 1);
+    assert_eq!(app.state.active_tab(), Some(origin_tab));
+    assert_eq!(app.state.active_view(), Some(origin_view));
+    assert_eq!(app.state.editor_tabs().count(), 1);
     assert_eq!(
         app.state.views[origin_view].cursor,
         crate::editor::text::ByteOffset(4)
@@ -2123,14 +2150,14 @@ fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     assert!(app.configuration.settings().editor.git_signs.enabled);
 
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
-    let zoomed_tab = app.state.active_tab;
+    let zoomed_tab = app.state.active_tab();
     app.process_effect(AppEffect::Zen);
     app.process_effect(AppEffect::Zen);
     assert!(
         app.state.is_zoomed(),
         "zen must preserve a pre-existing zoom"
     );
-    assert_eq!(app.state.active_tab, zoomed_tab);
+    assert_eq!(app.state.active_tab(), zoomed_tab);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
 
     let wrap = app.configuration.settings().editor.wrap;
@@ -2156,7 +2183,7 @@ fn editor_fixture() -> (crate::editor::EditorState, Windows) {
     let candidate = windows
         .prepare_editor(&(&state).into(), "[scratch]")
         .unwrap();
-    windows.commit(candidate).unwrap();
+    windows.commit(candidate, &mut state).unwrap();
     (state, windows)
 }
 
@@ -2167,9 +2194,9 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
     use crate::persistence::PersistedSession;
     use crate::persistence::PersistedTab;
     use crate::windows::ContentTypeId;
-    let (state, mut windows) = editor_fixture();
+    let (mut state, mut windows) = editor_fixture();
     let tab = windows.graph().active_tab().unwrap();
-    let graph = &mut windows.core.graph;
+    let graph = &mut state.graph;
     let content = graph
         .create_content(
             ContentTypeId::new("plugin.demo.panel").unwrap(),
@@ -2191,6 +2218,8 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
             1,
         )
         .unwrap();
+    let candidate = windows.prepare_editor(&(&state).into(), "scratch").unwrap();
+    windows.commit(candidate, &mut state).unwrap();
     windows
         .core
         .native
@@ -2319,14 +2348,14 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
 
 #[test]
 fn candidates_are_bound_to_the_session_and_owner_epoch_not_only_graph_revision() {
-    let (state, mut windows) = editor_fixture();
+    let (mut state, mut windows) = editor_fixture();
     let (_, mut other) = editor_fixture();
     assert_eq!(windows.graph(), other.graph());
     let candidate = windows
         .prepare_editor(&(&state).into(), "[scratch]")
         .unwrap();
     let before = other.graph().clone();
-    assert!(other.commit(candidate).is_err());
+    assert!(other.commit(candidate, &mut state).is_err());
     assert_eq!(other.graph(), &before);
     let candidate = windows
         .prepare_editor(&(&state).into(), "[scratch]")
@@ -2334,7 +2363,7 @@ fn candidates_are_bound_to_the_session_and_owner_epoch_not_only_graph_revision()
     let before = windows.graph().clone();
     windows.invalidate_native();
     assert_eq!(windows.graph(), &before);
-    assert!(windows.commit(candidate).is_err());
+    assert!(windows.commit(candidate, &mut state).is_err());
     assert_eq!(windows.graph(), &before);
 }
 
@@ -2344,7 +2373,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
     let graph = windows.graph().clone();
     let native = windows.core.native.clone();
     let epoch = windows.epoch;
-    let signature = crate::app::windows::bridge::NativeSurfaceSignature {
+    let signature = crate::app::windows::native::NativeSurfaceSignature {
         editor_tab: None,
         editor_window: None,
         focused_plugin: None,
@@ -2502,7 +2531,7 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
     let catalog = crate::plugins::PluginCatalogVersion::default();
     use crate::windows::ContentTypeId;
     use crate::windows::WindowError;
-    let (state, mut windows) = editor_fixture();
+    let (mut state, mut windows) = editor_fixture();
     let editor_window = windows.graph().focused().unwrap();
     let active = windows.graph().active_tab().unwrap();
     let other_tab = windows
@@ -2608,22 +2637,24 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
     assert_eq!(windows.graph(), &before);
     let duplicate = draft.clone();
     windows
-        .commit_plugin(draft, &state.window_version(), &catalog)
+        .commit_plugin(draft, &state.window_version(), &catalog, &mut state)
         .unwrap();
     assert!(windows.graph().window(window).is_some());
     assert!(
         windows
-            .commit_plugin(duplicate, &state.window_version(), &catalog)
+            .commit_plugin(duplicate, &state.window_version(), &catalog, &mut state)
             .is_err()
     );
     let pending = windows
         .begin_plugin("demo", 1, (&state.window_version(), &catalog))
         .unwrap();
-    windows.remove_plugin_generation("demo", 1).unwrap();
+    windows
+        .remove_plugin_generation("demo", 1, &mut state)
+        .unwrap();
     assert!(windows.graph().window(window).is_none());
     assert!(
         windows
-            .commit_plugin(pending, &state.window_version(), &catalog)
+            .commit_plugin(pending, &state.window_version(), &catalog, &mut state)
             .is_err()
     );
     assert!(windows.graph().window(editor_window).is_some());
@@ -2784,7 +2815,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
     let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
-            .commit_plugin(draft, &before, &catalog.version())
+            .commit_plugin(draft, &before, &catalog.version(), &mut state)
             .is_err()
     );
     assert!(
@@ -2816,7 +2847,12 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
     );
     assert!(
         windows
-            .commit_plugin(draft, &state.window_version(), &catalog.version())
+            .commit_plugin(
+                draft,
+                &state.window_version(),
+                &catalog.version(),
+                &mut state
+            )
             .is_err()
     );
     assert!(
@@ -2844,8 +2880,8 @@ fn cross_tab_focus_plan_targets_the_exact_editor_tab_without_eager_mutation() {
     let candidate = windows
         .prepare_editor(&(&state).into(), "[scratch]")
         .unwrap();
-    windows.commit(candidate).unwrap();
-    let active_before = state.active_tab;
+    windows.commit(candidate, &mut state).unwrap();
+    let active_before = state.active_tab();
     let graph_before = windows.graph().clone();
     let plan = windows
         .plan_focus(original_window, &state.window_version(), catalog.version())
@@ -2858,13 +2894,13 @@ fn cross_tab_focus_plan_targets_the_exact_editor_tab_without_eager_mutation() {
         plan.operations().get(1),
         Some(EditorOperation::FocusPaneId { .. })
     ));
-    assert_eq!(state.active_tab, active_before);
+    assert_eq!(state.active_tab(), active_before);
     assert_eq!(windows.graph(), &graph_before);
 }
 
 #[test]
 fn focus_capture_survives_geometry_invalidation_but_not_reset_or_another_editor() {
-    let (state, mut windows) = editor_fixture();
+    let (mut state, mut windows) = editor_fixture();
     let catalog = crate::plugins::PluginContributionCatalog::default();
     let capture = windows.capture_focus().unwrap();
     windows.invalidate_native();
@@ -2875,14 +2911,14 @@ fn focus_capture_survives_geometry_invalidation_but_not_reset_or_another_editor(
     );
     let capture = windows.capture_focus().unwrap();
     let (foreign, _) = editor_fixture();
-    assert_eq!(state.active_view, foreign.active_view);
+    assert_eq!(state.active_view(), foreign.active_view());
     assert!(
         windows
             .restore_focus_plan(capture, &foreign.window_version(), catalog.version())
             .is_none()
     );
     let capture = windows.capture_focus().unwrap();
-    windows.reset_runtime(&[]).unwrap();
+    windows.reset_runtime(&[], &mut state).unwrap();
     assert!(
         windows
             .restore_focus_plan(capture, &state.window_version(), catalog.version())
@@ -2920,7 +2956,7 @@ fn editor_proposals_cannot_swap_equal_revision_branches_or_rebase_stale_work() {
     state
         .apply_transaction(&EditorTransaction::new(TransactionId(2)).with_operation(
             EditorOperation::SetCursor {
-                view: state.active_view.unwrap(),
+                view: state.active_view().unwrap(),
                 position: crate::editor::text::ByteOffset(1),
             },
         ))
@@ -2944,7 +2980,7 @@ fn editor_proposals_cannot_swap_equal_revision_branches_or_rebase_stale_work() {
         .accept_editor_transition(transition, &state.version(), &catalog)
         .unwrap();
     assert_eq!(published.window_version(), expected);
-    assert_eq!(windows.editor_ids().source(), Some(&expected));
+    assert_eq!(windows.core.source.as_ref(), Some(&expected));
 }
 
 #[test]
@@ -2996,7 +3032,7 @@ fn window_admission_cost_probe() {
     }
     let mut windows = Windows::default();
     let candidate = windows.prepare_editor(&(&state).into(), "scratch").unwrap();
-    windows.commit(candidate).unwrap();
+    windows.commit(candidate, &mut state).unwrap();
     let foreign = EditorState::new("/foreign".into());
     let mut exhausted = state.clone();
     exhausted.exhaust_window_source_for_test();
@@ -3081,7 +3117,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
     let catalog = crate::plugins::PluginCatalogVersion::default();
     let current = state.version();
     let descriptions = || crate::app::windows::NativeDescriptions {
-        signature: crate::app::windows::bridge::NativeSurfaceSignature {
+        signature: crate::app::windows::native::NativeSurfaceSignature {
             editor_tab: None,
             editor_window: None,
             focused_plugin: None,
@@ -3156,7 +3192,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
 fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     use crate::app::windows::CommandPolicy;
     use crate::app::windows::WindowCommand;
-    let (state, mut windows) = editor_fixture();
+    let (mut state, mut windows) = editor_fixture();
     let source = state.window_version();
     let catalog = crate::plugins::PluginCatalogVersion::default();
     windows.project(ProjectionRequest {
@@ -3187,7 +3223,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     let copies = crate::windows::WindowGraph::test_clone_count();
     let clone_plan = windows
         .plan_window_command(
-            WindowCommand::Clone("focused", crate::editor::Axis::Horizontal, 500),
+            WindowCommand::Clone("focused", crate::windows::TileAxis::Horizontal, 500),
             &(&state).into(),
             policy(),
             catalog.clone(),
@@ -3200,7 +3236,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     let mut changed = state.clone();
     changed
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .expect("change clone source");
     let before_clone_rejection = windows.graph().clone();
     assert!(
@@ -3267,7 +3303,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     windows.invalidate_native();
     assert!(
         windows
-            .accept_window_command(placement_plan, &source, &catalog)
+            .accept_window_command(placement_plan, &source, &catalog, &mut state)
             .is_err()
     );
     assert_eq!(windows.graph(), &placement_before);
@@ -3301,11 +3337,11 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         )
         .unwrap_or_else(|_| panic!("plan"));
     windows
-        .accept_window_command(plan, &source, &catalog)
+        .accept_window_command(plan, &source, &catalog, &mut state)
         .unwrap();
     let plan = windows
         .plan_window_command(
-            WindowCommand::Clone("focused", crate::editor::Axis::Vertical, 500),
+            WindowCommand::Clone("focused", crate::windows::TileAxis::Vertical, 500),
             &(&state).into(),
             policy(),
             catalog.clone(),
@@ -3316,7 +3352,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
-            .accept_window_command(plan, &source, &catalog)
+            .accept_window_command(plan, &source, &catalog, &mut state)
             .is_err()
     );
     assert_eq!(windows.graph(), &before);

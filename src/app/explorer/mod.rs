@@ -1076,7 +1076,7 @@ impl App {
                 self.reconcile_editor_windows();
                 let navigation = self
                     .window_session
-                    .navigation_stamp(self.state.window_version(), self.state.active_view);
+                    .navigation_stamp(self.state.window_version(), self.state.active_view());
                 if !self.explorer.admit_open(request.ticket, id, navigation) {
                     self.documents.cancel_request(id);
                 }
@@ -1404,12 +1404,12 @@ impl App {
             let activate = self.window_session.navigation_current(
                 &reply.navigation,
                 &self.state.window_version(),
-                self.state.active_view,
+                self.state.active_view(),
             );
             let mut draft = self.state.draft();
             if activate {
                 if reply.split
-                    && self.state.active_view.is_some()
+                    && self.state.active_view().is_some()
                     && let Err(error) = draft.split_document(PANE_DEFAULT_RATIO)
                 {
                     self.show_error(error);
@@ -1420,7 +1420,10 @@ impl App {
                     return;
                 }
             } else {
-                draft.load_document(text, path);
+                if let Err(error) = draft.load_document(text, path) {
+                    self.show_error(error);
+                    return;
+                }
             }
             if let Err(error) = self.commit_editor_draft(draft, None, activate) {
                 self.show_error(error);

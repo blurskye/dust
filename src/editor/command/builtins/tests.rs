@@ -639,14 +639,14 @@ fn normal_horizontal_motion_stays_off_line_endings() {
 fn replace_backspace_never_restores_text_over_another_views_edit() {
     let (mut state, buffer, first) = editing("abc", 0);
     let second = state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     state.focus_pane(-1, true).unwrap();
-    assert_eq!(state.active_view, Some(first));
+    assert_eq!(state.active_view(), Some(first));
     apply(&mut state, "mode.replace", &[], 1);
     apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
     state.focus_pane(1, true).unwrap();
-    assert_eq!(state.active_view, Some(second));
+    assert_eq!(state.active_view(), Some(second));
     state.views[second].cursor = crate::editor::text::ByteOffset(0);
     apply(&mut state, "mode.replace", &[], 1);
     apply(&mut state, "edit.replace_text", &[("text", "Y")], 1);
@@ -670,7 +670,7 @@ fn replace_backspace_preserves_earlier_records_and_remaps_unaffected_ones() {
     state.views[view].cursor = crate::editor::text::ByteOffset(1);
     apply(&mut state, "edit.replace_text", &[("text", "X")], 1);
     let second = state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     state.views[second].cursor = crate::editor::text::ByteOffset(0);
     state.views[second].mode = crate::editor::EditorMode::Insert;

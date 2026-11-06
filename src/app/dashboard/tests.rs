@@ -107,7 +107,7 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
         .collect::<String>();
     assert_eq!(label, "New File");
     driver.key("enter");
-    assert!(driver.application_mut().state.active_view.is_some());
+    assert!(driver.application_mut().state.active_view().is_some());
 }
 
 #[cfg(unix)]

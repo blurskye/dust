@@ -1140,7 +1140,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         let delivery = app.extension.fixture_delivery_state();
 
         let error = app
-            .clone_graph_window(&target, crate::editor::Axis::Horizontal)
+            .clone_graph_window(&target, crate::windows::TileAxis::Horizontal)
             .expect_err("production 0.2 presenter clone must be rejected");
         assert!(error.contains("clone-view"), "{error}");
         assert_eq!(app.window_session.graph(), &graph);
@@ -1163,7 +1163,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         let graph = app.window_session.graph().clone();
         let delivery = app.extension.fixture_delivery_state();
         assert!(
-            app.clone_graph_window(&target, crate::editor::Axis::Horizontal)
+            app.clone_graph_window(&target, crate::windows::TileAxis::Horizontal)
                 .is_err()
         );
         assert_eq!(app.window_session.graph(), &graph);
@@ -1192,7 +1192,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         let graph = app.window_session.graph().clone();
         let delivery = app.extension.fixture_delivery_state();
         assert!(
-            app.clone_graph_window(&target, crate::editor::Axis::Horizontal)
+            app.clone_graph_window(&target, crate::windows::TileAxis::Horizontal)
                 .is_err()
         );
         assert_eq!(app.window_session.graph(), &graph);
@@ -1413,6 +1413,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         *transition,
         &app.state.window_version(),
         source.catalog(),
+        &mut app.state,
     );
     assert!(
         source
@@ -1445,6 +1446,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         other,
         &app.state.window_version(),
         source.catalog(),
+        &mut app.state,
     );
     assert!(
         source
@@ -1466,15 +1468,12 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
             .window(window)
             .is_some()
     );
-    let reconciliation_count = app.window_session.editor_ids().reconciliation_count();
+    let reconciliation_count = app.window_session.test_publications();
     let graph = app.window_session.graph().clone();
     for _ in 0..256 {
         app.reconcile_editor_windows();
     }
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        reconciliation_count
-    );
+    assert_eq!(app.window_session.test_publications(), reconciliation_count);
     assert_eq!(app.window_session.graph(), &graph);
     app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
     assert!(app.ui.plugin_surfaces.is_empty());
@@ -1518,7 +1517,7 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     assert_eq!(*app.extension.events(), stable_queue);
     assert_eq!(*app.extension.observation(), stable_observation);
 
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     app.state.views[view].cursor = ByteOffset(1);
     app.refresh_plugin_host_events();
     let event = app
@@ -1530,7 +1529,9 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     assert!(event.payload.contains("cursor=1"));
     app.extension
         .acknowledge("demo", PluginLoadId(77), &[event.id]);
-    app.state.active_view = None;
+    while app.state.active_view().is_some() {
+        app.state.close_active_view().unwrap();
+    }
     app.refresh_plugin_host_events();
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
     // The earlier delivery is rate-limited, but the disappearance is queued now.
@@ -1851,16 +1852,13 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
     assert_eq!(app.ui.private_surfaces[0].cells[0].grapheme, "X");
     let graph = app.window_session.graph().clone();
     let ui = app.ui.private_surfaces.clone();
-    let reconciliations = app.window_session.editor_ids().reconciliation_count();
+    let reconciliations = app.window_session.test_publications();
     for _ in 0..256 {
         app.reconcile_editor_windows();
     }
     assert_eq!(app.window_session.graph(), &graph);
     assert_eq!(app.ui.private_surfaces, ui);
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        reconciliations
-    );
+    assert_eq!(app.window_session.test_publications(), reconciliations);
 }
 
 #[test]
@@ -2800,7 +2798,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
     app.remove_plugin_contribution_generation("demo", PluginLoadId(7));
     assert!(!app.state.buffers.contains_key(virtual_buffer));
     assert_eq!(app.state.active_buffer_id(), Some(ordinary));
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     assert_eq!(app.window_session.graph().focused(), focus);
     assert_eq!(app.state.buffers[ordinary].text.to_string(), "ordinary");
 }
@@ -3084,7 +3082,7 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     app.reconcile_editor_windows();
     let navigation = app
         .window_session
-        .navigation_stamp(app.state.window_version(), app.state.active_view);
+        .navigation_stamp(app.state.window_version(), app.state.active_view());
     for _ in 0..2 {
         app.process_effect(AppEffect::VirtualDocumentOpen {
             source: "plugin.demo.virtual.help".into(),
@@ -3095,11 +3093,11 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     app.state.new_tab().unwrap();
     app.reconcile_editor_windows();
     let before = app.state.version();
-    let active = app.state.active_tab;
+    let active = app.state.active_tab();
     let navigation_current = app.window_session.navigation_current(
         &navigation,
         &app.state.window_version(),
-        app.state.active_view,
+        app.state.active_view(),
     );
     assert!(!navigation_current);
     let proposal = crate::plugins::PluginVirtualDocumentProposal {
@@ -3132,7 +3130,7 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
             .is_err()
     );
     assert_eq!(app.state.version(), before);
-    assert_eq!(app.state.active_tab, active);
+    assert_eq!(app.state.active_tab(), active);
     assert!(
         app.state
             .buffers
@@ -4033,14 +4031,14 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     );
     let ids = (
         buffer,
-        app.state.active_view,
+        app.state.active_view(),
         app.window_session.graph().focused(),
     );
     app.process_effect(AppEffect::HealthVirtualRefresh);
     assert_eq!(
         (
             app.state.active_buffer_id().unwrap(),
-            app.state.active_view,
+            app.state.active_view(),
             app.window_session.graph().focused()
         ),
         ids
@@ -4071,7 +4069,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     }
     app.remove_plugin_contribution_generation("builtin.health", PluginLoadId(1));
     assert!(!app.state.buffers.contains_key(buffer));
-    assert!(app.state.active_view.is_none());
+    assert!(app.state.active_view().is_none());
     assert!(app.window_session.dashboard_visible());
     app.window_session.graph().validate().unwrap();
 }
@@ -4099,18 +4097,16 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     *app.state = draft.accept(&app.state.version()).unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    assert!(
-        app.window_session
-            .editor_ids()
-            .content_for(buffer)
-            .is_some()
-    );
+    assert!(app.state.content_for_buffer(buffer).is_some());
     assert!(app.window_session.graph().focused().is_some());
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
         "# Héllo\nvirtual"
     );
-    let ids = (app.state.active_view, app.window_session.graph().focused());
+    let ids = (
+        app.state.active_view(),
+        app.window_session.graph().focused(),
+    );
     let mut refresh = snapshot.clone();
     refresh.revision = 2;
     refresh.text = "# Héllo\nrefreshed".into();
@@ -4134,7 +4130,10 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
         }
     );
     assert_eq!(
-        (app.state.active_view, app.window_session.graph().focused()),
+        (
+            app.state.active_view(),
+            app.window_session.graph().focused()
+        ),
         ids
     );
     assert!(matches!(
@@ -4201,12 +4200,12 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
         effect,
         AppEffect::WindowClone {
             target,
-            axis: crate::editor::Axis::Vertical,
+            axis: crate::windows::TileAxis::Vertical,
         } if target == &format!("window:{}", original_window.0)
     ));
     app.process_effect(outcome.effects.into_iter().next().expect("clone effect"));
 
-    let cloned_view = app.state.active_view.expect("cloned editor view");
+    let cloned_view = app.state.active_view().expect("cloned editor view");
     let cloned_window = app.window_session.graph().focused().expect("cloned window");
     assert_ne!(cloned_view, original_view);
     assert_ne!(cloned_window, original_window);
@@ -4280,9 +4279,9 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
 
     app.process_effect(AppEffect::WindowClone {
         target: format!("window:{}", original_window.0),
-        axis: crate::editor::Axis::Horizontal,
+        axis: crate::windows::TileAxis::Horizontal,
     });
-    let exact_clone = app.state.active_view.expect("exact source clone");
+    let exact_clone = app.state.active_view().expect("exact source clone");
     assert_ne!(exact_clone, cloned_view);
     assert_eq!(app.state.views[exact_clone].buffer, buffer);
     assert_eq!(
@@ -4317,7 +4316,7 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
     let (_virtual_app_dirs, mut virtual_app) = crate::app::tests::app();
     virtual_app.process_effect(AppEffect::HealthVirtualOpen);
     let virtual_buffer = virtual_app.state.active_buffer_id().expect("health buffer");
-    let virtual_view = virtual_app.state.active_view.expect("health view");
+    let virtual_view = virtual_app.state.active_view().expect("health view");
     virtual_app.reconcile_editor_windows();
     let virtual_window = virtual_app
         .window_session
@@ -4332,9 +4331,9 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
         .id;
     virtual_app.process_effect(AppEffect::WindowClone {
         target: format!("window:{}", virtual_window.0),
-        axis: crate::editor::Axis::Horizontal,
+        axis: crate::windows::TileAxis::Horizontal,
     });
-    let cloned_virtual_view = virtual_app.state.active_view.expect("cloned health view");
+    let cloned_virtual_view = virtual_app.state.active_view().expect("cloned health view");
     let cloned_virtual_window = virtual_app
         .window_session
         .graph()
@@ -4432,16 +4431,17 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
         )
         .unwrap();
     app.set_dashboard_visibility(false);
-    let tab = app.state.active_tab.expect("editor tab");
-    let source_pane = app.state.tabs[tab].focused;
-    let source_view = app.state.panes[source_pane].view;
+    let tab = app.state.active_tab().expect("editor tab");
+    let source_pane = app.state.tab_focused_window(tab).unwrap();
+    let source_view = app.state.window_view(source_pane).unwrap();
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     let source_window = app
-        .window_session
-        .editor_ids()
-        .window_for(source_pane)
+        .state
+        .graph
+        .window(source_pane)
+        .map(|window| window.id)
         .expect("source window");
     let source_content = app
         .window_session
@@ -4490,8 +4490,8 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
     );
     app.input.observe_mouse(12, 5);
     app.focus_mouse_pane();
-    assert_eq!(app.state.tabs[tab].focused, source_pane);
-    assert_eq!(app.state.active_view, Some(source_view));
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), source_pane);
+    assert_eq!(app.state.active_view(), Some(source_view));
 
     app.process_effect(AppEffect::WindowMove {
         target: format!("window:{}", source_window.0),
@@ -4518,14 +4518,15 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
     );
     let other_pane = app
         .state
-        .panes
-        .keys()
+        .editor_windows()
+        .map(|window| window.id)
         .find(|pane| *pane != source_pane)
         .expect("other pane");
     let other_window = app
-        .window_session
-        .editor_ids()
-        .window_for(other_pane)
+        .state
+        .graph
+        .window(other_pane)
+        .map(|window| window.id)
         .expect("other editor window");
     let other_placement = WindowPlacement::Floating(WindowRect {
         x: 48,
@@ -4584,23 +4585,21 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
             source_content
         );
         assert_eq!(
-            app.window_session.editor_ids().window_for(source_pane),
+            app.state.graph.window(source_pane).map(|window| window.id),
             Some(source_window)
         );
         if placement == WindowPlacement::Hidden {
-            assert_ne!(app.state.tabs[tab].focused, source_pane);
+            assert_ne!(app.state.tab_focused_window(tab).unwrap(), source_pane);
             assert_eq!(
                 app.window_session.graph().focused(),
-                app.window_session
-                    .editor_ids()
-                    .window_for(app.state.tabs[tab].focused)
+                app.state.tab_focused_window(tab)
             );
         }
     }
     app.show_graph_window(&format!("window:{}", source_window.0))
         .expect("show hidden editor");
-    assert_eq!(app.state.active_view, Some(source_view));
-    assert_eq!(app.state.tabs[tab].focused, source_pane);
+    assert_eq!(app.state.active_view(), Some(source_view));
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), source_pane);
     assert_eq!(app.window_session.graph().focused(), Some(source_window));
     assert_eq!(
         app.window_session
@@ -4721,14 +4720,14 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
         virtual_content.id
     );
     let virtual_pane = virtual_app
-        .window_session
-        .editor_ids()
-        .pane_for_window(virtual_window)
+        .state
+        .window_view(virtual_window)
+        .map(|_| virtual_window)
         .expect("virtual pane");
     virtual_app
         .clone_graph_window(
             &format!("window:{}", virtual_window.0),
-            crate::editor::Axis::Horizontal,
+            crate::windows::TileAxis::Horizontal,
         )
         .expect("clone virtual view for close qualification");
     let virtual_clone = virtual_app
@@ -4760,9 +4759,10 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
     );
     assert_eq!(
         virtual_app
-            .window_session
-            .editor_ids()
-            .window_for(virtual_pane),
+            .state
+            .graph
+            .window(virtual_pane)
+            .map(|window| window.id),
         Some(virtual_window)
     );
     assert_eq!(virtual_app.state.buffers.len(), 1);
@@ -4843,7 +4843,7 @@ fn startup_plugin_publication_waits_for_session_restoration() {
         "restored text\n"
     );
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(3)
     );
     app.process_plugin_events();

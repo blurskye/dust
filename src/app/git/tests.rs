@@ -173,7 +173,7 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
     }
     wait_vfs(&mut app);
     assert!(app.git.has_selection(), "{:?}", app.ui.notification);
-    let view = &app.state.views[app.state.active_view.expect("view")];
+    let view = &app.state.views[app.state.active_view().expect("view")];
     assert_eq!(
         app.state.buffers[view.buffer]
             .text
@@ -269,16 +269,14 @@ fn leaving_a_worktree_closes_shared_buffers_without_alternating_fallbacks() {
         .state
         .open_text(TextBuffer::from_text("b"), Some(old.join("b.txt")))
         .unwrap();
-    let middle = app
-        .state
-        .split_active(crate::editor::Axis::Vertical, 500)
+    app.state
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
-    app.state.views[middle].buffer = a;
-    let last = app
-        .state
-        .split_active(crate::editor::Axis::Vertical, 500)
+    app.state.replace_active_view(Some(a)).unwrap();
+    app.state
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
-    app.state.views[last].buffer = b;
+    app.state.replace_active_view(Some(b)).unwrap();
     assert_eq!(app.state.views[first].buffer, b);
     app.finish_root_switch(new, &old);
     assert!(!app.state.buffers.contains_key(a));
@@ -1337,7 +1335,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
             Some(main_file.clone()),
         )
         .unwrap();
-    app.state.active_view = Some(main_view);
+    app.state.focus_view(main_view).unwrap();
 
     let invoke = |app: &mut App, id: &str| {
         app.invoke(
@@ -1767,7 +1765,7 @@ fn choosing_a_side_for_an_unconflicted_path_is_refused() {
             Some(root.join("clean.txt")),
         )
         .unwrap();
-    app.state.active_view = Some(view);
+    app.state.focus_view(view).unwrap();
     app.state.views[view].buffer = buffer;
 
     app.invoke(

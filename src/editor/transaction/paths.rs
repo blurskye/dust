@@ -224,7 +224,8 @@ mod tests {
         let other = EditorState::new(root.path().into());
         assert!(other.reconcile_paths(change, None).is_err());
         let change = editor.capture_path_change(&source).unwrap();
-        editor.remove_buffer(buffer);
+        editor.close_active_view().unwrap();
+        editor.remove_buffer(buffer).unwrap();
         let (new, _) = editor
             .open_text(TextBuffer::from_text("new owner"), Some(source.clone()))
             .unwrap();

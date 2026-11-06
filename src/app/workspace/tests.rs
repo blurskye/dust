@@ -524,13 +524,13 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().expect("opened result");
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(expected_cursor));
     app.walk_jumps(true);
     wait_vfs(&mut app);
     assert_eq!(app.state.active_buffer_id(), Some(original));
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(1)
     );
 }
@@ -553,7 +553,7 @@ fn workspace_search_accepts_normalized_open_buffers() {
         }
         app.navigate_workspace_search_match(found);
         wait_vfs(&mut app);
-        let view = &app.state.views[app.state.active_view.unwrap()];
+        let view = &app.state.views[app.state.active_view().unwrap()];
         assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
         assert_eq!(view.cursor, ByteOffset(6));
         assert!(!app.ui.notification_error);
@@ -748,14 +748,17 @@ fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
         wait_workspace_search(&mut app);
         let before = app.state.active_buffer_id();
         app.accept_picker();
-        let buffer = app.state.load_hidden_text(
-            TextBuffer::from_text(if changed {
-                "prefix head needle\n"
-            } else {
-                "head needle\n"
-            }),
-            path,
-        );
+        let buffer = app
+            .state
+            .load_hidden_text(
+                TextBuffer::from_text(if changed {
+                    "prefix head needle\n"
+                } else {
+                    "head needle\n"
+                }),
+                path,
+            )
+            .unwrap();
         wait_vfs(&mut app);
         if changed {
             assert_eq!(app.state.active_buffer_id(), before);
@@ -767,7 +770,7 @@ fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
         } else {
             assert_eq!(app.state.active_buffer_id(), Some(buffer));
             assert_eq!(
-                app.state.views[app.state.active_view.unwrap()].cursor,
+                app.state.views[app.state.active_view().unwrap()].cursor,
                 ByteOffset(5)
             );
         }
@@ -793,7 +796,7 @@ fn workspace_search_accepts_unchanged_encoded_snapshots() {
         let buffer = app.state.active_buffer_id().unwrap();
         assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
         assert_eq!(
-            app.state.views[app.state.active_view.unwrap()].cursor,
+            app.state.views[app.state.active_view().unwrap()].cursor,
             ByteOffset(5)
         );
     }
@@ -859,7 +862,7 @@ fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
         }
         thread::sleep(Duration::from_millis(5));
     }
-    let view = &app.state.views[app.state.active_view.unwrap()];
+    let view = &app.state.views[app.state.active_view().unwrap()];
     assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
     assert!(!app.state.buffers[view.buffer].read_only);
     assert_eq!(view.cursor.get(), 4);

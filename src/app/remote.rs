@@ -61,7 +61,7 @@ impl App {
         for request in opens {
             let navigation = self
                 .window_session
-                .navigation_stamp(self.state.window_version(), self.state.active_view);
+                .navigation_stamp(self.state.window_version(), self.state.active_view());
             if let Err(error) = self.documents.request_open_at_line(
                 request.path,
                 &self.state.workspace_root,

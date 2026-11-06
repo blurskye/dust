@@ -262,7 +262,7 @@ mod tests {
             state.buffers[b].virtual_language.as_deref(),
             Some("markdown")
         );
-        let view = state.active_view.unwrap();
+        let view = state.active_view().unwrap();
         state.views[view].cursor = ByteOffset(3);
         let buffers = state.buffers.len();
         let text_revision = state.buffers[b].text.revision();
@@ -271,7 +271,7 @@ mod tests {
             b
         );
         assert!(state.buffers[b].text.revision() > text_revision);
-        assert_eq!(state.active_view, Some(view));
+        assert_eq!(state.active_view(), Some(view));
         assert_eq!(state.views[view].cursor, ByteOffset(3));
         assert_eq!(state.buffers[b].virtual_title(), Some("Help"));
         assert_eq!(

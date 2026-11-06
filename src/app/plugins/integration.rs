@@ -1035,8 +1035,11 @@ impl App {
         };
         let windows = self.prepare_configured_window_rules(&native_windows)?;
         let (rules, catalog) = self.extension.prepare_window_rules(&candidate)?;
-        self.window_session
-            .accept_current(windows, &self.state.window_version())?;
+        self.window_session.accept_current(
+            windows,
+            &self.state.window_version(),
+            &mut self.state,
+        )?;
         let receipt = self
             .configuration
             .commit_contributions(candidate, catalog)?;
@@ -1055,7 +1058,7 @@ impl App {
     ) {
         match self
             .window_session
-            .remove_plugin_generation(plugin, load.0)
+            .remove_plugin_generation(plugin, load.0, &mut self.state)
             .map(|()| self.extension.remove_windows(plugin, load.0))
         {
             Ok(removed) => {
@@ -1082,7 +1085,7 @@ impl App {
         let terminals = self.terminal_session.descriptions();
         let title = self.message("explorer_title", &[]);
         let descriptions = NativeDescriptions {
-            signature: self.native_surface_signature(self.window_session.editor_ids()),
+            signature: self.native_surface_signature(),
             explorer_title: &title,
             dashboard_title: &self.configuration.dashboard().identity,
             picker_title: self
@@ -1114,7 +1117,7 @@ impl App {
         match result {
             Ok(Some(state)) => {
                 *self.state = state;
-                if self.state.active_view.is_none() {
+                if self.state.active_view().is_none() {
                     self.set_dashboard_visibility(true);
                 }
                 self.reconcile_editor_windows();
@@ -1212,7 +1215,7 @@ impl App {
             "editor"
         }
         .to_string();
-        let buffer = self.state.active_view.and_then(|view_id| {
+        let buffer = self.state.active_view().and_then(|view_id| {
             let view = self.state.views.get(view_id)?;
             let buffer = self.state.buffers.get(view.buffer)?;
             let (anchor, head, kind) =
@@ -1494,6 +1497,7 @@ impl App {
                     *transition,
                     &self.state.window_version(),
                     source.catalog(),
+                    &mut self.state,
                 );
                 source.finish(receipt, self.window_session.graph().revision())
             }

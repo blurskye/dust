@@ -18,8 +18,8 @@ fn layout(record: &crate::persistence::PersistedLayout) -> RestoredLayout {
             second,
         } => {
             let axis = match axis.as_str() {
-                "horizontal" => crate::editor::Axis::Horizontal,
-                "vertical" => crate::editor::Axis::Vertical,
+                "horizontal" => crate::windows::TileAxis::Horizontal,
+                "vertical" => crate::windows::TileAxis::Vertical,
                 _ => return RestoredLayout::Invalid,
             };
             RestoredLayout::Split {
@@ -59,8 +59,8 @@ pub(in crate::app) fn build_restored_layout(
         (std::path::PathBuf, crate::editor::text::TextBuffer),
     >,
 ) -> Option<(
-    crate::editor::LayoutNode,
-    Vec<(std::path::PathBuf, crate::editor::PaneId)>,
+    crate::windows::TiledLayoutNode,
+    Vec<(std::path::PathBuf, crate::windows::WindowId)>,
 )> {
     crate::editor::build_layout_for_test(state, &layout(record), loaded)
 }

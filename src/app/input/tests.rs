@@ -380,7 +380,7 @@ fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
     other
         .open_text(TextBuffer::from_text("other"), None)
         .unwrap();
-    assert_eq!(first.active_view, other.active_view);
+    assert_eq!(first.active_view(), other.active_view());
     let mut input = InputState::new(100);
     assert_eq!(
         input.open_prompt(
@@ -388,7 +388,7 @@ fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
             String::new(),
             Some((
                 first.window_version(),
-                first.active_view.unwrap(),
+                first.active_view().unwrap(),
                 EditorMode::Insert
             ))
         ),

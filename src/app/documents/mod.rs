@@ -155,7 +155,7 @@ impl Documents {
     ) -> bool {
         if let Some(stamp) = &self.startup_navigation {
             self.startup_activate &=
-                windows.navigation_current(stamp, &editor.window_version(), editor.active_view);
+                windows.navigation_current(stamp, &editor.window_version(), editor.active_view());
         } else {
             // New startup files were opened synchronously and need no read receipt.
             self.primary = self.primary_path.as_ref().and_then(|path| {
@@ -174,7 +174,7 @@ impl Documents {
         windows: &crate::app::windows::Windows,
     ) {
         self.startup_navigation =
-            Some(windows.navigation_stamp(editor.window_version(), editor.active_view));
+            Some(windows.navigation_stamp(editor.window_version(), editor.active_view()));
     }
     fn startup_current(&self, editor: &EditorWindowVersion, root_revision: u64) -> bool {
         editor.revision().is_some()
@@ -940,7 +940,7 @@ impl App {
         if !self.state.buffers.contains_key(buffer) {
             return;
         }
-        self.window_session.toggle_pin(buffer);
+        self.window_session.toggle_pin(buffer, &self.state);
         self.reconcile_editor_windows();
     }
 }
@@ -1197,7 +1197,7 @@ impl App {
                         && (!self.window_session.navigation_current(
                             &navigation,
                             &self.state.window_version(),
-                            self.state.active_view,
+                            self.state.active_view(),
                         ) || !self.input.capture_current(&capture))
                     {
                         continue;
@@ -1363,10 +1363,16 @@ impl App {
                                 if !self.window_session.navigation_current(
                                     &navigation,
                                     &self.state.window_version(),
-                                    self.state.active_view,
+                                    self.state.active_view(),
                                 ) {
                                     let mut draft = self.state.draft();
-                                    let buffer = draft.load_document(text, path.clone());
+                                    let buffer = match draft.load_document(text, path.clone()) {
+                                        Ok(buffer) => buffer,
+                                        Err(error) => {
+                                            self.show_error(error);
+                                            continue;
+                                        }
+                                    };
                                     if let Err(error) = self.commit_editor_draft(draft, None, false)
                                     {
                                         self.show_error(error);
@@ -1743,7 +1749,7 @@ impl App {
             &self.state.window_version(),
             self.workspace.version(),
             self.window_session
-                .navigation_stamp(self.state.window_version(), self.state.active_view),
+                .navigation_stamp(self.state.window_version(), self.state.active_view()),
         ) {
             Ok(()) => self.notify_message(self.message("opening_file", &[]), false),
             Err(e) => self.show_document_failure(e),
@@ -2140,7 +2146,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn close_active_buffer(&mut self, force: bool) {
-        let Some(view) = self.state.active_view else {
+        let Some(view) = self.state.active_view() else {
             self.set_dashboard_visibility(true);
             return;
         };
@@ -2232,7 +2238,7 @@ impl App {
         if removed {
             self.retire_closed_buffer(buffer_id, closed_path.as_deref(), clean);
         }
-        self.set_dashboard_visibility(self.state.active_view.is_none());
+        self.set_dashboard_visibility(self.state.active_view().is_none());
         if !self.window_session.dashboard_visible() {
             self.sync_lsp_document();
         } else {
@@ -2312,7 +2318,7 @@ impl App {
                     && self.window_session.navigation_current(
                         &navigation,
                         &self.state.window_version(),
-                        self.state.active_view,
+                        self.state.active_view(),
                     );
                 if activate {
                     if let Err(error) = candidate.open_document(text, path.clone()) {
@@ -2320,13 +2326,16 @@ impl App {
                         return;
                     }
                 } else {
-                    candidate.load_document(text, path.clone());
+                    if let Err(error) = candidate.load_document(text, path.clone()) {
+                        self.show_error(error);
+                        return;
+                    }
                 }
                 if let Err(e) = self.commit_editor_draft(candidate, None, activate) {
                     self.show_error(e);
                     return;
                 }
-                if activate && let (Some(line), Some(view)) = (line, self.state.active_view) {
+                if activate && let (Some(line), Some(view)) = (line, self.state.active_view()) {
                     let text = &self.state.buffers[self.state.views[view].buffer].text;
                     let position = text
                         .line_to_byte(line.min(text.visible_lines().saturating_sub(1)))

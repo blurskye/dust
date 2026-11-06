@@ -100,7 +100,7 @@ fn completion_is_clipped_to_the_focused_split() {
         )
         .unwrap();
     state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
@@ -181,7 +181,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 10);
-    let view = state.active_view.expect("active view");
+    let view = state.active_view().expect("active view");
     let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,

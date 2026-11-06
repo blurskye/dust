@@ -134,7 +134,7 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
             Some(PathBuf::from("/tmp/index.html")),
         )
         .unwrap();
-    if let Some(view) = state.active_view {
+    if let Some(view) = state.active_view() {
         state.views[view].cursor = crate::editor::text::ByteOffset(9);
     }
     let ui = UiState {
@@ -188,7 +188,7 @@ fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
             Some(PathBuf::from("/tmp/completion.css")),
         )
         .unwrap();
-    if let Some(view) = state.active_view {
+    if let Some(view) = state.active_view() {
         state.views[view].cursor = crate::editor::text::ByteOffset(9);
     }
     let ui = UiState {

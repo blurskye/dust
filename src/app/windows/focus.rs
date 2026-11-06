@@ -168,7 +168,12 @@ impl Windows {
         self.debugging = debugging;
         self.terminal_shrunk = debugging && self.height() < SHORT_SCREEN_HEIGHT;
     }
-    pub(in crate::app) fn resize_terminal(&mut self, id: u64, rows: i16) -> Result<(), String> {
+    pub(in crate::app) fn resize_terminal(
+        &mut self,
+        id: u64,
+        rows: i16,
+        state: &mut crate::editor::EditorState,
+    ) -> Result<(), String> {
         self.require_projected_graph()?;
         let target = NativeSurfaceTarget::Terminal(id);
         let current = match self.native_placement(target)? {
@@ -199,7 +204,7 @@ impl Windows {
                     edge,
                     size: u16::try_from(size).unwrap_or(u16::MAX),
                 };
-                self.place_native(target, placement)?;
+                self.place_native(target, placement, state)?;
                 return Ok(());
             }
             crate::windows::WindowPlacement::Docked { edge, .. } => {
@@ -212,7 +217,7 @@ impl Windows {
             _ => None,
         };
         if let Some(placement) = placement {
-            self.place_native(target, placement)?;
+            self.place_native(target, placement, state)?;
         }
         self.terminal_height = height;
         self.terminal_shrunk = false;

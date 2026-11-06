@@ -2619,7 +2619,7 @@ impl App {
 impl App {
     /// Conflict markers are in the text itself, so this works in any file, staged or not.
     pub(in crate::app) fn navigate_git_conflict(&mut self, direction: i8) {
-        let Some(view) = self.state.active_view.map(|id| &self.state.views[id]) else {
+        let Some(view) = self.state.active_view().map(|id| &self.state.views[id]) else {
             return;
         };
         let buffer = &self.state.buffers[view.buffer];
@@ -2645,7 +2645,7 @@ impl App {
         };
         if let Some(line) = target {
             let position = buffer.text.line_to_byte(*line).unwrap_or(ByteOffset(0));
-            self.move_search_cursor(self.state.active_view.expect("active view"), position);
+            self.move_search_cursor(self.state.active_view().expect("active view"), position);
         } else {
             self.notify_message(self.message("conflict_none", &[]), false);
         }
@@ -2687,7 +2687,7 @@ impl App {
     /// The one-based line under the cursor in the active window.
     fn cursor_line_number(&self) -> u32 {
         self.state
-            .active_view
+            .active_view()
             .and_then(|id| {
                 let view = &self.state.views[id];
                 self.state.buffers[view.buffer]
@@ -2823,7 +2823,7 @@ impl App {
 impl App {
     /// The one-based lines of the active selection, or of the cursor, and whether it's a selection.
     fn active_selected_lines(&self) -> Option<(u32, u32, bool)> {
-        let view = self.state.views.get(self.state.active_view?)?;
+        let view = self.state.views.get(self.state.active_view()?)?;
         let text = &self.state.buffers.get(view.buffer)?.text;
         let (anchor, head) = view
             .selection
@@ -3213,7 +3213,7 @@ impl App {
 impl App {
     /// Open the current line on the forge, or copy its URL, as LazyVim's `<leader>gB`/`gY`.
     pub(in crate::app) fn browse_git_line(&mut self, copy: bool) {
-        let file = self.state.active_view.and_then(|view| {
+        let file = self.state.active_view().and_then(|view| {
             let view = &self.state.views[view];
             let buffer = &self.state.buffers[view.buffer];
             let line = buffer
@@ -3294,7 +3294,7 @@ impl App {
             return;
         };
         let repository = status.repository.clone();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             self.show_error("no view is active");
             return;
         };

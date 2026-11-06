@@ -38,6 +38,86 @@ fn balanced_layout(windows: &[WindowId]) -> TiledLayoutNode {
     }
 }
 
+#[test]
+fn hidden_and_floating_tiles_keep_their_split_positions_and_ratios() {
+    let (mut graph, content, view, tab) = graph_with_content();
+    let first = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    let view = graph.create_view(content, "builtin", 1).unwrap();
+    let middle = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    graph
+        .tile(middle, Some(first), TileAxis::Vertical, true, 320)
+        .unwrap();
+    let view = graph.create_view(content, "builtin", 1).unwrap();
+    let last = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    graph
+        .tile(last, Some(middle), TileAxis::Horizontal, true, 670)
+        .unwrap();
+    let original = graph.tiled_layout_snapshot(tab).unwrap();
+    for placement in [
+        WindowPlacement::Hidden,
+        WindowPlacement::Floating(WindowRect {
+            x: 2,
+            y: 3,
+            width: 20,
+            height: 8,
+        }),
+    ] {
+        graph.place(middle, placement).unwrap();
+        assert_eq!(
+            graph.logical_layout(tab).unwrap().windows(),
+            vec![first, middle, last]
+        );
+        assert_eq!(
+            graph.tiled_layout_snapshot(tab).unwrap().root.windows(),
+            vec![first, last]
+        );
+        graph.place(middle, WindowPlacement::Tiled).unwrap();
+        assert_eq!(graph.tiled_layout_snapshot(tab).unwrap(), original);
+    }
+    graph.place(middle, WindowPlacement::Hidden).unwrap();
+    graph.close_window(middle).unwrap();
+    assert_eq!(
+        graph.logical_layout(tab).unwrap().windows(),
+        vec![first, last]
+    );
+    graph.validate().unwrap();
+}
+
+#[test]
+fn clearing_a_session_does_not_reuse_runtime_window_or_tab_ids() {
+    let (mut graph, _, view, tab) = graph_with_content();
+    let old = graph
+        .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    graph.clear().unwrap();
+    assert_eq!(graph.counts(), (0, 0, 0, 0));
+    let next_tab = graph.create_workspace_tab("builtin", 1).unwrap();
+    let content = graph
+        .create_content(
+            ContentTypeId::new("builtin.text-buffer").unwrap(),
+            ContentAdapterKind::TextBuffer,
+            "new".into(),
+            false,
+            "builtin",
+            1,
+        )
+        .unwrap();
+    let view = graph.create_view(content, "builtin", 1).unwrap();
+    let next = graph
+        .open_window(next_tab, view, WindowPlacement::Tiled, true, "builtin", 1)
+        .unwrap();
+    assert_ne!(next_tab, tab);
+    assert_ne!(next, old);
+    assert!(graph.window(old).is_none());
+    assert!(graph.workspace_tab(tab).is_none());
+}
+
 fn graph_with_content() -> (WindowGraph, ContentId, ViewId, WorkspaceTabId) {
     let mut graph = WindowGraph::default();
     // Topology tests intentionally need many views of one content. A normal
@@ -269,6 +349,7 @@ fn window_limit_rejects_even_a_shallow_balanced_tree() {
                 tab,
                 view,
                 placement: WindowPlacement::Tiled,
+                restore_placement: WindowPlacement::Tiled,
                 focusable: true,
                 owner: "builtin".into(),
                 instance_id: 1,

@@ -105,7 +105,7 @@ impl App {
         }
         self.reconcile_editor_windows();
         self.input.hold_focus(self.window_session.capture_focus());
-        let active = self.state.active_view.map(|view| {
+        let active = self.state.active_view().map(|view| {
             (
                 self.state.window_version(),
                 view,
@@ -558,7 +558,7 @@ impl App {
                     self.prompt_error(message);
                     return;
                 }
-                if self.state.active_view.is_none() {
+                if self.state.active_view().is_none() {
                     let message = self.message("search_no_buffer", &[]);
                     self.prompt_error(message);
                     return;

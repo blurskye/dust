@@ -504,30 +504,36 @@ fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
     for _ in 0..4 {
         app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::NewTab));
     }
-    let tabs = app.state.tabs.keys().collect::<Vec<_>>();
+    let tabs = app
+        .state
+        .editor_tabs()
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
     for key in "3gt".chars() {
         app.handle_configured_key(KeyEvent::character(key));
     }
-    assert_eq!(app.state.active_tab, Some(tabs[2]));
+    assert_eq!(app.state.active_tab(), Some(tabs[2]));
     for key in "2gT".chars() {
         app.handle_configured_key(KeyEvent::character(key));
     }
-    assert_eq!(app.state.active_tab, Some(tabs[0]));
+    assert_eq!(app.state.active_tab(), Some(tabs[0]));
     app.handle_configured_key(KeyEvent::character('g'));
     app.handle_configured_key(KeyEvent::character('t'));
-    assert_eq!(app.state.active_tab, Some(tabs[1]));
+    assert_eq!(app.state.active_tab(), Some(tabs[1]));
     for key in "1gt".chars() {
         app.handle_configured_key(KeyEvent::character(key));
     }
-    assert_eq!(app.state.active_tab, Some(tabs[0]));
+    assert_eq!(app.state.active_tab(), Some(tabs[0]));
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     let mut invocation =
         crate::editor::CommandInvocation::new("pane.resize.grow", InvocationSource::Test).unwrap();
     invocation.count = std::num::NonZeroU64::new(3);
     app.invoke(invocation);
-    let crate::editor::LayoutNode::Split { ratio, .. } = &app.state.tabs[tabs[0]].root else {
+    let crate::windows::TiledLayoutNode::Split { ratio, .. } =
+        &app.state.tab_layout(tabs[0]).unwrap()
+    else {
         panic!("split")
     };
     assert_eq!(*ratio, 350);
@@ -559,7 +565,7 @@ fn insert_cursor_motion_splits_dot_recording() {
     }
     let buffer = app.state.active_buffer_id().unwrap();
     assert_eq!(app.state.buffers[buffer].text.to_string(), "bbaone");
-    let view = app.state.active_view.unwrap();
+    let view = app.state.active_view().unwrap();
     assert_eq!(app.state.views[view].cursor, ByteOffset(0));
     assert_eq!(
         app.state.views[view].mode,
@@ -630,7 +636,7 @@ fn normalized_visual_comment_and_surround_keep_operator_arguments() {
                 .with_argument("linewise", CommandValue::Bool(false))
                 .with_argument(argument, CommandValue::String(value.into())),
         );
-        let view = app.state.active_view.unwrap();
+        let view = app.state.active_view().unwrap();
         app.state.views[view].cursor = ByteOffset(if operator == "comment" { 6 } else { 5 });
         app.state.views[view].selection = None;
         app.state.views[view].mode = crate::editor::EditorMode::Normal;
@@ -1569,7 +1575,7 @@ fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
         )
         .unwrap();
     app.set_dashboard_visibility(false);
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     let line = |app: &App| {
         app.state.buffers[buffer]
             .text
@@ -1609,7 +1615,7 @@ fn tutor_moves_on_when_each_step_is_done() {
             .unwrap_or_default()
     }
     fn cursor_line(app: &App) -> String {
-        let view = &app.state.views[app.state.active_view.unwrap()];
+        let view = &app.state.views[app.state.active_view().unwrap()];
         let text = &app.state.buffers[view.buffer].text;
         text.line(text.byte_to_line(view.cursor).unwrap())
             .unwrap()
@@ -1691,7 +1697,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     for key in ["l", "x", "f", "p", "x", "$", "6", "h", "x"] {
         press(&mut app, key);
     }
-    let view = &app.state.views[app.state.active_view.unwrap()];
+    let view = &app.state.views[app.state.active_view().unwrap()];
     assert!(
         app.state.buffers[view.buffer]
             .text
@@ -1860,21 +1866,21 @@ fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
     fs::write(&path, b"a\nb\n\nc\n").expect("jumps");
     app.start_open(path);
     wait_vfs(&mut app);
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     app.state.views[view].cursor = ByteOffset(0);
     press_keys(&mut app, &["}"]);
     assert_eq!(app.state.views[view].cursor, ByteOffset(4));
     press_keys(&mut app, &["G", "ctrl-o"]);
     wait_vfs(&mut app);
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(4));
     press_keys(&mut app, &["ctrl-o"]);
     wait_vfs(&mut app);
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(0));
     press_keys(&mut app, &["tab"]);
     wait_vfs(&mut app);
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     assert_eq!(app.state.views[view].cursor, ByteOffset(4));
 }
 
@@ -1979,7 +1985,7 @@ fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it
     press_keys(&mut app, &["*"]);
     assert!(app.ui.search_whole_word);
     assert_eq!(app.ui.search_query.as_deref(), Some("foo"));
-    let view = app.state.active_view.unwrap();
+    let view = app.state.active_view().unwrap();
     assert_eq!(app.state.views[view].cursor, ByteOffset(11));
     press_keys(&mut app, &["/", "f", "o", "o", "enter"]);
     assert!(!app.ui.search_whole_word);
@@ -2423,7 +2429,7 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
         "Header\n"
     );
     assert_eq!(
-        app.state.views[app.state.active_view.expect("view")].mode,
+        app.state.views[app.state.active_view().expect("view")].mode,
         crate::editor::EditorMode::Normal
     );
 }
@@ -2470,7 +2476,7 @@ fn conflict_keys_move_between_markers_and_wrap() {
     wait_vfs(&mut app);
     let line = |app: &mut App| {
         wait_vfs(app);
-        let view = &app.state.views[app.state.active_view.expect("view")];
+        let view = &app.state.views[app.state.active_view().expect("view")];
         app.state.buffers[view.buffer]
             .text
             .byte_to_line(view.cursor)
@@ -2551,15 +2557,15 @@ fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let buffer = app.state.active_buffer_id().unwrap();
-    let first = app.state.active_view.unwrap();
+    let first = app.state.active_view().unwrap();
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
-    let second = app.state.active_view.unwrap();
+    let second = app.state.active_view().unwrap();
     app.state.views[first].cursor = ByteOffset(20);
     app.state.views[second].cursor = ByteOffset(20);
     app.state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     fs::write(&path, "x\n").unwrap();
     app.start_reload(false);
@@ -2568,7 +2574,7 @@ fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
         .open_text(TextBuffer::from_text("other"), None)
         .unwrap();
     wait_vfs(&mut app);
-    assert_eq!(app.state.active_view, Some(other));
+    assert_eq!(app.state.active_view(), Some(other));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "x\n");
     assert_eq!(app.state.views[first].cursor, ByteOffset(0));
     assert_eq!(app.state.views[second].cursor, ByteOffset(0));
@@ -2686,7 +2692,7 @@ fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
     // A view change rebuilds rows while this buffer still has its older parse.
     app.process_syntax();
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     app.process_syntax();
     assert!(
@@ -3110,7 +3116,7 @@ fn persisted_navigation_clamps_multibyte_offsets() {
         scroll_column: 0,
     });
     wait_vfs(&mut app);
-    let view = &app.state.views[app.state.active_view.unwrap()];
+    let view = &app.state.views[app.state.active_view().unwrap()];
     assert_eq!(view.cursor.get(), 0);
     assert_eq!(view.selection.unwrap().anchor.get(), 2);
     assert_eq!(view.selection.unwrap().head, view.cursor);

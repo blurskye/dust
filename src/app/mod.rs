@@ -228,7 +228,7 @@ struct App {
     /// Commands last run from the palette, newest first.
     palette_recent: Vec<String>,
     /// The split border being dragged with the mouse: the panes on its two sides.
-    border_drag: Option<(crate::editor::PaneId, crate::editor::PaneId, bool)>,
+    border_drag: Option<(crate::windows::WindowId, crate::windows::WindowId, bool)>,
     /// The docked terminal whose inner edge is being dragged with the mouse.
     dock_drag: Option<PtyId>,
     /// The column a buffer tab was last dragged at with the mouse.
@@ -289,7 +289,10 @@ pub fn run_interactive(
     )?;
     application
         .window_session
-        .configure_initial(&application.configuration.settings().windows)
+        .configure_initial(
+            &application.configuration.settings().windows,
+            &mut application.state,
+        )
         .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
     let crash_path = crate::config::user_state_directory().join("last-crash.json");
     if application.workspace.safe_mode() {

@@ -64,7 +64,7 @@ pub(in crate::app) fn persisted_window_rules_validate_the_final_fullscreen_confi
         })
         .unwrap();
     app.window_session
-        .accept_current(candidate, &app.state.window_version())
+        .accept_current(candidate, &app.state.window_version(), &mut app.state)
         .unwrap();
     app.reconcile_editor_windows();
     assert_eq!(

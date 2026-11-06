@@ -97,7 +97,7 @@ fn workspace_editor_cursor_follows_compositor_focus() {
             .unwrap();
         if split {
             state
-                .split_active(crate::editor::Axis::Horizontal, 500)
+                .split_active(crate::windows::TileAxis::Horizontal, 500)
                 .unwrap();
         }
         let mut ui = ui_with_editor_layout(&state);

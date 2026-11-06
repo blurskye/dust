@@ -45,6 +45,7 @@ pub(super) fn validate_tiled_layout(
     tab: WorkspaceTabId,
     root: Option<&TiledLayoutNode>,
     windows: &BTreeMap<WindowId, WindowDescriptor>,
+    expected: &BTreeSet<WindowId>,
 ) -> Result<(), WindowError> {
     fn collect(
         node: &TiledLayoutNode,
@@ -86,13 +87,6 @@ pub(super) fn validate_tiled_layout(
         Ok(())
     }
 
-    let expected = windows
-        .values()
-        .filter_map(|window| {
-            (window.tab == tab && matches!(window.placement, WindowPlacement::Tiled))
-                .then_some(window.id)
-        })
-        .collect::<BTreeSet<_>>();
     if expected.len() > MAX_WINDOWS {
         return Err(WindowError::TooManyTiledWindows);
     }
@@ -100,10 +94,69 @@ pub(super) fn validate_tiled_layout(
     if let Some(root) = root {
         collect(root, tab, windows, 1, &mut leaves)?;
     }
-    if leaves != expected {
+    if &leaves != expected {
         return Err(WindowError::OrphanTiledWindow);
     }
     Ok(())
+}
+
+pub(super) fn validate_logical_layout(
+    tab: WorkspaceTabId,
+    root: Option<&TiledLayoutNode>,
+    windows: &BTreeMap<WindowId, WindowDescriptor>,
+    expected: &BTreeSet<WindowId>,
+) -> Result<(), WindowError> {
+    fn ratios(
+        node: &TiledLayoutNode,
+        windows: &BTreeMap<WindowId, WindowDescriptor>,
+    ) -> Result<bool, WindowError> {
+        match node {
+            TiledLayoutNode::Window(id) => Ok(windows
+                .get(id)
+                .is_some_and(|window| window.owner == "builtin.editor")),
+            TiledLayoutNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                let first_editor = ratios(first, windows)?;
+                let second_editor = ratios(second, windows)?;
+                let editor_split = first_editor && second_editor;
+                if !(1..=999).contains(ratio) || (editor_split && !(100..=900).contains(ratio)) {
+                    return Err(WindowError::InvalidPlacement);
+                }
+                Ok(editor_split)
+            }
+        }
+    }
+    if let Some(root) = root {
+        ratios(root, windows)?;
+        if crate::windows::tree::layout_depth(root) > MAX_SPLIT_DEPTH {
+            return Err(WindowError::TiledLayoutTooDeep);
+        }
+        let mut seen = BTreeSet::new();
+        for id in root.windows() {
+            let window = windows.get(&id).ok_or(WindowError::StaleTiledWindow)?;
+            if window.tab != tab {
+                return Err(WindowError::NonTiledWindowInLayout);
+            }
+            if !seen.insert(id) {
+                return Err(WindowError::DuplicateTiledWindow);
+            }
+        }
+        if seen.len() > MAX_WINDOWS {
+            return Err(WindowError::TooManyTiledWindows);
+        }
+    }
+    let tiled = root.and_then(|root| {
+        root.filtered(&|id| {
+            windows
+                .get(&id)
+                .is_some_and(|window| window.placement == WindowPlacement::Tiled)
+        })
+    });
+    validate_tiled_layout(tab, tiled.as_ref(), windows, expected)
 }
 
 pub(super) fn tiled_contains(node: &TiledLayoutNode, target: WindowId) -> bool {

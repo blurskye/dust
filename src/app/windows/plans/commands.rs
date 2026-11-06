@@ -6,19 +6,19 @@ use crate::app::windows::plans::TargetError;
 use crate::app::windows::plans::WindowPlan;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTopology;
-use crate::editor::FocusDirection;
 use crate::plugins::PluginCatalogVersion;
+use crate::windows::SpatialDirection;
 use crate::windows::WindowPlacement;
 
 #[derive(Clone, Copy)]
 pub(in crate::app) enum WindowCommand<'a> {
-    Clone(&'a str, crate::editor::Axis, u16),
-    CloneExplorer(&'a str, u64, u64, crate::editor::Axis),
+    Clone(&'a str, crate::windows::TileAxis, u16),
+    CloneExplorer(&'a str, u64, u64, crate::windows::TileAxis),
     Place(&'a str, WindowPlacement),
     Show(&'a str),
     Move(&'a str, u16, u16),
     Resize(&'a str, i16),
-    Direction(FocusDirection, Option<NativeSurfaceTarget>, u64),
+    Direction(SpatialDirection, Option<NativeSurfaceTarget>, u64),
     Close(&'a str),
     Swap(&'a str, &'a str),
 }
@@ -45,17 +45,17 @@ impl From<TargetError> for CommandError {
 #[derive(Clone, Copy)]
 pub(super) enum NativeAction {
     None,
-    CloneExplorer(NativeSurfaceTarget, u64, crate::editor::Axis),
+    CloneExplorer(NativeSurfaceTarget, u64, crate::windows::TileAxis),
     Place(NativeSurfaceTarget, WindowPlacement),
     PlaceEditor(
-        crate::editor::PaneId,
+        crate::windows::WindowId,
         crate::windows::WindowId,
         WindowPlacement,
     ),
-    ShowEditor(crate::editor::PaneId, crate::windows::WindowId),
+    ShowEditor(crate::windows::WindowId, crate::windows::WindowId),
     SwapEditors(
-        (crate::editor::PaneId, crate::windows::WindowId),
-        (crate::editor::PaneId, crate::windows::WindowId),
+        (crate::windows::WindowId, crate::windows::WindowId),
+        (crate::windows::WindowId, crate::windows::WindowId),
     ),
     Close(NativeSurfaceTarget),
     Swap(NativeSurfaceTarget, NativeSurfaceTarget),
@@ -70,10 +70,10 @@ pub(in crate::app) enum CommandEffect {
 }
 impl Windows {
     /// A shown terminal docked on the right (for `Horizontal`) or at the bottom (`Vertical`).
-    fn docked_terminal_on(&self, axis: crate::editor::Axis) -> Option<NativeSurfaceTarget> {
+    fn docked_terminal_on(&self, axis: crate::windows::TileAxis) -> Option<NativeSurfaceTarget> {
         let wanted = match axis {
-            crate::editor::Axis::Horizontal => crate::windows::DockEdge::Right,
-            crate::editor::Axis::Vertical => crate::windows::DockEdge::Bottom,
+            crate::windows::TileAxis::Horizontal => crate::windows::DockEdge::Right,
+            crate::windows::TileAxis::Vertical => crate::windows::DockEdge::Bottom,
         };
         let mut ids: Vec<u64> = self.native_ids().terminal_ids().collect();
         ids.sort_unstable();
@@ -99,9 +99,14 @@ impl Windows {
         let mut plan = self.plan(source.version(), catalog)?;
         let target = |name| self.resolve_graph_target(name, policy.selected_terminal);
         let pane = |window| {
-            self.core.editor.pane_for_window(window).ok_or_else(|| {
-                CommandError::Rejected("window adapter has no authoritative editor hook".into())
-            })
+            self.core
+                .graph
+                .window(window)
+                .filter(|window| window.owner == "builtin.editor")
+                .map(|window| window.id)
+                .ok_or_else(|| {
+                    CommandError::Rejected("window adapter has no authoritative editor hook".into())
+                })
         };
         let bind_target = |plan: &mut WindowPlan, window| -> Result<(), CommandError> {
             let descriptor = self
@@ -191,26 +196,10 @@ impl Windows {
                     if placement == WindowPlacement::Hidden
                         && self.core.graph.focused() == Some(window)
                     {
-                        fn panes(
-                            node: &crate::editor::LayoutNode,
-                            output: &mut Vec<crate::editor::PaneId>,
-                        ) {
-                            match node {
-                                crate::editor::LayoutNode::Pane(pane) => output.push(*pane),
-                                crate::editor::LayoutNode::Split { first, second, .. } => {
-                                    panes(first, output);
-                                    panes(second, output);
-                                }
-                            }
-                        }
-                        let tab = source
-                            .active_tab()
-                            .and_then(|tab| source.tabs().get(tab))
-                            .ok_or_else(|| {
-                                CommandError::Rejected("active editor tab is stale".into())
-                            })?;
-                        let mut ordered = Vec::new();
-                        panes(&tab.root, &mut ordered);
+                        let tab = source.active_tab().ok_or_else(|| {
+                            CommandError::Rejected("active editor tab is stale".into())
+                        })?;
+                        let ordered = source.state().tab_windows(tab);
                         let index = ordered
                             .iter()
                             .position(|pane| *pane == target_pane)
@@ -222,9 +211,7 @@ impl Windows {
                             .chain(ordered[..index].iter().rev())
                             .copied()
                             .find(|candidate| {
-                                self.core
-                                    .editor
-                                    .window_for(*candidate)
+                                Some(*candidate)
                                     .and_then(|window| self.core.graph.window(window))
                                     .is_some_and(|window| {
                                         window.focusable
@@ -263,7 +250,14 @@ impl Windows {
                     plan.native = Some(NativeAction::Place(native, placement));
                 } else {
                     let pane = pane(window)?;
-                    if self.core.editor.restored_placement(pane) == WindowPlacement::Fullscreen {
+                    if self
+                        .core
+                        .graph
+                        .window(pane)
+                        .ok_or_else(|| CommandError::Rejected("stale window".into()))?
+                        .restore_placement
+                        == WindowPlacement::Fullscreen
+                    {
                         plan.operations.push(EditorOperation::FocusPaneId { pane });
                         plan.focus_editor = true;
                         plan.target = Some(window);
@@ -400,31 +394,36 @@ impl Windows {
                     match placement {
                         WindowPlacement::Tiled => {
                             let (axis, grow) = match direction {
-                                FocusDirection::Left => (crate::editor::Axis::Horizontal, false),
-                                FocusDirection::Right => (crate::editor::Axis::Horizontal, true),
-                                FocusDirection::Up => (crate::editor::Axis::Vertical, true),
-                                FocusDirection::Down => (crate::editor::Axis::Vertical, false),
+                                SpatialDirection::Left => {
+                                    (crate::windows::TileAxis::Horizontal, false)
+                                }
+                                SpatialDirection::Right => {
+                                    (crate::windows::TileAxis::Horizontal, true)
+                                }
+                                SpatialDirection::Up => (crate::windows::TileAxis::Vertical, true),
+                                SpatialDirection::Down => {
+                                    (crate::windows::TileAxis::Vertical, false)
+                                }
                             };
                             // With no split on that axis the border is a docked terminal's, such
                             // as an agent on the right, so that terminal resizes instead.
                             let split = self
                                 .core
-                                .editor
-                                .resized_tiled_split(
-                                    source,
-                                    pane,
-                                    axis,
-                                    if grow { step } else { -step },
-                                )
-                                .map_err(|error| CommandError::Rejected(error.to_string()))?;
+                                .graph
+                                .resized_split(pane, axis, if grow { step } else { -step })
+                                .map(|(first, second, ratio)| EditorOperation::SetSplitRatio {
+                                    first,
+                                    second,
+                                    ratio,
+                                });
                             if let Some(split) = split {
                                 plan.operations.push(split);
                             } else if let Some(dock) = self.docked_terminal_on(axis) {
                                 // The editor grows as the terminal shrinks: right grows the code
                                 // and narrows a right dock, up grows it and lowers a bottom one.
                                 let toward = match direction {
-                                    FocusDirection::Up => FocusDirection::Down,
-                                    FocusDirection::Down => FocusDirection::Up,
+                                    SpatialDirection::Up => SpatialDirection::Down,
+                                    SpatialDirection::Down => SpatialDirection::Up,
                                     other => other,
                                 };
                                 plan.native = Some(
@@ -441,14 +440,16 @@ impl Windows {
                         }
                         WindowPlacement::Docked { edge, size } => {
                             let grow = match (edge, direction) {
-                                (crate::windows::DockEdge::Bottom, FocusDirection::Up)
-                                | (crate::windows::DockEdge::Top, FocusDirection::Down)
-                                | (crate::windows::DockEdge::Left, FocusDirection::Right)
-                                | (crate::windows::DockEdge::Right, FocusDirection::Left) => true,
-                                (crate::windows::DockEdge::Bottom, FocusDirection::Down)
-                                | (crate::windows::DockEdge::Top, FocusDirection::Up)
-                                | (crate::windows::DockEdge::Left, FocusDirection::Left)
-                                | (crate::windows::DockEdge::Right, FocusDirection::Right) => false,
+                                (crate::windows::DockEdge::Bottom, SpatialDirection::Up)
+                                | (crate::windows::DockEdge::Top, SpatialDirection::Down)
+                                | (crate::windows::DockEdge::Left, SpatialDirection::Right)
+                                | (crate::windows::DockEdge::Right, SpatialDirection::Left) => true,
+                                (crate::windows::DockEdge::Bottom, SpatialDirection::Down)
+                                | (crate::windows::DockEdge::Top, SpatialDirection::Up)
+                                | (crate::windows::DockEdge::Left, SpatialDirection::Left)
+                                | (crate::windows::DockEdge::Right, SpatialDirection::Right) => {
+                                    false
+                                }
                                 _ => {
                                     plan.native = Some(NativeAction::None);
                                     return Ok(plan);
@@ -467,19 +468,19 @@ impl Windows {
                         }
                         WindowPlacement::Floating(mut rect) => {
                             match direction {
-                                FocusDirection::Left => {
+                                SpatialDirection::Left => {
                                     rect.width = rect
                                         .width
                                         .saturating_sub(u16::try_from(step).unwrap_or(u16::MAX))
                                         .max(1)
                                 }
-                                FocusDirection::Right => {
+                                SpatialDirection::Right => {
                                     rect.width = rect.width.saturating_add_signed(step).max(1)
                                 }
-                                FocusDirection::Up => {
+                                SpatialDirection::Up => {
                                     rect.height = rect.height.saturating_add_signed(step).max(1)
                                 }
-                                FocusDirection::Down => {
+                                SpatialDirection::Down => {
                                     rect.height = rect
                                         .height
                                         .saturating_sub(u16::try_from(step).unwrap_or(u16::MAX))
@@ -522,9 +523,9 @@ impl Windows {
                 } else {
                     let pane = pane(window)?;
                     if source
-                        .panes()
-                        .get(pane)
-                        .and_then(|p| source.views().get(p.view))
+                        .state()
+                        .window_view(pane)
+                        .and_then(|view| source.views().get(view))
                         .and_then(|v| source.buffers().get(v.buffer))
                         .is_some_and(|b| b.dirty)
                     {
@@ -624,6 +625,7 @@ impl Windows {
         plan: WindowPlan,
         source: &crate::editor::EditorWindowVersion,
         catalog: &PluginCatalogVersion,
+        state: &mut crate::editor::EditorState,
     ) -> Result<CommandEffect, String> {
         self.check_plan(&plan, source, catalog)?;
         if !plan.operations.is_empty() {
@@ -638,43 +640,43 @@ impl Windows {
                     .native
                     .clone_explorer(&mut candidate.core.graph, source, view, axis)
                     .map_err(|error| error.to_string())?;
-                self.commit(candidate)?;
+                self.commit(candidate, state)?;
                 return Ok(CommandEffect::ClonedExplorer(view));
             }
-            NativeAction::Place(target, placement) => self.place_native(target, placement)?,
-            NativeAction::PlaceEditor(pane, window, placement) => {
+            NativeAction::Place(target, placement) => {
+                self.place_native(target, placement, state)?
+            }
+            NativeAction::PlaceEditor(_pane, window, placement) => {
                 let mut candidate = self.candidate()?;
                 candidate
                     .core
-                    .editor
-                    .place_editor(&mut candidate.core.graph, pane, window, placement)
+                    .graph
+                    .place(window, placement)
                     .map_err(|error| error.to_string())?;
-                candidate.core.editor.invalidate_layout();
                 if candidate.core.graph.focused().is_none() {
                     candidate.dashboard = Some(true);
                 }
-                self.commit(candidate)?;
+                self.commit(candidate, state)?;
             }
-            NativeAction::ShowEditor(pane, window) => {
+            NativeAction::ShowEditor(_pane, window) => {
                 let mut candidate = self.candidate()?;
                 candidate
                     .core
-                    .editor
-                    .show_editor(&mut candidate.core.graph, pane, window)
+                    .graph
+                    .show_window(window)
                     .map_err(|error| error.to_string())?;
                 candidate.dashboard = Some(false);
-                candidate.core.editor.invalidate_layout();
-                self.commit(candidate)?;
+                self.commit(candidate, state)?;
             }
-            NativeAction::Swap(a, b) => self.swap_native(a, b)?,
+            NativeAction::Swap(a, b) => self.swap_native(a, b, state)?,
             NativeAction::SwapEditors(first, second) => {
                 let mut candidate = self.candidate()?;
                 candidate
                     .core
-                    .editor
-                    .swap_editors(&mut candidate.core.graph, first, second)
+                    .graph
+                    .swap_non_tiled_placements(first.1, second.1)
                     .map_err(|error| error.to_string())?;
-                self.commit(candidate)?;
+                self.commit(candidate, state)?;
             }
             NativeAction::Close(NativeSurfaceTarget::Terminal(id)) => {
                 return Ok(CommandEffect::CloseTerminal(id));
@@ -689,7 +691,7 @@ impl Windows {
                 if target == NativeSurfaceTarget::Dashboard {
                     candidate.dashboard = Some(false);
                 }
-                self.commit(candidate)?;
+                self.commit(candidate, state)?;
                 return Ok(match target {
                     NativeSurfaceTarget::Explorer => CommandEffect::ClosedExplorer,
                     NativeSurfaceTarget::ExplorerView(view) => {

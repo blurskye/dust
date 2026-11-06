@@ -562,7 +562,7 @@ impl App {
         let buffer = if activate {
             candidate.open_document(text, path)?.0
         } else {
-            candidate.load_document(text, path)
+            candidate.load_document(text, path)?
         };
         self.commit_editor_draft(candidate, None, activate)?;
         if activate {

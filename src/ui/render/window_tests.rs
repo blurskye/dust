@@ -33,7 +33,7 @@ fn missing_application_window_snapshot_fails_closed() {
     assert!(valid.cursor.is_some());
     assert!((0..8).any(|row| valid.grid.row_text(row).contains("not rendered")));
     state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("change source layout");
     assert!(crate::ui::render::pane_viewports(&state, &stale, &loaded.config, 40, 7).is_empty());
     let frame = crate::ui::render::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);

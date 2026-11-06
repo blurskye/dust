@@ -30,11 +30,14 @@ impl Windows {
         &self.content_line.entries
     }
     /// The buffers on the buffer line, left to right.
-    pub(in crate::app) fn content_tab_buffers(&self) -> Vec<BufferId> {
+    pub(in crate::app) fn content_tab_buffers(
+        &self,
+        state: &crate::editor::EditorState,
+    ) -> Vec<BufferId> {
         self.content_line
             .entries
             .iter()
-            .filter_map(|entry| self.core.editor.buffer_for_content(entry.identity.0))
+            .filter_map(|entry| state.buffer_for_content(entry.identity.0))
             .collect()
     }
     pub(in crate::app) fn content_current(&self, configuration_revision: u64) -> bool {
@@ -53,8 +56,12 @@ impl Windows {
             self.content_line.diagnostic_revision.saturating_add(1);
         self.content_line.signature = None;
     }
-    pub(in crate::app) fn toggle_pin(&mut self, buffer: BufferId) {
-        if self.core.editor.content_for(buffer).is_none() {
+    pub(in crate::app) fn toggle_pin(
+        &mut self,
+        buffer: BufferId,
+        state: &crate::editor::EditorState,
+    ) {
+        if state.content_for_buffer(buffer).is_none() {
             return;
         }
         let line = &mut self.content_line;
@@ -129,7 +136,7 @@ impl Windows {
         configuration_revision: u64,
     ) {
         let graph = &self.core.graph;
-        let bridge = &self.core.editor;
+        let documents = state.state();
         let line = &mut self.content_line;
         let graph_revision = graph.revision().unwrap_or(u64::MAX);
         let signature = (
@@ -166,7 +173,7 @@ impl Windows {
                 })
                 // The agent panel has its own tab line.
                 .filter(|content| {
-                    bridge
+                    documents
                         .buffer_for_content(content.id)
                         .and_then(|buffer| state.buffers().get(buffer))
                         .and_then(|buffer| buffer.virtual_owner())
@@ -175,14 +182,14 @@ impl Windows {
                 .collect::<Vec<_>>();
             let represented = snapshots
                 .iter()
-                .filter_map(|content| bridge.buffer_for_content(content.id))
+                .filter_map(|content| documents.buffer_for_content(content.id))
                 .collect::<BTreeSet<_>>();
             let before_order = line.order.clone();
             let before_pins = line.pins.clone();
             line.order.retain(|buffer| represented.contains(buffer));
             line.pins.retain(|buffer| represented.contains(buffer));
             for content in &snapshots {
-                if let Some(buffer) = bridge.buffer_for_content(content.id)
+                if let Some(buffer) = documents.buffer_for_content(content.id)
                     && !line.order.contains(&buffer)
                 {
                     line.order.push(buffer)
@@ -195,7 +202,7 @@ impl Windows {
                 .into_iter()
                 .enumerate()
                 .map(|(native_index, content)| {
-                    let buffer = bridge.buffer_for_content(content.id);
+                    let buffer = documents.buffer_for_content(content.id);
                     let pinned = buffer.is_some_and(|buffer| line.pins.contains(&buffer));
                     let order = buffer
                         .and_then(|buffer| {
@@ -299,4 +306,75 @@ impl Windows {
             ));
         }
     }
+}
+
+pub(super) fn editor_buffer_titles(
+    state: &crate::editor::EditorTopology<'_>,
+    scratch_label: &str,
+) -> std::collections::HashMap<BufferId, String> {
+    let mut bases = std::collections::HashMap::<String, usize>::new();
+    for (_, buffer) in state.buffers() {
+        let base = editor_buffer_base(
+            buffer.path.as_deref(),
+            buffer.virtual_title().unwrap_or(scratch_label),
+        );
+        *bases.entry(base).or_default() += 1;
+    }
+    let mut occurrences = std::collections::HashMap::<String, usize>::new();
+    state
+        .buffers()
+        .iter()
+        .map(|(id, buffer)| {
+            let base = editor_buffer_base(
+                buffer.path.as_deref(),
+                buffer.virtual_title().unwrap_or(scratch_label),
+            );
+            let duplicate = bases.get(&base).copied().unwrap_or(0) > 1;
+            let occurrence = occurrences.entry(base.clone()).or_default();
+            *occurrence = occurrence.saturating_add(1);
+            let title = if duplicate {
+                let context = buffer.path.as_deref().map_or_else(
+                    || base.clone(),
+                    |path| {
+                        path.strip_prefix(state.workspace_root())
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .into_owned()
+                    },
+                );
+                format!("{context} ·{}", *occurrence)
+            } else {
+                base
+            };
+            (id, sanitize_title(&title))
+        })
+        .collect()
+}
+
+fn editor_buffer_base(path: Option<&std::path::Path>, scratch_label: &str) -> String {
+    path.map_or_else(
+        || scratch_label.to_owned(),
+        |path| {
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        },
+    )
+}
+
+pub(super) fn sanitize_title(title: &str) -> String {
+    let mut output = String::new();
+    for character in title.chars() {
+        let character = if character.is_control() {
+            '\u{fffd}'
+        } else {
+            character
+        };
+        if output.len().saturating_add(character.len_utf8()) > 4096 {
+            break;
+        }
+        output.push(character);
+    }
+    output
 }

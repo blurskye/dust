@@ -313,6 +313,8 @@ impl PluginWindowHost {
         }
 
         let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
+        let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+        state.graph = graph.clone();
         let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
         let mut candidate = self.clone();
         let owner = format!("plugin.{}", index.owner);
@@ -442,7 +444,7 @@ impl PluginWindowHost {
             },
         );
         windows
-            .commit_plugin_fixture(draft)
+            .commit_plugin_fixture(draft, &mut state)
             .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
         *self = candidate;
         *graph = windows.graph().clone();
@@ -533,6 +535,8 @@ impl PluginWindowHost {
             ));
         }
         let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
+        let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+        state.graph = graph.clone();
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         if let Some((neighbor, axis, after, ratio)) = tile_parameters(&requested) {
@@ -548,7 +552,7 @@ impl PluginWindowHost {
             .validate()
             .map_err(|error| failure(wire::ErrorCode::ProtocolFailure, error))?;
         windows
-            .commit_plugin_fixture(draft)
+            .commit_plugin_fixture(draft, &mut state)
             .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
         *graph = windows.graph().clone();
         Ok(wire::UiReceipt {
@@ -583,13 +587,15 @@ impl PluginWindowHost {
         }
         let (_, instance) = self.target03_instance(graph, admission, &ui)?;
         let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
+        let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+        state.graph = graph.clone();
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         draft
             .focus(instance.window)
             .map_err(|error| map_error(map_graph_error(error)))?;
         windows
-            .commit_plugin_fixture(draft)
+            .commit_plugin_fixture(draft, &mut state)
             .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
         *graph = windows.graph().clone();
         Ok(wire::UiReceipt {
@@ -624,6 +630,8 @@ impl PluginWindowHost {
         }
         let (handle, instance) = self.target03_instance(graph, admission, &ui)?;
         let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
+        let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+        state.graph = graph.clone();
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         draft
@@ -645,7 +653,7 @@ impl PluginWindowHost {
             .validate()
             .map_err(|error| failure(wire::ErrorCode::ProtocolFailure, error))?;
         windows
-            .commit_plugin_fixture(draft)
+            .commit_plugin_fixture(draft, &mut state)
             .map_err(|error| failure(wire::ErrorCode::StaleSource, error))?;
         self.instances.remove(&handle);
         *graph = windows.graph().clone();

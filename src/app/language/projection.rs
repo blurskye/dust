@@ -101,7 +101,7 @@ impl LspSession {
         document: &LspDocument,
     ) -> Option<LspProjectionOwner> {
         let server = self.active.as_ref()?;
-        let view = editor.active_view?;
+        let view = editor.active_view()?;
         let session = self.sessions.get(server)?;
         if !session.definition.supports_language(&document.language_id)
             || !session.documents.contains_key(&buffer)
@@ -834,7 +834,7 @@ impl LspSession {
             .completion_owner
             .as_ref()
             .is_some_and(|(_, owner)| {
-                editor.active_view == Some(owner.view)
+                editor.active_view() == Some(owner.view)
                     && editor
                         .views
                         .get(owner.view)
@@ -1118,7 +1118,7 @@ impl LspSession {
             .as_ref()
             .ok_or("completion documentation is stale")?;
         if self.projection.owner.as_ref() != Some(owner)
-            || editor.active_view != Some(owner.view)
+            || editor.active_view() != Some(owner.view)
             || !editor
                 .views
                 .get(owner.view)
@@ -1210,7 +1210,7 @@ impl LspSession {
         }
         let index = *index;
         let activate = index == self.projection.completion_selected
-            && editor.active_view == Some(owner.view)
+            && editor.active_view() == Some(owner.view)
             && editor
                 .views
                 .get(owner.view)

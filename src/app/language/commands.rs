@@ -626,13 +626,13 @@ impl App {
             }
             AppEffect::SnippetCancel => {
                 self.input.clear_snippet();
-                if let Some(view) = self.state.active_view {
+                if let Some(view) = self.state.active_view() {
                     self.state.views[view].selection = None;
                     self.state.mark_editor_changed();
                 }
             }
             AppEffect::LspFoldToggle => {
-                if let Some(view) = self.state.active_view {
+                if let Some(view) = self.state.active_view() {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
                             .text
@@ -670,7 +670,7 @@ impl App {
                 if self.active_lsp_document_without_text().is_some() {
                     self.refresh_lsp_projection_owner();
                 }
-                if let Some(view) = self.state.active_view {
+                if let Some(view) = self.state.active_view() {
                     let state = &self.state.views[view];
                     let text = &self.state.buffers[state.buffer].text;
                     let selection = state.selection.map(|selection| {

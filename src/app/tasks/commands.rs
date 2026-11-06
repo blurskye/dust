@@ -285,7 +285,7 @@ impl App {
                 }
             }
             AppEffect::FormatRun(name) => {
-                let Some(view_id) = self.state.active_view else {
+                let Some(view_id) = self.state.active_view() else {
                     return Ok(());
                 };
                 let Some(view) = self.state.views.get(view_id) else {

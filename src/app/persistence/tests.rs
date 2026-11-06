@@ -113,7 +113,7 @@ fn session_restore_reads_more_files_than_the_document_queue_capacity() {
     app.restore_session(session);
     wait_vfs(&mut app);
     assert_eq!(app.ui.config_diagnostic, None);
-    assert_eq!(app.state.tabs.len(), 12);
+    assert_eq!(app.state.editor_tabs().count(), 12);
     assert!(app.persistence.next_restore_path().is_none());
     for index in 0..12 {
         let path = app
@@ -135,10 +135,10 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     app.start_open(path);
     wait_vfs(&mut app);
     app.set_dashboard_visibility(false);
-    let first = app.state.active_view.unwrap();
+    let first = app.state.active_view().unwrap();
     let second = app
         .state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     app.state.views[first].cursor = ByteOffset(0);
     app.state.views[second].cursor = ByteOffset(11);
@@ -156,7 +156,7 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     wait_vfs(&mut app);
     assert_eq!(app.ui.config_diagnostic, None);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(11)
     );
 }
@@ -168,12 +168,12 @@ fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     std::fs::write(&path, "first\nsecond\n").unwrap();
     app.start_open(path);
     wait_vfs(&mut app);
-    let first = app.state.active_view.unwrap();
+    let first = app.state.active_view().unwrap();
     app.state.views[first].cursor = ByteOffset(1);
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
-    let second = app.state.active_view.unwrap();
+    let second = app.state.active_view().unwrap();
     assert_ne!(first, second);
     app.state.views[second].cursor = ByteOffset(8);
     app.set_dashboard_visibility(false);
@@ -192,7 +192,7 @@ fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     app.restore_session(session);
     wait_vfs(&mut app);
     assert_eq!(app.ui.config_diagnostic, None);
-    let active = app.state.active_view.unwrap();
+    let active = app.state.active_view().unwrap();
     assert_eq!(app.state.views[active].cursor, ByteOffset(8));
     assert_eq!(app.state.views.len(), 2);
     assert!(
@@ -244,10 +244,12 @@ fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     assert_eq!(app.ui.config_diagnostic, None);
     let order = app
         .state
-        .tabs
-        .values()
+        .editor_tabs()
         .map(|tab| {
-            let view = app.state.panes[tab.focused].view;
+            let view = app
+                .state
+                .window_view(app.state.tab_focused_window(tab.id).unwrap())
+                .unwrap();
             app.state.buffers[app.state.views[view].buffer].path.clone()
         })
         .collect::<Vec<_>>();
@@ -374,7 +376,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         .unwrap();
     app.state.buffers[newer].dirty = true;
     wait_vfs(&mut app);
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     assert_eq!(app.state.buffers[newer].text.to_string(), "newer unsaved");
     assert_eq!(app.state.buffers.len(), 1);
     app.state.buffers[newer].dirty = false;
@@ -384,7 +386,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.restore_session(session.clone());
     app.input.capture_changed();
     wait_vfs(&mut app);
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     let identity = app.state.window_version();
     let (manager, plugin) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -423,7 +425,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
         app.capture_session().unwrap().pinned.as_slice(),
         std::slice::from_ref(&path)
     );
-    let restored = &app.state.views[app.state.active_view.unwrap()];
+    let restored = &app.state.views[app.state.active_view().unwrap()];
     assert_eq!(restored.cursor.get(), 1);
     assert!(restored.selection.is_none());
     assert_eq!(restored.scroll_column, 0); // default wrapping keeps the restored cursor visible
@@ -602,7 +604,7 @@ fn a_restored_session_keeps_the_buffer_line_in_window_order() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     app.state
         .open_text(TextBuffer::from_text("alpha\n"), Some(alpha.clone()))

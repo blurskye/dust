@@ -1075,7 +1075,7 @@ impl App {
         {
             let offset = self
                 .state
-                .active_view
+                .active_view()
                 .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
             if let Err(error) =
                 self.language
@@ -1089,7 +1089,7 @@ impl App {
         let snippet = item.snippet;
         let offset = self
             .state
-            .active_view
+            .active_view()
             .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
         let buffer = TextBuffer::from_text(&document.text);
         let codec = PositionCodec::new(&buffer);
@@ -1149,7 +1149,7 @@ impl App {
                 .map_or(current_line.len(), |(at, _)| column + at);
             let selected = self
                 .state
-                .active_view
+                .active_view()
                 .and_then(|view| self.state.views[view].selection)
                 .and_then(|selection| {
                     let start = selection.anchor.min(selection.head);
@@ -1285,7 +1285,7 @@ impl App {
                         editor: &source,
                         buffer: buffer_id,
                         text: &self.state.buffers[buffer_id].text,
-                        view: self.state.active_view,
+                        view: self.state.active_view(),
                     },
                     start,
                     tabstops,
@@ -1332,7 +1332,7 @@ impl App {
                     editor: &source,
                     buffer: id,
                     text: &buffer.text,
-                    view: self.state.active_view.filter(|view| {
+                    view: self.state.active_view().filter(|view| {
                         self.state
                             .views
                             .get(*view)
@@ -1359,7 +1359,7 @@ impl App {
     pub(in crate::app) fn navigate_snippet(&mut self, direction: i8) {
         let buffer = self.input.snippet_buffer();
         if self.input.navigate_snippet(direction)
-            && let Some(view) = self.state.active_view
+            && let Some(view) = self.state.active_view()
             && Some(self.state.views[view].buffer) == buffer
         {
             let transaction = EditorTransaction::new(self.transaction_id())
@@ -1921,7 +1921,7 @@ impl App {
                         &uri,
                         version,
                         self.state
-                            .active_view
+                            .active_view()
                             .and_then(|id| self.state.views.get(id))
                             .map_or(ByteOffset(0), |view| view.cursor),
                     ) {
@@ -2251,7 +2251,7 @@ impl App {
             return;
         }
         self.close_documentation();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];
@@ -2923,7 +2923,7 @@ impl App {
                                 .collect()
                         }
                         "textDocument/foldingRange" => {
-                            if let Some(view) = self.state.active_view {
+                            if let Some(view) = self.state.active_view() {
                                 self.ui.lsp_folds = ranges
                                     .into_iter()
                                     .filter_map(|range| {
@@ -2946,7 +2946,7 @@ impl App {
                             if let Some(cursor) = expand
                                 && self
                                     .state
-                                    .active_view
+                                    .active_view()
                                     .is_some_and(|view| self.state.views[view].cursor == cursor)
                             {
                                 self.process_effect(AppEffect::LspSelectionExpand);
@@ -3290,7 +3290,7 @@ impl App {
         let completion_open = self.ui.language_completion.is_some()
             && self.language.projection().is_some_and(|owner| {
                 owner.buffer == buffer
-                    && Some(owner.view) == self.state.active_view
+                    && Some(owner.view) == self.state.active_view()
                     && self.language.active() == Some(&owner.server)
                     && owner.uri == document.uri()
             });
@@ -3371,7 +3371,7 @@ impl App {
 impl App {
     fn lsp_completion_in_insert(&self) -> bool {
         self.state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
             .is_some_and(|view| view.mode == EditorMode::Insert)
     }
@@ -3381,7 +3381,7 @@ impl App {
     /// The word the cursor is at the end of, with where it starts.
     fn lsp_word_before_cursor(&self) -> Option<String> {
         let start = self.lsp_word_start()?;
-        let view = &self.state.views[self.state.active_view?];
+        let view = &self.state.views[self.state.active_view()?];
         let range = ByteRange::new(start, view.cursor).ok()?;
         self.state.buffers.get(view.buffer)?.text.slice(range).ok()
     }
@@ -3389,7 +3389,7 @@ impl App {
 
 impl App {
     fn lsp_word_start(&self) -> Option<ByteOffset> {
-        let view = &self.state.views[self.state.active_view?];
+        let view = &self.state.views[self.state.active_view()?];
         let text = &self.state.buffers.get(view.buffer)?.text;
         let line_start = text
             .line_to_byte(text.byte_to_line(view.cursor).ok()?)
@@ -3428,7 +3428,7 @@ impl App {
     pub(in crate::app) fn narrow_lsp_completion(&mut self) {
         let Some(view) = self
             .state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
         else {
             return;
@@ -3526,7 +3526,7 @@ impl App {
     fn lsp_completion_typed_columns(&self) -> u16 {
         let Some(view) = self
             .state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
         else {
             return 0;
@@ -3563,7 +3563,7 @@ impl App {
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
     fn word_at_cursor(&self) -> Option<String> {
         self.state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
             .and_then(|view| {
                 let source = self.state.buffers.get(view.buffer)?.text.to_string();

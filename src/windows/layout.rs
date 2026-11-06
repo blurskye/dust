@@ -78,6 +78,33 @@ pub enum TiledLayoutNode {
     },
 }
 
+impl TiledLayoutNode {
+    pub fn windows(&self) -> Vec<WindowId> {
+        crate::windows::tree::window_ids(self)
+    }
+
+    pub fn filtered(&self, keep: &impl Fn(WindowId) -> bool) -> Option<Self> {
+        match self {
+            Self::Window(window) => keep(*window).then_some(self.clone()),
+            Self::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => match (first.filtered(keep), second.filtered(keep)) {
+                (Some(first), Some(second)) => Some(Self::Split {
+                    axis: *axis,
+                    ratio: *ratio,
+                    first: Box::new(first),
+                    second: Box::new(second),
+                }),
+                (Some(node), None) | (None, Some(node)) => Some(node),
+                (None, None) => None,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProjectedBorder {
     pub x: u16,

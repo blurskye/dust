@@ -1,7 +1,7 @@
 //! Private graph, native/editor identity bridges and accepted geometry.
-mod bridge;
 pub(in crate::app) mod content;
 mod focus;
+mod native;
 pub(in crate::app) use focus::FocusTarget;
 mod mutations;
 mod plans;
@@ -22,12 +22,11 @@ use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use crate::windows::WorkspaceTabId;
-pub(in crate::app) use bridge::EditorWindowBridge;
-use bridge::NativeSurfaceBridge;
-pub(in crate::app) use bridge::NativeSurfaceSignature;
-pub(in crate::app) use bridge::NativeSurfaceTarget;
 pub(in crate::app) use mutations::NativeDescriptions;
 pub(in crate::app) use mutations::RestoreWindowPolicy;
+pub(in crate::app) use native::NativeSurfaceSignature;
+pub(in crate::app) use native::NativeSurfaceTarget;
+use native::NativeSurfaces;
 pub(in crate::app) use plans::CommandEffect;
 pub(in crate::app) use plans::CommandError;
 pub(in crate::app) use plans::CommandPolicy;
@@ -120,9 +119,11 @@ impl TerminalGeometrySource {
 
 #[derive(Clone, Default)]
 struct WindowState {
+    // The last accepted graph is retained for projection and checked native drafts.
     graph: WindowGraph,
-    editor: EditorWindowBridge,
-    native: NativeSurfaceBridge,
+    source: Option<crate::editor::EditorWindowVersion>,
+    scratch_label: Option<String>,
+    native: NativeSurfaces,
 }
 
 pub(in crate::app) struct WindowCandidate {
@@ -159,6 +160,11 @@ pub(super) struct Windows {
 }
 
 impl Windows {
+    #[cfg(test)]
+    pub(in crate::app) fn test_publications(&self) -> u64 {
+        self.epoch
+    }
+
     pub(in crate::app) fn observe_size(&mut self, size: (u16, u16)) {
         if self.observed_size != size {
             self.observed_size = size;
@@ -210,7 +216,7 @@ impl Windows {
         source: &crate::editor::EditorWindowVersion,
         size: (u16, u16),
     ) -> Option<&CompositorProjection> {
-        if self.core.editor.source() != Some(source) {
+        if self.core.source.as_ref() != Some(source) {
             return None;
         }
         self.current(source.revision(), size)
@@ -296,7 +302,6 @@ mod viewport_tests;
 
 use crate::app::App;
 use crate::editor::EditorTransaction;
-use crate::editor::FocusDirection;
 use crate::editor::UndoPolicy;
 use crate::telemetry::LogLevel;
 use crate::ui::PromptKind;
@@ -335,6 +340,7 @@ impl App {
                 plan,
                 &self.state.window_version(),
                 &self.extension.contributions().version(),
+                &mut self.state,
             )?;
             if let Some(id) = self
                 .window_session
@@ -362,14 +368,8 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn focus_surface(&mut self, direction: FocusDirection) {
+    pub(in crate::app) fn focus_surface(&mut self, direction: SpatialDirection) {
         self.reconcile_editor_windows();
-        let direction = match direction {
-            FocusDirection::Left => SpatialDirection::Left,
-            FocusDirection::Down => SpatialDirection::Down,
-            FocusDirection::Up => SpatialDirection::Up,
-            FocusDirection::Right => SpatialDirection::Right,
-        };
         let Some(target) = self.window_session.spatial_target(direction) else {
             return;
         };
@@ -672,7 +672,8 @@ impl App {
         if self.compositor_projection().is_none() {
             return Err("universal compositor projection is missing or stale".into());
         }
-        self.window_session.place_native(target, placement)?;
+        self.window_session
+            .place_native(target, placement, &mut self.state)?;
         self.reconcile_editor_windows();
         if matches!(target, NativeSurfaceTarget::Terminal(_))
             && placement != WindowPlacement::Hidden
@@ -703,8 +704,12 @@ impl App {
             edge: DockEdge::Bottom,
             size: self.window_session.terminal_height().max(1),
         };
-        self.window_session
-            .show_native(target, explorer_fallback, terminal_fallback)?;
+        self.window_session.show_native(
+            target,
+            explorer_fallback,
+            terminal_fallback,
+            &mut self.state,
+        )?;
         self.reconcile_editor_windows();
         if matches!(target, NativeSurfaceTarget::Terminal(_)) {
             self.resize_active_terminal_to_panel();
@@ -727,7 +732,7 @@ impl App {
     pub(in crate::app) fn clone_graph_window(
         &mut self,
         target: &str,
-        axis: crate::editor::Axis,
+        axis: crate::windows::TileAxis,
     ) -> Result<(), String> {
         let selected_terminal = self.terminal_session.selected().map(|id| id.0);
         let window = self
@@ -768,6 +773,7 @@ impl App {
             plan,
             &self.state.window_version(),
             &self.extension.contributions().version(),
+            &mut self.state,
         )? {
             CommandEffect::ClonedExplorer(view) if view == explorer.id().0 => {}
             _ => return Err("explorer clone returned the wrong window effect".into()),
@@ -827,7 +833,7 @@ impl App {
 impl App {
     pub(in crate::app) fn resize_focused_window(
         &mut self,
-        direction: FocusDirection,
+        direction: SpatialDirection,
         count: u64,
     ) -> Result<(), String> {
         self.reconcile_editor_windows();
@@ -840,7 +846,7 @@ impl App {
     pub(in crate::app) fn resize_native_window_direction(
         &mut self,
         target: NativeSurfaceTarget,
-        direction: FocusDirection,
+        direction: SpatialDirection,
     ) -> Result<(), String> {
         self.run_window_command(WindowCommand::Direction(direction, Some(target), 1))
     }
@@ -853,12 +859,7 @@ impl App {
             .window_session
             .resolve_graph_target(target, selected)
             .map_err(|error| self.window_target_error(error))?;
-        if self
-            .window_session
-            .editor_ids()
-            .pane_for_window(window)
-            .is_some()
-        {
+        if self.state.window_view(window).map(|_| window).is_some() {
             self.reconcile_editor_windows();
             let window = self
                 .window_session
@@ -940,6 +941,7 @@ impl App {
             plan,
             &self.state.window_version(),
             &self.extension.contributions().version(),
+            &mut self.state,
         )? {
             CommandEffect::None => {}
             CommandEffect::ClonedExplorer(_) => {
@@ -981,10 +983,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn native_surface_signature(
-        &self,
-        editor: &EditorWindowBridge,
-    ) -> NativeSurfaceSignature {
+    pub(in crate::app) fn native_surface_signature(&self) -> NativeSurfaceSignature {
         let explorer_size = self
             .ui
             .explorer
@@ -1014,8 +1013,8 @@ impl App {
             )
         });
         NativeSurfaceSignature {
-            editor_tab: editor.active_tab(&(&*self.state).into()),
-            editor_window: editor.focused_window(&(&*self.state).into()),
+            editor_tab: self.state.active_tab(),
+            editor_window: self.state.focused_window(),
             focused_plugin: match self.window_session.focus() {
                 crate::app::windows::FocusTarget::Plugin(window) => Some(window),
                 _ => None,
@@ -1054,7 +1053,7 @@ impl App {
             terminal_width: self.window_session.width(),
             terminal_height: self.window_session.height(),
             dashboard_visible: self.window_session.dashboard_visible()
-                || self.state.active_view.is_none(),
+                || self.state.active_view().is_none(),
             picker_rect,
             picker_surface: self
                 .ui
@@ -1097,11 +1096,19 @@ impl App {
 impl App {
     pub(in crate::app) fn reconcile_editor_windows(&mut self) {
         let scratch_label = &SCRATCH_LABEL;
-        let editor_current = self
-            .window_session
-            .editor_ids()
-            .is_current(&(&*self.state).into(), scratch_label);
-        let signature = self.native_surface_signature(self.window_session.editor_ids());
+        let editor_current = self.window_session.core.source.as_ref()
+            == Some(&self.state.window_version())
+            && self.window_session.core.scratch_label.as_deref() == Some(scratch_label);
+        if !editor_current && let Err(error) = self.state.register_window_content() {
+            self.health.record(
+                LogLevel::Error,
+                "windows",
+                "window-content-rejected",
+                BTreeMap::from([("error".into(), error.to_string())]),
+            );
+            return;
+        }
+        let signature = self.native_surface_signature();
         if editor_current
             && self.window_session.native_ids().is_current(&signature)
             && self.window_session.graph().revision() == self.ui.window_graph_revision
@@ -1121,7 +1128,7 @@ impl App {
                     &(&*self.state).into(),
                     scratch_label,
                     NativeDescriptions {
-                        signature: self.native_surface_signature(self.window_session.editor_ids()),
+                        signature: self.native_surface_signature(),
                         explorer_title: &self.message("explorer_title", &[]),
                         dashboard_title: &self.configuration.dashboard().identity,
                         picker_title: self
@@ -1133,38 +1140,45 @@ impl App {
                     },
                 )
                 .and_then(|candidate| {
-                    self.window_session
-                        .accept_current(candidate, &self.state.window_version())
+                    self.window_session.accept_current(
+                        candidate,
+                        &self.state.window_version(),
+                        &mut self.state,
+                    )
                 })
         };
         match result {
             Ok(()) => {
                 self.project_window_content_tabs();
                 let graph = self.window_session.graph();
-                let bridge = self.window_session.editor_ids();
                 let surfaces = self.window_session.native_ids();
                 self.ui.editor_window_layout = self.state.window_revision().and_then(|revision| {
-                    bridge
-                        .active_layout(&(&*self.state).into(), graph)
-                        .map(|active| EditorWindowLayoutState {
-                            source_revision: revision,
-                            layout: active.layout,
-                            bindings: active
-                                .bindings
-                                .into_iter()
-                                .map(|binding| UiEditorWindowBinding {
-                                    window: binding.window,
-                                    pane: binding.pane,
-                                    view: binding.view,
+                    let tab = self.state.active_tab()?;
+                    Some(EditorWindowLayoutState {
+                        source_revision: revision,
+                        layout: crate::windows::TiledLayoutSnapshot {
+                            root: self.state.tab_layout(tab)?,
+                            focused: graph.focused(),
+                        },
+                        bindings: self
+                            .state
+                            .tab_windows(tab)
+                            .into_iter()
+                            .filter_map(|window| {
+                                Some(UiEditorWindowBinding {
+                                    window,
+                                    view: self.state.window_view(window)?,
                                 })
-                                .collect(),
-                        })
+                            })
+                            .collect(),
+                    })
                 });
                 self.ui.window_graph_revision = graph.revision();
                 let projection = self.state.window_revision().and_then(|revision| {
                     let graph_revision = graph.revision()?;
-                    let tab = bridge
-                        .active_tab(&(&*self.state).into())
+                    let tab = self
+                        .state
+                        .active_tab()
                         .or_else(|| surfaces.workspace_tab())?;
                     let snapshot = graph.compositor_snapshot(tab)?;
                     let screen_bottom = screen_foot_rows(
@@ -1193,7 +1207,7 @@ impl App {
                         .ui
                         .debug_panes
                         .as_ref()
-                        .filter(|_| !self.ui.dashboard && self.state.active_view.is_some())
+                        .filter(|_| !self.ui.dashboard && self.state.active_view().is_some())
                         .and_then(|_| {
                             crate::ui::debug_pane_insets(
                                 preliminary.workspace_bounds.width,

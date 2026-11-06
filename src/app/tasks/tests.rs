@@ -235,7 +235,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
     assert!(!app.tasks.is_running("owned-format"));
     assert_eq!(app.state.buffers[buffer].text.to_string(), "XYZ");
     assert_eq!(app.state.buffers[other].text.to_string(), "leave alone");
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     assert_eq!(
         fs::read_to_string(root.path().join("dependency-runs")).unwrap(),
         "okokok"
@@ -539,7 +539,7 @@ fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
     });
     assert_eq!(app.state.active_buffer_id(), Some(buffer));
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(8)
     );
 }

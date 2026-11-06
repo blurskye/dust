@@ -64,7 +64,7 @@ fn help_filters_do_not_restart_the_suspended_live_grep() {
     app.accept_picker();
     wait_vfs(&mut app);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(0)
     );
 }

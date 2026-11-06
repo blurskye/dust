@@ -90,7 +90,7 @@ impl App {
             self.open_prompt(PromptKind::ReviewComment, body);
             return;
         }
-        let (Some(view), Some(buffer)) = (self.state.active_view, self.state.active_buffer_id())
+        let (Some(view), Some(buffer)) = (self.state.active_view(), self.state.active_buffer_id())
         else {
             self.show_error("no file to comment on");
             return;

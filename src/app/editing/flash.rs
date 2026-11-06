@@ -101,7 +101,7 @@ use crate::editor::input::KeyEvent;
 impl App {
     pub(in crate::app) fn begin_flash(&mut self) {
         self.reconcile_editor_windows();
-        let Some(view) = self.state.active_view else {
+        let Some(view) = self.state.active_view() else {
             return;
         };
         self.flash = Some(crate::app::editing::flash::FlashState {
@@ -124,7 +124,7 @@ impl App {
         let Some(mut flash) = self.flash.take() else {
             return;
         };
-        if self.state.active_view != Some(flash.view)
+        if self.state.active_view() != Some(flash.view)
             || !self
                 .state
                 .views
@@ -236,14 +236,13 @@ impl App {
 impl App {
     pub(in crate::app) fn sync_flash_ui(&mut self) {
         if self.flash.as_ref().is_some_and(|flash| {
-            self.state.active_view != Some(flash.view)
+            self.state.active_view() != Some(flash.view)
                 || self
                     .window_session
                     .graph()
                     .focused()
-                    .and_then(|window| self.window_session.editor_ids().pane_for_window(window))
-                    .and_then(|pane| self.state.panes.get(pane))
-                    .is_none_or(|pane| pane.view != flash.view)
+                    .and_then(|window| self.state.window_view(window))
+                    .is_none_or(|view| view != flash.view)
         }) {
             self.flash = None;
         }

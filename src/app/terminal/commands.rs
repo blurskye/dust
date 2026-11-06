@@ -376,7 +376,8 @@ impl App {
                     let result = if self.compositor_projection().is_none() {
                         Err("universal compositor projection is missing or stale".into())
                     } else {
-                        self.window_session.resize_terminal(id.0, rows)
+                        self.window_session
+                            .resize_terminal(id.0, rows, &mut self.state)
                     };
                     if let Err(error) = result {
                         self.show_error(error);

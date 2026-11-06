@@ -10,7 +10,7 @@ pub(crate) enum RestoredLayout {
         pane: RestoredPane,
     },
     Split {
-        axis: crate::editor::Axis,
+        axis: crate::windows::TileAxis,
         ratio: u16,
         first: Box<Self>,
         second: Box<Self>,
@@ -41,13 +41,20 @@ impl EditorDraft {
         }
         self.state.buffers.clear();
         self.state.views.clear();
-        self.state.panes.clear();
-        self.state.tabs.clear();
-        self.state.active_tab = None;
-        self.state.active_view = None;
+        self.state
+            .graph
+            .clear()
+            .map_err(|error| error.to_string())?;
+        self.state.buffer_contents.clear();
+        self.state.graph_views.clear();
         let mut built = Vec::new();
         for tab in tabs {
-            let (layout, panes) = build_layout(&mut self.state, &tab.layout, loaded)
+            let id = self
+                .state
+                .graph
+                .create_workspace_tab("builtin.editor", 1)
+                .map_err(|error| error.to_string())?;
+            let (layout, panes) = build_layout(&mut self.state, id, &tab.layout, loaded)
                 .ok_or("session layout is incomplete")?;
             let focused = tab
                 .focused_pane
@@ -62,45 +69,44 @@ impl EditorDraft {
                 })
                 .or_else(|| panes.first().map(|(_, pane)| *pane))
                 .ok_or("session tab is empty")?;
-            built.push(crate::editor::Tab {
-                root: layout,
-                focused,
-            });
+            self.state
+                .graph
+                .replace_layout(id, Some(layout))
+                .map_err(|error| error.to_string())?;
+            self.state
+                .graph
+                .select_window(focused)
+                .map_err(|error| error.to_string())?;
+            built.push(id);
         }
-        // Cleared slots are reused last-freed first, so take the keys in iteration order
-        // before filling them; the tab bar and saved tab indices both follow that order.
-        for tab in &built {
-            self.state.tabs.insert(tab.clone());
-        }
-        let keys = self.state.tabs.keys().collect::<Vec<_>>();
-        let mut tabs = Vec::new();
-        for (id, tab) in keys.into_iter().zip(built) {
-            tabs.push((id, tab.focused));
-            self.state.tabs[id] = tab;
-        }
+        let tabs = built;
         if tabs.is_empty() {
             return Err("session has no restorable tabs".into());
         }
         let active = active_tab.min(tabs.len() - 1);
-        self.state.active_tab = Some(tabs[active].0);
-        self.state.active_view = self.state.panes.get(tabs[active].1).map(|pane| pane.view);
+        self.state
+            .activate_tab(tabs[active])
+            .map_err(str::to_owned)?;
         self.state.mark_window_changed();
         self.state.validate_layout().map_err(str::to_owned)
     }
 }
 fn build_layout(
     state: &mut EditorState,
+    tab: crate::windows::WorkspaceTabId,
     layout: &RestoredLayout,
     loaded: &HashMap<PathBuf, (PathBuf, TextBuffer)>,
 ) -> Option<(
-    crate::editor::LayoutNode,
-    Vec<(PathBuf, crate::editor::PaneId)>,
+    crate::windows::TiledLayoutNode,
+    Vec<(PathBuf, crate::windows::WindowId)>,
 )> {
     match layout {
         RestoredLayout::Invalid => None,
         RestoredLayout::Pane { pane } => {
             let (canonical, text) = loaded.get(&pane.path)?;
-            let buffer = state.load_hidden_text(text.clone(), canonical.clone());
+            let buffer = state
+                .load_hidden_text(text.clone(), canonical.clone())
+                .ok()?;
             let mut view = crate::editor::View::new(buffer);
             let length = state.buffers[buffer].text.len_bytes();
             let mut offset = pane.cursor.min(length);
@@ -117,9 +123,20 @@ fn build_layout(
             view.scroll_wrap_row = 0;
             view.scroll_column = pane.scroll_column;
             let view = state.views.insert(view);
-            let pane_id = state.panes.insert(crate::editor::Pane { view });
+            let graph_view = state.register_view(view).ok()?;
+            let pane_id = state
+                .graph
+                .open_window(
+                    tab,
+                    graph_view,
+                    crate::windows::WindowPlacement::Tiled,
+                    true,
+                    "builtin.editor",
+                    1,
+                )
+                .ok()?;
             Some((
-                crate::editor::LayoutNode::Pane(pane_id),
+                crate::windows::TiledLayoutNode::Window(pane_id),
                 vec![(pane.path.clone(), pane_id)],
             ))
         }
@@ -132,15 +149,15 @@ fn build_layout(
             if !(100..=900).contains(ratio) {
                 return None;
             }
-            let (first, mut panes) = build_layout(state, first, loaded)?;
-            let (second, second_panes) = build_layout(state, second, loaded)?;
+            let (first, mut panes) = build_layout(state, tab, first, loaded)?;
+            let (second, second_panes) = build_layout(state, tab, second, loaded)?;
             panes.extend(second_panes);
             let axis = match axis {
-                crate::editor::Axis::Horizontal => crate::editor::Axis::Horizontal,
-                crate::editor::Axis::Vertical => crate::editor::Axis::Vertical,
+                crate::windows::TileAxis::Horizontal => crate::windows::TileAxis::Horizontal,
+                crate::windows::TileAxis::Vertical => crate::windows::TileAxis::Vertical,
             };
             Some((
-                crate::editor::LayoutNode::Split {
+                crate::windows::TiledLayoutNode::Split {
                     axis,
                     ratio: *ratio,
                     first: Box::new(first),
@@ -158,8 +175,9 @@ pub(crate) fn build_layout_for_test(
     layout: &RestoredLayout,
     loaded: &HashMap<PathBuf, (PathBuf, TextBuffer)>,
 ) -> Option<(
-    crate::editor::LayoutNode,
-    Vec<(PathBuf, crate::editor::PaneId)>,
+    crate::windows::TiledLayoutNode,
+    Vec<(PathBuf, crate::windows::WindowId)>,
 )> {
-    build_layout(state, layout, loaded)
+    let tab = state.graph.create_workspace_tab("builtin.editor", 1).ok()?;
+    build_layout(state, tab, layout, loaded)
 }

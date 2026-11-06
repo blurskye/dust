@@ -1584,7 +1584,7 @@ use crate::windows::PANE_MINIMUM_WIDTH;
 impl App {
     pub(in crate::app) fn mouse_pane_geometry(
         &self,
-    ) -> Option<(crate::editor::PaneId, u16, u16, u16, u16)> {
+    ) -> Option<(crate::windows::WindowId, u16, u16, u16, u16)> {
         let (global_column, global_row) = self.input.mouse_position()?;
         editor_pane_viewport_at(&self.state, &self.ui, global_column, global_row).map(|viewport| {
             (
@@ -1604,7 +1604,7 @@ impl App {
         let Some((pane, ..)) = self.mouse_pane_geometry() else {
             return;
         };
-        let Some(window) = self.window_session.editor_ids().window_for(pane) else {
+        let Some(window) = self.state.graph.window(pane).map(|window| window.id) else {
             return;
         };
         let result = self
@@ -1630,7 +1630,7 @@ impl App {
         else {
             return;
         };
-        let Some(view_id) = self.state.panes.get(pane_id).map(|pane| pane.view) else {
+        let Some(view_id) = self.state.window_view(pane_id) else {
             return;
         };
         let view = &self.state.views[view_id];
@@ -1703,7 +1703,7 @@ impl App {
             self.show_error(error);
         } else {
             let source = self.state.window_version();
-            let current = self.state.active_view.and_then(|id| {
+            let current = self.state.active_view().and_then(|id| {
                 self.state.views.get(id).and_then(|view| {
                     self.state
                         .buffers
@@ -1829,11 +1829,7 @@ impl App {
                 .windows
                 .iter()
                 .filter(|window| rect_contains_point(window.rect, x, y))
-                .find_map(|window| {
-                    self.window_session
-                        .editor_ids()
-                        .pane_for_window(window.window)
-                })
+                .find_map(|window| self.state.window_view(window.window).map(|_| window.window))
         };
         match key.terminal_mouse() {
             Some(TerminalMouseInput::LeftDown) => {
@@ -1881,9 +1877,9 @@ impl App {
                     .windows
                     .iter()
                     .filter(|window| {
-                        self.window_session
-                            .editor_ids()
-                            .pane_for_window(window.window)
+                        self.state
+                            .window_view(window.window)
+                            .map(|_| window.window)
                             .is_some_and(|pane| panes.contains(&pane))
                     })
                     .map(|window| window.rect)
@@ -1934,7 +1930,7 @@ impl App {
             || self.ui.tool_menu.is_some()
             || self.ui.settings.is_some()
             || self.ui.dashboard
-            || self.state.active_view.is_none()
+            || self.state.active_view().is_none()
         {
             return false;
         }
@@ -1996,7 +1992,7 @@ impl App {
         let Some(bounds) = self.workspace_bounds() else {
             return false;
         };
-        let tab_line = self.state.tabs.len() > 1;
+        let tab_line = self.state.editor_tabs().count() > 1;
         let buffer_line = self.configuration.settings().ui.buffer_line.enabled
             && (!self
                 .configuration
@@ -2026,11 +2022,7 @@ impl App {
             .iter()
             .find(|entry| entry.identity == identity)
             .cloned();
-        let Some(buffer) = self
-            .window_session
-            .editor_ids()
-            .buffer_for_content(identity.0)
-        else {
+        let Some(buffer) = self.state.buffer_for_content(identity.0) else {
             if kind == crate::editor::input::TerminalMouseInput::RightDown
                 && entry.is_some_and(|entry| !entry.closeable)
             {
@@ -2078,11 +2070,11 @@ impl App {
             return;
         };
         let active = self.state.active_buffer_id();
-        let ids = self.window_session.editor_ids();
+        let documents = &self.state;
         let tabs = &self.ui.content_tabs;
         let active = tabs
             .iter()
-            .position(|entry| ids.buffer_for_content(entry.identity.0) == active);
+            .position(|entry| documents.buffer_for_content(entry.identity.0) == active);
         let over = tabs.iter().position(|entry| entry.identity == over);
         let (Some(active), Some(over)) = (active, over) else {
             return;
@@ -2365,7 +2357,7 @@ impl App {
                 } else if over_explorer {
                     "explorer_mouse"
                 } else if self.window_session.dashboard_visible()
-                    || self.state.active_view.is_none()
+                    || self.state.active_view().is_none()
                 {
                     "dashboard_mouse"
                 } else {
@@ -2525,12 +2517,12 @@ impl App {
             }
             .into();
         }
-        if self.window_session.dashboard_visible() || self.state.active_view.is_none() {
+        if self.window_session.dashboard_visible() || self.state.active_view().is_none() {
             return "dashboard".into();
         }
         let mode = self
             .state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
             .map_or(EditorMode::Normal, |view| view.mode);
         if mode == EditorMode::Insert
@@ -2663,7 +2655,7 @@ impl App {
 
 impl App {
     fn typing(&self) -> bool {
-        self.state.active_view.is_some_and(|view| {
+        self.state.active_view().is_some_and(|view| {
             matches!(
                 self.state.views[view].mode,
                 EditorMode::Insert | EditorMode::Replace

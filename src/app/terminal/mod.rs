@@ -1407,10 +1407,11 @@ impl App {
                 }
             }
             crate::ui::ConfirmationChoice::No => {
-                if let Err(error) = self
-                    .window_session
-                    .place_native(NativeSurfaceTarget::Terminal(id.0), WindowPlacement::Hidden)
-                {
+                if let Err(error) = self.window_session.place_native(
+                    NativeSurfaceTarget::Terminal(id.0),
+                    WindowPlacement::Hidden,
+                    &mut self.state,
+                ) {
                     self.show_error(error);
                 }
             }
@@ -1644,7 +1645,7 @@ impl App {
             self.show_error("requesting debugger retired");
             return;
         }
-        let file = self.state.active_view.and_then(|view| {
+        let file = self.state.active_view().and_then(|view| {
             let view = &self.state.views[view];
             let buffer = &self.state.buffers[view.buffer];
             let line = buffer
@@ -1658,7 +1659,7 @@ impl App {
             &self.workspace,
             file,
             self.window_session
-                .navigation_stamp(self.state.window_version(), self.state.active_view),
+                .navigation_stamp(self.state.window_version(), self.state.active_view()),
             self.input.capture_epoch(),
         ) {
             Ok(intent) => self.run_trusted(if let Some(reply) = reply {
@@ -1715,7 +1716,7 @@ impl App {
                         if self.window_session.navigation_current(
                             &open.navigation,
                             &self.state.window_version(),
-                            self.state.active_view,
+                            self.state.active_view(),
                         ) && self.input.capture_current(&open.capture)
                             && self.input.capture_context().is_none()
                             && self.ui.picker.is_none()

@@ -50,9 +50,10 @@ impl RestoreSource {
             editor: context.editor.version(),
             workspace: context.workspace.version(),
             capture: context.input.capture_epoch(),
-            navigation: context
-                .windows
-                .navigation_stamp(context.editor.window_version(), context.editor.active_view),
+            navigation: context.windows.navigation_stamp(
+                context.editor.window_version(),
+                context.editor.active_view(),
+            ),
             configuration: context.configuration,
         }
     }
@@ -69,7 +70,7 @@ impl RestoreSource {
             && context.windows.navigation_current(
                 &self.navigation,
                 &context.editor.window_version(),
-                context.editor.active_view,
+                context.editor.active_view(),
             )
     }
 }
@@ -483,20 +484,25 @@ impl Persistence {
         let mut tabs = Vec::new();
         let mut descriptors = Vec::new();
         let mut active_tab = 0;
-        for (id, tab) in &state.tabs {
-            let Some(layout) = capture_persisted_layout(state, &tab.root, &roots) else {
+        for tab in state.editor_tabs() {
+            let id = tab.id;
+            let Some(root) = state.tab_layout(id) else {
                 continue;
             };
-            if Some(id) == state.active_tab {
+            let focused = state.tab_focused_window(id);
+            let Some(layout) = capture_persisted_layout(state, &root, &roots) else {
+                continue;
+            };
+            if Some(id) == state.active_tab() {
                 active_tab = tabs.len();
             }
             let tab_index = tabs.len();
             let mut panes = Vec::new();
-            collect_persistable_editor_panes(state, &tab.root, &roots, &mut panes);
-            let focused_pane = panes.iter().position(|(pane, _)| *pane == tab.focused);
+            collect_persistable_editor_panes(state, &root, &roots, &mut panes);
+            let focused_pane = panes.iter().position(|(pane, _)| Some(*pane) == focused);
             let focused_path = panes
                 .iter()
-                .find(|(pane, _)| *pane == tab.focused)
+                .find(|(pane, _)| Some(*pane) == focused)
                 .map(|(_, path)| path.clone());
             for (pane_index, (pane, path)) in panes.into_iter().enumerate() {
                 descriptors.push(PersistedContentDescriptor {
@@ -525,14 +531,12 @@ impl Persistence {
             .map(|(buffer, provider, source, key)| (*buffer, (provider, source, key)))
             .collect::<HashMap<_, _>>();
         let mut virtual_index = 0usize;
-        for (_, tab) in &state.tabs {
-            let mut panes = Vec::new();
-            collect_editor_panes(&tab.root, &mut panes);
+        for tab in state.editor_tabs() {
+            let panes = state.tab_windows(tab.id);
             for pane in panes {
                 let Some(view) = state
-                    .panes
-                    .get(pane)
-                    .and_then(|pane| state.views.get(pane.view))
+                    .window_view(pane)
+                    .and_then(|view| state.views.get(view))
                 else {
                     continue;
                 };
@@ -580,31 +584,17 @@ impl Persistence {
         self.load_source = Some(RestoreSource::capture(&context));
     }
 }
-fn collect_editor_panes(
-    layout: &crate::editor::LayoutNode,
-    panes: &mut Vec<crate::editor::PaneId>,
-) {
-    match layout {
-        crate::editor::LayoutNode::Pane(pane) => panes.push(*pane),
-        crate::editor::LayoutNode::Split { first, second, .. } => {
-            collect_editor_panes(first, panes);
-            collect_editor_panes(second, panes);
-        }
-    }
-}
-
 fn collect_persistable_editor_panes(
     state: &EditorState,
-    layout: &crate::editor::LayoutNode,
+    layout: &crate::windows::TiledLayoutNode,
     roots: &[PathBuf],
-    panes: &mut Vec<(crate::editor::PaneId, PathBuf)>,
+    panes: &mut Vec<(crate::windows::WindowId, PathBuf)>,
 ) {
     match layout {
-        crate::editor::LayoutNode::Pane(pane) => {
+        crate::windows::TiledLayoutNode::Window(pane) => {
             if let Some(path) = state
-                .panes
-                .get(*pane)
-                .and_then(|pane| state.views.get(pane.view))
+                .window_view(*pane)
+                .and_then(|view| state.views.get(view))
                 .and_then(|view| state.buffers.get(view.buffer))
                 .filter(|buffer| {
                     !buffer.dirty
@@ -618,7 +608,7 @@ fn collect_persistable_editor_panes(
                 panes.push((*pane, path));
             }
         }
-        crate::editor::LayoutNode::Split { first, second, .. } => {
+        crate::windows::TiledLayoutNode::Split { first, second, .. } => {
             collect_persistable_editor_panes(state, first, roots, panes);
             collect_persistable_editor_panes(state, second, roots, panes);
         }
@@ -637,13 +627,12 @@ fn collect_persisted_panes(layout: &PersistedLayout, panes: &mut Vec<PersistedPa
 
 pub(in crate::app) fn capture_persisted_layout(
     state: &EditorState,
-    layout: &crate::editor::LayoutNode,
+    layout: &crate::windows::TiledLayoutNode,
     roots: &[PathBuf],
 ) -> Option<PersistedLayout> {
     match layout {
-        crate::editor::LayoutNode::Pane(pane) => {
-            let pane = state.panes.get(*pane)?;
-            let view = state.views.get(pane.view)?;
+        crate::windows::TiledLayoutNode::Window(pane) => {
+            let view = state.views.get(state.window_view(*pane)?)?;
             let buffer = state.buffers.get(view.buffer)?;
             if buffer.dirty {
                 return None;
@@ -665,7 +654,7 @@ pub(in crate::app) fn capture_persisted_layout(
                 },
             })
         }
-        crate::editor::LayoutNode::Split {
+        crate::windows::TiledLayoutNode::Split {
             axis,
             ratio,
             first,
@@ -676,8 +665,8 @@ pub(in crate::app) fn capture_persisted_layout(
             match (first, second) {
                 (Some(first), Some(second)) => Some(PersistedLayout::Split {
                     axis: match axis {
-                        crate::editor::Axis::Horizontal => "horizontal",
-                        crate::editor::Axis::Vertical => "vertical",
+                        crate::windows::TileAxis::Horizontal => "horizontal",
+                        crate::windows::TileAxis::Vertical => "vertical",
                     }
                     .into(),
                     ratio: *ratio,

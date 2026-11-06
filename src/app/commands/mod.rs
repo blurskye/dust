@@ -18,10 +18,10 @@ use crate::editor::CommandValue;
 
 use crate::editor::ContextRequirement;
 
-use crate::editor::FocusDirection;
 use crate::editor::input::GrammarInput;
 use crate::ui::ConfirmationChoice;
 use crate::ui::PromptKind;
+use crate::windows::SpatialDirection;
 
 #[derive(Clone, Copy, Debug)]
 pub enum SyntaxFoldAction {
@@ -158,14 +158,14 @@ pub enum AppEffect {
     PlaceMouseCursor,
     ExtendMouseSelection,
     Layout(LayoutAction),
-    SurfaceFocus(FocusDirection),
+    SurfaceFocus(SpatialDirection),
     /// Moves the dashboard cursor by this many items.
     DashboardSelect(i8),
     DashboardOpen,
     WindowList,
     WindowClone {
         target: String,
-        axis: crate::editor::Axis,
+        axis: crate::windows::TileAxis,
     },
     RetainedUiFocus(isize),
     RetainedUiScroll(isize),
@@ -194,7 +194,7 @@ pub enum AppEffect {
         target: String,
         amount: i16,
     },
-    WindowResizeDirectional(FocusDirection, u64),
+    WindowResizeDirectional(SpatialDirection, u64),
     WindowMove {
         target: String,
         x: u16,
@@ -1323,7 +1323,7 @@ impl App {
             self.close_documentation();
         }
         if invocation.target.view.is_none() {
-            invocation.target.view = self.state.active_view;
+            invocation.target.view = self.state.active_view();
         }
         if invocation.target.buffer.is_none() {
             invocation.target.buffer = self.state.active_buffer_id();
@@ -1489,7 +1489,7 @@ impl App {
                 // A failed `dfz` or `di(` must not leave the view stuck in operator-pending.
                 if self
                     .state
-                    .active_view
+                    .active_view()
                     .and_then(|view| self.state.views.get(view))
                     .is_some_and(|view| view.mode == EditorMode::OperatorPending)
                 {

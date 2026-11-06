@@ -1959,7 +1959,7 @@ impl App {
                     column: 1,
                     navigation: self
                         .window_session
-                        .navigation_stamp(self.state.window_version(), self.state.active_view),
+                        .navigation_stamp(self.state.window_version(), self.state.active_view()),
                     capture: self.input.capture_epoch(),
                 };
                 let debug_selection = debug_selection.expect("debug selection routed");

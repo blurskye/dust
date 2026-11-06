@@ -684,7 +684,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn apply_syntax_indent_line(&mut self) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];
@@ -1092,7 +1092,7 @@ impl App {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::SyntaxFold(action) => {
-                if let Some(view) = self.state.active_view {
+                if let Some(view) = self.state.active_view() {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
                             .text

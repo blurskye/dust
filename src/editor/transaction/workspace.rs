@@ -205,7 +205,7 @@ impl EditorState {
             } else {
                 let text =
                     TextBuffer::from_bytes(file.original_bytes).map_err(|e| e.to_string())?;
-                let id = draft.load_document(text, file.canonical_path.to_path_buf());
+                let id = draft.load_document(text, file.canonical_path.to_path_buf())?;
                 created.push(id);
                 id
             };

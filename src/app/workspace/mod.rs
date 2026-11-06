@@ -1045,7 +1045,7 @@ impl App {
             }
         }
         // Windows left with nothing to show go too, down to the one the file reopens in.
-        let front = self.state.active_view;
+        let front = self.state.active_view();
         let empty = self
             .state
             .views

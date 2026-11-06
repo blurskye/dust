@@ -8,9 +8,6 @@ use crate::editor::BufferId;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTopology;
 use crate::editor::EditorWindowVersion;
-use crate::editor::LayoutNode;
-use crate::editor::PaneId;
-use crate::editor::TabId;
 use crate::editor::ViewId;
 use crate::editor::text::TextVersion;
 use crate::plugins::PluginCatalogVersion;
@@ -22,6 +19,7 @@ use crate::windows::ViewId as WindowViewId;
 use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowTarget;
+use crate::windows::WorkspaceTabId;
 pub(in crate::app) use commands::CommandEffect;
 pub(in crate::app) use commands::CommandError;
 pub(in crate::app) use commands::CommandPolicy;
@@ -30,7 +28,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LayoutAction {
-    Split(crate::editor::Axis),
+    Split(crate::windows::TileAxis),
     ClosePane,
     ResizePane(i8),
     FocusPane(isize),
@@ -74,7 +72,7 @@ pub(in crate::app) enum LayoutPlanError {
 pub(in crate::app) enum EditorCloseTarget {
     Buffer { view: ViewId, buffer: BufferId },
     Layout(LayoutAction),
-    Window { pane: PaneId, window: WindowId },
+    Window { pane: WindowId, window: WindowId },
 }
 
 #[derive(Clone, Debug)]
@@ -88,9 +86,9 @@ pub(in crate::app) struct EditorCloseIntent {
     nonce: Arc<()>,
     source: EditorWindowVersion,
     target: EditorCloseTarget,
-    tab: TabId,
-    focused: PaneId,
-    pane: PaneId,
+    tab: WorkspaceTabId,
+    focused: WindowId,
+    pane: WindowId,
     dirty: Vec<DirtyBufferSource>,
     next: usize,
     waiting: bool,
@@ -165,16 +163,6 @@ impl Windows {
             && Arc::ptr_eq(&stamp.focus, &self.focus_stamp)
     }
 }
-fn editor_panes(node: &LayoutNode) -> Vec<PaneId> {
-    match node {
-        LayoutNode::Pane(pane) => vec![*pane],
-        LayoutNode::Split { first, second, .. } => {
-            let mut panes = editor_panes(first);
-            panes.extend(editor_panes(second));
-            panes
-        }
-    }
-}
 
 impl Windows {
     fn validate_editor_close(
@@ -184,12 +172,9 @@ impl Windows {
     ) -> Result<(), String> {
         if source.version() != &intent.source
             || source.window_revision().is_none()
-            || self.core.editor.source() != Some(source.version())
+            || self.core.source.as_ref() != Some(source.version())
             || source.active_tab() != Some(intent.tab)
-            || source
-                .tabs()
-                .get(intent.tab)
-                .is_none_or(|tab| tab.focused != intent.focused)
+            || source.state().tab_focused_window(intent.tab) != Some(intent.focused)
         {
             return Err("dirty close source or focused target changed".into());
         }
@@ -198,17 +183,20 @@ impl Windows {
                 .views()
                 .get(view)
                 .is_none_or(|candidate| candidate.buffer != buffer)
-                || source
-                    .panes()
-                    .get(intent.pane)
-                    .is_none_or(|pane| pane.view != view))
+                || source.state().window_view(intent.pane) != Some(view))
         {
             return Err("dirty close buffer/view target changed".into());
         }
         if let EditorCloseTarget::Window { pane, window } = intent.target
             && (pane != intent.pane
-                || self.core.editor.pane_for_window(window) != Some(pane)
-                || source.panes().get(pane).is_none())
+                || self
+                    .core
+                    .graph
+                    .window(window)
+                    .filter(|window| window.owner == "builtin.editor")
+                    .map(|window| window.id)
+                    != Some(pane)
+                || source.state().window_view(pane).is_none())
         {
             return Err("dirty close window target changed".into());
         }
@@ -248,14 +236,10 @@ impl Windows {
     ) -> Result<EditorCloseStep, String> {
         let tab = source.active_tab().ok_or("no active editor tab")?;
         let pane = source
-            .tabs()
-            .get(tab)
-            .ok_or("active editor tab is stale")?
-            .focused;
-        if source
-            .panes()
-            .get(pane)
-            .is_none_or(|candidate| candidate.view != view)
+            .state()
+            .tab_focused_window(tab)
+            .ok_or("active editor tab is stale")?;
+        if source.state().window_view(pane) != Some(view)
             || source
                 .views()
                 .get(view)
@@ -300,16 +284,19 @@ impl Windows {
             return Err("editor close intent requires a close action".into());
         }
         let tab = source.active_tab().ok_or("no active editor tab")?;
-        let active = source.tabs().get(tab).ok_or("active editor tab is stale")?;
-        let pane = active.focused;
+        let focused = source
+            .state()
+            .tab_focused_window(tab)
+            .ok_or("active editor tab is stale")?;
+        let pane = focused;
         let closing_panes = if action == LayoutAction::ClosePane {
             vec![pane]
         } else {
-            editor_panes(&active.root)
+            source.state().tab_windows(tab)
         };
         let closing_views = closing_panes
             .iter()
-            .filter_map(|pane| source.panes().get(*pane).map(|pane| pane.view))
+            .filter_map(|pane| source.state().window_view(*pane))
             .collect::<Vec<_>>();
         let mut dirty = Vec::new();
         for view in &closing_views {
@@ -371,19 +358,23 @@ impl Windows {
     ) -> Result<EditorCloseStep, String> {
         let pane = self
             .core
-            .editor
-            .pane_for_window(window)
+            .graph
+            .window(window)
+            .filter(|window| window.owner == "builtin.editor")
+            .map(|window| window.id)
             .ok_or("close target is not an editor window")?;
         let tab = source.active_tab().ok_or("no active editor tab")?;
-        let active = source.tabs().get(tab).ok_or("active editor tab is stale")?;
-        if !editor_panes(&active.root).contains(&pane) {
+        let focused = source
+            .state()
+            .tab_focused_window(tab)
+            .ok_or("active editor tab is stale")?;
+        if !source.state().tab_windows(tab).contains(&pane) {
             return Err("editor window close target belongs to another workspace tab".into());
         }
         let view = source
-            .panes()
-            .get(pane)
-            .ok_or("editor window pane is stale")?
-            .view;
+            .state()
+            .window_view(pane)
+            .ok_or("editor window pane is stale")?;
         let buffer = source
             .views()
             .get(view)
@@ -412,7 +403,7 @@ impl Windows {
             source: source.version().clone(),
             target: EditorCloseTarget::Window { pane, window },
             tab,
-            focused: active.focused,
+            focused,
             pane,
             dirty: dirty.into_iter().collect(),
             next: 0,
@@ -518,7 +509,7 @@ impl Windows {
         source: &EditorWindowVersion,
         catalog: PluginCatalogVersion,
     ) -> Result<WindowPlan, String> {
-        if source.revision().is_none() || self.core.editor.source() != Some(source) {
+        if source.revision().is_none() || self.core.source.as_ref() != Some(source) {
             return Err("window planning editor source is stale".into());
         }
         Ok(WindowPlan {
@@ -601,8 +592,10 @@ impl Windows {
         if Some(descriptor.tab) != self.core.graph.active_tab() {
             let editor_tab = self
                 .core
-                .editor
-                .editor_tab_for(descriptor.tab)
+                .graph
+                .workspace_tab(descriptor.tab)
+                .filter(|tab| tab.owner == "builtin.editor")
+                .map(|tab| tab.id)
                 .ok_or("focus target tab is not owned by the active editor")?;
             plan.operations
                 .push(EditorOperation::FocusTabId { tab: editor_tab });
@@ -616,7 +609,13 @@ impl Windows {
             .ok_or("focus target view is closed")?
             .content;
         plan.target_source = Some((window, view, content, descriptor.tab));
-        if let Some(pane) = self.core.editor.pane_for_window(window) {
+        if let Some(pane) = self
+            .core
+            .graph
+            .window(window)
+            .filter(|window| window.owner == "builtin.editor")
+            .map(|window| window.id)
+        {
             plan.operations.push(EditorOperation::FocusPaneId { pane });
             plan.focus_editor = true;
             plan.hide_dashboard = true;
@@ -658,7 +657,14 @@ impl Windows {
                     .view(view)
                     .ok_or_else(|| LayoutPlanError::Rejected("close view is stale".into()))?
                     .content;
-                if self.core.editor.pane_for_window(window) != Some(pane) {
+                if self
+                    .core
+                    .graph
+                    .window(window)
+                    .filter(|window| window.owner == "builtin.editor")
+                    .map(|window| window.id)
+                    != Some(pane)
+                {
                     return Err(LayoutPlanError::Rejected(
                         "close window identity changed".into(),
                     ));
@@ -694,29 +700,20 @@ impl Windows {
             .map_err(LayoutPlanError::Rejected)?;
         let dirty = |pane| {
             source
-                .panes()
-                .get(pane)
-                .and_then(|pane| source.views().get(pane.view))
+                .state()
+                .window_view(pane)
+                .and_then(|view| source.views().get(view))
                 .and_then(|view| source.buffers().get(view.buffer))
                 .is_some_and(|buffer| buffer.dirty)
         };
-        fn any_dirty(node: &LayoutNode, dirty: &impl Fn(crate::editor::PaneId) -> bool) -> bool {
-            match node {
-                LayoutNode::Pane(pane) => dirty(*pane),
-                LayoutNode::Split { first, second, .. } => {
-                    any_dirty(first, dirty) || any_dirty(second, dirty)
-                }
-            }
-        }
         if reject_dirty
-            && source
-                .active_tab()
-                .and_then(|tab| source.tabs().get(tab))
-                .is_some_and(|tab| match action {
-                    LayoutAction::ClosePane => dirty(tab.focused),
-                    LayoutAction::CloseTab => any_dirty(&tab.root, &dirty),
-                    _ => false,
-                })
+            && source.active_tab().is_some_and(|tab| match action {
+                LayoutAction::ClosePane => {
+                    source.state().tab_focused_window(tab).is_some_and(dirty)
+                }
+                LayoutAction::CloseTab => source.state().tab_windows(tab).into_iter().any(dirty),
+                _ => false,
+            })
         {
             return Err(LayoutPlanError::Dirty);
         }
@@ -737,8 +734,9 @@ impl Windows {
             LayoutAction::FocusTab(offset) => EditorOperation::FocusTab { offset, wrap: true },
             LayoutAction::FocusTabNumber(number) => EditorOperation::FocusTabId {
                 tab: source
-                    .tabs()
-                    .keys()
+                    .state()
+                    .editor_tabs()
+                    .map(|tab| tab.id)
                     .nth(number.saturating_sub(1))
                     .ok_or_else(|| {
                         LayoutPlanError::Rejected("tab number is out of range".into())
@@ -773,38 +771,28 @@ impl Windows {
         let mut candidate = self.prepare_reconcile(&source, scratch, descriptions)?;
         if let Some(native) = plan.native {
             match native {
-                commands::NativeAction::PlaceEditor(pane, window, placement) => {
+                commands::NativeAction::PlaceEditor(_pane, window, placement) => {
                     candidate
                         .core
-                        .editor
-                        .place_editor(&mut candidate.core.graph, pane, window, placement)
-                        .map_err(|error| error.to_string())?;
-                    candidate
-                        .core
-                        .editor
-                        .rebuild_tiled_layout(&source, &mut candidate.core.graph)
+                        .graph
+                        .place(window, placement)
                         .map_err(|error| error.to_string())?;
                     if candidate.core.graph.focused().is_none() {
                         candidate.dashboard = Some(true);
                     }
                 }
-                commands::NativeAction::ShowEditor(pane, window) => {
+                commands::NativeAction::ShowEditor(_pane, window) => {
                     candidate
                         .core
-                        .editor
-                        .show_editor(&mut candidate.core.graph, pane, window)
-                        .map_err(|error| error.to_string())?;
-                    candidate
-                        .core
-                        .editor
-                        .rebuild_tiled_layout(&source, &mut candidate.core.graph)
+                        .graph
+                        .show_window(window)
                         .map_err(|error| error.to_string())?;
                 }
                 commands::NativeAction::SwapEditors(first, second) => {
                     candidate
                         .core
-                        .editor
-                        .swap_editors(&mut candidate.core.graph, first, second)
+                        .graph
+                        .swap_non_tiled_placements(first.1, second.1)
                         .map_err(|error| error.to_string())?;
                 }
                 _ => return Err("editor transition carries an invalid window action".into()),
@@ -829,20 +817,21 @@ impl Windows {
         plan: WindowPlan,
         current: &EditorWindowVersion,
         catalog: &PluginCatalogVersion,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         self.check_plan(&plan, current, catalog)?;
         if !plan.operations.is_empty() {
             return Err("editor focus requires a checked editor transaction".into());
         }
         let window = plan.target.ok_or("missing native focus target")?;
-        self.focus_window(window)
+        self.focus_window(window, state)
     }
     pub(in crate::app) fn capture_focus(&self) -> Option<FocusLease> {
         let window = self.core.graph.focused()?;
         let view = self.core.graph.window(window)?.view;
         Some(FocusLease {
             focus_stamp: self.focus_stamp.clone(),
-            source: self.core.editor.source()?.clone(),
+            source: self.core.source.as_ref()?.clone(),
             origin: self.origin.clone(),
             window,
             view,
@@ -919,7 +908,7 @@ mod tests {
         let (a, _) = state.open_text(TextBuffer::from_text("a"), None).unwrap();
         state.buffers[a].dirty = true;
         state
-            .split_active(crate::editor::Axis::Vertical, 500)
+            .split_active(crate::windows::TileAxis::Vertical, 500)
             .unwrap();
         let (b, _) = state.open_text(TextBuffer::from_text("b"), None).unwrap();
         state.buffers[b].dirty = true;
@@ -929,10 +918,9 @@ mod tests {
             .unwrap();
         state.focus_tab(-1, true).unwrap();
         let mut windows = Windows::default();
+        let candidate = windows.prepare_editor(&(&state).into(), "scratch").unwrap();
         windows
-            .core
-            .editor
-            .reconcile(&(&state).into(), &mut windows.core.graph, "scratch")
+            .accept_current(candidate, &state.window_version(), &mut state)
             .unwrap();
         windows
             .begin_layout_close(LayoutAction::CloseTab, &(&state).into())
@@ -947,10 +935,9 @@ mod tests {
         };
         state.buffers[a].text = TextBuffer::from_text("new edits");
         state.buffers[b].dirty = false;
+        let candidate = windows.prepare_editor(&(&state).into(), "scratch").unwrap();
         windows
-            .core
-            .editor
-            .reconcile(&(&state).into(), &mut windows.core.graph, "scratch")
+            .accept_current(candidate, &state.window_version(), &mut state)
             .unwrap();
         assert!(
             windows

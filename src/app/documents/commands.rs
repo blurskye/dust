@@ -292,7 +292,7 @@ impl App {
             AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
             AppEffect::CycleBuffer(offset) => {
                 self.project_window_content_tabs();
-                let order = self.window_session.content_tab_buffers();
+                let order = self.window_session.content_tab_buffers(&self.state);
                 match self.state.cycle_buffer(&order, offset, true) {
                     Ok(_) => {
                         self.set_dashboard_visibility(false);
@@ -313,7 +313,7 @@ impl App {
             AppEffect::LargeFileSet(mode) => {
                 let Some(buffer) = self
                     .state
-                    .active_view
+                    .active_view()
                     .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
                 else {
                     return Ok(());
@@ -344,7 +344,7 @@ impl App {
             AppEffect::LargeFileStatus => {
                 let Some(buffer) = self
                     .state
-                    .active_view
+                    .active_view()
                     .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
                 else {
                     return Ok(());

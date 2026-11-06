@@ -1025,7 +1025,7 @@ mod tests {
                 &state.window_version(),
                 workspace.version(),
                 crate::app::windows::Windows::default()
-                    .navigation_stamp(state.window_version(), state.active_view),
+                    .navigation_stamp(state.window_version(), state.active_view()),
             )
             .unwrap_or_else(|_| panic!("admit"));
         owner.stop_worker();
@@ -1050,7 +1050,7 @@ mod tests {
                     &state.window_version(),
                     workspace.version(),
                     crate::app::windows::Windows::default()
-                        .navigation_stamp(state.window_version(), state.active_view)
+                        .navigation_stamp(state.window_version(), state.active_view())
                 )
                 .is_err()
         );

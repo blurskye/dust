@@ -961,7 +961,7 @@ impl App {
         };
         let active = self
             .state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view));
         let text = &self.state.buffers[buffer].text;
         if let Some(expected) = &step.cursor {
@@ -1025,7 +1025,7 @@ impl App {
         let Some(buffer) = self.tutor_buffer(step.file()) else {
             return false;
         };
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return false;
         };
         let Some(view) = self.state.views.get(view_id) else {
