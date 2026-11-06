@@ -1,4 +1,6 @@
-use crate::app::search::SearchSession;
+//! Background file previews for picker selections.
+
+use crate::app::search::Search;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::RequestId;
 use crate::files::VfsError;
@@ -99,7 +101,7 @@ pub(in crate::app) fn picker_preview_lines_from(
         .collect()
 }
 
-impl SearchSession {
+impl Search {
     pub(in crate::app) fn preview(&self) -> &Option<PickerPreview> {
         &self.preview
     }

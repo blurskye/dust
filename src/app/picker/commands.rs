@@ -1,3 +1,5 @@
+//! Command registration and execution for picker rows, selection and previews.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;

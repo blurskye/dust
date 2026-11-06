@@ -1,7 +1,23 @@
+//! Picker behavior and application integration tests.
+
 use crate::app::tests::*;
+use crate::app::App;
+use crate::editor::InvocationSource;
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
+use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::windows::WindowRect;
 
 #[test]
-pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker_input() {
+fn file_preview_retries_after_capacity_returns_without_picker_input() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("preview.txt");
     fs::write(&path, "ready\n").unwrap();
@@ -62,7 +78,7 @@ pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker
 }
 
 #[test]
-pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
+fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("overlay.help.");
@@ -139,7 +155,7 @@ pub(in crate::app) fn palette_row_for(app: &mut App, query: &str) -> String {
 }
 
 #[test]
-pub(in crate::app) fn palette_finds_commands_by_the_words_people_type() {
+fn palette_finds_commands_by_the_words_people_type() {
     let (_app_dirs, mut app) = app();
     for (query, expected) in [
         ("theme", "Select Color Theme"),
@@ -158,7 +174,7 @@ pub(in crate::app) fn palette_finds_commands_by_the_words_people_type() {
 }
 
 #[test]
-pub(in crate::app) fn palette_runs_flagged_commands_with_the_flag_off() {
+fn palette_runs_flagged_commands_with_the_flag_off() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -172,7 +188,7 @@ pub(in crate::app) fn palette_runs_flagged_commands_with_the_flag_off() {
 }
 
 #[test]
-pub(in crate::app) fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
+fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
     let (_app_dirs, mut app) = app();
     palette_row_for(&mut app, "file.open");
     app.accept_picker();
@@ -204,7 +220,7 @@ pub(in crate::app) fn palette_rows_that_need_text_open_a_command_line_that_runs_
 }
 
 #[test]
-pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() {
+fn file_picker_can_filter_an_entry_after_the_display_limit() {
     let (_app_dirs, mut app) = app();
     app.start_workspace_file_picker();
     let items = (0..10_001)
@@ -234,15 +250,207 @@ pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() 
     app.picker_insert("file-10000");
     assert_eq!(app.ui.picker.as_ref().unwrap().rows[0].label, "file-10000");
 }
-use crate::app::App;
-use crate::editor::InvocationSource;
-use crate::editor::text::TextBuffer;
-use crate::ui::PickerSurfaceKind;
-use std::fs;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
 
-use crate::app::picker::MatcherSource;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
+#[test]
+fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
+    let (_app_dirs, mut app) = app();
+    app.window_session.observe_size((100, 30));
+    app.reconcile_editor_windows();
+    let dashboard = app
+        .window_session
+        .native_ids()
+        .dashboard()
+        .expect("dashboard resources");
+    let dashboard_rect = app
+        .compositor_projection()
+        .and_then(|projection| projection.window(dashboard.window))
+        .expect("dashboard projection")
+        .rect;
+    assert_eq!(
+        dashboard_rect,
+        WindowRect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        }
+    );
+
+    app.state
+        .open_text(crate::editor::text::TextBuffer::from_text("editor"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.ui.picker = Some(crate::ui::PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
+        input_hint: String::new(),
+        surface: crate::ui::PickerSurfaceKind::Generic,
+        title: "Search".into(),
+        query: "needle".into(),
+        rows: Vec::new(),
+        selected: None,
+        scroll: 0,
+        total: 0,
+        loading: false,
+        preview: None,
+    });
+    app.reconcile_editor_windows();
+    let picker = app
+        .window_session
+        .native_ids()
+        .picker()
+        .expect("picker resources");
+    let expected = crate::ui::picker_geometry(WindowRect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 30,
+    })
+    .expect("picker geometry");
+    let projection = app.compositor_projection().expect("picker projection");
+    assert_eq!(
+        projection
+            .window(picker.window)
+            .expect("picker window")
+            .rect,
+        expected
+    );
+    assert_eq!(
+        projection.hit_test(expected.x.saturating_add(1), expected.y.saturating_add(1)),
+        Some(picker.window)
+    );
+
+    app.ui.picker = None;
+    app.reconcile_editor_windows();
+    assert_eq!(app.window_session.native_ids().dashboard(), Some(dashboard));
+    assert_eq!(
+        app.window_session
+            .native_ids()
+            .picker_for(PickerSurfaceKind::Generic),
+        Some(picker)
+    );
+    assert!(
+        app.compositor_projection()
+            .expect("hidden picker projection")
+            .window(picker.window)
+            .is_none()
+    );
+
+    app.close_active_buffer(false);
+    app.reconcile_editor_windows();
+    assert!(app.ui.dashboard);
+    assert_eq!(app.window_session.native_ids().dashboard(), Some(dashboard));
+    assert!(
+        app.compositor_projection()
+            .expect("dashboard after last buffer")
+            .window(dashboard.window)
+            .is_some()
+    );
+}
+
+#[test]
+fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources()
+ {
+    let (_app_dirs, mut app) = app();
+    for logs in [false, true] {
+        app.close_picker();
+        if logs {
+            app.show_lsp_logs();
+        } else {
+            app.show_output_picker("one");
+        }
+        app.handle_configured_key("j".parse().unwrap());
+        app.handle_configured_key("escape".parse().unwrap());
+        for _ in 0..3 {
+            if logs {
+                app.show_lsp_logs();
+            } else {
+                app.show_output_picker("one");
+            }
+            assert_eq!(app.active_input_context(), "picker_normal");
+            assert_eq!(app.ui.picker.as_ref().unwrap().query, "j");
+            assert!(
+                app.ui
+                    .picker
+                    .as_ref()
+                    .unwrap()
+                    .input_hint
+                    .starts_with("Normal")
+            );
+        }
+        app.show_output_picker("different-source");
+        assert_eq!(app.active_input_context(), "picker");
+        assert_eq!(app.ui.picker.as_ref().unwrap().query, "");
+    }
+}
+
+#[test]
+fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
+{
+    let (_app_dirs, mut app) = app();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    for kind in [PickerSurfaceKind::Problems, PickerSurfaceKind::Output] {
+        if kind == PickerSurfaceKind::Problems {
+            app.open_builtin_picker(PickerKind::Diagnostics);
+        } else {
+            app.show_output_picker("missing-task");
+        }
+        app.reconcile_editor_windows();
+        let ids = app.window_session.native_ids().picker_for(kind).unwrap();
+        assert!(
+            app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.identity.0 == ids.content)
+        );
+        app.close_picker();
+        app.reconcile_editor_windows();
+        assert!(app.window_session.graph().content(ids.content).is_some());
+        assert!(
+            !app.ui
+                .content_tabs
+                .iter()
+                .any(|entry| entry.identity.0 == ids.content)
+        );
+    }
+}
+
+#[test]
+fn picker_title_changes_update_the_retained_window_content() {
+    let (_app_dirs, mut app) = app();
+    app.open_builtin_picker(PickerKind::Buffers);
+    app.reconcile_editor_windows();
+    let files = app.window_session.native_ids().picker().unwrap();
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content(files.content)
+            .unwrap()
+            .title,
+        "Buffers"
+    );
+    app.open_builtin_picker(PickerKind::Commands);
+    app.reconcile_editor_windows();
+    assert_eq!(app.window_session.native_ids().picker(), Some(files));
+    assert_eq!(
+        app.window_session
+            .graph()
+            .content(files.content)
+            .unwrap()
+            .title,
+        "Commands"
+    );
+    app.process_effect(AppEffect::WindowList);
+    assert!(
+        app.ui
+            .picker
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .any(|row| row.label.contains("Commands"))
+    );
+}
