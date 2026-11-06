@@ -121,8 +121,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     if !path.starts_with(root) {
                         return None;
                     }
-                    let bytes =
-                        crate::files::read_file_with_ceiling(&path, 4 * 1024 * 1024).ok()?;
+                    let bytes = crate::files::read_file_bounded(&path, 4 * 1024 * 1024).ok()?;
                     Some((
                         uri.to_owned(),
                         crate::editor::text::TextBuffer::from_text(&String::from_utf8(bytes).ok()?),

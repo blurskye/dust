@@ -14,9 +14,7 @@ pub enum LspError {
     Busy(String),
     #[error("language server executable `{0}` is not installed")]
     ExecutableMissing(String),
-    #[error(
-        "language server launch requires an absolute executable from ExecutionPreflightWorker"
-    )]
+    #[error("language server launch requires an absolute executable from ExecutionPreflightWorker")]
     PreflightRequired,
     #[error("failed to create language-server thread: {0}")]
     Thread(#[source] std::io::Error),
