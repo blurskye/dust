@@ -29,19 +29,19 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-mod keymaps;
+pub(in crate::app) mod keymaps;
 /// The enum name is needed by tests and by prose; production reaches it through the method it
 /// returns from, so the alias is gated rather than left to warn as an unused import.
 #[cfg(test)]
 pub(in crate::app) use keymaps::EffectiveBinding;
 pub(in crate::app) use keymaps::ReverseBinding;
-pub use keymaps::ConfigurationSources;
+pub use resolve::ConfigurationSources;
 pub use keymaps::KeymapInspection;
 pub use keymaps::KeymapOperation;
-pub use keymaps::ResolvedConfiguration;
+pub use resolve::ResolvedConfiguration;
 pub use keymaps::ResolvedKeyGroup;
 pub use keymaps::ResolvedKeymaps;
-mod resolve;
+pub(in crate::app) mod resolve;
 pub use resolve::validate_loaded_configuration;
 pub(in crate::app) use resolve::configuration_generation_is_newer;
 pub(in crate::app) use resolve::configured_grapheme_width;
@@ -489,4 +489,15 @@ pub(in crate::app) fn plugin_owner_from_id(id: &str) -> Option<&str> {
         .filter(|owner| !owner.is_empty())
 }
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod configuration_tests;
+
+#[cfg(test)]
+mod contributions_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

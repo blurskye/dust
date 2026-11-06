@@ -1853,4 +1853,15 @@ impl DebugSession {
 #[cfg(test)]
 pub(super) mod tests;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

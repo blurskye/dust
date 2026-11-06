@@ -13,3 +13,6 @@ impl App {
         self.project_window_activation();
     }
 }
+
+#[cfg(test)]
+mod surfaces_tests;

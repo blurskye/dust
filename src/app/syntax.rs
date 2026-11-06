@@ -1087,8 +1087,8 @@ mod formatter_cursor_tests {
             .chars()
             .filter(|c| !c.is_whitespace())
             .count();
-        let moved = crate::app::events::nth_non_blank(after, non_blank);
+        let moved = crate::app::syntax::nth_non_blank(after, non_blank);
         assert_eq!(&after[moved..moved + 5], "World");
-        assert_eq!(crate::app::events::nth_non_blank("a b", 9), 3);
+        assert_eq!(crate::app::syntax::nth_non_blank("a b", 9), 3);
     }
 }

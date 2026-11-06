@@ -770,7 +770,18 @@ fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<Pi
     cells
 }
 
-mod preview;
-mod palette;
+pub(in crate::app) mod preview;
+pub(in crate::app) mod palette;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

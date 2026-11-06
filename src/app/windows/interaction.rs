@@ -1014,7 +1014,7 @@ impl App {
                 self.sync_explorer_ui();
                 self.sync_plugin_window_ui();
             }
-            Err(error) => self.notices.record(
+            Err(error) => self.health.record(
                 LogLevel::Error,
                 "windows",
                 "window-reconciliation-rejected",

@@ -1,16 +1,33 @@
+pub(crate) struct RestoredPane {
+    pub(crate) path: PathBuf,
+    pub(crate) cursor: usize,
+    pub(crate) scroll_line: usize,
+    pub(crate) scroll_column: usize,
+}
+pub(crate) enum RestoredLayout {
+    Pane { pane: RestoredPane },
+    Split { axis: crate::editor::Axis, ratio: u16, first: Box<Self>, second: Box<Self> },
+    Invalid,
+}
+pub(crate) struct RestoredTab {
+    pub(crate) layout: RestoredLayout,
+    pub(crate) focused_pane: Option<usize>,
+    pub(crate) focused_path: Option<PathBuf>,
+}
 //! Canonical restoration of editor stores through a consuming draft.
 use crate::editor::transaction::EditorDraft;
 use crate::editor::EditorState;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::persistence::PersistedLayout;
-use crate::persistence::PersistedSession;
+
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 impl EditorDraft {
-    pub(crate) fn restore_layout(
+    pub(crate) fn restore_tabs(
         &mut self,
-        session: &PersistedSession,
+        tabs: &[RestoredTab],
+        active_tab: usize,
         loaded: &HashMap<PathBuf, (PathBuf, TextBuffer)>,
     ) -> Result<(), String> {
         if self.state.buffers.values().any(|buffer| buffer.dirty) {
@@ -23,7 +40,7 @@ impl EditorDraft {
         self.state.active_tab = None;
         self.state.active_view = None;
         let mut built = Vec::new();
-        for tab in &session.tabs {
+        for tab in tabs {
             let (layout, panes) = build_layout(&mut self.state, &tab.layout, loaded)
                 .ok_or("session layout is incomplete")?;
             let focused = tab
@@ -58,7 +75,7 @@ impl EditorDraft {
         if tabs.is_empty() {
             return Err("session has no restorable tabs".into());
         }
-        let active = session.active_tab.min(tabs.len() - 1);
+        let active = active_tab.min(tabs.len() - 1);
         self.state.active_tab = Some(tabs[active].0);
         self.state.active_view = self.state.panes.get(tabs[active].1).map(|pane| pane.view);
         self.state.mark_window_changed();
@@ -67,14 +84,15 @@ impl EditorDraft {
 }
 fn build_layout(
     state: &mut EditorState,
-    layout: &PersistedLayout,
+    layout: &RestoredLayout,
     loaded: &HashMap<PathBuf, (PathBuf, TextBuffer)>,
 ) -> Option<(
     crate::editor::LayoutNode,
     Vec<(PathBuf, crate::editor::PaneId)>,
 )> {
     match layout {
-        PersistedLayout::Pane { pane } => {
+        RestoredLayout::Invalid => None,
+        RestoredLayout::Pane { pane } => {
             let (canonical, text) = loaded.get(&pane.path)?;
             let buffer = state.load_hidden_text(text.clone(), canonical.clone());
             let mut view = crate::editor::View::new(buffer);
@@ -99,7 +117,7 @@ fn build_layout(
                 vec![(pane.path.clone(), pane_id)],
             ))
         }
-        PersistedLayout::Split {
+        RestoredLayout::Split {
             axis,
             ratio,
             first,
@@ -111,10 +129,9 @@ fn build_layout(
             let (first, mut panes) = build_layout(state, first, loaded)?;
             let (second, second_panes) = build_layout(state, second, loaded)?;
             panes.extend(second_panes);
-            let axis = match axis.as_str() {
-                "horizontal" => crate::editor::Axis::Horizontal,
-                "vertical" => crate::editor::Axis::Vertical,
-                _ => return None,
+            let axis = match axis {
+                crate::editor::Axis::Horizontal => crate::editor::Axis::Horizontal,
+                crate::editor::Axis::Vertical => crate::editor::Axis::Vertical,
             };
             Some((
                 crate::editor::LayoutNode::Split {
@@ -130,9 +147,9 @@ fn build_layout(
 }
 
 #[cfg(test)]
-pub(crate) fn build_restored_layout(
+pub(crate) fn build_layout_for_test(
     state: &mut EditorState,
-    layout: &PersistedLayout,
+    layout: &RestoredLayout,
     loaded: &HashMap<PathBuf, (PathBuf, TextBuffer)>,
 ) -> Option<(
     crate::editor::LayoutNode,

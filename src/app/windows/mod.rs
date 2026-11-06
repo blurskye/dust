@@ -1,6 +1,6 @@
 //! Private graph, native/editor identity bridges and accepted geometry.
 mod bridge;
-mod content;
+pub(in crate::app) mod content;
 mod focus;
 pub(in crate::app) use focus::FocusTarget;
 mod mutations;
@@ -294,4 +294,15 @@ pub(in crate::app) use plugin::PluginWindowReceipt;
 
 pub(in crate::app) use plugin::PluginWindowTransition;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod viewport_tests;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

@@ -92,8 +92,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
         pinned: Vec::new(),
     };
     let mut draft = state.draft();
-    draft
-        .restore_layout(
+    crate::app::persistence::restore::restore_layout(&mut draft, 
             &session,
             &std::collections::HashMap::from([(
                 path.clone(),

@@ -461,4 +461,14 @@ mod tests {
     }
 }
 
-mod coordination;
+pub(in crate::app) mod coordination;
+
+pub(in crate::app) mod restore;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

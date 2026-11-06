@@ -468,4 +468,12 @@ impl SearchSession {
 #[cfg(test)]
 mod tests;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod project_tests;

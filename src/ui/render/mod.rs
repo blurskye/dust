@@ -78,15 +78,15 @@ use overlays::content_tab_width;
 
 use overlays::render_content_tab_line;
 
-use surfaces::render_picker;
+use picker::render_picker;
 
-use surfaces::render_plugin_surface;
+use plugins::render_plugin_surface;
 
-use surfaces::render_private_surface;
+use plugins::render_private_surface;
 
-use surfaces::render_prompt;
+use prompt::render_prompt;
 
-use surfaces::render_tool_menu;
+use tools::render_tool_menu;
 
 #[cfg(test)]
 use visual_rows::VisualRowSlice;
@@ -136,7 +136,7 @@ pub use settings::settings_layout;
 
 pub use settings::settings_lines_height;
 
-pub use surfaces::picker_geometry;
+pub use picker::picker_geometry;
 
 pub use terminal::terminal_tab_at_column;
 
@@ -2560,6 +2560,30 @@ pub(crate) fn render_with_documentation_geometry(
 
 
 #[cfg(test)]
-mod tests;
+mod composition_tests;
+#[cfg(test)]
+mod prompt_tests;
+#[cfg(test)]
+mod documentation_tests;
+#[cfg(test)]
+mod editor_tests;
+#[cfg(test)]
+mod dashboard_tests;
+#[cfg(test)]
+mod completion_tests;
+#[cfg(test)]
+mod window_tests;
+#[cfg(test)]
+mod tab_tests;
+#[cfg(test)]
+mod explorer_tests;
+#[cfg(test)]
+mod plugin_tests;
+#[cfg(test)]
+mod picker_tests;
+#[cfg(test)]
+mod terminal_tests;
+#[cfg(test)]
+mod debug_tests;
 use crate::ui::grid::Frame;
 use crate::ui::diff::{DiffLineKind,DiffSpan,DiffLine,DiffHunk,DiffLayout,DiffRow,DiffSideCell,DiffSideRow,DiffPreview,DiffRowKind};

@@ -1647,7 +1647,7 @@ impl App {
         {
             self.show_error(error);
         }
-        self.notices.record(
+        self.health.record(
             LogLevel::Error,
             "plugins",
             "worker-stopped",
@@ -2115,7 +2115,7 @@ impl App {
                         continue;
                     }
                     self.configuration.complete_plugin_indexes();
-                    self.notices.record(
+                    self.health.record(
                         LogLevel::Info,
                         "plugins",
                         "indexed-and-accepted",
@@ -2172,7 +2172,7 @@ impl App {
                         self.remove_plugin_contribution_generation(&plugin, load);
                         self.show_error(error);
                     }
-                    self.notices.record(
+                    self.health.record(
                         LogLevel::Info,
                         "plugins",
                         "active",
@@ -2214,7 +2214,7 @@ impl App {
                     self.remove_plugin_contribution_generation(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
                     failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
-                    self.notices.record(
+                    self.health.record(
                         LogLevel::Error,
                         "plugins",
                         "failed",
@@ -2443,7 +2443,7 @@ impl App {
             Ok(None) => {}
             Err(error) => self.show_error(error),
         }
-        self.notices.record(
+        self.health.record(
             LogLevel::Info,
             "plugins",
             "executed",

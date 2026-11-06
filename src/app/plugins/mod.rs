@@ -35,7 +35,7 @@ use std::path::PathBuf;
 mod confirmations;
 mod hosting;
 pub(super) use confirmations::ConfirmationPresentation;
-mod integration;
+pub(in crate::app) mod integration;
 mod panels;
 pub(super) use hosting::WindowUpdate;
 pub(super) use integration::ExtensionUpdate;
@@ -43,7 +43,7 @@ pub(super) use integration::RegistryUpdate;
 pub(super) use windows::PluginUiInteraction;
 #[cfg(test)]
 pub(in crate::app) use windows::tests::fixture_manifest;
-mod content;
+pub(in crate::app) mod content;
 mod documents;
 pub(super) use content::VirtualContext;
 pub(super) use content::VirtualOpen;
@@ -609,4 +609,15 @@ impl ExtensionSession {
 
 pub(in crate::app) mod edits;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod extensions_tests;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

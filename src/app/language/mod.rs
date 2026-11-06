@@ -870,4 +870,15 @@ impl LspSession {
 pub(in crate::app) mod edits;
 pub(in crate::app) mod snippets;
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod language_tests;
+
+#[cfg(test)]
+mod language_features_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

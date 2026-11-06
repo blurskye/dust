@@ -531,3 +531,36 @@ impl App {
         self.project_input_documentation();
     }
 }
+
+use crate::app::AppEffect;
+
+impl App {
+    pub(in crate::app) fn process_documentation_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::LspDocumentationScroll(direction) => {
+                self.reconcile_editor_windows();
+                // Use the same final layout as painting, including a narrowed completion box.
+                let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                    &self.state,
+                    &self.ui,
+                    self.configuration.settings(),
+                    self.configuration.dashboard(),
+                    self.window_session.width(),
+                    self.window_session.height(),
+                );
+                if let Some((visible, total)) = geometry {
+                    self.input.scroll_documentation(
+                        direction,
+                        crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP,
+                        visible,
+                        total,
+                    );
+                }
+                self.project_input_documentation();
+            }
+            AppEffect::LspDocumentationClose => self.close_documentation(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

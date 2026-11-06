@@ -217,7 +217,7 @@ fn interactive_lsp_results_follow_the_request_cursor() {
             .open_text(TextBuffer::from_text("first\nsecond"), Some(path))
             .unwrap();
         app.set_dashboard_visibility(false);
-        let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "server", buffer);
+        let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "server", buffer);
         app.language.select("server");
         let document = app.active_lsp_document().unwrap().1;
         app.request_lsp(LspFeature::Hover);
@@ -251,8 +251,8 @@ fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
         .open_text(TextBuffer::from_text("symbol"), Some(path))
         .unwrap();
     app.set_dashboard_visibility(false);
-    let first = crate::app::tests::language::fixture_owned_lsp(&mut app, "first", buffer);
-    let second = crate::app::tests::language::fixture_owned_lsp(&mut app, "second", buffer);
+    let first = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "second", buffer);
     drop(second);
     app.language.select("first");
     let document = app.active_lsp_document().unwrap().1;
@@ -422,7 +422,7 @@ fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
     assert_eq!(hinted(&app), [first, second]);
 
     // Typing before a hint moves it instead of hiding it until the server answers again.
-    let _transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "server", second);
+    let _transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "server", second);
     app.language.running(
         "server",
         LspCapabilities {
@@ -499,7 +499,7 @@ fn stale_owned_inlay_replies_cannot_replace_the_projection() {
             .open_text(TextBuffer::from_text("let 界 = build();"), Some(path))
             .unwrap();
         app.set_dashboard_visibility(false);
-        let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "server", buffer);
+        let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "server", buffer);
         app.language.running(
             "server",
             LspCapabilities {
@@ -552,7 +552,7 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
         .open_text(TextBuffer::from_text("symbol"), Some(path))
         .unwrap();
     app.set_dashboard_visibility(false);
-    let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "rust-analyzer", buffer);
+    let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "rust-analyzer", buffer);
     app.language.select("rust-analyzer");
     app.request_lsp(crate::language::lsp::LspFeature::Hover);
     assert_eq!(
@@ -923,7 +923,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
     use crate::language::lsp::LspTextEdit;
     use crate::language::lsp::LspWorkspaceEdit;
     let (_app_dirs, mut app, buffer, path, uri) = app_waiting_to_save_formatted("formatted.txt");
-    let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "formatter", buffer);
+    let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "formatter", buffer);
     let position = |character| LspPosition { line: 0, character };
     app.present_lsp_result_owned(
         "formatter",
@@ -961,7 +961,7 @@ fn formatting_syncs_unsent_edits_before_requesting_the_server() {
         .state
         .open_text(TextBuffer::from_text("old"), Some(path))
         .unwrap();
-    let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "formatter", buffer);
+    let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "formatter", buffer);
     app.language.select("formatter");
     app.state.buffers[buffer]
         .text
@@ -1006,7 +1006,7 @@ fn formatting_rejects_missing_and_stale_document_sources() {
         } else {
             buffer
         };
-        let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "formatter", source_buffer);
+        let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "formatter", source_buffer);
         if ownership == "stale source" {
             app.state.buffers[buffer]
                 .text
@@ -1149,8 +1149,8 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
         command: None,
     };
     let buffer = app.state.active_buffer_id().unwrap();
-    let first = crate::app::tests::language::fixture_owned_lsp(&mut app, "types", buffer);
-    let second = crate::app::tests::language::fixture_owned_lsp(&mut app, "linter", buffer);
+    let first = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "types", buffer);
+    let second = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "linter", buffer);
     app.language.select("types");
     let document = app.active_lsp_document().unwrap().1;
     assert_eq!(document.uri(), uri);
@@ -1214,8 +1214,8 @@ fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
         .open_text(TextBuffer::from_text("fn main() {}"), Some(path))
         .unwrap();
     app.set_dashboard_visibility(false);
-    let first = crate::app::tests::language::fixture_owned_lsp(&mut app, "first", buffer);
-    let second = crate::app::tests::language::fixture_owned_lsp(&mut app, "second", buffer);
+    let first = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "second", buffer);
     app.language.select("first");
     let document = app.active_lsp_document().unwrap().1;
     let position = LspPosition {
@@ -1274,8 +1274,8 @@ fn null_completion_preserves_other_servers_items_without_an_error() {
         .open_text(TextBuffer::from_text(""), Some(path))
         .unwrap();
     app.set_dashboard_visibility(false);
-    let first = crate::app::tests::language::fixture_owned_lsp(&mut app, "first", buffer);
-    let second = crate::app::tests::language::fixture_owned_lsp(&mut app, "second", buffer);
+    let first = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "first", buffer);
+    let second = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "second", buffer);
     app.language.select("first");
     let document = app.active_lsp_document().unwrap().1;
     app.request_lsp(LspFeature::Completion);
@@ -1395,7 +1395,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(8);
-    let transport = crate::app::tests::language::fixture_owned_lsp(&mut app, "formatter", buffer);
+    let transport = crate::app::language::language_tests::fixture_owned_lsp(&mut app, "formatter", buffer);
     app.present_lsp_result_owned(
         "formatter",
         1,

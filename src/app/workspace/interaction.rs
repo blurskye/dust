@@ -2587,7 +2587,7 @@ impl App {
                     }
                 }
                 ExtensionUpdate::Failed { operation, error } => {
-                    self.notices.record(
+                    self.health.record(
                         LogLevel::Error,
                         "packages",
                         "operation-failed",

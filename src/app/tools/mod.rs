@@ -996,3 +996,5 @@ mod tests {
         assert_eq!(tooling.versions.len(), 8);
     }
 }
+
+pub(in crate::app) mod commands;

@@ -1,4 +1,4 @@
-mod commands;
+pub(in crate::app) mod commands;
 use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::EditorTopology;
 use crate::app::windows::EditorWindowCandidate;

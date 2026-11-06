@@ -1,17 +1,18 @@
+
 use crate::app::commands::AppEffect;
-use crate::app::commands::ArgumentSchema;
-use crate::app::commands::ArgumentType;
-use crate::app::commands::CommandError;
-use crate::app::commands::CommandRegistry;
-use crate::app::commands::ContextRequirement;
-use crate::app::commands::FocusDirection;
+use crate::editor::ArgumentSchema;
+use crate::editor::ArgumentType;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::editor::FocusDirection;
 use crate::app::commands::integer_arg;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
+use crate::app::commands::LayoutAction;
 
-pub(super) fn register_commands(
-    registry: &mut CommandRegistry<AppEffect>,
-) -> Result<(), CommandError> {
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
     register(
         registry,
         "window.list",
@@ -200,5 +201,207 @@ pub(super) fn register_commands(
             })
         },
     )?;
-    Ok(())
+    for (id, title, effect) in [
+        (
+            "surface.confirmation.select_yes",
+            "Answer yes",
+            AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::Yes),
+        ),
+        (
+            "surface.confirmation.select_no",
+            "Answer no",
+            AppEffect::PromptConfirmationSelect(crate::ui::ConfirmationChoice::No),
+        ),
+        (
+            "surface.confirmation.toggle",
+            "Toggle confirmation choice",
+            AppEffect::PromptConfirmationToggle,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
+    for (id, title, direction) in [
+        (
+            "surface.focus.left",
+            "Focus surface to the left",
+            FocusDirection::Left,
+        ),
+        (
+            "surface.focus.down",
+            "Focus surface below",
+            FocusDirection::Down,
+        ),
+        (
+            "surface.focus.up",
+            "Focus surface above",
+            FocusDirection::Up,
+        ),
+        (
+            "surface.focus.right",
+            "Focus surface to the right",
+            FocusDirection::Right,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::SurfaceFocus(direction),
+        )?;
+    }
+    for (id, title, effect) in [
+        (
+            "surface.retained.focus.next",
+            "Focus next retained UI node",
+            AppEffect::RetainedUiFocus(1),
+        ),
+        (
+            "surface.retained.focus.previous",
+            "Focus previous retained UI node",
+            AppEffect::RetainedUiFocus(-1),
+        ),
+        (
+            "surface.retained.scroll.down",
+            "Scroll retained UI down",
+            AppEffect::RetainedUiScroll(1),
+        ),
+        (
+            "surface.retained.scroll.up",
+            "Scroll retained UI up",
+            AppEffect::RetainedUiScroll(-1),
+        ),
+        (
+            "surface.retained.activate",
+            "Activate focused retained UI node",
+            AppEffect::RetainedUiActivate,
+        ),
+        (
+            "surface.retained.mouse.select",
+            "Select retained UI node at mouse position",
+            AppEffect::RetainedUiMouseSelect,
+        ),
+        (
+            "dashboard.select.next",
+            "Move to the next dashboard item",
+            AppEffect::DashboardSelect(1),
+        ),
+        (
+            "dashboard.select.previous",
+            "Move to the previous dashboard item",
+            AppEffect::DashboardSelect(-1),
+        ),
+        (
+            "dashboard.open",
+            "Run the dashboard item under the cursor",
+            AppEffect::DashboardOpen,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| effect.clone(),
+        )?;
+    }
+    for (id, title, at_mouse) in [
+        (
+            "surface.private.activate",
+            "Activate private surface action at cursor",
+            false,
+        ),
+        (
+            "surface.private.mouse.activate",
+            "Activate private surface action at mouse",
+            true,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::PrivateUiActivate { at_mouse },
+        )?;
+    }
+    for (id, title, action) in [
+        (
+            "pane.split.horizontal",
+            "Split pane horizontally",
+            LayoutAction::Split(crate::editor::Axis::Horizontal),
+        ),
+        (
+            "pane.split.vertical",
+            "Split pane vertically",
+            LayoutAction::Split(crate::editor::Axis::Vertical),
+        ),
+        ("pane.close", "Close pane", LayoutAction::ClosePane),
+        (
+            "pane.resize.grow",
+            "Grow focused pane",
+            LayoutAction::ResizePane(1),
+        ),
+        (
+            "pane.resize.shrink",
+            "Shrink focused pane",
+            LayoutAction::ResizePane(-1),
+        ),
+        (
+            "pane.focus.next",
+            "Focus next pane",
+            LayoutAction::FocusPane(1),
+        ),
+        (
+            "pane.focus.previous",
+            "Focus previous pane",
+            LayoutAction::FocusPane(-1),
+        ),
+        ("tab.new", "Open new tab", LayoutAction::NewTab),
+        ("tab.close", "Close tab", LayoutAction::CloseTab),
+        ("pane.zoom", "Zoom the pane", LayoutAction::Zoom),
+        ("tab.next", "Focus next tab", LayoutAction::FocusTab(1)),
+        (
+            "tab.previous",
+            "Focus previous tab",
+            LayoutAction::FocusTab(-1),
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::View,
+            ArgumentSchema::default(),
+            move |invocation| {
+                let count = invocation.count.map_or(1, |count| count.get());
+                let steps = isize::try_from(count).unwrap_or(isize::MAX);
+                let action = match action {
+                    LayoutAction::ResizePane(direction) => {
+                        LayoutAction::ResizePane(direction * i8::try_from(count).unwrap_or(i8::MAX))
+                    }
+                    LayoutAction::FocusPane(direction) => {
+                        LayoutAction::FocusPane(direction * steps)
+                    }
+                    LayoutAction::FocusTab(1) if invocation.count.is_some() => {
+                        LayoutAction::FocusTabNumber(usize::try_from(count).unwrap_or(usize::MAX))
+                    }
+                    LayoutAction::FocusTab(direction) => LayoutAction::FocusTab(direction * steps),
+                    action => action,
+                };
+                AppEffect::Layout(action)
+            },
+        )?;
+    }
+Ok(())
 }

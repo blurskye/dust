@@ -228,3 +228,39 @@ impl App {
         self.install_help_page(title, items);
     }
 }
+
+use crate::app::commands::AppEffect;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::app::commands::register;
+
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
+    register(
+        registry,
+        "overlay.help.contextual",
+        "Show what is available on the focused surface",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_invocation| Ok(AppEffect::HelpContextual),
+    )?;
+    register(
+        registry,
+        "overlay.help.form",
+        "Show help for the form or confirmation in front of you",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_invocation| Ok(AppEffect::HelpForForm),
+    )?;
+    register(
+        registry,
+        "overlay.help.reference",
+        "Show the reference for the selected command",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_invocation| Ok(AppEffect::HelpCommandReference),
+    )?;
+Ok(())
+}

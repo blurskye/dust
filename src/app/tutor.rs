@@ -1536,3 +1536,23 @@ mod tests {
         assert!(!invocation_matches("input.find.begin", &invocation));
     }
 }
+
+use crate::app::commands::AppEffect;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::app::commands::register;
+
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
+    register(
+        registry,
+        "session.tutor",
+        "Start the interactive tutor, or pick up where you left it",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_invocation| Ok(AppEffect::Tutor),
+    )?;
+Ok(())
+}

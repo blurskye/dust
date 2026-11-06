@@ -21,7 +21,7 @@ impl App {
         self.cancel_session_restore();
         let discarded = self.extension.close_edits();
         if discarded != 0 {
-            self.notices.record(
+            self.health.record(
                 crate::telemetry::LogLevel::Info,
                 "plugins",
                 "discarded-result-obligations-at-shutdown",

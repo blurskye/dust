@@ -405,7 +405,7 @@ impl App {
             safe_mode,
             crate::app::tasks::PROCESS_EVENT_CAPACITY,
         );
-        let notices = crate::app::notifications::NoticeSession::new(
+        let health = crate::app::health::Health::new(
             persist_logs,
             state_directory.join("live-health.json"),
             clock.monotonic(),
@@ -513,7 +513,8 @@ impl App {
                 persistence_path,
             ),
             tasks,
-            notices,
+            notices: crate::app::notifications::NoticeSession::new(),
+            health,
             clock,
             terminal_session,
         };

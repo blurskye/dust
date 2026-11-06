@@ -588,7 +588,7 @@ impl WorkspaceEditSession {
 #[cfg(test)]
 mod tests;
 
-mod interaction;
+pub(in crate::app) mod interaction;
 
 fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<crate::editor::transaction::DraftEdit<'_>> {
     proposal.files.iter().filter(|file| file.selected).map(|file| crate::editor::transaction::DraftEdit {

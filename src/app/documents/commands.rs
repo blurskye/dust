@@ -1,31 +1,95 @@
+
+use crate::app::AppEffect;
+use crate::app::App;
+use crate::app::LargeFileOverride;
+use crate::app::mode_name_large;
+
+impl App {
+    pub(in crate::app) fn process_documents_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
+                Ok(()) => {
+                    self.notify_message(self.message("config_reload_queued", &[]), false);
+                }
+                Err(error) => self.show_error(error),
+            },
+            AppEffect::LargeFileSet(mode) => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let mode = match mode.as_str() {
+                    "auto" => LargeFileOverride::Auto,
+                    "on" => LargeFileOverride::On,
+                    "off" => LargeFileOverride::Off,
+                    _ => {
+                        self.show_error(self.message("large_file_invalid", &[]));
+                        return Ok(());
+                    }
+                };
+                self.documents.set_large_file_mode(
+                    buffer,
+                    self.state.buffers[buffer].path.as_deref(),
+                    mode,
+                );
+                self.process_large_file_modes();
+                self.notify_message(
+                    self.message(
+                        "large_file_changed",
+                        &[("mode", mode_name_large(mode).into())],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::LargeFileStatus => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let configured = self.documents.configured_mode(buffer);
+                let effective = if self.effective_large_file(buffer) {
+                    "on"
+                } else {
+                    "off"
+                };
+                self.notify_message(
+                    self.message(
+                        "large_file_status",
+                        &[
+                            ("mode", mode_name_large(configured).into()),
+                            ("effective", effective.into()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
 use crate::app::commands::AppEffect;
-use crate::app::commands::ArgumentSchema;
-use crate::app::commands::ArgumentType;
-use crate::app::commands::CommandError;
-use crate::app::commands::CommandRegistry;
-use crate::app::commands::ContextRequirement;
-use crate::app::commands::PathBuf;
-use crate::app::commands::bool_arg;
-use crate::app::commands::optional_bool_arg;
-use crate::app::commands::optional_string_arg;
+use crate::editor::ArgumentSchema;
+use crate::editor::ArgumentType;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
+use crate::app::commands::PathBuf;
+use crate::app::commands::optional_bool_arg;
+use crate::app::commands::optional_string_arg;
+use crate::app::commands::bool_arg;
 
-pub(super) fn register_commands(
-    registry: &mut CommandRegistry<AppEffect>,
-) -> Result<(), CommandError> {
-    register(
-        registry,
-        "editor.quit",
-        "Quit Dust",
-        ContextRequirement::Application,
-        ArgumentSchema::default().field("force", ArgumentType::Bool, true),
-        |invocation| {
-            Ok(AppEffect::Quit {
-                force: bool_arg(invocation, "force")?,
-            })
-        },
-    )?;
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
     register(
         registry,
         "edit.substitute_lines",
@@ -206,5 +270,48 @@ pub(super) fn register_commands(
         ArgumentSchema::default(),
         |_| AppEffect::NewTab,
     )?;
-    Ok(())
+    register(
+        registry,
+        "buffer.large_file.set",
+        "Set large-file mode",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default().field("mode", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::LargeFileSet(
+                string_arg(invocation, "mode")?.to_owned(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "buffer.large_file.status",
+        "Show large-file mode",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::LargeFileStatus,
+    )?;
+    register(
+        registry,
+        "buffer.virtual.open",
+        "Open a read-only plugin virtual document",
+        ContextRequirement::Application,
+        ArgumentSchema::default()
+            .field("source", ArgumentType::String, true)
+            .field("key", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::VirtualDocumentOpen {
+                source: string_arg(invocation, "source")?.into(),
+                key: string_arg(invocation, "key")?.into(),
+            })
+        },
+    )?;
+    register(
+        registry,
+        "buffer.virtual.refresh",
+        "Refresh focused read-only virtual document",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::VirtualDocumentRefresh,
+    )?;
+Ok(())
 }

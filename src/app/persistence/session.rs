@@ -116,7 +116,7 @@ impl RestoreReady {
             return Err("session restore source changed".into());
         }
         let mut draft = context.editor.draft();
-        draft.restore_layout(&self.session, &self.loaded)?;
+        crate::app::persistence::restore::restore_layout(&mut draft, &self.session, &self.loaded)?;
         // Files come back in the order their windows had, which the buffer line follows.
         let mut panes = Vec::new();
         for tab in &self.session.tabs {

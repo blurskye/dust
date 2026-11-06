@@ -739,5 +739,7 @@ mod tests {
     }
 }
 
-mod setup;
-mod shortcuts;
+pub(in crate::app) mod setup;
+pub(in crate::app) mod shortcuts;
+
+pub(in crate::app) mod commands;

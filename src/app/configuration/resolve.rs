@@ -294,3 +294,121 @@ pub(in crate::app) fn configured_text_width(
     }
     column
 }
+
+use crate::app::configuration::BTreeMap;
+use crate::app::configuration::BTreeSet;
+use crate::app::configuration::PathBuf;
+
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationSources {
+    pub settings: PathBuf,
+    pub keymaps: PathBuf,
+    pub dashboard: PathBuf,
+    pub theme: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct ResolvedConfiguration {
+    pub settings: crate::config::Config,
+    pub dashboard: crate::config::DashboardConfig,
+    pub theme: crate::config::ThemeConfig,
+    pub raw_keymaps: crate::config::LoadedKeymaps,
+    pub base_keymaps: crate::config::LoadedKeymaps,
+    pub raw_windows: crate::config::WindowsConfig,
+    pub deferred_plugin_keymaps: bool,
+    pub expected_plugin_indexes: BTreeSet<String>,
+    pub keymaps: ResolvedKeymaps,
+    pub sources: ConfigurationSources,
+    pub user_setting_keys: BTreeSet<String>,
+    pub user_setting_spans: BTreeMap<String, std::ops::Range<usize>>,
+    pub dashboard_spans: BTreeMap<String, std::ops::Range<usize>>,
+    pub theme_spans: BTreeMap<String, std::ops::Range<usize>>,
+}
+
+pub(in crate::app) fn resolved_toml_value(
+    mut value: toml::Value,
+    segments: &[String],
+) -> Option<toml::Value> {
+    for segment in segments {
+        value = if let Some(table) = value.as_table() {
+            table.get(segment)?.clone()
+        } else {
+            value
+                .as_array()?
+                .get(segment.parse::<usize>().ok()?)?
+                .clone()
+        };
+    }
+    Some(value)
+}
+
+impl ResolvedConfiguration {
+    #[must_use]
+    pub fn explain(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+        let (value, source, span, layered) = if let Some(key) = key.strip_prefix("theme.") {
+            let segments = crate::config::config_key_segments(key)?;
+            let canonical = segments.join(".");
+            let value = resolved_toml_value(toml::Value::try_from(&self.theme).ok()?, &segments)?;
+            (
+                value,
+                &self.sources.theme,
+                self.theme_spans.get(&canonical),
+                false,
+            )
+        } else if let Some(key) = key.strip_prefix("dashboard.") {
+            let segments = crate::config::config_key_segments(key)?;
+            let canonical = segments.join(".");
+            let value =
+                resolved_toml_value(toml::Value::try_from(&self.dashboard).ok()?, &segments)?;
+            (
+                value,
+                &self.sources.dashboard,
+                self.dashboard_spans.get(&canonical),
+                false,
+            )
+        } else {
+            let segments = crate::config::config_key_segments(key)?;
+            let value =
+                resolved_toml_value(toml::Value::try_from(&self.settings).ok()?, &segments)?;
+            let user_key = (1..=segments.len())
+                .rev()
+                .map(|length| segments[..length].join("."))
+                .find(|ancestor| self.user_setting_keys.contains(ancestor));
+            let source = if user_key.is_some() {
+                &self.sources.settings
+            } else {
+                // Inherited values continue to identify the bundled declaration.
+                static BUNDLED_SETTINGS: std::sync::LazyLock<PathBuf> =
+                    std::sync::LazyLock::new(|| PathBuf::from("<bundled:config>"));
+                &BUNDLED_SETTINGS
+            };
+            let span = user_key
+                .as_ref()
+                .and_then(|key| self.user_setting_spans.get(key));
+            (value, source, span, true)
+        };
+        let mut final_source = source.display().to_string();
+        if let Some(span) = span {
+            final_source = format!("{final_source}:bytes {}..{}", span.start, span.end);
+        }
+        let bundled = final_source.starts_with("<bundled:");
+        Some(crate::config::ConfigExplanation {
+            key: key.into(),
+            value: value.to_string(),
+            source: if bundled {
+                "bundled defaults".into()
+            } else {
+                final_source.clone()
+            },
+            contributors: if bundled {
+                vec!["bundled defaults".into()]
+            } else if layered {
+                vec!["bundled defaults".into(), final_source]
+            } else {
+                vec![final_source]
+            },
+        })
+    }
+}
+

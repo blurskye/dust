@@ -1,17 +1,7 @@
 use crate::app::documents::configured_file_bytes;
-mod clipboard;
-mod configuration;
-mod contributions;
 mod driver;
-mod editing;
-mod extensions;
 mod input_workflows;
-mod language;
-mod language_features;
-pub(super) mod project;
-mod surfaces;
-mod viewport;
-mod window_workflows;
+pub(super) mod window_workflows;
 
 use std::collections::BTreeMap;
 
@@ -182,7 +172,7 @@ fn app_with_optional_plugin_queue(
     )
     .expect("application construction");
     app.window_session.observe_size((80, 24));
-    app.notices.set_terminal_capabilities("test".into());
+    app.health.set_terminal_capabilities("test".into());
     ((root, state), app)
 }
 

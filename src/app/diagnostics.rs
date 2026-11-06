@@ -844,3 +844,125 @@ impl App {
         self.ui.expanded_diagnostic = self.diagnostics.expanded(&self.state);
     }
 }
+
+use crate::app::AppEffect;
+
+impl App {
+    pub(in crate::app) fn process_diagnostics_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::DiagnosticNavigate {
+                direction,
+                filter,
+                count,
+            } => {
+                self.navigate_diagnostic(direction, filter, count);
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
+use crate::app::commands::AppEffect;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::app::commands::register;
+use crate::app::commands::PickerKind;
+use crate::app::commands::DiagnosticFilter;
+
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
+    for (id, title, kind) in [
+        (
+            "diagnostic.open",
+            "Open workspace problems",
+            PickerKind::Diagnostics,
+        ),
+        (
+            "buffer.picker.open",
+            "Open buffer picker",
+            PickerKind::Buffers,
+        ),
+        (
+            "command_palette.open",
+            "Open command picker",
+            PickerKind::Commands,
+        ),
+        ("workspace.root.list", "List projects", PickerKind::Roots),
+        (
+            "navigation.recents",
+            "Open recent files",
+            PickerKind::Recents,
+        ),
+        ("navigation.marks", "Open marks", PickerKind::Marks),
+        ("navigation.jumps", "Open jump list", PickerKind::Jumps),
+        (
+            "navigation.changes",
+            "Open change list",
+            PickerKind::Changes,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::OpenPicker(kind),
+        )?;
+    }
+    for (id, title, direction, filter) in [
+        (
+            "diagnostic.next",
+            "Go to next error or warning",
+            1,
+            DiagnosticFilter::ErrorOrWarning,
+        ),
+        (
+            "diagnostic.previous",
+            "Go to previous error or warning",
+            -1,
+            DiagnosticFilter::ErrorOrWarning,
+        ),
+        (
+            "diagnostic.error.next",
+            "Go to next error",
+            1,
+            DiagnosticFilter::Error,
+        ),
+        (
+            "diagnostic.error.previous",
+            "Go to previous error",
+            -1,
+            DiagnosticFilter::Error,
+        ),
+        (
+            "diagnostic.warning.next",
+            "Go to next warning",
+            1,
+            DiagnosticFilter::Warning,
+        ),
+        (
+            "diagnostic.warning.previous",
+            "Go to previous warning",
+            -1,
+            DiagnosticFilter::Warning,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |invocation| AppEffect::DiagnosticNavigate {
+                direction,
+                filter,
+                count: invocation.count.map_or(1, |count| count.get()),
+            },
+        )?;
+    }
+Ok(())
+}

@@ -1,17 +1,76 @@
+
+use crate::app::AdapterContext;
+use crate::app::AppEffect;
+use crate::app::App;
+use crate::app::TrustedAction;
+
+impl App {
+    pub(in crate::app) fn process_tasks_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::TestRun(name) => {
+                let Some(task) = self.configuration.settings().tasks.get(&name) else {
+                    self.show_error(self.message("task_unknown", &[("name", name)]));
+                    return Ok(());
+                };
+                // Without a matcher there are no per-test rows, but the run and its exit code stand.
+                match task.matcher.clone() {
+                    Some(matcher) => self.run_trusted(TrustedAction::RunTest { name, matcher }),
+                    None => self.run_trusted(TrustedAction::RunTask(name)),
+                }
+            }
+            AppEffect::TestStop(name) => self.stop_task(&name),
+            AppEffect::TestList(name) => self.show_test_picker(&name),
+            AppEffect::TaskList => self.show_task_picker(),
+            AppEffect::TaskRestart(name) => {
+                let adapter = self.tasks.last_adapter(&name).cloned();
+                // A finished task has nothing to stop: restarting just runs it again.
+                if self.tasks.is_running(&name) {
+                    self.stop_task(&name);
+                }
+                match adapter {
+                    Some(AdapterContext::Test { matcher }) => {
+                        self.run_trusted(TrustedAction::RunTest { name, matcher })
+                    }
+                    Some(AdapterContext::Linter {
+                        matcher,
+                        lint: true,
+                    }) => self.run_trusted(TrustedAction::RunLinter { name, matcher }),
+                    Some(AdapterContext::Formatter { source }) => {
+                        match crate::app::tasks::FormatterSource::capture(
+                            &self.state,
+                            source.buffer(),
+                        ) {
+                            Ok(source) => {
+                                self.run_trusted(TrustedAction::RunFormatter { name, source })
+                            }
+                            Err(error) => self.show_error(error),
+                        }
+                    }
+                    _ => self.run_trusted(TrustedAction::RunTask(name)),
+                }
+            }
+            AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
+            AppEffect::TaskStop(name) => self.stop_task(&name),
+            AppEffect::TaskOutput(name) => self.show_output_picker(&name),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
 use crate::app::commands::AppEffect;
-use crate::app::commands::ArgumentSchema;
-use crate::app::commands::ArgumentType;
-use crate::app::commands::CommandError;
-use crate::app::commands::CommandRegistry;
-use crate::app::commands::ContextRequirement;
-use crate::app::commands::PromptKind;
-use crate::app::commands::SyntaxFoldAction;
+use crate::editor::ArgumentSchema;
+use crate::editor::ArgumentType;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
+use crate::ui::PromptKind;
+use crate::app::commands::SyntaxFoldAction;
 
-pub(super) fn register_commands(
-    registry: &mut CommandRegistry<AppEffect>,
-) -> Result<(), CommandError> {
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
     register(
         registry,
         "format.run",
@@ -169,8 +228,45 @@ pub(super) fn register_commands(
             ))
         },
     )?;
-    Ok(())
+    register(
+        registry,
+        "task.run",
+        "Run configured task",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("name", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::TaskRun(
+                string_arg(invocation, "name")?.to_owned(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "task.stop",
+        "Stop running task",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("name", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::TaskStop(
+                string_arg(invocation, "name")?.to_owned(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "task.output",
+        "Show task output",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("name", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::TaskOutput(
+                string_arg(invocation, "name")?.to_owned(),
+            ))
+        },
+    )?;
+Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {

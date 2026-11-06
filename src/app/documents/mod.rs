@@ -1096,6 +1096,17 @@ mod tests {
 
 pub(in crate::app) mod recovery;
 
-mod coordination;
+pub(in crate::app) mod coordination;
 
 mod navigation;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

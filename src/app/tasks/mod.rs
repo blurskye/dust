@@ -1375,4 +1375,9 @@ mod tests {
     }
 }
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+mod project_tests;

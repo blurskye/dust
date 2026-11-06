@@ -4,7 +4,7 @@
 
 use crate::app::App;
 use crate::app::commands::SetupAction;
-use crate::app::effects::create_user_file;
+use crate::app::documents::coordination::create_user_file;
 use crate::app::settings::lookup;
 use crate::config::SetupChoiceInfo;
 use crate::config::setup_catalog;

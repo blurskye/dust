@@ -135,7 +135,7 @@ use crate::app::windows::rect_contains_point;
 use crate::app::tasks::AdapterContext;
 use crate::app::tasks::RunningTask;
 #[cfg(test)]
-use crate::editor::transaction::build_restored_layout;
+use crate::app::persistence::restore::build_restored_layout;
 
 pub use commands::AppEffect;
 
@@ -420,6 +420,7 @@ struct App {
     session_load_requested: bool,
     session_restore_notice: bool,
     notices: crate::app::notifications::NoticeSession,
+    health: crate::app::health::Health,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,
     extension: crate::app::plugins::ExtensionSession,
@@ -525,7 +526,7 @@ pub fn run_interactive(
         application.load_configured_plugins();
         application.extension.start_packages();
     }
-    application.notices.record(
+    application.health.record(
         LogLevel::Info,
         "application",
         "startup",

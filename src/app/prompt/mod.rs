@@ -684,4 +684,10 @@ fn takes_path(command: &str) -> bool {
     matches!(command, "file.open" | "file.save" | "workspace.root.add")
 }
 
-mod interaction;
+pub(in crate::app) mod interaction;
+
+#[cfg(test)]
+mod project_tests;
+
+#[cfg(test)]
+mod surfaces_tests;

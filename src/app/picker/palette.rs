@@ -99,7 +99,7 @@ impl App {
                 )
             })
             .collect();
-        match crate::app::effects::compose_command_picker_items(items) {
+        match crate::app::plugins::integration::compose_command_picker_items(items) {
             Ok(items) => {
                 self.install_picker(self.message("picker_commands_title", &[]), items);
                 self.search

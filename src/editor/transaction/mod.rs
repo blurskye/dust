@@ -5,7 +5,7 @@ use crate::editor::EditorWindowVersion;
 mod paths;
 mod restore;
 #[cfg(test)]
-pub(crate) use restore::build_restored_layout;
+pub(crate) use restore::build_layout_for_test;
 mod workspace;
 pub(crate) use workspace::EditorPublication;
 pub(crate) use workspace::WorkspaceCommitCheck;
@@ -1649,3 +1649,5 @@ mod tests {
 
 pub(crate) use workspace::DraftEdit;
 pub use workspace::DocumentSnapshot;
+
+pub(crate) use restore::{RestoredPane, RestoredLayout, RestoredTab};

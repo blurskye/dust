@@ -307,7 +307,7 @@ impl ConfigurationSession {
             toml::Value::String(choice.theme.name.clone())
         } else {
             let segments = crate::config::config_key_segments(key.strip_prefix("theme.")?)?;
-            crate::app::configuration::keymaps::resolved_toml_value(
+            crate::app::configuration::resolve::resolved_toml_value(
                 toml::Value::try_from(&choice.theme).ok()?,
                 &segments,
             )?

@@ -1,20 +1,12 @@
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use crate::app::App;
+use crate::app::Path;
+use crate::app::Duration;
 
-use crate::telemetry::CrashSnapshotWriter;
 
-use crate::telemetry::LiveCrashSnapshot;
 
-use crate::telemetry::LogLevel;
-
-use crate::telemetry::LogPolicy;
-
-use crate::telemetry::StructuredLogs;
 
 /// Owns notification insertion, expiry, history and telemetry writers.
 /// The renderer receives a projection, never this owner's mutable state.
@@ -26,31 +18,15 @@ pub(super) struct NoticeSession {
     warning: bool,
     history: VecDeque<(bool, String)>,
     deadline: Option<Instant>,
-    logs: StructuredLogs,
-    crash_snapshot: CrashSnapshotWriter,
-    next_crash_snapshot: Instant,
-    crash_snapshot_pending: bool,
-    /// The last snapshot written, without its timestamp: an unchanged one is not rewritten.
-    written_crash_snapshot: Option<LiveCrashSnapshot>,
-    terminal_capabilities: String,
+
 }
 
+
 impl NoticeSession {
-    pub(in crate::app) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
-        Self {
-            current: None,
-            passing: None,
-            warning: false,
-            history: VecDeque::new(),
-            deadline: None,
-            logs: make_logs(persist),
-            crash_snapshot: CrashSnapshotWriter::start(crash_path),
-            next_crash_snapshot: now,
-            crash_snapshot_pending: false,
-            written_crash_snapshot: None,
-            terminal_capabilities: "pending".into(),
-        }
-    }
+pub(in crate::app) fn new() -> Self {
+    Self { current: None, passing: None, warning: false, history: VecDeque::new(), deadline: None }
+}
+
 
     pub(in crate::app) fn notify(&mut self, message: String, error: bool, now: Instant, timeout: Duration) {
         // Repeated status messages do not perpetually postpone expiry.
@@ -79,24 +55,29 @@ impl NoticeSession {
         self.warning = false;
     }
 
+
     pub(super) fn warn(&mut self, message: String, now: Instant, timeout: Duration) {
         self.notify(message, false, now, timeout);
         self.warning = true;
     }
 
+
     pub(super) fn is_warning(&self) -> bool {
         self.current.is_some() && self.warning
     }
+
 
     pub(in crate::app) fn clear(&mut self) {
         self.current = None;
         self.deadline = None;
     }
 
+
     /// Remembers the current notice as one that stops being true, such as "starting".
     pub(in crate::app) fn mark_current_passing(&mut self) {
         self.passing = self.current.as_ref().map(|(_, message)| message.clone());
     }
+
 
     /// Takes down the passing notice once it has passed, unless another has replaced it.
     pub(in crate::app) fn clear_passing(&mut self) {
@@ -109,6 +90,7 @@ impl NoticeSession {
         }
     }
 
+
     pub(in crate::app) fn tick(&mut self, now: Instant) -> bool {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
             self.clear();
@@ -118,106 +100,20 @@ impl NoticeSession {
         }
     }
 
+
     pub(in crate::app) fn current(&self) -> Option<(bool, &str)> {
         self.current
             .as_ref()
             .map(|(error, message)| (*error, message.as_str()))
     }
 
+
     pub(in crate::app) fn history(&self) -> impl DoubleEndedIterator<Item = &(bool, String)> {
         self.history.iter()
     }
-
-    pub(in crate::app) fn record(
-        &mut self,
-        level: LogLevel,
-        subsystem: &str,
-        event: &str,
-        fields: BTreeMap<String, String>,
-    ) {
-        self.logs.record(level, subsystem, event, fields);
-    }
-
-    pub(in crate::app) fn set_terminal_capabilities(&mut self, capabilities: String) {
-        self.terminal_capabilities = capabilities;
-    }
-
-    pub(in crate::app) fn terminal_capabilities(&self) -> &str {
-        &self.terminal_capabilities
-    }
-
-    pub(in crate::app) fn health_due(&self, now: Instant) -> bool {
-        now >= self.next_crash_snapshot
-    }
-
-    pub(in crate::app) fn submit_health(
-        &mut self,
-        mut snapshot: LiveCrashSnapshot,
-        now: Instant,
-        wall_time: SystemTime,
-    ) {
-        if !self.health_due(now) {
-            return;
-        }
-        self.next_crash_snapshot = now + Duration::from_secs(1);
-        if let Some(result) = self.crash_snapshot.try_result() {
-            self.crash_snapshot_pending = false;
-            match result {
-                Ok(mut written) => {
-                    written.timestamp_ms = 0;
-                    self.written_crash_snapshot = Some(written);
-                }
-                Err(error) => self.record(
-                    LogLevel::Error,
-                    "telemetry",
-                    "crash_snapshot_failed",
-                    BTreeMap::from([("error".into(), error)]),
-                ),
-            }
-        }
-        if self.crash_snapshot_pending || self.written_crash_snapshot.as_ref() == Some(&snapshot) {
-            return;
-        }
-        snapshot.timestamp_ms = wall_time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64;
-        match self.crash_snapshot.submit(snapshot) {
-            Ok(()) => self.crash_snapshot_pending = true,
-            Err(error) => self.record(
-                LogLevel::Error,
-                "telemetry",
-                "crash_snapshot_failed",
-                BTreeMap::from([("error".into(), error)]),
-            ),
-        }
-    }
 }
 
-/// Structured logs kept in memory and, for a persistent session, in the state directory.
-fn make_logs(persist: bool) -> StructuredLogs {
-    StructuredLogs::new(
-        LogPolicy {
-            maximum_records: 2000,
-            maximum_field_bytes: 4096,
-            maximum_file_bytes: 8 * 1024 * 1024,
-            rotations: 3,
-            sensitive_keys: [
-                "token",
-                "password",
-                "secret",
-                "authorization",
-                "source",
-                "text",
-            ]
-            .map(String::from)
-            .to_vec(),
-        },
-        persist.then(|| crate::config::user_state_directory().join("dust.jsonl")),
-        256,
-    )
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -225,79 +121,12 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    #[test]
-    fn failed_health_snapshot_is_reported_and_unchanged_health_is_retried() {
-        use crate::telemetry::LiveCrashSnapshot;
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("health.json");
-        std::fs::create_dir(&path).unwrap();
-        let start = Instant::now();
-        let mut notices = NoticeSession::new(false, path.clone(), start);
-        let snapshot = LiveCrashSnapshot {
-            timestamp_ms: 0,
-            roots: 1,
-            buffers: 2,
-            dirty_buffers: 1,
-            jobs: 0,
-            ptys: 0,
-            lsp_sessions: 0,
-            dap_running: false,
-            pending_effects: 0,
-            plugins_failed: 0,
-            safe_mode: false,
-        };
-        let mut tick = 0;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            notices.submit_health(
-                snapshot.clone(),
-                start + Duration::from_secs(tick),
-                std::time::UNIX_EPOCH,
-            );
-            tick += 1;
-            if notices
-                .logs
-                .snapshot()
-                .iter()
-                .any(|record| record.event == "crash_snapshot_failed")
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "snapshot failure was not reported"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert!(notices.written_crash_snapshot.is_none());
-        std::fs::remove_dir(&path).unwrap();
-        loop {
-            notices.submit_health(
-                snapshot.clone(),
-                start + Duration::from_secs(tick),
-                std::time::UNIX_EPOCH,
-            );
-            tick += 1;
-            if notices.written_crash_snapshot.as_ref() == Some(&snapshot) {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "unchanged health was not retried"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let written: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(written["buffers"], 2);
-        assert_eq!(written["dirty_buffers"], 1);
-    }
+
 
     #[test]
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {
-        let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
-        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
+        let mut notices = NoticeSession::new();
         notices.notify("first".into(), false, now, Duration::from_secs(1));
         notices.notify(
             "first".into(),
@@ -323,9 +152,8 @@ mod tests {
 
     #[test]
     fn changed_severity_records_a_new_notice_and_restarts_expiry() {
-        let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
-        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
+        let mut notices = NoticeSession::new();
         notices.notify("offline".into(), false, now, Duration::from_secs(1));
         notices.notify(
             "offline".into(),
@@ -344,9 +172,8 @@ mod tests {
 
     #[test]
     fn history_retains_only_the_latest_two_hundred_notices() {
-        let root = tempfile::tempdir().unwrap();
         let now = Instant::now();
-        let mut notices = NoticeSession::new(false, root.path().join("health.json"), now);
+        let mut notices = NoticeSession::new();
         for index in 0..205 {
             notices.notify(index.to_string(), false, now, Duration::ZERO);
         }
@@ -356,15 +183,13 @@ mod tests {
     }
 }
 
-use crate::app::App;
-use crate::app::Path;
-use crate::app::Duration;
 
 
 
 
 /// How long a notice stays on screen.
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
+
 impl App {
 
     pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
@@ -373,6 +198,7 @@ impl App {
         self.project_notice();
     }
 }
+
 
 impl App {
 
@@ -384,6 +210,7 @@ impl App {
     }
 }
 
+
 impl App {
 
     pub(in crate::app) fn clear_notice(&mut self) {
@@ -391,6 +218,7 @@ impl App {
         self.project_notice();
     }
 }
+
 
 impl App {
 
@@ -402,6 +230,7 @@ impl App {
     }
 }
 
+
 impl App {
 
 
@@ -411,6 +240,7 @@ impl App {
         }
     }
 }
+
 
 impl App {
 
@@ -426,6 +256,7 @@ impl App {
         }
     }
 }
+
 
 impl App {
 

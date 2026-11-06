@@ -1,3 +1,5 @@
+use crate::app::editing::replay;
+use crate::app::language::snippets;
 mod mouse;
 
 pub(crate) const COMPLETION_LIMIT: usize = 1000;
@@ -6,8 +8,8 @@ pub(crate) const HISTORY_LIMIT: usize = 100;
 pub(in crate::app) use mouse::MouseDocument;
 
 pub(in crate::app) use mouse::MouseGeometry;
-pub(in crate::app) use replay::ReplayError;
-pub(in crate::app) use snippets::SnippetDocument;
+pub(in crate::app) use crate::app::editing::replay::ReplayError;
+pub(in crate::app) use crate::app::language::snippets::SnippetDocument;
 #[cfg(test)]
 mod tests;
 use crate::app::configuration::KeymapOperation;
@@ -25,7 +27,7 @@ use crate::editor::input::ModalResolver;
 use crate::editor::input::PendingInputContext;
 use crate::ui::KeyHintUiRow;
 use crate::ui::KeyHintUiState;
-pub(in crate::app) use prompts::PromptCompletionKey;
+pub(in crate::app) use crate::app::prompt::PromptCompletionKey;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -59,9 +61,7 @@ pub(super) struct InputSession {
     pending: Option<PendingKeymap>,
     hints: Option<KeyHintUiState>,
     prompt: Option<crate::ui::PromptState>,
-    /// The staging effect whose plan was refused for unsaved content. Held here rather
-    /// than on the coordinator, whose 26-field ownership census is a frozen boundary,
-    /// and because this is a prompt obligation: it is replayed when the answer is Yes.
+    /// The staging effect refused for unsaved content, replayed when the answer is Yes.
     pending_stage: Option<(crate::app::AppEffect, Option<u32>)>,
     stage_save: Option<crate::files::RequestId>,
     picker_normal: bool,
@@ -459,4 +459,4 @@ impl InputSession {
     }
 }
 
-mod interaction;
+pub(in crate::app) mod interaction;
