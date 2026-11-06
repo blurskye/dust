@@ -25,15 +25,15 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
     let workspace = workspace(root.path());
     let mut explorer = ExplorerState::default();
     explorer.reset_roots(workspace.roots(), 3);
-    let root_generation = explorer.projection_generation();
+    let root_revision = explorer.projection_revision();
     let root_id = explorer.selected_node().expect("selected root").id;
     assert_eq!(explorer.visible_ids(), &[root_id]);
     assert!(explorer.begin_load(root_id, 9));
-    let loading_generation = explorer.projection_generation();
-    assert!(loading_generation > root_generation);
+    let loading_revision = explorer.projection_revision();
+    assert!(loading_revision > root_revision);
     assert!(!explorer.apply_load(root_id, 8, 3, Vec::new()));
     assert!(!explorer.apply_load(root_id, 9, 2, Vec::new()));
-    assert_eq!(explorer.projection_generation(), loading_generation);
+    assert_eq!(explorer.projection_revision(), loading_revision);
     let root_path = &workspace.roots()[0].identity.canonical_path;
     let child_path = root_path.join("child");
     assert!(explorer.apply_load(
@@ -47,7 +47,7 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
         }]
     ));
     assert_eq!(explorer.visible().len(), 2);
-    assert!(explorer.projection_generation() > loading_generation);
+    assert!(explorer.projection_revision() > loading_revision);
     let child_id = explorer.visible_ids()[1];
     assert!(explorer.begin_load(root_id, 10));
     assert!(explorer.apply_load(
@@ -61,7 +61,7 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
         }]
     ));
     assert_eq!(explorer.visible_ids()[1], child_id, "stable path ID");
-    let loaded_generation = explorer.projection_generation();
+    let loaded_revision = explorer.projection_revision();
     assert!(explorer.begin_load(child_id, 11));
     assert!(explorer.apply_load(
         child_id,
@@ -75,25 +75,25 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
     ));
     let nested_id = explorer.visible_ids()[2];
     explorer.select(child_id);
-    let nested_generation = explorer.projection_generation();
+    let nested_revision = explorer.projection_revision();
     explorer.move_selection(-1);
     assert_eq!(explorer.selected_id(), Some(root_id));
-    assert_eq!(explorer.projection_generation(), nested_generation);
+    assert_eq!(explorer.projection_revision(), nested_revision);
 
     explorer.select(nested_id);
     explorer.collapse_or_parent();
     assert_eq!(explorer.selected_id(), Some(child_id));
     explorer.collapse_or_parent();
-    let collapsed_generation = explorer.projection_generation();
+    let collapsed_revision = explorer.projection_revision();
     assert_eq!(explorer.selected_id(), Some(child_id));
     assert_eq!(explorer.visible_ids(), &[root_id, child_id]);
     explorer.collapse_or_parent();
     assert_eq!(explorer.selected_id(), Some(root_id));
-    assert_eq!(explorer.projection_generation(), collapsed_generation);
+    assert_eq!(explorer.projection_revision(), collapsed_revision);
 
     explorer.select(root_id);
     explorer.toggle_loaded(root_id);
-    assert!(explorer.projection_generation() > loaded_generation);
+    assert!(explorer.projection_revision() > loaded_revision);
     assert_eq!(explorer.visible_ids(), &[root_id]);
     explorer.toggle_loaded(root_id);
     explorer.reset_roots(workspace.roots(), 4);

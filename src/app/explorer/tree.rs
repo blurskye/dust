@@ -69,7 +69,7 @@ pub struct ExplorerState {
     filter: String,
     visible_nodes: Vec<ExplorerNodeId>,
     visible_positions: HashMap<ExplorerNodeId, usize>,
-    projection_generation: u64,
+    projection_revision: u64,
 }
 
 impl Default for ExplorerState {
@@ -81,7 +81,7 @@ impl Default for ExplorerState {
             filter: String::new(),
             visible_nodes: Vec::new(),
             visible_positions: HashMap::new(),
-            projection_generation: 0,
+            projection_revision: 0,
         }
     }
 }
@@ -153,7 +153,7 @@ impl ExplorerState {
         self.rebuild_visible_projection();
     }
 
-    pub fn begin_load(&mut self, node: ExplorerNodeId, generation: u64) -> bool {
+    pub fn begin_load(&mut self, node: ExplorerNodeId, request_id: u64) -> bool {
         let data = Arc::make_mut(&mut self.data);
         let Some(node) = data.nodes.get_mut(&node) else {
             return false;
@@ -168,7 +168,7 @@ impl ExplorerState {
         {
             self.expanded.insert(node.id);
         }
-        node.load = ExplorerLoadState::Loading(generation);
+        node.load = ExplorerLoadState::Loading(request_id);
         self.rebuild_visible_projection();
         true
     }
@@ -176,7 +176,7 @@ impl ExplorerState {
     pub fn apply_load(
         &mut self,
         node: ExplorerNodeId,
-        generation: u64,
+        request_id: u64,
         root_revision: u64,
         children: Vec<ExplorerChild>,
     ) -> bool {
@@ -185,7 +185,7 @@ impl ExplorerState {
                 .data
                 .nodes
                 .get(&node)
-                .is_some_and(|node| node.load == ExplorerLoadState::Loading(generation))
+                .is_some_and(|node| node.load == ExplorerLoadState::Loading(request_id))
         {
             return false;
         }
@@ -263,10 +263,10 @@ impl ExplorerState {
         true
     }
 
-    pub fn set_error(&mut self, node: ExplorerNodeId, generation: u64) {
+    pub fn set_error(&mut self, node: ExplorerNodeId, request_id: u64) {
         let mut changed = false;
         if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node)
-            && node.load == ExplorerLoadState::Loading(generation)
+            && node.load == ExplorerLoadState::Loading(request_id)
         {
             node.load = ExplorerLoadState::Error;
             changed = true;
@@ -393,8 +393,8 @@ impl ExplorerState {
         self.visible_positions.get(&id).copied()
     }
     #[must_use]
-    pub const fn projection_generation(&self) -> u64 {
-        self.projection_generation
+    pub const fn projection_revision(&self) -> u64 {
+        self.projection_revision
     }
     #[must_use]
     pub fn watched_directories(&self) -> Vec<PathBuf> {
@@ -425,7 +425,7 @@ impl ExplorerState {
         self.visible_positions
             .extend(visible.iter().enumerate().map(|(index, id)| (*id, index)));
         self.visible_nodes = visible;
-        self.projection_generation = self.projection_generation.saturating_add(1);
+        self.projection_revision = self.projection_revision.saturating_add(1);
     }
     fn collect_visible_ids(&self, id: ExplorerNodeId, out: &mut Vec<ExplorerNodeId>) -> bool {
         let Some(node) = self.data.nodes.get(&id) else {
