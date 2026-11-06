@@ -18,7 +18,7 @@ pub struct SearchWorkflowId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SearchRequestId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SearchStreamGeneration(pub u64);
+pub struct SearchStreamId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SearchPreviewRevision(pub u64);
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,7 +71,7 @@ pub struct SearchWorkflowItem {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchWorkflowChunk {
     pub request: SearchRequestId,
-    pub generation: SearchStreamGeneration,
+    pub stream_id: SearchStreamId,
     pub sequence: u64,
     pub items: Vec<SearchWorkflowItem>,
     pub complete: bool,
@@ -86,7 +86,7 @@ pub struct SearchWorkflowSnapshot {
 #[derive(Clone, Debug)]
 struct Active {
     request: SearchRequestId,
-    generation: SearchStreamGeneration,
+    stream_id: SearchStreamId,
     next_sequence: u64,
     query: String,
     items: BTreeMap<String, SearchWorkflowItem>,
@@ -137,7 +137,7 @@ impl SearchWorkflowBroker {
     pub fn begin(
         &mut self,
         request: SearchRequestId,
-        generation: SearchStreamGeneration,
+        stream_id: SearchStreamId,
         query: impl Into<String>,
     ) -> Result<(), SearchWorkflowError> {
         let query = query.into();
@@ -146,7 +146,7 @@ impl SearchWorkflowBroker {
         }
         self.active = Some(Active {
             request,
-            generation,
+            stream_id,
             next_sequence: 0,
             query,
             items: BTreeMap::new(),
@@ -188,7 +188,7 @@ impl SearchWorkflowBroker {
             .revision
             .checked_add(1)
             .ok_or(SearchWorkflowError::Limit)?;
-        if next.request != chunk.request || next.generation != chunk.generation {
+        if next.request != chunk.request || next.stream_id != chunk.stream_id {
             return Err(SearchWorkflowError::Stale);
         }
         if next.complete {
@@ -382,12 +382,12 @@ mod tests {
     fn empty_query_preserves_producer_order_in_every_projection() {
         let mut broker = broker();
         broker
-            .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+            .begin(SearchRequestId(1), SearchStreamId(1), "")
             .unwrap();
         broker
             .accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(1),
+                stream_id: SearchStreamId(1),
                 sequence: 0,
                 items: vec![item("20", "recent"), item("100", "earlier")],
                 complete: true,
@@ -420,7 +420,7 @@ mod tests {
             let mut broker = broker();
             broker.spec.matcher = matcher;
             broker
-                .begin(SearchRequestId(1), SearchStreamGeneration(1), "AC")
+                .begin(SearchRequestId(1), SearchStreamId(1), "AC")
                 .unwrap();
             let mut subsequence = item("subsequence", "A");
             subsequence.search_text = "abc".into();
@@ -429,7 +429,7 @@ mod tests {
             broker
                 .accept(SearchWorkflowChunk {
                     request: SearchRequestId(1),
-                    generation: SearchStreamGeneration(1),
+                    stream_id: SearchStreamId(1),
                     sequence: 0,
                     items: vec![subsequence, literal],
                     complete: true,
@@ -452,12 +452,12 @@ mod tests {
         let mut broker = broker();
         broker.spec.matcher = SearchMatcherKind::Literal;
         broker
-            .begin(SearchRequestId(1), SearchStreamGeneration(1), "ac")
+            .begin(SearchRequestId(1), SearchStreamId(1), "ac")
             .unwrap();
         broker
             .accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(1),
+                stream_id: SearchStreamId(1),
                 sequence: 0,
                 items: vec![item("late", "A ac"), item("early", "ac Z")],
                 complete: true,
@@ -469,12 +469,11 @@ mod tests {
     #[test]
     fn bounded_streams_are_exact_and_idle() {
         let mut b = broker();
-        b.begin(SearchRequestId(1), SearchStreamGeneration(2), "x")
-            .unwrap();
+        b.begin(SearchRequestId(1), SearchStreamId(2), "x").unwrap();
         assert_eq!(
             b.accept(SearchWorkflowChunk {
                 request: SearchRequestId(9),
-                generation: SearchStreamGeneration(2),
+                stream_id: SearchStreamId(2),
                 sequence: 0,
                 items: vec![],
                 complete: false
@@ -484,7 +483,7 @@ mod tests {
         assert_eq!(
             b.accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(2),
+                stream_id: SearchStreamId(2),
                 sequence: 1,
                 items: vec![],
                 complete: false
@@ -494,7 +493,7 @@ mod tests {
         assert_eq!(
             b.accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(2),
+                stream_id: SearchStreamId(2),
                 sequence: 0,
                 items: vec![item("a", "xa"), item("a", "xb")],
                 complete: false
@@ -503,7 +502,7 @@ mod tests {
         );
         b.accept(SearchWorkflowChunk {
             request: SearchRequestId(1),
-            generation: SearchStreamGeneration(2),
+            stream_id: SearchStreamId(2),
             sequence: 0,
             items: vec![item("b", "xb"), item("a", "xa")],
             complete: true,
@@ -529,7 +528,7 @@ mod tests {
         assert_eq!(
             b.accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(2),
+                stream_id: SearchStreamId(2),
                 sequence: 1,
                 items: vec![],
                 complete: true
@@ -555,13 +554,12 @@ mod tests {
         assert_eq!(
             b.begin(
                 SearchRequestId(1),
-                SearchStreamGeneration(1),
+                SearchStreamId(1),
                 "x".repeat(MAX_QUERY_BYTES + 1)
             ),
             Err(SearchWorkflowError::Limit)
         );
-        b.begin(SearchRequestId(1), SearchStreamGeneration(1), "")
-            .unwrap();
+        b.begin(SearchRequestId(1), SearchStreamId(1), "").unwrap();
         let revision = b.revision;
         let huge = SearchWorkflowItem {
             stable_key: "k".into(),
@@ -573,7 +571,7 @@ mod tests {
         assert_eq!(
             b.accept(SearchWorkflowChunk {
                 request: SearchRequestId(1),
-                generation: SearchStreamGeneration(1),
+                stream_id: SearchStreamId(1),
                 sequence: 0,
                 items: vec![huge],
                 complete: false

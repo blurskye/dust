@@ -7,7 +7,7 @@ use crate::app::search::workflow::SearchMatcherKind;
 use crate::app::search::workflow::SearchPresenterKind;
 use crate::app::search::workflow::SearchRequestId;
 use crate::app::search::workflow::SearchSourceKind;
-use crate::app::search::workflow::SearchStreamGeneration;
+use crate::app::search::workflow::SearchStreamId;
 use crate::app::search::workflow::SearchWorkflowBroker;
 use crate::app::search::workflow::SearchWorkflowChunk;
 use crate::app::search::workflow::SearchWorkflowError;
@@ -44,11 +44,11 @@ pub(in crate::app) struct Search {
     pub(in crate::app) preview_epoch: std::sync::Arc<()>,
     pub(in crate::app) preview_read: Option<(crate::files::RequestId, usize)>,
     files: WorkspaceFileWorker,
-    file_generation: Option<u64>,
+    file_stream_id: Option<u64>,
     pub(in crate::app) file_scope: Option<(WorkspaceVersion, u64)>,
     file_entries: Vec<WorkspaceFileEntry>,
     grep: WorkspaceSearchWorker,
-    generation: Option<u64>,
+    stream_id: Option<u64>,
     pub(in crate::app) scope: Option<(WorkspaceVersion, u64)>,
     workflow: Option<SearchWorkflowBroker>,
     sequence: u64,
@@ -122,10 +122,10 @@ impl Search {
         &self.query
     }
     pub(in crate::app) fn pending(&self) -> bool {
-        self.generation.is_some()
+        self.stream_id.is_some()
     }
     pub(in crate::app) fn files_pending(&self) -> bool {
-        self.file_generation.is_some()
+        self.file_stream_id.is_some()
     }
     pub(in crate::app) fn matches(&self) -> &[WorkspaceSearchMatch] {
         &self.matches
@@ -149,7 +149,7 @@ impl Search {
     }
     pub(in crate::app) fn cancel_grep(&mut self) {
         self.grep.cancel();
-        self.generation = None;
+        self.stream_id = None;
         self.scope = None;
         self.workflow = None;
         self.sequence = 0;
@@ -158,7 +158,7 @@ impl Search {
     }
     pub(in crate::app) fn cancel_files(&mut self) {
         self.files.cancel();
-        self.file_generation = None;
+        self.file_stream_id = None;
         self.file_scope = None;
         self.file_entries.clear();
     }
@@ -201,8 +201,8 @@ impl Search {
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> Result<(), String> {
-        let generation = self.files.start(policy).map_err(|e| e.to_string())?;
-        self.file_generation = Some(generation);
+        let stream_id = self.files.start(policy).map_err(|e| e.to_string())?;
+        self.file_stream_id = Some(stream_id);
         self.file_scope = Some((scope, configuration));
         self.file_entries.clear();
         Ok(())
@@ -222,7 +222,7 @@ impl Search {
         }
         let mut changed = false;
         for _ in 0..256 {
-            self.file_generation?;
+            self.file_stream_id?;
             let event = match self.files.poll_event() {
                 Ok(Some(event)) => event,
                 Ok(None) => break,
@@ -233,28 +233,26 @@ impl Search {
             };
             match event {
                 WorkspaceFileEvent::Batch {
-                    generation,
-                    entries,
-                    ..
-                } if Some(generation) == self.file_generation => {
+                    stream_id, entries, ..
+                } if Some(stream_id) == self.file_stream_id => {
                     self.file_entries.extend(entries);
                     changed = true;
                 }
-                WorkspaceFileEvent::Complete { generation, .. }
-                    if Some(generation) == self.file_generation =>
+                WorkspaceFileEvent::Complete { stream_id, .. }
+                    if Some(stream_id) == self.file_stream_id =>
                 {
-                    self.file_generation = None;
+                    self.file_stream_id = None;
                     self.files.cancel();
                     return Some(Ok(std::mem::take(&mut self.file_entries)));
                 }
                 WorkspaceFileEvent::Failed {
-                    generation, error, ..
-                } if Some(generation) == self.file_generation => {
+                    stream_id, error, ..
+                } if Some(stream_id) == self.file_stream_id => {
                     self.cancel_files();
                     return Some(Err(error));
                 }
-                WorkspaceFileEvent::Cancelled { generation, .. }
-                    if Some(generation) == self.file_generation =>
+                WorkspaceFileEvent::Cancelled { stream_id, .. }
+                    if Some(stream_id) == self.file_stream_id =>
                 {
                     self.cancel_files();
                     return None;
@@ -283,16 +281,12 @@ impl Search {
         })
         .map_err(|e| e.to_string())?;
         let query = policy.query.clone();
-        let generation = self.grep.start(policy).map_err(|e| e.to_string())?;
+        let stream_id = self.grep.start(policy).map_err(|e| e.to_string())?;
         workflow
-            .begin(
-                SearchRequestId(generation),
-                SearchStreamGeneration(generation),
-                "",
-            )
+            .begin(SearchRequestId(stream_id), SearchStreamId(stream_id), "")
             .map_err(|e| e.to_string())?;
         self.query = query;
-        self.generation = Some(generation);
+        self.stream_id = Some(stream_id);
         self.scope = Some((scope, configuration));
         self.workflow = Some(workflow);
         self.sequence = 0;
@@ -315,7 +309,7 @@ impl Search {
         }
         let mut updates = Vec::new();
         for _ in 0..256 {
-            if self.generation.is_none() {
+            if self.stream_id.is_none() {
                 break;
             }
             let event = match self.grep.poll_event() {
@@ -340,13 +334,13 @@ impl Search {
         updates
     }
     pub(in crate::app) fn accept(&mut self, event: WorkspaceSearchEvent) -> Option<SearchUpdate> {
-        let generation = match &event {
-            WorkspaceSearchEvent::Batch { generation, .. }
-            | WorkspaceSearchEvent::Complete { generation, .. }
-            | WorkspaceSearchEvent::Failed { generation, .. }
-            | WorkspaceSearchEvent::Cancelled { generation } => *generation,
+        let stream_id = match &event {
+            WorkspaceSearchEvent::Batch { stream_id, .. }
+            | WorkspaceSearchEvent::Complete { stream_id, .. }
+            | WorkspaceSearchEvent::Failed { stream_id, .. }
+            | WorkspaceSearchEvent::Cancelled { stream_id } => *stream_id,
         };
-        if self.generation != Some(generation) {
+        if self.stream_id != Some(stream_id) {
             return None;
         }
         match event {
@@ -367,17 +361,17 @@ impl Search {
                         },
                     })
                     .collect();
-                match self.accept_chunk(generation, items.clone(), false) {
+                match self.accept_chunk(stream_id, items.clone(), false) {
                     Ok(()) => self.matches.extend(matches),
                     Err(SearchWorkflowError::Limit) => {
                         // A batch is atomic. Keep the prefix that still fits before ending
                         // the search as truncated, just like the worker's own limits.
                         for (found, item) in matches.into_iter().zip(items) {
-                            match self.accept_chunk(generation, vec![item], false) {
+                            match self.accept_chunk(stream_id, vec![item], false) {
                                 Ok(()) => self.matches.push(found),
                                 Err(SearchWorkflowError::Limit) => {
                                     return self.accept(WorkspaceSearchEvent::Complete {
-                                        generation,
+                                        stream_id,
                                         summary: crate::files::WorkspaceSearchSummary {
                                             truncated: true,
                                             ..Default::default()
@@ -399,13 +393,13 @@ impl Search {
                 Some(SearchUpdate::Batch)
             }
             WorkspaceSearchEvent::Complete { summary, .. } => {
-                if self.accept_chunk(generation, Vec::new(), true).is_err() {
+                if self.accept_chunk(stream_id, Vec::new(), true).is_err() {
                     self.cancel_grep();
                     return Some(SearchUpdate::Failed(
                         "workspace search workflow rejected completion".into(),
                     ));
                 }
-                self.generation = None;
+                self.stream_id = None;
                 self.grep.cancel();
                 self.intent.take().map(|intent| SearchUpdate::Complete {
                     intent,
@@ -425,7 +419,7 @@ impl Search {
     }
     fn accept_chunk(
         &mut self,
-        generation: u64,
+        stream_id: u64,
         items: Vec<SearchWorkflowItem>,
         complete: bool,
     ) -> Result<(), SearchWorkflowError> {
@@ -437,8 +431,8 @@ impl Search {
             .as_mut()
             .ok_or(SearchWorkflowError::Stale)?
             .accept(SearchWorkflowChunk {
-                request: SearchRequestId(generation),
-                generation: SearchStreamGeneration(generation),
+                request: SearchRequestId(stream_id),
+                stream_id: SearchStreamId(stream_id),
                 sequence: self.sequence,
                 items,
                 complete,
@@ -454,14 +448,11 @@ impl Search {
     }
     #[cfg(test)]
     pub(in crate::app) fn file_requests(&self) -> u64 {
-        self.files.generation()
+        self.files.stream_id()
     }
 }
 
-
-
 pub(in crate::app) mod commands;
-
 
 use crate::app::picker::MatcherSource;
 pub(in crate::app) mod workflow;

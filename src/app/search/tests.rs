@@ -1,16 +1,16 @@
 //! Search behavior and application integration tests.
 
+use crate::app::picker::PickerContent;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::app::search::*;
 use crate::app::tests::*;
 use crate::app::workspace::tests::wait_workspace_search;
 use crate::editor::text::ByteOffset;
 use std::fs;
-use crate::app::search::*;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::picker::PickerContent;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
 
 #[test]
 fn search_moves_forward_wraps_and_repeats() {
@@ -492,7 +492,7 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
     let mut owner = Search {
-        generation: Some(1),
+        stream_id: Some(1),
         scope: Some((source.clone(), 1)),
         intent: Some(Intent::Find),
         ..Search::default()
@@ -507,13 +507,13 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     })
     .unwrap();
     broker
-        .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+        .begin(SearchRequestId(1), SearchStreamId(1), "")
         .unwrap();
     owner.workflow = Some(broker);
     assert!(
         owner
             .accept(WorkspaceSearchEvent::Batch {
-                generation: 2,
+                stream_id: 2,
                 matches: vec![found()]
             })
             .is_none()
@@ -521,14 +521,14 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     assert!(owner.matches().is_empty());
     assert!(matches!(
         owner.accept(WorkspaceSearchEvent::Batch {
-            generation: 1,
+            stream_id: 1,
             matches: vec![found()]
         }),
         Some(SearchUpdate::Batch)
     ));
     assert!(matches!(
         owner.accept(WorkspaceSearchEvent::Complete {
-            generation: 1,
+            stream_id: 1,
             summary: crate::files::WorkspaceSearchSummary::default(),
         }),
         Some(SearchUpdate::Complete { .. })
@@ -561,16 +561,16 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     }
     for event in [
         WorkspaceSearchEvent::Batch {
-            generation: 1,
+            stream_id: 1,
             matches: vec![found()],
         },
         WorkspaceSearchEvent::Failed {
-            generation: 1,
+            stream_id: 1,
             error: "late failure".into(),
         },
-        WorkspaceSearchEvent::Cancelled { generation: 1 },
+        WorkspaceSearchEvent::Cancelled { stream_id: 1 },
         WorkspaceSearchEvent::Complete {
-            generation: 1,
+            stream_id: 1,
             summary: crate::files::WorkspaceSearchSummary::default(),
         },
     ] {
@@ -642,26 +642,26 @@ fn bounded_drain_publishes_only_the_final_accepted_store_disposition() {
         })
         .unwrap();
         workflow
-            .begin(SearchRequestId(1), SearchStreamGeneration(1), "")
+            .begin(SearchRequestId(1), SearchStreamId(1), "")
             .unwrap();
         let mut events = vec![WorkspaceSearchEvent::Batch {
-            generation: 1,
+            stream_id: 1,
             matches: vec![found()],
         }];
         events.push(if failed {
             WorkspaceSearchEvent::Failed {
-                generation: 1,
+                stream_id: 1,
                 error: "fixture failure".into(),
             }
         } else {
             WorkspaceSearchEvent::Complete {
-                generation: 1,
+                stream_id: 1,
                 summary: crate::files::WorkspaceSearchSummary::default(),
             }
         });
         let mut owner = Search {
             grep: WorkspaceSearchWorker::events_for_test(events),
-            generation: Some(1),
+            stream_id: Some(1),
             scope: Some((source.clone(), 1)),
             workflow: Some(workflow),
             intent: Some(Intent::Find),
@@ -755,9 +755,9 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
     assert!(owner.preview().is_none());
     assert_eq!(owner.close_picker(), None);
     owner.open_live();
-    owner.generation = Some(9);
+    owner.stream_id = Some(9);
     owner.grep = WorkspaceSearchWorker::events_for_test(vec![WorkspaceSearchEvent::Batch {
-        generation: 9,
+        stream_id: 9,
         matches: vec![found()],
     }]);
     owner
@@ -937,14 +937,11 @@ impl Search {
         matches: Vec<WorkspaceSearchMatch>,
         truncated: bool,
     ) {
-        let generation = self.generation.expect("admitted search");
+        let stream_id = self.stream_id.expect("admitted search");
         self.grep = WorkspaceSearchWorker::events_for_test(vec![
-            WorkspaceSearchEvent::Batch {
-                generation,
-                matches,
-            },
+            WorkspaceSearchEvent::Batch { stream_id, matches },
             WorkspaceSearchEvent::Complete {
-                generation,
+                stream_id,
                 summary: crate::files::WorkspaceSearchSummary {
                     truncated,
                     ..Default::default()
@@ -975,11 +972,11 @@ fn rejected_live_query_retires_previous_results() {
     let mut owner = Search::default();
     owner.open_live();
     owner.set_query("needle".into());
-    owner.generation = Some(9);
+    owner.stream_id = Some(9);
     owner.scope = Some((source.clone(), 1));
     owner.matches.push(found());
     owner.grep = WorkspaceSearchWorker::events_for_test(vec![WorkspaceSearchEvent::Batch {
-        generation: 9,
+        stream_id: 9,
         matches: vec![found()],
     }]);
     let query = "a".repeat(65_537);
