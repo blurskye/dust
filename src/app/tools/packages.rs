@@ -1,3 +1,5 @@
+//! Package installation and activation in the application.
+
 use crate::app::App;
 use crate::app::TrustedAction;
 use crate::app::picker::PickerPayload;

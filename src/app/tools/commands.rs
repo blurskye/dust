@@ -1,3 +1,5 @@
+//! Command registration and execution for tool installation and runtime selection.
+
 use crate::app::App;
 use crate::app::TrustedAction;
 use crate::app::commands::AppEffect;
