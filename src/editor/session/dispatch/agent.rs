@@ -523,7 +523,26 @@ impl InteractiveApplication {
             self.set_mode(EditorMode::Normal);
         }
         self.show_agent_panel();
+        self.start_default_agent();
         self.refresh_agent_transcript();
+    }
+
+    /// Opening the panel starts the default agent, so it is ready by the time the first
+    /// question is typed. With no default, or its program missing, the panel says so instead.
+    fn start_default_agent(&mut self) {
+        let agents = &self.configuration.settings().agents;
+        if !self.agent.sessions.is_empty()
+            || !agents
+                .profiles
+                .get(&agents.default)
+                .is_some_and(|profile| self.agent_program(&profile.program).is_some())
+        {
+            return;
+        }
+        let name = agents.default.clone();
+        if let Err(error) = self.start_agent_session(&name) {
+            self.show_error(error);
+        }
     }
 
     /// The default agent's own program in a terminal, for `agents.connection = "terminal"`:
@@ -2306,6 +2325,7 @@ impl InteractiveApplication {
             return;
         }
         self.show_agent_panel();
+        self.start_default_agent();
         self.refresh_agent_transcript();
     }
 
@@ -3413,6 +3433,40 @@ mod tests {
             .picker()
             .and_then(|picker| picker.selected_item());
         assert_eq!(selected.map(|item| item.id.0.as_str()), Some("agent:pi"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_the_panel_starts_the_default_agent_before_anything_is_asked() {
+        let fixture = |config: &mut crate::config::Config| {
+            config.agents.default = "claude".into();
+            config.agents.add_tools = false;
+            let profile = config.agents.profiles.get_mut("claude").unwrap();
+            profile.program = "cat".into();
+            profile.arguments.clear();
+        };
+        let (_dirs, mut app) = test_app_with(fixture);
+        app.begin_agent_question();
+        assert_eq!(app.agent.sessions.len(), 1);
+        assert_eq!(app.agent.sessions[0].name, "claude");
+        assert!(app.agent.sessions[0].process.is_some());
+        app.toggle_agent_panel();
+        app.toggle_agent_panel();
+        assert_eq!(
+            app.agent.sessions.len(),
+            1,
+            "one session, not one per opening"
+        );
+
+        let (_dirs, mut app) = test_app_with(|config| {
+            fixture(config);
+            config.agents.default = String::new();
+        });
+        app.begin_agent_question();
+        assert!(
+            app.agent.sessions.is_empty(),
+            "Ask every time waits for the pick"
+        );
     }
 
     #[test]
