@@ -1,3 +1,5 @@
+//! Command registration and execution for keyboard, mouse and mapped command input.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 

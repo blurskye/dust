@@ -1,5 +1,7 @@
+//! Replay tests for keyboard, mouse and mapped command input.
+
 use crate::app::editing::replay::ReplayError;
-use crate::app::input::InputSession;
+use crate::app::input::InputState;
 use crate::editor::CommandInvocation;
 use crate::editor::InvocationSource;
 
@@ -15,7 +17,7 @@ fn cancelling_pending_grammar_keeps_macro_recording() {
     use crate::editor::EditorMode;
     use crate::editor::input::GrammarInput;
     use crate::editor::input::InputAction;
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input
         .feed(
             EditorMode::Normal,
@@ -40,7 +42,7 @@ fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
     use crate::editor::input::GrammarInput;
     use crate::editor::input::InputAction;
     use crate::editor::input::PendingInputContext;
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input.start_macro_recording('a');
     input.record_successful_invocation(&invocation("edit.delete_char"), None, false, true);
     input.cancel_pending();
@@ -68,7 +70,7 @@ fn macro_toggle_uses_actual_recording_after_pending_grammar_is_cancelled() {
 
 #[test]
 fn recording_and_repeat_retain_semantics_and_strip_original_targets() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     assert_eq!(input.repeat_plan(10, None), Err(ReplayError::NoChange));
     input.start_macro_recording('a');
     for id in ["mode.insert", "edit.insert_text", "mode.normal"] {
@@ -115,7 +117,7 @@ fn visual_repeat_keeps_surround_delimiters_and_comment_tokens() {
         ("surround_add", "character", ")", "(one)\n(two)"),
         ("comment", "comment", "//", "// one\n// two"),
     ] {
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let mut state = EditorState::new(Default::default());
         let (buffer, view) = state
             .open_text(TextBuffer::from_text("one\ntwo"), None)
@@ -162,7 +164,7 @@ fn visual_repeat_keeps_surround_delimiters_and_comment_tokens() {
 
 #[test]
 fn nested_macro_batches_share_step_budget_and_unwind_without_losing_last_register() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     assert_eq!(input.macro_register('@'), Err(ReplayError::NoMacro));
     input.begin_macro_batch();
     input.begin_macro_replay('a', 2).unwrap();
@@ -189,7 +191,7 @@ fn nested_macro_batches_share_step_budget_and_unwind_without_losing_last_registe
 }
 #[test]
 fn macro_recording_keeps_repeat_commands_without_their_expansion() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input.start_macro_recording('a');
     input.record_successful_invocation(&invocation("edit.repeat_last"), None, false, false);
     let mut expanded = invocation("edit.delete_char");
@@ -202,7 +204,7 @@ fn macro_recording_keeps_repeat_commands_without_their_expansion() {
 
 #[test]
 fn insert_delete_joins_the_change_and_yanks_leave_it_alone() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     for id in [
         "mode.insert",
         "edit.insert_text",

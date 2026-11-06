@@ -1,6 +1,8 @@
+//! Tests for keyboard, mouse and mapped command input.
+
 use crate::app::commands::PromptMove;
 use crate::app::commands::register_app_commands;
-use crate::app::input::InputSession;
+use crate::app::input::InputState;
 use crate::config::load_bundled_config;
 use crate::editor::CommandRegistry;
 use crate::editor::input::ABSOLUTE_MAX_COUNT;
@@ -12,7 +14,7 @@ use std::path::Path;
 
 #[test]
 fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input.open_prompt(PromptKind::Command, "é界".into(), None);
     input.prompt_move(PromptMove::Left);
     input.prompt_backspace();
@@ -42,7 +44,7 @@ fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
 
 #[test]
 fn prompt_word_moves_and_backspace_keep_combining_characters_together() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input.open_prompt(PromptKind::SearchForward, "cafe\u{301} next".into(), None);
     input.prompt_move(PromptMove::Home);
     input.prompt_move(PromptMove::WordRight);
@@ -55,7 +57,7 @@ fn prompt_word_moves_and_backspace_keep_combining_characters_together() {
 
 #[test]
 fn prompt_word_deletion_keeps_decomposed_accents_and_emoji_whole() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     for (text, expected) in [
         ("e e\u{301}", "e "),
         ("e cafe\u{301}  ", "e "),
@@ -77,7 +79,7 @@ fn prompt_word_deletion_keeps_decomposed_accents_and_emoji_whole() {
 
 #[test]
 fn prompt_history_restores_the_draft_and_its_cursor() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     for kind in [
         PromptKind::Command,
         PromptKind::SearchForward,
@@ -108,7 +110,7 @@ fn prompt_history_restores_the_draft_and_its_cursor() {
 
 #[test]
 fn confirmation_choice_is_typed_and_does_not_accept_text() {
-    let mut input = InputSession::new(10);
+    let mut input = InputState::new(10);
     input.open_prompt(PromptKind::ExplorerDelete, String::new(), None);
     assert!(input.configure_confirmation_actions(
         "Delete?".into(),
@@ -150,7 +152,7 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
     let mut registry = CommandRegistry::default();
     register_builtin_commands(&mut registry).unwrap();
     register_app_commands(&mut registry).unwrap();
-    let mut input = InputSession::new(ABSOLUTE_MAX_COUNT);
+    let mut input = InputState::new(ABSOLUTE_MAX_COUNT);
     let root = Path::new("/isolated");
     input.open_prompt(PromptKind::Command, "e foo".into(), None);
     let old = input
@@ -209,7 +211,7 @@ fn closed_reopened_and_reconfigured_prompt_rejects_the_old_directory_reply() {
 #[test]
 fn prompt_directory_replies_merge_and_deduplicate_open_buffer_matches() {
     let policy = load_bundled_config().config;
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     let root = Path::new("/isolated");
     let open = root.join("src/needle.rs");
     input.open_prompt(PromptKind::Command, "e needle".into(), None);
@@ -250,7 +252,7 @@ fn prompt_directory_replies_merge_and_deduplicate_open_buffer_matches() {
 #[test]
 fn prompt_path_completion_requests_children_after_a_directory_separator() {
     let policy = load_bundled_config().config;
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     let root = Path::new("/isolated");
     for (fragment, directory, prefix) in [
         ("src/", "/isolated/src", ""),
@@ -276,7 +278,7 @@ fn prompt_command_completion_uses_the_id_when_a_plugin_label_is_absent() {
         .input
         .command_aliases
         .insert("demo".into(), "plugin.demo".into());
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     for query in ["", "dem", "plugin."] {
         input.open_prompt(PromptKind::Command, query.into(), None);
         assert!(
@@ -310,7 +312,7 @@ fn prompt_command_completion_uses_the_id_when_a_plugin_label_is_absent() {
 
 #[test]
 fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_content_rows() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     let policy = load_bundled_config().config;
     input.present_documentation(
         DocumentationPopupKind::Hover,
@@ -379,7 +381,7 @@ fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
         .open_text(TextBuffer::from_text("other"), None)
         .unwrap();
     assert_eq!(first.active_view, other.active_view);
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     assert_eq!(
         input.open_prompt(
             PromptKind::Command,
@@ -397,7 +399,7 @@ fn prompt_mode_restore_rejects_a_new_editor_with_reused_view_ids() {
 
 #[test]
 fn delayed_history_restore_preserves_new_entries_and_explicit_clear() {
-    let mut input = InputSession::new(100);
+    let mut input = InputState::new(100);
     input.record_prompt_history(PromptKind::Command, "new");
     input.restore_history(vec!["old".into()], vec!["saved search".into()]);
     assert_eq!(input.command_history(), ["old", "new"]);

@@ -1,4 +1,6 @@
-use crate::app::input::InputSession;
+//! Mouse targets, gestures and document positions.
+
+use crate::app::input::InputState;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
@@ -57,7 +59,7 @@ pub(in crate::app) struct MousePlan {
     before: crate::editor::EditorVersion,
     anchor: Option<MouseAnchor>,
 }
-impl InputSession {
+impl InputState {
     pub(in crate::app) fn mouse_transaction<'a>(
         &self,
         plan: &'a MousePlan,
@@ -228,11 +230,11 @@ impl InputSession {
 mod tests {
     use crate::app::input::mouse::*;
     use crate::editor::EditorState;
-    pub(in crate::app) fn plan(input: &InputSession, state: &EditorState) -> MousePlan {
+    pub(in crate::app) fn plan(input: &InputState, state: &EditorState) -> MousePlan {
         plan_at(input, state, &crate::ui::UiState::default(), 1, 0, false)
     }
     fn plan_at(
-        input: &InputSession,
+        input: &InputState,
         state: &EditorState,
         ui: &crate::ui::UiState,
         column: u16,
@@ -269,7 +271,7 @@ mod tests {
     fn mouse_plans_reject_new_input_or_editor_changes_and_publish_anchors_only_after_commit() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, view) = state.open_text(TextBuffer::from_text("éab"), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         input.observe_mouse(1, 0);
         let pending = plan(&input, &state);
         let window = state.window_version();
@@ -315,7 +317,7 @@ mod tests {
                 label: ":".into(),
             })
             .collect();
-        let input = InputSession::new(100);
+        let input = InputState::new(100);
         let pending = plan_at(&input, &state, &ui, 1, 0, false);
         state
             .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
@@ -343,7 +345,7 @@ mod tests {
                     mark: crate::language::syntax::MarkdownMark::Hide,
                 })
                 .collect();
-            let input = InputSession::new(100);
+            let input = InputState::new(100);
             let pending = plan_at(&input, &state, &ui, column, 0, false);
             state
                 .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
@@ -361,7 +363,7 @@ mod tests {
                 .unwrap();
             state.views[view].mode = EditorMode::Insert;
             let ui = crate::ui::UiState::default();
-            let mut input = InputSession::new(100);
+            let mut input = InputState::new(100);
             let pending = plan_at(&input, &state, &ui, start, 0, false);
             state
                 .apply_transaction(input.mouse_transaction(&pending, &state.version()).unwrap())
@@ -408,7 +410,7 @@ mod tests {
             head: ByteOffset(2),
             kind: crate::editor::SelectionKind::Character,
         });
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         input.observe_mouse(1, 0);
         let pending = plan(&input, &state);
         state
