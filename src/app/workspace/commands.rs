@@ -1,3 +1,5 @@
+//! Command registration and execution for workspace roots and trust.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::workspace::WorkspaceTrust;

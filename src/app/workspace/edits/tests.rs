@@ -1,3 +1,5 @@
+//! Tests for workspace edit preparation and approval.
+
 use crate::app::workspace::edits::*;
 use crate::editor::EditorState;
 use crate::editor::TransactionId;
@@ -58,7 +60,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         )],
     )
     .unwrap();
-    let workspace = crate::app::workspace::WorkspaceSession::new(
+    let workspace = crate::app::workspace::Workspace::new(
         scope.clone(),
         root.path().join("trust.json"),
         1,
@@ -70,7 +72,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
     let mut editor = EditorState::new(root.path().into());
     editor.undo_directory = Some(history.clone());
     editor.undo_maximum_bytes = maximum;
-    let mut owner = WorkspaceEditSession::default();
+    let mut owner = WorkspaceEdits::default();
     let ticket = owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -152,7 +154,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         )],
     )
     .unwrap();
-    let workspace = crate::app::workspace::WorkspaceSession::new(
+    let workspace = crate::app::workspace::Workspace::new(
         scope.clone(),
         root.path().join("trust.json"),
         1,
@@ -202,7 +204,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         ],
         resources: Vec::new(),
     };
-    let mut owner = WorkspaceEditSession::default();
+    let mut owner = WorkspaceEdits::default();
     let retired = owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -213,7 +215,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     assert!(id.id() > retired.id());
     let before = TextBuffer::test_materializations();
     assert!(owner.build(prepared(retired), &scope, &version, 1).is_err());
-    let mut foreign_owner = WorkspaceEditSession::default();
+    let mut foreign_owner = WorkspaceEdits::default();
     let foreign_ticket = foreign_owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -317,14 +319,14 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     // A single real bounded document lane proves read/create admission, queue
     // refusal, cancellation, and a late terminal without reviving old preparation.
     use crate::app::documents::DocumentEvent;
-    use crate::app::documents::DocumentSession;
+    use crate::app::documents::Documents;
     use crate::app::startup::StartupTarget;
     use crate::files::VfsWorker;
     let disk = root.path().join("on-disk");
     std::fs::write(&disk, b"abc").unwrap();
     let created = root.path().join("new-file");
     let (vfs, release) = VfsWorker::start_gated_for_test(1);
-    let mut documents = DocumentSession::new(
+    let mut documents = Documents::new(
         vfs,
         &StartupTarget::Dashboard {
             root: root.path().into(),
@@ -333,7 +335,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         1,
         1,
     );
-    let mut io = WorkspaceEditSession::default();
+    let mut io = WorkspaceEdits::default();
     let ticket = io
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -371,7 +373,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     )
     .unwrap();
     release.send(()).unwrap();
-    let wait = |documents: &mut DocumentSession| {
+    let wait = |documents: &mut Documents| {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             if let Some(event) = documents.poll(&editor.window_version(), 1).unwrap() {
@@ -385,7 +387,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     assert!(io.preparing());
     let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
     documents.submit_workspace_io(permit).unwrap();
-    let mut foreign_documents = DocumentSession::new(
+    let mut foreign_documents = Documents::new(
         VfsWorker::start(2),
         &StartupTarget::Dashboard {
             root: root.path().into(),
@@ -399,7 +401,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         wait(&mut foreign_documents),
         DocumentEvent::Legacy(_)
     ));
-    let mut foreign_io = WorkspaceEditSession::default();
+    let mut foreign_io = WorkspaceEdits::default();
     let ticket = foreign_io
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -485,7 +487,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         "create inspection is not a disk mutation"
     );
     io.reject();
-    documents.close_admission();
+    documents.stop_accepting();
     let ticket = io
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -505,8 +507,8 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let resource = root.path().join("resource");
     let target = root.path().join("resource-renamed");
     std::fs::write(&resource, b"resource bytes").unwrap();
-    let mut resources = WorkspaceEditSession::default();
-    let mut inspections = DocumentSession::new(
+    let mut resources = WorkspaceEdits::default();
+    let mut inspections = Documents::new(
         VfsWorker::start(2),
         &StartupTarget::Dashboard {
             root: root.path().into(),
@@ -557,7 +559,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         &target,
     );
     let (vfs, release) = VfsWorker::start_gated_for_test(2);
-    let mut writes = DocumentSession::new(
+    let mut writes = Documents::new(
         vfs,
         &StartupTarget::Dashboard {
             root: root.path().into(),
@@ -638,7 +640,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         &resource,
     );
     let (vfs, release) = VfsWorker::start_gated_for_test(2);
-    let mut stopped = DocumentSession::new(
+    let mut stopped = Documents::new(
         vfs,
         &StartupTarget::Dashboard {
             root: root.path().into(),
@@ -677,7 +679,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
 }
 
 fn wait_workspace_document(
-    documents: &mut crate::app::documents::DocumentSession,
+    documents: &mut crate::app::documents::Documents,
     editor: &EditorState,
 ) -> crate::app::documents::DocumentEvent {
     let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -690,10 +692,10 @@ fn wait_workspace_document(
     }
 }
 fn stage_resource(
-    owner: &mut WorkspaceEditSession,
-    documents: &mut crate::app::documents::DocumentSession,
+    owner: &mut WorkspaceEdits,
+    documents: &mut crate::app::documents::Documents,
     editor: &EditorState,
-    workspace: &crate::app::workspace::WorkspaceSession,
+    workspace: &crate::app::workspace::Workspace,
     scope: &WorkspaceState,
     source: &std::path::Path,
     target: &std::path::Path,
@@ -751,7 +753,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
         )],
     )
     .unwrap();
-    let workspace = crate::app::workspace::WorkspaceSession::new(
+    let workspace = crate::app::workspace::Workspace::new(
         scope.clone(),
         root.path().join("trust"),
         1,
@@ -761,7 +763,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
     );
     let editor = EditorState::new(root.path().into());
     let path = root.path().join("new.rs");
-    let mut documents = crate::app::documents::DocumentSession::new(
+    let mut documents = crate::app::documents::Documents::new(
         crate::files::VfsWorker::start(2),
         &crate::app::startup::StartupTarget::Dashboard {
             root: root.path().into(),
@@ -770,7 +772,7 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
         1,
         2,
     );
-    let mut owner = WorkspaceEditSession::default();
+    let mut owner = WorkspaceEdits::default();
     let ticket = owner
         .begin(
             workspace.version(),
@@ -849,7 +851,7 @@ fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
         )],
     )
     .unwrap();
-    let workspace = crate::app::workspace::WorkspaceSession::new(
+    let workspace = crate::app::workspace::Workspace::new(
         scope.clone(),
         root.path().join("trust"),
         1,
@@ -870,7 +872,7 @@ fn combined_text_and_rename_or_delete_is_rejected_before_publication() {
         },
         ResourceIntentKind::Delete,
     ] {
-        let mut owner = WorkspaceEditSession::default();
+        let mut owner = WorkspaceEdits::default();
         let ticket = owner
             .begin(
                 workspace.version(),
@@ -926,7 +928,7 @@ fn combined_text_and_rename_is_rejected_before_publication() {
         )],
     )
     .unwrap();
-    let workspace = crate::app::workspace::WorkspaceSession::new(
+    let workspace = crate::app::workspace::Workspace::new(
         scope.clone(),
         root.path().join("trust"),
         1,
@@ -939,7 +941,7 @@ fn combined_text_and_rename_is_rejected_before_publication() {
     let (buffer, _) = editor
         .open_text(TextBuffer::from_text("old"), Some(path.clone()))
         .unwrap();
-    let mut owner = WorkspaceEditSession::default();
+    let mut owner = WorkspaceEdits::default();
     let ticket = owner
         .begin(
             workspace.version(),

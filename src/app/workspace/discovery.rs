@@ -1,13 +1,13 @@
 //! Root discovery and execution metadata belong to workspace, not protocol adapters.
-use crate::app::workspace::WorkspaceSession;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::ProjectRootResolution;
-use crate::files::ProjectRootService;
+use crate::files::ProjectRootWorker;
 use crate::files::ProjectRootStrategy;
 use crate::files::RootIdentity;
 use crate::process::ExecutionPreflightEvent;
 use crate::process::ExecutionPreflightRequest;
-use crate::process::ExecutionPreflightService;
+use crate::process::ExecutionPreflightWorker;
 use crate::process::PreflightError;
 use crate::process::PreflightId;
 use crate::workspace::RootId;
@@ -35,7 +35,7 @@ impl ExecutionReady {
     pub(in crate::app) fn into_execution_result(
         self,
         request: &ExecutionPreflightRequest,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
     ) -> Result<crate::process::ExecutionPreflightResult, String> {
         self.into_scoped_result(request, &workspace.version())
     }
@@ -56,7 +56,7 @@ impl ExecutionReady {
     }
     #[cfg(test)]
     pub(in crate::app) fn fixture(
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         result: crate::process::ExecutionPreflightResult,
     ) -> Self {
         Self {
@@ -78,7 +78,7 @@ pub(in crate::app) enum DiscoveryKind {
 }
 #[derive(Default)]
 pub(super) struct Discovery {
-    worker: ProjectRootService,
+    worker: ProjectRootWorker,
     pending: Option<DiscoveryIntent>,
 }
 struct DiscoveryIntent {
@@ -89,20 +89,20 @@ struct DiscoveryIntent {
     document: PathBuf,
 }
 pub(super) struct Preflights {
-    worker: ExecutionPreflightService,
+    worker: ExecutionPreflightWorker,
     pending: HashMap<PreflightId, (WorkspaceVersion, ExecutionPreflightRequest)>,
     capacity: usize,
 }
 impl Preflights {
     pub(in crate::app) fn new(capacity: usize) -> Self {
         Self {
-            worker: ExecutionPreflightService::start(capacity),
+            worker: ExecutionPreflightWorker::start(capacity),
             pending: HashMap::new(),
             capacity: capacity.clamp(1, 256),
         }
     }
 }
-impl WorkspaceSession {
+impl Workspace {
     fn discovery(&mut self, kind: DiscoveryKind) -> &mut Discovery {
         match kind {
             DiscoveryKind::Language => &mut self.language_roots,
@@ -226,7 +226,7 @@ pub(in crate::app) struct ExecutionLane<'a> {
     revision: u64,
     allowed: bool,
 }
-impl WorkspaceSession {
+impl Workspace {
     pub(in crate::app) fn execution_lane(&mut self, kind: DiscoveryKind) -> ExecutionLane<'_> {
         let discovery = match kind {
             DiscoveryKind::Language => &mut self.language_roots,
@@ -356,14 +356,14 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use std::time::Instant;
-    pub(in crate::app) fn owner(root: &std::path::Path) -> WorkspaceSession {
+    pub(in crate::app) fn owner(root: &std::path::Path) -> Workspace {
         let identity = RootIdentity::capture(root).unwrap();
         let state = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
             [("root".into(), identity.clone())],
         )
         .unwrap();
-        let mut owner = WorkspaceSession::new(state, root.join("trust.toml"), 2, false, false, 2);
+        let mut owner = Workspace::new(state, root.join("trust.toml"), 2, false, false, 2);
         owner.fixture_identity(RootId(1), identity.clone()).unwrap();
         owner.fixture_trust_identity(identity);
         owner.reconcile_trust();

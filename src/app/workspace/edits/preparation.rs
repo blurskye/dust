@@ -1,7 +1,7 @@
 //! Protocol-neutral file preparation and one-shot I/O admission.
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::Source;
-use crate::app::workspace::edits::WorkspaceEditSession;
+use crate::app::workspace::edits::WorkspaceEdits;
 use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::editor::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
@@ -84,7 +84,7 @@ impl PreparedFiles<'_> {
 pub(in crate::app) struct IoPermit<'a> {
     preparation: &'a mut Preparation,
     index: usize,
-    _workspace: &'a crate::app::workspace::WorkspaceSession,
+    _workspace: &'a crate::app::workspace::Workspace,
     _configuration: &'a u64,
     _editor: &'a crate::editor::EditorState,
 }
@@ -129,7 +129,7 @@ impl IoPermit<'_> {
         Ok(())
     }
 }
-impl WorkspaceEditSession {
+impl WorkspaceEdits {
     pub(in crate::app) fn start_files(
         &mut self,
         ticket: PreparationTicket,
@@ -238,7 +238,7 @@ impl WorkspaceEditSession {
     pub(in crate::app) fn prepare_io<'a>(
         &'a mut self,
         index: usize,
-        workspace: &'a crate::app::workspace::WorkspaceSession,
+        workspace: &'a crate::app::workspace::Workspace,
         configuration: &'a u64,
         editor: &'a crate::editor::EditorState,
     ) -> Result<IoPermit<'a>, String> {

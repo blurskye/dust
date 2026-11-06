@@ -1,3 +1,5 @@
+//! Tests for checked workspace edit drafts.
+
 use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::editor::EditorOperation;
 use crate::editor::EditorState;
