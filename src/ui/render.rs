@@ -548,6 +548,8 @@ pub enum PickerSurfaceKind {
     /// The change list: grouped sections whose entries draw status, path and provenance as
     /// their own columns.
     Changes,
+    /// Workspace files: each row draws its file's icon, the folder dimmed and the name.
+    Files,
     /// Grep matches: each row draws its file's icon, `path:line:col` and the line's text
     /// highlighted as its own columns.
     Grep,
@@ -1114,6 +1116,8 @@ pub struct PickerUiState {
     pub title: String,
     pub query: String,
     pub rows: Vec<PickerRow>,
+    /// How many entries there are before the query filters them, for the `shown/total` count.
+    pub total: usize,
     pub selected: Option<usize>,
     pub scroll: usize,
     pub loading: bool,

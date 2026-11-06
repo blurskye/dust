@@ -574,6 +574,7 @@ impl SearchSession {
             preview_side_scroll: (preview_scroll, preview_scroll),
             title: presentation.title,
             query: presentation.query,
+            total: presentation.total,
             rows: presentation
                 .rows
                 .into_iter()
@@ -591,7 +592,9 @@ impl SearchSession {
                         {
                             choice_row_cells(&row)
                         } else if let Some(found) = grep_matches.get(row.id.0.as_str()) {
-                            grep_row_cells(found, &row)
+                            grep_row_cells(found, &row, self.file_icon.as_deref())
+                        } else if picker.surface == PickerSurfaceKind::Files {
+                            path_cells(&row.label, &row.source, self.file_icon.as_deref())
                         } else {
                             Vec::new()
                         };
@@ -676,30 +679,12 @@ fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<Pic
 fn grep_row_cells(
     found: &crate::files::WorkspaceSearchMatch,
     row: &crate::workspace::PickerRowPresentation,
+    file_icon: Option<&str>,
 ) -> Vec<PickerCell> {
-    let cell = |text: &str, style| {
-        let width = unicode_width::UnicodeWidthStr::width(text);
-        PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
-    };
-    let mut cells = Vec::new();
-    if let Some(icon) = found
-        .relative_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(crate::files::file_icon)
-    {
-        let role = super::super::explorer::explorer_icon_role(icon.color);
-        let style = crate::ui::explorer_segment_style(role);
-        cells.push(PickerCell::new(format!("{} ", icon.glyph), style, 2));
-    }
-    // With more than one root the root's name comes first, as the source column did.
-    if !row.source.is_empty() {
-        cells.push(cell(&format!("{}/", row.source), Style::Muted));
-    }
     let path = found.relative_path.display().to_string();
     let line = found.line.saturating_add(1).to_string();
     let column = found.column.saturating_add(1).to_string();
-    cells.push(cell(&path, Style::Default));
+    let mut cells = path_cells(&path, &row.source, file_icon);
     cells.push(cell(":", Style::Muted));
     cells.push(cell(&line, Style::Accent));
     cells.push(cell(":", Style::Muted));
@@ -723,6 +708,36 @@ fn grep_row_cells(
     cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
     cells.retain(|cell| !cell.text.is_empty());
     cells
+}
+
+/// A path as LazyVim's pickers draw it: the file's icon, then the folder dimmed and the
+/// name bright. With more than one root the root's name comes first, dimmed too.
+fn path_cells(path: &str, root: &str, file_icon: Option<&str>) -> Vec<PickerCell> {
+    let split = path.rfind(std::path::is_separator).map_or(0, |at| at + 1);
+    let (folder, name) = path.split_at(split);
+    let mut cells = Vec::new();
+    if let Some(fallback) = file_icon {
+        let (glyph, style) =
+            crate::files::file_icon(name).map_or((fallback, Style::ExplorerIcon), |icon| {
+                let role = super::super::explorer::explorer_icon_role(icon.color);
+                (icon.glyph, crate::ui::explorer_segment_style(role))
+            });
+        cells.push(cell(&format!("{glyph} "), style));
+    }
+    if !root.is_empty() {
+        cells.push(cell(&format!("{root}/"), Style::Muted));
+    }
+    if !folder.is_empty() {
+        cells.push(cell(folder, Style::Muted));
+    }
+    cells.push(cell(name, Style::Default));
+    cells
+}
+
+/// A cell exactly as wide as its text.
+fn cell(text: &str, style: Style) -> PickerCell {
+    let width = unicode_width::UnicodeWidthStr::width(text);
+    PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
 }
 
 fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {

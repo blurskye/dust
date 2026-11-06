@@ -3451,7 +3451,7 @@ impl InteractiveApplication {
             self.configuration.binding_revision(),
         ) {
             Ok(()) => self.install_surface_picker_state(
-                PickerSurfaceKind::Generic,
+                PickerSurfaceKind::Files,
                 "Files".into(),
                 Vec::new(),
                 String::new(),
@@ -3509,7 +3509,7 @@ impl InteractiveApplication {
             })
             .collect();
         self.install_surface_picker_state(
-            PickerSurfaceKind::Generic,
+            PickerSurfaceKind::Files,
             "Files".into(),
             items,
             String::new(),
@@ -9668,6 +9668,10 @@ impl InteractiveApplication {
 
     pub(in crate::editor::session) fn sync_picker_ui(&mut self) {
         self.retire_stale_picker();
+        let explorer = &self.configuration.settings().ui.explorer;
+        let icon = (explorer.icon_mode == crate::config::ExplorerIconMode::NerdFont)
+            .then(|| explorer.active_glyphs().file.clone());
+        self.search.set_file_icon(icon);
         self.ui.picker = self.search.picker_projection();
         let theme = match self.search.selected_picker_payload() {
             Some(PickerPayload::Theme(key)) => Some(key),

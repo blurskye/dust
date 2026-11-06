@@ -553,13 +553,13 @@ pub(super) fn render_picker(
     let content_left = left + 2;
     let query_y = top + 1;
 
-    let count = format!(
-        "{}/{}",
-        picker
-            .selected
-            .map_or(0, |selected| selected.saturating_add(1)),
-        picker.rows.len()
-    );
+    // As in LazyVim: how many entries the query leaves, of how many there are.
+    let shown = picker
+        .rows
+        .iter()
+        .filter(|row| row.kind == PickerRowKind::Entry)
+        .count();
+    let count = format!("{shown}/{}", picker.total.max(shown));
     let status = if picker.loading {
         format!("loading…  {count}")
     } else {

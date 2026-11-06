@@ -8220,6 +8220,31 @@ fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
 }
 
 #[test]
+fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
+    let (_app_dirs, mut app) = app();
+    fs::create_dir(app.state.workspace_root.join("src")).unwrap();
+    fs::write(app.state.workspace_root.join("src/lib.rs"), "").unwrap();
+    fs::write(app.state.workspace_root.join("NOTICE"), "").unwrap();
+    app.start_workspace_file_picker();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.search.files_pending() {
+        app.process_workspace_file_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.picker_insert("lib");
+    let picker = app.ui.picker.as_ref().unwrap();
+    assert_eq!(picker.surface, crate::ui::PickerSurfaceKind::Files);
+    assert_eq!((picker.rows.len(), picker.total), (1, 2));
+    let cells = &picker.rows[0].cells;
+    let icon = crate::files::file_icon("lib.rs").unwrap().glyph;
+    let texts: Vec<_> = cells.iter().map(|cell| cell.text.as_str()).collect();
+    assert_eq!(texts, [format!("{icon} ").as_str(), "src/", "lib.rs"]);
+    assert_eq!(cells[1].style, crate::ui::Style::Muted);
+    assert_eq!(cells[2].style, crate::ui::Style::Default);
+}
+
+#[test]
 fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
     for replacement in [None, Some("changed".into())] {
         let replacing = replacement.is_some();

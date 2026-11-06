@@ -991,6 +991,7 @@ impl NativeSurfaceBridge {
             let content_type = match kind {
                 PickerSurfaceKind::Generic
                 | PickerSurfaceKind::Choice
+                | PickerSurfaceKind::Files
                 | PickerSurfaceKind::Grep => "builtin.picker",
                 PickerSurfaceKind::Problems => "builtin.problems",
                 PickerSurfaceKind::Output => "builtin.output",

@@ -58,6 +58,9 @@ pub(in crate::editor::session) struct SearchSession {
         std::path::PathBuf,
         crate::workspace::git::GitDiffLayer,
     )>,
+    /// The icon a picker row of a file without its own icon gets, or `None` when the
+    /// explorer draws no Nerd Font icons and the rows draw none either.
+    file_icon: Option<String>,
 }
 pub(in crate::editor::session) enum Intent {
     Find,
@@ -129,6 +132,9 @@ impl SearchSession {
         self.cancel();
         self.live = true;
         self.query.clear();
+    }
+    pub(in crate::editor::session) fn set_file_icon(&mut self, icon: Option<String>) {
+        self.file_icon = icon;
     }
     pub(in crate::editor::session) fn set_query(&mut self, query: String) {
         if self.query != query {

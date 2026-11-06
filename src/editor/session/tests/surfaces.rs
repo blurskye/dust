@@ -433,6 +433,7 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
         rows: Vec::new(),
         selected: None,
         scroll: 0,
+        total: 0,
         loading: false,
         preview: None,
     });
@@ -4369,7 +4370,7 @@ fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
 #[test]
 fn picker_title_changes_update_the_retained_window_content() {
     let (_app_dirs, mut app) = app();
-    app.start_workspace_file_picker();
+    app.open_builtin_picker(PickerKind::Buffers);
     app.reconcile_editor_windows();
     let files = app.window_session.native_ids().picker().unwrap();
     assert_eq!(
@@ -4378,7 +4379,7 @@ fn picker_title_changes_update_the_retained_window_content() {
             .content(files.content)
             .unwrap()
             .title,
-        "Files"
+        "Buffers"
     );
     app.open_builtin_picker(PickerKind::Commands);
     app.reconcile_editor_windows();

@@ -715,6 +715,7 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
                     rows: Vec::new(),
                     selected: None,
                     scroll: 0,
+                    total: 0,
                     loading: false,
                     preview: None,
                 })
@@ -2831,6 +2832,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
         rows: vec![],
         selected: None,
         scroll: 0,
+        total: 0,
         loading: false,
         preview: None,
     };
@@ -2895,6 +2897,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                 ],
                 selected: Some(1),
                 scroll: 0,
+                total: 0,
                 loading: false,
                 preview: None,
             };
@@ -2943,6 +2946,7 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             )],
             selected: Some(0),
             scroll: 0,
+            total: 0,
             loading: false,
             preview: Some(super::PickerPreview::text(
                 "health.rs",
@@ -3031,6 +3035,7 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
             )],
             selected: Some(0),
             scroll: 0,
+            total: 0,
             loading: false,
             preview: Some(super::PickerPreview::text(
                 "src/long.rs",
@@ -4748,6 +4753,7 @@ fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
         )],
         selected: Some(0),
         scroll: 0,
+        total: 0,
         loading: false,
         preview: None,
     });
@@ -5195,6 +5201,7 @@ fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
             rows: vec![row],
             selected: None,
             scroll: 0,
+            total: 0,
             loading: false,
             preview: None,
         }),
@@ -5343,6 +5350,7 @@ fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
             )],
             selected: None,
             scroll: 0,
+            total: 0,
             loading: false,
             preview: Some(super::PickerPreview {
                 title: "src/main.rs".into(),
@@ -5459,6 +5467,7 @@ fn diff_picker(diff: super::DiffPreview) -> UiState {
             rows: vec![super::PickerRow::text("row", "f.txt", "unstaged", "git")],
             selected: None,
             scroll: 0,
+            total: 0,
             loading: false,
             preview: Some(super::PickerPreview {
                 title: "f.txt".into(),
@@ -5976,6 +5985,7 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
         rows: Vec::new(),
         selected: None,
         scroll: 0,
+        total: 0,
         loading: false,
     };
     let rect = WindowRect {

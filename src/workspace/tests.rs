@@ -890,6 +890,15 @@ fn picker_fuzzy_adjacency_uses_the_previous_unicode_character_end() {
 }
 
 #[test]
+fn each_word_of_a_picker_query_matches_on_its_own_in_any_order() {
+    let path = "assets/defaults/tutor/python/practice.py";
+    assert!(fuzzy_score("tutor py", path, "").is_some());
+    assert!(fuzzy_score("practice tutor", path, "").is_some());
+    assert_eq!(fuzzy_score("tutor rs", path, ""), None);
+    assert_eq!(fuzzy_score("  ", path, ""), Some(0));
+}
+
+#[test]
 fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
     let directory = tempdir().expect("tempdir");
     let workspace = workspace(directory.path());

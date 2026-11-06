@@ -54,6 +54,8 @@ pub struct PickerPresentation {
     pub title: String,
     pub query: String,
     pub rows: Vec<PickerRowPresentation>,
+    /// Entries before the query filters them.
+    pub total: usize,
     pub selected: Option<usize>,
     pub scroll: usize,
     pub loading: bool,
@@ -282,6 +284,11 @@ impl PickerState {
                     kind: item.kind,
                 })
                 .collect(),
+            total: self
+                .items
+                .iter()
+                .filter(|item| item.kind == PickerItemKind::Entry)
+                .count(),
             selected: self.selected,
             scroll: self.scroll,
             loading: self.loading,
@@ -362,15 +369,22 @@ impl PickerState {
     }
 }
 
+/// How well `query` matches a row, `None` when it doesn't. Each word of the query must
+/// match on its own, in any order, as in LazyVim's pickers: `tutor py` finds
+/// `assets/defaults/tutor/python/practice.py`.
 pub fn fuzzy_score(query: &str, label: &str, detail: &str) -> Option<i64> {
-    if query.is_empty() {
-        return Some(0);
-    }
     let haystack = format!("{label} {detail}").to_lowercase();
-    let query = query.to_lowercase();
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|word| word_score(&haystack, word))
+        .sum()
+}
+
+fn word_score(haystack: &str, query: &str) -> Option<i64> {
     let mut previous_end = None;
     // The query typed as one piece beats the same letters scattered across the row.
-    let mut score = if haystack.contains(&query) {
+    let mut score = if haystack.contains(query) {
         1000_i64
     } else {
         0
