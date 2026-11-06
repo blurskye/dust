@@ -1912,7 +1912,7 @@ impl App {
                     &uri,
                     version,
                     self.state
-                        .active_view
+                        .active_view()
                         .and_then(|id| self.state.views.get(id))
                         .map_or(ByteOffset(0), |view| view.cursor),
                 ) {

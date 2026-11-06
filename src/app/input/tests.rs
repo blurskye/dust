@@ -116,7 +116,7 @@ fn capture_mode_handles_unmapped_keys_without_running_normal_mode_bindings() {
     }
     assert_eq!(*received.lock().unwrap(), ["i", "ctrl-left", "escape"]);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].mode,
+        app.state.views[app.state.active_view().unwrap()].mode,
         crate::editor::EditorMode::Normal
     );
     // Trusted prompts retain their own input context rather than inheriting editor capture.
@@ -128,7 +128,7 @@ fn capture_mode_handles_unmapped_keys_without_running_normal_mode_bindings() {
     app.process_effect(AppEffect::Input(InputCommand::LeaveMode));
     app.handle_configured_key("i".parse().unwrap());
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].mode,
+        app.state.views[app.state.active_view().unwrap()].mode,
         crate::editor::EditorMode::Insert
     );
 }

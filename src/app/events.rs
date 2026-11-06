@@ -63,7 +63,7 @@ pub fn batch(state: &EditorState, after: Option<u64>) -> EventBatch {
                 .iter()
                 .map(|(id, view)| (id, view.clone()))
                 .collect(),
-            active_view: state.active_view,
+            active_view: state.active_view(),
             workspace_root: state.workspace_root.clone(),
         }),
     }

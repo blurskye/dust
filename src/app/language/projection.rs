@@ -954,7 +954,7 @@ impl LspSession {
             return None;
         }
         let item = self.completion_items().get(selected)?;
-        let view = editor.views.get(editor.active_view?)?;
+        let view = editor.views.get(editor.active_view()?)?;
         let text = &editor.buffers.get(view.buffer)?.text;
         let (start, insertion) = if let Some(edit) = &item.text_edit {
             let codec = PositionCodec::new(text);

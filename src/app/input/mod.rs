@@ -3108,7 +3108,7 @@ impl App {
                 .as_ref()
                 .is_none_or(|(editor, view, mode)| {
                     editor.same_editor(&self.state.window_version())
-                        && self.state.active_view == Some(*view)
+                        && self.state.active_view() == Some(*view)
                         && self.state.views.get(*view).is_some_and(|view| {
                             view.mode == mode.base().unwrap_or(EditorMode::Normal)
                         })
@@ -3121,7 +3121,7 @@ impl App {
 
     /// Built-in and named modes expose the same metadata; configuration remains the default owner.
     pub(in crate::app) fn editor_input_mode(&self) -> Option<NamedMode> {
-        let view_id = self.state.active_view?;
+        let view_id = self.state.active_view()?;
         let view = self.state.views.get(view_id)?;
         if let Some((editor, id, mode)) = &self.input.named_mode
             && *id == view_id

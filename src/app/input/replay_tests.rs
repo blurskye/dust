@@ -20,7 +20,7 @@ fn pending_session() -> crate::app::tests::driver::TestSession {
     app.handle_configured_key("i".parse().unwrap());
     app.invoke_insert_text("abcdef".into());
     app.invoke(CommandInvocation::new("mode.normal", InvocationSource::Test).unwrap());
-    let view = app.state.active_view.unwrap();
+    let view = app.state.active_view().unwrap();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(0);
     let ids = Arc::new(AtomicU64::new(1));
     app.commands
@@ -81,7 +81,7 @@ fn pending_command_holds_keys_and_replays_them_in_order_after_completion() {
     assert!(!app.input.command_pending());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "12bcdef");
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].mode,
+        app.state.views[app.state.active_view().unwrap()].mode,
         crate::editor::EditorMode::Normal
     );
 }
@@ -99,13 +99,13 @@ fn dot_records_the_completed_pending_command_and_waits_again_when_replayed() {
     assert_eq!(plan[0].id.as_str(), "test.pending_edit");
     assert!(app.input.command_pending());
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()].cursor.get(),
         0
     );
     complete_edit(app, 2);
     assert!(!app.input.command_pending());
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()].cursor.get(),
         1
     );
     assert_eq!(
@@ -131,13 +131,13 @@ fn macro_records_completion_and_pauses_its_remaining_steps_during_replay() {
     assert!(app.input.command_pending());
     assert_eq!(app.input.replay_depth(), 1);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()].cursor.get(),
         1
     );
     complete_edit(app, 2);
     assert_eq!(app.input.replay_depth(), 0);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()].cursor.get(),
         2
     );
     assert_eq!(

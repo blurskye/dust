@@ -22,7 +22,7 @@ impl App {
         use crate::app::input::InputCommand;
         match command {
             InputCommand::EnterMode(mode) => {
-                if let Some(view) = self.state.active_view {
+                if let Some(view) = self.state.active_view() {
                     self.set_mode(mode.base().unwrap_or(crate::editor::EditorMode::Normal));
                     self.input.cancel_pending();
                     self.input.cancel_mapping();
