@@ -180,6 +180,9 @@ pub(in crate::app) fn invocation_fingerprint(invocation: &CommandInvocation) -> 
                 fingerprint.push_str("integer:");
                 fingerprint.push_str(&value.to_string());
             }
+            CommandValue::Number(_) | CommandValue::List(_) | CommandValue::Record(_) => {
+                fingerprint.push_str(&format!("{value:?}"));
+            }
         }
     }
     fingerprint

@@ -143,6 +143,8 @@ pub(in crate::app) fn typed_plugin_defaults_compile_between_bundled_and_user_con
                 title: "Run demo".into(),
                 description: String::new(),
                 arguments: crate::editor::ArgumentSchema::default(),
+                result: None,
+                access: std::collections::BTreeSet::from([crate::editor::CommandAccess::HostOnly]),
                 context: crate::editor::ContextRequirement::Application,
                 source: crate::editor::CommandSource::Plugin("demo".into()),
             },

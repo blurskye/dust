@@ -963,6 +963,8 @@ impl App {
                 title: declaration.title.clone(),
                 description: declaration.description.clone(),
                 arguments,
+                result: None,
+                access: std::collections::BTreeSet::from([crate::editor::CommandAccess::HostOnly]),
                 context: match declaration.context {
                     crate::plugins::PluginCommandContext::Application => {
                         ContextRequirement::Application
@@ -991,11 +993,11 @@ impl App {
                                 CommandValue::String(value) => value.clone(),
                                 CommandValue::Bool(value) => value.to_string(),
                                 CommandValue::Integer(value) => value.to_string(),
+                                _ => unreachable!("the 0.2 ABI only declares scalar arguments"),
                             })
                             .collect(),
                     }],
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 })
             }) {
                 self.commands.unregister_plugin(&plugin);

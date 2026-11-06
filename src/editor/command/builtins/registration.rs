@@ -162,5 +162,6 @@ pub(super) fn register<E: 'static>(
     let mut spec = CommandSpec::builtin(id, title)?;
     spec.context = context;
     spec.arguments = arguments;
+    spec.access = std::collections::BTreeSet::from([crate::editor::command::CommandAccess::Edit]);
     registry.register(spec, execute_builtin::<E>)
 }

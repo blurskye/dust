@@ -206,6 +206,8 @@ struct App {
     diagnostics: crate::app::diagnostics::Diagnostics,
     workspace_edits: crate::app::workspace::edits::WorkspaceEdits,
     commands: CommandRegistry<AppEffect>,
+    pending_commands:
+        std::collections::BTreeMap<crate::editor::PendingCommandId, commands::PendingInvocation>,
     input: InputState,
     configuration: Configuration,
     ui: Tracked<UiState>,

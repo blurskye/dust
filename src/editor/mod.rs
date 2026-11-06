@@ -14,6 +14,8 @@ pub use command::ArgumentSchema;
 
 pub use command::ArgumentType;
 
+pub use command::{CommandAccess, CommandAuthority, CommandWrapperAction, PendingCommandId};
+
 pub use command::CommandArguments;
 
 pub use command::CommandError;

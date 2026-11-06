@@ -396,6 +396,8 @@ fn invocation_matches(pattern: &str, invocation: &CommandInvocation) -> bool {
                         CommandValue::String(text) => text == value,
                         CommandValue::Bool(flag) => flag.to_string() == value,
                         CommandValue::Integer(number) => number.to_string() == value,
+                        CommandValue::Number(number) => number.to_string() == value,
+                        CommandValue::List(_) | CommandValue::Record(_) => false,
                     })
             })
         })

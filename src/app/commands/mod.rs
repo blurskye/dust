@@ -20,6 +20,7 @@ use crate::editor::ContextRequirement;
 
 use crate::editor::FocusDirection;
 use crate::editor::input::GrammarInput;
+use crate::editor::{CommandAuthority, CommandWrapperAction, PendingCommandId};
 use crate::ui::ConfirmationChoice;
 use crate::ui::PromptKind;
 
@@ -34,6 +35,11 @@ pub enum SyntaxFoldAction {
 
 #[derive(Clone, Debug)]
 pub enum AppEffect {
+    CommandResume {
+        pending: PendingCommandId,
+        owner: String,
+        action: Box<CommandWrapperAction<AppEffect>>,
+    },
     Quit {
         force: bool,
     },
@@ -994,6 +1000,13 @@ impl App {
             return true;
         }
         let result = match effect {
+            AppEffect::CommandResume {
+                pending,
+                owner,
+                action,
+            } => {
+                return self.resume_command(pending, &owner, *action);
+            }
             effect @ (AppEffect::LspDocumentationScroll(..) | AppEffect::LspDocumentationClose) => {
                 self.process_documentation_effect(effect)
             }
@@ -1314,8 +1327,39 @@ impl App {
     }
 }
 
+pub(in crate::app) struct PendingInvocation {
+    invocation: CommandInvocation,
+    repeat_override: Option<CommandInvocation>,
+    suppress_repeat: bool,
+}
+
 impl App {
-    pub(in crate::app) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
+    pub(in crate::app) fn invoke_checked(&mut self, invocation: CommandInvocation) -> bool {
+        let authority = if invocation.source == crate::editor::InvocationSource::Plugin {
+            CommandAuthority::Plugin {
+                initiator: String::new(),
+                grants: Default::default(),
+            }
+        } else {
+            CommandAuthority::Host
+        };
+        self.invoke_with_authority(invocation, authority)
+    }
+
+    pub(in crate::app) fn invoke_with_authority(
+        &mut self,
+        mut invocation: CommandInvocation,
+        authority: CommandAuthority,
+    ) -> bool {
+        if let Err(error) = self.commands.check_access(&invocation.id, &authority) {
+            self.show_error(error);
+            return false;
+        }
+        // Clipboard deferral currently stores native input, not a caller's grants.
+        if authority != CommandAuthority::Host && self.clipboard.waiting() {
+            self.show_error("clipboard input is pending");
+            return false;
+        }
         if self.clipboard.waiting() {
             self.clipboard
                 .defer(crate::app::editing::clipboard::DeferredInput::Invocation(
@@ -1332,7 +1376,8 @@ impl App {
         if invocation.target.buffer.is_none() {
             invocation.target.buffer = self.state.active_buffer_id();
         }
-        if invocation.id.as_str() == "edit.put"
+        if authority == CommandAuthority::Host
+            && invocation.id.as_str() == "edit.put"
             && matches!(invocation.register, None | Some('"' | '+' | '*'))
             && (self.clipboard_shared() || matches!(invocation.register, Some('+' | '*')))
             && {
@@ -1417,8 +1462,82 @@ impl App {
         {
             self.language.note_typed(text);
         }
-        match self.commands.execute(&self.state, &invocation) {
+        let outcome = self
+            .commands
+            .execute_with_authority(&self.state, &invocation, authority);
+        self.finish_command(
+            PendingInvocation {
+                invocation,
+                repeat_override,
+                suppress_repeat,
+            },
+            outcome,
+        )
+    }
+
+    fn resume_command(
+        &mut self,
+        pending: PendingCommandId,
+        owner: &str,
+        action: CommandWrapperAction<AppEffect>,
+    ) -> bool {
+        let outcome = self.commands.resume(&self.state, pending, owner, action);
+        // An unrelated caller cannot consume the real wrapper's continuation.
+        if matches!(outcome, Err(CommandError::WrongWrapper)) {
+            self.show_error(CommandError::WrongWrapper);
+            return false;
+        }
+        let Some(invocation) = self.pending_commands.remove(&pending) else {
+            self.commands.cancel(pending);
+            self.show_error(CommandError::UnknownPending);
+            return false;
+        };
+        self.finish_command(invocation, outcome)
+    }
+
+    fn finish_command(
+        &mut self,
+        invocation: PendingInvocation,
+        outcome: Result<CommandOutcome<AppEffect>, CommandError>,
+    ) -> bool {
+        let PendingInvocation {
+            invocation,
+            repeat_override,
+            suppress_repeat,
+        } = invocation;
+        match outcome {
             Ok(outcome) => {
+                // Feature effects still use the 0.2 host-only ABI. Until those owners carry
+                // grants to the final operation, restricted calls may only return editor work.
+                if outcome.authority != CommandAuthority::Host
+                    && (!outcome.effects.is_empty() || !outcome.follow_up.is_empty())
+                {
+                    if let Some(pending) = outcome.pending {
+                        self.commands.cancel(pending);
+                    }
+                    self.show_error("application effects require host authority");
+                    return false;
+                }
+                if let Some(pending) = outcome.pending {
+                    self.pending_commands
+                        .retain(|id, _| self.commands.is_pending(*id));
+                    self.pending_commands.insert(
+                        pending,
+                        PendingInvocation {
+                            invocation,
+                            repeat_override,
+                            suppress_repeat,
+                        },
+                    );
+                    for effect in outcome.effects {
+                        if !self.process_effect_checked(effect) {
+                            self.pending_commands.remove(&pending);
+                            self.commands.cancel(pending);
+                            return false;
+                        }
+                    }
+                    return true;
+                }
                 let text_before = invocation.target.buffer.and_then(|buffer| {
                     self.state
                         .buffers
@@ -1509,6 +1628,86 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::app::commands::PromptMove;
+
+    #[test]
+    fn suspended_builtin_applies_only_when_its_wrapper_continues() {
+        use crate::editor::{CommandAuthority, CommandWrapperAction};
+        use crate::editor::{CommandInvocation, CommandValue, InvocationSource};
+        let (_dirs, mut app) = crate::app::tests::app();
+        let (buffer, _) = app
+            .state
+            .open_text(crate::editor::text::TextBuffer::from_text(""), None)
+            .unwrap();
+        let invocation = CommandInvocation::new("edit.insert_text", InvocationSource::Test)
+            .unwrap()
+            .with_argument("text", CommandValue::String("wrapped".into()));
+        app.commands
+            .register_wrapper(
+                &invocation.id,
+                "example".into(),
+                0,
+                CommandAuthority::Host,
+                |_, _, _, result| {
+                    Ok(match result {
+                        None => CommandWrapperAction::Pending(vec![]),
+                        Some(result) => CommandWrapperAction::Complete(result),
+                    })
+                },
+            )
+            .unwrap();
+        assert!(app.invoke_checked(invocation.clone()));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+        let pending = *app.pending_commands.keys().next().unwrap();
+        assert!(
+            !app.process_effect_checked(super::AppEffect::CommandResume {
+                pending,
+                owner: "other".into(),
+                action: Box::new(CommandWrapperAction::CallNext(invocation.clone())),
+            })
+        );
+        assert!(app.pending_commands.contains_key(&pending));
+        assert!(app.process_effect_checked(super::AppEffect::CommandResume {
+            pending,
+            owner: "example".into(),
+            action: Box::new(CommandWrapperAction::CallNext(invocation)),
+        }));
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "wrapped");
+        assert!(app.pending_commands.is_empty());
+    }
+
+    #[test]
+    fn restricted_wrapper_cannot_emit_host_application_effects() {
+        use crate::editor::{CommandAccess, CommandAuthority, CommandWrapperAction};
+        use crate::editor::{CommandInvocation, CommandOutcome, CommandValue, InvocationSource};
+        let (_dirs, mut app) = crate::app::tests::app();
+        let (buffer, _) = app
+            .state
+            .open_text(crate::editor::text::TextBuffer::from_text(""), None)
+            .unwrap();
+        let invocation = CommandInvocation::new("edit.insert_text", InvocationSource::Test)
+            .unwrap()
+            .with_argument("text", CommandValue::String("no".into()));
+        app.commands
+            .register_wrapper(
+                &invocation.id,
+                "example".into(),
+                0,
+                CommandAuthority::Plugin {
+                    initiator: "example".into(),
+                    grants: [CommandAccess::Edit].into(),
+                },
+                |_, _, _, _| {
+                    Ok(CommandWrapperAction::Complete(CommandOutcome {
+                        effects: vec![super::AppEffect::Quit { force: true }],
+                        ..CommandOutcome::empty()
+                    }))
+                },
+            )
+            .unwrap();
+        assert!(!app.invoke_checked(invocation));
+        assert!(!app.should_quit);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+    }
 
     #[test]
     fn word_moves_stop_at_words_and_punctuation_runs_as_vim_does() {

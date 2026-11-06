@@ -1,11 +1,15 @@
 //! Command declarations and dispatch.
 
 mod builtins;
+mod wrappers;
+
+pub use wrappers::{CommandWrapperAction, PendingCommandId};
 
 pub use builtins::register_builtin_commands;
 pub(crate) use builtins::visual_ranges;
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use std::fmt;
 
@@ -126,6 +130,9 @@ pub enum CommandValue {
     String(String),
     Bool(bool),
     Integer(i64),
+    Number(serde_json::Number),
+    List(Vec<CommandValue>),
+    Record(CommandArguments),
 }
 
 impl CommandValue {
@@ -140,6 +147,28 @@ impl CommandValue {
         match self {
             Self::Bool(value) => Ok(*value),
             _ => Err(CommandError::InvalidArguments("expected boolean".into())),
+        }
+    }
+
+    pub fn as_list(&self) -> Result<&[CommandValue], CommandError> {
+        match self {
+            Self::List(value) => Ok(value),
+            _ => Err(CommandError::InvalidArguments("expected list".into())),
+        }
+    }
+
+    pub fn as_record(&self) -> Result<&CommandArguments, CommandError> {
+        match self {
+            Self::Record(value) => Ok(value),
+            _ => Err(CommandError::InvalidArguments("expected record".into())),
+        }
+    }
+
+    pub fn as_number(&self) -> Result<serde_json::Number, CommandError> {
+        match self {
+            Self::Number(value) => Ok(value.clone()),
+            Self::Integer(value) => Ok((*value).into()),
+            _ => Err(CommandError::InvalidArguments("expected number".into())),
         }
     }
 
@@ -158,6 +187,23 @@ pub enum ArgumentType {
     String,
     Bool,
     Integer,
+    Number,
+    List,
+    Record,
+}
+
+impl ArgumentType {
+    fn accepts(self, value: &CommandValue) -> bool {
+        matches!(
+            (self, value),
+            (Self::String, CommandValue::String(_))
+                | (Self::Bool, CommandValue::Bool(_))
+                | (Self::Integer | Self::Number, CommandValue::Integer(_))
+                | (Self::Number, CommandValue::Number(_))
+                | (Self::List, CommandValue::List(_))
+                | (Self::Record, CommandValue::Record(_))
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -184,12 +230,7 @@ impl ArgumentSchema {
             let field = self.fields.get(name).ok_or_else(|| {
                 CommandError::InvalidArguments(format!("unknown argument `{name}`"))
             })?;
-            let valid = matches!(
-                (field.kind, value),
-                (ArgumentType::String, CommandValue::String(_))
-                    | (ArgumentType::Bool, CommandValue::Bool(_))
-                    | (ArgumentType::Integer, CommandValue::Integer(_))
-            );
+            let valid = field.kind.accepts(value);
             if !valid {
                 return Err(CommandError::InvalidArguments(format!(
                     "argument `{name}` has the wrong type"
@@ -223,12 +264,60 @@ pub enum CommandSource {
     Plugin(String),
 }
 
+/// Access is checked before running either a wrapper or the command handler.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CommandAccess {
+    Edit,
+    Ui,
+    Files,
+    Process,
+    Network,
+    HostOnly,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum CommandAuthority {
+    #[default]
+    Host,
+    Plugin {
+        initiator: String,
+        grants: BTreeSet<CommandAccess>,
+    },
+}
+
+impl CommandAuthority {
+    fn check(&self, command: &CommandSpec) -> Result<(), CommandError> {
+        if let Self::Plugin { grants, .. } = self
+            && (command.access.contains(&CommandAccess::HostOnly)
+                || !command.access.is_subset(grants))
+        {
+            return Err(CommandError::AccessDenied(command.id.clone()));
+        }
+        Ok(())
+    }
+
+    fn restrict(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Host, _) => other.clone(),
+            (_, Self::Host) => self.clone(),
+            (Self::Plugin { initiator, grants }, Self::Plugin { grants: other, .. }) => {
+                Self::Plugin {
+                    initiator: initiator.clone(),
+                    grants: grants.intersection(other).copied().collect(),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandSpec {
     pub id: CommandId,
     pub title: String,
     pub description: String,
     pub arguments: ArgumentSchema,
+    pub result: Option<ArgumentType>,
+    pub access: BTreeSet<CommandAccess>,
     pub context: ContextRequirement,
     pub source: CommandSource,
 }
@@ -240,6 +329,8 @@ impl CommandSpec {
             title: title.into(),
             description: String::new(),
             arguments: ArgumentSchema::default(),
+            result: None,
+            access: BTreeSet::from([CommandAccess::HostOnly]),
             context: ContextRequirement::Application,
             source: CommandSource::Builtin,
         })
@@ -299,6 +390,9 @@ pub struct CommandOutcome<E> {
     pub effects: Vec<E>,
     pub message: Option<String>,
     pub follow_up: Vec<CommandInvocation>,
+    pub value: Option<CommandValue>,
+    pub pending: Option<PendingCommandId>,
+    pub authority: CommandAuthority,
 }
 
 impl<E> CommandOutcome<E> {
@@ -309,6 +403,9 @@ impl<E> CommandOutcome<E> {
             effects: Vec::new(),
             message: None,
             follow_up: Vec::new(),
+            value: None,
+            pending: None,
+            authority: CommandAuthority::Host,
         }
     }
 }
@@ -322,16 +419,19 @@ type Handler<E> = Arc<
 struct RegisteredCommand<E> {
     spec: CommandSpec,
     handler: Handler<E>,
+    wrappers: Vec<Arc<wrappers::CommandWrapper<E>>>,
 }
 
 pub struct CommandRegistry<E> {
     commands: BTreeMap<CommandId, RegisteredCommand<E>>,
+    pending: RefCell<wrappers::PendingCommands<E>>,
 }
 
 impl<E> Default for CommandRegistry<E> {
     fn default() -> Self {
         Self {
             commands: BTreeMap::new(),
+            pending: RefCell::new(wrappers::PendingCommands::default()),
         }
     }
 }
@@ -353,9 +453,22 @@ impl<E> CommandRegistry<E> {
             RegisteredCommand {
                 spec,
                 handler: Arc::new(handler),
+                wrappers: Vec::new(),
             },
         );
         Ok(())
+    }
+
+    pub fn check_access(
+        &self,
+        id: &CommandId,
+        authority: &CommandAuthority,
+    ) -> Result<(), CommandError> {
+        let command = self
+            .commands
+            .get(id)
+            .ok_or_else(|| CommandError::Unknown(id.clone()))?;
+        authority.check(&command.spec)
     }
 
     pub fn execute(
@@ -363,17 +476,23 @@ impl<E> CommandRegistry<E> {
         state: &EditorState,
         invocation: &CommandInvocation,
     ) -> Result<CommandOutcome<E>, CommandError> {
-        let command = self
-            .commands
-            .get(&invocation.id)
-            .ok_or_else(|| CommandError::Unknown(invocation.id.clone()))?;
-        command.spec.arguments.validate(&invocation.arguments)?;
-        validate_context(state, invocation, command.spec.context)?;
-        (command.handler)(state, invocation)
+        let authority = if invocation.source == InvocationSource::Plugin {
+            CommandAuthority::Plugin {
+                initiator: String::new(),
+                grants: BTreeSet::new(),
+            }
+        } else {
+            CommandAuthority::Host
+        };
+        self.execute_with_authority(state, invocation, authority)
     }
 
     pub fn unregister_plugin(&mut self, owner: &str) {
-        self.commands.retain(|_,registered|!matches!(&registered.spec.source,CommandSource::Plugin(candidate) if candidate==owner));
+        self.cancel_plugin_commands(owner);
+        self.commands.retain(|_, registered| {
+            registered.wrappers.retain(|wrapper| wrapper.owner != owner);
+            !matches!(&registered.spec.source, CommandSource::Plugin(candidate) if candidate == owner)
+        });
     }
 
     pub fn specs(&self) -> impl Iterator<Item = &CommandSpec> {
@@ -468,6 +587,16 @@ pub enum CommandError {
     Unavailable(String),
     #[error("command failed: {0}")]
     Failed(String),
+    #[error("access to command `{0}` was refused")]
+    AccessDenied(CommandId),
+    #[error("unknown or completed pending command")]
+    UnknownPending,
+    #[error("only the waiting wrapper can continue this command")]
+    WrongWrapper,
+    #[error("call-next may only be used once, before the wrapped command returns")]
+    AlreadyContinued,
+    #[error("a command may have at most 16 wrappers")]
+    TooManyWrappers,
 }
 
 #[cfg(test)]
