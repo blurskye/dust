@@ -1,6 +1,10 @@
-use std::{fs, time::Instant};
+//! Benchmarks bounded workspace search against disposable source files.
+use std::fs;
+use std::time::Instant;
 
-use dust::files::{WorkspaceSearchEvent, WorkspaceSearchPolicy, WorkspaceSearchService};
+use dust::files::WorkspaceSearchEvent;
+use dust::files::WorkspaceSearchPolicy;
+use dust::files::WorkspaceSearchWorker;
 use tempfile::tempdir;
 
 fn main() {
@@ -36,7 +40,7 @@ fn main() {
         event_queue_capacity: 8,
     };
     let started = Instant::now();
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     service.start(policy).expect("start search");
     let mut matches = 0;
     loop {
