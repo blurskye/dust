@@ -424,7 +424,7 @@ pub enum AppEffect {
     LspAttach,
     LspDetach,
     LspInlayHintsToggle,
-    ViewToggle(crate::app::ViewToggle),
+    ViewToggle(crate::app::configuration::ViewToggle),
     Zen,
     LspRequest(crate::language::lsp::LspFeature),
     LspDocumentationScroll(isize),
@@ -973,47 +973,20 @@ mod tests {
     }
 }
 
-use crate::app::persistence::MARK_LIMIT;
-use crate::ui::render::SCRATCH_LABEL;
 
-use crate::app::AdapterContext;
 
-use crate::app::CommandInvocation;
-use crate::app::DapControl;
-use crate::app::DapSourceBreakpoint;
-use crate::app::DiagnosticOwner;
-use crate::app::DockEdge;
-use crate::app::EditorMode;
+use crate::editor::CommandInvocation;
+use crate::editor::EditorMode;
 use crate::app::App;
-use crate::app::LargeFileOverride;
-use crate::app::LspFeature;
-use crate::app::NativeSurfaceTarget;
-use crate::app::PackageOperation;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
+use crate::language::lsp::LspFeature;
 
-use crate::app::RegistryRequest;
-use crate::app::TerminalInput;
-use crate::app::TrustedAction;
-use crate::app::WindowPlacement;
-use crate::app::WindowRect;
-use crate::app::WorkspaceTrust;
-use crate::app::builtin_languages;
-use crate::app::mode_name_large;
-use crate::app::plugins::VirtualContext;
-use slotmap::Key;
+use crate::windows::WindowRect;
+use crate::workspace::WorkspaceTrust;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use crate::app::PtyId;
 
 
 use crate::app::command;
-use crate::app::language_for_document;
 
-use std::ops::ControlFlow::Continue;
-use crate::app::PluginStatus;
 
 
 
@@ -1061,32 +1034,36 @@ impl App {
             return true;
         }
         let result = match effect {
-            effect @ (AppEffect::Quit { .. }) => self.process_shutdown_effect(effect),
-            effect @ (AppEffect::Save { .. } | AppEffect::SaveAll { .. } | AppEffect::OpenPath(..) | AppEffect::ForceOpenPath(..) | AppEffect::OpenUserFile(..) | AppEffect::Reload { .. } | AppEffect::CloseBuffer { .. } | AppEffect::CycleBuffer(..) | AppEffect::ToggleBufferPin | AppEffect::MoveBufferLine(..) | AppEffect::NewBuffer | AppEffect::ReloadConfiguration | AppEffect::LargeFileSet(..) | AppEffect::LargeFileStatus) => self.process_documents_effect(effect),
-            effect @ (AppEffect::OpenWorkspaceFilePicker | AppEffect::WalkJumps(..) | AppEffect::FlashBegin | AppEffect::OpenPrompt { .. } | AppEffect::NotificationHistory | AppEffect::NotificationDismiss | AppEffect::SubstituteAll | AppEffect::Scroll { .. } | AppEffect::PlaceMouseCursor | AppEffect::ExtendMouseSelection | AppEffect::ViewToggle(..) | AppEffect::RetainedUiFocus(..) | AppEffect::RetainedUiScroll(..) | AppEffect::RetainedUiActivate | AppEffect::RetainedUiMouseSelect | AppEffect::PrivateUiActivate { .. } | AppEffect::RepeatLast(..) | AppEffect::MacroRecordStart(..) | AppEffect::MacroRecordStop | AppEffect::MacroReplay { .. } | AppEffect::Grammar(..) | AppEffect::CancelPendingMapping | AppEffect::ExplainConfig(..) | AppEffect::InspectKeymap { .. } | AppEffect::ShowKeymapConflicts | AppEffect::RecoveryInspect | AppEffect::HistoryClear | AppEffect::SyntaxFold(..) | AppEffect::SyntaxIndentLine | AppEffect::SyntaxStatus | AppEffect::LintRun(..) | AppEffect::LintClear(..) | AppEffect::FormatRun(..) | AppEffect::VirtualDocumentOpen { .. } | AppEffect::VirtualDocumentRefresh | AppEffect::Substitute { .. } | AppEffect::GlobalDelete { .. }) => self.process_editing_effect(effect),
-            effect @ (AppEffect::NewTab | AppEffect::Layout(..) | AppEffect::SurfaceFocus(..) | AppEffect::WindowClone { .. } | AppEffect::WindowList | AppEffect::WindowDock { .. } | AppEffect::WindowFloat { .. } | AppEffect::WindowFullscreen(..) | AppEffect::WindowHide(..) | AppEffect::WindowShow(..) | AppEffect::WindowClose(..) | AppEffect::WindowResize { .. } | AppEffect::WindowResizeDirectional(..) | AppEffect::WindowMove { .. } | AppEffect::WindowSwap { .. }) => self.process_windows_effect(effect),
-            effect @ (AppEffect::GitFileStage | AppEffect::GitFileUnstage | AppEffect::GitLinesStage { .. } | AppEffect::GitWorktreeCreate { .. } | AppEffect::GitConflictsOpen | AppEffect::GitConflictAccept { .. } | AppEffect::GitConflictChoose { .. } | AppEffect::GitConflictStage | AppEffect::GitConflictContinue | AppEffect::GitConflictAbort | AppEffect::GitConflictReplace { .. } | AppEffect::GitWorktreeOpen | AppEffect::GitWorktreeRemove | AppEffect::GitWorktreesOpen | AppEffect::GitHunksOpenStaged | AppEffect::GitHunkUnstage | AppEffect::GitStatusRefresh | AppEffect::GitStatusOpen | AppEffect::GitBrowse { .. } | AppEffect::PullRequestList | AppEffect::PullRequestComments | AppEffect::PullRequestComment | AppEffect::GitChangesLayerSwitch | AppEffect::GitHunksOpen | AppEffect::GitConflictNavigate(..) | AppEffect::GitHunkNavigate(..) | AppEffect::GitHunkPreview | AppEffect::GitHunkStage | AppEffect::GitHunkReset) => self.process_git_effect(effect),
-            effect @ (AppEffect::HelpForForm | AppEffect::HelpContextual | AppEffect::HelpCommandReference) => self.process_help_effect(effect),
-            effect @ (AppEffect::DebuggerBreakpointStates | AppEffect::DebuggerBreakpointDisable | AppEffect::DebuggerTerminate | AppEffect::DebuggerDetach | AppEffect::DapStart(..) | AppEffect::DapConfigurationStart(..) | AppEffect::DapWatchAdd(..) | AppEffect::DapWatchRemove(..) | AppEffect::DapWatchList | AppEffect::DapStop | AppEffect::DapContinue | AppEffect::DapPause | AppEffect::DapNext | AppEffect::DapStepIn | AppEffect::DapStepOut | AppEffect::DapConsole | AppEffect::DapSessions | AppEffect::DapThreads | AppEffect::DapStack(..) | AppEffect::DapScopes(..) | AppEffect::DapVariables(..) | AppEffect::DapEvaluate(..) | AppEffect::DapRestart | AppEffect::DapBreakpointConfigure { .. } | AppEffect::DapBreakpointToggle | AppEffect::DapInspectorNext | AppEffect::DapStatus) => self.process_debugger_effect(effect),
-            effect @ (AppEffect::Tutor | AppEffect::TutorNext | AppEffect::TutorBack | AppEffect::TutorQuit) => self.process_tutor_effect(effect),
-            effect @ (AppEffect::TodoSearch | AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext(..)) => self.process_search_effect(effect),
-            effect @ (AppEffect::Agent(..)) => self.process_agent_effect(effect),
-            effect @ (AppEffect::MarkdownPreview | AppEffect::SessionSave | AppEffect::SessionLoad | AppEffect::MarkJump(..) | AppEffect::MarkSet(..)) => self.process_persistence_effect(effect),
-            effect @ (AppEffect::OpenFilePrompt | AppEffect::PromptInsert(..) | AppEffect::PromptBackspace | AppEffect::PromptDeleteWord | AppEffect::PromptDeleteToStart | AppEffect::PromptMove(..) | AppEffect::PromptHistory(..) | AppEffect::PromptComplete(..) | AppEffect::PromptConfirmationSelect(..) | AppEffect::PromptConfirmationToggle | AppEffect::PromptSubmit | AppEffect::PromptCancel) => self.process_prompt_effect(effect),
-            effect @ (AppEffect::Zen | AppEffect::SelectTheme | AppEffect::SetTheme(..)) => self.process_configuration_effect(effect),
-            effect @ (AppEffect::DashboardSelect(..) | AppEffect::DashboardOpen) => self.process_dashboard_effect(effect),
-            effect @ (AppEffect::TestRun(..) | AppEffect::TestStop(..) | AppEffect::TestList(..) | AppEffect::TaskList | AppEffect::TaskRestart(..) | AppEffect::TaskRun(..) | AppEffect::TaskStop(..) | AppEffect::TaskOutput(..)) => self.process_tasks_effect(effect),
-            effect @ (AppEffect::CrashInspect | AppEffect::CrashClear | AppEffect::ShowHealth) => self.process_health_effect(effect),
-            effect @ (AppEffect::TerminalOpen(..) | AppEffect::TerminalToggle | AppEffect::TerminalList | AppEffect::TerminalFocus(..) | AppEffect::TerminalFocusActive | AppEffect::TerminalCycle(..) | AppEffect::TerminalResize(..) | AppEffect::TerminalDock { .. } | AppEffect::TerminalFloat(..) | AppEffect::TerminalFullscreen | AppEffect::TerminalHide | AppEffect::TerminalUnfocus | AppEffect::TerminalSend(..) | AppEffect::TerminalModeNormal | AppEffect::TerminalModeInput | AppEffect::TerminalNormalMove(..) | AppEffect::TerminalVisualStart(..) | AppEffect::TerminalYank { .. } | AppEffect::TerminalClose | AppEffect::TerminalQuit) => self.process_terminal_effect(effect),
-            effect @ (AppEffect::PluginValidate | AppEffect::PluginList | AppEffect::PluginDisable(..) | AppEffect::PluginPickerOpen { .. } | AppEffect::PluginExecute { .. }) => self.process_plugins_effect(effect),
-            effect @ (AppEffect::PackageInstall { .. } | AppEffect::PackageRegistrySearch(..) | AppEffect::PackageRegistryShow { .. } | AppEffect::PackageRegistryInstall { .. } | AppEffect::PackageList | AppEffect::PackageVerify | AppEffect::PackageRollback | AppEffect::PackageRemove(..) | AppEffect::PackageGarbageCollect | AppEffect::OpenToolMenu(..) | AppEffect::CloseToolMenu | AppEffect::ToolSearch | AppEffect::ToolSearchInsert(..) | AppEffect::ToolSearchDelete | AppEffect::ToolSearchStop { .. } | AppEffect::MoveToolMenu(..) | AppEffect::CycleToolCategory(..) | AppEffect::RefreshTools | AppEffect::ActivateTool | AppEffect::InstallSelectedTool | AppEffect::UninstallSelectedTool | AppEffect::StopSelectedLsp | AppEffect::RestartSelectedLsp | AppEffect::ToggleToolRuntime) => self.process_tools_effect(effect),
-            effect @ (AppEffect::WorkspaceTrust | AppEffect::WorkspaceUntrust | AppEffect::WorkspaceStatus | AppEffect::WorkspaceRootAdd(..) | AppEffect::WorkspaceRootActivate(..) | AppEffect::WorkspaceRootRemove(..) | AppEffect::WorkspaceRootStatus | AppEffect::WorkspaceSearchPrompt | AppEffect::WorkspaceSearch(..) | AppEffect::WorkspaceSearchCancel | AppEffect::WorkspaceReplace { .. } | AppEffect::WorkspaceEditToggle | AppEffect::WorkspaceEditAccept | AppEffect::WorkspaceEditReject | AppEffect::WorkspaceResourceApply | AppEffect::SafeModeStatus) => self.process_workspace_effect(effect),
-            effect @ (AppEffect::ExplorerPanelToggle | AppEffect::ExplorerOpen | AppEffect::ExplorerSearch | AppEffect::ExplorerSearchInsert(..) | AppEffect::ExplorerSearchDelete | AppEffect::ExplorerSearchStop { .. } | AppEffect::ExplorerClose | AppEffect::ExplorerMove(..) | AppEffect::ExplorerPage(..) | AppEffect::ExplorerParent | AppEffect::ExplorerChild | AppEffect::ExplorerToggle | AppEffect::ExplorerRefresh | AppEffect::ExplorerFollow | AppEffect::ExplorerToggleHidden | AppEffect::ExplorerToggleIgnored | AppEffect::ExplorerFileOpen { .. } | AppEffect::ExplorerCreate(..) | AppEffect::ExplorerRename(..) | AppEffect::ExplorerRenamePrompt | AppEffect::ExplorerDeleteRequest | AppEffect::ExplorerClipboard { .. } | AppEffect::ExplorerPaste | AppEffect::ExplorerYankPath | AppEffect::ExplorerMouseSelect) => self.process_explorer_effect(effect),
-            effect @ (AppEffect::OpenPicker(..) | AppEffect::PickerInsert(..) | AppEffect::PickerBackspace | AppEffect::PickerMove(..) | AppEffect::PickerPreviewPage(..) | AppEffect::PickerResults | AppEffect::PickerRemove | AppEffect::PickerAccept | AppEffect::PickerCancel | AppEffect::PickerNormal | AppEffect::PickerInsertMode) => self.process_picker_effect(effect),
-            effect @ (AppEffect::Settings(..) | AppEffect::Setup(..)) => self.process_settings_effect(effect),
-            effect @ (AppEffect::LspStart | AppEffect::LspStop | AppEffect::LspRestart | AppEffect::LspStatus | AppEffect::LspAttach | AppEffect::LspDetach | AppEffect::LspSessions | AppEffect::LspSessionSelect(..) | AppEffect::LspLogs | AppEffect::LspInlayHintsToggle | AppEffect::LspRequest(..) | AppEffect::LspCompletionDocumentationOpen | AppEffect::LspCompletionMove(..) | AppEffect::LspCompletionAccept | AppEffect::LspRenamePrompt | AppEffect::LspCompletionLeave | AppEffect::LspCompletionCancel | AppEffect::SnippetNavigate(..) | AppEffect::SnippetLeave | AppEffect::SnippetCancel | AppEffect::LspFoldToggle | AppEffect::LspSelectionExpand) => self.process_language_effect(effect),
             effect @ (AppEffect::LspDocumentationScroll(..) | AppEffect::LspDocumentationClose) => self.process_documentation_effect(effect),
             effect @ (AppEffect::DiagnosticNavigate { .. }) => self.process_diagnostics_effect(effect),
+            effect @ (AppEffect::HelpForForm | AppEffect::HelpContextual | AppEffect::HelpCommandReference) => self.process_help_effect(effect),
+            effect @ (AppEffect::CrashInspect | AppEffect::CrashClear | AppEffect::ShowHealth | AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => self.process_health_effect(effect),
+            effect @ (AppEffect::Tutor | AppEffect::TutorNext | AppEffect::TutorBack | AppEffect::TutorQuit) => self.process_tutor_effect(effect),
+            effect @ (AppEffect::Quit { .. }) => self.process_shutdown_effect(effect),
+            effect @ (AppEffect::ExplorerPanelToggle | AppEffect::ExplorerOpen | AppEffect::ExplorerSearch | AppEffect::ExplorerSearchInsert(..) | AppEffect::ExplorerSearchDelete | AppEffect::ExplorerSearchStop { .. } | AppEffect::ExplorerClose | AppEffect::ExplorerMove(..) | AppEffect::ExplorerPage(..) | AppEffect::ExplorerParent | AppEffect::ExplorerChild | AppEffect::ExplorerToggle | AppEffect::ExplorerRefresh | AppEffect::ExplorerFollow | AppEffect::ExplorerToggleHidden | AppEffect::ExplorerToggleIgnored | AppEffect::ExplorerFileOpen { .. } | AppEffect::ExplorerCreate(..) | AppEffect::ExplorerRename(..) | AppEffect::ExplorerRenamePrompt | AppEffect::ExplorerDeleteRequest | AppEffect::ExplorerClipboard { .. } | AppEffect::ExplorerPaste | AppEffect::ExplorerYankPath | AppEffect::ExplorerMouseSelect) => self.process_explorer_effect(effect),
+            effect @ (AppEffect::Agent(..)) => self.process_agent_effect(effect),
+            effect @ (AppEffect::WorkspaceTrust | AppEffect::WorkspaceUntrust | AppEffect::WorkspaceStatus | AppEffect::WorkspaceRootAdd(..) | AppEffect::WorkspaceRootActivate(..) | AppEffect::WorkspaceRootRemove(..) | AppEffect::WorkspaceRootStatus | AppEffect::SafeModeStatus) => self.process_workspace_effect(effect),
+            effect @ (AppEffect::WorkspaceSearchPrompt | AppEffect::WorkspaceSearch(..) | AppEffect::WorkspaceSearchCancel | AppEffect::WorkspaceReplace { .. } | AppEffect::TodoSearch | AppEffect::SearchRepeat { .. } | AppEffect::SearchWord { .. } | AppEffect::SearchSelectNext(..)) => self.process_search_effect(effect),
+            effect @ (AppEffect::WorkspaceEditToggle | AppEffect::WorkspaceEditAccept | AppEffect::WorkspaceEditReject | AppEffect::WorkspaceResourceApply) => self.process_workspace_edits_effect(effect),
+            effect @ (AppEffect::Save { .. } | AppEffect::SaveAll { .. } | AppEffect::OpenPath(..) | AppEffect::ForceOpenPath(..) | AppEffect::OpenUserFile(..) | AppEffect::Reload { .. } | AppEffect::CloseBuffer { .. } | AppEffect::CycleBuffer(..) | AppEffect::ToggleBufferPin | AppEffect::MoveBufferLine(..) | AppEffect::NewBuffer | AppEffect::LargeFileSet(..) | AppEffect::LargeFileStatus | AppEffect::WalkJumps(..) | AppEffect::RecoveryInspect | AppEffect::MarkdownPreview) => self.process_documents_effect(effect),
+            effect @ (AppEffect::ReloadConfiguration | AppEffect::Zen | AppEffect::SelectTheme | AppEffect::SetTheme(..) | AppEffect::ViewToggle(..) | AppEffect::ExplainConfig(..) | AppEffect::InspectKeymap { .. } | AppEffect::ShowKeymapConflicts) => self.process_configuration_effect(effect),
+            effect @ (AppEffect::DashboardSelect(..) | AppEffect::DashboardOpen) => self.process_dashboard_effect(effect),
+            effect @ (AppEffect::PackageInstall { .. } | AppEffect::PackageRegistrySearch(..) | AppEffect::PackageRegistryShow { .. } | AppEffect::PackageRegistryInstall { .. } | AppEffect::PackageList | AppEffect::PackageVerify | AppEffect::PackageRollback | AppEffect::PackageRemove(..) | AppEffect::PackageGarbageCollect | AppEffect::OpenToolMenu(..) | AppEffect::CloseToolMenu | AppEffect::ToolSearch | AppEffect::ToolSearchInsert(..) | AppEffect::ToolSearchDelete | AppEffect::ToolSearchStop { .. } | AppEffect::MoveToolMenu(..) | AppEffect::CycleToolCategory(..) | AppEffect::RefreshTools | AppEffect::ActivateTool | AppEffect::InstallSelectedTool | AppEffect::UninstallSelectedTool | AppEffect::StopSelectedLsp | AppEffect::RestartSelectedLsp | AppEffect::ToggleToolRuntime) => self.process_tools_effect(effect),
+            effect @ (AppEffect::TestRun(..) | AppEffect::TestStop(..) | AppEffect::TestList(..) | AppEffect::TaskList | AppEffect::TaskRestart(..) | AppEffect::TaskRun(..) | AppEffect::TaskStop(..) | AppEffect::TaskOutput(..) | AppEffect::LintRun(..) | AppEffect::LintClear(..) | AppEffect::FormatRun(..)) => self.process_tasks_effect(effect),
+            effect @ (AppEffect::DebuggerBreakpointStates | AppEffect::DebuggerBreakpointDisable | AppEffect::DebuggerTerminate | AppEffect::DebuggerDetach | AppEffect::DapStart(..) | AppEffect::DapConfigurationStart(..) | AppEffect::DapWatchAdd(..) | AppEffect::DapWatchRemove(..) | AppEffect::DapWatchList | AppEffect::DapStop | AppEffect::DapContinue | AppEffect::DapPause | AppEffect::DapNext | AppEffect::DapStepIn | AppEffect::DapStepOut | AppEffect::DapConsole | AppEffect::DapSessions | AppEffect::DapThreads | AppEffect::DapStack(..) | AppEffect::DapScopes(..) | AppEffect::DapVariables(..) | AppEffect::DapEvaluate(..) | AppEffect::DapRestart | AppEffect::DapBreakpointConfigure { .. } | AppEffect::DapBreakpointToggle | AppEffect::DapInspectorNext | AppEffect::DapStatus) => self.process_debugger_effect(effect),
+            effect @ (AppEffect::GitFileStage | AppEffect::GitFileUnstage | AppEffect::GitLinesStage { .. } | AppEffect::GitWorktreeCreate { .. } | AppEffect::GitConflictsOpen | AppEffect::GitConflictAccept { .. } | AppEffect::GitConflictChoose { .. } | AppEffect::GitConflictStage | AppEffect::GitConflictContinue | AppEffect::GitConflictAbort | AppEffect::GitConflictReplace { .. } | AppEffect::GitWorktreeOpen | AppEffect::GitWorktreeRemove | AppEffect::GitWorktreesOpen | AppEffect::GitHunksOpenStaged | AppEffect::GitHunkUnstage | AppEffect::GitStatusRefresh | AppEffect::GitStatusOpen | AppEffect::GitBrowse { .. } | AppEffect::PullRequestList | AppEffect::PullRequestComments | AppEffect::PullRequestComment | AppEffect::GitChangesLayerSwitch | AppEffect::GitHunksOpen | AppEffect::GitConflictNavigate(..) | AppEffect::GitHunkNavigate(..) | AppEffect::GitHunkPreview | AppEffect::GitHunkStage | AppEffect::GitHunkReset) => self.process_git_effect(effect),
+            effect @ (AppEffect::PluginValidate | AppEffect::PluginList | AppEffect::PluginDisable(..) | AppEffect::PluginPickerOpen { .. } | AppEffect::PluginExecute { .. } | AppEffect::RetainedUiFocus(..) | AppEffect::RetainedUiScroll(..) | AppEffect::RetainedUiActivate | AppEffect::RetainedUiMouseSelect | AppEffect::PrivateUiActivate { .. } | AppEffect::VirtualDocumentOpen { .. } | AppEffect::VirtualDocumentRefresh) => self.process_plugins_effect(effect),
+            effect @ (AppEffect::LspStart | AppEffect::LspStop | AppEffect::LspRestart | AppEffect::LspStatus | AppEffect::LspAttach | AppEffect::LspDetach | AppEffect::LspSessions | AppEffect::LspSessionSelect(..) | AppEffect::LspLogs | AppEffect::LspInlayHintsToggle | AppEffect::LspRequest(..) | AppEffect::LspCompletionDocumentationOpen | AppEffect::LspCompletionMove(..) | AppEffect::LspCompletionAccept | AppEffect::LspRenamePrompt | AppEffect::LspCompletionLeave | AppEffect::LspCompletionCancel | AppEffect::SnippetNavigate(..) | AppEffect::SnippetLeave | AppEffect::SnippetCancel | AppEffect::LspFoldToggle | AppEffect::LspSelectionExpand) => self.process_language_effect(effect),
+            effect @ (AppEffect::Settings(..) | AppEffect::Setup(..)) => self.process_settings_effect(effect),
+            effect @ (AppEffect::TerminalOpen(..) | AppEffect::TerminalToggle | AppEffect::TerminalList | AppEffect::TerminalFocus(..) | AppEffect::TerminalFocusActive | AppEffect::TerminalCycle(..) | AppEffect::TerminalResize(..) | AppEffect::TerminalDock { .. } | AppEffect::TerminalFloat(..) | AppEffect::TerminalFullscreen | AppEffect::TerminalHide | AppEffect::TerminalUnfocus | AppEffect::TerminalSend(..) | AppEffect::TerminalModeNormal | AppEffect::TerminalModeInput | AppEffect::TerminalNormalMove(..) | AppEffect::TerminalVisualStart(..) | AppEffect::TerminalYank { .. } | AppEffect::TerminalClose | AppEffect::TerminalQuit) => self.process_terminal_effect(effect),
+            effect @ (AppEffect::OpenWorkspaceFilePicker | AppEffect::OpenPicker(..) | AppEffect::PickerInsert(..) | AppEffect::PickerBackspace | AppEffect::PickerMove(..) | AppEffect::PickerPreviewPage(..) | AppEffect::PickerResults | AppEffect::PickerRemove | AppEffect::PickerAccept | AppEffect::PickerCancel | AppEffect::PickerNormal | AppEffect::PickerInsertMode) => self.process_picker_effect(effect),
+            effect @ (AppEffect::FlashBegin | AppEffect::SubstituteAll | AppEffect::Scroll { .. } | AppEffect::RepeatLast(..) | AppEffect::MacroRecordStart(..) | AppEffect::MacroRecordStop | AppEffect::MacroReplay { .. } | AppEffect::Grammar(..) | AppEffect::Substitute { .. } | AppEffect::GlobalDelete { .. }) => self.process_editing_effect(effect),
+            effect @ (AppEffect::OpenPrompt { .. } | AppEffect::OpenFilePrompt | AppEffect::PromptInsert(..) | AppEffect::PromptBackspace | AppEffect::PromptDeleteWord | AppEffect::PromptDeleteToStart | AppEffect::PromptMove(..) | AppEffect::PromptHistory(..) | AppEffect::PromptComplete(..) | AppEffect::PromptConfirmationSelect(..) | AppEffect::PromptConfirmationToggle | AppEffect::PromptSubmit | AppEffect::PromptCancel) => self.process_prompt_effect(effect),
+            effect @ (AppEffect::NotificationHistory | AppEffect::NotificationDismiss) => self.process_notifications_effect(effect),
+            effect @ (AppEffect::PlaceMouseCursor | AppEffect::ExtendMouseSelection | AppEffect::CancelPendingMapping) => self.process_input_effect(effect),
+            effect @ (AppEffect::HistoryClear | AppEffect::SessionSave | AppEffect::SessionLoad | AppEffect::MarkJump(..) | AppEffect::MarkSet(..)) => self.process_persistence_effect(effect),
+            effect @ (AppEffect::SyntaxFold(..) | AppEffect::SyntaxIndentLine | AppEffect::SyntaxStatus) => self.process_syntax_effect(effect),
+            effect @ (AppEffect::NewTab | AppEffect::Layout(..) | AppEffect::SurfaceFocus(..) | AppEffect::WindowClone { .. } | AppEffect::WindowList | AppEffect::WindowDock { .. } | AppEffect::WindowFloat { .. } | AppEffect::WindowFullscreen(..) | AppEffect::WindowHide(..) | AppEffect::WindowShow(..) | AppEffect::WindowClose(..) | AppEffect::WindowResize { .. } | AppEffect::WindowResizeDirectional(..) | AppEffect::WindowMove { .. } | AppEffect::WindowSwap { .. }) => self.process_windows_effect(effect),
         };
         match result { Ok(()) => true, Err(_) => unreachable!("every AppEffect variant has one owning handler") }
     }
@@ -1231,7 +1208,7 @@ impl App {
                     let source = self.state.window_version();
                     let snippet_document = self.input.snippet_buffer().and_then(|id| {
                         self.state.buffers.get(id).map(|buffer| {
-                            crate::app::input::SnippetDocument {
+                            crate::app::language::snippets::SnippetDocument {
                                 editor: &source,
                                 buffer: id,
                                 text: &buffer.text,
@@ -1253,7 +1230,7 @@ impl App {
                         let source = self.state.window_version();
                         let document = self.input.snippet_buffer().and_then(|id| {
                             self.state.buffers.get(id).map(|buffer| {
-                                crate::app::input::SnippetDocument {
+                                crate::app::language::snippets::SnippetDocument {
                                     editor: &source,
                                     buffer: id,
                                     text: &buffer.text,
@@ -1307,13 +1284,8 @@ impl App {
     }
 }
 
-use crate::app::DocumentationPopupKind;
 
-use crate::app::LspMarkupContent;
-use crate::app::LspMarkupKind;
-use crate::app::PluginUiInteraction;
 
-use crate::app::TextBuffer;
 
 
 

@@ -1,15 +1,10 @@
 //! Content rectangles shared by surface painting and interaction.
 use crate::config::AmbiguousWidth;
-use crate::windows::WindowRect;
+
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
-use crate::ui::geometry::text_width;
-
-use crate::ui::render::picker::PickerContentGeometry;
 
 
-
-pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
 
 
 pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
@@ -37,27 +32,6 @@ pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
             text_width(safe, ambiguous).clamp(1, 2)
         })
         .sum()
-}
-
-
-pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
-    let margin = 1_u16.min(width / 2);
-    let available = NOTIFICATION_MAX_WIDTH.min(width.saturating_sub(margin.saturating_mul(2)));
-    (available >= 4 && height >= 3).then_some(WindowRect {
-        x: width.saturating_sub(margin).saturating_sub(available),
-        y: 1.min(height.saturating_sub(3)),
-        width: available,
-        height: 3,
-    })
-}
-
-
-#[derive(Clone, Debug, Default)]
-pub struct SurfaceContentGeometry {
-    pub picker: Option<PickerContentGeometry>,
-    pub explorer: Option<WindowRect>,
-    pub terminal: Option<WindowRect>,
-    pub documentation_rows: usize,
 }
 
 

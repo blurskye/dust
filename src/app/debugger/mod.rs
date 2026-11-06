@@ -21,10 +21,10 @@ use crate::persistence::PersistedBreakpoint;
 use crate::persistence::PersistedWatch;
 use crate::process::PtyId;
 
-pub(crate) const MAXIMUM_BREAKPOINTS: usize = 10_000;
-pub(crate) const MAXIMUM_WATCHES: usize = 1_000;
-pub(crate) const MAXIMUM_DEBUG_ARGUMENTS: usize = 4096;
-pub(crate) const MAXIMUM_DEBUG_ENVIRONMENT: usize = 4096;
+pub(in crate::app) const MAXIMUM_BREAKPOINTS: usize = 10_000;
+pub(in crate::app) const MAXIMUM_WATCHES: usize = 1_000;
+pub(in crate::app) const MAXIMUM_DEBUG_ARGUMENTS: usize = 4096;
+pub(in crate::app) const MAXIMUM_DEBUG_ENVIRONMENT: usize = 4096;
 
 pub(in crate::app) use launch::DebugIntent;
 use std::collections::BTreeMap;

@@ -1,14 +1,14 @@
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::app::AdapterContext;
-use crate::app::BTreeMap;
-use crate::app::DiagnosticOwner;
-use crate::app::Instant;
+use crate::app::tasks::AdapterContext;
+use std::collections::BTreeMap;
+use crate::workspace::DiagnosticOwner;
+use std::time::Instant;
 use crate::app::App;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::RunningTask;
-use crate::app::managed_formatter;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::app::tasks::RunningTask;
+use crate::tools::managed_formatter;
 
 
 

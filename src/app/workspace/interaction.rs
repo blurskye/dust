@@ -1,20 +1,19 @@
 
-use crate::app::AdapterContext;
-use crate::app::DiagnosticOwner;
-use crate::app::ExecutionPreflightEvent;
-use crate::app::ExecutionSource;
-use crate::app::HashSet;
+use crate::app::tasks::AdapterContext;
+use crate::workspace::DiagnosticOwner;
+use crate::app::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
+use crate::workspace::ExecutionSource;
+use std::collections::HashSet;
 use crate::app::App;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::PromptKind;
-use crate::app::RegistryRequest;
-use crate::app::ToolStatus;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::ui::PromptKind;
+use crate::tools::RegistryRequest;
+use crate::tools::ToolStatus;
 use crate::app::TrustedAction;
-use crate::app::WorkspaceTrust;
+use crate::workspace::WorkspaceTrust;
 use crate::app::workspace::leaves_root;
-use crate::app::Duration;
-use crate::app::command;
+use std::time::Duration;
 use crate::app::workspace::WorkspaceFailure;
 use crate::app::workspace::WorkspaceUpdate;
 

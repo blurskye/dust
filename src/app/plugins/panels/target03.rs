@@ -843,3 +843,18 @@ impl PluginWindowHost {
         Ok(events)
     }
 }
+
+use crate::plugins::PluginPrivateStyle;
+use crate::plugins::PluginUiError;
+use crate::plugins::PluginUiErrorCode;
+use crate::plugins::PluginUiNodeKind;
+use crate::plugins::PluginUiRequest;
+use crate::plugins::PluginUiRequestKind;
+use crate::plugins::PluginUiStyle;
+use crate::plugins::PluginWindowPlacementKind;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentCapabilities;
+use crate::windows::ContentContract;
+use crate::windows::ContentTypeId;
+use crate::windows::WindowGraph;
+use crate::windows::WindowPlacement;

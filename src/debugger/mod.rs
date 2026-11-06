@@ -1650,12 +1650,16 @@ pub(crate) fn terminal_reply_source_fixture() {
 
 #[cfg(test)]
 pub(crate) use session::TestAdapter;
+#[cfg(test)]
 pub(crate) use session::fixture as test_session;
 #[cfg(test)]
 mod transport_tests;
 #[cfg(test)]
+#[cfg(test)]
 pub(crate) use transport_tests::ADAPTER as TEST_ADAPTER;
+#[cfg(test)]
 pub(crate) use transport_tests::LOGGING_ADAPTER as TEST_LOGGING_ADAPTER;
+#[cfg(test)]
 pub(crate) use transport_tests::python as test_python;
 
 /// What is TRUE about a breakpoint, as opposed to what was asked for.

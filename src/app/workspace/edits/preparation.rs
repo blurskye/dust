@@ -273,7 +273,7 @@ impl WorkspaceEditSession {
     pub(in crate::app) fn accept_preparation_reply(
         &mut self,
         reply: crate::app::documents::WorkspaceIoReply,
-        workspace: &crate::app::workspace::edits::WorkspaceVersion,
+        workspace: &crate::app::workspace::WorkspaceVersion,
         configuration: u64,
     ) -> Result<(), String> {
         if !self.owns_preparation_reply(&reply) {

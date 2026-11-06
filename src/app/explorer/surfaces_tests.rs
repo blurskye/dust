@@ -304,7 +304,7 @@ pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer
     app.reconcile_editor_windows();
     let explorer = app.explorer_window_rect().unwrap();
     let before = app.ui.explorer.clone();
-    app.process_effect(AppEffect::OpenPicker(crate::app::PickerKind::Buffers));
+    app.process_effect(AppEffect::OpenPicker(crate::app::commands::PickerKind::Buffers));
     app.handle_event(UiEvent::Mouse {
         key: "mouse-scroll-down".parse().unwrap(),
         column: explorer.x,
@@ -312,3 +312,18 @@ pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer
     });
     assert_eq!(app.ui.explorer, before);
 }
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::FocusDirection;
+use crate::process::PtyId;
+use crate::ui::KeyInputKind;
+use crate::ui::UiEvent;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::fs;
+use crate::ui::PtyScreen;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+

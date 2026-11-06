@@ -314,7 +314,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     ];
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
     let gutter = crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
-    let sign_column = crate::ui::render::git_sign_column(gutter, &loaded.config.editor).unwrap();
+    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &loaded.config.editor).unwrap();
     assert_eq!(
         (
             frame.grid.get(sign_column, 0).unwrap().symbol.as_str(),
@@ -381,7 +381,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
         )
         .unwrap();
     let loaded = crate::config::load_bundled_config();
-    assert_eq!(crate::ui::render::editor_line_number_digits(&state), 4);
+    assert_eq!(crate::ui::render::visual_rows::editor_line_number_digits(&state), 4);
     let short_gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[short].text,
@@ -400,8 +400,8 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     assert_eq!(state.active_tab, Some(first_tab));
     let ui = ui_with_editor_layout(&state);
     let frame = crate::ui::render::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
-    let short_sign = crate::ui::render::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
-    let long_sign = crate::ui::render::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
+    let short_sign = crate::ui::render::visual_rows::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
+    let long_sign = crate::ui::render::visual_rows::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
     assert_eq!(frame.grid.get(3, 0).unwrap().symbol, "1");
     assert_eq!(frame.grid.get(short_sign, 0).unwrap().symbol, "│");
     assert_eq!(
@@ -414,4 +414,100 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     assert_eq!(long_frame.grid.get(long_sign, 0).unwrap().symbol, "│");
     assert_eq!(long_frame.grid.get(long_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(long_frame.grid.get(long_gutter, 0).unwrap().symbol, "l");
+}
+use crate::ui::render::composition_tests::drawn_at;
+
+use crate::ui::render::visual_rows::editor_line_number_digits;
+use crate::ui::render::visual_rows::git_sign_column;
+
+use crate::ui::render::overlays::BUFFER_OVERFLOW_RIGHT;
+use crate::ui::render::overlays::BUFFER_SEPARATOR;
+
+use crate::ui::render::overlays::render_content_tab_line;
+
+
+
+
+#[test]
+fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
+    let config = crate::config::load_bundled_config().config;
+    let entries = [
+        "a{dirty}.rs".to_owned(),
+        format!("a{}.rs", "\u{200b}".repeat(10)),
+        "last.rs".into(),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, title)| crate::ui::render::ContentTabEntry {
+        identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index as u64)),
+        kind: crate::ui::render::ContentTabKind::Text,
+        title,
+        active: index == 0,
+        dirty: false,
+        pinned: false,
+        diagnostic: None,
+        icon: "R".into(),
+        closeable: false,
+    })
+    .collect::<Vec<_>>();
+    let mut grid = crate::ui::CellGrid::new(120, 1);
+    crate::ui::render::overlays::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).contains("a{dirty}.rs"));
+    let separators = (0..120)
+        .filter(|x| grid.get(*x, 0).unwrap().symbol == BUFFER_SEPARATOR)
+        .collect::<Vec<_>>();
+    let mut start = 0;
+    for (entry, separator) in entries.iter().zip(separators) {
+        assert_eq!(
+            usize::from(separator + 1 - start),
+            crate::ui::render::content_tab_width(entry, &config)
+        );
+        for column in start..=separator {
+            assert_eq!(
+                crate::ui::render::content_tab_at_column(&entries, &config, 120, column),
+                Some(entry.identity)
+            );
+        }
+        start = separator + 1;
+    }
+    // The last two cells are painted over the clipped first tab by the overflow marker.
+    let mut grid = crate::ui::CellGrid::new(12, 1);
+    crate::ui::render::overlays::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).ends_with(BUFFER_OVERFLOW_RIGHT));
+    for column in 10..12 {
+        assert_eq!(
+            crate::ui::render::content_tab_at_column(&entries, &config, 12, column),
+            None
+        );
+    }
+}
+
+
+#[test]
+fn content_tabs_follow_the_last_of_many_entries() {
+    let config = crate::config::load_bundled_config().config;
+    let entries = (0..1000)
+        .map(|index| crate::ui::render::ContentTabEntry {
+            identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index)),
+            kind: crate::ui::render::ContentTabKind::Text,
+            title: format!("file-{index}.rs"),
+            active: index == 999,
+            dirty: false,
+            pinned: false,
+            diagnostic: None,
+            icon: "R".into(),
+            closeable: false,
+        })
+        .collect::<Vec<_>>();
+    let mut grid = crate::ui::CellGrid::new(40, 1);
+    crate::ui::render::overlays::render_content_tab_line(&mut grid, &entries, &config, 0);
+    assert!(grid.row_text(0).contains("file-999.rs"));
+    let column = (0..40)
+        .rev()
+        .find(|x| grid.get(*x, 0).unwrap().symbol == "9")
+        .unwrap();
+    assert_eq!(
+        crate::ui::render::content_tab_at_column(&entries, &config, 40, column),
+        Some(entries[999].identity)
+    );
 }

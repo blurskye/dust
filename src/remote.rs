@@ -456,7 +456,8 @@ pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_sent_file_arrives_with_its_line() {
@@ -787,3 +788,5 @@ mod tests {
         assert_eq!(asking.join().unwrap().unwrap(), json!({"text": "found"}));
     }
 }
+
+

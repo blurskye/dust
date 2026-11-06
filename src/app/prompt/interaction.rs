@@ -1,15 +1,15 @@
-use crate::app::ByteOffset;
-use crate::app::EditorMode;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
+use crate::editor::text::ByteOffset;
+use crate::editor::EditorMode;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
 use crate::app::App;
-use crate::app::PromptKind;
-use crate::app::PromptMove;
-use crate::app::UndoPolicy;
-use crate::app::WorkspaceTrust;
-use crate::app::parse_ex;
+use crate::ui::PromptKind;
+use crate::app::commands::PromptMove;
+use crate::editor::UndoPolicy;
+use crate::workspace::WorkspaceTrust;
+use crate::editor::input::parse_ex;
 use crate::app::command;
-use crate::app::ViewId;
+use crate::editor::ViewId;
 
 
 

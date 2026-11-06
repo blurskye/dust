@@ -1,5 +1,5 @@
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
 
 
@@ -191,11 +191,17 @@ Ok(())
 }
 
 
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_settings_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::Settings(action) => self.settings_action(action),
-            AppEffect::Setup(action) => self.setup_action(action),
+AppEffect::Settings(action) => self.settings_action(action),
+AppEffect::Setup(action) => self.setup_action(action),
             effect => return Err(effect),
         }
         Ok(())

@@ -95,10 +95,10 @@ pub struct ApiCompatibility {
 }
 
 pub fn manifest() -> Result<ApiManifest, String> {
-    let mut registry = crate::editor::CommandRegistry::<crate::app::AppEffect>::default();
+    let mut registry = crate::editor::CommandRegistry::<crate::app::commands::AppEffect>::default();
     crate::editor::register_builtin_commands(&mut registry)
         .map_err(|error| format!("built-in command inventory failed: {error}"))?;
-    crate::app::register_app_commands(&mut registry)
+    crate::app::commands::register_app_commands(&mut registry)
         .map_err(|error| format!("application command inventory failed: {error}"))?;
     let commands = registry
         .specs()

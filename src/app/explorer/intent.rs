@@ -1,7 +1,7 @@
 //! Explorer operations retain their exact request, confirmation and reconciliation context.
-use crate::app::explorer::ExplorerKind;
+use crate::app::explorer::tree::ExplorerKind;
 use crate::app::explorer::ExplorerSession;
-use crate::app::explorer::WorkspaceVersion;
+use crate::app::workspace::WorkspaceVersion;
 use crate::app::windows::NavigationStamp;
 use crate::editor::EditorWindowVersion;
 use crate::editor::BufferPathChange;

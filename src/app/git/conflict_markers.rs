@@ -1,23 +1,23 @@
 //! Accepting one conflict block at a time from its markers, like VS Code's Accept Current,
 //! Accept Incoming and Accept Both. The whole-file choices live in `git::conflict`.
 
-use crate::app::ByteOffset;
+use crate::editor::text::ByteOffset;
 
-use crate::app::ByteRange;
+use crate::editor::text::ByteRange;
 
-use crate::app::EditorOperation;
+use crate::editor::EditorOperation;
 
-use crate::app::EditorTransaction;
+use crate::editor::EditorTransaction;
 
 use crate::app::App;
 
-use crate::app::Precondition;
+use crate::editor::Precondition;
 
-use crate::app::TextEdit;
+use crate::editor::text::TextEdit;
 
-use crate::app::TextEditSet;
+use crate::editor::text::TextEditSet;
 
-use crate::app::UndoPolicy;
+use crate::editor::UndoPolicy;
 
 /// Line numbers of one block's markers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

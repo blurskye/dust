@@ -1,11 +1,11 @@
-use crate::app::windows::plans::EditorOperation;
-use crate::app::windows::plans::EditorTopology;
-use crate::app::windows::plans::NativeSurfaceTarget;
-use crate::app::windows::plans::PluginCatalogVersion;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTopology;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::plugins::PluginCatalogVersion;
 use crate::app::windows::plans::TargetError;
-use crate::app::windows::plans::WindowPlacement;
+use crate::windows::WindowPlacement;
 use crate::app::windows::plans::WindowPlan;
-use crate::app::windows::plans::WindowSession;
+use crate::app::windows::WindowSession;
 use crate::editor::FocusDirection;
 
 #[derive(Clone, Copy)]

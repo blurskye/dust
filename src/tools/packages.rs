@@ -1185,3 +1185,6 @@ pub(crate) fn installed_plugins(root: &Path) -> BTreeSet<String> {
         })
         .collect()
 }
+use std::io::Read;
+
+

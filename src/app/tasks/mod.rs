@@ -5,7 +5,7 @@ mod linter;
 mod sources;
 
 /// Limits for every task and tool process Dust runs.
-pub(crate) const PROCESS_EVENT_CAPACITY: usize = 256;
+pub(in crate::app) const PROCESS_EVENT_CAPACITY: usize = 256;
 const MAXIMUM_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAXIMUM_LINE_BYTES: usize = 1024 * 1024;
 const MAXIMUM_STDIN_BYTES: usize = 16 * 1024 * 1024;

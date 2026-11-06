@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::language::lsp::paths::file_uri;
 
 use crate::language::lsp::server::LspCapabilities;
-use crate::language::lsp::server::supports_document;
+
 
 
 

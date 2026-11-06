@@ -207,3 +207,9 @@ pub(in crate::app) fn picker_title_changes_update_the_retained_window_content() 
             .any(|row| row.label.contains("Commands"))
     );
 }
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
+use crate::windows::WindowRect;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+

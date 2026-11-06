@@ -1,251 +1,10 @@
 
-use crate::app::AppEffect;
-use crate::app::DiagnosticOwner;
+use crate::app::commands::AppEffect;
+use crate::workspace::DiagnosticOwner;
 use crate::app::App;
-use crate::app::LspFeature;
+use crate::language::lsp::LspFeature;
 
-impl App {
-    pub(in crate::app) fn process_language_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::LspStart => {
-                self.language.clear_all_stopped();
-                if let Some(key) = self.language.active().cloned() {
-                    self.language.request_start(&key, None);
-                }
-                self.start_lsp(None);
-            }
-            AppEffect::LspStop => {
-                if let Some(buffer) = self.state.active_buffer_id() {
-                    self.language.stop_document_launches(buffer);
-                }
-                if let Some(server) = self.language.active().cloned() {
-                    if let Some(id) = self
-                        .language
-                        .sessions()
-                        .get(&server)
-                        .map(|state| state.server_id.clone())
-                    {
-                        self.language.mark_stopped(&id);
-                    }
-                    self.language.request_stop(&server);
-                    self.clear_lsp_server_ownership(&server);
-                    if let Err(error) = self.language.stop(&server) {
-                        self.show_error(error)
-                    }
-                    self.clear_lsp_progress(&server);
-                    self.language.remove(&server);
-                    self.clear_lsp_session_state();
-                }
-            }
-            AppEffect::LspRestart => {
-                if let Some(server) = self.language.active().cloned() {
-                    self.restart_lsp(&server);
-                } else {
-                    self.start_lsp(None);
-                }
-            }
-            AppEffect::LspStatus => {
-                let mut servers = self
-                    .language
-                    .running_servers()
-                    .iter()
-                    .map(|server| self.lsp_server_label(server))
-                    .collect::<Vec<_>>();
-                servers.sort();
-                servers.dedup();
-                self.notify_message(
-                    self.message(
-                        "lsp_status",
-                        &[(
-                            "servers",
-                            if servers.is_empty() {
-                                "none".into()
-                            } else {
-                                servers.join(", ")
-                            },
-                        )],
-                    ),
-                    false,
-                );
-                if let Some(server) = self.language.active().map(String::as_str) {
-                    let _ = self.language.health(server);
-                }
-            }
-            AppEffect::LspAttach => {
-                if let Some(buffer) = self.state.active_buffer_id() {
-                    self.language.clear_detached(buffer);
-                }
-                if let Some(server) = self.language.active().cloned() {
-                    if let Some((buffer, document)) = self.active_lsp_document() {
-                        if let Some(id) = self
-                            .language
-                            .sessions()
-                            .get(&server)
-                            .map(|session| session.server_id.clone())
-                        {
-                            self.language.set_detached(id, buffer, false);
-                        }
-                        let source = self.state.buffers[buffer].text.source_version();
-                        if let Err(error) =
-                            self.language
-                                .sync_owned(&server, document, (buffer, source))
-                        {
-                            self.show_error(error);
-                        }
-                    }
-                } else {
-                    self.start_lsp(None);
-                }
-            }
-            AppEffect::LspDetach => {
-                if let (Some(server), Some((buffer, document))) =
-                    (self.language.active().cloned(), self.active_lsp_document())
-                {
-                    let uri = document.uri();
-                    let _ = self.language.close(&server, uri.clone());
-                    if let Some(id) = self
-                        .language
-                        .sessions()
-                        .get(&server)
-                        .map(|session| session.server_id.clone())
-                    {
-                        self.language.set_detached(id, buffer, true);
-                    }
-                    self.language.detach(&server, buffer);
-                    for name in [format!("lsp.{server}"), format!("lsp-pull:{server}")] {
-                        if let Ok(owner) = DiagnosticOwner::new(name) {
-                            self.diagnostics.clear_owner_uri(&owner, &uri);
-                        }
-                    }
-                    self.clear_lsp_ui_projection();
-                    self.sync_ui_diagnostics();
-                }
-            }
-            AppEffect::LspSessions => self.show_lsp_sessions(),
-            AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
-            AppEffect::LspLogs => self.show_lsp_logs(),
-            AppEffect::LspInlayHintsToggle => {
-                let enabled = self.configuration.toggle_inlay_hints();
-                self.schedule_lsp_inlay_refresh(true);
-                self.notify_message(
-                    format!(
-                        "inlay hints {}",
-                        if enabled { "enabled" } else { "disabled" }
-                    ),
-                    false,
-                );
-            }
-            AppEffect::LspRequest(feature) => {
-                if matches!(feature, LspFeature::Completion) {
-                    self.mark_lsp_completion_start(false);
-                }
-                self.request_lsp(feature);
-            }
-            AppEffect::LspCompletionDocumentationOpen => {
-                self.open_lsp_completion_documentation(true)
-            }
-            AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
-            AppEffect::LspRenamePrompt => self.open_rename_prompt(),
-            AppEffect::LspCompletionLeave => {
-                self.cancel_lsp_completion();
-                self.invoke_mapped_command("input.cancel");
-            }
-            AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
-            AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
-            AppEffect::SnippetLeave => {
-                self.input.clear_snippet();
-                self.invoke_mapped_command("input.cancel");
-            }
-            AppEffect::SnippetCancel => {
-                self.input.clear_snippet();
-                if let Some(view) = self.state.active_view {
-                    self.state.views[view].selection = None;
-                    self.state.mark_editor_changed();
-                }
-            }
-            AppEffect::LspFoldToggle => {
-                if let Some(view) = self.state.active_view {
-                    let line = self.state.views.get(view).and_then(|view| {
-                        self.state.buffers[view.buffer]
-                            .text
-                            .byte_to_line(view.cursor)
-                            .ok()
-                    });
-                    if let Some(fold) = self
-                        .ui
-                        .lsp_folds
-                        .iter_mut()
-                        .filter(|fold| {
-                            fold.view == view
-                                && line.is_some_and(|line| {
-                                    line >= fold.start_line && line <= fold.end_line
-                                })
-                        })
-                        .min_by_key(|fold| fold.end_line.saturating_sub(fold.start_line))
-                    {
-                        fold.collapsed = !fold.collapsed;
-                        if fold.collapsed && line.is_some_and(|line| line > fold.start_line) {
-                            let buffer = self.state.views[view].buffer;
-                            if let Ok(cursor) = self.state.buffers[buffer]
-                                .text
-                                .line_to_byte(fold.start_line)
-                            {
-                                self.state.views[view].cursor = cursor;
-                                self.state.views[view].selection = None;
-                                self.state.mark_editor_changed();
-                            }
-                        }
-                    }
-                }
-            }
-            AppEffect::LspSelectionExpand => {
-                if self.active_lsp_document_without_text().is_some() {
-                    self.refresh_lsp_projection_owner();
-                }
-                if let Some(view) = self.state.active_view {
-                    let state = &self.state.views[view];
-                    let text = &self.state.buffers[state.buffer].text;
-                    let selection = state.selection.map(|selection| {
-                        let start = selection.anchor.min(selection.head);
-                        let end = crate::editor::text::next_grapheme_boundary(
-                            text,
-                            selection.anchor.max(selection.head),
-                        );
-                        (start, end)
-                    });
-                    let range = self
-                        .language
-                        .selection_ranges()
-                        .iter()
-                        .filter(|_| {
-                            selection.is_some()
-                                || self.language.selection_ranges_current(state.cursor)
-                        })
-                        .filter(|range| {
-                            if let Some((start, end)) = selection {
-                                range.start <= start
-                                    && range.end >= end
-                                    && (range.start < start || range.end > end)
-                            } else {
-                                range.contains(state.cursor)
-                            }
-                        })
-                        .min_by_key(|range| range.len())
-                        .copied();
-                    if let Some(range) = range {
-                        self.select_text(view, range.start.get(), range.end.get());
-                    } else if selection.is_none() || self.language.selection_ranges().is_empty() {
-                        self.request_lsp(LspFeature::SelectionRanges);
-                        self.language.expand_requested_selection();
-                    }
-                }
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
+
 
 
 use crate::editor::ArgumentSchema;
@@ -711,17 +470,25 @@ Ok(())
 }
 
 
+
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_language_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::LspStart => {
+AppEffect::LspStart => {
                 self.language.clear_all_stopped();
                 if let Some(key) = self.language.active().cloned() {
                     self.language.request_start(&key, None);
                 }
                 self.start_lsp(None);
             }
-            AppEffect::LspStop => {
+AppEffect::LspStop => {
                 if let Some(buffer) = self.state.active_buffer_id() {
                     self.language.stop_document_launches(buffer);
                 }
@@ -744,14 +511,14 @@ impl App {
                     self.clear_lsp_session_state();
                 }
             }
-            AppEffect::LspRestart => {
+AppEffect::LspRestart => {
                 if let Some(server) = self.language.active().cloned() {
                     self.restart_lsp(&server);
                 } else {
                     self.start_lsp(None);
                 }
             }
-            AppEffect::LspStatus => {
+AppEffect::LspStatus => {
                 let mut servers = self
                     .language
                     .running_servers()
@@ -778,7 +545,7 @@ impl App {
                     let _ = self.language.health(server);
                 }
             }
-            AppEffect::LspAttach => {
+AppEffect::LspAttach => {
                 if let Some(buffer) = self.state.active_buffer_id() {
                     self.language.clear_detached(buffer);
                 }
@@ -804,7 +571,7 @@ impl App {
                     self.start_lsp(None);
                 }
             }
-            AppEffect::LspDetach => {
+AppEffect::LspDetach => {
                 if let (Some(server), Some((buffer, document))) =
                     (self.language.active().cloned(), self.active_lsp_document())
                 {
@@ -828,10 +595,10 @@ impl App {
                     self.sync_ui_diagnostics();
                 }
             }
-            AppEffect::LspSessions => self.show_lsp_sessions(),
-            AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
-            AppEffect::LspLogs => self.show_lsp_logs(),
-            AppEffect::LspInlayHintsToggle => {
+AppEffect::LspSessions => self.show_lsp_sessions(),
+AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
+AppEffect::LspLogs => self.show_lsp_logs(),
+AppEffect::LspInlayHintsToggle => {
                 let enabled = self.configuration.toggle_inlay_hints();
                 self.schedule_lsp_inlay_refresh(true);
                 self.notify_message(
@@ -842,36 +609,36 @@ impl App {
                     false,
                 );
             }
-            AppEffect::LspRequest(feature) => {
+AppEffect::LspRequest(feature) => {
                 if matches!(feature, LspFeature::Completion) {
                     self.mark_lsp_completion_start(false);
                 }
                 self.request_lsp(feature);
             }
-            AppEffect::LspCompletionDocumentationOpen => {
+AppEffect::LspCompletionDocumentationOpen => {
                 self.open_lsp_completion_documentation(true)
             }
-            AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-            AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
-            AppEffect::LspRenamePrompt => self.open_rename_prompt(),
-            AppEffect::LspCompletionLeave => {
+AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
+AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
+AppEffect::LspRenamePrompt => self.open_rename_prompt(),
+AppEffect::LspCompletionLeave => {
                 self.cancel_lsp_completion();
                 self.invoke_mapped_command("input.cancel");
             }
-            AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
-            AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
-            AppEffect::SnippetLeave => {
+AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
+AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
+AppEffect::SnippetLeave => {
                 self.input.clear_snippet();
                 self.invoke_mapped_command("input.cancel");
             }
-            AppEffect::SnippetCancel => {
+AppEffect::SnippetCancel => {
                 self.input.clear_snippet();
                 if let Some(view) = self.state.active_view {
                     self.state.views[view].selection = None;
                     self.state.mark_editor_changed();
                 }
             }
-            AppEffect::LspFoldToggle => {
+AppEffect::LspFoldToggle => {
                 if let Some(view) = self.state.active_view {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
@@ -906,7 +673,7 @@ impl App {
                     }
                 }
             }
-            AppEffect::LspSelectionExpand => {
+AppEffect::LspSelectionExpand => {
                 if self.active_lsp_document_without_text().is_some() {
                     self.refresh_lsp_projection_owner();
                 }

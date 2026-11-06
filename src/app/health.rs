@@ -1,6 +1,6 @@
 use crate::app::App;
-use crate::app::LiveCrashSnapshot;
-use crate::app::PluginStatus;
+use crate::telemetry::LiveCrashSnapshot;
+use crate::plugins::PluginStatus;
 
 
 
@@ -45,7 +45,7 @@ impl App {
     }
 }
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 
 
 
@@ -297,17 +297,28 @@ use std::time::{Instant, Duration};
 }
 
 
+
+
+
+
+
+
+
+use crate::ui::render::SCRATCH_LABEL;
+use crate::app::plugins::VirtualContext;
+
+
 impl App {
     pub(in crate::app) fn process_health_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::CrashInspect => {
+AppEffect::CrashInspect => {
                 let path = crate::config::user_state_directory().join("last-crash.json");
                 self.notify_message(
                     self.message("crash_location", &[("path", path.display().to_string())]),
                     path.is_file(),
                 );
             }
-            AppEffect::CrashClear => {
+AppEffect::CrashClear => {
                 let path = crate::config::user_state_directory().join("last-crash.json");
                 if let Err(error) = self
                     .recovery
@@ -316,7 +327,7 @@ impl App {
                     self.show_error(error);
                 }
             }
-            AppEffect::ShowHealth => {
+AppEffect::ShowHealth => {
                 self.notify_message(
                     self.message(
                         "healthy",
@@ -349,6 +360,30 @@ impl App {
                     ),
                     false,
                 );
+            }
+kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
+                let result = self
+                    .extension
+                    .prepare_health(
+                        matches!(kind, AppEffect::HealthVirtualRefresh),
+                        self.commands.specs().count(),
+                        VirtualContext {
+                            editor: &self.state,
+                            windows: &self.window_session,
+                            scratch: SCRATCH_LABEL,
+                        },
+                    )
+                    .and_then(|staged| {
+                        Self::accept_virtual_publication(&mut self.window_session, staged)
+                    });
+                match result {
+                    Ok(state) => {
+                        *self.state = state;
+                        self.set_dashboard_visibility(false);
+                        self.reconcile_editor_windows();
+                    }
+                    Err(error) => self.show_error(error),
+                }
             }
             effect => return Err(effect),
         }

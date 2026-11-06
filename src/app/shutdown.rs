@@ -1,8 +1,8 @@
-use crate::app::Duration;
-use crate::app::Instant;
+use std::time::Duration;
+use std::time::Instant;
 use crate::app::App;
 use crate::app::InteractiveError;
-use crate::app::VfsError;
+use crate::files::VfsError;
 
 impl App {
     pub(in crate::app) fn finish_shutdown(&mut self) -> Result<(), InteractiveError> {
@@ -107,7 +107,7 @@ impl App {
             diagnostics.push(format!("{unfinished_tasks} task outcomes are unknown at shutdown; admitted work may still complete"));
         }
         for outcome in self.terminal_session.expire_shutdown() {
-            if let crate::app::TerminalUpdate::Unknown(id, message) = outcome {
+            if let crate::app::terminal::TerminalUpdate::Unknown(id, message) = outcome {
                 diagnostics.push(format!("terminal #{} outcome is Unknown: {message}", id.0));
             }
         }
@@ -211,12 +211,20 @@ impl App {
     }
 }
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
+
+
+
+
+
+
+
+
 
 impl App {
     pub(in crate::app) fn process_shutdown_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::Quit { force } => {
+AppEffect::Quit { force } => {
                 if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
                     self.show_error(self.message("unsaved_quit", &[]));
                 } else {

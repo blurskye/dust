@@ -6,7 +6,7 @@ use crate::app::tests::*;
 #[test]
 pub(in crate::app) fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("file");
     let before = app.ui.picker.as_ref().unwrap().query.clone();
     app.open_contextual_help();
@@ -44,3 +44,9 @@ pub(in crate::app) fn help_restores_the_visible_palette_and_keeps_file_search_al
         "found after help\n"
     );
 }
+use std::time::Duration;
+use std::time::Instant;
+use std::fs;
+use std::thread;
+use crate::app::PickerKind;
+

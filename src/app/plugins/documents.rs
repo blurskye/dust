@@ -223,8 +223,8 @@ impl VirtualDocumentEditorBridge {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::plugins::documents::PluginLoadId;
-    use crate::app::plugins::documents::PluginVirtualDocumentSnapshot;
+    use crate::plugins::PluginLoadId;
+    use crate::plugins::PluginVirtualDocumentSnapshot;
     use crate::app::plugins::documents::VirtualDocumentEditorBridge;
     use crate::app::plugins::documents::VirtualDocumentEditorError;
     use crate::editor::text::ByteOffset;

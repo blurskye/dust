@@ -1,15 +1,15 @@
 
-use crate::app::BTreeMap;
+use std::collections::BTreeMap;
 use crate::app::App;
-use crate::app::LogLevel;
-use crate::app::PackageOperation;
-use crate::app::PathBuf;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::RegistryRequest;
-use crate::app::RegistryResult;
+use crate::telemetry::LogLevel;
+use crate::tools::PackageOperation;
+use std::path::PathBuf;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::tools::RegistryRequest;
+use crate::tools::RegistryResult;
 use crate::app::TrustedAction;
 
 
@@ -17,7 +17,7 @@ use crate::app::TrustedAction;
 
 impl App {
 
-    pub(super) fn install_package_after_validation(
+    pub(in crate::app) fn install_package_after_validation(
         &mut self,
         package_manifest: PathBuf,
         plugin_manifest: PathBuf,

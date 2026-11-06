@@ -17,17 +17,17 @@ use serde::Deserialize;
 
 use crate::app::App;
 
-use crate::app::PersistedSession;
+use crate::persistence::PersistedSession;
 
-use crate::app::PickerAction;
+use crate::workspace::PickerAction;
 
-use crate::app::PickerItem;
+use crate::workspace::PickerItem;
 
-use crate::app::PickerItemId;
+use crate::workspace::PickerItemId;
 
-use crate::app::PickerPayload;
+use crate::app::picker::PickerPayload;
 
-use crate::app::RestoreContext;
+use crate::app::persistence::RestoreContext;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::BufferId;
@@ -1170,7 +1170,7 @@ mod tests {
         let (buffer, _) = app
             .state
             .open_text(
-                crate::editor::TextBuffer::from_text("practice edits"),
+                crate::editor::text::TextBuffer::from_text("practice edits"),
                 Some(path),
             )
             .unwrap();
@@ -1191,13 +1191,13 @@ mod tests {
         std::fs::write(&path, "saved notes").unwrap();
         app.state
             .open_text(
-                crate::editor::TextBuffer::from_text("saved notes"),
+                crate::editor::text::TextBuffer::from_text("saved notes"),
                 Some(path),
             )
             .unwrap();
         let (scratch, _) = app
             .state
-            .open_text(crate::editor::TextBuffer::from_text("unsaved notes"), None)
+            .open_text(crate::editor::text::TextBuffer::from_text("unsaved notes"), None)
             .unwrap();
         app.state.set_buffer_dirty(scratch, true);
         app.start_tutor(TutorStart {
@@ -1325,7 +1325,7 @@ mod tests {
             .unwrap()
             .root
             .join("practice.rs");
-        let text = crate::editor::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
+        let text = crate::editor::text::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
         let (buffer, _) = app.state.open_text(text, Some(path)).unwrap();
         app.tutor_command("mode.insert");
         app.handle_key_in_context(
@@ -1409,7 +1409,7 @@ mod tests {
     fn every_lesson_checks_a_real_command_and_practice_line() {
         let mut registry = crate::editor::CommandRegistry::default();
         crate::editor::register_builtin_commands(&mut registry).expect("builtin commands");
-        crate::app::register_app_commands(&mut registry).expect("app commands");
+        crate::app::commands::register_app_commands(&mut registry).expect("app commands");
         for language in Language::ALL {
             let steps = lessons(language).expect("lessons parse");
             assert!(steps.len() > 40);
@@ -1559,13 +1559,21 @@ Ok(())
 
 
 
+
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_tutor_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::Tutor => self.open_tutor(),
-            AppEffect::TutorNext => self.tutor_next(),
-            AppEffect::TutorBack => self.tutor_back(),
-            AppEffect::TutorQuit => self.tutor_quit(),
+AppEffect::Tutor => self.open_tutor(),
+AppEffect::TutorNext => self.tutor_next(),
+AppEffect::TutorBack => self.tutor_back(),
+AppEffect::TutorQuit => self.tutor_quit(),
             effect => return Err(effect),
         }
         Ok(())

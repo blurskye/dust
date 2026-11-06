@@ -590,7 +590,7 @@ pub(in crate::app) fn untrusted_workspace_blocks_project_local_language_server_l
 #[test]
 pub(in crate::app) fn generic_picker_filters_and_invokes_registry_commands() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     assert!(
         app.ui
             .picker
@@ -1191,7 +1191,7 @@ pub(in crate::app) fn lsp_completion_applies_through_one_validated_transaction()
         .unwrap();
     app.state.views[view].cursor = ByteOffset(5);
     app.set_dashboard_visibility(false);
-    let owner = crate::app::tests::LspProjectionOwner {
+    let owner = crate::app::language::LspProjectionOwner {
         server: "server".into(),
         buffer,
         view,
@@ -1724,12 +1724,12 @@ pub(in crate::app) fn symbol_picker_uses_the_session_key_to_resolve_position_enc
     let key = "rust-analyzer@nested-project";
     app.language.fixture_session(
         key.into(),
-        crate::app::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root: app.workspace.active_root().unwrap(),
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable: crate::tools::discover_executable("false").unwrap(),
                 managed: false,
             },
@@ -1796,12 +1796,12 @@ pub(in crate::app) fn typing_narrows_the_completion_menu_instead_of_closing_it()
     let key = "typing".to_owned();
     app.language.fixture_session(
         key.clone(),
-        crate::app::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root: app.workspace.active_root().expect("workspace root"),
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable: crate::tools::discover_executable("false").expect("false executable"),
                 managed: false,
             },
@@ -1882,12 +1882,12 @@ pub(in crate::app) fn lsp_status_never_labels_failed_or_backing_off_sessions_as_
     let key = "failed-rust-analyzer".to_owned();
     app.language.fixture_session(
         key.clone(),
-        crate::app::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root,
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable,
                 managed: false,
             },
@@ -2291,7 +2291,7 @@ pub(in crate::app) fn tool_menu_navigation_keeps_the_selected_server_inside_the_
 #[test]
 pub(in crate::app) fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
     let (_app_dirs, mut app) = app();
-    app.process_effect(crate::app::AppEffect::OpenToolMenu("lsp".into()));
+    app.process_effect(crate::app::commands::AppEffect::OpenToolMenu("lsp".into()));
     let menu = app.ui.tool_menu.as_ref().expect("tool menu");
     assert_eq!(menu.category, "lsp");
     assert!(menu.rows.iter().all(|row| row.kind == "LSP"));
@@ -2631,12 +2631,12 @@ pub(in crate::app) fn completion_keeps_its_start_when_the_request_takes_ownershi
     let key = "owner".to_owned();
     app.language.fixture_session(
         key.clone(),
-        crate::app::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root: app.workspace.active_root().expect("workspace root"),
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable: crate::tools::discover_executable("false").expect("false executable"),
                 managed: false,
             },
@@ -2667,7 +2667,7 @@ pub(in crate::app) fn completion_anchor_measures_wide_identifiers_in_terminal_ce
         .open_text(TextBuffer::from_text("obj.变量"), Some(path))
         .unwrap();
     app.state.views[view].cursor = ByteOffset("obj.变量".len());
-    let owner = crate::app::tests::LspProjectionOwner {
+    let owner = crate::app::language::LspProjectionOwner {
         server: "server".into(),
         buffer,
         view,
@@ -2732,7 +2732,7 @@ pub(in crate::app) fn completion_narrows_as_you_type_and_replaces_what_was_typed
         .unwrap();
     app.state.views[view].cursor = ByteOffset(9);
     app.set_dashboard_visibility(false);
-    let owner = crate::app::tests::LspProjectionOwner {
+    let owner = crate::app::language::LspProjectionOwner {
         server: "server".into(),
         buffer,
         view,
@@ -3675,3 +3675,49 @@ pub(in crate::app) fn stopping_a_starting_server_retires_its_launch() {
     app.sync_lsp_document();
     assert!(!app.language.project_pending());
 }
+
+use crate::app::language::LspLaunch;
+use crate::app::language::LspProjectionOwner;
+use crate::app::language::LspRuntimeState;
+use crate::app::tools::LspRuntimeSource;
+use crate::app::tools::ToolInstall;
+use crate::app::tools::lsp_runtime_source_allowed_on_host;
+use std::path::Path;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
+use crate::editor::EditorMode;
+use crate::language::lsp::LspDocument;
+use crate::language::lsp::LspFeature;
+use crate::language::lsp::LspFeatureResult;
+use crate::language::lsp::LspProgressKind;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::language::lsp::file_uri;
+use crate::tools::ToolDefinition;
+use crate::tools::ToolKind;
+use crate::tools::ToolOperation;
+use crate::tools::ToolStatus;
+use crate::tools::discover_executable;
+use crate::tools::is_nixos_host;
+use crate::workspace::WorkspaceTrust;
+use thiserror::Error;
+use crate::app::startup::StartupTarget;
+use std::collections::HashMap;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+
+
+
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::workspace::DiagnosticSeverity;
+

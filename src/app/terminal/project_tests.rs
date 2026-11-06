@@ -240,3 +240,19 @@ pub(in crate::app) fn removing_a_root_preserves_terminals_and_updates_relative_p
     app.process_pty_events();
     assert!(app.terminal_session.contains(PtyId(101)));
 }
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::InvocationSource;
+use crate::process::PtyId;
+use crate::files::RootIdentity;
+use crate::app::startup::StartupTarget;
+use std::fs;
+use std::thread;
+use crate::ui::PtyScreen;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::AppEffect;
+

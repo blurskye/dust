@@ -26,7 +26,7 @@ use crate::language::syntax::SyntaxService;
 
 use crate::language::syntax::SyntaxSupport;
 
-pub(crate) const SYNTAX_QUEUE_CAPACITY: usize = 8;
+pub(in crate::app) const SYNTAX_QUEUE_CAPACITY: usize = 8;
 /// How long typing must pause before a buffer is parsed again.
 const SYNTAX_DEBOUNCE_MS: u64 = 75;
 /// How long a newly opened buffer's first frame waits for its colours and inlay hints before
@@ -653,23 +653,23 @@ mod tests {
     }
 }
 
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::EditorOperation;
-use crate::app::EditorState;
-use crate::app::EditorTransaction;
-use crate::app::HashSet;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::EditorOperation;
+use crate::editor::EditorState;
+use crate::editor::EditorTransaction;
+use std::collections::HashSet;
 use crate::app::App;
-use crate::app::Precondition;
-use crate::app::TextEdit;
+use crate::editor::Precondition;
+use crate::editor::text::TextEdit;
 
 
 
 
-use crate::app::TextEditSet;
-use crate::app::UiFold;
-use crate::app::UiSyntaxSpan;
-use crate::app::language_for_document;
+use crate::editor::text::TextEditSet;
+use crate::ui::UiFold;
+use crate::ui::UiSyntaxSpan;
+use crate::language::syntax::language_for_document;
 
 
 impl App {
@@ -1090,5 +1090,144 @@ mod formatter_cursor_tests {
         let moved = crate::app::syntax::nth_non_blank(after, non_blank);
         assert_eq!(&after[moved..moved + 5], "World");
         assert_eq!(crate::app::syntax::nth_non_blank("a b", 9), 3);
+    }
+}
+use crate::app::commands::SyntaxFoldAction;
+use crate::app::commands::AppEffect;
+
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::language::syntax::builtin_languages;
+
+
+
+impl App {
+    pub(in crate::app) fn process_syntax_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+AppEffect::SyntaxFold(action) => {
+                if let Some(view) = self.state.active_view {
+                    let line = self.state.views.get(view).and_then(|view| {
+                        self.state.buffers[view.buffer]
+                            .text
+                            .byte_to_line(view.cursor)
+                            .ok()
+                    });
+                    let folds = self
+                        .ui
+                        .syntax_folds
+                        .iter_mut()
+                        .filter(|fold| fold.view == view);
+                    match action {
+                        SyntaxFoldAction::OpenAll => folds.for_each(|fold| fold.collapsed = false),
+                        SyntaxFoldAction::CloseAll => folds.for_each(|fold| fold.collapsed = true),
+                        SyntaxFoldAction::Toggle
+                        | SyntaxFoldAction::Open
+                        | SyntaxFoldAction::Close => {
+                            // The innermost fold around the cursor, the one Vim's `za` acts on.
+                            if let Some(fold) = folds
+                                .filter(|fold| {
+                                    line.is_some_and(|line| {
+                                        line >= fold.start_line && line <= fold.end_line
+                                    })
+                                })
+                                .max_by_key(|fold| fold.start_line)
+                            {
+                                fold.collapsed = match action {
+                                    SyntaxFoldAction::Open => false,
+                                    SyntaxFoldAction::Close => true,
+                                    _ => !fold.collapsed,
+                                };
+                            } else {
+                                self.notify_message(self.message("syntax_no_fold", &[]), false);
+                            }
+                        }
+                    }
+                }
+            }
+AppEffect::SyntaxIndentLine => self.apply_syntax_indent_line(),
+AppEffect::SyntaxStatus => {
+                let active = self.state.active_buffer_id();
+                let active_language = active
+                    .and_then(|buffer| self.state.buffers.get(buffer))
+                    .and_then(|buffer| {
+                        crate::language::syntax::language_for_document(
+                            buffer.path.as_deref(),
+                            buffer.text.chunks().next().unwrap_or_default(),
+                        )
+                    });
+                let items = builtin_languages()
+                    .enumerate()
+                    .map(|(index, info)| {
+                        let state = if Some(info.language) == active_language {
+                            if let Some(buffer) = active {
+                                if let Some(error) = self.syntax.failure(buffer) {
+                                    self.message(
+                                        "syntax_state_failed",
+                                        &[("error", error.to_owned())],
+                                    )
+                                } else if self.syntax.result(buffer).is_some_and(|result| {
+                                    self.state.buffers.get(buffer).is_some_and(|state| {
+                                        state.text.revision().0 == result.revision
+                                    }) && result.language == info.language
+                                }) {
+                                    self.message(
+                                        if self
+                                            .syntax
+                                            .result(buffer)
+                                            .is_some_and(|result| result.truncated)
+                                        {
+                                            "syntax_state_active_truncated"
+                                        } else {
+                                            "syntax_state_active"
+                                        },
+                                        &[],
+                                    )
+                                } else {
+                                    self.message("syntax_state_pending", &[])
+                                }
+                            } else {
+                                self.message("syntax_state_available", &[])
+                            }
+                        } else {
+                            self.message("syntax_state_available", &[])
+                        };
+                        (
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("syntax:{index}:{}", info.id)),
+                                label: info.language.name().to_owned(),
+                                detail: self.message(
+                                    "syntax_capabilities",
+                                    &[
+                                        (
+                                            "highlights",
+                                            self.syntax_support_label(info.capabilities.highlights),
+                                        ),
+                                        (
+                                            "folds",
+                                            self.syntax_support_label(info.capabilities.folds),
+                                        ),
+                                        (
+                                            "indents",
+                                            self.syntax_support_label(info.capabilities.indents),
+                                        ),
+                                        ("state", state),
+                                    ],
+                                ),
+                                source: self.message("syntax_builtin_source", &[]),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Command(String::new()),
+                        )
+                    })
+                    .collect();
+                self.install_picker(self.message("syntax_status_title", &[]), items);
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
     }
 }

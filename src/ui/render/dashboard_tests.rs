@@ -192,3 +192,34 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         actual.grid.get(rect.x, rect.y)
     );
 }
+use std::path::Path;
+
+
+
+
+
+#[test]
+fn dashboard_labels_leave_a_gap_before_shortcut_keys() {
+    let loaded = crate::config::load_bundled_config();
+    let mut dashboard = loaded.dashboard;
+    dashboard.minimum_width = 1;
+    dashboard.minimum_height = 1;
+    let actions = vec![crate::ui::render::DashboardAction {
+        command: "recovery.open".into(),
+        icon: String::new(),
+        label: "Recover Unsaved Work".into(),
+        key: Some("R".into()),
+    }];
+    let frame = crate::ui::render::overlays::render_dashboard(
+        Path::new("/tmp"),
+        &actions,
+        0,
+        &dashboard,
+        &loaded.config,
+        20,
+        24,
+    );
+    let (x, y, _) = frame.cursor.unwrap();
+    assert!(frame.grid.row_text(y).contains("Recover Unsave R"));
+    assert_eq!(frame.grid.get(x + 14, y).unwrap().symbol, " ");
+}

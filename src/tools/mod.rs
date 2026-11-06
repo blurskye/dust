@@ -63,7 +63,6 @@ pub use catalog::nix_lsp_workspace_root;
 pub use catalog::rust_analyzer_is_rustup_proxy;
 pub use catalog::tool_launch_environment;
 pub use catalog::tool_store_root;
-pub(crate) use catalog::executable_file;
 pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 mod installer;
 pub use installer::ToolInstallProgress;

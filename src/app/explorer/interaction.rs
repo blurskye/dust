@@ -1,18 +1,18 @@
 use crate::app::search::MAXIMUM_PICKER_ITEMS;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::app::DockEdge;
-use crate::app::ExplorerKind;
-use crate::app::ExplorerMutation;
+use crate::windows::DockEdge;
+use crate::app::explorer::tree::ExplorerKind;
+use crate::files::ExplorerMutation;
 use crate::app::App;
-use crate::app::NativeSurfaceTarget;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::PromptKind;
-use crate::app::TextBuffer;
-use crate::app::WindowRect;
-use crate::app::RegisterShape;
-use crate::app::RegisterValue;
-use crate::app::rect_contains_point;
+use crate::app::windows::NativeSurfaceTarget;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::ui::PromptKind;
+use crate::editor::text::TextBuffer;
+use crate::windows::WindowRect;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
+use crate::app::windows::rect_contains_point;
 use crate::windows::PANE_DEFAULT_RATIO;
 
 

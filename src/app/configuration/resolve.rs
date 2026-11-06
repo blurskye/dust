@@ -1,15 +1,13 @@
-use crate::app::configuration::AppEffect;
-use crate::app::configuration::BTreeSet;
-use crate::app::configuration::CommandRegistry;
-use crate::app::configuration::ConfigurationSources;
-use crate::app::configuration::DashboardAction;
-use crate::app::configuration::InputContextRegistry;
+use crate::app::commands::AppEffect;
+use std::collections::BTreeSet;
+use crate::editor::CommandRegistry;
+use crate::ui::DashboardAction;
+use crate::editor::input::InputContextRegistry;
 use crate::app::configuration::KeymapCompilation;
-use crate::app::configuration::LoadedConfig;
-use crate::app::configuration::PathBuf;
-use crate::app::configuration::ResolvedConfiguration;
-use crate::app::configuration::UnicodeSegmentation;
-use crate::app::configuration::UnicodeWidthStr;
+use crate::config::LoadedConfig;
+use std::path::PathBuf;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use crate::app::configuration::compile::expanded_key_sequence;
 use crate::app::configuration::compile_keymap_entries;
 use crate::app::configuration::compile_keymaps;
@@ -17,8 +15,8 @@ use crate::app::configuration::configured_context;
 use crate::app::configuration::keymap_entries;
 use crate::app::configuration::literal_key_sequence;
 use crate::app::configuration::plugin_owner_from_id;
-use crate::app::configuration::register_app_commands;
-use crate::app::configuration::register_builtin_commands;
+use crate::app::commands::register_app_commands;
+use crate::editor::register_builtin_commands;
 use crate::app::configuration::validate_configured_commands;
 
 pub(super) fn enabled_plugin_owners(loaded: &LoadedConfig) -> BTreeSet<String> {
@@ -295,7 +293,7 @@ pub(in crate::app) fn configured_text_width(
     column
 }
 
-use crate::app::configuration::BTreeMap;
+use std::collections::BTreeMap;
 
 
 

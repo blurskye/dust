@@ -1,6 +1,6 @@
 //! Restricted driver for migrated input/configuration workflows. It deliberately
 //! offers no mutable application, editor, configuration, registry or UI access.
-use crate::app::tests::App;
+use crate::app::App;
 use crate::app::persistence::STATE_FILE;
 use crate::clock::Clock;
 use crate::clock::ManualClock;
@@ -17,33 +17,33 @@ use tempfile::TempDir;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct TerminalCloneState {
-    graph: crate::windows::WindowGraph,
-    editor: crate::editor::EditorWindowVersion,
-    descriptions: Vec<(u64, String, crate::windows::ContentLifecycle)>,
-    selected: Option<crate::process::PtyId>,
-    focused: Option<u64>,
-    dimensions: Option<(usize, usize)>,
-    screen: Vec<String>,
-    pending: usize,
-    starts: String,
+    pub(in crate::app) graph: crate::windows::WindowGraph,
+    pub(in crate::app) editor: crate::editor::EditorWindowVersion,
+    pub(in crate::app) descriptions: Vec<(u64, String, crate::windows::ContentLifecycle)>,
+    pub(in crate::app) selected: Option<crate::process::PtyId>,
+    pub(in crate::app) focused: Option<u64>,
+    pub(in crate::app) dimensions: Option<(usize, usize)>,
+    pub(in crate::app) screen: Vec<String>,
+    pub(in crate::app) pending: usize,
+    pub(in crate::app) starts: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct PluginCloneState {
-    graph: String,
-    editor: crate::editor::EditorWindowVersion,
-    catalog: crate::plugins::PluginCatalogVersion,
-    host: String,
-    retained: Vec<crate::ui::PluginSurfaceUiState>,
-    private: Vec<crate::ui::PrivateSurfaceUiState>,
-    copies: (usize, usize, usize),
+    pub(in crate::app) graph: String,
+    pub(in crate::app) editor: crate::editor::EditorWindowVersion,
+    pub(in crate::app) catalog: crate::plugins::PluginCatalogVersion,
+    pub(in crate::app) host: String,
+    pub(in crate::app) retained: Vec<crate::ui::PluginSurfaceUiState>,
+    pub(in crate::app) private: Vec<crate::ui::PrivateSurfaceUiState>,
+    pub(in crate::app) copies: (usize, usize, usize),
 }
 
-pub(super) struct TestSession {
-    application: App,
-    clock: Arc<ManualClock>,
-    _workspace: TempDir,
-    _state: TempDir,
+pub(in crate::app) struct TestSession {
+    pub(in crate::app) application: App,
+    pub(in crate::app) clock: Arc<ManualClock>,
+    pub(in crate::app) _workspace: TempDir,
+    pub(in crate::app) _state: TempDir,
 }
 impl TestSession {
     pub(in crate::app) fn new(loaded: LoadedConfig) -> Self {
@@ -76,17 +76,17 @@ impl TestSession {
     }
     pub(in crate::app) fn new_buffer(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::NewBuffer);
+            .process_effect(crate::app::commands::AppEffect::NewBuffer);
     }
     pub(in crate::app) fn new_tab(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::Layout(
-                crate::app::LayoutAction::NewTab,
+            .process_effect(crate::app::commands::AppEffect::Layout(
+                crate::app::windows::LayoutAction::NewTab,
             ));
     }
     pub(in crate::app) fn window_list(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::WindowList);
+            .process_effect(crate::app::commands::AppEffect::WindowList);
     }
     pub(in crate::app) fn focused_window(&self) -> Option<crate::windows::WindowId> {
         self.application.window_session.graph().focused()
@@ -166,13 +166,13 @@ impl TestSession {
     }
     pub(in crate::app) fn clone_plugin_window(&mut self, target: String) {
         self.application
-            .process_effect(crate::app::AppEffect::WindowClone {
+            .process_effect(crate::app::commands::AppEffect::WindowClone {
                 target,
                 axis: crate::editor::Axis::Vertical,
             });
     }
     pub(in crate::app) fn attempt_host_plugin_window_operations(&mut self, target: &str) {
-        use crate::app::AppEffect;
+        use crate::app::commands::AppEffect;
         for effect in [
             AppEffect::WindowDock {
                 target: target.into(),
@@ -319,7 +319,7 @@ impl TestSession {
     }
     pub(in crate::app) fn close_explorer(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::ExplorerClose);
+            .process_effect(crate::app::commands::AppEffect::ExplorerClose);
     }
     pub(in crate::app) fn notice(&mut self, text: &str) {
         self.application.notify_message(text.into(), false);
@@ -470,7 +470,7 @@ impl TestSession {
     }
     pub(in crate::app) fn float_explorer(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::WindowFloat {
+            .process_effect(crate::app::commands::AppEffect::WindowFloat {
                 target: "explorer".into(),
                 x: 5,
                 y: 5,
@@ -841,7 +841,7 @@ impl TestSession {
     }
     pub(in crate::app) fn terminal_request(&mut self, profile: &str) {
         self.application
-            .process_effect(crate::app::AppEffect::TerminalOpen(Some(profile.into())));
+            .process_effect(crate::app::commands::AppEffect::TerminalOpen(Some(profile.into())));
     }
     pub(in crate::app) fn terminal_open(&mut self, profile: &str) {
         self.terminal_request(profile);
@@ -850,11 +850,11 @@ impl TestSession {
         let ids = self.application.terminal_session.descriptions();
         assert_eq!(ids.len(), 1);
         self.application
-            .process_effect(crate::app::AppEffect::TerminalFocus(ids[0].0));
+            .process_effect(crate::app::commands::AppEffect::TerminalFocus(ids[0].0));
     }
     pub(in crate::app) fn terminal_close(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::TerminalClose);
+            .process_effect(crate::app::commands::AppEffect::TerminalClose);
         if self
             .application
             .input
@@ -869,7 +869,7 @@ impl TestSession {
     }
     pub(in crate::app) fn terminal_begin_close(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::TerminalClose);
+            .process_effect(crate::app::commands::AppEffect::TerminalClose);
         assert!(
             self.application
                 .input
@@ -884,22 +884,22 @@ impl TestSession {
         self.terminal_begin_close();
         self.terminal_submit_close();
         self.application
-            .process_effect(crate::app::AppEffect::TerminalToggle);
+            .process_effect(crate::app::commands::AppEffect::TerminalToggle);
     }
     pub(in crate::app) fn notification(&self) -> Option<&str> {
         self.application.ui.notification.as_deref()
     }
     pub(in crate::app) fn terminal_unfocus(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::TerminalUnfocus);
+            .process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
     }
     pub(in crate::app) fn terminal_send(&mut self, text: &str) {
         self.application
-            .process_effect(crate::app::AppEffect::TerminalSend(text.into()));
+            .process_effect(crate::app::commands::AppEffect::TerminalSend(text.into()));
     }
     pub(in crate::app) fn clone_terminal(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::WindowClone {
+            .process_effect(crate::app::commands::AppEffect::WindowClone {
                 target: "terminal".into(),
                 axis: crate::editor::Axis::Horizontal,
             });
@@ -1112,18 +1112,18 @@ impl TestSession {
     }
     pub(in crate::app) fn debug_request(&mut self, name: &str) {
         self.application
-            .process_effect(crate::app::AppEffect::DapConfigurationStart(name.into()));
+            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(name.into()));
     }
     pub(in crate::app) fn debug_preflights(&self) -> usize {
         self.application.workspace.preflight_pending()
     }
     pub(in crate::app) fn debug_start(&mut self, name: &str) {
         self.application
-            .process_effect(crate::app::AppEffect::DapConfigurationStart(name.into()));
+            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(name.into()));
     }
     pub(in crate::app) fn debug_stop(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::DapStop);
+            .process_effect(crate::app::commands::AppEffect::DapStop);
     }
     pub(in crate::app) fn pump_debug(&mut self) {
         self.application.process_dap_project_root();
@@ -1151,7 +1151,7 @@ impl TestSession {
     }
     pub(in crate::app) fn debug_threads(&mut self) {
         self.application
-            .process_effect(crate::app::AppEffect::DapThreads);
+            .process_effect(crate::app::commands::AppEffect::DapThreads);
     }
     pub(in crate::app) fn accept_debug_picker(&mut self) {
         self.application.accept_picker();

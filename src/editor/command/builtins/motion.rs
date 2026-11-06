@@ -28,7 +28,7 @@ use crate::editor::text::previous_grapheme_boundary;
 
 use crate::editor::command::CommandError;
 
-use crate::editor::command::CommandInvocation;
+use crate::editor::CommandInvocation;
 
 use crate::editor::command::builtins::text_object::text_object;
 

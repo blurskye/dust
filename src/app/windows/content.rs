@@ -1,4 +1,4 @@
-use crate::app::windows::EditorTopology;
+use crate::editor::EditorTopology;
 use crate::app::windows::WindowSession;
 use crate::ui::render::overlays::CUSTOM_ICON;
 use crate::ui::render::overlays::SCRATCH_ICON;

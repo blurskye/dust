@@ -1,4 +1,4 @@
-use crate::app::windows::EditorTopology;
+use crate::editor::EditorTopology;
 use crate::app::windows::bridge::EditorWindowBridge;
 use crate::app::windows::bridge::NativeSurfaceBridge;
 use crate::app::windows::EditorWindowCandidate;

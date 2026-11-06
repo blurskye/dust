@@ -4439,3 +4439,21 @@ fn retained_keyboard_focus_scrolls_with_the_projected_height() {
         Some("plugin.demo.open".into())
     );
 }
+
+use crate::plugins::PluginContributionIndex;
+use crate::plugins::PluginPrivatePatch;
+use crate::plugins::PluginPrivateRect;
+use crate::plugins::PluginPrivateStyle;
+use crate::plugins::PluginUiErrorCode;
+use crate::plugins::PluginUiEvent;
+use crate::plugins::PluginUiNodeKind;
+use crate::plugins::PluginUiRequest;
+use crate::plugins::PluginUiRequestKind;
+use crate::plugins::PluginUiStyle;
+use crate::plugins::PluginWindowPlacementKind;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentTypeId;
+use crate::windows::WindowGraph;
+use crate::windows::WindowPlacement;
+
+use crate::windows::WindowRect;

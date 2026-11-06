@@ -1,244 +1,25 @@
 
-use crate::app::AppEffect;
-use crate::app::DockEdge;
+use crate::app::commands::AppEffect;
+use crate::windows::DockEdge;
 use crate::app::App;
-use crate::app::NativeSurfaceTarget;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::TerminalInput;
-use crate::app::WindowPlacement;
-use crate::app::WindowRect;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::app::terminal::TerminalInput;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 use slotmap::Key;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use crate::app::PtyId;
+use crate::process::PtyId;
 
 
 
 
 
 
-impl App {
-    pub(in crate::app) fn process_terminal_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::TerminalOpen(profile) => {
-                let profile = profile.unwrap_or_else(|| {
-                    self.configuration
-                        .settings()
-                        .terminals
-                        .default_profile
-                        .clone()
-                });
-                self.request_terminal_open(&profile, None);
-            }
-            AppEffect::TerminalToggle => {
-                // This is the panel's terminal. A side terminal, such as a docked agent, keeps its
-                // window, so from one this opens the panel beside it.
-                let focused = self
-                    .window_session
-                    .focused_terminal()
-                    .map(PtyId)
-                    .filter(|id| self.terminal_session.contains(*id))
-                    .filter(|id| !self.terminal_session.side(*id));
-                if let Some(id) = focused {
-                    if let Err(error) = self.apply_native_window_placement(
-                        NativeSurfaceTarget::Terminal(id.0),
-                        WindowPlacement::Hidden,
-                    ) {
-                        self.show_error(error);
-                    }
-                } else if let Some(id) = self.terminal_session.panel() {
-                    self.reveal_terminal(id);
-                } else {
-                    let profile = self
-                        .configuration
-                        .settings()
-                        .terminals
-                        .default_profile
-                        .clone();
-                    self.request_terminal_open(&profile, None);
-                }
-            }
-            AppEffect::TerminalList => {
-                let items = self
-                    .terminal_session
-                    .choices()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (key, label, detail))| {
-                        (
-                            PickerItem {
-                                badge: String::new(),
-                                kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("terminal:{index}")),
-                                label,
-                                detail,
-                                source: "terminal".into(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Terminal(key),
-                        )
-                    })
-                    .collect();
-                self.install_picker("Terminals".into(), items);
-            }
-            AppEffect::TerminalFocus(id) => {
-                let id = PtyId(id);
-                if self.terminal_session.select(id) {
-                    self.reveal_terminal(id);
-                } else {
-                    self.show_error(self.message("terminal_missing", &[]));
-                }
-            }
-            AppEffect::TerminalFocusActive => {
-                if self.terminal_session.selected().is_some() {
-                    self.set_terminal_focus(true);
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
-                } else {
-                    self.show_error(self.message("terminal_missing", &[]));
-                }
-            }
-            AppEffect::TerminalCycle(direction) => {
-                let focused = self.window_session.terminal_focused();
-                let hidden = self.terminal_window_rect().is_none();
-                if !self.terminal_session.cycle(i64::from(direction)) {
-                    self.show_error(self.message("terminal_missing", &[]));
-                } else if let Some(id) = self
-                    .terminal_session
-                    .selected()
-                    .filter(|_| focused || hidden)
-                {
-                    self.reveal_terminal(id);
-                } else {
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
-                }
-            }
-            AppEffect::TerminalResize(rows) => {
-                if let Some(id) = self.displayed_terminal() {
-                    let result = if self.compositor_projection().is_none() {
-                        Err("universal compositor projection is missing or stale".into())
-                    } else {
-                        self.window_session.resize_terminal(id.0, rows)
-                    };
-                    if let Err(error) = result {
-                        self.show_error(error);
-                    }
-                    self.resize_active_terminal_to_panel();
-                    self.sync_terminal_panel();
-                    self.sync_explorer_ui();
-                    self.ensure_cursor_visible();
-                } else {
-                    self.show_error(self.message("terminal_missing", &[]));
-                }
-            }
-            AppEffect::TerminalDock { edge, size } => {
-                let edge = match edge.as_str() {
-                    "left" => DockEdge::Left,
-                    "right" => DockEdge::Right,
-                    "top" => DockEdge::Top,
-                    "bottom" => DockEdge::Bottom,
-                    _ => {
-                        self.show_error("terminal dock edge must be left, right, top, or bottom");
-                        return Ok(());
-                    }
-                };
-                self.place_active_terminal(WindowPlacement::Docked { edge, size });
-            }
-            AppEffect::TerminalFloat(rect) => {
-                let rect = rect.unwrap_or_else(|| {
-                    let (columns, rows) =
-                        (self.window_session.width(), self.window_session.height());
-                    let (width, height) = (
-                        (u32::from(columns) * 4 / 5) as u16,
-                        (u32::from(rows) * 4 / 5) as u16,
-                    );
-                    WindowRect {
-                        x: (columns - width) / 2,
-                        y: (rows - height) / 2,
-                        width,
-                        height,
-                    }
-                });
-                self.place_active_terminal(WindowPlacement::Floating(rect));
-            }
-            AppEffect::TerminalFullscreen => {
-                self.place_active_terminal(WindowPlacement::Fullscreen)
-            }
-            AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
-            AppEffect::TerminalUnfocus => {
-                self.set_terminal_focus(false);
-                self.sync_terminal_panel();
-                self.ensure_cursor_visible();
-            }
-            AppEffect::TerminalSend(text) => {
-                if let Some(id) = self.terminal_session.selected()
-                    && let Err(error) = self.terminal_session.send(
-                        id,
-                        match text.as_str() {
-                            "\x1b[A" => TerminalInput::Key(crate::ui::PtyInputKey::Up),
-                            "\x1b[B" => TerminalInput::Key(crate::ui::PtyInputKey::Down),
-                            "\x1b[C" => TerminalInput::Key(crate::ui::PtyInputKey::Right),
-                            "\x1b[D" => TerminalInput::Key(crate::ui::PtyInputKey::Left),
-                            "\x1b[H" => TerminalInput::Key(crate::ui::PtyInputKey::Home),
-                            "\x1b[F" => TerminalInput::Key(crate::ui::PtyInputKey::End),
-                            "\x1b[5~" => TerminalInput::Key(crate::ui::PtyInputKey::PageUp),
-                            "\x1b[6~" => TerminalInput::Key(crate::ui::PtyInputKey::PageDown),
-                            _ => TerminalInput::Text(&text),
-                        },
-                        &self.workspace,
-                    )
-                {
-                    self.show_error(error);
-                }
-            }
-            AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
-            AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
-            AppEffect::TerminalNormalMove(motion) => {
-                self.move_terminal_normal_cursor(&motion);
-            }
-            AppEffect::TerminalVisualStart(linewise) => {
-                self.start_terminal_visual(linewise);
-            }
-            AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
-            AppEffect::TerminalClose => {
-                if let Some(id) = self.displayed_terminal() {
-                    self.close_terminal(id);
-                } else {
-                    self.terminal_session.cancel_open();
-                }
-            }
-            AppEffect::TerminalQuit => {
-                let Some(id) = self.displayed_terminal() else {
-                    return Ok(());
-                };
-                if self.terminal_session.stopping(id) {
-                    return Ok(());
-                }
-                if let Err(error) = self
-                    .window_session
-                    .require_native_stop(NativeSurfaceTarget::Terminal(id.0))
-                {
-                    self.show_error(error);
-                    return Ok(());
-                }
-                self.terminal_session.cancel_open();
-                // The neighbouring tab takes over while this one stops.
-                self.terminal_session.select(id);
-                self.terminal_session.cycle(-1);
-                match self.terminal_session.selected().filter(|next| *next != id) {
-                    Some(next) => self.reveal_terminal(next),
-                    None => self.set_terminal_focus(false),
-                }
-                self.retire_terminal(id, true);
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
+
 
 
 use crate::editor::ArgumentSchema;
@@ -499,7 +280,7 @@ Ok(())
 
 #[cfg(test)]
 mod tests {
-    use crate::app::commands::terminal::*;
+    use crate::app::terminal::commands::*;
 
     #[test]
     fn partial_float_rectangles_are_rejected() {
@@ -518,10 +299,28 @@ mod tests {
 
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Remaining editor/window routing; terminal data and algorithms live in the owner.
+
+
+
 impl App {
     pub(in crate::app) fn process_terminal_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::TerminalOpen(profile) => {
+AppEffect::TerminalOpen(profile) => {
                 let profile = profile.unwrap_or_else(|| {
                     self.configuration
                         .settings()
@@ -531,7 +330,7 @@ impl App {
                 });
                 self.request_terminal_open(&profile, None);
             }
-            AppEffect::TerminalToggle => {
+AppEffect::TerminalToggle => {
                 // This is the panel's terminal. A side terminal, such as a docked agent, keeps its
                 // window, so from one this opens the panel beside it.
                 let focused = self
@@ -559,7 +358,7 @@ impl App {
                     self.request_terminal_open(&profile, None);
                 }
             }
-            AppEffect::TerminalList => {
+AppEffect::TerminalList => {
                 let items = self
                     .terminal_session
                     .choices()
@@ -582,7 +381,7 @@ impl App {
                     .collect();
                 self.install_picker("Terminals".into(), items);
             }
-            AppEffect::TerminalFocus(id) => {
+AppEffect::TerminalFocus(id) => {
                 let id = PtyId(id);
                 if self.terminal_session.select(id) {
                     self.reveal_terminal(id);
@@ -590,7 +389,7 @@ impl App {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-            AppEffect::TerminalFocusActive => {
+AppEffect::TerminalFocusActive => {
                 if self.terminal_session.selected().is_some() {
                     self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
@@ -599,7 +398,7 @@ impl App {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-            AppEffect::TerminalCycle(direction) => {
+AppEffect::TerminalCycle(direction) => {
                 let focused = self.window_session.terminal_focused();
                 let hidden = self.terminal_window_rect().is_none();
                 if !self.terminal_session.cycle(i64::from(direction)) {
@@ -615,7 +414,7 @@ impl App {
                     self.sync_terminal_panel();
                 }
             }
-            AppEffect::TerminalResize(rows) => {
+AppEffect::TerminalResize(rows) => {
                 if let Some(id) = self.displayed_terminal() {
                     let result = if self.compositor_projection().is_none() {
                         Err("universal compositor projection is missing or stale".into())
@@ -633,7 +432,7 @@ impl App {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-            AppEffect::TerminalDock { edge, size } => {
+AppEffect::TerminalDock { edge, size } => {
                 let edge = match edge.as_str() {
                     "left" => DockEdge::Left,
                     "right" => DockEdge::Right,
@@ -646,7 +445,7 @@ impl App {
                 };
                 self.place_active_terminal(WindowPlacement::Docked { edge, size });
             }
-            AppEffect::TerminalFloat(rect) => {
+AppEffect::TerminalFloat(rect) => {
                 let rect = rect.unwrap_or_else(|| {
                     let (columns, rows) =
                         (self.window_session.width(), self.window_session.height());
@@ -663,16 +462,16 @@ impl App {
                 });
                 self.place_active_terminal(WindowPlacement::Floating(rect));
             }
-            AppEffect::TerminalFullscreen => {
+AppEffect::TerminalFullscreen => {
                 self.place_active_terminal(WindowPlacement::Fullscreen)
             }
-            AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
-            AppEffect::TerminalUnfocus => {
+AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
+AppEffect::TerminalUnfocus => {
                 self.set_terminal_focus(false);
                 self.sync_terminal_panel();
                 self.ensure_cursor_visible();
             }
-            AppEffect::TerminalSend(text) => {
+AppEffect::TerminalSend(text) => {
                 if let Some(id) = self.terminal_session.selected()
                     && let Err(error) = self.terminal_session.send(
                         id,
@@ -693,23 +492,23 @@ impl App {
                     self.show_error(error);
                 }
             }
-            AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
-            AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
-            AppEffect::TerminalNormalMove(motion) => {
+AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
+AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
+AppEffect::TerminalNormalMove(motion) => {
                 self.move_terminal_normal_cursor(&motion);
             }
-            AppEffect::TerminalVisualStart(linewise) => {
+AppEffect::TerminalVisualStart(linewise) => {
                 self.start_terminal_visual(linewise);
             }
-            AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
-            AppEffect::TerminalClose => {
+AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
+AppEffect::TerminalClose => {
                 if let Some(id) = self.displayed_terminal() {
                     self.close_terminal(id);
                 } else {
                     self.terminal_session.cancel_open();
                 }
             }
-            AppEffect::TerminalQuit => {
+AppEffect::TerminalQuit => {
                 let Some(id) = self.displayed_terminal() else {
                     return Ok(());
                 };

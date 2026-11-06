@@ -1,6 +1,6 @@
 
-use crate::app::AdapterContext;
-use crate::app::AppEffect;
+use crate::app::tasks::AdapterContext;
+use crate::app::commands::AppEffect;
 use crate::app::App;
 use crate::app::TrustedAction;
 
@@ -218,7 +218,7 @@ Ok(())
 
 #[cfg(test)]
 mod tests {
-    use crate::app::commands::tasks::*;
+    use crate::app::tasks::commands::*;
     use crate::editor::CommandInvocation;
     use crate::editor::EditorState;
     use crate::editor::InvocationSource;
@@ -242,10 +242,19 @@ mod tests {
 }
 
 
+
+
+
+
+
+
+use crate::workspace::DiagnosticOwner;
+
+
 impl App {
     pub(in crate::app) fn process_tasks_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::TestRun(name) => {
+AppEffect::TestRun(name) => {
                 let Some(task) = self.configuration.settings().tasks.get(&name) else {
                     self.show_error(self.message("task_unknown", &[("name", name)]));
                     return Ok(());
@@ -256,10 +265,10 @@ impl App {
                     None => self.run_trusted(TrustedAction::RunTask(name)),
                 }
             }
-            AppEffect::TestStop(name) => self.stop_task(&name),
-            AppEffect::TestList(name) => self.show_test_picker(&name),
-            AppEffect::TaskList => self.show_task_picker(),
-            AppEffect::TaskRestart(name) => {
+AppEffect::TestStop(name) => self.stop_task(&name),
+AppEffect::TestList(name) => self.show_test_picker(&name),
+AppEffect::TaskList => self.show_task_picker(),
+AppEffect::TaskRestart(name) => {
                 let adapter = self.tasks.last_adapter(&name).cloned();
                 // A finished task has nothing to stop: restarting just runs it again.
                 if self.tasks.is_running(&name) {
@@ -287,9 +296,39 @@ impl App {
                     _ => self.run_trusted(TrustedAction::RunTask(name)),
                 }
             }
-            AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
-            AppEffect::TaskStop(name) => self.stop_task(&name),
-            AppEffect::TaskOutput(name) => self.show_output_picker(&name),
+AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
+AppEffect::TaskStop(name) => self.stop_task(&name),
+AppEffect::TaskOutput(name) => self.show_output_picker(&name),
+AppEffect::LintRun(name) => {
+                let Some(task) = self.configuration.settings().tasks.get(&name) else {
+                    self.show_error(self.message("task_unknown", &[("name", name)]));
+                    return Ok(());
+                };
+                let Some(matcher) = task.matcher.clone() else {
+                    self.show_error(self.message("linter_matcher_missing", &[]));
+                    return Ok(());
+                };
+                self.run_trusted(TrustedAction::RunLinter { name, matcher });
+            }
+AppEffect::LintClear(name) => {
+                if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
+                    self.diagnostics.clear_owner(&owner);
+                    self.sync_ui_diagnostics();
+                }
+            }
+AppEffect::FormatRun(name) => {
+                let Some(view_id) = self.state.active_view else {
+                    return Ok(());
+                };
+                let Some(view) = self.state.views.get(view_id) else {
+                    return Ok(());
+                };
+                let buffer = view.buffer;
+                match crate::app::tasks::FormatterSource::capture(&self.state, buffer) {
+                    Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
+                    Err(error) => self.show_error(error),
+                }
+            }
             effect => return Err(effect),
         }
         Ok(())

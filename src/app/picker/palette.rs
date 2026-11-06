@@ -2,15 +2,15 @@
 //! run by name, read as "Category: Label", with its key on the right and the commands run
 //! from here most recently at the top. Enter runs the command.
 
-use crate::app::CommandInvocation;
+use crate::editor::CommandInvocation;
 
-use crate::app::CommandValue;
+use crate::editor::CommandValue;
 
 use crate::app::App;
 
-use crate::app::InvocationSource;
+use crate::editor::InvocationSource;
 
-use crate::app::PromptKind;
+use crate::ui::PromptKind;
 use crate::editor::ArgumentType;
 use crate::app::picker::PickerPayload;
 use crate::workspace::PickerAction;

@@ -426,3 +426,4 @@ pub(super) fn render_prompt(
         cursor_style(PROMPT_CURSOR),
     ));
 }
+use unicode_segmentation::UnicodeSegmentation;

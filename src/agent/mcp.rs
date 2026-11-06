@@ -258,7 +258,7 @@ fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::*;
+    use super::*;
     use std::io::BufReader;
     use std::io::Cursor;
     use std::os::unix::net::UnixListener;

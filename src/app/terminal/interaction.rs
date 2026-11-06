@@ -1,15 +1,15 @@
-use crate::app::DockEdge;
+use crate::windows::DockEdge;
 use crate::app::App;
-use crate::app::NativeSurfaceTarget;
-use crate::app::PromptKind;
-use crate::app::TerminalUpdate;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::ui::PromptKind;
+use crate::app::terminal::TerminalUpdate;
 use crate::app::TrustedAction;
-use crate::app::WindowPlacement;
-use crate::app::WindowRect;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use crate::app::PtyId;
-use crate::app::RegisterShape;
-use crate::app::RegisterValue;
+use crate::process::PtyId;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
 
 
 

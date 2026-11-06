@@ -15,7 +15,7 @@ use crate::editor::text::TextBuffer;
 const LABELS: &str = "asdfghjklqwertyuiopzxcvbnm";
 
 #[derive(Clone, Debug)]
-pub(super) struct FlashState {
+pub(in crate::app) struct FlashState {
     pub(super) view: ViewId,
     pub(super) buffer: crate::editor::BufferId,
     pub(super) source: crate::editor::text::TextVersion,
@@ -146,15 +146,15 @@ mod tests {
 }
 
 
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
 use crate::app::App;
-use crate::app::UndoPolicy;
-use crate::app::VisualRowAnchor;
-use crate::app::VisualRowModel;
-use crate::app::active_editor_pane_viewport;
-use crate::app::editor_state_content_width;
-use crate::app::KeyEvent;
+use crate::editor::UndoPolicy;
+use crate::ui::VisualRowAnchor;
+use crate::ui::VisualRowModel;
+use crate::ui::active_editor_pane_viewport;
+use crate::ui::editor_state_content_width;
+use crate::editor::input::KeyEvent;
 
 
 

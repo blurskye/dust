@@ -1,5 +1,5 @@
 use crate::app::tests::*;
-use crate::app::ViewToggle;
+use crate::app::configuration::ViewToggle;
 
 #[test]
 pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
@@ -476,9 +476,9 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
 
 #[test]
 pub(in crate::app) fn stale_configuration_generations_are_never_applied() {
-    assert!(crate::app::tests::configuration_generation_is_newer(4, 5));
-    assert!(!crate::app::tests::configuration_generation_is_newer(5, 5));
-    assert!(!crate::app::tests::configuration_generation_is_newer(6, 5));
+    assert!(crate::app::configuration::configuration_generation_is_newer(4, 5));
+    assert!(!crate::app::configuration::configuration_generation_is_newer(5, 5));
+    assert!(!crate::app::configuration::configuration_generation_is_newer(6, 5));
 }
 
 #[test]
@@ -542,7 +542,7 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
     loaded.theme_spans = crate::config::setting_spans(&theme_source);
 
     let (resolved, diagnostic) =
-        crate::app::tests::resolve_configuration(&app.commands, loaded, true).expect("resolve");
+        crate::app::configuration::resolve_configuration(&app.commands, loaded, true).expect("resolve");
     assert!(diagnostic.is_none());
     let label = resolved
         .explain(r#"command_labels."view.cursor.\u006dove""#)
@@ -1135,7 +1135,7 @@ pub(in crate::app) fn invalid_user_keymap_set_is_rejected_transactionally() {
 pub(in crate::app) fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
     let (_app_dirs, mut app) = app();
     let id = "builtin.global.files-explorer.editor-normal";
-    app.process_effect(crate::app::AppEffect::InspectKeymap {
+    app.process_effect(crate::app::commands::AppEffect::InspectKeymap {
         id: Some(id.into()),
         context: None,
         key: None,
@@ -1402,7 +1402,7 @@ pub(in crate::app) fn confirmation_keys_and_hints_follow_accepted_remaps() {
 }
 
 /// Compile the bundled keymaps exactly as application construction does.
-pub(in crate::app) fn bundled_keymaps(app: &App) -> crate::app::ResolvedKeymaps {
+pub(in crate::app) fn bundled_keymaps(app: &App) -> crate::app::configuration::ResolvedKeymaps {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &crate::config::load_bundled_config().keymaps,
@@ -1417,7 +1417,7 @@ pub(in crate::app) fn bundled_keymaps(app: &App) -> crate::app::ResolvedKeymaps 
 /// `<leader>` expands to the bundled leader and every key is fed as a real key event, so this
 /// proves what a keypress does rather than comparing strings in a configuration file.
 pub(in crate::app) fn documented_key_reaches(
-    keymaps: &crate::app::ResolvedKeymaps,
+    keymaps: &crate::app::configuration::ResolvedKeymaps,
     keys: &str,
 ) -> Option<crate::editor::CommandInvocation> {
     let mut sequence = crate::editor::input::KeymapSequence::default();
@@ -2497,4 +2497,126 @@ pub(in crate::app) fn settings_toggles_wait_for_the_saved_configuration_to_reloa
     app.ui.settings.as_mut().unwrap().saving = true;
     app.settings_status("Reload rejected".into(), true);
     assert!(!app.ui.settings.as_ref().unwrap().saving);
+}
+
+use crate::app::configuration::KeymapOperation;
+use crate::app::configuration::configuration_generation_is_newer;
+use crate::app::configuration::resolve_configuration;
+use crate::app::picker::PickerPayload;
+use crate::app::tools::LspRuntimeSource;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::debugger::DapSourceBreakpoint;
+use crate::editor::input::KeyEvent;
+use crate::editor::input::MappingResolution;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandOutcome;
+use crate::editor::CommandSource;
+use crate::editor::CommandSpec;
+use crate::editor::CommandValue;
+use crate::editor::EditorMode;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistenceService;
+use crate::ui::KeyInputKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::app::startup::StartupTarget;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use std::fs;
+use std::thread;
+use tempfile::tempdir;
+use crate::app::App;
+
+
+use crate::app::compile_keymaps;
+
+use crate::app::reload_keymaps;
+
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+
+
+
+
+
+use crate::config::load_bundled_config;
+use crate::config::load_config;
+use crate::config::load_keymaps;
+
+
+
+
+#[test]
+fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface() {
+    let user = crate::config::parse_keymaps(
+        "[[keymap]]\nid='builtin.global.explorer'\ndisable=true\n",
+        PathBuf::from("keymaps.toml"),
+    );
+    assert!(user.diagnostic.is_none());
+    assert_eq!(user.entries.len(), 7);
+    assert!(user.entries.iter().all(|entry| entry.disable));
+    let mut loaded = load_bundled_config();
+    loaded.keymaps.entries.extend(user.entries);
+    loaded.keymaps.user_spans = user.user_spans;
+    let mut commands = crate::editor::CommandRegistry::default();
+    crate::editor::register_builtin_commands(&mut commands).unwrap();
+    crate::app::register_app_commands(&mut commands).unwrap();
+    let (_, diagnostic) = crate::app::compile_keymaps(
+        &commands,
+        &loaded.keymaps,
+        &loaded.config.input.keymaps,
+    );
+    assert!(diagnostic.is_none(), "{diagnostic:?}");
+
+    let surface = crate::config::parse_keymaps(
+        "[[keymap]]\nid='builtin.global.explorer.explorer'\ndisable=true\n",
+        PathBuf::from("keymaps.toml"),
+    );
+    assert_eq!(surface.entries.len(), 1);
+    assert_eq!(surface.entries[0].id, "builtin.global.explorer.explorer");
+}
+
+
+#[test]
+fn product_plan_terminal_profile_and_keymap_are_accepted() {
+    let plan = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/product-plan.md"));
+    let profile = plan
+        .split("Example profile in `config.toml`:")
+        .nth(1)
+        .unwrap()
+        .split("```toml\n")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap();
+    let mapping = plan
+        .split("Mapping in `keymaps.toml`:")
+        .nth(1)
+        .unwrap()
+        .split("```toml\n")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap();
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, profile).unwrap();
+    let loaded = load_config(&path);
+    assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
+    let path = directory.path().join("keymaps.toml");
+    fs::write(&path, mapping).unwrap();
+    let mappings = load_keymaps(&path);
+    assert!(mappings.diagnostic.is_none(), "{:?}", mappings.diagnostic);
+    let mut config = load_bundled_config();
+    config.config = loaded.config;
+    config.keymaps = mappings;
+    crate::app::validate_loaded_configuration(config).unwrap();
 }

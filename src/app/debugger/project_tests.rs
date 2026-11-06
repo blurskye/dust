@@ -29,3 +29,6 @@ pub(in crate::app) fn breakpoint_toggle_uses_disabled_state_after_another_breakp
         Some(false)
     );
 }
+use crate::debugger::DapSourceBreakpoint;
+use crate::editor::text::TextBuffer;
+

@@ -19,7 +19,7 @@ use crate::workspace::ABSOLUTE_PROPOSAL_FILE_LIMIT;
 
 use crate::workspace::root::ExecutionSource;
 
-use crate::workspace::root::RootId;
+use crate::workspace::RootId;
 
 use crate::workspace::root::WorkspaceState;
 

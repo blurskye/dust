@@ -1,4 +1,4 @@
-use crate::app::windows::EditorTopology;
+use crate::editor::EditorTopology;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;

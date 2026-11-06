@@ -2173,7 +2173,7 @@ mod regression_tests {
 }
 
 mod conflict_markers;
-mod pull_requests;
+pub(in crate::app) mod pull_requests;
 
 pub(in crate::app) mod interaction;
 

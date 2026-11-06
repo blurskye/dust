@@ -474,7 +474,7 @@ mod tests {
 
     use crate::editor::command::CommandError;
 
-    use crate::editor::command::CommandInvocation;
+    use crate::editor::CommandInvocation;
 
     use crate::editor::command::CommandOutcome;
 

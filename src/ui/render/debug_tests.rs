@@ -1,6 +1,5 @@
 
 
-use crate::ui::render::composition_tests::render;
 
 
 #[test]
@@ -65,7 +64,7 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
 
     // And the panels are DRAWN in the regions the arrangement reserved, not over the source.
     let mut frame = crate::ui::grid::Frame {
-        grid: crate::ui::render::CellGrid::new(120, 40),
+        grid: crate::ui::CellGrid::new(120, 40),
         cursor: None,
     };
     render_debug_panes(&mut frame, layout, &panes);
@@ -102,7 +101,7 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     assert!(narrow.source.width >= DEBUG_SOURCE_MIN_WIDTH);
     let strip = narrow.console.expect("one selectable inspector remains");
     let mut frame = crate::ui::grid::Frame {
-        grid: crate::ui::render::CellGrid::new(60, 24),
+        grid: crate::ui::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(&mut frame, narrow, &panes);

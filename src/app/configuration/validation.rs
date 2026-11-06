@@ -1,11 +1,11 @@
-use crate::app::configuration::AppEffect;
-use crate::app::configuration::BTreeSet;
-use crate::app::configuration::CommandError;
-use crate::app::configuration::CommandInvocation;
-use crate::app::configuration::CommandRegistry;
-use crate::app::configuration::CommandValue;
-use crate::app::configuration::InvocationSource;
-use crate::app::configuration::LoadedConfig;
+use crate::app::commands::AppEffect;
+use std::collections::BTreeSet;
+use crate::editor::CommandError;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandRegistry;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
+use crate::config::LoadedConfig;
 
 pub(in crate::app) fn validate_configured_commands(
     commands: &CommandRegistry<AppEffect>,

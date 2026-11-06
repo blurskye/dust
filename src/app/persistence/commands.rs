@@ -1,6 +1,6 @@
 
 use crate::app::persistence::MARK_LIMIT;
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
 
 
@@ -87,38 +87,22 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
 Ok(())
 }
 
-use crate::app::DocumentationPopupKind;
-use crate::app::LspMarkupContent;
-use crate::app::LspMarkupKind;
+
+
+
+
+
+
+
 
 impl App {
     pub(in crate::app) fn process_persistence_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::MarkdownPreview => {
-                let Some(buffer) = self
-                    .state
-                    .active_buffer_id()
-                    .map(|id| &self.state.buffers[id])
-                else {
-                    return Ok(());
-                };
-                let title = buffer.path.as_ref().map_or_else(
-                    || "Markdown".to_owned(),
-                    |path| self.workspace_relative_label(path),
-                );
-                let value = buffer.text.to_string();
-                self.present_documentation_popup(
-                    DocumentationPopupKind::Git,
-                    title,
-                    "Markdown".into(),
-                    None,
-                    vec![LspMarkupContent {
-                        kind: LspMarkupKind::Markdown,
-                        value,
-                    }],
-                );
+AppEffect::HistoryClear => {
+                self.input.clear_history();
+                self.notify_message(self.message("history_cleared", &[]), false);
             }
-            AppEffect::SessionSave => {
+AppEffect::SessionSave => {
                 if self.configuration.settings().persistence.enabled {
                     self.persistence.request_save_notice();
                     self.write_persistence();
@@ -126,8 +110,8 @@ impl App {
                     self.show_error(self.message("session_disabled", &[]));
                 }
             }
-            AppEffect::SessionLoad => self.load_session_on_request(),
-            AppEffect::MarkJump(name) => {
+AppEffect::SessionLoad => self.load_session_on_request(),
+AppEffect::MarkJump(name) => {
                 self.persistence.reconcile_marks(&self.state);
                 let location = self
                     .persistence
@@ -140,7 +124,7 @@ impl App {
                     None => self.show_error(self.message("mark_unset", &[("name", name)])),
                 }
             }
-            AppEffect::MarkSet(name) => {
+AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
                     self.persistence
                         .set_mark(name, location, MARK_LIMIT, &self.state);

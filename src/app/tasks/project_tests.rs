@@ -536,3 +536,19 @@ pub(in crate::app) fn matcher_navigation_uses_the_open_buffer_after_its_file_is_
         ByteOffset(8)
     );
 }
+use crate::app::picker::MatcherSource;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::app::startup::StartupTarget;
+use std::fs;
+use std::thread;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+

@@ -853,3 +853,22 @@ pub(in crate::app) fn workspace_search_presentation_limit_keeps_matches_and_bloc
         }
     }
 }
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::files::VfsError;
+use crate::files::WorkspaceFilePolicy;
+use crate::files::WorkspaceSearchMatch;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::files::RootIdentity;
+use crate::workspace::WorkspaceTrust;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::AppEffect;
+

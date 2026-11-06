@@ -25,13 +25,13 @@ use crate::editor::input::ModalResolver;
 
 use crate::editor::text::TextBuffer;
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 
 use crate::app::ResolvedKeymaps;
 
 use crate::app::compile_keymaps;
 
-use crate::app::register_app_commands;
+use crate::app::commands::register_app_commands;
 
 use crate::editor::CommandError;
 

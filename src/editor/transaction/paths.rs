@@ -1,7 +1,7 @@
 //! Exact buffer-path reconciliation after a separately completed filesystem operation.
 use crate::editor::transaction::EditorDraft;
-use crate::editor::transaction::EditorState;
-use crate::editor::transaction::EditorWindowVersion;
+use crate::editor::EditorState;
+use crate::editor::EditorWindowVersion;
 use crate::editor::BufferId;
 use crate::editor::text::TextVersion;
 use std::path::Path;

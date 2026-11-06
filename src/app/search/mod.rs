@@ -24,12 +24,12 @@ use crate::app::search::workflow::SearchWorkflowId;
 use crate::app::search::workflow::SearchWorkflowItem;
 use crate::app::search::workflow::SearchWorkflowSpec;
 
-pub(crate) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
+pub(in crate::app) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
 /// Bounds for walking the workspace in the file picker and project search.
-pub(crate) const SEARCH_MAXIMUM_FILES: usize = 100_000;
-pub(crate) const SEARCH_MAXIMUM_FILE_BYTES: usize = 8 * 1024 * 1024;
-pub(crate) const SEARCH_BATCH_SIZE: usize = 128;
-pub(crate) const SEARCH_QUEUE_CAPACITY: usize = 8;
+pub(in crate::app) const SEARCH_MAXIMUM_FILES: usize = 100_000;
+pub(in crate::app) const SEARCH_MAXIMUM_FILE_BYTES: usize = 8 * 1024 * 1024;
+pub(in crate::app) const SEARCH_BATCH_SIZE: usize = 128;
+pub(in crate::app) const SEARCH_QUEUE_CAPACITY: usize = 8;
 
 
 
@@ -41,30 +41,30 @@ type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8
 #[derive(Default)]
 pub(in crate::app) struct SearchSession {
     pub(in crate::app) picker: picker::PickerSession,
-    preview: Option<crate::ui::PickerPreview>,
-    preview_snapshot_key: Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>, usize)>,
-    preview_path: Option<std::path::PathBuf>,
-    preview_scope: Option<(WorkspaceVersion, u64)>,
-    preview_epoch: std::sync::Arc<()>,
-    preview_read: Option<(crate::files::RequestId, usize)>,
+    pub(in crate::app) preview: Option<crate::ui::PickerPreview>,
+    pub(in crate::app) preview_snapshot_key: Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>, usize)>,
+    pub(in crate::app) preview_path: Option<std::path::PathBuf>,
+    pub(in crate::app) preview_scope: Option<(WorkspaceVersion, u64)>,
+    pub(in crate::app) preview_epoch: std::sync::Arc<()>,
+    pub(in crate::app) preview_read: Option<(crate::files::RequestId, usize)>,
     files: WorkspaceFileService,
     file_generation: Option<u64>,
-    file_scope: Option<(WorkspaceVersion, u64)>,
+    pub(in crate::app) file_scope: Option<(WorkspaceVersion, u64)>,
     file_entries: Vec<WorkspaceFileEntry>,
     grep: WorkspaceSearchService,
     generation: Option<u64>,
-    scope: Option<(WorkspaceVersion, u64)>,
+    pub(in crate::app) scope: Option<(WorkspaceVersion, u64)>,
     workflow: Option<SearchWorkflowBroker>,
     sequence: u64,
-    matches: Vec<WorkspaceSearchMatch>,
+    pub(in crate::app) matches: Vec<WorkspaceSearchMatch>,
     intent: Option<Intent>,
-    live: bool,
-    query: String,
+    pub(in crate::app) live: bool,
+    pub(in crate::app) query: String,
     matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
     byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
-    preview_location: Option<(usize, usize)>,
-    diff_preview: crate::git::GitHunkService,
-    diff_preview_key: Option<(
+    pub(in crate::app) preview_location: Option<(usize, usize)>,
+    pub(in crate::app) diff_preview: crate::git::GitHunkService,
+    pub(in crate::app) diff_preview_key: Option<(
         WorkspaceVersion,
         u64,
         std::path::PathBuf,
@@ -72,7 +72,7 @@ pub(in crate::app) struct SearchSession {
     )>,
     /// The icon a picker row of a file without its own icon gets, or `None` when the
     /// explorer draws no Nerd Font icons and the rows draw none either.
-    file_icon: Option<String>,
+    pub(in crate::app) file_icon: Option<String>,
 }
 pub(in crate::app) enum Intent {
     Find,
@@ -476,5 +476,16 @@ pub(in crate::app) mod commands;
 pub(in crate::app) mod project_tests;
 
 
-use crate::app::picker::{MatcherSource, PickerContent, PickerEpoch, PickerOrigin, PickerPayload};
+use crate::app::picker::MatcherSource;
 pub(in crate::app) mod workflow;
+
+
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+
+use crate::files::RequestId;
+use crate::ui::PickerPreview;
+use std::path::PathBuf;
+

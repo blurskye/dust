@@ -200,7 +200,7 @@ pub(in crate::app) fn semantic_window_layout_persistence_is_strict_transactional
         .unwrap();
     source.set_dashboard_visibility(false);
     source.open_explorer();
-    source.process_effect(crate::app::AppEffect::WindowDock {
+    source.process_effect(crate::app::commands::AppEffect::WindowDock {
         target: "explorer".into(),
         edge: "right".into(),
         size: 27,
@@ -433,3 +433,19 @@ pub(in crate::app) fn semantic_content_restore_uses_fresh_ids_and_preserves_uncl
     );
     app.window_session.graph().validate().expect("valid graph");
 }
+use crate::app::persistence::RestoreContext;
+use std::time::Duration;
+use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowRule;
+use crate::ui::DocumentationMarkupKind;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::UiEvent;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use crate::app::AppEffect;
+use crate::persistence::PersistedWindowPlacement;
+

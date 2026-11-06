@@ -130,7 +130,6 @@ pub use index::activate_candidate;
 pub use index::index_manifest_contributions;
 #[cfg(test)]
 pub(crate) use index::execute_component;
-pub(crate) use index::load_component;
 
 #[cfg(test)]
 mod host_tests;
@@ -138,5 +137,10 @@ mod host_tests;
 pub(crate) mod target03;
 
 #[cfg(test)]
-pub(crate) use manager_tests::ExecutionFixture;
-pub(crate) use manager_tests::empty_execution_request;
+#[cfg(test)]
+pub(crate) use host_tests::ExecutionFixture;
+#[cfg(test)]
+pub(crate) use host_tests::empty_execution_request;
+
+#[cfg(test)]
+pub(crate) use index::load_component;

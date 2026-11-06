@@ -1,4 +1,3 @@
-use crate::app::documents::configured_file_bytes;
 pub(in crate::app) mod driver;
 mod input_workflows;
 pub(super) mod window_workflows;
@@ -7,11 +6,9 @@ use std::collections::BTreeMap;
 
 use std::collections::BTreeSet;
 
-use std::collections::HashMap;
 
 use std::fs;
 
-use std::path::PathBuf;
 
 use std::thread;
 
@@ -19,78 +16,24 @@ use std::time::Duration;
 
 use std::time::Instant;
 
-use crate::editor::input::InputContextLayer;
 
-use crate::editor::input::KeyEvent;
 
-use crate::editor::input::MappingResolution;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandSource;
-use crate::editor::CommandValue;
-use crate::editor::InvocationSource;
-use crate::files::ExplorerWatchBatch;
-use crate::files::ExplorerWatchGeneration;
-use crate::ui::ContentTabDiagnostic;
-use crate::ui::ContentTabDiagnosticSeverity;
-use crate::ui::ContentTabKind;
-use crate::ui::DocumentationMarkupKind;
-use crate::ui::DocumentationPopupKind;
-use crate::ui::ExplorerSegmentRole;
-use crate::ui::ExplorerUiState;
-use crate::ui::PickerSurfaceKind;
-use crate::ui::PtyScreen;
-use crate::ui::UiEvent;
-use crate::ui::UiFold;
-use crate::ui::VisualRowAnchor;
-use crate::ui::VisualRowModel;
-use crate::ui::active_pane_viewport;
-use crate::ui::explorer_panel_width;
-use crate::ui::render;
-use crate::ui::snap_display_column;
 use tempfile::tempdir;
 
 use crate::app::App;
 
-use crate::app::KeymapOperation;
 
-use crate::app::LspProjectionOwner;
 
-use crate::app::LspRuntimeSource;
 
-use crate::app::build_restored_layout;
 
-use crate::app::capture_persisted_layout;
 
-use crate::app::compile_keymaps;
 
-use crate::app::compile_keymaps_with_plugin_catalog;
 
-use crate::app::configuration_generation_is_newer;
 
-use crate::app::lsp_runtime_source_allowed_on_host;
 
-use crate::app::reload_keymaps;
 
-use crate::app::resolve_configuration;
 
-use crate::app::validate_configured_commands;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
 use crate::app::startup::StartupTarget;
-use crate::plugins::PluginLoadId;
-use crate::persistence::PersistedWindowPlacement;
-use crate::persistence::PersistedWindowRule;
-use crate::process::PtyId;
-use crate::tools::ToolKind;
-use crate::tools::ToolStatus;
-use crate::tools::is_nixos_host;
-use crate::windows::DockEdge;
-use crate::windows::WindowPlacement;
-use crate::windows::WindowRect;
-use crate::workspace::DiagnosticSeverity;
-use crate::workspace::WorkspaceTrust;
 
 #[test]
 fn nix_workspace_fallback_is_reserved_for_nixos_hosts() {
@@ -99,15 +42,15 @@ fn nix_workspace_fallback_is_reserved_for_nixos_hosts() {
         .find(|tool| tool.id == "rust-analyzer")
         .expect("Rust analyzer catalog definition");
     assert_eq!(
-        crate::app::nix_workspace_shell_for_host(&definition, true, true),
+        crate::app::tools::nix_workspace_shell_for_host(&definition, true, true),
         Some("rust-analyzer")
     );
     assert_eq!(
-        crate::app::nix_workspace_shell_for_host(&definition, true, false),
+        crate::app::tools::nix_workspace_shell_for_host(&definition, true, false),
         None
     );
     assert_eq!(
-        crate::app::nix_workspace_shell_for_host(&definition, false, true),
+        crate::app::tools::nix_workspace_shell_for_host(&definition, false, true),
         None
     );
 }
@@ -119,7 +62,7 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
         .find(|tool| tool.id == "rust-analyzer")
         .expect("Rust analyzer catalog definition");
     let root = tempdir().expect("isolated tool directory");
-    let launch = crate::app::LspLaunch::NixWorkspace {
+    let launch = crate::app::language::LspLaunch::NixWorkspace {
         nix: root.path().join("rust-analyzer/bin/rust-analyzer"),
         workspace_root: root.path().join("nix-lsp-workspace"),
         shell: "rust-analyzer".into(),
@@ -137,7 +80,7 @@ pub(super) fn app() -> (
     app_with_optional_plugin_queue(None)
 }
 
-fn app_with_plugin_queue(
+pub(in crate::app) fn app_with_plugin_queue(
     plugin_queue_capacity: usize,
 ) -> (
     (tempfile::TempDir, tempfile::TempDir),
@@ -189,7 +132,7 @@ fn application_fixture_cleans_up_workspace_and_state_after_drop() {
     assert!(!state.exists());
 }
 
-fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::plugins::PluginManifest {
+pub(in crate::app) fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::plugins::PluginManifest {
     crate::plugins::PluginManifest {
         id: owner.into(),
         version: "1.0.0".into(),
@@ -249,7 +192,7 @@ fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::plugins:
     }
 }
 
-fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::PluginManifest) {
+pub(in crate::app) fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::PluginManifest) {
     fs::write(
         root.join("manifest.toml"),
         toml::to_string(manifest).expect("manifest TOML"),
@@ -280,7 +223,7 @@ pub(in crate::app) fn wait_workspace_approval(app: &mut App) {
     }
 }
 
-fn prepare_trust_identity(app: &mut App) {
+pub(in crate::app) fn prepare_trust_identity(app: &mut App) {
     let identity =
         crate::files::RootIdentity::capture(&app.state.workspace_root).expect("identity");
     let root = app.workspace.active_root().expect("root");

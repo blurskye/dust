@@ -417,3 +417,4 @@ pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usiz
     usize::from(DOCUMENTATION_MAX_HEIGHT.saturating_sub(2))
         .min(usize::from(height.saturating_sub(2)))
 }
+use unicode_segmentation::UnicodeSegmentation;

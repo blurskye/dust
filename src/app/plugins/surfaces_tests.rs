@@ -521,7 +521,7 @@ pub(in crate::app) fn text_and_virtual_windows_project_input_and_preserve_identi
     let tab = app.state.active_tab.expect("editor tab");
     let source_pane = app.state.tabs[tab].focused;
     let source_view = app.state.panes[source_pane].view;
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let source_window = app
@@ -941,3 +941,36 @@ pub(in crate::app) fn startup_plugin_publication_waits_for_session_restoration()
     assert!(app.extension.contributions().get("demo").is_some());
     assert!(app.configuration.binding_revision() > revision);
 }
+use crate::app::persistence::RestoreContext;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::EditorMode;
+
+
+use crate::editor::InvocationSource;
+
+use crate::plugins::PluginLoadId;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistedWindowRule;
+use crate::persistence::PersistenceService;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::fs;
+use std::thread;
+use crate::ui::ContentTabKind;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::AppEffect;
+use crate::persistence::PersistedWindowPlacement;
+

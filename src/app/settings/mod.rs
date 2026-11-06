@@ -395,7 +395,7 @@ impl App {
         result
     }
 
-    pub(in crate::app) fn settings_mouse(&mut self, key: &crate::app::KeyEvent, column: u16, row: u16) {
+    pub(in crate::app) fn settings_mouse(&mut self, key: &crate::editor::input::KeyEvent, column: u16, row: u16) {
         use crate::editor::input::TerminalMouseInput;
         let (width, height) = (self.window_session.width(), self.settings_height());
         let ambiguous = self.configuration.settings().editor.ambiguous_width;

@@ -466,7 +466,7 @@ pub fn load_keymaps(path: &Path) -> LoadedKeymaps {
     parse_keymaps(&source, path.to_path_buf())
 }
 
-pub(super) fn parse_keymaps(source: &str, path: PathBuf) -> LoadedKeymaps {
+pub(crate) fn parse_keymaps(source: &str, path: PathBuf) -> LoadedKeymaps {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct KeymapFile {

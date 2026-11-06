@@ -1725,3 +1725,6 @@ pub(in crate::app) mod project_tests;
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;
+
+#[cfg(test)]
+mod tree_tests;

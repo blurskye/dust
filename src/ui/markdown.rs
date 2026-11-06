@@ -9,7 +9,7 @@ use crate::config::AmbiguousWidth;
 use crate::ui::geometry::text_width;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::language::syntax::self;
+use std::sync::mpsc::self;
 
 use crate::config::Highlight;
 
@@ -979,3 +979,5 @@ mod tests {
         assert_eq!(rendered("- aaa bbb", 7).text, "• aaa\n  bbb\n");
     }
 }
+
+use crate::language::syntax;

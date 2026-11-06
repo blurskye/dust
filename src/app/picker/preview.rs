@@ -8,6 +8,101 @@ use crate::ui::PickerTextPreview;
 use std::path::PathBuf;
 use std::sync::Arc;
 pub(in crate::app) struct PreviewTicket(Arc<()>);
+pub(in crate::app) fn search_picker_preview(
+    found: &crate::files::WorkspaceSearchMatch,
+    maximum_bytes: usize,
+) -> PickerPreview {
+    let normalized = crate::editor::text::TextBuffer::from_bytes(&found.snapshot)
+        .map(|text| text.to_string())
+        .unwrap_or_default();
+    let bytes = normalized.as_bytes();
+    let maximum_bytes = maximum_bytes.max(1);
+    let match_start = found.range.start.min(bytes.len());
+    let mut start = match_start.saturating_sub(maximum_bytes / 3);
+    while start < match_start
+        && bytes
+            .get(start)
+            .is_some_and(|byte| byte & 0b1100_0000 == 0b1000_0000)
+    {
+        start = start.saturating_add(1);
+    }
+    if start > 0
+        && let Some(line_break) = bytes[start..match_start]
+            .iter()
+            .position(|byte| *byte == b'\n')
+    {
+        start = start.saturating_add(line_break).saturating_add(1);
+    }
+    let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
+    while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {
+        end = end.saturating_sub(1);
+    }
+    let before_lines = bytes[start..match_start]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count();
+    let mut first_line = found.line.saturating_sub(before_lines);
+    let selected_offset = found.line.saturating_sub(first_line);
+    let first_visible_offset = selected_offset.saturating_sub(8);
+    let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
+        |_| vec!["binary preview unavailable".into()],
+        |text| {
+            let column = bytes[start..match_start]
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(match_start - start, |offset| {
+                    match_start - start - offset - 1
+                });
+            picker_preview_lines_from(
+                text,
+                first_visible_offset,
+                512,
+                Some((selected_offset, column)),
+            )
+        },
+    );
+    first_line = first_line.saturating_add(first_visible_offset);
+    PickerPreview {
+        title: found.relative_path.display().to_string(),
+        body: PickerPreviewBody::Text(PickerTextPreview::new(
+            lines,
+            first_line,
+            Some(found.line),
+            crate::language::syntax::language_for_path(&found.relative_path),
+        )),
+    }
+}
+
+pub(in crate::app) fn picker_preview_lines_from(
+    text: &str,
+    first_line: usize,
+    maximum_lines: usize,
+    selected: Option<(usize, usize)>,
+) -> Vec<String> {
+    text.lines()
+        .enumerate()
+        .skip(first_line)
+        .take(maximum_lines)
+        .map(|(index, line)| {
+            let start = selected
+                .filter(|(selected_line, _)| *selected_line == index)
+                .and_then(|(_, column)| line.get(..column))
+                .filter(|_| line.chars().take(4097).count() > 4096)
+                .and_then(|prefix| prefix.char_indices().rev().nth(16))
+                .map_or(0, |(offset, _)| offset);
+            line[start..]
+                .chars()
+                .filter(|character| !character.is_control() || *character == '\t')
+                .take(4096)
+                .collect()
+        })
+        .collect()
+}
+
+
+
+
+
 impl SearchSession {
     pub(in crate::app) fn preview(&self) -> &Option<PickerPreview> {
         &self.preview
@@ -274,94 +369,4 @@ impl SearchSession {
         }
         true
     }
-}
-pub(in crate::app) fn search_picker_preview(
-    found: &crate::files::WorkspaceSearchMatch,
-    maximum_bytes: usize,
-) -> PickerPreview {
-    let normalized = crate::editor::text::TextBuffer::from_bytes(&found.snapshot)
-        .map(|text| text.to_string())
-        .unwrap_or_default();
-    let bytes = normalized.as_bytes();
-    let maximum_bytes = maximum_bytes.max(1);
-    let match_start = found.range.start.min(bytes.len());
-    let mut start = match_start.saturating_sub(maximum_bytes / 3);
-    while start < match_start
-        && bytes
-            .get(start)
-            .is_some_and(|byte| byte & 0b1100_0000 == 0b1000_0000)
-    {
-        start = start.saturating_add(1);
-    }
-    if start > 0
-        && let Some(line_break) = bytes[start..match_start]
-            .iter()
-            .position(|byte| *byte == b'\n')
-    {
-        start = start.saturating_add(line_break).saturating_add(1);
-    }
-    let mut end = start.saturating_add(maximum_bytes).min(bytes.len());
-    while end > start && std::str::from_utf8(&bytes[start..end]).is_err() {
-        end = end.saturating_sub(1);
-    }
-    let before_lines = bytes[start..match_start]
-        .iter()
-        .filter(|byte| **byte == b'\n')
-        .count();
-    let mut first_line = found.line.saturating_sub(before_lines);
-    let selected_offset = found.line.saturating_sub(first_line);
-    let first_visible_offset = selected_offset.saturating_sub(8);
-    let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
-        |_| vec!["binary preview unavailable".into()],
-        |text| {
-            let column = bytes[start..match_start]
-                .iter()
-                .rposition(|byte| *byte == b'\n')
-                .map_or(match_start - start, |offset| {
-                    match_start - start - offset - 1
-                });
-            picker_preview_lines_from(
-                text,
-                first_visible_offset,
-                512,
-                Some((selected_offset, column)),
-            )
-        },
-    );
-    first_line = first_line.saturating_add(first_visible_offset);
-    PickerPreview {
-        title: found.relative_path.display().to_string(),
-        body: PickerPreviewBody::Text(PickerTextPreview::new(
-            lines,
-            first_line,
-            Some(found.line),
-            crate::language::syntax::language_for_path(&found.relative_path),
-        )),
-    }
-}
-
-fn picker_preview_lines_from(
-    text: &str,
-    first_line: usize,
-    maximum_lines: usize,
-    selected: Option<(usize, usize)>,
-) -> Vec<String> {
-    text.lines()
-        .enumerate()
-        .skip(first_line)
-        .take(maximum_lines)
-        .map(|(index, line)| {
-            let start = selected
-                .filter(|(selected_line, _)| *selected_line == index)
-                .and_then(|(_, column)| line.get(..column))
-                .filter(|_| line.chars().take(4097).count() > 4096)
-                .and_then(|prefix| prefix.char_indices().rev().nth(16))
-                .map_or(0, |(offset, _)| offset);
-            line[start..]
-                .chars()
-                .filter(|character| !character.is_control() || *character == '\t')
-                .take(4096)
-                .collect()
-        })
-        .collect()
 }

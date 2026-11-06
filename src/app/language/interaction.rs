@@ -1,39 +1,39 @@
 use crate::ui::render::COMPLETION_MAX_ROWS;
-use crate::app::AppEffect;
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::DocumentationPopupKind;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
-use crate::app::Instant;
+use crate::app::commands::AppEffect;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::ui::DocumentationPopupKind;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use std::time::Instant;
 use crate::app::App;
-use crate::app::LspFeature;
-use crate::app::LspRuntimeSource;
-use crate::app::LspWorkspaceEdit;
-use crate::app::MatcherSource;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::PersistedLocation;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::PositionCodec;
-use crate::app::PositionEncoding;
-use crate::app::TextBuffer;
-use crate::app::TextEdit;
-use crate::app::UndoPolicy;
-use crate::app::discover_executable;
-use crate::app::path_from_file_uri;
-use crate::app::Duration;
-use crate::app::LspEvent;
-use crate::app::LspFeatureResult;
-use crate::app::LspLaunch;
-use crate::app::LspProgressKind;
-use crate::app::UiFold;
-use crate::app::UiInlayHint;
-use crate::app::UiSyntaxSpan;
+use crate::language::lsp::LspFeature;
+use crate::app::tools::LspRuntimeSource;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::app::picker::MatcherSource;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::persistence::PersistedLocation;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::UndoPolicy;
+use crate::tools::discover_executable;
+use crate::language::lsp::path_from_file_uri;
+use std::time::Duration;
+use crate::language::lsp::LspEvent;
+use crate::language::lsp::LspFeatureResult;
+use crate::app::language::LspLaunch;
+use crate::language::lsp::LspProgressKind;
+use crate::ui::UiFold;
+use crate::ui::UiInlayHint;
+use crate::ui::UiSyntaxSpan;
 use crate::app::command;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
 use crate::app::language::LSP_MAXIMUM_LOG_LINES;
@@ -413,7 +413,7 @@ impl App {
             {
                 let source = self.state.window_version();
                 self.input.install_snippet(
-                    crate::app::input::SnippetDocument {
+                    crate::app::language::snippets::SnippetDocument {
                         editor: &source,
                         buffer: buffer_id,
                         text: &self.state.buffers[buffer_id].text,
@@ -464,7 +464,7 @@ impl App {
         let source = self.state.window_version();
         let document = self.input.snippet_buffer().and_then(|id| {
             self.state.buffers.get(id).map(|buffer| {
-                crate::app::input::SnippetDocument {
+                crate::app::language::snippets::SnippetDocument {
                     editor: &source,
                     buffer: id,
                     text: &buffer.text,
@@ -2169,23 +2169,23 @@ impl App {
 }
 
 use crate::app::configuration::configured_text_width;
-use crate::app::DiagnosticOwner;
-use crate::app::EditorMode;
-use crate::app::ExecutionSource;
-use crate::app::LspAutostartObservation;
-use crate::app::LspDocument;
-use crate::app::LspLaunchRequest;
-use crate::app::LspLaunchSource;
-use crate::app::PendingLspProjectRoot;
-use crate::app::PromptKind;
-use crate::app::ToolInstall;
-use crate::app::ToolKind;
-use crate::app::ToolStatus;
-use crate::app::is_nixos_host;
-use crate::app::language_id_for_path;
-use crate::app::nix_lsp_launch_environment;
-use crate::app::nix_lsp_profile_installed;
-use crate::app::nix_workspace_shell_for_host;
+use crate::workspace::DiagnosticOwner;
+use crate::editor::EditorMode;
+use crate::workspace::ExecutionSource;
+use crate::app::language::LspAutostartObservation;
+use crate::language::lsp::LspDocument;
+use crate::app::language::LspLaunchRequest;
+use crate::app::language::LspLaunchSource;
+use crate::app::language::PendingLspProjectRoot;
+use crate::ui::PromptKind;
+use crate::app::tools::ToolInstall;
+use crate::tools::ToolKind;
+use crate::tools::ToolStatus;
+use crate::tools::is_nixos_host;
+use crate::language::lsp::language_id_for_path;
+use crate::tools::nix_lsp_launch_environment;
+use crate::tools::nix_lsp_profile_installed;
+use crate::app::tools::nix_workspace_shell_for_host;
 use crate::ui::CompletionItem;
 use crate::ui::LanguageCompletionState;
 
@@ -2823,12 +2823,7 @@ impl App {
 
 
 /// Where a conflicted file's first marker is, so opening it lands there.
-fn first_conflict_line(path: &std::path::Path) -> usize {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| text.lines().position(|line| line.starts_with("<<<<<<<")))
-        .unwrap_or(0)
-}
+
 
 
 fn completion_word_char(character: char) -> bool {
@@ -2880,7 +2875,7 @@ impl App {
 
 
     /// `asked` is a person starting this server, who is told when the project can't have it.
-    fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
+    pub(in crate::app) fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
         if let Some(id) = requested.as_ref().filter(|_| asked) {
             self.language.clear_stopped(id);
         }

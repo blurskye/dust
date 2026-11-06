@@ -255,7 +255,7 @@ impl SearchWorkflowBroker {
         self.revision += 1;
         Ok(())
     }
-    pub(crate) fn ordered_items(&self) -> Option<Vec<&SearchWorkflowItem>> {
+    pub(in crate::app) fn ordered_items(&self) -> Option<Vec<&SearchWorkflowItem>> {
         let active = self.active.as_ref()?;
         let q = active.query.to_lowercase();
         let mut items = active

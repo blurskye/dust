@@ -34,7 +34,7 @@ use crate::ui::geometry::text_width;
 
 use overlays::render_dashboard;
 
-use overlays::render_documentation_popup;
+use documentation::render_documentation_popup;
 
 use overlays::render_language_completion;
 
@@ -76,7 +76,6 @@ pub(crate) use editor::workspace_title;
 #[cfg(test)]
 use overlays::content_tab_width;
 
-use overlays::render_content_tab_line;
 
 use picker::render_picker;
 
@@ -91,9 +90,7 @@ use tools::render_tool_menu;
 #[cfg(test)]
 use visual_rows::VisualRowSlice;
 
-use visual_rows::editor_line_number_digits;
 
-use visual_rows::git_sign_column;
 
 
 pub use agent::AgentListRow;
@@ -199,7 +196,6 @@ use crate::windows::WindowId;
 
 use crate::windows::WindowRect;
 
-use crossterm::cursor::SetCursorStyle;
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1388,7 +1384,7 @@ pub struct YankHighlight {
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
-    pub surface_content: crate::ui::geometry::SurfaceContentGeometry,
+    pub surface_content: crate::ui::render::SurfaceContentGeometry,
     pub dashboard: bool,
     pub prompt: Option<PromptState>,
     pub notification: Option<String>,
@@ -1738,7 +1734,7 @@ fn render_error_notification(
     height: u16,
     at_bottom: bool,
 ) {
-    let Some(mut rect) = crate::ui::geometry::error_notification_geometry(width, height) else {
+    let Some(mut rect) = crate::ui::render::overlays::error_notification_geometry(width, height) else {
         return;
     };
     // A long message wraps instead of losing its end, which is usually the part that says why.
@@ -2589,3 +2585,20 @@ use crate::ui::grid::Frame;
 use crate::ui::diff::{DiffLineKind,DiffSpan,DiffLine,DiffHunk,DiffLayout,DiffRow,DiffSideCell,DiffSideRow,DiffPreview,DiffRowKind};
 
 use crate::ui::grid::{CONTROL_CHARACTER_REPLACEMENT,ZERO_WIDTH_REPLACEMENT};
+
+
+
+
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceContentGeometry {
+    pub picker: Option<PickerContentGeometry>,
+    pub explorer: Option<WindowRect>,
+    pub terminal: Option<WindowRect>,
+    pub documentation_rows: usize,
+}
+
+use crate::ui::render::picker::PickerContentGeometry;
+
+
+#[cfg(test)]
+mod tools_tests;

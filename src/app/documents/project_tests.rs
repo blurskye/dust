@@ -1055,7 +1055,7 @@ pub(in crate::app) fn the_advertised_help_key_is_the_key_that_resolves() {
 #[test]
 pub(in crate::app) fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     let palette = app.search.picker_projection().expect("palette");
     let query_before = palette.query.clone();
@@ -1096,7 +1096,7 @@ pub(in crate::app) fn accepting_inside_help_closes_the_page_and_invokes_nothing(
 #[test]
 pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     app.invoke(
         crate::editor::CommandInvocation::new("overlay.help.reference", InvocationSource::Test)
@@ -1106,7 +1106,7 @@ pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
 
     // A real surface is installed while help is open. The stale palette must not come back
     // when that new surface is closed.
-    app.open_builtin_picker(crate::app::PickerKind::Buffers);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Buffers);
     assert!(
         app.search.picker_projection().is_some(),
         "the new surface is up"
@@ -1122,7 +1122,7 @@ pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
 #[test]
 pub(in crate::app) fn help_opened_over_help_keeps_the_original_surface() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
     let palette = app.search.picker_projection().expect("palette");
     let query_before = palette.query.clone();
@@ -2622,3 +2622,41 @@ pub(in crate::app) fn file_rows_dim_the_folder_and_count_what_the_query_leaves_o
     assert_eq!(cells[1].style, crate::ui::Style::Muted);
     assert_eq!(cells[2].style, crate::ui::Style::Default);
 }
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerPayload;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::EditorMode;
+use crate::editor::InvocationSource;
+use crate::language::lsp::file_uri;
+use crate::persistence::PersistedLocation;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::workspace::DiagnosticOwner;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::workspace::WorkspaceTrust;
+use thiserror::Error;
+use crate::app::startup::StartupTarget;
+use crate::app::documents::configured_file_bytes;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::workspace::DiagnosticSeverity;
+

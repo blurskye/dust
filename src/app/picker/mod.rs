@@ -1,6 +1,6 @@
 //! Canonical picker rows, actions, interaction and derived presentation.
 use crate::app::search::SearchSession;
-use crate::app::search::WorkspaceVersion;
+use crate::app::workspace::WorkspaceVersion;
 use crate::plugins::PluginLoadId;
 use crate::persistence::PersistedLocation;
 use crate::tools::RegistryPackageMetadata;
@@ -110,7 +110,7 @@ pub(in crate::app) struct PickerContent {
     pub query: String,
     pub complete: bool,
 }
-struct PickerInteraction {
+pub(in crate::app) struct PickerInteraction {
     state: PickerState,
     payloads: HashMap<PickerItemId, PickerPayload>,
     surface: PickerSurfaceKind,
@@ -193,6 +193,160 @@ impl PickerSession {
         }
     }
 }
+
+/// More grep rows than any terminal is tall.
+pub(in crate::app) const GREP_ROWS_ON_SCREEN: usize = 200;
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct MatcherSource {
+    pub(in crate::app) path: PathBuf,
+    pub(in crate::app) line: usize,
+    pub(in crate::app) column: usize,
+    pub(in crate::app) encoding: crate::editor::text::PositionEncoding,
+}
+
+/// A surface's own footer legend: what its keys do on that surface, rather than the widget's
+/// mode. Only the surfaces that draw a footer have one.
+pub(in crate::app) fn surface_footer(surface: PickerSurfaceKind) -> Option<String> {
+    match surface {
+        // The change surface sets its own legend so it can carry the live staged count.
+        PickerSurfaceKind::Changes => None,
+        _ => None,
+    }
+}
+
+/// The columns a change row draws: the two-character status code, the path, and an unsaved
+/// badge when the buffer has edits.
+///
+/// The status code is its own glyph column rather than a colour, so the meaning survives a
+/// terminal without colour. The path column is flexible, so a narrow picker clips the path
+/// instead of the provenance.
+/// A choice with an icon: the badge is the icon, coloured as the explorer colours the file
+/// named by the row's source, such as `practice.rs`.
+pub(in crate::app) fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
+    let icon = crate::files::file_icon(&source.source).map_or(Style::ExplorerIcon, |icon| {
+        crate::ui::explorer_segment_style(crate::app::explorer::explorer_icon_role(icon.color))
+    });
+    let label = format!("{}  ", source.label);
+    let width = u16::try_from(label.chars().count()).unwrap_or(u16::MAX);
+    vec![
+        PickerCell::new(format!("{} ", source.badge), icon, 2),
+        PickerCell::new(label, Style::Default, width),
+        PickerCell::flex(source.detail.clone(), Style::Muted),
+    ]
+}
+
+/// A grep row as LazyVim draws it: the file's icon, `path:line:col` with the line number
+/// accented, and the line's text highlighted for the file's language.
+pub(in crate::app) fn grep_row_cells(
+    found: &crate::files::WorkspaceSearchMatch,
+    row: &crate::workspace::PickerRowPresentation,
+    file_icon: Option<&str>,
+) -> Vec<PickerCell> {
+    let path = found.relative_path.display().to_string();
+    let line = found.line.saturating_add(1).to_string();
+    let column = found.column.saturating_add(1).to_string();
+    let mut cells = path_cells(&path, &row.source, file_icon);
+    cells.push(cell(":", Style::Muted));
+    cells.push(cell(&line, Style::Accent));
+    cells.push(cell(":", Style::Muted));
+    cells.push(cell(&column, Style::Muted));
+    cells.push(cell("  ", Style::Default));
+    let text = row.detail.as_str();
+    let spans = crate::language::syntax::language_for_path(&found.canonical_path)
+        .map(|language| crate::language::syntax::highlight(language, text))
+        .unwrap_or_default();
+    let mut at = 0;
+    for span in spans {
+        let (Some(before), Some(styled)) =
+            (text.get(at..span.start), text.get(span.start..span.end))
+        else {
+            continue;
+        };
+        cells.push(cell(before, Style::Default));
+        cells.push(cell(styled, Style::Syntax(span.role)));
+        at = span.end;
+    }
+    cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
+    cells.retain(|cell| !cell.text.is_empty());
+    cells
+}
+
+/// A path as LazyVim's pickers draw it: the file's icon, then the folder dimmed and the
+/// name bright. With more than one root the root's name comes first, dimmed too.
+pub(in crate::app) fn path_cells(path: &str, root: &str, file_icon: Option<&str>) -> Vec<PickerCell> {
+    let split = path.rfind(std::path::is_separator).map_or(0, |at| at + 1);
+    let (folder, name) = path.split_at(split);
+    let mut cells = Vec::new();
+    if let Some(fallback) = file_icon {
+        let (glyph, style) =
+            crate::files::file_icon(name).map_or((fallback, Style::ExplorerIcon), |icon| {
+                let role = crate::app::explorer::explorer_icon_role(icon.color);
+                (icon.glyph, crate::ui::explorer_segment_style(role))
+            });
+        cells.push(cell(&format!("{glyph} "), style));
+    }
+    if !root.is_empty() {
+        cells.push(cell(&format!("{root}/"), Style::Muted));
+    }
+    if !folder.is_empty() {
+        cells.push(cell(folder, Style::Muted));
+    }
+    cells.push(cell(name, Style::Default));
+    cells
+}
+
+/// A cell exactly as wide as its text.
+fn cell(text: &str, style: Style) -> PickerCell {
+    let width = unicode_width::UnicodeWidthStr::width(text);
+    PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
+}
+
+pub(in crate::app) fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
+    let code = source.source.clone();
+    let status_style = match code.chars().next() {
+        // A path with only unsaved edits has no comparison code to colour.
+        Some(' ') | None => Style::Muted,
+        // Unmerged: both sides touched it.
+        Some('U') => Style::Error,
+        // Untracked.
+        Some('?') => Style::Muted,
+        Some('A') => Style::StatusAccent,
+        Some('D') => Style::Error,
+        Some('R') => Style::Warning,
+        _ => Style::Warning,
+    };
+    let mut cells = vec![
+        PickerCell::new(code, status_style, 3),
+        PickerCell::flex(source.label.clone(), Style::Default),
+    ];
+    // The section header already names the comparison, so only an unsaved buffer gets a badge.
+    if !source.badge.is_empty() {
+        let badge = format!(" {}", source.badge);
+        let width = u16::try_from(badge.chars().count()).unwrap_or(u16::MAX);
+        cells.push(PickerCell::new(badge, Style::Warning, width));
+    }
+    cells
+}
+
+pub(in crate::app) mod preview;
+pub(in crate::app) mod palette;
+
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod commands;
+
+#[cfg(test)]
+pub(in crate::app) mod project_tests;
+
+
+#[cfg(test)]
+pub(in crate::app) mod surfaces_tests;
+
+
+
+
+
 impl SearchSession {
     pub(in crate::app) fn install_picker(
         &mut self,
@@ -634,152 +788,3 @@ impl SearchSession {
             .collect()
     }
 }
-
-/// More grep rows than any terminal is tall.
-const GREP_ROWS_ON_SCREEN: usize = 200;
-
-#[derive(Clone, Debug)]
-pub(in crate::app) struct MatcherSource {
-    pub(in crate::app) path: PathBuf,
-    pub(in crate::app) line: usize,
-    pub(in crate::app) column: usize,
-    pub(in crate::app) encoding: crate::editor::text::PositionEncoding,
-}
-
-/// A surface's own footer legend: what its keys do on that surface, rather than the widget's
-/// mode. Only the surfaces that draw a footer have one.
-fn surface_footer(surface: PickerSurfaceKind) -> Option<String> {
-    match surface {
-        // The change surface sets its own legend so it can carry the live staged count.
-        PickerSurfaceKind::Changes => None,
-        _ => None,
-    }
-}
-
-/// The columns a change row draws: the two-character status code, the path, and an unsaved
-/// badge when the buffer has edits.
-///
-/// The status code is its own glyph column rather than a colour, so the meaning survives a
-/// terminal without colour. The path column is flexible, so a narrow picker clips the path
-/// instead of the provenance.
-/// A choice with an icon: the badge is the icon, coloured as the explorer colours the file
-/// named by the row's source, such as `practice.rs`.
-fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
-    let icon = crate::files::file_icon(&source.source).map_or(Style::ExplorerIcon, |icon| {
-        crate::ui::explorer_segment_style(crate::app::explorer::explorer_icon_role(icon.color))
-    });
-    let label = format!("{}  ", source.label);
-    let width = u16::try_from(label.chars().count()).unwrap_or(u16::MAX);
-    vec![
-        PickerCell::new(format!("{} ", source.badge), icon, 2),
-        PickerCell::new(label, Style::Default, width),
-        PickerCell::flex(source.detail.clone(), Style::Muted),
-    ]
-}
-
-/// A grep row as LazyVim draws it: the file's icon, `path:line:col` with the line number
-/// accented, and the line's text highlighted for the file's language.
-fn grep_row_cells(
-    found: &crate::files::WorkspaceSearchMatch,
-    row: &crate::workspace::PickerRowPresentation,
-    file_icon: Option<&str>,
-) -> Vec<PickerCell> {
-    let path = found.relative_path.display().to_string();
-    let line = found.line.saturating_add(1).to_string();
-    let column = found.column.saturating_add(1).to_string();
-    let mut cells = path_cells(&path, &row.source, file_icon);
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&line, Style::Accent));
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&column, Style::Muted));
-    cells.push(cell("  ", Style::Default));
-    let text = row.detail.as_str();
-    let spans = crate::language::syntax::language_for_path(&found.canonical_path)
-        .map(|language| crate::language::syntax::highlight(language, text))
-        .unwrap_or_default();
-    let mut at = 0;
-    for span in spans {
-        let (Some(before), Some(styled)) =
-            (text.get(at..span.start), text.get(span.start..span.end))
-        else {
-            continue;
-        };
-        cells.push(cell(before, Style::Default));
-        cells.push(cell(styled, Style::Syntax(span.role)));
-        at = span.end;
-    }
-    cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
-    cells.retain(|cell| !cell.text.is_empty());
-    cells
-}
-
-/// A path as LazyVim's pickers draw it: the file's icon, then the folder dimmed and the
-/// name bright. With more than one root the root's name comes first, dimmed too.
-fn path_cells(path: &str, root: &str, file_icon: Option<&str>) -> Vec<PickerCell> {
-    let split = path.rfind(std::path::is_separator).map_or(0, |at| at + 1);
-    let (folder, name) = path.split_at(split);
-    let mut cells = Vec::new();
-    if let Some(fallback) = file_icon {
-        let (glyph, style) =
-            crate::files::file_icon(name).map_or((fallback, Style::ExplorerIcon), |icon| {
-                let role = crate::app::explorer::explorer_icon_role(icon.color);
-                (icon.glyph, crate::ui::explorer_segment_style(role))
-            });
-        cells.push(cell(&format!("{glyph} "), style));
-    }
-    if !root.is_empty() {
-        cells.push(cell(&format!("{root}/"), Style::Muted));
-    }
-    if !folder.is_empty() {
-        cells.push(cell(folder, Style::Muted));
-    }
-    cells.push(cell(name, Style::Default));
-    cells
-}
-
-/// A cell exactly as wide as its text.
-fn cell(text: &str, style: Style) -> PickerCell {
-    let width = unicode_width::UnicodeWidthStr::width(text);
-    PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
-}
-
-fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
-    let code = source.source.clone();
-    let status_style = match code.chars().next() {
-        // A path with only unsaved edits has no comparison code to colour.
-        Some(' ') | None => Style::Muted,
-        // Unmerged: both sides touched it.
-        Some('U') => Style::Error,
-        // Untracked.
-        Some('?') => Style::Muted,
-        Some('A') => Style::StatusAccent,
-        Some('D') => Style::Error,
-        Some('R') => Style::Warning,
-        _ => Style::Warning,
-    };
-    let mut cells = vec![
-        PickerCell::new(code, status_style, 3),
-        PickerCell::flex(source.label.clone(), Style::Default),
-    ];
-    // The section header already names the comparison, so only an unsaved buffer gets a badge.
-    if !source.badge.is_empty() {
-        let badge = format!(" {}", source.badge);
-        let width = u16::try_from(badge.chars().count()).unwrap_or(u16::MAX);
-        cells.push(PickerCell::new(badge, Style::Warning, width));
-    }
-    cells
-}
-
-pub(in crate::app) mod preview;
-pub(in crate::app) mod palette;
-
-pub(in crate::app) mod interaction;
-
-pub(in crate::app) mod commands;
-
-#[cfg(test)]
-pub(in crate::app) mod project_tests;
-
-
-#[cfg(test)]
-pub(in crate::app) mod surfaces_tests;

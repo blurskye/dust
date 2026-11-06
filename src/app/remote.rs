@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::app::App;
-use crate::app::WindowPlacement;
+use crate::windows::WindowPlacement;
 use crate::remote::RemoteRequest;
 use crate::remote::RemoteServer;
 use crate::remote::SERVER_VARIABLE;

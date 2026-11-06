@@ -1,15 +1,15 @@
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::app::App;
-use crate::app::LspWorkspaceEdit;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerOrigin;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::PositionEncoding;
-use crate::app::ResourceIntentKind;
-use crate::app::VfsResult;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::PositionEncoding;
+use crate::files::ResourceIntentKind;
+use crate::files::VfsResult;
 
 
 

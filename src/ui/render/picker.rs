@@ -7,8 +7,8 @@ use crate::ui::Style;
 use crate::ui::geometry::text_width;
 use crate::windows::WindowRect;
 use crate::ui::render::CellAlign;
-use crate::ui::diff::DiffLayout;
-use crate::ui::diff::DiffPreview;
+use crate::ui::DiffLayout;
+use crate::ui::DiffPreview;
 use crate::ui::diff::DiffRow;
 use crate::ui::diff::DiffRowKind;
 use crate::ui::diff::DiffSideRow;
@@ -719,7 +719,7 @@ pub(super) fn render_picker(
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::render::surfaces::*;
+    use crate::ui::render::picker::*;
 
     #[test]
     fn emphasized_diff_stops_at_a_wide_grapheme_that_cannot_fit() {
@@ -738,7 +738,7 @@ mod tests {
             &DiffRow {
                 kind: DiffRowKind::Added,
                 text: "ab界z".into(),
-                spans: vec![crate::ui::diff::DiffSpan { start: 0, end: 6 }],
+                spans: vec![crate::ui::DiffSpan { start: 0, end: 6 }],
             },
         );
         assert_eq!(frame.grid.row_text(0), "ab |");
@@ -774,7 +774,7 @@ mod tests {
 use crate::ui::PickerSurfaceKind;
 
 
-use crate::ui::render::geometry::text_width;
+
 
 
 

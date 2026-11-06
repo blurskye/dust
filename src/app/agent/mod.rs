@@ -28,7 +28,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::app::App;
 use crate::app::commands::PromptMove;
 use crate::windows::ContentLifecycle;
-use crate::agent::self;
+use std::sync::mpsc::self;
 use crate::agent::AgentMessage;
 use crate::agent::AgentProcess;
 use crate::agent::AuthMethod;
@@ -43,7 +43,7 @@ use crate::agent::history::Entry;
 use crate::editor::Axis;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
-use crate::app::LayoutAction;
+use crate::app::windows::LayoutAction;
 use crate::app::picker::PickerPayload;
 use crate::editor::text::TextBuffer;
 use crate::config::Highlight;
@@ -58,7 +58,7 @@ use crate::ui::ContentTabEntry;
 use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
 use crate::ui::PromptKind;
-use crate::ui::markdown::self;
+
 use crate::ui::markdown::Styled;
 use crate::windows::ContentId;
 use crate::workspace::PickerAction;
@@ -604,7 +604,7 @@ impl App {
             .descriptions()
             .into_iter()
             .find(|(id, profile, lifecycle)| {
-                self.agent_terminal(crate::app::PtyId(*id))
+                self.agent_terminal(crate::process::PtyId(*id))
                     && *profile == name
                     && matches!(
                         lifecycle,
@@ -613,7 +613,7 @@ impl App {
                             | ContentLifecycle::Running
                     )
             })
-            .map(|(id, ..)| crate::app::PtyId(id));
+            .map(|(id, ..)| crate::process::PtyId(id));
         let source_view = self.state.active_view;
         let selection = source_view.and_then(|view| {
             self.state.views[view].selection?;
@@ -633,7 +633,7 @@ impl App {
             if let Some(text) = selection {
                 match self.terminal_session.send(
                     id,
-                    crate::app::TerminalInput::Paste(&text),
+                    crate::app::terminal::TerminalInput::Paste(&text),
                     &self.workspace,
                 ) {
                     Ok(true) => {
@@ -2307,7 +2307,7 @@ impl App {
             match shown {
                 Some(id) => {
                     if let Err(error) = self.apply_native_window_placement(
-                        super::NativeSurfaceTarget::Terminal(id.0),
+                        crate::app::windows::NativeSurfaceTarget::Terminal(id.0),
                         crate::windows::WindowPlacement::Hidden,
                     ) {
                         self.show_error(error);
@@ -3228,7 +3228,7 @@ fn selected_text(
     view: &crate::editor::View,
     policy: crate::editor::EditingPolicy,
 ) -> String {
-    crate::editor::command::visual_ranges(text, view, policy)
+    crate::editor::visual_ranges(text, view, policy)
         .map(|(ranges, shape)| {
             ranges
                 .into_iter()
@@ -3372,3 +3372,6 @@ fn slash_matches(
 pub(in crate::app) mod commands;
 #[cfg(test)]
 mod tests;
+
+use crate::agent;
+use crate::ui::markdown;

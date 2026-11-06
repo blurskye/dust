@@ -6,29 +6,29 @@ use crate::app::REPEAT_STEP_LIMIT;
 use crate::ui::render::SCRATCH_LABEL;
 use crate::app::configuration::configured_grapheme_width;
 use crate::app::configuration::configured_text_width;
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::CommandInvocation;
-use crate::app::DisplayWidthPolicy;
-use crate::app::EditorMode;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
-use crate::app::InputAction;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::CommandInvocation;
+use crate::editor::text::DisplayWidthPolicy;
+use crate::editor::EditorMode;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::input::InputAction;
 use crate::app::App;
-use crate::app::NativeDescriptions;
-use crate::app::Precondition;
-use crate::app::TextBuffer;
-use crate::app::TransactionId;
-use crate::app::UndoPolicy;
-use crate::app::VisualRowAnchor;
-use crate::app::VisualRowModel;
-use crate::app::active_editor_pane_viewport;
-use crate::app::editor_state_content_width;
-use crate::app::BufferRevision;
-use crate::app::Duration;
-use crate::app::ViewId;
-use crate::app::snap_display_column;
-use crate::app::snap_display_column_forward;
+use crate::app::windows::NativeDescriptions;
+use crate::editor::Precondition;
+use crate::editor::text::TextBuffer;
+use crate::editor::TransactionId;
+use crate::editor::UndoPolicy;
+use crate::ui::VisualRowAnchor;
+use crate::ui::VisualRowModel;
+use crate::ui::active_editor_pane_viewport;
+use crate::ui::editor_state_content_width;
+use crate::editor::text::BufferRevision;
+use std::time::Duration;
+use crate::editor::ViewId;
+use crate::ui::snap_display_column;
+use crate::ui::snap_display_column_forward;
 
 use crate::app::syntax::nth_non_blank;
 
@@ -114,7 +114,7 @@ impl App {
                     }
                 }
             }
-            Err(crate::app::input::ReplayError::NoChange) => {
+            Err(crate::app::editing::replay::ReplayError::NoChange) => {
                 self.show_error(self.message("no_previous_change", &[]));
             }
             Err(_) => {
@@ -926,3 +926,5 @@ impl App {
         id
     }
 }
+
+use unicode_segmentation::UnicodeSegmentation;

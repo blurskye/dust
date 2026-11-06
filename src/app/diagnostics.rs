@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub(crate) const MAXIMUM_DIAGNOSTICS_PER_URI: usize = 2_000;
-pub(crate) const MAXIMUM_DIAGNOSTICS: usize = 10_000;
+pub(in crate::app) const MAXIMUM_DIAGNOSTICS_PER_URI: usize = 2_000;
+pub(in crate::app) const MAXIMUM_DIAGNOSTICS: usize = 10_000;
 
 /// Captured by a source before work, or checked against its original transport context.
 #[derive(Clone, Debug)]
@@ -845,7 +845,7 @@ impl App {
     }
 }
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 
 
 
@@ -954,10 +954,18 @@ Ok(())
 }
 
 
+
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_diagnostics_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::DiagnosticNavigate {
+AppEffect::DiagnosticNavigate {
                 direction,
                 filter,
                 count,

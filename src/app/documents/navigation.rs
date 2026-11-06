@@ -1,20 +1,20 @@
 use crate::app::persistence::CHANGE_LIMIT;
 use crate::app::persistence::JUMP_LIMIT;
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::DiagnosticFilter;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::app::commands::DiagnosticFilter;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
 use crate::app::App;
-use crate::app::MatcherSource;
-use crate::app::Path;
-use crate::app::PersistedLocation;
-use crate::app::PositionCodec;
-use crate::app::PositionEncoding;
-use crate::app::Precondition;
-use crate::app::UndoPolicy;
-use crate::app::file_uri;
-use crate::app::path_from_file_uri;
+use crate::app::picker::MatcherSource;
+use std::path::Path;
+use crate::persistence::PersistedLocation;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::PositionEncoding;
+use crate::editor::Precondition;
+use crate::editor::UndoPolicy;
+use crate::language::lsp::file_uri;
+use crate::language::lsp::path_from_file_uri;
 
 
 

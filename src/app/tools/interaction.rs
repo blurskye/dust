@@ -1,25 +1,25 @@
 
-use crate::app::ExecutionSource;
-use crate::app::Instant;
+use crate::workspace::ExecutionSource;
+use std::time::Instant;
 use crate::app::App;
-use crate::app::LspRuntimeSource;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::ToolDefinition;
-use crate::app::ToolInstall;
-use crate::app::ToolKind;
-use crate::app::ToolMenuRow;
-use crate::app::ToolMenuState;
-use crate::app::ToolOperation;
-use crate::app::ToolRuntimeOption;
-use crate::app::ToolRuntimePickerState;
-use crate::app::ToolStatus;
-use crate::app::discover_executable;
-use crate::app::is_nixos_host;
-use crate::app::lsp_runtime_source_allowed_on_host;
-use crate::app::managed_tool_executable;
-use crate::app::nix_lsp_profile_installed;
-use crate::app::tool_kind_key;
+use crate::app::tools::LspRuntimeSource;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::tools::ToolDefinition;
+use crate::app::tools::ToolInstall;
+use crate::tools::ToolKind;
+use crate::ui::ToolMenuRow;
+use crate::ui::ToolMenuState;
+use crate::tools::ToolOperation;
+use crate::ui::ToolRuntimeOption;
+use crate::ui::ToolRuntimePickerState;
+use crate::tools::ToolStatus;
+use crate::tools::discover_executable;
+use crate::tools::is_nixos_host;
+use crate::app::tools::lsp_runtime_source_allowed_on_host;
+use crate::tools::managed_tool_executable;
+use crate::tools::nix_lsp_profile_installed;
+use crate::app::tools::tool_kind_key;
 use crate::ui::render::tools::TOOL_CATEGORY_ORDER;
 use crate::ui::render::tools::TOOL_MANAGER_MINIMUM_HEIGHT;
 
@@ -1449,7 +1449,7 @@ impl App {
 
     /// rustup and its rust-analyzer proxy, when the proxy on PATH fails because the toolchain
     /// lacks the component, so `rustup component add` can fix it.
-    fn rust_analyzer_rustup_install(
+    pub(in crate::app) fn rust_analyzer_rustup_install(
         &self,
         definition: &ToolDefinition,
     ) -> Option<(PathBuf, PathBuf)> {

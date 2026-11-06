@@ -271,8 +271,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let (sources, preview) = owner.approval(&version, 1).unwrap();
     let foreign = EditorState::new(root.path().into());
     assert!(
-        foreign
-            .prepare_workspace_edit(sources, preview, TransactionId(4))
+        crate::app::workspace::edits::prepare_workspace_edit(&foreign, sources, preview, TransactionId(4))
             .is_err()
     );
     let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(5))

@@ -480,7 +480,7 @@ pub(in crate::app) fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
     }
     assert_eq!(app.state.active_buffer_id(), Some(buffers[3]));
     for _ in 0..4 {
-        app.process_effect(AppEffect::Layout(crate::app::LayoutAction::NewTab));
+        app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::NewTab));
     }
     let tabs = app.state.tabs.keys().collect::<Vec<_>>();
     for key in "3gt".chars() {
@@ -498,7 +498,7 @@ pub(in crate::app) fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
         app.handle_configured_key(KeyEvent::character(key));
     }
     assert_eq!(app.state.active_tab, Some(tabs[0]));
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let mut invocation =
@@ -1306,7 +1306,7 @@ pub(in crate::app) fn an_unfinished_insert_mapping_types_its_keys() {
         app.set_dashboard_visibility(false);
         if snippet {
             app.input.install_snippet(
-                crate::app::input::SnippetDocument {
+                crate::app::language::snippets::SnippetDocument {
                     editor: &app.state.window_version(),
                     buffer,
                     text: &app.state.buffers[buffer].text,
@@ -1368,7 +1368,7 @@ pub(in crate::app) fn snippet_keys_only_route_in_the_owning_buffer() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.input.install_snippet(
-        crate::app::input::SnippetDocument {
+        crate::app::language::snippets::SnippetDocument {
             editor: &app.state.window_version(),
             buffer,
             text: &app.state.buffers[buffer].text,
@@ -3386,3 +3386,48 @@ pub(in crate::app) fn startup_reads_load_without_changing_focus_after_user_navig
     assert_eq!(app.window_session.graph().focused(), focus);
     assert!(!app.documents.has_startup_work());
 }
+
+use crate::app::documents::DocumentSession;
+use std::collections::BTreeMap;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::EditorMode;
+use crate::editor::EditorState;
+use crate::editor::InvocationSource;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
+use crate::files::VfsWorker;
+use crate::language::lsp::file_uri;
+use crate::language::syntax::language_for_document;
+use crate::persistence::PersistedLocation;
+use crate::ui::KeyInputKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::ui::UiFold;
+use crate::ui::UiInlayHint;
+use crate::ui::UiSyntaxSpan;
+use crate::ui::VisualRowAnchor;
+use crate::ui::VisualRowModel;
+use crate::ui::active_editor_pane_viewport;
+use crate::ui::editor_state_content_width;
+use crate::workspace::DiagnosticOwner;
+use crate::workspace::WorkspaceTrust;
+use thiserror::Error;
+use crate::app::startup::StartupTarget;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::compile_keymaps;
+use crate::app::AppEffect;
+use crate::workspace::DiagnosticSeverity;
+

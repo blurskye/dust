@@ -1,10 +1,10 @@
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
 use crate::app::command;
 
 
@@ -55,11 +55,23 @@ Ok(())
 }
 
 
+
+
+
+
+
+
+
+
+
+use crate::app::plugins::PluginUiInteraction;
+
+
 impl App {
     pub(in crate::app) fn process_plugins_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::PluginValidate => self.load_configured_plugins(),
-            AppEffect::PluginList => {
+AppEffect::PluginValidate => self.load_configured_plugins(),
+AppEffect::PluginList => {
                 let items: Vec<_> = self
                     .extension
                     .statuses()
@@ -89,7 +101,7 @@ impl App {
                     self.sync_picker_ui();
                 }
             }
-            AppEffect::PluginDisable(id) => {
+AppEffect::PluginDisable(id) => {
                 if !self.extension.statuses().contains_key(&id) {
                     self.show_error(self.message("plugin_unknown", &[("id", id)]));
                     return Ok(());
@@ -105,15 +117,40 @@ impl App {
                     self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);
                 }
             }
-            AppEffect::PluginPickerOpen { provider, query } => {
+AppEffect::PluginPickerOpen { provider, query } => {
                 self.open_plugin_picker(provider, query)
             }
-            AppEffect::PluginExecute {
+AppEffect::PluginExecute {
                 plugin,
                 command,
                 arguments,
             } => {
                 self.execute_plugin_command(plugin, command, arguments);
+            }
+AppEffect::RetainedUiFocus(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Focus(delta));
+            }
+AppEffect::RetainedUiScroll(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Scroll(delta));
+            }
+AppEffect::RetainedUiActivate => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Activate);
+            }
+AppEffect::RetainedUiMouseSelect => self.select_retained_ui_at_mouse(),
+AppEffect::PrivateUiActivate { at_mouse } => {
+                self.activate_private_surface_action(at_mouse);
+            }
+AppEffect::VirtualDocumentOpen { source, key } => {
+                let result = self.extension.open_virtual(&source, key, &self.state);
+                self.route_virtual_open(result);
+            }
+AppEffect::VirtualDocumentRefresh => {
+                let result = self
+                    .state
+                    .active_buffer_id()
+                    .ok_or_else(|| "no active virtual document".to_owned())
+                    .and_then(|buffer| self.extension.refresh_virtual(buffer, &self.state));
+                self.route_virtual_open(result);
             }
             effect => return Err(effect),
         }

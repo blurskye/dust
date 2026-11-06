@@ -34,3 +34,5 @@ pub(in crate::app) fn palette_finds_plugin_titles_without_configured_labels_and_
         "Plugins: Say Goodbye"
     );
 }
+
+

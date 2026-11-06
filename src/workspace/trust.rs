@@ -18,9 +18,9 @@ use serde::Serialize;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use crate::workspace::edit::WorkspaceError;
+use crate::files::VfsError;
 
-use crate::workspace::root::RootIdentity;
+use crate::workspace::RootIdentity;
 
 #[derive(Clone, Debug, Default)]
 pub struct TrustStore {
@@ -389,7 +389,7 @@ pub enum TrustEvent {
     },
     RootInspected {
         generation: u64,
-        result: Result<RootIdentity, WorkspaceError>,
+        result: Result<RootIdentity, VfsError>,
     },
     Persisted {
         generation: u64,

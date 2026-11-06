@@ -85,3 +85,8 @@ pub(in crate::app) fn grep_rows_draw_the_icon_location_and_highlighted_text_as_l
     let keyword = cells.iter().find(|cell| cell.text == "let").unwrap();
     assert!(matches!(keyword.style, crate::ui::Style::Syntax(_)));
 }
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
+use std::fs;
+

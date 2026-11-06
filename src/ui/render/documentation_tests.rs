@@ -236,3 +236,152 @@ fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
         assert!(text.contains(word), "{word} lost:\n{text}");
     }
 }
+
+
+
+
+
+
+
+
+
+#[test]
+fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
+    let config = crate::config::load_bundled_config().config;
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Git,
+        title: "Hunk".into(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            lines: vec![format!("{}THE-END", "x".repeat(2000))],
+            spans: Vec::new(),
+        }],
+        scroll: 20,
+    };
+    let total = crate::ui::render::documentation::documentation_display_rows(&popup, &config, 80);
+    assert!(total > 20);
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(80, 40),
+        cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    crate::ui::render::documentation::render_documentation_popup(
+        &mut frame,
+        &popup,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 40,
+        },
+        None,
+    );
+    assert!((0..40).any(|y| frame.grid.row_text(y).contains("THE-END")));
+    assert!(
+        crate::ui::render::documentation::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
+            > 1
+    );
+}
+
+
+#[test]
+fn documentation_popup_clamps_scroll_after_widening() {
+    let config = crate::config::load_bundled_config().config;
+    let mut popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover,
+        title: "Hover".into(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}THE-END", "x".repeat(300))],
+        }],
+        scroll: 0,
+    };
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(16, 24),
+        cursor: None,
+    };
+    let (visible, total) = crate::ui::render::documentation::render_documentation_popup(
+        &mut frame,
+        &popup,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 24,
+        },
+        None,
+    )
+    .unwrap();
+    popup.scroll = total - visible;
+    assert!(popup.scroll > 0);
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(80, 24),
+        cursor: None,
+    };
+    crate::ui::render::documentation::render_documentation_popup(
+        &mut frame,
+        &popup,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        },
+        None,
+    );
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
+}
+
+
+#[test]
+fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside() {
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Hover,
+        title: String::new(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}END", "\t\u{200b}".repeat(12))],
+        }],
+        scroll: 0,
+    };
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new_with_policy(30, 24, "�", "◌", true),
+        cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    let (_, total) = crate::ui::render::documentation::render_documentation_popup(
+        &mut frame,
+        &popup,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 24,
+        },
+        None,
+    )
+    .unwrap();
+    assert!(total > 1);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("END")));
+    assert_eq!(frame.grid.get(15, 1).unwrap().symbol, "+");
+    assert_eq!(frame.grid.get(15, 2).unwrap().symbol, "|");
+    assert_eq!(frame.grid.get(5, 1).unwrap().symbol, "-");
+    for y in 0..24 {
+        assert_eq!(frame.grid.get(16, y).unwrap().symbol, " ");
+    }
+}

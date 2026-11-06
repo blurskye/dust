@@ -1,20 +1,20 @@
-use crate::app::DapControl;
-use crate::app::DapEvent;
-use crate::app::DapResponse;
-use crate::app::DapSourceBreakpoint;
+use crate::debugger::DapControl;
+use crate::debugger::DapEvent;
+use crate::debugger::DapResponse;
+use crate::debugger::DapSourceBreakpoint;
 use crate::app::App;
-use crate::app::PathBuf;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::PositionCodec;
-use crate::app::PositionEncoding;
-use crate::app::TextBuffer;
+use std::path::PathBuf;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
 use crate::app::TrustedAction;
-use crate::app::file_uri;
-use crate::app::language_id_for_path;
+use crate::language::lsp::file_uri;
+use crate::language::lsp::language_id_for_path;
 use crate::app::command;
 
 

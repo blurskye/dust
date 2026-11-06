@@ -49,9 +49,9 @@ const MAXIMUM_DISCOVERED_JOURNALS: usize = 100;
 const MAXIMUM_RETAINED_JOURNALS: usize = 100;
 const MAXIMUM_JOURNAL_AGE_DAYS: u64 = 30;
 /// How long an edit waits before its journal is written.
-pub(super) const WRITE_DEBOUNCE_MS: u64 = 250;
+pub(in crate::app) const WRITE_DEBOUNCE_MS: u64 = 250;
 
-pub(super) struct RecoverySession {
+pub(in crate::app) struct RecoverySession {
     directory: PathBuf,
     session: String,
     records: Vec<(PathBuf, RecoveryRecord)>,

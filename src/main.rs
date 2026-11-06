@@ -381,7 +381,7 @@ fn install_crash_hook() {
 
 #[cfg(test)]
 mod tests {
-    use crate::main::*;
+    use super::*;
 
     #[test]
     fn crash_counts_accept_bounded_regular_reports() {

@@ -2268,7 +2268,7 @@ pub(in crate::app) fn deferred_user_plugin_move_compiles_after_index_then_falls_
         },
     ]);
     let (configuration, diagnostic) =
-        crate::app::tests::resolve_configuration(&app.commands, loaded, true).expect("deferred config");
+        crate::app::configuration::resolve_configuration(&app.commands, loaded, true).expect("deferred config");
     assert!(diagnostic.is_none());
     assert!(configuration.deferred_plugin_keymaps);
     assert!(configuration.settings.windows.rules.is_empty());
@@ -2393,7 +2393,7 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
             desc: None,
         },
     ]);
-    let (resolved, diagnostic) = crate::app::tests::resolve_configuration(&app.commands, loaded, true)
+    let (resolved, diagnostic) = crate::app::configuration::resolve_configuration(&app.commands, loaded, true)
         .expect("deferred plugin references");
     assert!(diagnostic.is_none());
     assert!(resolved.deferred_plugin_keymaps);
@@ -2439,7 +2439,7 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
         pass_through: false,
         desc: None,
     });
-    assert!(crate::app::tests::resolve_configuration(&app.commands, unknown, true).is_err());
+    assert!(crate::app::configuration::resolve_configuration(&app.commands, unknown, true).is_err());
     let mut unknown_window = crate::config::load_bundled_config();
     unknown_window
         .config
@@ -2449,7 +2449,7 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
             content_type: "plugin.unknown.panel".into(),
             placement: crate::config::WindowPlacementConfig::Hidden,
         });
-    assert!(crate::app::tests::resolve_configuration(&app.commands, unknown_window, true).is_err());
+    assert!(crate::app::configuration::resolve_configuration(&app.commands, unknown_window, true).is_err());
 
     let (_running_dirs, mut running) = self::app();
     let previous = running.configuration.settings().plugins.clone();
@@ -3863,3 +3863,39 @@ pub(in crate::app) fn virtual_error_returns_the_broker_error_and_releases_the_op
     });
     assert_eq!(fixture.take().virtual_documents().len(), 1);
 }
+
+use crate::app::configuration::resolve_configuration;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::config::LoadedConfig;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandSource;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
+use crate::plugins::PluginLoadId;
+use crate::plugins::PluginStatus;
+use crate::ui::DocumentationMarkupKind;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::workspace::PickerState;
+use thiserror::Error;
+use crate::app::plugins::PluginUiInteraction;
+use crate::app::plugins::WindowUpdate;
+use crate::windows::WindowRect;
+use std::fs;
+use std::thread;
+use crate::editor::input::InputContextLayer;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::compile_keymaps_with_plugin_catalog;
+
+use crate::app::AppEffect;
+

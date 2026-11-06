@@ -1,6 +1,6 @@
 
 use crate::ui::PromptKind;
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
 
 
@@ -220,40 +220,46 @@ Ok(())
 }
 
 
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_explorer_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::ExplorerPanelToggle => {
+AppEffect::ExplorerPanelToggle => {
                 return self.process_explorer_effect(if self.ui.explorer.is_some() {
                     AppEffect::ExplorerClose
                 } else {
                     AppEffect::ExplorerOpen
                 });
             }
-            AppEffect::ExplorerOpen => self.open_explorer(),
-            AppEffect::ExplorerSearch => {
+AppEffect::ExplorerOpen => self.open_explorer(),
+AppEffect::ExplorerSearch => {
                 self.explorer.start_search();
                 self.sync_explorer_ui();
             }
-            AppEffect::ExplorerSearchInsert(text) => {
+AppEffect::ExplorerSearchInsert(text) => {
                 let query = format!("{}{text}", self.explorer.tree().filter());
                 self.search_explorer(query);
             }
-            AppEffect::ExplorerSearchDelete => {
+AppEffect::ExplorerSearchDelete => {
                 let mut query = self.explorer.tree().filter().to_owned();
                 query.pop();
                 self.search_explorer(query);
             }
-            AppEffect::ExplorerSearchStop { keep } => {
+AppEffect::ExplorerSearchStop { keep } => {
                 self.explorer.stop_search(keep);
                 self.sync_explorer_ui();
             }
-            // Esc on a filtered tree clears the filter before it closes the explorer.
-            AppEffect::ExplorerClose if !self.explorer.tree().filter().is_empty() => {
+AppEffect::ExplorerClose if !self.explorer.tree().filter().is_empty() => {
                 self.explorer.stop_search(false);
                 self.sync_explorer_ui();
             }
-            AppEffect::ExplorerClose => {
+AppEffect::ExplorerClose => {
                 if self
                     .input
                     .prompt()
@@ -266,38 +272,38 @@ impl App {
                 self.reconcile_explorer_watch();
                 self.ensure_cursor_visible();
             }
-            AppEffect::ExplorerMove(delta) => {
+AppEffect::ExplorerMove(delta) => {
                 self.move_explorer_selection(isize::from(delta));
             }
-            AppEffect::ExplorerPage(direction) => self.page_explorer_selection(direction),
-            AppEffect::ExplorerParent => self.explorer_collapse_or_parent(),
-            AppEffect::ExplorerChild => {
+AppEffect::ExplorerPage(direction) => self.page_explorer_selection(direction),
+AppEffect::ExplorerParent => self.explorer_collapse_or_parent(),
+AppEffect::ExplorerChild => {
                 self.explorer.select_first_child();
                 self.sync_explorer_ui();
             }
-            AppEffect::ExplorerToggle => self.explorer_toggle(),
-            AppEffect::ExplorerRefresh => {
+AppEffect::ExplorerToggle => self.explorer_toggle(),
+AppEffect::ExplorerRefresh => {
                 self.refresh_explorer();
                 self.start_git_status_refresh_with_feedback(false);
             }
-            AppEffect::ExplorerFollow => self.follow_active_file_in_explorer(),
-            AppEffect::ExplorerToggleHidden => {
+AppEffect::ExplorerFollow => self.follow_active_file_in_explorer(),
+AppEffect::ExplorerToggleHidden => {
                 self.explorer.toggle_hidden();
                 self.refresh_explorer();
             }
-            AppEffect::ExplorerToggleIgnored => {
+AppEffect::ExplorerToggleIgnored => {
                 self.explorer.toggle_ignored();
                 self.refresh_explorer();
             }
-            AppEffect::ExplorerFileOpen { split } => self.explorer_open_file(split),
-            AppEffect::ExplorerCreate(path) => self.create_explorer_path(path),
-            AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
-            AppEffect::ExplorerRenamePrompt => self.open_explorer_rename_prompt(),
-            AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
-            AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
-            AppEffect::ExplorerPaste => self.paste_explorer_clipboard(),
-            AppEffect::ExplorerYankPath => self.yank_explorer_path(),
-            AppEffect::ExplorerMouseSelect => self.explorer_mouse_select(),
+AppEffect::ExplorerFileOpen { split } => self.explorer_open_file(split),
+AppEffect::ExplorerCreate(path) => self.create_explorer_path(path),
+AppEffect::ExplorerRename(target) => self.rename_explorer_path(target),
+AppEffect::ExplorerRenamePrompt => self.open_explorer_rename_prompt(),
+AppEffect::ExplorerDeleteRequest => self.request_explorer_delete(),
+AppEffect::ExplorerClipboard { cut } => self.set_explorer_clipboard(cut),
+AppEffect::ExplorerPaste => self.paste_explorer_clipboard(),
+AppEffect::ExplorerYankPath => self.yank_explorer_path(),
+AppEffect::ExplorerMouseSelect => self.explorer_mouse_select(),
             effect => return Err(effect),
         }
         Ok(())

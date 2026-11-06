@@ -241,3 +241,135 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
             .is_some_and(|cell| cell.style == crate::ui::Style::Selection)
     }));
 }
+use crate::ui::render::composition_tests::drawn_at;
+
+
+use crate::ui::render::DocumentationMarkupKind;
+use crate::ui::render::DocumentationPopupKind;
+use crate::ui::render::DocumentationPopupState;
+use crate::ui::render::DocumentationSection;
+
+
+
+
+
+#[test]
+fn completion_height_fits_on_one_side_of_the_cursor() {
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(40, 10),
+        cursor: Some((3, 5, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    frame
+        .grid
+        .put_text(0, 5, "editing", crate::ui::Style::Default);
+    let completion = crate::ui::render::LanguageCompletionState {
+        typed: 0,
+        items: (0..9)
+            .map(|n| CompletionItem {
+                icon: None,
+                color: None,
+                label: format!("item{n}"),
+                detail: String::new(),
+            })
+            .collect(),
+        selected: 8,
+        scroll: 0,
+    };
+    let config = crate::config::load_bundled_config().config;
+    let rect = crate::ui::render::overlays::render_language_completion(
+        &mut frame,
+        &completion,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 10,
+        },
+    )
+    .unwrap();
+    assert!(rect.y + rect.height <= 5 || rect.y > 5);
+    assert!(frame.grid.row_text(5).starts_with("editing"));
+    assert!((0..10).any(|y| frame.grid.row_text(y).contains("item8")));
+}
+
+
+#[test]
+fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap() {
+    let config = crate::config::load_bundled_config().config;
+    let popup = DocumentationPopupState {
+        kind: DocumentationPopupKind::Completion,
+        title: "Completion".into(),
+        provider: String::new(),
+        source_range: None,
+        sections: vec![DocumentationSection {
+            heading: None,
+            markup: DocumentationMarkupKind::PlainText,
+            spans: Vec::new(),
+            lines: vec![format!("{}THE-END", "x".repeat(400))],
+        }],
+        scroll: usize::MAX,
+    };
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(80, 24),
+        cursor: Some((21, 20, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    let (visible, total) = crate::ui::render::documentation::render_documentation_popup(
+        &mut frame,
+        &popup,
+        &config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        },
+        Some(crate::windows::WindowRect {
+            x: 20,
+            y: 4,
+            width: 53,
+            height: 16,
+        }),
+    )
+    .unwrap();
+    let expected = crate::ui::render::documentation::wrap_ranges(
+        &popup.sections[0].lines[0],
+        16,
+        config.editor.ambiguous_width,
+    )
+    .len();
+    assert_eq!(total, expected);
+    assert!(visible <= 14);
+    assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
+    assert!(
+        !(0..80)
+            .any(|x| frame.grid.get(x, 20).unwrap().style
+                == crate::ui::Style::DocumentationBackground)
+    );
+
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(80, 3),
+        cursor: Some((21, 2, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    assert!(
+        crate::ui::render::documentation::render_documentation_popup(
+            &mut frame,
+            &popup,
+            &config,
+            crate::windows::WindowRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 3
+            },
+            Some(crate::windows::WindowRect {
+                x: 20,
+                y: 0,
+                width: 53,
+                height: 2
+            }),
+        )
+        .is_none()
+    );
+    assert!((0..3).all(|y| frame.grid.row_text(y).trim().is_empty()));
+}

@@ -14,13 +14,11 @@ use crate::process::PtyRequest;
 use crate::process::PtyService;
 use crate::ui::PtyScreen;
 use crate::ui::TerminalPanelMode;
-use crate::ui::TerminalPanelState;
-use crate::ui::TerminalTabState;
 use crate::windows::ContentLifecycle;
 
-pub(crate) const TERMINAL_QUEUE_CAPACITY: usize = 256;
-pub(crate) const TERMINAL_MAXIMUM_INPUT_BYTES: usize = 1024 * 1024;
-pub(crate) const TERMINAL_SCROLLBACK_BYTES: usize = 8 * 1024 * 1024;
+pub(in crate::app) const TERMINAL_QUEUE_CAPACITY: usize = 256;
+pub(in crate::app) const TERMINAL_MAXIMUM_INPUT_BYTES: usize = 1024 * 1024;
+pub(in crate::app) const TERMINAL_SCROLLBACK_BYTES: usize = 8 * 1024 * 1024;
 
 pub(in crate::app) use input::TerminalInput;
 use input::clamp_terminal_cursor;

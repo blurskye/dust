@@ -614,9 +614,14 @@ pub(in crate::app) fn prepare_workspace_edit(
     }
     state.prepare_document_edits(sources, &proposal.label, &selected_edits(proposal), transaction)
 }
-pub(crate) fn workspace_commit_check(
+pub(in crate::app) fn workspace_commit_check(
     draft: &crate::editor::EditorDraft,
     proposal: &crate::workspace::WorkspaceEditProposal,
 ) -> Result<crate::editor::WorkspaceCommitCheck, String> {
     draft.check_document_edits(proposal.files.iter().filter(|file| file.selected).map(|file| (file.canonical_path.as_path(), file.proposed_bytes.as_slice())))
 }
+
+#[cfg(test)]
+mod draft_tests;
+
+mod commands;

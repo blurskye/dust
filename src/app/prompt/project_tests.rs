@@ -92,3 +92,8 @@ pub(in crate::app) fn form_help_captures_keys_without_changing_the_prompt_draft(
     app.handle_configured_key(KeyEvent::character('x'));
     assert_eq!(app.input.prompt().unwrap().input, "write draftx");
 }
+use crate::editor::input::KeyEvent;
+use crate::editor::CommandInvocation;
+use crate::editor::InvocationSource;
+use crate::ui::PromptKind;
+

@@ -6,9 +6,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::workspace::root::RootId;
+use crate::workspace::RootId;
 
-use crate::workspace::root::WorkspaceRoot;
+use crate::workspace::WorkspaceRoot;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExplorerNodeId(pub u64);
@@ -93,7 +93,7 @@ impl ExplorerState {
 
     /// Adopt a newer shared data snapshot without adopting another view's
     /// selection, expansion or filter state.
-    pub(crate) fn synchronize_data_from(&mut self, source: &Self) {
+    pub(in crate::app) fn synchronize_data_from(&mut self, source: &Self) {
         self.data = source.data.clone();
         self.selected = self
             .selected
@@ -105,7 +105,7 @@ impl ExplorerState {
 
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn shares_data_with(&self, other: &Self) -> bool {
+    pub(in crate::app) fn shares_data_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.data, &other.data)
     }
 
@@ -402,7 +402,7 @@ impl ExplorerState {
             .map(|node| node.path.clone())
             .collect()
     }
-    pub(crate) fn is_watched_directory(&self, id: ExplorerNodeId) -> bool {
+    pub(in crate::app) fn is_watched_directory(&self, id: ExplorerNodeId) -> bool {
         self.data.nodes.get(&id).is_some_and(|node| {
             matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
                 && (self.expanded.contains(&id)

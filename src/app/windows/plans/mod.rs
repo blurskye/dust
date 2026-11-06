@@ -1,6 +1,5 @@
 pub(in crate::app) mod commands;
-use crate::app::windows::NativeSurfaceTarget;
-use crate::app::windows::EditorTopology;
+use crate::editor::EditorTopology;
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeDescriptions;
 use crate::app::windows::WindowSession;

@@ -1,25 +1,25 @@
 //! `:s/old/new/g`. Patterns are the regex crate's syntax, the same as `/` search, plus Vim's
 //! `\<` and `\>`; replacements take `&`, `\1` to `\9`, `\n` and `\t`.
 
-use crate::app::ByteOffset;
+use crate::editor::text::ByteOffset;
 
-use crate::app::ByteRange;
+use crate::editor::text::ByteRange;
 
-use crate::app::EditorMode;
+use crate::editor::EditorMode;
 
-use crate::app::EditorOperation;
+use crate::editor::EditorOperation;
 
-use crate::app::EditorTransaction;
+use crate::editor::EditorTransaction;
 
 use crate::app::App;
 
-use crate::app::Precondition;
+use crate::editor::Precondition;
 
-use crate::app::PromptKind;
+use crate::ui::PromptKind;
 
-use crate::app::TextEdit;
+use crate::editor::text::TextEdit;
 
-use crate::app::TextEditSet;
+use crate::editor::text::TextEditSet;
 use crate::editor::input::substitution_pattern;
 use crate::editor::text::TextBuffer;
 use unicode_segmentation::UnicodeSegmentation;
@@ -380,7 +380,7 @@ impl App {
             .with_operation(EditorOperation::SetRegister {
                 name: '"',
                 text: deleted,
-                shape: crate::app::RegisterShape::Line,
+                shape: crate::editor::RegisterShape::Line,
             });
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
@@ -503,7 +503,7 @@ impl App {
                 view,
                 first_wrap_row: first.wrap_row,
             })
-            .with_undo_policy(crate::app::UndoPolicy::Ignore);
+            .with_undo_policy(crate::editor::UndoPolicy::Ignore);
         if let Err(error) = self.state.apply_transaction(&transaction) {
             self.show_error(error);
         }
@@ -612,7 +612,7 @@ impl App {
 }
 
 /// A `:s///c` in progress: its matches, found before anything changed, and which to replace.
-pub(super) struct SubstituteConfirm {
+pub(in crate::app) struct SubstituteConfirm {
     view: crate::editor::ViewId,
     buffer: crate::editor::BufferId,
     revision: crate::editor::text::BufferRevision,

@@ -1,5 +1,5 @@
 use crate::app::tests::*;
-use crate::app::AgentCommand;
+use crate::app::agent::commands::AgentCommand;
 use crate::editor::EditorOperation;
 use crate::editor::EditorState;
 use crate::editor::EditorTransaction;
@@ -45,10 +45,10 @@ pub(in crate::app) fn directional_editor_resize_skips_hidden_splits_and_reaches_
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let first = app.window_session.graph().focused().unwrap();
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     app.place_graph_window("focused", WindowPlacement::Hidden)
@@ -1778,3 +1778,42 @@ pub(in crate::app) fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_j
     app.invoke_mapped_command("history.undo");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
 }
+use crate::app::documents::DocumentSession;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::debugger::DapControl;
+use crate::debugger::DapEvent;
+use crate::debugger::DapResponse;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
+
+
+
+
+use crate::files::VfsWorker;
+use crate::language::lsp::file_uri;
+use crate::persistence::PersistedLocation;
+use crate::process::PtyId;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::ui::editor_state_gutter_width;
+use crate::workspace::DiagnosticOwner;
+use thiserror::Error;
+use crate::app::startup::StartupTarget;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use std::fs;
+use std::thread;
+use crate::ui::ContentTabDiagnostic;
+use crate::ui::ContentTabDiagnosticSeverity;
+use crate::ui::ContentTabKind;
+use crate::ui::PtyScreen;
+use crate::ui::active_pane_viewport;
+use crate::ui::render;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::workspace::DiagnosticSeverity;
+

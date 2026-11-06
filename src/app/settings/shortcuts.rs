@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::app::App;
-use crate::app::KeyEvent;
+use crate::editor::input::KeyEvent;
 use crate::app::documents::coordination::create_user_file;
 use crate::config::DeclaredKeymap;
 use crate::config::declared_keymaps;
@@ -366,3 +366,5 @@ fn section_title(context: &str, mode: &str) -> String {
         format!("{context} · {}", mode.replace('_', " "))
     }
 }
+
+

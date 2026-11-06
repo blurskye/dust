@@ -1,7 +1,6 @@
 use crate::editor::text::ByteOffset;
 use crate::editor::state::id::BufferId;
 
-use crate::editor::state::EditingPolicy;
 
 
 

@@ -2,36 +2,36 @@ use crate::app::search::SEARCH_BATCH_SIZE;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::app::search::SEARCH_MAXIMUM_FILES;
 use crate::app::search::SEARCH_QUEUE_CAPACITY;
-use crate::app::BTreeMap;
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
-use crate::app::FileSnapshot;
-use crate::app::HashSet;
+use std::collections::BTreeMap;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::DocumentSnapshot as FileSnapshot;
+use std::collections::HashSet;
 use crate::app::App;
-use crate::app::MatcherSource;
-use crate::app::PathBuf;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerOrigin;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::PositionEncoding;
-use crate::app::Precondition;
-use crate::app::PromptKind;
-use crate::app::TextEdit;
-use crate::app::UndoPolicy;
-use crate::app::WorkspaceEditDraft;
-use crate::app::WorkspaceFilePolicy;
-use crate::app::WorkspaceSearchMatch;
-use crate::app::WorkspaceSearchPolicy;
-use crate::app::file_uri;
+use crate::app::picker::MatcherSource;
+use std::path::PathBuf;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::PositionEncoding;
+use crate::editor::Precondition;
+use crate::ui::PromptKind;
+use crate::editor::text::TextEdit;
+use crate::editor::UndoPolicy;
+use crate::workspace::WorkspaceEditDraft;
+use crate::files::WorkspaceFilePolicy;
+use crate::files::WorkspaceSearchMatch;
+use crate::files::WorkspaceSearchPolicy;
+use crate::language::lsp::file_uri;
 use crate::app::search::Intent;
 use crate::app::search::SearchUpdate;
-use crate::app::BufferRevision;
-use crate::app::ViewId;
+use crate::editor::text::BufferRevision;
+use crate::editor::ViewId;
 
 
 
@@ -791,7 +791,7 @@ impl App {
     }
 }
 
-use crate::app::TextBuffer;
+use crate::editor::text::TextBuffer;
 
 
 
@@ -825,3 +825,4 @@ fn search_target(
             .map(|matched| matched.start)
     }
 }
+use unicode_segmentation::UnicodeSegmentation;

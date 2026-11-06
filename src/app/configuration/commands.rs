@@ -1,26 +1,8 @@
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
 
-impl App {
-    pub(in crate::app) fn process_configuration_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
-                self.close_picker();
-                match self.configuration.begin_theme_picker() {
-                    Ok(rows) => self.present_theme_picker(rows),
-                    Err(error) => self.show_error(error),
-                }
-                self.configuration.want_theme(match effect {
-                    AppEffect::SetTheme(name) => Some(name),
-                    _ => None,
-                });
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
+
 
 
 use crate::editor::ArgumentSchema;
@@ -273,12 +255,27 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
 Ok(())
 }
 
-use crate::app::LayoutAction;
+use crate::app::windows::LayoutAction;
+
+
+
+
+
+
+use crate::app::command;
+use crate::app::configuration::ViewToggle;
+
 
 impl App {
     pub(in crate::app) fn process_configuration_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::Zen => {
+AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
+                Ok(()) => {
+                    self.notify_message(self.message("config_reload_queued", &[]), false);
+                }
+                Err(error) => self.show_error(error),
+            },
+AppEffect::Zen => {
                 let explorer_open = self.ui.explorer.is_some();
                 match self
                     .configuration
@@ -303,7 +300,7 @@ impl App {
                 }
                 self.ensure_cursor_visible();
             }
-            AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
+AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
                 self.close_picker();
                 match self.configuration.begin_theme_picker() {
                     Ok(rows) => self.present_theme_picker(rows),
@@ -313,6 +310,114 @@ impl App {
                     AppEffect::SetTheme(name) => Some(name),
                     _ => None,
                 });
+            }
+AppEffect::ViewToggle(toggle) => {
+                let enabled = self.configuration.toggle_view(toggle);
+                let name = match toggle {
+                    crate::app::configuration::ViewToggle::Wrap => "wrap",
+                    crate::app::configuration::ViewToggle::LineNumbers => "line numbers",
+                    crate::app::configuration::ViewToggle::RelativeNumbers => "relative numbers",
+                    crate::app::configuration::ViewToggle::IndentGuides => "indent guides",
+                    crate::app::configuration::ViewToggle::GitSigns => "git signs",
+                    crate::app::configuration::ViewToggle::FormatOnSave => "format on save",
+                };
+                self.ensure_cursor_visible();
+                self.notify_message(
+                    format!("{name} {}", if enabled { "enabled" } else { "disabled" }),
+                    false,
+                );
+            }
+AppEffect::ExplainConfig(key) => {
+                if let Some(explanation) = self.configuration.explain(&key) {
+                    self.notify_message(
+                        self.message(
+                            "config_explanation",
+                            &[
+                                ("key", explanation.key),
+                                ("value", explanation.value),
+                                ("source", explanation.source),
+                            ],
+                        ),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("unknown_config_key", &[("key", key)]));
+                }
+            }
+AppEffect::InspectKeymap {
+                id,
+                context,
+                key,
+                command,
+            } => {
+                let context = context.unwrap_or_else(|| self.active_input_context());
+                let inspection = id
+                    .as_deref()
+                    .and_then(|id| self.configuration.keymaps().inspect_id(id))
+                    .or_else(|| {
+                        key.as_deref().and_then(|keys| {
+                            self.configuration.keymaps().inspect_key(&context, keys)
+                        })
+                    })
+                    .or_else(|| {
+                        command.as_deref().and_then(|command| {
+                            self.configuration.keymaps().inspect(&context, command)
+                        })
+                    });
+                if let Some(inspection) = inspection {
+                    self.notify_message(
+                        self.message(
+                            "keymap_inspection",
+                            &[
+                                ("id", inspection.id),
+                                ("context", inspection.context),
+                                ("source_keys", inspection.source_keys),
+                                ("keys", inspection.keys),
+                                ("operation", inspection.operation.as_str().into()),
+                                ("command", inspection.command.unwrap_or_default()),
+                                ("arguments", format!("{:?}", inspection.arguments)),
+                                ("source", inspection.source),
+                            ],
+                        ),
+                        false,
+                    );
+                } else if id.is_none() && command.is_none() && key.is_none() {
+                    let count = self
+                        .configuration
+                        .keymaps()
+                        .reverse
+                        .keys()
+                        .filter(|(mapped_context, _)| mapped_context == &context)
+                        .count();
+                    self.notify_message(
+                        self.message(
+                            "keymap_context_summary",
+                            &[("context", context), ("count", count.to_string())],
+                        ),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("no_keymap_binding", &[("context", context)]));
+                }
+            }
+AppEffect::ShowKeymapConflicts => {
+                let conflicts = self
+                    .configuration
+                    .rejected_keymaps()
+                    .into_iter()
+                    .chain(
+                        self.configuration
+                            .keymaps()
+                            .conflicts
+                            .iter()
+                            .map(String::as_str),
+                    )
+                    .collect::<Vec<_>>();
+                if conflicts.is_empty() {
+                    self.notify_message(self.message("no_keymap_conflicts", &[]), false);
+                } else {
+                    self.show_error(conflicts.join("; "));
+                }
             }
             effect => return Err(effect),
         }

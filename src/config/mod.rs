@@ -430,3 +430,6 @@ mod tests;
 
 mod highlight;
 pub use highlight::Highlight;
+
+#[cfg(test)]
+pub(crate) use load::parse_keymaps;

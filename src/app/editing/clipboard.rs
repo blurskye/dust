@@ -75,14 +75,14 @@ impl Tool {
 }
 
 #[derive(Debug)]
-pub(super) enum DeferredInput {
+pub(in crate::app) enum DeferredInput {
     Event(crate::ui::UiEvent),
     Invocation(CommandInvocation),
     MacroReplay(char, u64),
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ClipboardSession {
+pub(in crate::app) struct ClipboardSession {
     enabled: bool,
     tool: Option<Tool>,
     /// Register generation last queued for copying or imported from a read.

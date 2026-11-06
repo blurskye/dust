@@ -1,7 +1,7 @@
 //! Task-neutral worker routes. Parser state and document/run authority stay in TaskSession.
 use crate::app::documents::DocumentSession;
-use crate::app::documents::RequestId;
-use crate::app::documents::VfsResult;
+use crate::files::RequestId;
+use crate::files::VfsResult;
 use std::sync::Arc;
 #[derive(Clone)]
 pub(in crate::app) struct TaskReadKey {

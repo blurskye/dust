@@ -1,8 +1,8 @@
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
-use crate::app::LargeFileOverride;
-use crate::app::mode_name_large;
+use crate::app::documents::LargeFileOverride;
+use crate::app::documents::mode_name_large;
 
 
 
@@ -14,7 +14,7 @@ use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
-use crate::app::commands::PathBuf;
+use std::path::PathBuf;
 use crate::app::commands::optional_bool_arg;
 use crate::app::commands::optional_string_arg;
 use crate::app::commands::bool_arg;
@@ -247,12 +247,27 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
 Ok(())
 }
 
-use crate::app::TextBuffer;
+use crate::editor::text::TextBuffer;
+
+
+
+use crate::app::documents::coordination::create_user_file;
+
+
+
+
+
+
+
+use crate::ui::DocumentationPopupKind;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+
 
 impl App {
     pub(in crate::app) fn process_documents_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::Save {
+AppEffect::Save {
                 quit_after,
                 path,
                 force,
@@ -261,9 +276,9 @@ impl App {
                     self.start_save(quit_after, path, force);
                 }
             }
-            AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
-            AppEffect::OpenPath(path) => self.edit_path(path),
-            AppEffect::ForceOpenPath(path) => {
+AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
+AppEffect::OpenPath(path) => self.edit_path(path),
+AppEffect::ForceOpenPath(path) => {
                 let wanted = self.state.workspace_root.join(&path).canonicalize().ok();
                 let current = self
                     .state
@@ -276,14 +291,13 @@ impl App {
                     self.edit_path(path);
                 }
             }
-            // Settings files are optional, so the first open creates one to edit.
-            AppEffect::OpenUserFile(path) => match create_user_file(&path) {
+AppEffect::OpenUserFile(path) => match create_user_file(&path) {
                 Ok(()) => self.start_open(path),
                 Err(error) => self.show_error(format!("{}: {error}", path.display())),
             },
-            AppEffect::Reload { force } => self.start_reload(force),
-            AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
-            AppEffect::CycleBuffer(offset) => {
+AppEffect::Reload { force } => self.start_reload(force),
+AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
+AppEffect::CycleBuffer(offset) => {
                 self.project_window_content_tabs();
                 let order = self.window_session.content_tab_buffers();
                 match self.state.cycle_buffer(&order, offset, true) {
@@ -293,9 +307,9 @@ impl App {
                     Err(error) => self.show_error(error),
                 }
             }
-            AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
-            AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
-            AppEffect::NewBuffer => {
+AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
+AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
+AppEffect::NewBuffer => {
                 if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
                     self.show_error(error);
                     return Ok(());
@@ -303,13 +317,7 @@ impl App {
                 self.set_dashboard_visibility(false);
                 self.notify_message(self.message("new_scratch", &[]), false);
             }
-            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
-                Ok(()) => {
-                    self.notify_message(self.message("config_reload_queued", &[]), false);
-                }
-                Err(error) => self.show_error(error),
-            },
-            AppEffect::LargeFileSet(mode) => {
+AppEffect::LargeFileSet(mode) => {
                 let Some(buffer) = self
                     .state
                     .active_view
@@ -340,7 +348,7 @@ impl App {
                     false,
                 );
             }
-            AppEffect::LargeFileStatus => {
+AppEffect::LargeFileStatus => {
                 let Some(buffer) = self
                     .state
                     .active_view
@@ -363,6 +371,32 @@ impl App {
                         ],
                     ),
                     false,
+                );
+            }
+AppEffect::WalkJumps(back) => self.walk_jumps(back),
+AppEffect::RecoveryInspect => self.open_recovery_picker(),
+AppEffect::MarkdownPreview => {
+                let Some(buffer) = self
+                    .state
+                    .active_buffer_id()
+                    .map(|id| &self.state.buffers[id])
+                else {
+                    return Ok(());
+                };
+                let title = buffer.path.as_ref().map_or_else(
+                    || "Markdown".to_owned(),
+                    |path| self.workspace_relative_label(path),
+                );
+                let value = buffer.text.to_string();
+                self.present_documentation_popup(
+                    DocumentationPopupKind::Git,
+                    title,
+                    "Markdown".into(),
+                    None,
+                    vec![LspMarkupContent {
+                        kind: LspMarkupKind::Markdown,
+                        value,
+                    }],
                 );
             }
             effect => return Err(effect),

@@ -503,7 +503,7 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
             let body = crate::ui::render::explorer::explorer_body_geometry(rect);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
-            if let Some(notice) = crate::ui::geometry::error_notification_geometry(width, height) {
+            if let Some(notice) = crate::ui::render::overlays::error_notification_geometry(width, height) {
                 assert!(notice.x + notice.width <= width);
                 assert!(notice.y + notice.height <= height);
             }

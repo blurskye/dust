@@ -80,3 +80,13 @@ pub use objects::{SyntaxObject, SyntaxObjectKind};
 pub(crate) use transaction::{DraftEdit,DocumentSnapshot,WorkspaceEditSources,WorkspaceCommitCheck,RestoredPane,RestoredLayout,RestoredTab};
 #[cfg(test)]
 pub(crate) use transaction::build_layout_for_test;
+
+pub(crate) use transaction::BufferPathChange;
+
+pub(crate) use transaction::EditorPublication;
+
+pub(crate) use transaction::WorkspaceSnapshot;
+
+pub(crate) use command::visual_ranges;
+
+pub(crate) use transaction::load_undo_history;

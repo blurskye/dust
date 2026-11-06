@@ -1,42 +1,42 @@
 use crate::editor::CommandValue;
-use crate::app::AppEffect;
-use crate::app::CommandInvocation;
-use crate::app::DockEdge;
-use crate::app::EditorMode;
-use crate::app::Instant;
+use crate::app::commands::AppEffect;
+use crate::editor::CommandInvocation;
+use crate::windows::DockEdge;
+use crate::editor::EditorMode;
+use std::time::Instant;
 use crate::app::App;
-use crate::app::NativeSurfaceTarget;
-use crate::app::PromptKind;
-use crate::app::TerminalInput;
-use crate::app::TransactionId;
-use crate::app::VisualRowModel;
-use crate::app::WindowPlacement;
-use crate::app::WindowRect;
-use crate::app::WorkspaceTrust;
-use crate::app::editor_pane_viewport_at;
-use crate::app::editor_state_content_width;
-use crate::app::editor_state_gutter_width;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::ui::PromptKind;
+use crate::app::terminal::TerminalInput;
+use crate::editor::TransactionId;
+use crate::ui::VisualRowModel;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use crate::workspace::WorkspaceTrust;
+use crate::ui::editor_pane_viewport_at;
+use crate::ui::editor_state_content_width;
+use crate::ui::editor_state_gutter_width;
 use slotmap::Key;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use crate::app::PtyId;
+use crate::process::PtyId;
 
-use crate::app::Duration;
-use crate::app::KeyEvent;
-use crate::app::KeyInputKind;
-use crate::app::MappingResolution;
+use std::time::Duration;
+use crate::editor::input::KeyEvent;
+use crate::ui::KeyInputKind;
+use crate::editor::input::MappingResolution;
 
-use crate::app::TerminalPanelMode;
-use crate::app::UiEvent;
+use crate::ui::TerminalPanelMode;
+use crate::ui::UiEvent;
 use crate::app::command;
 use crate::app::mode_name;
-use crate::app::rect_contains_point;
-use crate::app::terminal_tab_at_column;
+use crate::app::windows::rect_contains_point;
+use crate::ui::terminal_tab_at_column;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
 
 
-use crate::app::workspace_top_rows;
+use crate::ui::workspace_top_rows;
 
 
 

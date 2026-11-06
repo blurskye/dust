@@ -1,6 +1,6 @@
 //! Root discovery and execution metadata belong to workspace, not protocol adapters.
-use crate::app::workspace::RootId;
-use crate::app::workspace::RootIdentity;
+use crate::workspace::RootId;
+use crate::files::RootIdentity;
 use crate::app::workspace::WorkspaceSession;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::ProjectRootResolution;

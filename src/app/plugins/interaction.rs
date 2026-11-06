@@ -1,10 +1,10 @@
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
-use crate::app::PickerOrigin;
-use crate::app::PickerSurfaceKind;
-use crate::app::PluginUiInteraction;
-use crate::app::PromptKind;
+use crate::app::picker::PickerOrigin;
+use crate::ui::PickerSurfaceKind;
+use crate::app::plugins::PluginUiInteraction;
+use crate::ui::PromptKind;
 use crate::app::command;
 
 use crate::app::plugins::integration::compose_plugin_picker_items;

@@ -1173,36 +1173,6 @@ fn keymaps_parse_typed_arguments_and_fail_transactionally() {
 }
 
 #[test]
-fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface() {
-    let user = crate::config::load::parse_keymaps(
-        "[[keymap]]\nid='builtin.global.explorer'\ndisable=true\n",
-        PathBuf::from("keymaps.toml"),
-    );
-    assert!(user.diagnostic.is_none());
-    assert_eq!(user.entries.len(), 7);
-    assert!(user.entries.iter().all(|entry| entry.disable));
-    let mut loaded = load_bundled_config();
-    loaded.keymaps.entries.extend(user.entries);
-    loaded.keymaps.user_spans = user.user_spans;
-    let mut commands = crate::editor::CommandRegistry::default();
-    crate::editor::register_builtin_commands(&mut commands).unwrap();
-    crate::editor::register_app_commands(&mut commands).unwrap();
-    let (_, diagnostic) = crate::editor::session::compile_keymaps(
-        &commands,
-        &loaded.keymaps,
-        &loaded.config.input.keymaps,
-    );
-    assert!(diagnostic.is_none(), "{diagnostic:?}");
-
-    let surface = crate::config::load::parse_keymaps(
-        "[[keymap]]\nid='builtin.global.explorer.explorer'\ndisable=true\n",
-        PathBuf::from("keymaps.toml"),
-    );
-    assert_eq!(surface.entries.len(), 1);
-    assert_eq!(surface.entries[0].id, "builtin.global.explorer.explorer");
-}
-
-#[test]
 fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
     for (global, local) in [
         ("z esc", "z escape"),
@@ -2018,42 +1988,4 @@ fn config_migration_preserves_symlinks_and_updates_their_target() {
             .is_symlink()
     );
     assert_eq!(std::fs::read_to_string(target).unwrap(), migrated);
-}
-
-#[test]
-fn product_plan_terminal_profile_and_keymap_are_accepted() {
-    let plan = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/product-plan.md"));
-    let profile = plan
-        .split("Example profile in `config.toml`:")
-        .nth(1)
-        .unwrap()
-        .split("```toml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let mapping = plan
-        .split("Mapping in `keymaps.toml`:")
-        .nth(1)
-        .unwrap()
-        .split("```toml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("config.toml");
-    fs::write(&path, profile).unwrap();
-    let loaded = load_config(&path);
-    assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
-    let path = directory.path().join("keymaps.toml");
-    fs::write(&path, mapping).unwrap();
-    let mappings = load_keymaps(&path);
-    assert!(mappings.diagnostic.is_none(), "{:?}", mappings.diagnostic);
-    let mut config = load_bundled_config();
-    config.config = loaded.config;
-    config.keymaps = mappings;
-    crate::editor::validate_loaded_configuration(config).unwrap();
 }

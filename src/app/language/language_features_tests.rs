@@ -33,7 +33,7 @@ pub(in crate::app) fn auto_import_completion_keeps_snippet_tabstops_after_shifte
         let document = app.active_lsp_document().unwrap().1;
         app.language.fixture_completion_source(Some((
             1,
-            crate::app::tests::LspProjectionOwner {
+            crate::app::language::LspProjectionOwner {
                 server: "fixture".into(),
                 buffer,
                 view,
@@ -618,7 +618,7 @@ pub(in crate::app) fn background_inlay_failures_never_replace_the_user_notificat
         .state
         .open_text(TextBuffer::from_text("fn value() {}"), Some(path))
         .unwrap();
-    let owner = crate::app::tests::LspProjectionOwner {
+    let owner = crate::app::language::LspProjectionOwner {
         server: "rust-analyzer".into(),
         buffer,
         view,
@@ -709,7 +709,7 @@ pub(in crate::app) fn retiring_a_completion_server_refreshes_the_menu_without_a_
         .unwrap();
     app.set_dashboard_visibility(false);
     app.language
-        .fixture_projection(Some(crate::app::tests::LspProjectionOwner {
+        .fixture_projection(Some(crate::app::language::LspProjectionOwner {
             server: "primary".into(),
             buffer,
             view,
@@ -763,7 +763,7 @@ pub(in crate::app) fn completion_documentation_is_typed_and_exact_request_owned(
         .open_text(TextBuffer::from_text("let value = 1;"), Some(path))
         .unwrap();
     app.set_dashboard_visibility(false);
-    let owner = crate::app::tests::LspProjectionOwner {
+    let owner = crate::app::language::LspProjectionOwner {
         server: "fake-server".into(),
         buffer,
         view,
@@ -1926,7 +1926,7 @@ pub(in crate::app) fn leaving_the_last_snippet_stop_clears_its_selection() {
         .unwrap();
     let source = app.state.window_version();
     app.input.install_snippet(
-        crate::app::input::SnippetDocument {
+        crate::app::language::snippets::SnippetDocument {
             editor: &source,
             buffer,
             text: &app.state.buffers[buffer].text,
@@ -1984,7 +1984,7 @@ pub(in crate::app) fn auto_import_completion_keeps_snippet_tabstops_after_normal
         let document = app.active_lsp_document().unwrap().1;
         app.language.fixture_completion_source(Some((
             1,
-            crate::app::tests::LspProjectionOwner {
+            crate::app::language::LspProjectionOwner {
                 server: "fixture".into(),
                 buffer,
                 view,
@@ -2077,3 +2077,39 @@ pub(in crate::app) fn auto_import_completion_keeps_snippet_tabstops_after_normal
         }
     }
 }
+
+use crate::app::language::LspProjectionOwner;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
+use crate::editor::EditorMode;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::language::lsp::LspFeature;
+use crate::language::lsp::LspFeatureResult;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+use crate::language::lsp::LspProgressKind;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::language::lsp::file_uri;
+use crate::ui::DocumentationMarkupKind;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::KeyInputKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::ui::UiFold;
+use std::fs;
+use std::thread;
+use crate::ui::render;
+use crate::app::App;
+
+use crate::app::AppEffect;
+

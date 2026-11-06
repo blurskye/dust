@@ -20,7 +20,7 @@ use crate::workspace::PickerItemId;
 use crate::workspace::PickerItemKind;
 
 #[derive(Default)]
-pub(super) struct PullRequests {
+pub(in crate::app) struct PullRequests {
     jobs: ForgeJobs,
     source: Option<crate::app::workspace::WorkspaceVersion>,
     generation: u64,

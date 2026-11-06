@@ -33,8 +33,7 @@ mod objects;
 use crate::config::Highlight;
 pub use markdown::MarkdownMark;
 pub use markdown::MarkdownSpan;
-pub use objects::SyntaxObject;
-pub use objects::SyntaxObjectKind;
+use crate::editor::SyntaxObject;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SyntaxDocumentId(pub u64);

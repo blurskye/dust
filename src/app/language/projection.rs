@@ -1648,13 +1648,13 @@ impl LspSession {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::language::projection::ByteOffset;
-    use crate::app::language::projection::EditorState;
-    use crate::app::language::projection::LspCompletionItem;
-    use crate::app::language::projection::LspProjectionOwner;
-    use crate::app::language::projection::LspSemanticTokenDelta;
-    use crate::app::language::projection::LspSemanticTokens;
-    use crate::app::language::projection::LspSession;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::EditorState;
+    use crate::language::lsp::LspCompletionItem;
+    use crate::app::language::LspProjectionOwner;
+    use crate::language::lsp::LspSemanticTokenDelta;
+    use crate::language::lsp::LspSemanticTokens;
+    use crate::app::language::LspSession;
     use crate::editor::text::TextBuffer;
     use crate::language::lsp::LspDocument;
     use crate::language::lsp::LspSemanticTokenEdit;
@@ -2277,7 +2277,7 @@ mod tests {
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
         owner.projection.resolve =
             Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
-        owner.narrow_completions(vec![None, Some(2)], ByteOffset(0), crate::app::language::projection::BufferRevision(0));
+        owner.narrow_completions(vec![None, Some(2)], ByteOffset(0), crate::editor::text::BufferRevision(0));
         assert!(!owner.accept_resolved(3, item("resolved abX"), &editor));
         assert_eq!(owner.completion_items()[0].label, "aXb");
     }
@@ -2291,7 +2291,7 @@ mod tests {
         owner.move_completion(1, 10);
         owner.move_completion(1, 10);
         owner.install_completions("third", vec![item("aaa")], false, 0);
-        owner.narrow_completions(vec![Some(1); 4], ByteOffset(0), crate::app::language::projection::BufferRevision(0));
+        owner.narrow_completions(vec![Some(1); 4], ByteOffset(0), crate::editor::text::BufferRevision(0));
         let selected = owner.completion_position().0;
         assert_eq!(owner.completion_server(selected), Some("second"));
         assert_eq!(owner.completion_items()[selected], overload);

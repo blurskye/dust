@@ -113,3 +113,10 @@ pub(in crate::app) fn persisted_window_rules_validate_the_final_fullscreen_confi
         ]
     );
 }
+use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowRule;
+use crate::process::PtyId;
+use crate::windows::WindowPlacement;
+use crate::ui::PtyScreen;
+use crate::persistence::PersistedWindowPlacement;
+

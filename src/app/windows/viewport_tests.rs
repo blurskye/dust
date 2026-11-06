@@ -852,7 +852,7 @@ pub(in crate::app) fn dragging_the_border_between_two_windows_resizes_them() {
         .open_text(TextBuffer::from_text("a\n"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.apply_layout_action(crate::app::LayoutAction::Split(
+    app.apply_layout_action(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     ));
     app.reconcile_editor_windows();
@@ -1419,3 +1419,34 @@ pub(in crate::app) fn mouse_hits_use_painted_inlay_replacement_widths() {
         }
     }
 }
+
+use crate::app::persistence::capture_persisted_layout;
+use crate::app::persistence::restore::build_restored_layout;
+use std::path::PathBuf;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
+use crate::editor::EditorMode;
+use crate::editor::EditorState;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::UiEvent;
+use crate::ui::UiFold;
+use crate::ui::UiInlayHint;
+use crate::ui::VisualRowAnchor;
+use crate::ui::VisualRowModel;
+use crate::ui::active_editor_pane_viewport;
+use crate::ui::explorer_panel_width;
+use crate::ui::snap_display_column;
+use thiserror::Error;
+use std::collections::HashMap;
+use crate::ui::ExplorerUiState;
+use crate::ui::active_pane_viewport;
+use crate::ui::render;
+use crate::app::App;
+
+
+use crate::workspace::DiagnosticSeverity;
+

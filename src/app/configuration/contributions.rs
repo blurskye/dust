@@ -5,7 +5,7 @@ use crate::app::configuration::compile_keymaps_with_plugin_catalog;
 use crate::app::configuration::plugin_owner_from_id;
 use crate::config::WindowPlacementConfig;
 use crate::config::WindowsConfig;
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::editor::CommandRegistry;
 use crate::plugins::PluginContributionCatalog;
 use crate::plugins::PluginWindowPlacementKind;
@@ -185,7 +185,7 @@ impl ConfigurationSession {
 #[cfg(test)]
 mod tests {
     use crate::app::configuration::contributions::*;
-    use crate::app::register_app_commands;
+    use crate::app::commands::register_app_commands;
     use crate::editor::register_builtin_commands;
 
     #[test]

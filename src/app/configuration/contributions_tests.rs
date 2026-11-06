@@ -191,7 +191,7 @@ pub(in crate::app) fn typed_plugin_defaults_compile_between_bundled_and_user_con
     loaded.path = PathBuf::from("keymaps.toml");
     let mut catalog = crate::plugins::PluginContributionCatalog::default();
     catalog.install(index).expect("catalog install");
-    let plugin_defaults = crate::app::tests::compile_keymaps_with_plugin_catalog(
+    let plugin_defaults = crate::app::configuration::compile_keymaps_with_plugin_catalog(
         &app.commands,
         &loaded,
         &catalog,
@@ -232,7 +232,7 @@ pub(in crate::app) fn typed_plugin_defaults_compile_between_bundled_and_user_con
             desc: None,
         },
     ]);
-    let resolved = crate::app::tests::compile_keymaps_with_plugin_catalog(
+    let resolved = crate::app::configuration::compile_keymaps_with_plugin_catalog(
         &app.commands,
         &loaded,
         &catalog,
@@ -1354,3 +1354,31 @@ pub(in crate::app) fn binding_for_names_the_same_key_every_time_for_a_multi_boun
     let effective = keymaps.effective_binding("editor.normal", "command_line.open");
     assert_eq!(effective.primary(), Some(shown));
 }
+
+use crate::app::configuration::KeymapOperation;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::input::MappingResolution;
+use crate::editor::text::TextBuffer;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandId;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandOutcome;
+use crate::editor::CommandSource;
+use crate::editor::CommandSpec;
+use crate::editor::CommandValue;
+use crate::editor::ContextRequirement;
+use crate::editor::InvocationSource;
+use std::fs;
+use std::thread;
+use crate::editor::input::InputContextLayer;
+use tempfile::tempdir;
+
+use crate::app::compile_keymaps;
+use crate::app::compile_keymaps_with_plugin_catalog;
+use crate::app::reload_keymaps;
+

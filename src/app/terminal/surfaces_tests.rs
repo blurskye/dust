@@ -1,5 +1,5 @@
 use crate::app::tests::*;
-use crate::app::AgentCommand;
+use crate::app::agent::commands::AgentCommand;
 
 
 
@@ -203,7 +203,7 @@ pub(in crate::app) fn the_terminal_opens_where_its_placement_setting_says() {
         driver.trust_owned_terminal_fixture();
         driver
             .application_mut()
-            .process_effect(crate::app::AppEffect::TerminalToggle);
+            .process_effect(crate::app::commands::AppEffect::TerminalToggle);
         let deadline = Instant::now() + Duration::from_secs(6);
         let id = loop {
             if let Some(id) = driver.application_mut().displayed_terminal() {
@@ -452,27 +452,27 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         "Ctrl-j returns to the terminal below"
     );
 
-    app.process_effect(crate::app::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
     assert_eq!(app.terminal_session.selected(), Some(PtyId(1)));
     assert!(!app.window_session.terminal_focused());
     assert!(app.ui.terminal_panel.is_some());
     assert_eq!(app.active_input_context(), "editor.normal");
-    app.process_effect(crate::app::AppEffect::TerminalToggle);
+    app.process_effect(crate::app::commands::AppEffect::TerminalToggle);
     assert!(app.window_session.terminal_focused());
-    app.process_effect(crate::app::AppEffect::TerminalToggle);
+    app.process_effect(crate::app::commands::AppEffect::TerminalToggle);
     assert!(!app.window_session.terminal_focused());
     assert_eq!(app.terminal_session.selected(), Some(PtyId(1)));
     assert!(app.terminal_window_rect().is_none());
-    app.process_effect(crate::app::AppEffect::TerminalToggle);
+    app.process_effect(crate::app::commands::AppEffect::TerminalToggle);
     assert!(app.window_session.terminal_focused());
     assert!(app.terminal_window_rect().is_some());
     assert_eq!(app.terminal_session.selected(), Some(PtyId(1)));
-    app.process_effect(crate::app::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
 
-    app.process_effect(crate::app::AppEffect::TerminalFocus(2));
+    app.process_effect(crate::app::commands::AppEffect::TerminalFocus(2));
     assert_eq!(app.terminal_session.selected(), Some(PtyId(2)));
     assert!(app.window_session.terminal_focused());
-    app.process_effect(crate::app::AppEffect::TerminalResize(5));
+    app.process_effect(crate::app::commands::AppEffect::TerminalResize(5));
     assert_eq!(app.window_session.terminal_height(), 20);
     assert_eq!(
         app.ui
@@ -508,11 +508,11 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
     );
     app.handle_configured_key("i".parse::<KeyEvent>().expect("terminal input"));
     assert_eq!(app.active_input_context(), "terminal");
-    app.process_effect(crate::app::AppEffect::TerminalCycle(-1));
+    app.process_effect(crate::app::commands::AppEffect::TerminalCycle(-1));
     assert_eq!(app.terminal_session.selected(), Some(PtyId(1)));
     assert!(app.terminal_session.fixture_lines(PtyId(2))[0].contains("second"));
 
-    app.process_effect(crate::app::AppEffect::TerminalResize(1));
+    app.process_effect(crate::app::commands::AppEffect::TerminalResize(1));
     assert_eq!(app.window_session.terminal_height(), 12);
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 11));
     let mut resize =
@@ -538,7 +538,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         .native_ids()
         .terminal(1)
         .expect("terminal resources");
-    app.process_effect(crate::app::AppEffect::TerminalFloat(Some(
+    app.process_effect(crate::app::commands::AppEffect::TerminalFloat(Some(
         crate::windows::WindowRect {
             x: 5,
             y: 3,
@@ -564,12 +564,12 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         })
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (40, 9));
-    app.process_effect(crate::app::AppEffect::WindowMove {
+    app.process_effect(crate::app::commands::AppEffect::WindowMove {
         target: "terminal".into(),
         x: 7,
         y: 4,
     });
-    app.process_effect(crate::app::AppEffect::WindowResize {
+    app.process_effect(crate::app::commands::AppEffect::WindowResize {
         target: "terminal".into(),
         amount: 2,
     });
@@ -587,7 +587,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         })
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (42, 11));
-    app.process_effect(crate::app::AppEffect::TerminalFullscreen);
+    app.process_effect(crate::app::commands::AppEffect::TerminalFullscreen);
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
@@ -601,14 +601,14 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         WindowPlacement::Fullscreen
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 19));
-    app.process_effect(crate::app::AppEffect::TerminalHide);
+    app.process_effect(crate::app::commands::AppEffect::TerminalHide);
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
     );
     assert!(app.terminal_session.contains(PtyId(1)));
     assert!(app.terminal_window_rect().is_none());
-    app.process_effect(crate::app::AppEffect::WindowShow("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowShow("terminal".into()));
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
@@ -621,23 +621,23 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
             .placement,
         WindowPlacement::Fullscreen
     );
-    app.process_effect(crate::app::AppEffect::TerminalDock {
+    app.process_effect(crate::app::commands::AppEffect::TerminalDock {
         edge: "top".into(),
         size: 5,
     });
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (60, 4));
-    app.process_effect(crate::app::AppEffect::TerminalDock {
+    app.process_effect(crate::app::commands::AppEffect::TerminalDock {
         edge: "right".into(),
         size: 10,
     });
     // The column left of a right dock is its border.
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (9, 18));
-    app.process_effect(crate::app::AppEffect::TerminalDock {
+    app.process_effect(crate::app::commands::AppEffect::TerminalDock {
         edge: "left".into(),
         size: 8,
     });
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (8, 18));
-    app.process_effect(crate::app::AppEffect::TerminalDock {
+    app.process_effect(crate::app::commands::AppEffect::TerminalDock {
         edge: "bottom".into(),
         size: 12,
     });
@@ -691,8 +691,8 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         app.terminal_session.fixture_dimensions(PtyId(1)),
         app.terminal_session.fixture_lines(PtyId(1)),
     );
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::NewTab,
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::NewTab,
     ));
     let rehosted_tab = app
         .window_session
@@ -723,8 +723,8 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         terminal_state_before_rehost,
         "cross-tab rehosting preserves the terminal owner state"
     );
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::FocusTab(-1),
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::FocusTab(-1),
     ));
     assert_eq!(app.state.active_tab, Some(first_editor_tab));
     assert_eq!(
@@ -739,8 +739,8 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
             .tab,
         rehosted_tab
     );
-    app.process_effect(crate::app::AppEffect::TerminalFocus(2));
-    app.process_effect(crate::app::AppEffect::TerminalFloat(Some(
+    app.process_effect(crate::app::commands::AppEffect::TerminalFocus(2));
+    app.process_effect(crate::app::commands::AppEffect::TerminalFloat(Some(
         crate::windows::WindowRect {
             x: 9,
             y: 4,
@@ -762,7 +762,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
             height: 9,
         }
     );
-    app.process_effect(crate::app::AppEffect::TerminalFocus(1));
+    app.process_effect(crate::app::commands::AppEffect::TerminalFocus(1));
 
     let visible_placement = app
         .window_session
@@ -770,7 +770,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         .window(terminal_ids.window)
         .expect("terminal window")
         .placement;
-    app.process_effect(crate::app::AppEffect::TerminalClose);
+    app.process_effect(crate::app::commands::AppEffect::TerminalClose);
     let close = app.input.prompt().expect("running terminal close prompt");
     assert_eq!(close.kind, crate::ui::PromptKind::TerminalClose);
     let confirmation = close.confirmation.as_ref().expect("close actions");
@@ -788,7 +788,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
         visible_placement
     );
 
-    app.process_effect(crate::app::AppEffect::TerminalClose);
+    app.process_effect(crate::app::commands::AppEffect::TerminalClose);
     app.submit_prompt();
     assert!(app.terminal_session.contains(PtyId(1)));
     assert_eq!(
@@ -803,13 +803,13 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
             .placement,
         WindowPlacement::Hidden
     );
-    app.process_effect(crate::app::AppEffect::TerminalToggle);
+    app.process_effect(crate::app::commands::AppEffect::TerminalToggle);
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
     );
 
-    app.process_effect(crate::app::AppEffect::TerminalClose);
+    app.process_effect(crate::app::commands::AppEffect::TerminalClose);
     assert!(app.terminal_session.select(PtyId(2)));
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
@@ -817,7 +817,7 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
     assert!(!app.terminal_session.contains(PtyId(1)));
     assert_eq!(app.terminal_session.selected(), Some(PtyId(2)));
     assert!(app.ui.terminal_panel.is_some());
-    app.process_effect(crate::app::AppEffect::TerminalClose);
+    app.process_effect(crate::app::commands::AppEffect::TerminalClose);
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
@@ -939,13 +939,13 @@ pub(in crate::app) fn ordinary_terminal_profile_names_do_not_make_agent_terminal
     assert!(!app.agent_terminal(shell));
     assert!(!app.terminal_session.side(shell));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::Agent(crate::app::AgentCommand::Ask));
+    app.process_effect(AppEffect::Agent(crate::app::agent::commands::AgentCommand::Ask));
     let agent = app.terminal_session.selected().unwrap();
     assert_ne!(shell, agent, "an ordinary shell is not reused as an agent");
     assert!(app.agent_terminal(agent));
     assert!(app.terminal_session.side(agent));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::Agent(crate::app::AgentCommand::Ask));
+    app.process_effect(AppEffect::Agent(crate::app::agent::commands::AgentCommand::Ask));
     assert_eq!(app.terminal_session.selected(), Some(agent));
     assert_eq!(app.terminal_session.descriptions().len(), 2);
 }
@@ -1037,7 +1037,7 @@ pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_p
     let app = driver.application_mut();
     let agent = app.keyboard_terminal().unwrap();
     app.terminal_session.enter_terminal_normal_mode(agent);
-    app.process_effect(crate::app::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
     let (_, view) = app
         .state
         .open_text(TextBuffer::from_text("SELECTION_SENT"), None)
@@ -1074,7 +1074,7 @@ pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_p
         thread::sleep(Duration::from_millis(2));
     }
     let app = driver.application_mut();
-    app.process_effect(crate::app::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
     let text = "x".repeat(crate::app::terminal::TERMINAL_MAXIMUM_INPUT_BYTES + 1);
     let (_, view) = app
         .state
@@ -1148,7 +1148,7 @@ pub(in crate::app) fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_
     app.process_effect(AppEffect::Agent(AgentCommand::Toggle));
     assert_eq!(app.terminal_window_rect(), Some(rect));
     // From the code beside it, the toggle hides it too.
-    app.process_effect(crate::app::AppEffect::TerminalUnfocus);
+    app.process_effect(crate::app::commands::AppEffect::TerminalUnfocus);
     app.process_effect(AppEffect::Agent(AgentCommand::Toggle));
     assert!(app.terminal_window_rect().is_none());
     assert_eq!(app.terminal_session.descriptions().len(), 1);
@@ -1274,7 +1274,7 @@ pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_
     assert_eq!(app.window_session.focused_terminal(), Some(shell.0));
 
     // The agent widens and narrows in columns, and its program follows.
-    app.process_effect(crate::app::AppEffect::TerminalFocus(agent.0));
+    app.process_effect(crate::app::commands::AppEffect::TerminalFocus(agent.0));
     assert_eq!(app.window_session.focused_terminal(), Some(agent.0));
     assert!(app.terminal_rect(shell).is_some(), "the shell stays below");
     app.resize_focused_window(crate::editor::FocusDirection::Left, 1)
@@ -1294,7 +1294,7 @@ pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_
     });
     // terminal.resize, given rows, moves a side terminal in columns too.
     let app = driver.application_mut();
-    app.process_effect(crate::app::AppEffect::TerminalResize(-1));
+    app.process_effect(crate::app::commands::AppEffect::TerminalResize(-1));
     assert_eq!(
         app.terminal_rect(agent).map(|rect| rect.width),
         Some(agent_rect.width)
@@ -2294,3 +2294,35 @@ pub(in crate::app) fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_
             && message.contains("shared shutdown deadline expired")
     }));
 }
+use crate::app::windows::NativeSurfaceTarget;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::FocusDirection;
+use crate::editor::InvocationSource;
+use crate::persistence::PersistedWindowRule;
+use crate::process::PtyId;
+use crate::ui::PromptKind;
+use crate::ui::TerminalPanelMode;
+use crate::ui::TerminalSession;
+use crate::ui::UiEvent;
+use crate::ui::workspace_top_rows;
+use crate::app::startup::StartupTarget;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::fs;
+use std::thread;
+use crate::ui::ContentTabKind;
+use crate::ui::PtyScreen;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::compile_keymaps;
+use crate::app::AppEffect;
+use crate::persistence::PersistedWindowPlacement;
+

@@ -946,7 +946,7 @@ pub(in crate::app) fn directional_focus_moves_spatially_then_crosses_the_explore
         .open_text(crate::editor::text::TextBuffer::from_text("focus"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.apply_layout_action(crate::app::LayoutAction::Split(
+    app.apply_layout_action(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     ));
     let tab = app.state.active_tab.expect("active tab");
@@ -975,3 +975,21 @@ pub(in crate::app) fn directional_focus_moves_spatially_then_crosses_the_explore
     assert!(!app.ui.explorer_focused);
     assert_eq!(app.state.tabs[tab].focused, left);
 }
+use crate::app::documents::DocumentEvent;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::FocusDirection;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use std::fs;
+use std::thread;
+use crate::files::ExplorerWatchBatch;
+use crate::files::ExplorerWatchGeneration;
+use crate::ui::ExplorerSegmentRole;
+use crate::ui::render;
+use crate::app::App;
+use crate::app::AppEffect;
+

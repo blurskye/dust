@@ -56,7 +56,7 @@ pub(in crate::app) struct InvocationContext<'a> {
     pub generation: u64,
     pub ui_revision: Option<u64>,
     pub input_capture: std::sync::Arc<()>,
-    pub navigation: crate::app::panels::NavigationStamp,
+    pub navigation: crate::app::windows::NavigationStamp,
     pub interaction_available: bool,
     pub maximum: usize,
     pub arguments: Vec<String>,
@@ -304,7 +304,7 @@ impl ExtensionSession {
         workspace: &WorkspaceVersion,
         configuration: u64,
         input: &crate::app::input::InputSession,
-        windows: &crate::app::panels::WindowSession,
+        windows: &crate::app::windows::WindowSession,
     ) -> Option<ConfirmationPresentation> {
         self.confirmations
             .activate_next(confirmations::ConfirmationContext {
@@ -343,7 +343,7 @@ impl ExtensionSession {
         workspace: &WorkspaceVersion,
         configuration: u64,
         input: &crate::app::input::InputSession,
-        windows: &crate::app::panels::WindowSession,
+        windows: &crate::app::windows::WindowSession,
     ) -> bool {
         self.confirmations
             .retire_stale(confirmations::ConfirmationContext {

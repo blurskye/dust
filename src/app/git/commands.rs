@@ -7,7 +7,7 @@ use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
-use crate::app::commands::PathBuf;
+use std::path::PathBuf;
 use crate::app::commands::optional_string_arg;
 use crate::editor::CommandValue;
 
@@ -307,12 +307,19 @@ Ok(())
 
 
 use crate::app::App;
-use crate::app::WorkspaceTrust;
+use crate::workspace::WorkspaceTrust;
+
+
+
+
+
+
+
 
 impl App {
     pub(in crate::app) fn process_git_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::GitFileStage => {
+AppEffect::GitFileStage => {
                 self.input.set_pending_stage(AppEffect::GitFileStage);
                 // The plan itself refuses a path whose buffer has unsaved edits and reports
                 // `UnsavedDocument`, which the mutation handler turns into the explicit
@@ -330,7 +337,7 @@ impl App {
                     self.show_error(error);
                 }
             }
-            AppEffect::GitFileUnstage => {
+AppEffect::GitFileUnstage => {
                 self.input.set_pending_stage(AppEffect::GitFileUnstage);
                 let file = self.changes_focused_relative();
                 if let Err(error) = self.git.start_plan_for(
@@ -345,48 +352,48 @@ impl App {
                     self.show_error(error);
                 }
             }
-            AppEffect::GitLinesStage { start, end } => self.stage_git_lines(start, end),
-            AppEffect::GitWorktreeCreate { branch, path } => {
+AppEffect::GitLinesStage { start, end } => self.stage_git_lines(start, end),
+AppEffect::GitWorktreeCreate { branch, path } => {
                 self.create_git_worktree(branch, path);
             }
-            AppEffect::GitConflictsOpen => self.open_git_conflicts(),
-            AppEffect::GitConflictAccept { side } => self.accept_conflict_block(&side),
-            AppEffect::GitConflictChoose { side } => self.choose_git_conflict_side(&side),
-            AppEffect::GitConflictStage => self.stage_git_conflict(),
-            AppEffect::GitConflictContinue => self.continue_git_conflict(),
-            AppEffect::GitConflictAbort => self.abort_git_conflict(),
-            AppEffect::GitConflictReplace { side, files } => {
+AppEffect::GitConflictsOpen => self.open_git_conflicts(),
+AppEffect::GitConflictAccept { side } => self.accept_conflict_block(&side),
+AppEffect::GitConflictChoose { side } => self.choose_git_conflict_side(&side),
+AppEffect::GitConflictStage => self.stage_git_conflict(),
+AppEffect::GitConflictContinue => self.continue_git_conflict(),
+AppEffect::GitConflictAbort => self.abort_git_conflict(),
+AppEffect::GitConflictReplace { side, files } => {
                 self.preview_git_replacement(&side, &files);
             }
-            AppEffect::GitWorktreeOpen => self.open_git_worktree(),
-            AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
-            AppEffect::GitWorktreesOpen => self.start_git_worktrees(),
-            AppEffect::GitHunksOpenStaged => {
+AppEffect::GitWorktreeOpen => self.open_git_worktree(),
+AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
+AppEffect::GitWorktreesOpen => self.start_git_worktrees(),
+AppEffect::GitHunksOpenStaged => {
                 self.start_git_hunks_with_layer(None, crate::git::GitDiffLayer::Staged);
             }
-            AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
-            AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
-            AppEffect::GitStatusOpen => self.open_git_status_picker(),
-            AppEffect::GitBrowse { copy } => self.browse_git_line(copy),
-            AppEffect::PullRequestList => self.list_pull_requests(),
-            AppEffect::PullRequestComments => self.list_review_comments(),
-            AppEffect::PullRequestComment => self.begin_review_comment(),
-            AppEffect::GitChangesLayerSwitch => {
+AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
+AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
+AppEffect::GitStatusOpen => self.open_git_status_picker(),
+AppEffect::GitBrowse { copy } => self.browse_git_line(copy),
+AppEffect::PullRequestList => self.list_pull_requests(),
+AppEffect::PullRequestComments => self.list_review_comments(),
+AppEffect::PullRequestComment => self.begin_review_comment(),
+AppEffect::GitChangesLayerSwitch => {
                 // Only the change surface has a layer to switch; elsewhere this does nothing
                 // rather than reporting an error for a key that has no meaning there.
                 if self.search.switch_changes_layer().is_some() {
                     self.sync_picker_ui();
                 }
             }
-            AppEffect::GitHunksOpen => self.start_git_hunks(),
-            AppEffect::GitConflictNavigate(direction) => self.navigate_git_conflict(direction),
-            AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
-            AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
-            AppEffect::GitHunkStage => {
+AppEffect::GitHunksOpen => self.start_git_hunks(),
+AppEffect::GitConflictNavigate(direction) => self.navigate_git_conflict(direction),
+AppEffect::GitHunkNavigate(direction) => self.navigate_git_hunk(direction),
+AppEffect::GitHunkPreview => self.preview_selected_git_hunk(),
+AppEffect::GitHunkStage => {
                 self.input.set_pending_stage(AppEffect::GitHunkStage);
                 self.stage_selected_git_hunk();
             }
-            AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
+AppEffect::GitHunkReset => self.request_reset_selected_git_hunk(),
             effect => return Err(effect),
         }
         Ok(())

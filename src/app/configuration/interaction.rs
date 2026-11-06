@@ -1,13 +1,13 @@
-use crate::app::DiagnosticOwner;
+use crate::workspace::DiagnosticOwner;
 use crate::app::App;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerOrigin;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::TextBuffer;
-use crate::app::LoadedConfig;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::TextBuffer;
+use crate::config::LoadedConfig;
 use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
 

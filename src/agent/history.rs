@@ -322,7 +322,7 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::*;
+    use super::*;
 
     #[test]
     fn pending_history_saves_are_fair_and_coalesce_in_place() {
@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn history_round_trips_attachments_and_recaps_legacy_context() {
-        use crate::PromptPart;
+        use crate::agent::PromptPart;
         let directory = tempfile::tempdir().unwrap();
         let conversation = Conversation {
             id: "attached".into(),

@@ -675,12 +675,12 @@ impl ExtensionSession {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::plugins::integration::ExtensionSession;
+    use crate::app::plugins::ExtensionSession;
     use crate::app::plugins::integration::ExtensionUpdate;
-    use crate::app::plugins::integration::PluginLimits;
-    use crate::app::plugins::integration::PluginLoadId;
-    use crate::app::plugins::integration::RegistryEvent;
-    use crate::app::plugins::integration::RegistryResult;
+    use crate::plugins::PluginLimits;
+    use crate::plugins::PluginLoadId;
+    use crate::tools::RegistryEvent;
+    use crate::tools::RegistryResult;
     use crate::app::plugins::integration::RegistryUpdate;
     use crate::plugins::PluginManifest;
     use crate::tools::PackageManifest;
@@ -1389,28 +1389,28 @@ mod tests {
 use crate::editor::CommandValue;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::ui::render::SCRATCH_LABEL;
-use crate::app::AppEffect;
-use crate::app::ArgumentSchema;
+use crate::app::commands::AppEffect;
+use crate::editor::ArgumentSchema;
 
-use crate::app::BTreeSet;
-use crate::app::CommandId;
-use crate::app::CommandOutcome;
-use crate::app::CommandSource;
-use crate::app::CommandSpec;
-use crate::app::ContextRequirement;
-use crate::app::EditorState;
+use std::collections::BTreeSet;
+use crate::editor::CommandId;
+use crate::editor::CommandOutcome;
+use crate::editor::CommandSource;
+use crate::editor::CommandSpec;
+use crate::editor::ContextRequirement;
+use crate::editor::EditorState;
 use crate::app::App;
-use crate::app::LogLevel;
-use crate::app::NativeDescriptions;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::PluginEvent;
+use crate::telemetry::LogLevel;
+use crate::app::windows::NativeDescriptions;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::plugins::PluginEvent;
 
 
-use crate::app::PromptKind;
-use crate::app::WindowUpdate;
+use crate::ui::PromptKind;
+use crate::app::plugins::WindowUpdate;
 use crate::app::plugins::VirtualContext;
 use crate::app::plugins::VirtualOpen;
 use crate::app::plugins::VirtualPublication;
@@ -1508,7 +1508,7 @@ pub(in crate::app) fn compose_plugin_picker_items(
 }
 
 
-pub(super) fn compose_command_picker_items(
+pub(in crate::app) fn compose_command_picker_items(
     items: Vec<(PickerItem, PickerPayload)>,
 ) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
     let spec = SearchWorkflowSpec {
@@ -2604,3 +2604,5 @@ impl App {
         }
     }
 }
+
+use slotmap::Key;

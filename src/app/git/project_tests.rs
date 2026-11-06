@@ -2206,3 +2206,27 @@ pub(in crate::app) fn document_paths_identify_their_worktrees_independently_of_o
     assert_eq!(identity.path(), alpha.path());
     assert!(unopened.starts_with(identity.workdir().unwrap()));
 }
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerPayload;
+use std::path::Path;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::PromptKind;
+use crate::files::RootIdentity;
+use crate::workspace::WorkspaceTrust;
+use crate::app::startup::StartupTarget;
+use std::fs;
+use std::thread;
+use crate::ui::ExplorerSegmentRole;
+use crate::ui::render;
+use tempfile::tempdir;
+use crate::app::App;
+use crate::app::AppEffect;
+

@@ -7,7 +7,7 @@ use crate::editor::transaction::UndoTree;
 use crate::editor::state::id::BufferId;
 
 use crate::editor::state::view::View;
-use crate::editor::state::registers::get;
+
 
 
 

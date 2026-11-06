@@ -70,7 +70,7 @@ pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker
 #[test]
 pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
     let (_app_dirs, mut app) = app();
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert("overlay.help.");
     let palette = app.search.picker_projection().expect("palette");
     let query_before = palette.query.clone();
@@ -136,7 +136,7 @@ pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_select
 
 
 pub(in crate::app) fn palette_row_for(app: &mut App, query: &str) -> String {
-    app.open_builtin_picker(crate::app::PickerKind::Commands);
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert(query);
     let palette = app.search.picker_projection().expect("palette");
     let selected = palette
@@ -247,3 +247,23 @@ pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() 
     app.picker_insert("file-10000");
     assert_eq!(app.ui.picker.as_ref().unwrap().rows[0].label, "file-10000");
 }
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::parse_ex;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::InvocationSource;
+use crate::files::VfsError;
+use crate::ui::PickerSurfaceKind;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use std::fs;
+use std::thread;
+use crate::app::App;
+use crate::app::PickerKind;
+

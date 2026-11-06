@@ -6,17 +6,11 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::ui::DiffHunk;
 
-use crate::ui::DiffLayout;
 
-use crate::ui::DiffLine;
 
-use crate::ui::DiffLineKind;
 
-use crate::ui::DiffPreview;
 
-use crate::ui::DiffSpan;
 
 /// Parse unified diff text into a `DiffPreview`.
 ///
@@ -625,7 +619,7 @@ impl DiffPreview {
         Self::side_cell_text_with_width(cell, self.number_width())
     }
 
-    fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
+    pub(crate) fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
         let number = cell.number.map_or_else(String::new, |n| n.to_string());
         let prefix = format!("{number:>width$} ", width = width);
         let offset = prefix.len();

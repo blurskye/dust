@@ -819,7 +819,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     };
     let width = crate::ui::render::content_tab_width(&entry, &config);
     let mut grid = crate::ui::CellGrid::new(u16::try_from(width).unwrap(), 1);
-    crate::ui::render::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
+    crate::ui::render::overlays::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
     let styles = (0..grid.width())
         .filter_map(|x| grid.get(x, 0).map(|cell| cell.style))
         .collect::<Vec<_>>();
@@ -858,7 +858,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         entry.title = char::from(b'a' + index as u8).to_string();
         entry.active = index == 2;
     }
-    let left = crate::ui::render::text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
+    let left = crate::ui::geometry::text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
     for column in 0..u16::try_from(left).unwrap() {
         assert_eq!(
             crate::ui::render::content_tab_at_column(&entries, &config, 8, column),
@@ -1575,7 +1575,7 @@ fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
     let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
     assert_eq!(frame.grid.row_text(0).trim_end(), "");
     assert_eq!(frame.grid.row_text(1).trim_end(), "text");
-    assert_eq!(crate::ui::render::git_sign_column(0, &config.editor), None);
+    assert_eq!(crate::ui::render::visual_rows::git_sign_column(0, &config.editor), None);
 }
 
 
@@ -1601,7 +1601,7 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
         10,
     );
 
-    let sign_column = crate::ui::render::git_sign_column(gutter, &config.editor).unwrap();
+    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
     assert!(
         (0..frame.grid.height()).all(|row| {
             frame
@@ -1637,8 +1637,8 @@ fn end_of_buffer_markers_right_align_with_line_number_digits() {
         20,
     );
 
-    assert_eq!(crate::ui::render::editor_line_number_digits(&state), 4);
-    let sign_column = crate::ui::render::git_sign_column(gutter, &config.editor).unwrap();
+    assert_eq!(crate::ui::render::visual_rows::editor_line_number_digits(&state), 4);
+    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
     for row in 1..frame.grid.height() {
         assert_eq!(frame.grid.get(0, row).unwrap().symbol, " ");
         assert_eq!(frame.grid.get(3, row).unwrap().symbol, "~");
@@ -1755,7 +1755,7 @@ fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
         assert!(
             lines
                 .iter()
-                .all(|line| crate::ui::render::text_width(line, ambiguous) <= 40)
+                .all(|line| crate::ui::geometry::text_width(line, ambiguous) <= 40)
         );
     }
     assert_eq!(
@@ -2197,11 +2197,11 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
     };
     assert_eq!(
         mark(row("bad")),
-        Some(crate::ui::render::Style::Error),
+        Some(crate::ui::Style::Error),
         "the worst severity on the line"
     );
     assert_eq!(mark(row("fine")), None);
-    assert_eq!(mark(row("odd")), Some(crate::ui::render::Style::Warning));
+    assert_eq!(mark(row("odd")), Some(crate::ui::Style::Warning));
 }
 
 
@@ -2495,7 +2495,7 @@ fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
         for width in 0..90 {
             let row = bar.row(width, ambiguous);
             assert!(
-                crate::ui::render::text_width(&row, ambiguous) <= usize::from(width),
+                crate::ui::geometry::text_width(&row, ambiguous) <= usize::from(width),
                 "{row:?} at {width}"
             );
             assert!(!row.contains("esc cancel"));
@@ -2507,7 +2507,7 @@ fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
         bar.blockers = vec!["·".repeat(25)];
         let row = bar.row(70, ambiguous);
         assert!(row.contains("resolve/ctrl-a abort"));
-        assert!(crate::ui::render::text_width(&row, ambiguous) <= 70);
+        assert!(crate::ui::geometry::text_width(&row, ambiguous) <= 70);
     }
 }
 
@@ -2639,12 +2639,12 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
         console: vec!["count = 1".into()],
     };
     let mut watches = crate::ui::grid::Frame {
-        grid: crate::ui::render::CellGrid::new(60, 24),
+        grid: crate::ui::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(&mut watches, layout, &base);
     let mut breakpoints = crate::ui::grid::Frame {
-        grid: crate::ui::render::CellGrid::new(60, 24),
+        grid: crate::ui::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(
@@ -2700,7 +2700,7 @@ fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
         console: Vec::new(),
     };
     let mut frame = crate::ui::grid::Frame {
-        grid: crate::ui::render::CellGrid::new(120, 40),
+        grid: crate::ui::CellGrid::new(120, 40),
         cursor: None,
     };
     render_debug_panes(&mut frame, layout, &panes);
@@ -2712,5 +2712,257 @@ fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
     assert!(
         text.contains(&format!("{}…", "f".repeat(inner - 1))),
         "{text}"
+    );
+}
+use crate::ui::render::overlays::render_content_tab_line;
+use crate::ui::render::visual_rows::editor_line_number_digits;
+use crate::ui::render::visual_rows::git_sign_column;
+
+
+
+
+
+
+
+
+
+/// The column at which `needle` starts on the row where it is drawn, and that row.
+pub(super) fn drawn_at(frame: &super::Frame, needle: &str) -> Option<(u16, u16)> {
+    for y in 0..frame.grid.height() {
+        let text = frame.grid.row_text(y);
+        if let Some(byte) = text.find(needle) {
+            let mut offset = 0;
+            for column in 0..frame.grid.width() {
+                let cell = frame.grid.get(column, y).expect("grid cell");
+                if cell.continuation {
+                    continue;
+                }
+                if offset == byte {
+                    return Some((column, y));
+                }
+                offset += cell.symbol.len();
+            }
+        }
+    }
+    None
+}
+
+
+#[test]
+fn drawn_at_locates_display_cells_after_wide_and_combining_graphemes() {
+    for wide in [false, true] {
+        let mut grid =
+            crate::ui::CellGrid::new_with_policy(20, 1, CONTROL_CHARACTER_REPLACEMENT, "◌", wide);
+        grid.put_text(0, 0, "界e\u{301}·target", crate::ui::Style::Default);
+        let frame = super::Frame { grid, cursor: None };
+        let expected = if wide { 5 } else { 4 };
+        assert_eq!(drawn_at(&frame, "target"), Some((expected, 0)));
+        assert_eq!(frame.grid.get(expected, 0).unwrap().symbol, "t");
+    }
+}
+
+
+#[test]
+fn key_help_breaks_between_items_and_keeps_its_end() {
+    let ambiguous = crate::config::load_bundled_config()
+        .config
+        .editor
+        .ambiguous_width;
+    let rows = crate::ui::geometry::wrapped_key_help(
+        "j/k move · Enter install · r refresh · Esc close",
+        26,
+        ambiguous,
+    );
+    assert_eq!(rows, ["j/k move · Enter install", "r refresh · Esc close"]);
+}
+
+
+#[test]
+fn a_notification_too_long_to_show_points_at_the_messages_list() {
+    let mut state = EditorState::new(PathBuf::from("/tmp"));
+    let _ = state
+        .open_text(crate::editor::text::TextBuffer::from_text(""), None)
+        .unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.notification = Some("conflict ".repeat(200));
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
+    let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
+    assert!(
+        text.iter().any(|row| row.contains("… :messages")),
+        "{text:#?}"
+    );
+}
+
+
+#[test]
+fn the_status_line_puts_the_server_and_root_on_the_right() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/some-project"));
+    let (_, view) = state
+        .open_text(crate::editor::text::TextBuffer::from_text("x"), None)
+        .unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let mut ui = ui_with_editor_layout(&state);
+    ui.lsp_server = Some("rust-analyzer".into());
+    let wide = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    let status = wide.grid.row_text(4);
+    assert!(status.contains("rust-analyzer  some-project"), "{status:?}");
+    assert!(
+        status.trim_end().ends_with("Top \u{e0b2} 1:1"),
+        "{status:?}"
+    );
+    assert_eq!(
+        wide.grid.get(1, 4).expect("mode").style,
+        crate::ui::Style::StatusAccent
+    );
+
+    // The server goes first when the room runs out, then the progress; the root stays.
+    let narrow = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 42, 5);
+    let status = narrow.grid.row_text(4);
+    assert!(
+        status.trim_end().ends_with("some-project  \u{e0b2} 1:1"),
+        "{status:?}"
+    );
+    assert!(
+        !status.contains("rust-analyzer") && !status.contains("Top"),
+        "{status:?}"
+    );
+
+    // Each mode shows in its own colour.
+    state.views[view].mode = crate::editor::EditorMode::Insert;
+    let insert = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    assert_eq!(
+        insert.grid.get(1, 4).expect("mode").style,
+        crate::ui::Style::StatusInsert
+    );
+}
+
+
+#[test]
+fn the_status_line_names_a_worktree_with_its_repository() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/repo/.worktree/feature"));
+    state.workspace_repository = Some("repo".into());
+    let (_, view) = state
+        .open_text(crate::editor::text::TextBuffer::from_text("x"), None)
+        .unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let ui = ui_with_editor_layout(&state);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    assert!(frame.grid.row_text(4).contains("repo › feature"));
+    state.workspace_repository = Some("repo{worktree}{repository}".into());
+    state.workspace_root = PathBuf::from("/tmp/repo/.worktree/feature{repository}");
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 120, 5);
+    assert!(
+        frame
+            .grid
+            .row_text(4)
+            .contains("repo{worktree}{repository} › feature{repository}")
+    );
+}
+
+
+#[test]
+fn the_status_line_keeps_fields_from_running_into_the_position() {
+    let mut state = EditorState::new(PathBuf::from("/tmp/a-rather-long-project-name"));
+    let (_, view) = state
+        .open_text(crate::editor::text::TextBuffer::from_text("x"), None)
+        .unwrap();
+    let loaded = crate::config::load_bundled_config();
+    let ui = ui_with_editor_layout(&state);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
+    let status = frame.grid.row_text(4);
+    assert!(status.trim_end().ends_with(" 1:1"), "{status:?}");
+}
+
+
+#[test]
+fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("fn main() {}"),
+            Some(PathBuf::from("/workspace/main.rs")),
+        )
+        .unwrap();
+    let mut ui = UiState {
+        editor_window_layout: Some(editor_layout(&state)),
+        explorer: Some(crate::ui::render::ExplorerUiState {
+            title: "Explorer".into(),
+            rows: Vec::new(),
+            scroll: 0,
+            loading: false,
+            total: 0,
+            matches: 0,
+            query: String::new(),
+            searching: false,
+        }),
+        lsp_progress: vec![
+            crate::ui::render::UiLspProgress {
+                server_key: "root:1:rust-analyzer".into(),
+                token: "roots".into(),
+                server: "rust-analyzer".into(),
+                title: "Roots Scanned".into(),
+                message: String::new(),
+                percentage: None,
+                done: true,
+                completed_at: Some(std::time::Instant::now()),
+            },
+            crate::ui::render::UiLspProgress {
+                server_key: "root:1:rust-analyzer".into(),
+                token: "cargo-check".into(),
+                server: "rust-analyzer".into(),
+                title: "Building".into(),
+                message: "ring (lib)".into(),
+                percentage: Some(72),
+                done: false,
+                completed_at: None,
+            },
+        ],
+        lsp_progress_frame: 8,
+        ..UiState::default()
+    };
+    let loaded = crate::config::load_bundled_config();
+    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let row = (0..10)
+        .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
+        .unwrap_or_else(|| {
+            panic!(
+                "progress row: {:?}",
+                (0..10)
+                    .map(|row| frame.grid.row_text(row))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert!(!frame.grid.row_text(row).contains("root:1"));
+    assert!((panel.saturating_add(1)..79).any(|x| {
+        frame
+            .grid
+            .get(x, row)
+            .is_some_and(|cell| cell.symbol == "⠇" && cell.style == crate::ui::Style::Accent)
+    }));
+    assert_eq!(frame.grid.get(78, row).unwrap().symbol, "r");
+    for x in 66..79 {
+        assert_eq!(
+            frame.grid.get(x, row).unwrap().style,
+            crate::ui::Style::Accent
+        );
+    }
+    assert_eq!(frame.grid.get(79, row).unwrap().symbol, " ");
+    let completed_row = (0..10)
+        .find(|row| frame.grid.row_text(*row).contains("Roots Scanned"))
+        .expect("completed progress row");
+    assert!((panel.saturating_add(1)..79).any(|x| {
+        frame
+            .grid
+            .get(x, completed_row)
+            .is_some_and(|cell| cell.symbol == "✓")
+    }));
+
+    ui.lsp_progress_frame = 4;
+    let next = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    assert!(
+        (panel.saturating_add(1)..79)
+            .any(|x| next.grid.get(x, row).is_some_and(|cell| cell.symbol == "⠼"))
     );
 }

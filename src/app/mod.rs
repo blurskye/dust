@@ -75,50 +75,8 @@ pub use configuration::validate_loaded_configuration;
 pub use agent::commands::AgentCommand;
 
 use crate::app::configuration::ConfigurationSession;
-#[cfg(test)]
-use crate::app::configuration::KeymapOperation;
-use crate::app::configuration::configuration_generation_is_newer;
-use crate::app::configuration::resolve_configuration;
-use crate::app::configuration::validate_configured_commands;
-use crate::app::documents::DocumentEvent;
 use crate::app::documents::DocumentSession;
-use crate::app::documents::LargeFileOverride;
-use crate::app::documents::mode_name_large;
 use crate::app::input::InputSession;
-use crate::app::language::LspAutostartObservation;
-use crate::app::language::LspLaunch;
-use crate::app::language::LspLaunchRequest;
-use crate::app::language::LspLaunchSource;
-use crate::app::language::PendingLspProjectRoot;
-#[cfg(test)]
-use crate::app::language::LspProjectionOwner;
-use crate::app::language::LspRuntimeState;
-use crate::app::persistence::RestoreContext;
-use crate::app::persistence::RestorePrepared;
-use crate::app::persistence::RestoreReady;
-use crate::app::persistence::RestoreUpdate;
-use crate::app::picker::MatcherSource;
-use crate::app::picker::PickerContent;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
-use crate::app::terminal::TerminalInput;
-use crate::app::terminal::TerminalUpdate;
-use crate::app::tools::LspRuntimeSource;
-use crate::app::tools::ToolInstall;
-use crate::app::tools::lsp_runtime_source_allowed_on_host;
-use crate::app::tools::nix_workspace_shell_for_host;
-use crate::app::tools::tool_kind_key;
-use crate::app::windows::EditorCloseSave;
-use crate::app::windows::EditorCloseStep;
-use crate::app::windows::EditorCloseTarget;
-use crate::app::windows::EditorWindowBridge;
-use crate::app::windows::LayoutPlanError;
-use crate::app::windows::NativeDescriptions;
-use crate::app::windows::NativeSurfaceSignature;
-use crate::app::windows::NativeSurfaceTarget;
-use crate::app::windows::ProjectionRequest;
-use crate::app::windows::RestoreWindowPolicy;
-use crate::app::windows::WindowCandidate;
 use crate::app::windows::WindowSession;
 pub(super) mod commands;
 use crate::app::debugger::DebugSession;
@@ -126,16 +84,7 @@ pub(super) mod agent;
 mod remote;
 mod settings;
 
-#[cfg(test)]
-use crate::app::persistence::capture_persisted_layout;
-use crate::app::syntax::IndentError;
-use crate::app::syntax::SyntaxDocument;
 use crate::app::syntax::SyntaxSession;
-use crate::app::windows::rect_contains_point;
-use crate::app::tasks::AdapterContext;
-use crate::app::tasks::RunningTask;
-#[cfg(test)]
-use crate::app::persistence::restore::build_restored_layout;
 
 pub use commands::AppEffect;
 
@@ -146,15 +95,11 @@ pub use commands::PickerKind;
 pub use commands::PromptMove;
 
 pub use commands::register_app_commands;
-use commands::DiagnosticFilter;
 
 use std::collections::BTreeMap;
 
-use std::collections::BTreeSet;
 
-use std::collections::HashSet;
 
-use std::path::Path;
 
 use std::path::PathBuf;
 
@@ -162,177 +107,47 @@ use std::time::Duration;
 
 use std::time::Instant;
 
-use crate::app::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
 use crate::config::LoadedConfig;
-use crate::debugger::DapControl;
-use crate::debugger::DapEvent;
-use crate::debugger::DapResponse;
-use crate::debugger::DapSourceBreakpoint;
-use crate::editor::input::InputAction;
-use crate::editor::input::KeyEvent;
-use crate::editor::input::MappingResolution;
-use crate::editor::input::parse_ex;
 use crate::editor::text::BufferRevision;
-use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
-use crate::editor::text::DisplayWidthPolicy;
-use crate::editor::text::PositionCodec;
-use crate::editor::text::PositionEncoding;
-use crate::editor::text::TextBuffer;
-use crate::editor::text::TextEdit;
-use crate::editor::text::TextEditSet;
-use crate::editor::ArgumentSchema;
 use crate::editor::CommandError;
-use crate::editor::CommandId;
 use crate::editor::CommandInvocation;
-use crate::editor::CommandOutcome;
 use crate::editor::CommandRegistry;
-use crate::editor::CommandSource;
-use crate::editor::CommandSpec;
-use crate::editor::CommandValue;
-use crate::editor::ContextRequirement;
 use crate::editor::EditorMode;
-use crate::editor::EditorOperation;
 use crate::editor::EditorState;
-use crate::editor::EditorTransaction;
-use crate::editor::FocusDirection;
 use crate::editor::InvocationSource;
-use crate::editor::Precondition;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
-use crate::editor::TransactionId;
-use crate::editor::UndoPolicy;
 use crate::editor::ViewId;
-use crate::editor::register_builtin_commands;
 
-use crate::plugins::PluginEvent;
 
-use crate::plugins::PluginLimits;
 
-use crate::plugins::PluginLoadId;
 
-use crate::plugins::PluginStatus;
-use crate::files::ExplorerMutation;
-use crate::files::ExplorerWatchService;
-use crate::files::ResourceIntentKind;
 use crate::files::VfsError;
-use crate::files::VfsResult;
-use crate::files::VfsWorker;
-use crate::files::WorkspaceFilePolicy;
-use crate::files::WorkspaceSearchMatch;
-use crate::files::WorkspaceSearchPolicy;
-use crate::language::lsp::LspDocument;
-use crate::language::lsp::LspEvent;
 use crate::language::lsp::LspFeature;
-use crate::language::lsp::LspFeatureResult;
-use crate::language::lsp::LspMarkupContent;
-use crate::language::lsp::LspMarkupKind;
-use crate::language::lsp::LspProgressKind;
-use crate::language::lsp::LspWorkspaceEdit;
-use crate::language::lsp::file_uri;
-use crate::language::lsp::language_id_for_path;
-use crate::language::lsp::path_from_file_uri;
-use crate::language::syntax::SyntaxSupport;
-use crate::language::syntax::builtin_languages;
-use crate::language::syntax::language_for_document;
-use crate::persistence::PersistedLargeFileOverride;
-use crate::persistence::PersistedLocation;
-use crate::persistence::PersistedSession;
-use crate::persistence::PersistedState;
-use crate::persistence::PersistedWindowRule;
-use crate::persistence::PersistencePolicy;
-use crate::persistence::PersistenceService;
-use crate::persistence::STATE_VERSION;
 use crate::process::PtyId;
-use crate::telemetry::LiveCrashSnapshot;
 use crate::telemetry::LogLevel;
-use crate::tools::PackageOperation;
-use crate::tools::RegistryRequest;
-use crate::tools::RegistryResult;
-use crate::tools::RegistryService;
-use crate::tools::ToolDefinition;
-use crate::tools::ToolKind;
-use crate::tools::ToolOperation;
-use crate::tools::ToolStatus;
-use crate::tools::discover_executable;
-use crate::tools::is_nixos_host;
-use crate::tools::managed_formatter;
-use crate::tools::managed_tool_executable;
-use crate::tools::nix_lsp_launch_environment;
-use crate::tools::nix_lsp_profile_installed;
-use crate::ui::DocumentationMarkupKind;
-use crate::ui::DocumentationPopupKind;
-use crate::ui::EditorWindowBinding as UiEditorWindowBinding;
-use crate::ui::EditorWindowLayoutState;
-use crate::ui::KeyInputKind;
-use crate::ui::NativeSurfaceWindowBinding;
-use crate::ui::PickerSurfaceKind;
-use crate::ui::PromptKind;
 use crate::ui::TerminalError;
 use crate::ui::TerminalOptions;
-use crate::ui::TerminalPanelMode;
 use crate::ui::TerminalSession;
-use crate::ui::ToolMenuRow;
-use crate::ui::ToolMenuState;
-use crate::ui::ToolRuntimeOption;
-use crate::ui::ToolRuntimePickerState;
 use crate::ui::UiEvent;
-use crate::ui::UiFold;
-use crate::ui::UiInlayHint;
 use crate::ui::UiState;
-use crate::ui::UiSyntaxSpan;
-use crate::ui::VisualRowAnchor;
-use crate::ui::VisualRowModel;
-use crate::ui::active_editor_pane_viewport;
-use crate::ui::editor_pane_viewport_at;
-use crate::ui::editor_state_content_width;
-use crate::ui::editor_state_gutter_width;
-use crate::ui::explorer_panel_width;
 use crate::ui::render as render_frame;
-use crate::ui::screen_foot_rows;
-use crate::ui::snap_display_column;
-use crate::ui::snap_display_column_forward;
-use crate::ui::terminal_panel_geometry;
-use crate::ui::terminal_tab_at_column;
-use crate::ui::workspace_top_rows;
-use crate::workspace::DiagnosticOwner;
-use crate::workspace::ExecutionSource;
-use crate::app::explorer::tree::ExplorerKind;
-use crate::editor::DocumentSnapshot as FileSnapshot;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::workspace::PickerState;
-use crate::files::RootIdentity;
-use crate::workspace::WorkspaceEditDraft;
-use crate::workspace::WorkspaceId;
-use crate::workspace::WorkspaceState;
-use crate::workspace::WorkspaceTrust;
 use thiserror::Error;
 
-use crate::app::plugins::PluginUiInteraction;
 
-use crate::app::plugins::WindowUpdate;
 use crate::app::startup::ApplicationError;
 use crate::app::startup::StartupTarget;
-use crate::app::startup::build_state;
 
-use crate::windows::CompositorProjection;
 
-use crate::windows::DockEdge;
 
-use crate::windows::SpatialDirection;
 
-use crate::windows::WindowPlacement;
 
-use crate::windows::WindowRect;
 
-pub(crate) const EVENT_POLL_MS: u64 = 16;
-pub(crate) const MACRO_RECURSION_LIMIT: usize = 16;
-pub(crate) const MACRO_STEP_LIMIT: usize = 10_000;
-pub(crate) const REPEAT_STEP_LIMIT: usize = 10_000;
-pub(crate) const HALF_PAGE_PERCENT: u8 = 50;
-pub(crate) const FULL_PAGE_PERCENT: u8 = 100;
+pub(in crate::app) const EVENT_POLL_MS: u64 = 16;
+pub(in crate::app) const MACRO_RECURSION_LIMIT: usize = 16;
+pub(in crate::app) const MACRO_STEP_LIMIT: usize = 10_000;
+pub(in crate::app) const REPEAT_STEP_LIMIT: usize = 10_000;
+pub(in crate::app) const HALF_PAGE_PERCENT: u8 = 50;
+pub(in crate::app) const FULL_PAGE_PERCENT: u8 = 100;
 
 /// A value that counts how often it was borrowed mutably. The main loop rebuilds the frame
 /// only when the editor or UI state was touched (or input arrived), so an idle editor does

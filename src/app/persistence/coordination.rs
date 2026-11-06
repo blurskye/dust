@@ -3,21 +3,21 @@ use crate::app::persistence::STATE_ENTRY_LIMIT;
 use crate::app::persistence::STATE_MAXIMUM_BYTES;
 use crate::ui::render::SCRATCH_LABEL;
 use crate::app::App;
-use crate::app::NativeDescriptions;
-use crate::app::PathBuf;
-use crate::app::PersistedLargeFileOverride;
-use crate::app::PersistedSession;
-use crate::app::PersistedState;
-use crate::app::PersistedWindowRule;
-use crate::app::PersistencePolicy;
-use crate::app::PromptKind;
-use crate::app::RestoreContext;
-use crate::app::RestorePrepared;
-use crate::app::RestoreReady;
-use crate::app::RestoreWindowPolicy;
-use crate::app::STATE_VERSION;
-use crate::app::WindowCandidate;
-use crate::app::mode_name_large;
+use crate::app::windows::NativeDescriptions;
+use std::path::PathBuf;
+use crate::persistence::PersistedLargeFileOverride;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistedWindowRule;
+use crate::persistence::PersistencePolicy;
+use crate::ui::PromptKind;
+use crate::app::persistence::RestoreContext;
+use crate::app::persistence::RestorePrepared;
+use crate::app::persistence::RestoreReady;
+use crate::app::windows::RestoreWindowPolicy;
+use crate::persistence::STATE_VERSION;
+use crate::app::windows::WindowCandidate;
+use crate::app::documents::mode_name_large;
 
 
 

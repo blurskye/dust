@@ -1,13 +1,13 @@
 use crate::app::search::MAXIMUM_PICKER_ITEMS;
-use crate::app::CommandInvocation;
+use crate::editor::CommandInvocation;
 use crate::app::App;
-use crate::app::PickerAction;
-use crate::app::PickerContent;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerOrigin;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
+use crate::workspace::PickerAction;
+use crate::app::picker::PickerContent;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
 use crate::app::command;
 
 
@@ -267,12 +267,20 @@ Ok(())
 
 
 
+
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_help_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::HelpForForm => self.open_form_help(),
-            AppEffect::HelpContextual => self.open_contextual_help(),
-            AppEffect::HelpCommandReference => self.open_command_reference(),
+AppEffect::HelpForForm => self.open_form_help(),
+AppEffect::HelpContextual => self.open_contextual_help(),
+AppEffect::HelpCommandReference => self.open_command_reference(),
             effect => return Err(effect),
         }
         Ok(())

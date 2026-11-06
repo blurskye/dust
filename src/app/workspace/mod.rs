@@ -13,7 +13,7 @@ use crate::workspace::WorkspaceState;
 use crate::workspace::WorkspaceTrust;
 use crate::workspace::WorkspaceTrustService;
 
-pub(crate) const TRUST_QUEUE_CAPACITY: usize = 8;
+pub(in crate::app) const TRUST_QUEUE_CAPACITY: usize = 8;
 
 pub(in crate::app) use discovery::DiscoveryKind;
 
@@ -583,9 +583,9 @@ impl WorkspaceSession {
                             self.identity_ready = true;
                             self.changed();
                         }
-                        Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
+                        Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
                     },
-                    Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
+                    Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
                 }
                 self.reconcile_trust();
             }
@@ -633,7 +633,7 @@ impl WorkspaceSession {
                                         path: identity.canonical_path,
                                         old,
                                     }),
-                                    Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
+                                    Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
                                 }
                             }
                             None => match self.state.add_root(name, identity.clone()) {
@@ -643,7 +643,7 @@ impl WorkspaceSession {
                                     updates
                                         .push(WorkspaceUpdate::RootAdded(identity.canonical_path));
                                 }
-                                Err(e) => updates.push(WorkspaceUpdate::Failure(e.into())),
+                                Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
                             },
                         }
                     }

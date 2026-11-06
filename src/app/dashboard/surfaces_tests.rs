@@ -1,5 +1,5 @@
 use crate::app::tests::*;
-use crate::app::AgentCommand;
+use crate::app::agent::commands::AgentCommand;
 
 
 
@@ -171,3 +171,12 @@ pub(in crate::app) fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_an
         Some(agent.0)
     );
 }
+use crate::app::configuration::validate_configured_commands;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::text::TextBuffer;
+use crate::windows::WindowPlacement;
+use std::thread;
+
+use crate::app::AppEffect;
+

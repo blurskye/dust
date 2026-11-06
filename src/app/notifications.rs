@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 use crate::app::App;
-use crate::app::Path;
+use std::path::Path;
 
 
 
@@ -263,5 +263,55 @@ impl App {
 
     pub(in crate::app) fn show_error(&mut self, error: impl std::fmt::Display) {
         self.notify_message(error.to_string(), true);
+    }
+}
+use crate::app::commands::AppEffect;
+
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+
+
+impl App {
+    pub(in crate::app) fn process_notifications_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+AppEffect::NotificationHistory => {
+                let items = self
+                    .notices
+                    .history()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, (error, message))| {
+                        (
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("notification:{index}")),
+                                label: message.clone(),
+                                detail: if *error {
+                                    "error".into()
+                                } else {
+                                    "info".into()
+                                },
+                                source: "application".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Notice {
+                                title: "Notification".into(),
+                                text: message.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                self.clear_notice();
+                self.install_picker("Notifications".into(), items);
+            }
+AppEffect::NotificationDismiss => {
+                self.clear_notice();
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
     }
 }

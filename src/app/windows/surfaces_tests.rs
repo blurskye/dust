@@ -10,7 +10,7 @@ pub(in crate::app) fn placement_swap_moves_editing_focus_to_the_visible_editor()
         .open_text(TextBuffer::from_text("oldest"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let (_, first_view) = app
@@ -18,7 +18,7 @@ pub(in crate::app) fn placement_swap_moves_editing_focus_to_the_visible_editor()
         .open_text(TextBuffer::from_text("first"), None)
         .unwrap();
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let second_view = app.state.active_view.unwrap();
@@ -67,7 +67,7 @@ pub(in crate::app) fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscre
         .unwrap();
     app.set_dashboard_visibility(false);
     let first_pane = app.state.tabs[app.state.active_tab.unwrap()].focused;
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let second_view = app.state.active_view.unwrap();
@@ -120,7 +120,7 @@ pub(in crate::app) fn fullscreen_placement_swaps_keep_graph_and_editor_focus_tog
         app.set_dashboard_visibility(false);
         app.reconcile_editor_windows();
         let original = app.window_session.graph().focused().unwrap();
-        app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+        app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
             crate::editor::Axis::Horizontal,
         )));
         let clone_view = app.state.active_view.unwrap();
@@ -178,7 +178,7 @@ pub(in crate::app) fn tiled_window_resize_accepts_the_minimum_delta() {
         .open_text(TextBuffer::from_text("editor"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     app.resize_graph_window("focused", i16::MIN).unwrap();
@@ -461,7 +461,7 @@ pub(in crate::app) fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_f
         .expect("shared split");
     app.state.new_tab().expect("shared tab");
     let tab_count = app.state.tabs.len();
-    app.apply_layout_action(crate::app::LayoutAction::CloseTab);
+    app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
     assert_eq!(
         app.state.tabs.len(),
         tab_count - 1,
@@ -505,7 +505,7 @@ pub(in crate::app) fn exact_dirty_window_close_rejects_stale_focus_then_discards
     let target = format!("window:{}", window.0);
 
     app.close_graph_window(&target).unwrap();
-    app.apply_layout_action(crate::app::LayoutAction::FocusPane(-1));
+    app.apply_layout_action(crate::app::windows::LayoutAction::FocusPane(-1));
     let graph = app.window_session.graph().clone();
     app.submit_prompt();
     assert_eq!(app.window_session.graph(), &graph);
@@ -569,12 +569,12 @@ pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_pu
         .clone();
     app.language.fixture_session(
         "discarded".into(),
-        crate::app::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root: app.workspace.active_root().unwrap(),
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable: crate::tools::discover_executable("false").unwrap(),
                 managed: false,
             },
@@ -601,7 +601,7 @@ pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_pu
     app.reconcile_editor_windows();
     let tabs = app.state.tabs.len();
 
-    app.apply_layout_action(crate::app::LayoutAction::CloseTab);
+    app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
     assert_eq!(app.state.tabs.len(), tabs);
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
@@ -656,7 +656,7 @@ pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_pu
         app.state.panes.len(),
         app.state.views.len(),
     );
-    app.apply_layout_action(crate::app::LayoutAction::CloseTab);
+    app.apply_layout_action(crate::app::windows::LayoutAction::CloseTab);
     app.submit_prompt();
     assert!(
         app.input.prompt().is_some(),
@@ -818,8 +818,8 @@ pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_on
         .focused()
         .expect("initial window");
 
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::Split(crate::editor::Axis::Horizontal),
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::Split(crate::editor::Axis::Horizontal),
     ));
     assert_eq!(app.state.panes.len(), 2);
     assert_eq!(
@@ -860,7 +860,7 @@ pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_on
         .expect("initial rect")
         .rect;
     let focused_rect = before_swap.window(focused).expect("focused rect").rect;
-    app.process_effect(crate::app::AppEffect::WindowSwap {
+    app.process_effect(crate::app::commands::AppEffect::WindowSwap {
         first: format!("window:{}", initial_window.0),
         second: format!("window:{}", focused.0),
     });
@@ -894,14 +894,14 @@ pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_on
     assert!(width_after_directional > width_before_directional);
 
     let before_resize = app.window_session.graph().clone();
-    app.process_effect(crate::app::AppEffect::WindowResize {
+    app.process_effect(crate::app::commands::AppEffect::WindowResize {
         target: format!("window:{}", focused.0),
         amount: 50,
     });
     assert_ne!(app.window_session.graph(), &before_resize);
     assert_eq!(app.state.panes.len(), 2);
 
-    app.process_effect(crate::app::AppEffect::WindowClose(format!(
+    app.process_effect(crate::app::commands::AppEffect::WindowClose(format!(
         "window:{}",
         focused.0
     )));
@@ -911,7 +911,7 @@ pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_on
     let active_view_before_rejected = app.state.active_view;
     let pane_count_before_rejected = app.state.panes.len();
     let graph_before_rejected = app.window_session.graph().clone();
-    app.process_effect(crate::app::AppEffect::WindowClose("focused".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowClose("focused".into()));
     assert_eq!(app.state.window_revision(), state_revision_before_rejected);
     assert_eq!(app.state.active_view, active_view_before_rejected);
     assert_eq!(app.state.panes.len(), pane_count_before_rejected);
@@ -937,7 +937,7 @@ pub(in crate::app) fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_o
         width: 35,
         height: 10,
     });
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let pane = app.state.tabs[app.state.active_tab.expect("tab")].focused;
@@ -1011,7 +1011,7 @@ pub(in crate::app) fn editor_window_swap_rejects_mixed_and_cross_tab_targets_ato
         .open_text(TextBuffer::from_text("editor"), None)
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     app.open_explorer();
@@ -1050,7 +1050,7 @@ pub(in crate::app) fn editor_window_swap_rejects_mixed_and_cross_tab_targets_ato
     assert!(app.ui.notification_error);
 
     let old_editor = editor_windows[0];
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::NewTab));
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::NewTab));
     let current_editor = app
         .window_session
         .graph()
@@ -1212,7 +1212,7 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         .expect("terminal")
         .placement;
 
-    app.process_effect(crate::app::AppEffect::WindowSwap {
+    app.process_effect(crate::app::commands::AppEffect::WindowSwap {
         first: "explorer".into(),
         second: "terminal".into(),
     });
@@ -1234,12 +1234,12 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
             .placement,
         original_explorer
     );
-    app.process_effect(crate::app::AppEffect::WindowSwap {
+    app.process_effect(crate::app::commands::AppEffect::WindowSwap {
         first: "explorer".into(),
         second: "terminal".into(),
     });
 
-    app.process_effect(crate::app::AppEffect::WindowFullscreen(
+    app.process_effect(crate::app::commands::AppEffect::WindowFullscreen(
         "explorer".into(),
     ));
     let terminal_before = app
@@ -1248,7 +1248,7 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         .window(terminal.window)
         .expect("terminal")
         .placement;
-    app.process_effect(crate::app::AppEffect::WindowFullscreen(
+    app.process_effect(crate::app::commands::AppEffect::WindowFullscreen(
         "terminal".into(),
     ));
     assert_eq!(
@@ -1326,12 +1326,12 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
     app.place_graph_window("terminal", original_terminal)
         .unwrap();
 
-    app.process_effect(crate::app::AppEffect::WindowDock {
+    app.process_effect(crate::app::commands::AppEffect::WindowDock {
         target: "explorer".into(),
         edge: "left".into(),
         size: 31,
     });
-    app.process_effect(crate::app::AppEffect::WindowHide("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide("explorer".into()));
     assert_eq!(
         app.window_session
             .graph()
@@ -1340,7 +1340,7 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
             .placement,
         WindowPlacement::Hidden
     );
-    app.process_effect(crate::app::AppEffect::WindowShow("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowShow("explorer".into()));
     assert_eq!(
         app.window_session
             .graph()
@@ -1385,13 +1385,13 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
     let height_before = app.window_session.terminal_height();
     assert!(
         app.resize_native_window_direction(
-            crate::app::NativeSurfaceTarget::Terminal(7),
+            crate::app::windows::NativeSurfaceTarget::Terminal(7),
             crate::editor::FocusDirection::Up
         )
         .is_err()
     );
     assert_eq!(app.window_session.terminal_height(), height_before);
-    app.process_effect(crate::app::AppEffect::WindowHide("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide("terminal".into()));
     assert_eq!(app.window_session.graph(), &graph_stale);
     app.reconcile_editor_windows();
     assert!(app.compositor_projection().is_some());
@@ -1410,7 +1410,7 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
     // still refuses the operation and preserves graph atomicity.
     assert!(app.compositor_projection().is_some());
     app.window_session.invalidate();
-    app.process_effect(crate::app::AppEffect::WindowHide("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide("terminal".into()));
     assert_eq!(app.window_session.graph(), &before_stale);
     assert!(app.ui.notification_error);
     app.reconcile_editor_windows();
@@ -1426,7 +1426,7 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         idle_reconciliations
     );
 
-    app.process_effect(crate::app::AppEffect::WindowClose("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowClose("explorer".into()));
     assert!(
         app.window_session
             .graph()
@@ -1586,16 +1586,16 @@ pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back()
         .unwrap();
     app.set_dashboard_visibility(false);
     let origin_tab = app.state.active_tab.expect("editor tab");
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     let origin_view = app.state.active_view.expect("split view");
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Zoom));
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
     assert!(app.state.is_zoomed());
     assert_ne!(app.state.active_tab, Some(origin_tab));
     let zoomed = app.state.active_view.unwrap();
     app.state.views[zoomed].cursor = crate::editor::text::ByteOffset(4);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Zoom));
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
     assert!(!app.state.is_zoomed());
     assert_eq!(app.state.active_tab, Some(origin_tab));
     assert_eq!(app.state.active_view, Some(origin_view));
@@ -1618,7 +1618,7 @@ pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back()
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
     assert!(app.configuration.settings().editor.git_signs.enabled);
 
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Zoom));
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
     let zoomed_tab = app.state.active_tab;
     app.process_effect(AppEffect::Zen);
     app.process_effect(AppEffect::Zen);
@@ -1627,18 +1627,46 @@ pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back()
         "zen must preserve a pre-existing zoom"
     );
     assert_eq!(app.state.active_tab, zoomed_tab);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Zoom));
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Zoom));
 
     let wrap = app.configuration.settings().editor.wrap;
     app.process_effect(AppEffect::ViewToggle(
-        crate::app::ViewToggle::Wrap,
+        crate::app::configuration::ViewToggle::Wrap,
     ));
     assert_eq!(app.configuration.settings().editor.wrap, !wrap);
     app.process_effect(AppEffect::ViewToggle(
-        crate::app::ViewToggle::LineNumbers,
+        crate::app::configuration::ViewToggle::LineNumbers,
     ));
     app.process_effect(AppEffect::ViewToggle(
-        crate::app::ViewToggle::LineNumbers,
+        crate::app::configuration::ViewToggle::LineNumbers,
     ));
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
 }
+use crate::app::language::LspLaunch;
+use crate::app::language::LspRuntimeState;
+use crate::app::windows::NativeSurfaceTarget;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::FocusDirection;
+use crate::process::PtyId;
+use crate::tools::discover_executable;
+use crate::ui::KeyInputKind;
+use crate::ui::PromptKind;
+use crate::ui::UiEvent;
+use crate::ui::editor_state_gutter_width;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::collections::HashMap;
+use std::fs;
+use std::thread;
+use crate::ui::PtyScreen;
+use crate::ui::active_pane_viewport;
+use crate::ui::render;
+use crate::app::AppEffect;
+

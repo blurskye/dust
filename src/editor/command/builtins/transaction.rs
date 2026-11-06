@@ -37,7 +37,7 @@ use crate::editor::transaction::Precondition;
 
 use crate::editor::command::CommandError;
 
-use crate::editor::command::CommandInvocation;
+use crate::editor::CommandInvocation;
 
 use crate::editor::command::builtins::motion::first_nonblank;
 

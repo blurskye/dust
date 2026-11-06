@@ -1,19 +1,18 @@
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
-use crate::app::Instant;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use std::time::Instant;
 use crate::app::App;
-use crate::app::PositionCodec;
-use crate::app::Precondition;
-use crate::app::RestoreContext;
-use crate::app::TextBuffer;
-use crate::app::UndoPolicy;
-use crate::app::DocumentEvent;
+use crate::editor::text::PositionCodec;
+use crate::editor::Precondition;
+use crate::app::persistence::RestoreContext;
+use crate::editor::text::TextBuffer;
+use crate::editor::UndoPolicy;
+use crate::app::documents::DocumentEvent;
 use crate::app::InteractiveError;
-use crate::app::RestoreUpdate;
-use crate::app::VfsResult;
-use crate::app::command;
+use crate::app::persistence::RestoreUpdate;
+use crate::files::VfsResult;
 use std::ops::ControlFlow::Break;
 use std::ops::ControlFlow::Continue;
 
@@ -646,24 +645,24 @@ impl App {
 }
 
 use crate::ui::render::SCRATCH_LABEL;
-use crate::app::AppEffect;
-use crate::app::EditorCloseSave;
-use crate::app::LspDocument;
-use crate::app::LspFeature;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::TextEdit;
+use crate::app::commands::AppEffect;
+use crate::app::windows::EditorCloseSave;
+use crate::language::lsp::LspDocument;
+use crate::language::lsp::LspFeature;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::editor::text::TextEdit;
 use crate::app::TrustedAction;
-use crate::app::language_id_for_path;
-use crate::app::managed_formatter;
-use crate::app::BufferRevision;
-use crate::app::Duration;
-use crate::app::TextEditSet;
-use crate::app::ViewId;
+use crate::language::lsp::language_id_for_path;
+use crate::tools::managed_formatter;
+use crate::editor::text::BufferRevision;
+use std::time::Duration;
+use crate::editor::text::TextEditSet;
+use crate::editor::ViewId;
 
 
 
@@ -976,7 +975,7 @@ impl App {
         };
         self.format_on_save.insert(
             buffer,
-            super::FormatOnSave {
+            crate::app::FormatOnSave {
                 request: None,
                 buffer,
                 source: self.state.buffers[buffer].text.source_version(),
@@ -1730,7 +1729,7 @@ impl App {
 
 /// Create a user settings or keymaps file if it is missing or empty. A new file starts with a
 /// few commented examples rather than nothing.
-pub(super) fn create_user_file(path: &std::path::Path) -> std::io::Result<()> {
+pub(in crate::app) fn create_user_file(path: &std::path::Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

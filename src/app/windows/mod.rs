@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::ui::CompositorLayoutState;
 use crate::ui::NativeSurfaceWindowBinding;
 use crate::ui::PickerUiState;
-use crate::ui::geometry::SurfaceContentGeometry;
+use crate::ui::render::SurfaceContentGeometry;
 use crate::ui::render::documentation::documentation_page_rows;
 use crate::ui::render::explorer::explorer_body_geometry;
 use crate::ui::render::picker::picker_content_geometry;
@@ -55,7 +55,6 @@ pub(super) struct ProjectionRequest {
     pub protected: Option<WindowRect>,
 }
 
-pub(in crate::app) use crate::editor::EditorTopology;
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct TerminalGeometrySource {

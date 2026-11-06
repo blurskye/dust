@@ -1,8 +1,8 @@
 
-use crate::app::AppEffect;
+use crate::app::commands::AppEffect;
 use crate::app::App;
-use crate::app::PackageOperation;
-use crate::app::RegistryRequest;
+use crate::tools::PackageOperation;
+use crate::tools::RegistryRequest;
 use crate::app::TrustedAction;
 
 
@@ -15,7 +15,7 @@ use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
-use crate::app::commands::PathBuf;
+use std::path::PathBuf;
 
 pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
 
@@ -143,10 +143,19 @@ Ok(())
 }
 
 
+
+
+
+
+
+
+
+
+
 impl App {
     pub(in crate::app) fn process_tools_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
-            AppEffect::PackageInstall {
+AppEffect::PackageInstall {
                 package_manifest,
                 plugin_manifest,
                 component,
@@ -163,10 +172,10 @@ impl App {
                     });
                 }
             }
-            AppEffect::PackageRegistrySearch(query) => {
+AppEffect::PackageRegistrySearch(query) => {
                 self.request_registry(RegistryRequest::Search { query }, false)
             }
-            AppEffect::PackageRegistryShow {
+AppEffect::PackageRegistryShow {
                 publisher,
                 name,
                 version,
@@ -178,7 +187,7 @@ impl App {
                 },
                 false,
             ),
-            AppEffect::PackageRegistryInstall {
+AppEffect::PackageRegistryInstall {
                 publisher,
                 name,
                 version,
@@ -193,22 +202,22 @@ impl App {
                     })
                 }
             }
-            AppEffect::PackageList => {
+AppEffect::PackageList => {
                 if let Err(error) = self.extension.request_package(PackageOperation::List) {
                     self.show_error(error)
                 }
             }
-            AppEffect::PackageVerify => {
+AppEffect::PackageVerify => {
                 if let Err(error) = self.extension.request_package(PackageOperation::Verify) {
                     self.show_error(error)
                 }
             }
-            AppEffect::PackageRollback => {
+AppEffect::PackageRollback => {
                 if let Err(error) = self.extension.request_package(PackageOperation::Rollback) {
                     self.show_error(error)
                 }
             }
-            AppEffect::PackageRemove(name) => {
+AppEffect::PackageRemove(name) => {
                 if let Err(error) = self
                     .extension
                     .request_package(PackageOperation::Remove(name))
@@ -216,7 +225,7 @@ impl App {
                     self.show_error(error)
                 }
             }
-            AppEffect::PackageGarbageCollect => {
+AppEffect::PackageGarbageCollect => {
                 if let Err(error) = self
                     .extension
                     .request_package(PackageOperation::GarbageCollect { maximum: 256 })
@@ -224,9 +233,8 @@ impl App {
                     self.show_error(error)
                 }
             }
-            AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
-            // Esc on a filtered list clears the search before it closes the manager.
-            AppEffect::CloseToolMenu
+AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
+AppEffect::CloseToolMenu
                 if self
                     .ui
                     .tool_menu
@@ -235,9 +243,9 @@ impl App {
             {
                 self.search_tool_menu(None, false);
             }
-            AppEffect::CloseToolMenu => self.close_tool_menu(),
-            AppEffect::ToolSearch => self.search_tool_menu(None, true),
-            AppEffect::ToolSearchInsert(text) => {
+AppEffect::CloseToolMenu => self.close_tool_menu(),
+AppEffect::ToolSearch => self.search_tool_menu(None, true),
+AppEffect::ToolSearchInsert(text) => {
                 let query = self
                     .ui
                     .tool_menu
@@ -245,7 +253,7 @@ impl App {
                     .map(|menu| format!("{}{text}", menu.query));
                 self.search_tool_menu(query, true);
             }
-            AppEffect::ToolSearchDelete => {
+AppEffect::ToolSearchDelete => {
                 let query = self.ui.tool_menu.as_ref().map(|menu| {
                     let mut query = menu.query.clone();
                     query.pop();
@@ -253,19 +261,19 @@ impl App {
                 });
                 self.search_tool_menu(query, true);
             }
-            AppEffect::ToolSearchStop { keep } => {
+AppEffect::ToolSearchStop { keep } => {
                 let query = self.ui.tool_menu.as_ref().map(|menu| menu.query.clone());
                 self.search_tool_menu(query.filter(|_| keep), false);
             }
-            AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
-            AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
-            AppEffect::RefreshTools => self.refresh_tools(),
-            AppEffect::ActivateTool => self.activate_selected_tool(),
-            AppEffect::InstallSelectedTool => self.install_selected_tool(),
-            AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
-            AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
-            AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
-            AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
+AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
+AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
+AppEffect::RefreshTools => self.refresh_tools(),
+AppEffect::ActivateTool => self.activate_selected_tool(),
+AppEffect::InstallSelectedTool => self.install_selected_tool(),
+AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
+AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
+AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
+AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
             effect => return Err(effect),
         }
         Ok(())

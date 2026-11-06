@@ -1,31 +1,30 @@
-use crate::app::AppEffect;
-use crate::app::ByteOffset;
-use crate::app::ByteRange;
-use crate::app::DocumentationPopupKind;
-use crate::app::EditorOperation;
-use crate::app::EditorTransaction;
+use crate::app::commands::AppEffect;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::ui::DocumentationPopupKind;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
 use crate::app::App;
-use crate::app::LspMarkupContent;
-use crate::app::LspMarkupKind;
-use crate::app::MatcherSource;
-use crate::app::Path;
-use crate::app::PathBuf;
-use crate::app::PickerAction;
-use crate::app::PickerItem;
-use crate::app::PickerItemId;
-use crate::app::PickerPayload;
-use crate::app::PickerSurfaceKind;
-use crate::app::PositionEncoding;
-use crate::app::Precondition;
-use crate::app::PromptKind;
-use crate::app::TextEdit;
-use crate::app::WorkspaceTrust;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+use crate::app::picker::MatcherSource;
+use std::path::Path;
+use std::path::PathBuf;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::app::picker::PickerPayload;
+use crate::ui::PickerSurfaceKind;
+use crate::editor::text::PositionEncoding;
+use crate::editor::Precondition;
+use crate::ui::PromptKind;
+use crate::editor::text::TextEdit;
+use crate::workspace::WorkspaceTrust;
 use crate::app::git::GitHunkAction;
-use crate::app::RegisterShape;
-use crate::app::RegisterValue;
-use crate::app::BufferRevision;
-use crate::app::TextEditSet;
-use std::ops::ControlFlow::Continue;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
+use crate::editor::text::BufferRevision;
+use crate::editor::text::TextEditSet;
 
 
 
@@ -1513,4 +1512,11 @@ impl App {
         };
         self.switch_workspace_root(path);
     }
+}
+
+fn first_conflict_line(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.lines().position(|line| line.starts_with("<<<<<<<")))
+        .unwrap_or(0)
 }

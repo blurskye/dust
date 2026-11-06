@@ -41,7 +41,7 @@ pub(in crate::app) fn session_restore_reads_more_files_than_the_document_queue_c
     app.set_dashboard_visibility(false);
     for index in 0..12 {
         if index > 0 {
-            app.process_effect(AppEffect::Layout(crate::app::LayoutAction::NewTab));
+            app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::NewTab));
         }
         let path = app
             .state
@@ -174,19 +174,19 @@ pub(in crate::app) fn session_restore_keeps_tab_order_after_the_first_tab_was_cl
     app.set_dashboard_visibility(false);
     app.start_open(paths[0].clone());
     wait_vfs(&mut app);
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::NewTab,
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::NewTab,
     ));
     app.start_open(paths[1].clone());
     wait_vfs(&mut app);
     let session = app.capture_session().expect("captured session");
 
     // Closing the first tab frees the slot that a restore would otherwise fill last.
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::FocusTab(-1),
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::FocusTab(-1),
     ));
-    app.process_effect(crate::app::AppEffect::Layout(
-        crate::app::LayoutAction::CloseTab,
+    app.process_effect(crate::app::commands::AppEffect::Layout(
+        crate::app::windows::LayoutAction::CloseTab,
     ));
     app.start_open(paths[2].clone());
     wait_vfs(&mut app);
@@ -575,7 +575,7 @@ pub(in crate::app) fn a_restored_session_keeps_the_buffer_line_in_window_order()
         .open_text(TextBuffer::from_text("zeta\n"), Some(zeta.clone()))
         .unwrap();
     app.set_dashboard_visibility(false);
-    app.process_effect(AppEffect::Layout(crate::app::LayoutAction::Split(
+    app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
         crate::editor::Axis::Horizontal,
     )));
     app.state
@@ -602,3 +602,19 @@ pub(in crate::app) fn a_restored_session_keeps_the_buffer_line_in_window_order()
         .collect::<Vec<_>>();
     assert_eq!(order, [zeta, alpha]);
 }
+use crate::app::persistence::RestoreContext;
+use std::time::Duration;
+use std::time::Instant;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::editor::CommandInvocation;
+use crate::editor::InvocationSource;
+use crate::persistence::PersistedLocation;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistedWindowRule;
+use std::fs;
+use std::thread;
+use crate::app::AppEffect;
+use crate::persistence::PersistedWindowPlacement;
+

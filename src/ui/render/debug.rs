@@ -11,7 +11,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::ui::render::WindowRect;
+use crate::windows::WindowRect;
 
 /// The width at which inspectors are worth docking on BOTH sides of the source.
 pub(crate) const DEBUG_WIDE_MIN_WIDTH: u16 = 96;
@@ -142,7 +142,7 @@ pub fn debug_pane_tab_at(
 }
 
 /// Long values go on to the next rows, since a value's end is often the part being looked for.
-pub(super) fn wrap_rows(body: &[String], width: u16, grid: &crate::ui::render::CellGrid) -> Vec<String> {
+pub(super) fn wrap_rows(body: &[String], width: u16, grid: &crate::ui::CellGrid) -> Vec<String> {
     let width = usize::from(width).max(3);
     let mut wrapped = Vec::new();
     for line in body {
@@ -297,7 +297,7 @@ pub struct DebugPanesUiState {
 }
 
 /// Cuts text to the width, ending in an ellipsis so a cut line doesn't read as the whole value.
-fn clip(text: &str, width: u16, grid: &crate::ui::render::CellGrid) -> String {
+fn clip(text: &str, width: u16, grid: &crate::ui::CellGrid) -> String {
     let width = usize::from(width);
     if grid.display_width(text) <= width {
         return text.to_owned();
@@ -319,10 +319,10 @@ fn clip(text: &str, width: u16, grid: &crate::ui::render::CellGrid) -> String {
     result
 }
 
-fn fill(grid: &mut crate::ui::render::CellGrid, rect: WindowRect) {
+fn fill(grid: &mut crate::ui::CellGrid, rect: WindowRect) {
     for y in rect.y..rect.y.saturating_add(rect.height) {
         for x in rect.x..rect.x.saturating_add(rect.width) {
-            grid.set_cell(x, y, " ", crate::ui::render::Style::Default);
+            grid.set_cell(x, y, " ", crate::ui::Style::Default);
         }
     }
 }
@@ -339,14 +339,14 @@ fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
     }
 }
 
-fn draw_region(grid: &mut crate::ui::render::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
+fn draw_region(grid: &mut crate::ui::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
     fill(grid, rect);
     let inner = rect.width.saturating_sub(2);
     grid.put_text_clipped(
         rect.x + 1,
         rect.y,
         &clip(title, inner, grid),
-        crate::ui::render::Style::Accent,
+        crate::ui::Style::Accent,
         rect.x.saturating_add(rect.width),
     );
     for (index, line) in body
@@ -362,7 +362,7 @@ fn draw_region(grid: &mut crate::ui::render::CellGrid, rect: WindowRect, title: 
             rect.x + 1,
             y,
             &clip(line, inner, grid),
-            crate::ui::render::Style::Muted,
+            crate::ui::Style::Muted,
             rect.x.saturating_add(rect.width),
         );
     }
@@ -433,7 +433,7 @@ pub(crate) fn render_debug_panes(
                         tab_x,
                         tab_y,
                         &label,
-                        crate::ui::render::Style::Default,
+                        crate::ui::Style::Default,
                         strip.x.saturating_add(strip.width),
                     );
                     x = tab_x.saturating_add(label.chars().count() as u16 + 1);
@@ -447,7 +447,7 @@ pub(crate) fn render_debug_panes(
                         x,
                         y,
                         NEXT_PANE_HINT,
-                        crate::ui::render::Style::Muted,
+                        crate::ui::Style::Muted,
                         strip.x.saturating_add(strip.width),
                     );
                 }
@@ -476,7 +476,7 @@ pub(crate) fn render_debug_panes(
                         strip.x + 1,
                         row,
                         &clip(line, inner, &frame.grid),
-                        crate::ui::render::Style::Muted,
+                        crate::ui::Style::Muted,
                         strip.x.saturating_add(strip.width),
                     );
                 }
@@ -491,9 +491,9 @@ mod tests {
 
     #[test]
     fn wide_inspector_rows_stay_inside_their_region() {
-        let mut grid = crate::ui::render::CellGrid::new_with_policy(80, 10, "�", "◌", true);
+        let mut grid = crate::ui::CellGrid::new_with_policy(80, 10, "�", "◌", true);
         for x in 30..80 {
-            grid.set_cell(x, 1, "x", crate::ui::render::Style::Default);
+            grid.set_cell(x, 1, "x", crate::ui::Style::Default);
         }
         let rect = WindowRect {
             x: 0,
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn narrow_wrapping_leaves_room_for_wide_graphemes() {
         for wide in [false, true] {
-            let grid = crate::ui::render::CellGrid::new_with_policy(3, 10, "�", "◌", wide);
+            let grid = crate::ui::CellGrid::new_with_policy(3, 10, "�", "◌", wide);
             let rows = wrap_rows(&["1. 界界".into()], 3, &grid);
             assert_eq!(rows, ["1.", " 界", " 界"]);
             assert!(rows.iter().all(|row| grid.display_width(row) <= 3));
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn narrow_console_shows_the_newest_output() {
         let mut frame = crate::ui::grid::Frame {
-            grid: crate::ui::render::CellGrid::new(80, 24),
+            grid: crate::ui::CellGrid::new(80, 24),
             cursor: None,
         };
         let layout = debug_layout(80, 24).unwrap();

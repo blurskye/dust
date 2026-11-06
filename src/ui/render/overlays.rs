@@ -759,3 +759,25 @@ mod tests {
         }
     }
 }
+use unicode_segmentation::UnicodeSegmentation;
+
+
+
+
+
+pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
+
+
+
+pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
+    let margin = 1_u16.min(width / 2);
+    let available = NOTIFICATION_MAX_WIDTH.min(width.saturating_sub(margin.saturating_mul(2)));
+    (available >= 4 && height >= 3).then_some(WindowRect {
+        x: width.saturating_sub(margin).saturating_sub(available),
+        y: 1.min(height.saturating_sub(3)),
+        width: available,
+        height: 3,
+    })
+}
+
+

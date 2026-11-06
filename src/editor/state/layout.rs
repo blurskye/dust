@@ -1,7 +1,4 @@
 use crate::editor::state::id::PaneId;
-use crate::editor::state::layout::Axis;
-use crate::editor::state::layout::FocusDirection;
-use crate::editor::state::layout::LayoutNode;
 
 pub(super) fn layout_ratios_are_valid(node: &LayoutNode) -> bool {
     match node {

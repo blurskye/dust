@@ -123,7 +123,7 @@ mod tests {
             vec!["new.txt", "existing.txt", "another.txt"],
             vec!["existing.txt", "new.txt"],
         ] {
-            let startup = crate::::resolve_startup(
+            let startup = crate::app::startup::resolve_startup(
                 &paths
                     .iter()
                     .map(std::path::PathBuf::from)
